@@ -1,8 +1,19 @@
+import React, { useState, useEffect } from 'react';
+import { 
+  Truck, Calendar, MapPin, Phone, FileText, 
+  CheckCircle, Clock, PlusCircle, ClipboardList, 
+  Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight,
+  ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, GripVertical, Activity,
+  ArrowUpRight, ArrowDownRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, ArrowUpDown,
+  UserPlus, Camera, Upload, Edit, Ban, LogOut, Lock, Mail, Bell, User, Sparkles, Loader2, Copy, MessageSquareText,
+  MessageCircle, Send
+} from 'lucide-react';
+
 // --- FIREBASE BAĞLANTISI ---
 import { initializeApp } from "firebase/app";
 import { 
   getFirestore, collection, addDoc, onSnapshot, 
-  query, orderBy, doc, updateDoc, deleteDoc 
+  query, orderBy, doc, updateDoc, deleteDoc, setDoc 
 } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -17,15 +28,6 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 // ----------------------------
-  Truck, Calendar, MapPin, Phone, FileText, 
-  CheckCircle, Clock, PlusCircle, ClipboardList, 
-  Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight,
-  ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, GripVertical, Activity,
-  ArrowUpRight, ArrowDownRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, ArrowUpDown,
-  UserPlus, Camera, Upload, Edit, Ban, LogOut, Lock, Mail, Bell, User, Sparkles, Loader2, Copy, MessageSquareText,
-  MessageCircle, Send
-} from 'lucide-react';
-
 // TÜRKİYE İL VE İLÇE VERİTABANI
 const TURKEY_LOCATIONS = {
   "İstanbul (Avrupa)": ["Arnavutköy", "Avcılar", "Bağcılar", "Bahçelievler", "Bakırköy", "Başakşehir", "Bayrampaşa", "Beşiktaş", "Beylikdüzü", "Beyoğlu", "Büyükçekmece", "Çatalca", "Esenler", "Esenyurt", "Eyüpsultan", "Fatih", "Gaziosmanpaşa", "Güngören", "Kâğıthane", "Küçükçekmece", "Sarıyer", "Silivri", "Sultangazi", "Şişli", "Zeytinburnu"],
