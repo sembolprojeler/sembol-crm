@@ -2665,13 +2665,13 @@ export default function App() {
           >
             <Calendar className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Anasayfa</span>
           </button>
-{/* --- GÖÇ BUTONU BURADA --- */}
+{/* --- GÖÇ BUTONU BURADA --- */}{/*
           <button 
             onClick={handleMigrateToCloud}
             className="w-full py-3 px-4 mt-2 mb-4 text-sm font-black transition flex justify-center items-center gap-2 rounded-xl bg-green-600 text-white shadow-lg shadow-green-600/30 animate-pulse"
           >
             ☁️ VERİLERİ BULUTA AKTAR
-          </button>          
+          </button>       */}   
           <button 
             onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
             className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'calendar' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
