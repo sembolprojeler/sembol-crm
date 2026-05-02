@@ -1,5 +1,22 @@
-import React, { useState, useEffect } from 'react';
-import { 
+// --- FIREBASE BAĞLANTISI ---
+import { initializeApp } from "firebase/app";
+import { 
+  getFirestore, collection, addDoc, onSnapshot, 
+  query, orderBy, doc, updateDoc, deleteDoc 
+} from "firebase/firestore";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
+  authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
+  projectId: "sembol-operasyon-merkezi",
+  storageBucket: "sembol-operasyon-merkezi.firebasestorage.app",
+  messagingSenderId: "1054049299174",
+  appId: "1:1054049299174:web:2193f916a3501543d92927"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+// ----------------------------
   Truck, Calendar, MapPin, Phone, FileText, 
   CheckCircle, Clock, PlusCircle, ClipboardList, 
   Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight,
@@ -2283,7 +2300,34 @@ export default function App() {
   const handleInputChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
+// --- TEK SEFERLİK VERİ GÖÇÜ (MIGRATION) FONKSİYONU ---
+  const handleMigrateToCloud = async () => {
+    const onay = window.confirm("Dikkat: Tüm lokal verileriniz Google Bulut'a kopyalanacak. Onaylıyor musunuz?");
+    if (!onay) return;
 
+    try {
+      // 1. Personelleri Buluta Yolla
+      for (const person of personnelList) {
+         await addDoc(collection(db, "personnel"), person);
+      }
+      
+      // 2. Mevcut İşleri Buluta Yolla
+      for (const job of jobs) {
+         await addDoc(collection(db, "jobs"), job);
+      }
+
+      // 3. Kasa Hareketlerini Buluta Yolla
+      for (const tx of transactions) {
+         await addDoc(collection(db, "transactions"), tx);
+      }
+
+      alert("MUHTEŞEM! 🚀 Tüm verileriniz başarıyla Google Firebase'e yüklendi. Artık Firebase panelinden verilerinizi görebilirsiniz. Şimdi eski kodları silme işlemine geçebiliriz.");
+    } catch (error) {
+      console.error("Yükleme hatası:", error);
+      alert("Bir hata oluştu: " + error.message);
+    }
+  };
+  // -----------------------------------------------------
   const handleProvinceChange = (e, type) => {
     const province = e.target.value;
     let provKey, distKey;
@@ -2619,7 +2663,13 @@ export default function App() {
           >
             <Calendar className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Anasayfa</span>
           </button>
-          
+{/* --- GÖÇ BUTONU BURADA --- */}
+          <button 
+            onClick={handleMigrateToCloud}
+            className="w-full py-3 px-4 mt-2 mb-4 text-sm font-black transition flex justify-center items-center gap-2 rounded-xl bg-green-600 text-white shadow-lg shadow-green-600/30 animate-pulse"
+          >
+            ☁️ VERİLERİ BULUTA AKTAR
+          </button>          
           <button 
             onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
             className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'calendar' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
