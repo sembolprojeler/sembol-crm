@@ -4617,18 +4617,26 @@ export default function App() {
 
   if (!isAuthenticated) return <LoginScreen onLogin={handleLogin} error={loginError} />;
 
+// --- YETKİLENDİRME VE GÜVENLİK KONTROLLERİ ---
   const userPos = currentUser?.position || '';
-  const isSales = userPos.includes('Satış');
-  const isMuhasebe = userPos.includes('Muhasebe');
-  const isDepo = userPos.includes('Depo Sorumlusu') || userPos.includes('Depo');
-  const isManager = userPos.includes('Yönetici') || userPos.includes('Firma Sahibi') || currentUser?.rank === 'Müdür';
+  const userRank = currentUser?.rank || '';
   const canEdit = currentUser?.permissions?.canEdit;
 
-  const hasJobAccess = canEdit || isManager || isMuhasebe || isDepo;
-  const hasResourceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); 
-  const hasFinanceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); 
-  const hasTaskAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); 
-  const hasAdminAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); 
+  const isOwner = userPos.includes('Firma Sahibi');
+  const isManager = userPos.includes('Yönetici') || isOwner || userRank === 'Müdür';
+  const isMuhasebe = userPos.includes('Muhasebe');
+  const isDepo = userPos.includes('Depo Sorumlusu') || userPos.includes('Depo');
+  const isSales = userPos.includes('Satış');
+  const isOperasyon = userPos.includes('Operasyon');
+
+  // MENÜ ERİŞİM KURALLARI (Kesin ve Sıkı Sınırlar)
+  const hasJobAccess = isManager || isOperasyon || isSales || isMuhasebe || isDepo || canEdit; 
+  const hasResourceAccess = isManager || isOperasyon; // Araç, Personel, Malzeme (Sadece Yönetici ve Operasyon)
+  const hasFinanceAccess = isManager || isMuhasebe; // Finans Kasa (Sadece Yönetici ve Muhasebe)
+  const hasTaskAccess = isManager || isOperasyon || isMuhasebe; // Görevler
+  const hasAdminAccess = isManager; // ŞİFRELER VE YETKİLER (SADECE MÜDÜR VEYA FİRMA SAHİBİ)
+  const hasFullAccess = isManager; // Eski verileri kurtarma vs.
+  // ----------------------------------------------
   const hasFullAccess = isManager; // <-- EKSİK OLAN SATIR EKLENDİ
   const visibleJobs = hasJobAccess ? jobs : jobs.filter(j => {
     const isMyJob = j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id;
