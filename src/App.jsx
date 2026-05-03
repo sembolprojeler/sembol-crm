@@ -4530,12 +4530,22 @@ const handleDeleteTask = async (taskId) => {
     setShowEndJobModal(true);
   };
 
-  const submitEndJob = async (e) => {
+const submitEndJob = async (e) => {
     e.preventDefault();
     if (!firebaseUser) return;
-    if (jobToEnd.deliveryCode && endJobData.enteredCode !== jobToEnd.deliveryCode) {
-      setEndJobError('Girdiğiniz teslim kodu hatalı. Lütfen müşteriden doğru kodu isteyin.'); return;
+    
+    // Güvenli eşleşme: Sadece alfanümerik karakterleri al ve büyük harfe çevir
+    const userCode = (endJobData.enteredCode || '').toString().trim().toUpperCase();
+    const realCode = (jobToEnd.deliveryCode || '').toString().trim().toUpperCase();
+
+    // Hata Kontrolü:
+    // Sadece eğer işin bir kodu varsa (realCode mevcutsa) VE girilen kodla uyuşmuyorsa hata ver.
+    if (realCode && userCode !== realCode) {
+      setEndJobError(`Girdiğiniz kod hatalı. Müşteriden "${realCode}" kodunu istemelisiniz.`); 
+      return;
     }
+
+    setEndJobError(''); // Hata yoksa eski hatayı temizle
 
     if (!jobToEnd.materialsDeducted) {
       const estData = calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking);
@@ -4554,7 +4564,8 @@ const handleDeleteTask = async (taskId) => {
     }
 
     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobToEnd.id), { status: 'completed', endJobDetails: endJobData, materialsDeducted: true });
-    setShowEndJobModal(false); setJobToEnd(null);
+    setShowEndJobModal(false); 
+    setJobToEnd(null);
   };
 
   const handleGenerateMessage = async (job) => {
@@ -5393,7 +5404,7 @@ const handleDeleteTask = async (taskId) => {
                 </div>
               )}
 
-              {/* YENİ EKLENEN: Müşteri Teslim Kodu Alanı (Sadece kod atandıysa görünür) */}
+{/* YENİ EKLENEN: Müşteri Teslim Kodu Alanı (Sadece kod atandıysa görünür) */}
               {jobToEnd.deliveryCode && (
                 <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-200 text-center mb-4">
                   <Key className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
@@ -5402,8 +5413,12 @@ const handleDeleteTask = async (taskId) => {
                     required 
                     type="text" 
                     maxLength={6}
-                    value={endJobData.enteredCode} 
-                    onChange={(e) => setEndJobData({...endJobData, enteredCode: e.target.value.toUpperCase()})} 
+                    value={endJobData.enteredCode || ''} 
+                    onChange={(e) => {
+                      // Kullanıcı yazarken harfleri anında büyüt ve boşlukları yut
+                      const cleanValue = e.target.value.replace(/\s+/g, '').toUpperCase();
+                      setEndJobData({...endJobData, enteredCode: cleanValue});
+                    }} 
                     className="w-full p-4 border-2 border-emerald-300 rounded-xl focus:ring-4 focus:ring-emerald-500/30 focus:border-emerald-500 outline-none text-center font-black text-2xl tracking-[0.5em] text-emerald-700 bg-white placeholder:text-emerald-200 uppercase transition-all shadow-inner" 
                     placeholder="6 HANELİ KOD" 
                   />
@@ -5412,7 +5427,7 @@ const handleDeleteTask = async (taskId) => {
                   </p>
                 </div>
               )}
-
+              
               <div>
                 <label className="block text-sm font-bold text-black mb-2">İşin Ödemesi Nereye Yapıldı?</label>
                   <select required value={endJobData.paymentMethod} onChange={(e) => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
