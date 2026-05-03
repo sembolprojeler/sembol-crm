@@ -3953,10 +3953,68 @@ const LoginScreen = ({ onLogin, error }) => {
   );
 };
 
-const CustomerListView = ({ jobs, title, handleEditJob }) => {
+const CustomerListView = ({ jobs, title, handleEditJob, handleDeleteCustomer }) => {
   // Müşterileri telefon numaralarına göre tekilleştirip filtreliyoruz
   const uniqueCustomers = jobs
     .filter(j => title === 'Özel Müşteriler' ? j.isSpecial : true)
+    .reduce((acc, current) => {
+      const x = acc.find(item => item.customerPhone === current.customerPhone);
+      if (!x) {
+        return acc.concat([current]);
+      } else {
+        return acc;
+      }
+    }, []);
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+      <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
+        <Users className="w-6 h-6 text-red-600" /> {title}
+      </h2>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-black text-white border-b border-neutral-200">
+            <tr>
+              <th className="p-4 font-bold rounded-tl-xl">Müşteri Adı</th>
+              <th className="p-4 font-bold">Telefon Numarası</th>
+              <th className="p-4 font-bold">Müşteri Tipi</th>
+              <th className="p-4 font-bold">Son İşlem Tarihi</th>
+              <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-neutral-100">
+            {uniqueCustomers.map(customer => (
+              <tr key={customer.id} className="hover:bg-neutral-50 transition">
+                <td className="p-4 font-bold text-black flex items-center gap-2">
+                  {customer.isSpecial && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
+                  {customer.customerName}
+                </td>
+                <td className="p-4 text-neutral-600 font-bold">{customer.customerPhone}</td>
+                <td className="p-4 text-neutral-600">{customer.customerType || 'Bireysel'}</td>
+                <td className="p-4 text-neutral-600">{customer.date}</td>
+                <td className="p-4">
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => handleEditJob(customer)} className="p-2 bg-neutral-100 hover:bg-blue-100 text-neutral-700 hover:text-blue-600 rounded-lg transition" title="Müşteri Kaydını Düzenle">
+                      <Edit className="w-4 h-4" />
+                    </button>
+                    <button onClick={() => handleDeleteCustomer(customer.customerPhone)} className="p-2 bg-neutral-100 hover:bg-red-100 text-neutral-700 hover:text-red-600 rounded-lg transition" title="Müşteriyi ve Tüm Kayıtlarını Sil">
+                      <Ban className="w-4 h-4" />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+            {uniqueCustomers.length === 0 && (
+              <tr>
+                <td colSpan="5" className="p-6 text-center text-neutral-500 font-medium">Bu listede müşteri bulunmuyor.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
     .reduce((acc, current) => {
       const x = acc.find(item => item.customerPhone === current.customerPhone);
       if (!x) {
@@ -4420,6 +4478,18 @@ const handleDeleteTask = async (taskId) => {
     if (!firebaseUser) return;
     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id), { status: 'pending' });
     addSystemLog('İş Geri Alındı', `İptal edilen bir operasyon geri alındı.`);
+  };
+
+  const handleDeleteCustomer = async (customerPhone) => {
+    if (!firebaseUser) return;
+    if (window.confirm('DİKKAT: Bu müşteriyi ve ona ait geçmiş/gelecek TÜM operasyon kayıtlarını tamamen silmek istediğinize emin misiniz? Bu işlem geri alınamaz!')) {
+      // Müşterinin telefon numarasıyla eşleşen tüm iş kayıtlarını bulup siliyoruz
+      const jobsToDelete = jobs.filter(j => j.customerPhone === customerPhone);
+      for (const job of jobsToDelete) {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id));
+      }
+      addSystemLog('Müşteri Silindi', `${customerPhone} numaralı müşteri sistemden kalıcı olarak temizlendi.`);
+    }
   };
 
   const handleAddJob = async (e) => {
@@ -5173,9 +5243,8 @@ const submitEndJob = async (e) => {
               editingJobId={editingJobId}
             />
           }
-          {activeTab === 'allCustomers' && hasJobAccess && <CustomerListView jobs={jobs} title="Tüm Müşteriler" handleEditJob={handleEditJob} />}
-          {activeTab === 'specialCustomers' && hasJobAccess && <CustomerListView jobs={jobs} title="Özel Müşteriler" handleEditJob={handleEditJob} />}
-
+{activeTab === 'allCustomers' && hasJobAccess && <CustomerListView jobs={jobs} title="Tüm Müşteriler" handleEditJob={handleEditJob} handleDeleteCustomer={handleDeleteCustomer} />}
+          {activeTab === 'specialCustomers' && hasJobAccess && <CustomerListView jobs={jobs} title="Özel Müşteriler" handleEditJob={handleEditJob} handleDeleteCustomer={handleDeleteCustomer} />}
           {/* İş Listesi Modülleri */}
           {activeTab === 'currentJobs' && hasJobAccess && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} />}
           {activeTab === 'completedJobs' && hasJobAccess && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} />}
@@ -5427,7 +5496,7 @@ const submitEndJob = async (e) => {
                   </p>
                 </div>
               )}
-              
+
               <div>
                 <label className="block text-sm font-bold text-black mb-2">İşin Ödemesi Nereye Yapıldı?</label>
                   <select required value={endJobData.paymentMethod} onChange={(e) => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
