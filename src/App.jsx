@@ -4637,7 +4637,6 @@ export default function App() {
   const hasAdminAccess = isManager; // ŞİFRELER VE YETKİLER (SADECE MÜDÜR VEYA FİRMA SAHİBİ)
   const hasFullAccess = isManager; // Eski verileri kurtarma vs.
   // ----------------------------------------------
-  const hasFullAccess = isManager; // <-- EKSİK OLAN SATIR EKLENDİ
   const visibleJobs = hasJobAccess ? jobs : jobs.filter(j => {
     const isMyJob = j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id;
     if (!isMyJob) return false;
