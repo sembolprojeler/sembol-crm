@@ -88,7 +88,10 @@ const callGeminiAPI = async (prompt, isJson = false) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
-      if (!response.ok) throw new Error('API Error');
+      if (!response.ok) {
+        const errInfo = await response.json().catch(() => ({}));
+        throw new Error(errInfo.error?.message || 'API Error');
+      }
       const data = await response.json();
       return data.candidates[0].content.parts[0].text;
     } catch (error) {
@@ -165,10 +168,12 @@ const AddJobView = ({
 }) => {
   const [aiText, setAiText] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
+  const [aiError, setAiError] = useState('');
 
   const handleAIFill = async () => {
     if(!aiText.trim()) return;
     setIsAiLoading(true);
+    setAiError('');
     try {
       const prompt = `Nakliyat müşterisinden gelen mesajdan kayıt formu bilgilerini çıkar:
       Mesaj: "${aiText}"
@@ -176,7 +181,9 @@ const AddJobView = ({
       Sadece JSON döndür.`;
       
       const res = await callGeminiAPI(prompt, true);
-      const data = JSON.parse(res);
+      // Olası markdown kalıntılarını temizle
+      let cleanRes = res.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const data = JSON.parse(cleanRes);
       
       setFormData(prev => ({
         ...prev,
@@ -189,6 +196,7 @@ const AddJobView = ({
       setAiText('');
     } catch (e) {
       console.error("AI Error:", e);
+      setAiError('Yapay zeka asistanı mesajı okuyamadı veya geçici bir sorun yaşandı.');
     } finally {
       setIsAiLoading(false);
     }
@@ -207,21 +215,28 @@ const AddJobView = ({
           <Sparkles className="w-5 h-5 text-purple-600" /> ✨ Yapay Zeka ile Hızlı Doldur
         </h3>
         <p className="text-sm text-purple-800 mb-3">Müşterinin WhatsApp mesajını veya dağınık notlarınızı buraya yapıştırın, formu otomatik dolduralım.</p>
-        <div className="flex flex-col md:flex-row gap-3">
-          <textarea 
-            value={aiText} 
-            onChange={(e) => setAiText(e.target.value)} 
-            className="flex-1 p-3 border border-purple-200 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none h-14 resize-none transition bg-white text-sm" 
-            placeholder="Örn: Merhaba, haftaya Salı Kadıköy'den Ümraniye'ye 3+1 ev taşıyacağız, Ahmet Yılmaz 0555123..." 
-          />
-          <button 
-            type="button"
-            onClick={handleAIFill}
-            disabled={isAiLoading || !aiText.trim()}
-            className="bg-purple-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-purple-700 transition disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap shadow-md shadow-purple-600/30"
-          >
-            {isAiLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Sparkles className="w-5 h-5" /> Formu Doldur</>}
-          </button>
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col md:flex-row gap-3">
+            <textarea 
+              value={aiText} 
+              onChange={(e) => setAiText(e.target.value)} 
+              className="flex-1 p-3 border border-purple-200 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none h-14 resize-none transition bg-white text-sm" 
+              placeholder="Örn: Merhaba, haftaya Salı Kadıköy'den Ümraniye'ye 3+1 ev taşıyacağız, Ahmet Yılmaz 0555123..." 
+            />
+            <button 
+              type="button"
+              onClick={handleAIFill}
+              disabled={isAiLoading || !aiText.trim()}
+              className="bg-purple-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-purple-700 transition disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap shadow-md shadow-purple-600/30"
+            >
+              {isAiLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Sparkles className="w-5 h-5" /> Formu Doldur</>}
+            </button>
+          </div>
+          {aiError && (
+            <p className="text-xs font-bold text-red-600 flex items-center gap-1 mt-1">
+              <AlertTriangle className="w-4 h-4" /> {aiError}
+            </p>
+          )}
         </div>
       </div>
 
@@ -385,105 +400,109 @@ const CurrentJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGen
             <p className="text-lg font-medium">Bu tarihe kayıtlı herhangi bir operasyon bulunmuyor.</p>
           </div>
         ) : (
-          dailyJobs.map(job => (
-            <div key={job.id} className="bg-white p-5 rounded-2xl shadow-sm border border-neutral-200 flex flex-col md:flex-row gap-6 justify-between hover:border-red-600 transition group cursor-pointer">
-              <div className="flex-1">
-                <div className="flex items-center gap-3 mb-3">
-                  <span className="font-black text-xl text-black">{job.customerName}</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase tracking-wider ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
-                    {job.type || 'Nakliye'}
-                  </span>
-                  <span className={`text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider ${
-                    job.status === 'completed' ? 'bg-black text-white' :
-                    job.status === 'in-progress' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' :
-                    'bg-neutral-100 text-neutral-700'
-                  }`}>
-                    {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
-                  </span>
-                </div>
-                
-                <div className="flex flex-wrap items-center gap-3 mb-4">
-                  <span className="flex items-center gap-1.5 text-sm font-bold bg-neutral-50 text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><Phone className="w-4 h-4 text-black" /> {job.customerPhone}</span>
-                  
-                  {(job.teamNames || (job.team && job.team !== 'Atanmadı' ? [job.team] : [])).length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {(job.teamNames || [job.team]).map((name, i) => (
-                        <span key={i} className="flex items-center gap-1.5 text-sm font-bold bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-100">
-                          <User className="w-4 h-4" /> {name}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="flex items-center gap-1.5 text-sm font-bold bg-yellow-50 text-yellow-700 px-3 py-1.5 rounded-lg border border-yellow-100">
-                      <User className="w-4 h-4" /> Atanmadı
+          dailyJobs.map(job => {
+            const teamArr = Array.isArray(job.teamNames) && job.teamNames.length > 0 ? job.teamNames : (job.team && job.team !== 'Atanmadı' ? [job.team] : []);
+
+            return (
+              <div key={job.id} className="bg-white p-5 rounded-2xl shadow-sm border border-neutral-200 flex flex-col md:flex-row gap-6 justify-between hover:border-red-600 transition group cursor-pointer">
+                <div className="flex-1">
+                  <div className="flex items-center gap-3 mb-3">
+                    <span className="font-black text-xl text-black">{job.customerName}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase tracking-wider ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                      {job.type || 'Nakliye'}
                     </span>
+                    <span className={`text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider ${
+                      job.status === 'completed' ? 'bg-black text-white' :
+                      job.status === 'in-progress' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' :
+                      'bg-neutral-100 text-neutral-700'
+                    }`}>
+                      {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
+                    </span>
+                  </div>
+                  
+                  <div className="flex flex-wrap items-center gap-3 mb-4">
+                    <span className="flex items-center gap-1.5 text-sm font-bold bg-neutral-50 text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><Phone className="w-4 h-4 text-black" /> {job.customerPhone}</span>
+                    
+                    {teamArr.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5">
+                        {teamArr.map((name, i) => (
+                          <span key={i} className="flex items-center gap-1.5 text-sm font-bold bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-100">
+                            <User className="w-4 h-4" /> {name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-sm font-bold bg-yellow-50 text-yellow-700 px-3 py-1.5 rounded-lg border border-yellow-100">
+                        <User className="w-4 h-4" /> Atanmadı
+                      </span>
+                    )}
+                    
+                    {job.time && <span className="flex items-center gap-1.5 text-sm font-bold bg-red-50 text-red-700 px-3 py-1.5 rounded-lg border border-red-100"><Clock className="w-4 h-4" /> Saat: {job.time}</span>}
+                    
+                    <span className="flex items-center gap-1.5 text-sm font-bold bg-neutral-100 text-neutral-500 px-3 py-1.5 rounded-lg border border-neutral-200">
+                      <UserPlus className="w-4 h-4" /> Kayıt: {job.createdBy || 'Sistem'}
+                    </span>
+                  </div>
+                  
+                  <div className="text-sm text-neutral-600 flex flex-col gap-2 bg-neutral-50 p-4 rounded-xl border border-neutral-100">
+                    <div className="flex items-start gap-2"><MapPin className="w-4 h-4 text-neutral-400 mt-0.5 shrink-0" /> <div><b className="text-black">Nereden Alınacak:</b> {job.fromProvince}/{job.fromDistrict} - {job.fromAddress}</div></div>
+                    <div className="flex items-start gap-2 mt-2"><MapPin className="w-4 h-4 text-red-400 mt-0.5 shrink-0" /> <div><b className="text-black">Nereye Gidecek:</b> {job.toProvince}/{job.toDistrict} - {job.toAddress}</div></div>
+                  </div>
+                  
+                  {(job.contractDetails || job.notes) && (
+                    <div className="mt-4 grid grid-cols-1 gap-2">
+                      {job.contractDetails && (
+                        <div className="text-xs font-medium bg-blue-50 text-blue-800 p-3 rounded-xl border border-blue-200 flex items-start gap-2">
+                          <FileText className="w-4 h-4 shrink-0 mt-0.5 text-blue-600" /> 
+                          <div><b className="block text-blue-900 mb-0.5">Sözleşme Detayı:</b>{job.contractDetails}</div>
+                        </div>
+                      )}
+                      {job.notes && (
+                        <div className="text-xs font-medium bg-yellow-50 text-yellow-800 p-3 rounded-xl border border-yellow-200 flex items-start gap-2 whitespace-pre-wrap">
+                          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-yellow-600" /> 
+                          <div><b className="block text-yellow-900 mb-0.5">Operasyon Notu:</b>{job.notes}</div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {job.endJobDetails && (
+                    <div className="mt-4 text-xs font-medium bg-green-50 text-green-800 p-4 rounded-xl border border-green-200 flex flex-col gap-3">
+                       <div className="flex items-center gap-2 border-b border-green-200/50 pb-2">
+                         <CheckCircle className="w-5 h-5 shrink-0 text-green-600" />
+                         <b className="text-green-900 text-sm">Personel Tarafından İş Sonlandırıldı</b>
+                       </div>
+                       <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                         <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
+                         <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
+                         <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
+                         <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
+                         {job.endJobDetails.truckImage && <p className="md:col-span-2 text-green-700"><b>Kasa Fotoğrafı:</b> 📷 Sisteme Yüklendi ({job.endJobDetails.truckImage})</p>}
+                         {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
+                         {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
+                       </div>
+                    </div>
                   )}
                   
-                  {job.time && <span className="flex items-center gap-1.5 text-sm font-bold bg-red-50 text-red-700 px-3 py-1.5 rounded-lg border border-red-100"><Clock className="w-4 h-4" /> Saat: {job.time}</span>}
-                  
-                  <span className="flex items-center gap-1.5 text-sm font-bold bg-neutral-100 text-neutral-500 px-3 py-1.5 rounded-lg border border-neutral-200">
-                    <UserPlus className="w-4 h-4" /> Kayıt: {job.createdBy || 'Sistem'}
-                  </span>
-                </div>
-                
-                <div className="text-sm text-neutral-600 flex flex-col gap-2 bg-neutral-50 p-4 rounded-xl border border-neutral-100">
-                  <div className="flex items-start gap-2"><MapPin className="w-4 h-4 text-neutral-400 mt-0.5 shrink-0" /> <div><b className="text-black">Nereden Alınacak:</b> {job.fromProvince}/{job.fromDistrict} - {job.fromAddress}</div></div>
-                  <div className="flex items-start gap-2 mt-2"><MapPin className="w-4 h-4 text-red-400 mt-0.5 shrink-0" /> <div><b className="text-black">Nereye Gidecek:</b> {job.toProvince}/{job.toDistrict} - {job.toAddress}</div></div>
-                </div>
-                
-                {(job.contractDetails || job.notes) && (
-                  <div className="mt-4 grid grid-cols-1 gap-2">
-                    {job.contractDetails && (
-                      <div className="text-xs font-medium bg-blue-50 text-blue-800 p-3 rounded-xl border border-blue-200 flex items-start gap-2">
-                        <FileText className="w-4 h-4 shrink-0 mt-0.5 text-blue-600" /> 
-                        <div><b className="block text-blue-900 mb-0.5">Sözleşme Detayı:</b>{job.contractDetails}</div>
-                      </div>
-                    )}
-                    {job.notes && (
-                      <div className="text-xs font-medium bg-yellow-50 text-yellow-800 p-3 rounded-xl border border-yellow-200 flex items-start gap-2 whitespace-pre-wrap">
-                        <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-yellow-600" /> 
-                        <div><b className="block text-yellow-900 mb-0.5">Operasyon Notu:</b>{job.notes}</div>
-                      </div>
-                    )}
+                  {/* YENİ İŞLEM BUTONLARI */}
+                  <div className="mt-4 pt-4 border-t border-neutral-100 flex flex-wrap gap-2">
+                    <button onClick={() => handleEditJob(job)} className="px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                      <Edit className="w-4 h-4"/> Bilgileri Düzenle
+                    </button>
+                    <button onClick={() => handleOpenAssignModal(job)} className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                      <CheckSquare className="w-4 h-4"/> {job.team !== 'Atanmadı' ? 'Görevlendirmeyi Düzenle' : 'Görev Ata'}
+                    </button>
+                    <button onClick={() => handleGenerateMessage(job)} className="px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                      <Sparkles className="w-4 h-4"/> Müşteri Mesajı
+                    </button>
+                    <button className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                      <Ban className="w-4 h-4"/> İşi İptal Et
+                    </button>
                   </div>
-                )}
-
-                {job.endJobDetails && (
-                  <div className="mt-4 text-xs font-medium bg-green-50 text-green-800 p-4 rounded-xl border border-green-200 flex flex-col gap-3">
-                     <div className="flex items-center gap-2 border-b border-green-200/50 pb-2">
-                       <CheckCircle className="w-5 h-5 shrink-0 text-green-600" />
-                       <b className="text-green-900 text-sm">Personel Tarafından İş Sonlandırıldı</b>
-                     </div>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
-                       <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
-                       <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
-                       <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
-                       <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
-                       {job.endJobDetails.truckImage && <p className="md:col-span-2 text-green-700"><b>Kasa Fotoğrafı:</b> 📷 Sisteme Yüklendi ({job.endJobDetails.truckImage})</p>}
-                       {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
-                       {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
-                     </div>
-                  </div>
-                )}
-                
-                {/* YENİ İŞLEM BUTONLARI */}
-                <div className="mt-4 pt-4 border-t border-neutral-100 flex flex-wrap gap-2">
-                  <button onClick={() => handleEditJob(job)} className="px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
-                    <Edit className="w-4 h-4"/> Bilgileri Düzenle
-                  </button>
-                  <button onClick={() => handleOpenAssignModal(job)} className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
-                    <CheckSquare className="w-4 h-4"/> {job.team !== 'Atanmadı' ? 'Görevlendirmeyi Düzenle' : 'Görev Ata'}
-                  </button>
-                  <button onClick={() => handleGenerateMessage(job)} className="px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4"/> Müşteri Mesajı
-                  </button>
-                  <button className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
-                    <Ban className="w-4 h-4"/> İşi İptal Et
-                  </button>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -529,60 +548,64 @@ const AllJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerat
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100">
-            {sortedJobs.map(job => (
-              <tr key={job.id} className="hover:bg-neutral-50 transition">
-                <td className="p-4 font-bold text-black whitespace-nowrap">
-                  <Clock className="w-4 h-4 inline mr-1 text-neutral-400"/> {job.date} <br/>
-                  <span className="text-xs text-red-600 bg-red-50 px-1.5 py-0.5 rounded mt-1 inline-block">{job.time}</span><br/>
-                  <span className="text-[10px] text-neutral-400 font-bold mt-1.5 flex items-center gap-1"><UserPlus className="w-3 h-3" /> Kayıt: {job.createdBy || 'Sistem'}</span>
-                </td>
-                <td className="p-4 font-bold text-neutral-800">{job.customerName}<br/><span className="text-xs font-medium text-neutral-500">{job.customerPhone}</span></td>
-                <td className="p-4 text-neutral-600 text-xs min-w-[200px]">
-                  <div className="mb-1"><span className="text-neutral-400 font-bold">AL:</span> {job.fromProvince}/{job.fromDistrict} - {job.fromAddress}</div>
-                  {job.toProvince && <div className="mt-2 mb-1"><span className="text-neutral-400 font-bold">VR:</span> {job.toProvince}/{job.toDistrict} - {job.toAddress}</div>}
-                </td>
-                <td className="p-4">
-                  <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase whitespace-nowrap ${
-                    job.status === 'completed' ? 'bg-black text-white' :
-                    job.status === 'in-progress' ? 'bg-red-600 text-white shadow-sm' :
-                    'bg-neutral-200 text-neutral-700'
-                  }`}>
-                    {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
-                  </span>
-                </td>
-                <td className="p-4 text-neutral-700 font-bold whitespace-nowrap">
-                  {(job.teamNames || (job.team && job.team !== 'Atanmadı' ? [job.team] : [])).length > 0 ? (
-                    <div className="flex flex-col gap-1 w-fit">
-                      {(job.teamNames || [job.team]).map((name, i) => (
-                        <span key={i} className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs border bg-blue-50 text-blue-700 border-blue-100 whitespace-nowrap">
-                          <User className="w-3.5 h-3.5 shrink-0" /> {name}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs border w-fit bg-yellow-50 text-yellow-700 border-yellow-100 whitespace-nowrap">
-                      <User className="w-3.5 h-3.5 shrink-0" /> Atanmadı
+            {sortedJobs.map(job => {
+              const teamArr = Array.isArray(job.teamNames) && job.teamNames.length > 0 ? job.teamNames : (job.team && job.team !== 'Atanmadı' ? [job.team] : []);
+              
+              return (
+                <tr key={job.id} className="hover:bg-neutral-50 transition">
+                  <td className="p-4 font-bold text-black whitespace-nowrap">
+                    <Clock className="w-4 h-4 inline mr-1 text-neutral-400"/> {job.date} <br/>
+                    <span className="text-xs text-red-600 bg-red-50 px-1.5 py-0.5 rounded mt-1 inline-block">{job.time}</span><br/>
+                    <span className="text-[10px] text-neutral-400 font-bold mt-1.5 flex items-center gap-1"><UserPlus className="w-3 h-3" /> Kayıt: {job.createdBy || 'Sistem'}</span>
+                  </td>
+                  <td className="p-4 font-bold text-neutral-800">{job.customerName}<br/><span className="text-xs font-medium text-neutral-500">{job.customerPhone}</span></td>
+                  <td className="p-4 text-neutral-600 text-xs min-w-[200px]">
+                    <div className="mb-1"><span className="text-neutral-400 font-bold">AL:</span> {job.fromProvince}/{job.fromDistrict} - {job.fromAddress}</div>
+                    {job.toProvince && <div className="mt-2 mb-1"><span className="text-neutral-400 font-bold">VR:</span> {job.toProvince}/{job.toDistrict} - {job.toAddress}</div>}
+                  </td>
+                  <td className="p-4">
+                    <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase whitespace-nowrap ${
+                      job.status === 'completed' ? 'bg-black text-white' :
+                      job.status === 'in-progress' ? 'bg-red-600 text-white shadow-sm' :
+                      'bg-neutral-200 text-neutral-700'
+                    }`}>
+                      {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
                     </span>
-                  )}
-                </td>
-                <td className="p-4">
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => handleEditJob(job)} className="p-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg transition" title="Bilgileri Düzenle">
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => handleOpenAssignModal(job)} className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition" title={job.team !== 'Atanmadı' ? 'Görevlendirmeyi Düzenle' : 'Görev Ata'}>
-                      <CheckSquare className="w-4 h-4" />
-                    </button>
-                    <button onClick={() => handleGenerateMessage(job)} className="p-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg transition" title="Müşteri Mesajı Oluştur">
-                      <MessageSquareText className="w-4 h-4" />
-                    </button>
-                    <button className="p-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition" title="İşi İptal Et">
-                      <Ban className="w-4 h-4" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="p-4 text-neutral-700 font-bold whitespace-nowrap">
+                    {teamArr.length > 0 ? (
+                      <div className="flex flex-col gap-1 w-fit">
+                        {teamArr.map((name, i) => (
+                          <span key={i} className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs border bg-blue-50 text-blue-700 border-blue-100 whitespace-nowrap">
+                            <User className="w-3.5 h-3.5 shrink-0" /> {name}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs border w-fit bg-yellow-50 text-yellow-700 border-yellow-100 whitespace-nowrap">
+                        <User className="w-3.5 h-3.5 shrink-0" /> Atanmadı
+                      </span>
+                    )}
+                  </td>
+                  <td className="p-4">
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => handleEditJob(job)} className="p-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg transition" title="Bilgileri Düzenle">
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleOpenAssignModal(job)} className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition" title={job.team !== 'Atanmadı' ? 'Görevlendirmeyi Düzenle' : 'Görev Ata'}>
+                        <CheckSquare className="w-4 h-4" />
+                      </button>
+                      <button onClick={() => handleGenerateMessage(job)} className="p-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg transition" title="Müşteri Mesajı Oluştur">
+                        <MessageSquareText className="w-4 h-4" />
+                      </button>
+                      <button className="p-2 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition" title="İşi İptal Et">
+                        <Ban className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
             {sortedJobs.length === 0 && (
               <tr>
                 <td colSpan="6" className="p-6 text-center text-neutral-500">Kayıtlı iş bulunamadı.</td>
@@ -835,10 +858,10 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
   const [activeChatUserId, setActiveChatUserId] = useState(null);
   const [newMessage, setNewMessage] = useState('');
 
-  const myJobs = jobs.filter(j => 
-    j.assignedPersonnelIds?.some(id => String(id) === String(currentUser?.id)) || 
-    String(j.assignedPersonnelId) === String(currentUser?.id)
-  );
+  const myJobs = jobs.filter(j => {
+    const ids = Array.isArray(j.assignedPersonnelIds) ? j.assignedPersonnelIds : [];
+    return ids.some(id => String(id) === String(currentUser?.id)) || String(j.assignedPersonnelId) === String(currentUser?.id);
+  });
   
   const myNotifications = notifications.filter(n => String(n.userId) === String(currentUser?.id));
 
@@ -958,87 +981,91 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
                     <p className="font-bold">Şu anda size atanmış aktif bir operasyon bulunmuyor.</p>
                   </div>
                 ) : (
-                  myJobs.map(job => (
-                    <div key={job.id} className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 hover:border-red-400 transition group">
-                      <div className="flex justify-between items-start mb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-lg text-black">{job.customerName}</span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
-                            {job.type || 'Nakliye'}
+                  myJobs.map(job => {
+                    const teamArr = Array.isArray(job.teamNames) && job.teamNames.length > 0 ? job.teamNames : (job.team && job.team !== 'Atanmadı' ? [job.team] : []);
+
+                    return (
+                      <div key={job.id} className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 hover:border-red-400 transition group">
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-lg text-black">{job.customerName}</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                              {job.type || 'Nakliye'}
+                            </span>
+                          </div>
+                          <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase whitespace-nowrap ${
+                            job.status === 'completed' ? 'bg-black text-white' :
+                            job.status === 'in-progress' ? 'bg-red-600 text-white shadow-sm' :
+                            'bg-white border border-neutral-300 text-neutral-700'
+                          }`}>
+                            {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
                           </span>
                         </div>
-                        <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase whitespace-nowrap ${
-                          job.status === 'completed' ? 'bg-black text-white' :
-                          job.status === 'in-progress' ? 'bg-red-600 text-white shadow-sm' :
-                          'bg-white border border-neutral-300 text-neutral-700'
-                        }`}>
-                          {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
-                        </span>
-                      </div>
 
-                      <div className="flex flex-wrap items-center gap-3 mb-4 text-xs">
-                        <span className="flex items-center gap-1.5 font-bold bg-white text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><CalendarDays className="w-3.5 h-3.5" /> {job.date}</span>
-                        <span className="flex items-center gap-1.5 font-bold bg-white text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><Clock className="w-3.5 h-3.5" /> {job.time}</span>
-                        <span className="flex items-center gap-1.5 font-bold bg-white text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><Phone className="w-3.5 h-3.5" /> {job.customerPhone}</span>
-                        
-                        {(job.teamNames || (job.team && job.team !== 'Atanmadı' ? [job.team] : [])).length > 0 && (
-                           <div className="flex flex-wrap gap-1.5">
-                             {(job.teamNames || [job.team]).map((name, i) => (
-                                <span key={i} className="flex items-center gap-1 font-bold bg-blue-50 text-blue-700 px-2 py-1.5 rounded-lg border border-blue-100">
-                                  <User className="w-3.5 h-3.5" /> {name}
-                                </span>
-                             ))}
-                           </div>
+                        <div className="flex flex-wrap items-center gap-3 mb-4 text-xs">
+                          <span className="flex items-center gap-1.5 font-bold bg-white text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><CalendarDays className="w-3.5 h-3.5" /> {job.date}</span>
+                          <span className="flex items-center gap-1.5 font-bold bg-white text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><Clock className="w-3.5 h-3.5" /> {job.time}</span>
+                          <span className="flex items-center gap-1.5 font-bold bg-white text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><Phone className="w-3.5 h-3.5" /> {job.customerPhone}</span>
+                          
+                          {teamArr.length > 0 && (
+                             <div className="flex flex-wrap gap-1.5">
+                               {teamArr.map((name, i) => (
+                                  <span key={i} className="flex items-center gap-1 font-bold bg-blue-50 text-blue-700 px-2 py-1.5 rounded-lg border border-blue-100">
+                                    <User className="w-3.5 h-3.5" /> {name}
+                                  </span>
+                               ))}
+                             </div>
+                          )}
+
+                          <span className="flex items-center gap-1 font-bold bg-neutral-100 text-neutral-500 px-2 py-1.5 rounded-lg border border-neutral-200">
+                            <UserPlus className="w-3.5 h-3.5" /> Kayıt: {job.createdBy || 'Sistem'}
+                          </span>
+                        </div>
+
+                        <div className="text-sm text-neutral-600 space-y-2 bg-white p-4 rounded-xl border border-neutral-100">
+                          <div className="flex items-start gap-2"><MapPin className="w-4 h-4 text-neutral-400 mt-0.5 shrink-0" /> <div><b className="text-black">AL:</b> {job.fromProvince}/{job.fromDistrict} - {job.fromAddress}</div></div>
+                          {job.toProvince && <div className="flex items-start gap-2 mt-2 pt-2 border-t border-neutral-100"><MapPin className="w-4 h-4 text-red-400 mt-0.5 shrink-0" /> <div><b className="text-black">VR:</b> {job.toProvince}/{job.toDistrict} - {job.toAddress}</div></div>}
+                        </div>
+
+                        {job.notes && (
+                          <div className="mt-4 text-xs font-medium bg-yellow-50 text-yellow-800 p-3 rounded-xl border border-yellow-200 flex items-start gap-2">
+                            <FileText className="w-4 h-4 shrink-0 mt-0.5 text-yellow-600" /> {job.notes}
+                          </div>
                         )}
 
-                        <span className="flex items-center gap-1 font-bold bg-neutral-100 text-neutral-500 px-2 py-1.5 rounded-lg border border-neutral-200">
-                          <UserPlus className="w-3.5 h-3.5" /> Kayıt: {job.createdBy || 'Sistem'}
-                        </span>
+                        {/* İş Sonu Formu Gösterimi */}
+                        {job.endJobDetails && (
+                          <div className="mt-4 text-xs font-medium bg-green-50 text-green-800 p-4 rounded-xl border border-green-200 flex flex-col gap-3">
+                             <div className="flex items-center gap-2 border-b border-green-200/50 pb-2">
+                               <CheckCircle className="w-5 h-5 shrink-0 text-green-600" />
+                               <b className="text-green-900 text-sm">İş Tarafınızca Sonlandırıldı</b>
+                             </div>
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                               <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
+                               <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
+                               <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
+                               <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
+                               {job.endJobDetails.truckImage && <p className="md:col-span-2 text-green-700"><b>Kasa Fotoğrafı:</b> 📷 Sisteme Yüklendi ({job.endJobDetails.truckImage})</p>}
+                               {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
+                               {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
+                             </div>
+                          </div>
+                        )}
+
+                        {/* İŞİ SONLANDIR BUTONU */}
+                        {job.status !== 'completed' && (
+                          <div className="mt-4 pt-4 border-t border-neutral-100 flex justify-end">
+                            <button
+                              onClick={() => handleOpenEndJobModal(job)}
+                              className="px-4 py-2 bg-green-600 text-white text-xs font-bold rounded-xl hover:bg-green-700 transition flex items-center gap-2 shadow-lg shadow-green-600/20"
+                            >
+                              <CheckCircle className="w-4 h-4" /> İşi Sonlandır
+                            </button>
+                          </div>
+                        )}
                       </div>
-
-                      <div className="text-sm text-neutral-600 space-y-2 bg-white p-4 rounded-xl border border-neutral-100">
-                        <div className="flex items-start gap-2"><MapPin className="w-4 h-4 text-neutral-400 mt-0.5 shrink-0" /> <div><b className="text-black">AL:</b> {job.fromProvince}/{job.fromDistrict} - {job.fromAddress}</div></div>
-                        {job.toProvince && <div className="flex items-start gap-2 mt-2 pt-2 border-t border-neutral-100"><MapPin className="w-4 h-4 text-red-400 mt-0.5 shrink-0" /> <div><b className="text-black">VR:</b> {job.toProvince}/{job.toDistrict} - {job.toAddress}</div></div>}
-                      </div>
-
-                      {job.notes && (
-                        <div className="mt-4 text-xs font-medium bg-yellow-50 text-yellow-800 p-3 rounded-xl border border-yellow-200 flex items-start gap-2">
-                          <FileText className="w-4 h-4 shrink-0 mt-0.5 text-yellow-600" /> {job.notes}
-                        </div>
-                      )}
-
-                      {/* İş Sonu Formu Gösterimi */}
-                      {job.endJobDetails && (
-                        <div className="mt-4 text-xs font-medium bg-green-50 text-green-800 p-4 rounded-xl border border-green-200 flex flex-col gap-3">
-                           <div className="flex items-center gap-2 border-b border-green-200/50 pb-2">
-                             <CheckCircle className="w-5 h-5 shrink-0 text-green-600" />
-                             <b className="text-green-900 text-sm">İş Tarafınızca Sonlandırıldı</b>
-                           </div>
-                           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
-                             <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
-                             <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
-                             <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
-                             <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
-                             {job.endJobDetails.truckImage && <p className="md:col-span-2 text-green-700"><b>Kasa Fotoğrafı:</b> 📷 Sisteme Yüklendi ({job.endJobDetails.truckImage})</p>}
-                             {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
-                             {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
-                           </div>
-                        </div>
-                      )}
-
-                      {/* İŞİ SONLANDIR BUTONU */}
-                      {job.status !== 'completed' && (
-                        <div className="mt-4 pt-4 border-t border-neutral-100 flex justify-end">
-                          <button
-                            onClick={() => handleOpenEndJobModal(job)}
-                            className="px-4 py-2 bg-green-600 text-white text-xs font-bold rounded-xl hover:bg-green-700 transition flex items-center gap-2 shadow-lg shadow-green-600/20"
-                          >
-                            <CheckCircle className="w-4 h-4" /> İşi Sonlandır
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             )}
@@ -2111,7 +2138,7 @@ export default function App() {
         if (savedUser) {
           const parsed = JSON.parse(savedUser);
           const user = personnelList.find(p => 
-            (p.email === parsed.email || p.fullName.toLowerCase() === parsed.email?.toLowerCase()) && 
+            (p.email === parsed.email || p.fullName?.toLowerCase() === parsed.email?.toLowerCase()) && 
             p.password === parsed.password
           );
           if (user) {
@@ -3280,11 +3307,11 @@ export default function App() {
             </div>
             
             <form onSubmit={(e) => {
-               e.preventDefault();
-               if (!firebaseUser) return;
-               updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', editingTask.id), editingTask)
-                 .then(() => setEditingTask(null))
-                 .catch(console.error);
+              e.preventDefault();
+              if (!firebaseUser) return;
+              updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', editingTask.id), editingTask)
+                .then(() => setEditingTask(null))
+                .catch(console.error);
             }} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
@@ -3331,7 +3358,7 @@ export default function App() {
           border-radius: 10px;
         }
         .dark .custom-scrollbar::-webkit-scrollbar-thumb {
-           background-color: rgba(255, 255, 255, 0.1);
+          background-color: rgba(255, 255, 255, 0.1);
         }
       `}} />
     </div>
