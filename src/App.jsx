@@ -93,7 +93,7 @@ const DEPO_LOCATIONS = [
 
 // --- GEMINI API CALLER ---
 const callGeminiAPI = async (prompt, isJson = false) => {
-  const apiKey = "AIzaSyBsL1IaMriWM5zrUpFioE6CQpXJZaHDIMU"; // Sistem runtime'da otomatik tanımlar
+  const apiKey = "AIzaSyAQNBCWSbtmPEQGD4jQEo7BdoRQC_uoV8I"; // Sistem runtime'da otomatik tanımlar
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
   const payload = {
     contents: [{ parts: [{ text: prompt }] }],
