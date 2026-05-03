@@ -836,16 +836,18 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
   const [newMessage, setNewMessage] = useState('');
 
   const myJobs = jobs.filter(j => 
-    j.assignedPersonnelIds?.some(id => String(id) === String(currentUser.id)) || 
-    String(j.assignedPersonnelId) === String(currentUser.id)
+    j.assignedPersonnelIds?.some(id => String(id) === String(currentUser?.id)) || 
+    String(j.assignedPersonnelId) === String(currentUser?.id)
   );
   
-  const myNotifications = notifications.filter(n => String(n.userId) === String(currentUser.id));
+  const myNotifications = notifications.filter(n => String(n.userId) === String(currentUser?.id));
 
   // Profil sekmesi açıldığında bildirimleri okundu olarak işaretle
   React.useEffect(() => {
-    markNotificationsAsRead(currentUser.id);
-  }, [currentUser.id]);
+    if (currentUser?.id) {
+      markNotificationsAsRead(currentUser.id);
+    }
+  }, [currentUser?.id]);
 
   // Yeni mesaj gönderme işlemi
   const handleSendMessage = (e) => {
@@ -853,7 +855,7 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
     if (!newMessage.trim() || !activeChatUserId) return;
     
     const msg = {
-      senderId: currentUser.id,
+      senderId: currentUser?.id,
       receiverId: activeChatUserId,
       text: newMessage,
       timestamp: new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }),
@@ -866,14 +868,14 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
 
   // Chat penceresi açıldığında gelen mesajları okundu yap
   React.useEffect(() => {
-    if (activeChatUserId) {
+    if (activeChatUserId && currentUser?.id) {
       messages.forEach(m => {
         if (String(m.senderId) === String(activeChatUserId) && String(m.receiverId) === String(currentUser.id) && !m.read) {
           onMarkMessageAsRead(m.id);
         }
       });
     }
-  }, [activeChatUserId, messages, currentUser.id, onMarkMessageAsRead]);
+  }, [activeChatUserId, messages, currentUser?.id, onMarkMessageAsRead]);
 
   return (
     <div className="space-y-6 animate-in fade-in">
@@ -1889,6 +1891,7 @@ const LoginScreen = ({ onLogin, error }) => {
                 onChange={(e) => setPassword(e.target.value)} 
                 className="w-full pl-11 pr-4 py-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition font-medium" 
                 placeholder="••••••••" 
+                autoComplete="new-password"
               />
             </div>
           </div>
@@ -1979,6 +1982,11 @@ export default function App() {
   const [editingTask, setEditingTask] = useState(null);
   const [draggingTask, setDraggingTask] = useState(null);
   const [newTask, setNewTask] = useState({ title: '', description: '', assignee: '', date: new Date().toISOString().split('T')[0] });
+
+  // Çeviri uyarısını engellemek için HTML dilini TR yap
+  useEffect(() => {
+    document.documentElement.lang = 'tr';
+  }, []);
 
   // Firebase Auth Effect
   useEffect(() => {
