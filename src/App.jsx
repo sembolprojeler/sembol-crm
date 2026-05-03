@@ -34,6 +34,42 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
 // ----------------------------
 
+function useCloudState(key, initialValue, authUser) {
+  const [state, setState] = useState(initialValue);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!authUser) return;
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sembol_cloud_state', key);
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setState(docSnap.data().value);
+      } else {
+        setDoc(docRef, { value: initialValue }).catch(console.error);
+        setState(initialValue);
+      }
+      setIsLoaded(true);
+    }, (err) => {
+      console.error(err);
+      setIsLoaded(true);
+    });
+    return () => unsubscribe();
+  }, [authUser, key]);
+
+  const setCloudState = (newValue) => {
+    setState((prevState) => {
+      const evaluated = typeof newValue === 'function' ? newValue(prevState) : newValue;
+      if (authUser) {
+         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sembol_cloud_state', key);
+         setDoc(docRef, { value: evaluated }).catch(console.error);
+      }
+      return evaluated;
+    });
+  };
+
+  return [state, setCloudState, isLoaded];
+}
+
 // TÜRKİYE İL VE İLÇE VERİTABANI
 const TURKEY_LOCATIONS = {
   "İstanbul (Avrupa)": ["Arnavutköy", "Avcılar", "Bağcılar", "Bahçelievler", "Bakırköy", "Başakşehir", "Bayrampaşa", "Beşiktaş", "Beylikdüzü", "Beyoğlu", "Büyükçekmece", "Çatalca", "Esenler", "Esenyurt", "Eyüpsultan", "Fatih", "Gaziosmanpaşa", "Güngören", "Kâğıthane", "Küçükçekmece", "Sarıyer", "Silivri", "Sultangazi", "Şişli", "Zeytinburnu"],
@@ -3910,31 +3946,13 @@ const LoginScreen = ({ onLogin, error }) => {
 
 // --- ANA UYGULAMA (APP) ---
 export default function App() {
+  const [firebaseUser, setFirebaseUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
   const [loginError, setLoginError] = useState('');
-  const [authUser, setAuthUser] = useState(null);
 
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (error) {
-        console.error('Auth hatası:', error);
-      }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setAuthUser(user);
-    });
-    return () => unsubscribe();
-  }, []);
-
+  // Arayüz State'leri
   const [activeTab, setActiveTab] = useState('dashboard'); 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isSubMenuOpen, setIsSubMenuOpen] = useState(false);
@@ -3947,13 +3965,16 @@ export default function App() {
   const [isAuthSubMenuOpen, setIsAuthSubMenuOpen] = useState(false);
   const [isFinanceSubMenuOpen, setIsFinanceSubMenuOpen] = useState(false);
   const [isSystemFilesSubMenuOpen, setIsSystemFilesSubMenuOpen] = useState(false);
+  
   const [recordType, setRecordType] = useState('Nakliye');
+  const [transactionType, setTransactionType] = useState('income');
   const [editingJobId, setEditingJobId] = useState(null); 
   const [cancelJobId, setCancelJobId] = useState(null); 
 
   const [showSecondFromAddress, setShowSecondFromAddress] = useState(false);
   const [showSecondToAddress, setShowSecondToAddress] = useState(false);
 
+  // Modal State'leri
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [jobToAssign, setJobToAssign] = useState(null);
   const [assigneeId, setAssigneeId] = useState('');
@@ -3961,7 +3982,6 @@ export default function App() {
   const [manualExtraAssignees, setManualExtraAssignees] = useState([]);
   const [assignedVehiclePlate, setAssignedVehiclePlate] = useState('');
   
-  // Personel İşi Sonlandırma State'i
   const [showEndJobModal, setShowEndJobModal] = useState(false);
   const [jobToEnd, setJobToEnd] = useState(null);
   const [endJobError, setEndJobError] = useState('');
@@ -3978,195 +3998,298 @@ export default function App() {
   });
 
   const [aiModal, setAiModal] = useState({ isOpen: false, loading: false, content: '', title: '', type: '' });
-  const [viewingImage, setViewingImage] = useState(null); // Görsel önizleme state'i
+  const [viewingImage, setViewingImage] = useState(null);
 
-  const [notifications, setNotifications, isNotifLoaded] = useCloudState('notifications', [], authUser);
-  const [messages, setMessages, isMsgLoaded] = useCloudState('messages', [], authUser);
-  const [systemLogs, setSystemLogs, isLogsLoaded] = useCloudState('systemLogs', [], authUser);
-
-  const addSystemLog = (action, details) => {
-    const newLog = {
-      id: Date.now() + Math.random(),
-      action,
-      details,
-      user: currentUser ? currentUser.fullName : 'Sistem',
-      timestamp: new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
-    };
-    setSystemLogs(prev => [newLog, ...prev]);
-  };
-
-  const [positions, setPositions, isPosLoaded] = useCloudState('positions', [
-      'Şoför', 'Taşıma Elemanı', 'Muhasebe', 
-      'Mobilya Ustası', 'Satış Personeli', 
-      'Depo Sorumlusu', 'Temizlik Görevlisi', 
-      'Operasyon', 'Firma Sahibi'
-    ], authUser);
-
-  const handleAddPosition = (newPos) => { setPositions([...positions, newPos]); };
-  const handleDeletePosition = (posToDelete) => { setPositions(positions.filter(p => p !== posToDelete)); };
-
-  const [ranks, setRanks, isRanksLoaded] = useCloudState('ranks', [
-      'Müdür', 'Ekip Şefi', 'Asistan', 
-      'Standart', 'Kalfa'
-    ], authUser);
-
-  const handleAddRank = (newRank) => { setRanks([...ranks, newRank]); };
-  const handleDeleteRank = (rankToDelete) => { setRanks(ranks.filter(r => r !== rankToDelete)); };
-
-  const defaultPersonnelList = [
-    { id: 1, fullName: 'Mustafa Beşinci', tcNo: '11111111111', birthDate: '1980-01-01', companyPhone: '05320000000', personalPhone: '05320000000', position: 'Firma Sahibi', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'mustafa', password: 'mustafa', permissions: { canView: true, canEdit: true } },
-    { id: 2, fullName: 'Şenol Beşinci', tcNo: '12345678901', birthDate: '1985-05-15', companyPhone: '05551112233', personalPhone: '05321112233', position: 'Firma Sahibi', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'senol@sembolnakliyat.com', password: 'pass.senol123', permissions: { canView: true, canEdit: true } },
-    { id: 3, fullName: 'Mehmet Şen', tcNo: '98765432109', birthDate: '1990-08-22', companyPhone: '', personalPhone: '05441112233', position: 'Operasyon', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'mustafa@sembolnakliyat.com', password: 'pass.mustafa123', permissions: { canView: true, canEdit: true } },
-    { id: 4, fullName: 'Ahmet Öztürk', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ahmet', password: 'ahmet', permissions: { canView: true, canEdit: false } },
-    { id: 5, fullName: 'Azat Allakulyyev', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'azat.allakulyyev@sembolnakliyat.com', password: 'pass.azat123', permissions: { canView: true, canEdit: false } },
-    { id: 6, fullName: 'Atamurad Razakulov', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'atamurad.razakulov@sembolnakliyat.com', password: 'pass.atamurad123', permissions: { canView: true, canEdit: false } },
-    { id: 7, fullName: 'Batuhan Bagana', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'batuhan.bagana@sembolnakliyat.com', password: 'pass.batuhan123', permissions: { canView: true, canEdit: false } },
-    { id: 8, fullName: 'Berdimyrat Artykov', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'berdimyrat.artykov@sembolnakliyat.com', password: 'pass.berdimyrat123', permissions: { canView: true, canEdit: false } },
-    { id: 9, fullName: 'Berna Çelik', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Muhasebe', rank: 'Asistan', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'berna.celik@sembolnakliyat.com', password: 'pass.berna123', permissions: { canView: true, canEdit: false } },
-    { id: 10, fullName: 'Cengiz Çakar', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'cengiz.cakar@sembolnakliyat.com', password: 'pass.cengiz123', permissions: { canView: true, canEdit: false } },
-    { id: 11, fullName: 'Erkan Kurt', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'erkan.kurt@sembolnakliyat.com', password: 'pass.erkan123', permissions: { canView: true, canEdit: false } },
-    { id: 12, fullName: 'Ferhat Arslan', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ferhat.arslan@sembolnakliyat.com', password: 'pass.ferhat123', permissions: { canView: true, canEdit: false } },
-    { id: 13, fullName: 'Fatma Koçak', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Muhasebe', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'fatma.kocak@sembolnakliyat.com', password: 'pass.fatma123', permissions: { canView: true, canEdit: false } },
-    { id: 14, fullName: 'Kamil Kılınç', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'kamil.kilinc@sembolnakliyat.com', password: 'pass.kamil123', permissions: { canView: true, canEdit: false } },
-    { id: 15, fullName: 'Korhan Taşkaya', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'korhan.taskaya@sembolnakliyat.com', password: 'pass.korhan123', permissions: { canView: true, canEdit: false } },
-    { id: 17, fullName: 'Mesut İnan', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'mesut.inan@sembolnakliyat.com', password: 'pass.mesut123', permissions: { canView: true, canEdit: false } },
-    { id: 18, fullName: 'Muhammet Gök', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'muhammet.gok@sembolnakliyat.com', password: 'pass.muhammet123', permissions: { canView: true, canEdit: false } },
-    { id: 19, fullName: 'Oğuzhan Çakır', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'oguzhan.cakir@sembolnakliyat.com', password: 'pass.oguzhan123', permissions: { canView: true, canEdit: false } },
-    { id: 20, fullName: 'Ömer Akmeşe', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'omer.akmese@sembolnakliyat.com', password: 'pass.omer123', permissions: { canView: true, canEdit: false } },
-    { id: 21, fullName: 'Ömer Yıldız', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'omer.yildiz@sembolnakliyat.com', password: 'pass.omer1234', permissions: { canView: true, canEdit: false } },
-    { id: 22, fullName: 'Oğuzhan Akbulut', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'oguzhan.akbulut@sembolnakliyat.com', password: 'pass.oguzhan1234', permissions: { canView: true, canEdit: false } },
-    { id: 23, fullName: 'Ruslan Muradov', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ruslan.muradov@sembolnakliyat.com', password: 'pass.ruslan123', permissions: { canView: true, canEdit: false } },
-    { id: 24, fullName: 'Sedat Uslu', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'sedat.uslu@sembolnakliyat.com', password: 'pass.sedat123', permissions: { canView: true, canEdit: false } },
-    { id: 25, fullName: 'Vehbi Çirgin', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'vehbi.cirgin@sembolnakliyat.com', password: 'pass.vehbi123', permissions: { canView: true, canEdit: false } },
-    { id: 26, fullName: 'Tayfur Akyüz', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'tayfur.akyuz@sembolnakliyat.com', password: 'pass.tayfur123', permissions: { canView: true, canEdit: false } },
-    { id: 27, fullName: 'Ozan İbiş', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ozan.ibis@sembolnakliyat.com', password: 'pass.ozan123', permissions: { canView: true, canEdit: false } },
-    { id: 28, fullName: 'Rafet Tarakçı', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'rafet.tarakci@sembolnakliyat.com', password: 'pass.rafet123', permissions: { canView: true, canEdit: false } },
-    { id: 29, fullName: 'Erdem Yaman', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'erdem.yaman@sembolnakliyat.com', password: 'pass.erdem123', permissions: { canView: true, canEdit: false } }
-  ];
-
-  const [personnelList, setPersonnelList, isPersonnelLoaded] = useCloudState('personnelList', defaultPersonnelList, authUser);
-
-  React.useEffect(() => {
-    try {
-      const savedUser = localStorage.getItem('sembol_crm_user');
-      if (savedUser) {
-        const parsed = JSON.parse(savedUser);
-        const user = personnelList.find(p => 
-          (p.email === parsed.email || p.fullName.toLowerCase() === parsed.email?.toLowerCase()) && 
-          p.password === parsed.password
-        );
-        if (user) {
-          setCurrentUser(user);
-          setIsAuthenticated(true);
-        }
-      }
-    } catch (e) {
-      console.warn("Tarayıcı önbelleğine erişilemedi.");
-    } finally {
-      setIsAuthChecking(false);
-    }
-  }, []); 
-
-  const handleAddPersonnel = (newPersonnel) => {
-    setPersonnelList(prev => [{ ...newPersonnel, permissions: { canView: true, canEdit: false } }, ...prev]);
-  };
-
-  const handleUpdatePersonnel = (updatedUser) => {
-    setPersonnelList(prev => prev.map(p => p.id === updatedUser.id ? updatedUser : p));
-    if (currentUser && currentUser.id === updatedUser.id) {
-      setCurrentUser(updatedUser);
-      const savedUser = localStorage.getItem('sembol_crm_user');
-      if (savedUser) {
-        localStorage.setItem('sembol_crm_user', JSON.stringify({ email: updatedUser.email, password: updatedUser.password }));
-      }
-    }
-  };
-
-  const handleDeletePersonnel = (id) => {
-    const personToDelete = personnelList.find(p => p.id === id);
-    if (personToDelete) {
-      setPersonnelList(prev => prev.filter(p => p.id !== id));
-      addSystemLog('Kullanıcı Silindi', `${personToDelete.fullName} adlı personelin sisteme erişimi ve kaydı silindi.`);
-      if (currentUser?.id === id) {
-        handleLogout();
-      }
-    }
-  };
-
-  const handleUpdatePermissions = (userId, permissionKey, value) => {
-    setPersonnelList(prev => prev.map(p => {
-      if (p.id === userId) {
-        const updatedPermissions = { ...(p.permissions || {}), [permissionKey]: value };
-        return { ...p, permissions: updatedPermissions };
-      }
-      return p;
-    }));
-  };
-
-  const [tasks, setTasks, isTasksLoaded] = useCloudState('tasks', [
-    { id: '1', title: 'Yeni Araç Kredisi Başvurusu', description: 'Ziraat bankası ile görüşülecek ve evraklar teslim edilecek.', status: 'todo', assignee: 'Mustafa Beşinci', date: '2026-04-28' },
-    { id: '2', title: 'Aylık Fatura Kesimleri', description: 'Nisan ayı faturaları e-arşiv portala girilecek.', status: 'in-progress', assignee: 'Muhasebe Departmanı', date: '2026-04-27' },
-    { id: '3', title: 'Depo 4 İlaçlaması', description: 'Depo 4 için rutin haşere ilaçlaması yapıldı.', status: 'completed', assignee: 'Şenol Beşinci', date: '2026-04-25' }
-  ], authUser);
+  // --- FİREBASE VERİ STATE'LERİ ---
+  const [dataLoadStatus, setDataLoadStatus] = useState({
+    jobs: false, trans: false, tasks: false, notif: false, msg: false, logs: false, veh: false, mat: false, pers: false, settings: false
+  });
+  
+  const [jobs, setJobs] = useState([]);
+  const [transactions, setTransactions] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [notifications, setNotifications] = useState([]);
+  const [messages, setMessages] = useState([]);
+  const [systemLogs, setSystemLogs] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [materials, setMaterials] = useState([]);
+  const [personnelList, setPersonnelList] = useState([]);
+  const [positions, setPositions] = useState([]);
+  const [ranks, setRanks] = useState([]);
+  
+  // Form State'leri
+  const [newTransaction, setNewTransaction] = useState({ amount: '', category: 'Nakliye Tahsilatı', account: 'cash', date: new Date().toISOString().split('T')[0], description: '' });
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [draggingTask, setDraggingTask] = useState(null);
-  const [newTask, setNewTask] = useState({ title: '', description: '', assignee: 'Mustafa Beşinci', date: new Date().toISOString().split('T')[0] });
+  const [newTask, setNewTask] = useState({ title: '', description: '', assignee: '', date: new Date().toISOString().split('T')[0] });
 
-  const defaultVehicles = [];
-  const [vehicles, setVehicles, isVehiclesLoaded] = useCloudState('vehicles', defaultVehicles, authUser);
-
-  const handleAddVehicle = (newVehicle) => {
-    setVehicles([{ id: Date.now(), ...newVehicle }, ...vehicles]);
-    setActiveTab('vehicleList');
-  };
-
-  const handleDeleteVehicle = (id) => {
-    setVehicles(vehicles.filter(v => v.id !== id));
-  };
-
-  const defaultMaterials = [];
-  const [materials, setMaterials, isMaterialsLoaded] = useCloudState('materials', defaultMaterials, authUser);
-
-  const handleAddMaterial = (newMaterial) => {
-    setMaterials([{ id: Date.now(), ...newMaterial }, ...materials]);
-    addSystemLog('Malzeme Eklendi', `${newMaterial.name} adlı malzeme stoklara eklendi.`);
-    setActiveTab('materialList');
-  };
-
-  const handleDeleteMaterial = (id) => {
-    const mToDelete = materials.find(m => m.id === id);
-    setMaterials(materials.filter(m => m.id !== id));
-    if (mToDelete) addSystemLog('Malzeme Silindi', `${mToDelete.name} adlı malzeme sistemden silindi.`);
-  };
-
-  const getInitialJobs = () => {
-    return [];
-  };
-  const [jobs, setJobs, isJobsLoaded] = useCloudState('jobs', getInitialJobs(), authUser);
+  // Eski veri aktarımı kontrolü
+  const [isDataMigrated, setIsDataMigrated] = useState(() => localStorage.getItem('sembol_data_migrated') === 'true');
 
   const [formData, setFormData] = useState({
     isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo',
     fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '',
-    extraLoadingAddresses: [],
-    selectedDepo: '', 
+    extraLoadingAddresses: [], selectedDepo: '', 
     toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '',
     extraUnloadingAddresses: [],
     date: new Date().toISOString().split('T')[0], time: '08:00', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
   });
 
-  const handleInputChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+  // --- FIREBASE BAĞLANTI EFEKTLERİ ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (e) { console.error("Auth hatası:", e); }
+    };
+    initAuth();
+    
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      if(!user) setIsAuthChecking(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
+    const unsubs = [];
+
+    // Koleksiyon Dinleyicileri
+    unsubs.push(onSnapshot(getCol('jobs'), snap => { setJobs(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('transactions'), snap => { setTransactions(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('tasks'), snap => { setTasks(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('notifications'), snap => { setNotifications(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('messages'), snap => { setMessages(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, msg: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('systemLogs'), snap => { setSystemLogs(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('vehicles'), snap => { setVehicles(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, veh: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('materials'), snap => { setMaterials(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, mat: true})); }, console.error));
+
+    unsubs.push(onSnapshot(getCol('personnelList'), async snap => {
+      const list = snap.docs.map(d => ({id: d.id, ...d.data()}));
+      setPersonnelList(list);
+      if (snap.empty) {
+        await addDoc(getCol('personnelList'), {
+          fullName: 'Sistem Yöneticisi', email: 'admin', password: 'admin', position: 'Firma Sahibi', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', permissions: { canView: true, canEdit: true }
+        });
+      }
+      setDataLoadStatus(p => ({...p, pers: true}));
+      setIsAuthChecking(false);
+    }, console.error));
+
+    unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), async docSnap => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setPositions(data.positions || []);
+        setRanks(data.ranks || []);
+      } else {
+        const defaultPos = ['Şoför', 'Taşıma Elemanı', 'Muhasebe', 'Mobilya Ustası', 'Satış Personeli', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operasyon', 'Firma Sahibi'];
+        const defaultRanks = ['Müdür', 'Ekip Şefi', 'Asistan', 'Standart', 'Kalfa'];
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { positions: defaultPos, ranks: defaultRanks });
+        setPositions(defaultPos);
+        setRanks(defaultRanks);
+      }
+      setDataLoadStatus(p => ({...p, settings: true}));
+    }, console.error));
+
+    return () => unsubs.forEach(unsub => unsub());
+  }, [firebaseUser]);
+
+  // Oturum Kontrolü (Yerel Önbellek)
+  useEffect(() => {
+    if (personnelList.length > 0 && !isAuthenticated) {
+      try {
+        const savedUser = localStorage.getItem('sembol_crm_user');
+        if (savedUser) {
+          const parsed = JSON.parse(savedUser);
+          const user = personnelList.find(p => 
+            (p.email === parsed.email || p.fullName?.toLowerCase() === parsed.email?.toLowerCase()) && 
+            p.password === parsed.password
+          );
+          if (user) {
+            setCurrentUser(user);
+            setIsAuthenticated(true);
+          }
+        }
+      } catch (e) {}
+    }
+  }, [personnelList, isAuthenticated]); 
+
+  // --- FIREBASE CRUD İŞLEMLERİ ---
+
+  const addSystemLog = async (action, details) => {
+    if (!firebaseUser) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'systemLogs'), {
+      action, details,
+      user: currentUser ? currentUser.fullName : 'Sistem',
+      timestamp: new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
+    });
   };
+
+  const handleSyncOldData = async () => {
+    try {
+      const jobsSnap = await getDocs(collection(db, 'jobs'));
+      for (const docSnap of jobsSnap.docs) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', docSnap.id), docSnap.data());
+
+      const personnelSnap = await getDocs(collection(db, 'personnel'));
+      for (const docSnap of personnelSnap.docs) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', docSnap.id), docSnap.data());
+
+      const transSnap = await getDocs(collection(db, 'transactions'));
+      for (const docSnap of transSnap.docs) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', docSnap.id), docSnap.data());
+
+      localStorage.setItem('sembol_data_migrated', 'true');
+      setIsDataMigrated(true);
+      alert("Harika! Kök dizindeki eski verileriniz yeni sisteme aktarıldı.");
+    } catch (err) {
+      console.error(err);
+      alert("Veri çekilirken hata oluştu: " + err.message);
+    }
+  };
+
+  const handleAddPersonnel = async (newPersonnel) => {
+    if (!firebaseUser) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelList'), {
+      ...newPersonnel, permissions: { canView: true, canEdit: false }
+    });
+    addSystemLog('Personel Eklendi', `${newPersonnel.fullName} sisteme eklendi.`);
+  };
+
+  const handleUpdatePersonnel = async (updatedUser) => {
+    if (!firebaseUser) return;
+    const { id, ...data } = updatedUser;
+    Object.keys(data).forEach(key => data[key] === undefined && delete data[key]);
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', id), data);
+    
+    if (currentUser && currentUser.id === id) {
+      setCurrentUser(updatedUser);
+      const savedUser = localStorage.getItem('sembol_crm_user');
+      if (savedUser) localStorage.setItem('sembol_crm_user', JSON.stringify({ email: updatedUser.email, password: updatedUser.password }));
+    }
+  };
+
+  const handleDeletePersonnel = async (id) => {
+    if (!firebaseUser) return;
+    const person = personnelList.find(p => p.id === id);
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', id));
+    if(person) addSystemLog('Personel Silindi', `${person.fullName} sistemden kaldırıldı.`);
+    if (currentUser && currentUser.id === id) handleLogout();
+  };
+
+  const handleUpdatePermissions = async (id, permissionType, value) => {
+    if (!firebaseUser) return;
+    const user = personnelList.find(p => p.id === id);
+    if (!user) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', id), {
+      permissions: { ...user.permissions, [permissionType]: value }
+    });
+  };
+
+  const handleAddPosition = async (newPos) => {
+    if (!firebaseUser) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { positions: [...positions, newPos] });
+  };
+
+  const handleDeletePosition = async (posToDelete) => {
+    if (!firebaseUser) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { positions: positions.filter(p => p !== posToDelete) });
+  };
+
+  const handleAddRank = async (newRank) => {
+    if (!firebaseUser) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { ranks: [...ranks, newRank] });
+  };
+
+  const handleDeleteRank = async (rankToDelete) => {
+    if (!firebaseUser) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { ranks: ranks.filter(r => r !== rankToDelete) });
+  };
+
+  const handleAddVehicle = async (newVehicle) => {
+    if (!firebaseUser) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'vehicles'), newVehicle);
+    addSystemLog('Araç Eklendi', `${newVehicle.plate} plakalı araç eklendi.`);
+    setActiveTab('vehicleList');
+  };
+
+  const handleDeleteVehicle = async (id) => {
+    if (!firebaseUser) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'vehicles', id));
+  };
+
+  const handleAddMaterial = async (newMaterial) => {
+    if (!firebaseUser) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'materials'), newMaterial);
+    addSystemLog('Malzeme Eklendi', `${newMaterial.name} stoklara eklendi.`);
+    setActiveTab('materialList');
+  };
+
+  const handleDeleteMaterial = async (id) => {
+    if (!firebaseUser) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', id));
+  };
+
+  const handleAddTask = async (e) => {
+    e.preventDefault();
+    if (!firebaseUser) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'tasks'), { ...newTask, status: 'todo' });
+    setShowTaskModal(false);
+    setNewTask({ title: '', description: '', assignee: personnelList.length > 0 ? personnelList[0].fullName : 'Yönetim', date: new Date().toISOString().split('T')[0] });
+    setActiveTab('taskList');
+  };
+  
+  const handleUpdateTaskStatus = async (taskId, status) => {
+    if (!firebaseUser) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', taskId), { status });
+  };
+  
+  const handleDeleteTask = async (taskId) => {
+    if (!firebaseUser) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', taskId));
+  };
+
+  const handleAddTransaction = async (e) => {
+    e.preventDefault();
+    if (!firebaseUser) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { 
+      type: transactionType, amount: parseFloat(newTransaction.amount), category: newTransaction.category, account: newTransaction.account, date: newTransaction.date, description: newTransaction.description 
+    });
+    setNewTransaction({ amount: '', category: transactionType === 'income' ? 'Nakliye Tahsilatı' : 'Maaş Ödemesi', account: 'cash', date: new Date().toISOString().split('T')[0], description: '' });
+    setActiveTab('financeDashboard');
+  };
+
+  const onSendMessage = async (msgData) => {
+    if (!firebaseUser) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), msgData);
+  };
+
+  const onMarkMessageAsRead = async (msgId) => {
+    if (!firebaseUser) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId), { read: true });
+  };
+
+  const markNotificationsAsRead = async (userId) => {
+    if (!firebaseUser) return;
+    const unreadNotifs = notifications.filter(n => String(n.userId) === String(userId) && !n.read);
+    for (const n of unreadNotifs) {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notifications', n.id), { read: true });
+    }
+  };
+
+  // --- ARAYÜZ YARDIMCI FONKSİYONLARI ---
+
+  const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
   const handleProvinceChange = (e, type) => {
     const province = e.target.value;
     let provKey, distKey;
     if (type === 'from') { provKey = 'fromProvince'; distKey = 'fromDistrict'; }
     else if (type === 'to') { provKey = 'toProvince'; distKey = 'toDistrict'; }
-    else if (type === 'from2') { provKey = 'fromProvince2'; distKey = 'fromDistrict2'; }
-    else if (type === 'to2') { provKey = 'toProvince2'; distKey = 'toDistrict2'; }
-
     setFormData({ ...formData, [provKey]: province, [distKey]: '' });
   };
 
@@ -4180,8 +4303,7 @@ export default function App() {
 
   const handleSwapAddresses = () => {
     setFormData(prev => ({
-      ...prev, 
-      depoDirection: prev.depoDirection === 'toDepo' ? 'fromDepo' : 'toDepo',
+      ...prev, depoDirection: prev.depoDirection === 'toDepo' ? 'fromDepo' : 'toDepo',
       fromProvince: prev.toProvince, fromDistrict: prev.toDistrict, fromFloor: prev.toFloor, fromTransportMethod: prev.toTransportMethod, fromPacking: prev.toPacking, fromRoomCount: prev.toRoomCount, fromDistance: prev.toDistance, fromDistanceUnit: prev.toDistanceUnit, fromAddress: prev.toAddress,
       extraLoadingAddresses: prev.extraUnloadingAddresses || [],
       toProvince: prev.fromProvince, toDistrict: prev.fromDistrict, toFloor: prev.fromFloor, toTransportMethod: prev.fromTransportMethod, toPacking: prev.fromPacking, toRoomCount: prev.fromRoomCount, toDistance: prev.fromDistance, toDistanceUnit: prev.fromDistanceUnit, toAddress: prev.fromAddress,
@@ -4192,16 +4314,11 @@ export default function App() {
   const handleDepoChange = (e) => {
     const depoName = e.target.value;
     const depo = DEPO_LOCATIONS.find(d => d.name === depoName);
-    
     if (depo) {
       if (formData.depoDirection === 'fromDepo') {
-        setFormData({
-          ...formData, selectedDepo: depoName, fromProvince: depo.province, fromDistrict: depo.district, fromAddress: depo.address, fromFloor: 'Giriş Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre'
-        });
+        setFormData({...formData, selectedDepo: depoName, fromProvince: depo.province, fromDistrict: depo.district, fromAddress: depo.address, fromFloor: 'Giriş Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre'});
       } else {
-        setFormData({
-          ...formData, selectedDepo: depoName, toProvince: depo.province, toDistrict: depo.district, toAddress: depo.address, toFloor: 'Giriş Kat', toTransportMethod: 'Merdiven', toPacking: 'Kendisi Topladı', toRoomCount: 'Depoevim Tesisleri', toDistance: '0', toDistanceUnit: 'Metre'
-        });
+        setFormData({...formData, selectedDepo: depoName, toProvince: depo.province, toDistrict: depo.district, toAddress: depo.address, toFloor: 'Giriş Kat', toTransportMethod: 'Merdiven', toPacking: 'Kendisi Topladı', toRoomCount: 'Depoevim Tesisleri', toDistance: '0', toDistanceUnit: 'Metre'});
       }
     } else {
       if (formData.depoDirection === 'fromDepo') {
@@ -4215,175 +4332,70 @@ export default function App() {
   const handleEditJob = (job) => {
     setEditingJobId(job.id);
     setRecordType(job.type || 'Nakliye');
-    setFormData({ 
-      ...job,
-      extraLoadingAddresses: job.extraLoadingAddresses || [],
-      extraUnloadingAddresses: job.extraUnloadingAddresses || []
-    });
-    
+    setFormData({ ...job, extraLoadingAddresses: job.extraLoadingAddresses || [], extraUnloadingAddresses: job.extraUnloadingAddresses || [] });
     if (job.type === 'Nakliye') setActiveTab('addNakliye');
     else if (job.type === 'Depo') setActiveTab('addDepo');
     else if (job.type === 'Asansör') setActiveTab('addAsansor');
     else setActiveTab('addNakliye');
   };
 
-  const handleCancelJob = (id) => {
-    setJobs(jobs.map(j => j.id === id ? { ...j, status: 'cancelled' } : j));
+  const handleCancelJob = async (id) => {
+    if (!firebaseUser) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id), { status: 'cancelled' });
     addSystemLog('İş İptal Edildi', `Sistem üzerinden bir operasyon iptal edildi.`);
   };
 
-  const handleRestoreJob = (id) => {
-    setJobs(jobs.map(j => j.id === id ? { ...j, status: 'pending' } : j));
-    addSystemLog('İş Geri Alındı', `İptal edilen bir operasyon geri alındı ve bekleme durumuna çekildi.`);
+  const handleRestoreJob = async (id) => {
+    if (!firebaseUser) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id), { status: 'pending' });
+    addSystemLog('İş Geri Alındı', `İptal edilen bir operasyon geri alındı.`);
   };
 
-  const handleAddJob = (e) => {
+  const handleAddJob = async (e) => {
     e.preventDefault();
+    if (!firebaseUser) return;
     try {
+      const jobData = { type: recordType, ...formData };
+      Object.keys(jobData).forEach(key => jobData[key] === undefined && delete jobData[key]);
+
       if (editingJobId) {
-        setJobs(jobs.map(j => j.id === editingJobId ? { ...formData, id: editingJobId, status: j.status, endJobDetails: j.endJobDetails, assignedPersonnelId: j.assignedPersonnelId, team: j.team, deliveryCode: j.deliveryCode, createdBy: j.createdBy } : j));
-        addSystemLog('Kayıt Güncellendi', `${formData.customerName} müşterisine ait iş kaydı güncellendi.`);
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', editingJobId), jobData);
+        addSystemLog('Kayıt Güncellendi', `${formData.customerName} müşterisine ait iş güncellendi.`);
         setEditingJobId(null);
       } else {
-        const newJobsToCreate = [];
         const newDeliveryCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const primaryJob = { id: Date.now(), type: recordType, ...formData, team: 'Atanmadı', assignedPersonnelId: null, status: 'pending', endJobDetails: null, deliveryCode: newDeliveryCode, createdBy: currentUser?.fullName || 'Sistem' };
-        newJobsToCreate.push(primaryJob);
-        addSystemLog('Yeni İş Kaydı', `${formData.customerName} müşterisi için yeni bir ${recordType} kaydı oluşturuldu.`);
+        const primaryJob = { ...jobData, team: 'Atanmadı', assignedPersonnelId: null, assignedPersonnelIds: [], teamNames: [], status: 'pending', endJobDetails: null, deliveryCode: newDeliveryCode, createdBy: currentUser?.fullName || 'Sistem' };
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), primaryJob);
+        addSystemLog('Yeni İş Kaydı', `${formData.customerName} için yeni bir ${recordType} kaydı oluşturuldu.`);
 
-        // Otomatik Asansör Kaydı Oluşturma Mantığı
+        // Otomatik Asansör
         if (recordType !== 'Asansör') {
-          let asansorIdCounter = 1;
-          const createAsansorPayload = (sourceAddr, installType) => ({
-            id: Date.now() + asansorIdCounter++,
-            type: 'Asansör',
-            customerType: formData.customerType,
-            tcNo: formData.tcNo,
-            taxNo: formData.taxNo,
-            customerName: formData.customerName,
-            customerPhone: formData.customerPhone,
-            altPhone: formData.altPhone,
-            date: formData.date,
-            time: formData.time,
-            price: '0',
-            deposit: '0',
-            deliveryCode: newDeliveryCode,
-            contractDetails: 'Otomatik Oluşturulan Asansör Kurulum Kaydı (Kendi İşimiz)',
-            notes: '',
-            team: 'Atanmadı',
-            assignedPersonnelId: null,
-            status: 'pending',
-            endJobDetails: null,
-            createdBy: currentUser?.fullName || 'Sistem',
-            fromFloor: sourceAddr.floor,
-            fromDistance: sourceAddr.distance,
-            fromDistanceUnit: sourceAddr.distanceUnit,
-            fromPacking: 'Kendi İşimiz', // Kime Kurulacak
-            fromProvince: sourceAddr.province || '',
-            fromDistrict: sourceAddr.district || '',
-            fromAddress: sourceAddr.address || '',
-            toProvince: '', toDistrict: '', toAddress: '', toFloor: '', toRoomCount: '', toDistance: '', toDistanceUnit: '',
-            extraLoadingAddresses: [],
-            extraUnloadingAddresses: []
-          });
+          const createAsansor = async (sourceAddr, installType) => {
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), {
+              type: 'Asansör', customerType: formData.customerType, tcNo: formData.tcNo, taxNo: formData.taxNo, customerName: formData.customerName, customerPhone: formData.customerPhone, altPhone: formData.altPhone, date: formData.date, time: formData.time, price: '0', deposit: '0', deliveryCode: newDeliveryCode, contractDetails: 'Otomatik Oluşturulan Asansör Kurulum Kaydı', notes: '', team: 'Atanmadı', assignedPersonnelId: null, assignedPersonnelIds: [], teamNames: [], status: 'pending', endJobDetails: null, createdBy: currentUser?.fullName || 'Sistem', fromFloor: sourceAddr.floor, fromDistance: sourceAddr.distance, fromDistanceUnit: sourceAddr.distanceUnit, fromPacking: 'Kendi İşimiz', fromProvince: sourceAddr.province || '', fromDistrict: sourceAddr.district || '', fromAddress: sourceAddr.address || '', toProvince: '', toDistrict: '', toAddress: '', toFloor: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', extraLoadingAddresses: [], extraUnloadingAddresses: []
+            });
+          };
 
-          // 1. Ana Yükleme Adresi Kontrolü
           if (formData.fromTransportMethod === 'Dış Cephe Asansörü') {
-            newJobsToCreate.push(createAsansorPayload({
-              floor: formData.fromFloor, distance: formData.fromDistance, distanceUnit: formData.fromDistanceUnit,
-              province: formData.fromProvince, district: formData.fromDistrict, address: formData.fromAddress
-            }, 'Yükleme Kurulum'));
-            addSystemLog('Otomatik Asansör Kaydı', `${formData.customerName} müşterisi için otomatik Yükleme Asansörü kaydı oluşturuldu.`);
+            await createAsansor({ floor: formData.fromFloor, distance: formData.fromDistance, distanceUnit: formData.fromDistanceUnit, province: formData.fromProvince, district: formData.fromDistrict, address: formData.fromAddress }, 'Yükleme Kurulum');
           }
-
-          // 2. Ekstra Yükleme Adresleri Kontrolü
-          formData.extraLoadingAddresses?.forEach((addr, idx) => {
-            if (addr.transportMethod === 'Dış Cephe Asansörü') {
-              newJobsToCreate.push(createAsansorPayload(addr, 'Yükleme Kurulum'));
-              addSystemLog('Otomatik Asansör Kaydı', `${formData.customerName} müşterisi için otomatik ${idx + 2}. Yükleme Asansörü kaydı oluşturuldu.`);
-            }
-          });
-
-          // 3. Ana Boşaltma Adresi Kontrolü
+          for (const addr of (formData.extraLoadingAddresses || [])) {
+            if (addr.transportMethod === 'Dış Cephe Asansörü') await createAsansor(addr, 'Yükleme Kurulum');
+          }
           if (formData.toTransportMethod === 'Dış Cephe Asansörü') {
-            newJobsToCreate.push(createAsansorPayload({
-              floor: formData.toFloor, distance: formData.toDistance, distanceUnit: formData.toDistanceUnit,
-              province: formData.toProvince, district: formData.toDistrict, address: formData.toAddress
-            }, 'Boşaltma Kurulum'));
-            addSystemLog('Otomatik Asansör Kaydı', `${formData.customerName} müşterisi için otomatik Boşaltma Asansörü kaydı oluşturuldu.`);
+            await createAsansor({ floor: formData.toFloor, distance: formData.toDistance, distanceUnit: formData.toDistanceUnit, province: formData.toProvince, district: formData.toDistrict, address: formData.toAddress }, 'Boşaltma Kurulum');
           }
-
-          // 4. Ekstra Boşaltma Adresleri Kontrolü
-          formData.extraUnloadingAddresses?.forEach((addr, idx) => {
-            if (addr.transportMethod === 'Dış Cephe Asansörü') {
-              newJobsToCreate.push(createAsansorPayload(addr, 'Boşaltma Kurulum'));
-              addSystemLog('Otomatik Asansör Kaydı', `${formData.customerName} müşterisi için otomatik ${idx + 2}. Boşaltma Asansörü kaydı oluşturuldu.`);
-            }
-          });
+          for (const addr of (formData.extraUnloadingAddresses || [])) {
+            if (addr.transportMethod === 'Dış Cephe Asansörü') await createAsansor(addr, 'Boşaltma Kurulum');
+          }
         }
-
-        setJobs([...newJobsToCreate, ...jobs]);
       }
       
       setFormData({
-        isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo',
-        fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '',
-        extraLoadingAddresses: [],
-        selectedDepo: '',
-        toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '',
-        extraUnloadingAddresses: [],
-        date: new Date().toISOString().split('T')[0], time: '08:00', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
+        isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo', fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', extraLoadingAddresses: [], selectedDepo: '', toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', extraUnloadingAddresses: [], date: new Date().toISOString().split('T')[0], time: '08:00', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
       });
       setActiveTab('dashboard');
-    } catch (err) {
-      console.error("Kayıt oluşturulurken bir hata meydana geldi:", err);
-    }
-  };
-
-  const handleAddTask = (e) => {
-    e.preventDefault();
-    const newTaskObj = { id: Date.now().toString(), ...newTask, status: 'todo' };
-    setTasks([...tasks, newTaskObj]);
-    setShowTaskModal(false);
-    setNewTask({ title: '', description: '', assignee: personnelList.length > 0 ? personnelList[0].fullName : 'Yönetim', date: new Date().toISOString().split('T')[0] });
-    setActiveTab('taskList');
-  };
-
-  const openEditTask = (task) => {
-    setEditingTask(task);
-  };
-
-  const handleUpdateTask = (e) => {
-    e.preventDefault();
-    setTasks(tasks.map(t => t.id === editingTask.id ? editingTask : t));
-    setEditingTask(null);
-  };
-
-  const handleLogin = (email, password, rememberMe) => {
-    const user = personnelList.find(p => 
-      (p.email === email || p.fullName.toLowerCase() === email.toLowerCase()) && 
-      p.password === password
-    );
-    if (user) {
-      setCurrentUser(user);
-      setIsAuthenticated(true);
-      setLoginError('');
-      if (rememberMe) {
-        try { localStorage.setItem('sembol_crm_user', JSON.stringify({ email, password })); } catch (e) { }
-      } else {
-        try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
-      }
-    } else {
-      setLoginError('Kullanıcı adı / E-posta veya şifre hatalı. Lütfen tekrar deneyin.');
-    }
-  };
-
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    setCurrentUser(null);
-    setActiveTab('dashboard');
-    setIsSidebarOpen(false);
-    try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
+    } catch (err) { console.error(err); }
   };
 
   const handleOpenAssignModal = (job) => {
@@ -4401,196 +4413,113 @@ export default function App() {
     setShowAssignModal(true);
   };
 
-  const submitAssignJob = (e) => {
+  const submitAssignJob = async (e) => {
     e.preventDefault();
-    if(!assigneeId) return;
-
-    const mainPerson = personnelList.find(p => p.id === parseInt(assigneeId));
+    if(!assigneeId || !firebaseUser) return;
+    const mainPerson = personnelList.find(p => String(p.id) === String(assigneeId));
     if(!mainPerson) return;
 
     const additionalPersons = personnelList.filter(p => additionalAssignees.includes(p.id));
     const allAssignedIds = [mainPerson.id, ...additionalPersons.map(p => p.id)];
-    
     const manualNames = manualExtraAssignees.map(n => n.trim()).filter(n => n !== '');
-    
     const allNames = [mainPerson.fullName, ...additionalPersons.map(p => p.fullName), ...manualNames];
 
-    setJobs(jobs.map(j => j.id === jobToAssign.id ? { 
-      ...j, 
-      assignedPersonnelId: mainPerson.id, 
-      assignedPersonnelIds: allAssignedIds,
-      teamNames: allNames,
-      team: allNames.join(', '), 
-      assignedVehiclePlate: assignedVehiclePlate,
-      status: 'in-progress' 
-    } : j));
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobToAssign.id), {
+      assignedPersonnelId: mainPerson.id, assignedPersonnelIds: allAssignedIds, teamNames: allNames, team: allNames.join(', '), assignedVehiclePlate: assignedVehiclePlate, status: 'in-progress' 
+    });
     
-    const newNotifs = allAssignedIds.map(userId => ({
-      id: Date.now() + Math.random(),
-      userId: userId,
-      title: 'Yeni Görev Ataması',
-      message: `${jobToAssign.customerName} müşterisine ait ${jobToAssign.date} tarihli operasyon için ${userId === mainPerson.id ? 'ekip sorumlusu (asıl görevli) olarak ' : 'ekip üyesi olarak '}görevlendirildiniz.`,
-      date: new Date().toLocaleString('tr-TR'),
-      read: false
-    }));
+    const notifsCol = collection(db, 'artifacts', appId, 'public', 'data', 'notifications');
+    for (const userId of allAssignedIds) {
+      await addDoc(notifsCol, {
+        userId: userId, title: 'Yeni Görev Ataması', message: `${jobToAssign.customerName} operasyonu için görevlendirildiniz.`, date: new Date().toLocaleString('tr-TR'), read: false
+      });
+    }
     
-    setNotifications([...newNotifs, ...notifications]);
-    
-    setShowAssignModal(false);
-    setJobToAssign(null);
-    setAssigneeId('');
-    setAdditionalAssignees([]);
-    setManualExtraAssignees([]);
-    setAssignedVehiclePlate('');
+    setShowAssignModal(false); setJobToAssign(null); setAssigneeId(''); setAdditionalAssignees([]); setManualExtraAssignees([]); setAssignedVehiclePlate('');
   };
 
-  const handleAddManualAssignee = () => {
-    setManualExtraAssignees([...manualExtraAssignees, '']);
-  };
-
+  const handleAddManualAssignee = () => setManualExtraAssignees([...manualExtraAssignees, '']);
   const handleManualAssigneeChange = (index, value) => {
-    const updated = [...manualExtraAssignees];
-    updated[index] = value;
-    setManualExtraAssignees(updated);
+    const updated = [...manualExtraAssignees]; updated[index] = value; setManualExtraAssignees(updated);
+  };
+  const handleRemoveManualAssignee = (index) => setManualExtraAssignees(manualExtraAssignees.filter((_, i) => i !== index));
+
+  const submitRemoveAssignment = async () => {
+    if (!firebaseUser) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobToAssign.id), {
+      assignedPersonnelId: null, assignedPersonnelIds: [], teamNames: [], team: 'Atanmadı', assignedVehiclePlate: '', status: jobToAssign.status === 'completed' ? 'completed' : 'pending' 
+    });
+    setShowAssignModal(false); setJobToAssign(null); setAssigneeId(''); setAdditionalAssignees([]); setManualExtraAssignees([]); setAssignedVehiclePlate('');
   };
 
-  const handleRemoveManualAssignee = (index) => {
-    const updated = manualExtraAssignees.filter((_, i) => i !== index);
-    setManualExtraAssignees(updated);
-  };
-
-  const submitRemoveAssignment = () => {
-    setJobs(jobs.map(j => j.id === jobToAssign.id ? { 
-      ...j, 
-      assignedPersonnelId: null, 
-      assignedPersonnelIds: [],
-      teamNames: [],
-      team: 'Atanmadı', 
-      assignedVehiclePlate: '',
-      status: j.status === 'completed' ? 'completed' : 'pending' 
-    } : j));
-    setShowAssignModal(false);
-    setJobToAssign(null);
-    setAssigneeId('');
-    setAdditionalAssignees([]);
-    setManualExtraAssignees([]);
-    setAssignedVehiclePlate('');
-  };
-
-  // İŞ SONLANDIRMA FONKSİYONLARI (YENİ EKLENDİ)
   const handleOpenEndJobModal = (job) => {
     setJobToEnd(job);
     setEndJobError('');
-    setEndJobData({ 
-      paymentMethod: 'Nakit', 
-      damageStatus: 'Hasarsız teslim edildi', 
-      damageDetails: '',
-      damageImage: '',
-      truckImage: '',
-      truckStatus: 'Herhangi bir sorun yok',
-      truckIssueDetails: '',
-      customerSatisfaction: 'Herhangi bir işlem yapmadı.',
-      enteredCode: ''
-    });
+    setEndJobData({ paymentMethod: 'Nakit', damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImage: '', truckImage: '', truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '' });
     setShowEndJobModal(true);
   };
 
-  const submitEndJob = (e) => {
+  const submitEndJob = async (e) => {
     e.preventDefault();
-
-    // Müşteri Teslim Kodu Doğrulaması
+    if (!firebaseUser) return;
     if (jobToEnd.deliveryCode && endJobData.enteredCode !== jobToEnd.deliveryCode) {
-      setEndJobError('Girdiğiniz teslim kodu hatalı. Lütfen müşteriden sözleşmesindeki doğru kodu isteyin.');
-      return;
+      setEndJobError('Girdiğiniz teslim kodu hatalı. Lütfen müşteriden doğru kodu isteyin.'); return;
     }
 
-    // İş tamamlandığında, malzemeler daha önce düşülmemişse otomatik düşüyoruz
     if (!jobToEnd.materialsDeducted) {
       const estData = calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking);
-      const newMaterials = materials.map(m => {
+      for (const m of materials) {
         let deductAmount = 0;
         if (m.name.includes('Streç')) deductAmount = estData.strec;
         if (m.name === 'Bant') deductAmount = estData.bant;
         if (m.name === 'Poşet') deductAmount = estData.poset;
         if (m.name.includes('Kağıt')) deductAmount = estData.kagit;
         if (m.name === 'Koli') deductAmount = estData.koli;
-
-        return { ...m, stock: String(Math.max(0, parseFloat(m.stock) - deductAmount)) };
-      });
-      setMaterials(newMaterials);
-      addSystemLog('Stok Çıkışı (Oto)', `${jobToEnd.customerName} operasyonu sonlandırıldığı için sistem tahminiyle operasyon malzemeleri stoktan otomatik düşüldü.`);
+        if (deductAmount > 0) {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', m.id), { stock: String(Math.max(0, parseFloat(m.stock) - deductAmount)) });
+        }
+      }
+      addSystemLog('Stok Çıkışı (Oto)', `${jobToEnd.customerName} operasyonu sonlandırıldığı için malzemeler stoktan otomatik düşüldü.`);
     }
 
-    setJobs(jobs.map(j => j.id === jobToEnd.id ? { ...j, status: 'completed', endJobDetails: endJobData, materialsDeducted: true } : j));
-    setShowEndJobModal(false);
-    setJobToEnd(null);
-  };
-
-  const markNotificationsAsRead = (userId) => {
-    setNotifications(prev => prev.map(n => n.userId === userId ? { ...n, read: true } : n));
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobToEnd.id), { status: 'completed', endJobDetails: endJobData, materialsDeducted: true });
+    setShowEndJobModal(false); setJobToEnd(null);
   };
 
   const handleGenerateMessage = async (job) => {
     setAiModal({ isOpen: true, loading: true, content: '', title: 'Müşteri Mesajı Hazırla', type: 'message' });
     try {
-      const prompt = `Sen Sembol Nakliyat firmasının kurumsal ve samimi bir asistanısın. Şu müşteri için profesyonel bir taşıma onay ve bilgilendirme WhatsApp mesajı taslağı oluştur.
-      Müşteri Adı: ${job.customerName}
-      Tarih ve Saat: ${job.date} ${job.time}
-      Güzergah: ${job.fromProvince}/${job.fromDistrict} bölgesinden ${job.toProvince ? job.toProvince + '/' + job.toDistrict : 'belirtilmemiş'} bölgesine.
-      Lütfen emojiler kullan, güven verici bir dil kullan ve ekibimizin belirtilen saatte orada olacağını belirt.`;
-      
+      const prompt = `Sen Sembol Nakliyat firmasının kurumsal asistanısın. Müşteri: ${job.customerName}, Tarih: ${job.date} ${job.time}, Güzergah: ${job.fromProvince}/${job.fromDistrict} -> ${job.toProvince ? job.toProvince + '/' + job.toDistrict : 'belirtilmemiş'}. Onay ve bilgilendirme WhatsApp mesajı oluştur.`;
       const resText = await callGeminiAPI(prompt, false);
       setAiModal(prev => ({ ...prev, loading: false, content: resText }));
-    } catch (e) {
-      setAiModal(prev => ({ ...prev, loading: false, content: 'Mesaj oluşturulurken bir hata oluştu.' }));
-    }
+    } catch (e) { setAiModal(prev => ({ ...prev, loading: false, content: 'Hata oluştu.' })); }
   };
 
   const handleEstimateMaterials = (job) => {
     const est = calculateMaterials(job.fromRoomCount, job.fromPacking);
-    const content = `Tahmini Gerekli Malzemeler (Daire: ${job.fromRoomCount}, Durum: ${job.fromPacking}):\n\n` +
-                    `- ${est.strec} Rulo Streç\n` +
-                    `- ${est.bant} Adet Bant\n` +
-                    `- ${est.poset} Adet Poşet\n` +
-                    `- ${est.kagit} Kg Sarma Kağıdı\n` +
-                    `- ${est.koli} Adet Koli`;
-
-    setAiModal({ 
-      isOpen: true, 
-      loading: false, 
-      content, 
-      title: '📦 Malzeme Tahmini', 
-      type: 'material',
-      jobId: job.id,
-      estData: est,
-      alreadyDeducted: job.materialsDeducted
-    });
+    const content = `Tahmini Gerekli Malzemeler:\n\n- ${est.strec} Rulo Streç\n- ${est.bant} Adet Bant\n- ${est.poset} Adet Poşet\n- ${est.kagit} Kg Kağıt\n- ${est.koli} Adet Koli`;
+    setAiModal({ isOpen: true, loading: false, content, title: '📦 Malzeme Tahmini', type: 'material', jobId: job.id, estData: est, alreadyDeducted: job.materialsDeducted });
   };
 
-  const handleDeductMaterials = () => {
+  const handleDeductMaterials = async () => {
     const { jobId, estData } = aiModal;
-    if (!estData || !jobId) return;
+    if (!estData || !jobId || !firebaseUser) return;
 
-    const newMaterials = materials.map(m => {
+    for (const m of materials) {
       let deductAmount = 0;
       if (m.name.includes('Streç')) deductAmount = estData.strec;
       if (m.name === 'Bant') deductAmount = estData.bant;
       if (m.name === 'Poşet') deductAmount = estData.poset;
       if (m.name.includes('Kağıt')) deductAmount = estData.kagit;
       if (m.name === 'Koli') deductAmount = estData.koli;
+      if (deductAmount > 0) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', m.id), { stock: String(Math.max(0, parseFloat(m.stock) - deductAmount)) });
+      }
+    }
 
-      return { ...m, stock: String(Math.max(0, parseFloat(m.stock) - deductAmount)) };
-    });
-
-    setMaterials(newMaterials);
-    setJobs(jobs.map(j => j.id === jobId ? { ...j, materialsDeducted: true } : j));
-    
-    setAiModal({ 
-      ...aiModal, 
-      alreadyDeducted: true, 
-      content: aiModal.content + '\n\n✅ Malzemeler stoktan başarılı bir şekilde düşüldü.' 
-    });
-    addSystemLog('Stok Çıkışı', `Sistem tahminiyle operasyon için malzeme stoktan düşüldü.`);
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobId), { materialsDeducted: true });
+    setAiModal({ ...aiModal, alreadyDeducted: true, content: aiModal.content + '\n\n✅ Malzemeler stoktan başarılı bir şekilde düşüldü.' });
+    addSystemLog('Stok Çıkışı', `Manuel onay ile operasyon için malzeme stoktan düşüldü.`);
   };
 
   const handleGenerateDailySummary = async (jobsList) => {
@@ -4598,43 +4527,38 @@ export default function App() {
     try {
       const pendingCount = jobsList.filter(j => j.status === 'pending').length;
       const inProgressCount = jobsList.filter(j => j.status === 'in-progress').length;
-      const prompt = `Sembol Nakliyat'ın yapay zeka operasyon müdürüsün. Sistemde bugün toplam ${jobsList.length} kayıtlı iş var. ${pendingCount} tanesi bekliyor, ${inProgressCount} tanesi sürüyor. Ekibine güne başlarken gönderebileceğin, onları motive edecek, dikkatli taşımaya ve müşteri memnuniyetine vurgu yapan enerjik ve çok kısa (max 3 cümle) bir sabah brifingi yaz.`;
-      
+      const prompt = `Sembol Nakliyat'ın yapay zeka müdürüsün. Sistemde bugün toplam ${jobsList.length} kayıtlı iş var. ${pendingCount} bekliyor, ${inProgressCount} sürüyor. Ekibine güne başlarken gönderebileceğin, onları motive edecek kısa (max 3 cümle) bir sabah brifingi yaz.`;
       const resText = await callGeminiAPI(prompt, false);
       setAiModal(prev => ({ ...prev, loading: false, content: resText }));
-    } catch (e) {
-      setAiModal(prev => ({ ...prev, loading: false, content: 'Brifing oluşturulurken bir hata oluştu.' }));
-    }
+    } catch (e) { setAiModal(prev => ({ ...prev, loading: false, content: 'Hata oluştu.' })); }
   };
 
-  if (isAuthChecking) {
+  const handleLogin = (email, password, rememberMe) => {
+    const user = personnelList.find(p => (p.email === email || p.fullName?.toLowerCase() === email.toLowerCase()) && p.password === password);
+    if (user) {
+      setCurrentUser(user); setIsAuthenticated(true); setLoginError('');
+      if (rememberMe) try { localStorage.setItem('sembol_crm_user', JSON.stringify({ email, password })); } catch (e) { }
+      else try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
+    } else setLoginError('Kullanıcı adı / E-posta veya şifre hatalı.');
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false); setCurrentUser(null); setActiveTab('dashboard'); setIsSidebarOpen(false);
+    try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
+  };
+
+  const allDataLoaded = Object.values(dataLoadStatus).every(v => v === true);
+
+  if (isAuthChecking || !allDataLoaded) {
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
-         <img 
-           src="sembol-nakliyat-logo-zeminsiz-09.jpg" 
-           alt="Sembol Nakliyat" 
-           className="w-auto h-24 object-contain mb-6 animate-pulse drop-shadow-2xl" 
-           onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-4 animate-pulse">S</div>'; }} 
-         />
-         <p className="font-bold tracking-widest text-neutral-400">SİSTEM YÜKLENİYOR...</p>
+         <div className="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-4 animate-pulse">S</div>
+         <p className="font-bold tracking-widest text-neutral-400">SİSTEM YÜKLENİYOR VE BULUTA BAĞLANIYOR...</p>
       </div>
     );
   }
 
-  if (!isAuthenticated) {
-    return <LoginScreen onLogin={handleLogin} error={loginError} />;
-  }
-
-  const allDataLoaded = isNotifLoaded && isMsgLoaded && isLogsLoaded && isPosLoaded && isRanksLoaded && isPersonnelLoaded && isTasksLoaded && isVehiclesLoaded && isMaterialsLoaded && isJobsLoaded;
-
-  if (!allDataLoaded) {
-    return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
-         <Loader2 className="w-12 h-12 text-red-600 animate-spin mb-4" />
-         <p className="font-bold tracking-widest text-neutral-400">BULUT VERİLERİ EŞİTLENİYOR...</p>
-      </div>
-    );
-  }
+  if (!isAuthenticated) return <LoginScreen onLogin={handleLogin} error={loginError} />;
 
   const userPos = currentUser?.position || '';
   const isSales = userPos.includes('Satış');
@@ -4643,35 +4567,25 @@ export default function App() {
   const isManager = userPos.includes('Yönetici') || userPos.includes('Firma Sahibi') || currentUser?.rank === 'Müdür';
   const canEdit = currentUser?.permissions?.canEdit;
 
-  // İşlem yetkisi olanlar veya yöneticiler (Kayıt, İşler ve Müşteriler için tam yetki)
   const hasJobAccess = canEdit || isManager || isMuhasebe || isDepo;
-  
-  // Spesifik modül erişim yetkileri
-  const hasResourceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); // Personel, Araç, Malzeme
-  const hasFinanceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); // Finans
-  const hasTaskAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); // Görev Listesi
-  const hasAdminAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); // Yetkilendirme, Sistem
+  const hasResourceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); 
+  const hasFinanceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); 
+  const hasTaskAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); 
+  const hasAdminAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); 
   
   const visibleJobs = hasJobAccess ? jobs : jobs.filter(j => {
     const isMyJob = j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id;
     if (!isMyJob) return false;
-
-    // Personel için: İş tamamlanmışsa ve üzerinden 1 gün geçmişse gizle
     if (j.status === 'completed') {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const jobDate = new Date(j.date);
-      jobDate.setHours(0, 0, 0, 0);
-      
-      if (jobDate < today) {
-        return false;
-      }
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const jobDate = new Date(j.date); jobDate.setHours(0, 0, 0, 0);
+      if (jobDate < today) return false;
     }
     return true;
   });
   
-  const unreadNotifCount = notifications.filter(n => n.userId === currentUser?.id && !n.read).length;
-  const unreadMessageCount = messages.filter(m => m.receiverId === currentUser?.id && !m.read).length;
+  const unreadNotifCount = notifications.filter(n => String(n.userId) === String(currentUser?.id) && !n.read).length;
+  const unreadMessageCount = messages.filter(m => String(m.receiverId) === String(currentUser?.id) && !m.read).length;
   const totalUnreadCount = unreadNotifCount + unreadMessageCount;
 
   return (
@@ -4680,12 +4594,10 @@ export default function App() {
       {/* Mobil Header & Menü Butonu */}
       <div className="md:hidden absolute top-0 left-0 right-0 h-16 bg-black text-white flex items-center justify-between px-4 z-30 shadow-md border-b border-red-600">
         <div className="flex items-center gap-2">
-          <img 
-            src="sembol-nakliyat-logo-zeminsiz-09.jpg" 
-            alt="Sembol Nakliyat" 
-            className="h-10 w-auto object-contain" 
-            onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="flex items-center gap-2"><div class="w-8 h-8 bg-red-600 flex items-center justify-center rounded-lg font-black text-white">S</div><h1 class="font-bold text-lg">Sembol Nakliyat</h1></div>'; }} 
-          />
+          <div className="w-10 h-10 flex items-center justify-center shrink-0 overflow-hidden">
+             <div className="w-full h-full bg-red-600 flex items-center justify-center rounded-lg font-black text-white">S</div>
+          </div>
+          <h1 className="font-bold text-lg">Sembol Nakliyat</h1>
         </div>
         <button 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
@@ -4704,14 +4616,14 @@ export default function App() {
 
       {/* Sol Menü (Dikey Sidebar) */}
       <aside className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative top-0 left-0 z-40 w-64 md:min-w-[256px] bg-black text-white flex flex-col shadow-2xl shrink-0 h-full transition-transform duration-300 ease-in-out border-r border-neutral-800`}>
-        <div className="p-6 flex flex-col items-center gap-2 border-b border-neutral-800 text-center">
-          <img 
-            src="sembol-nakliyat-logo-zeminsiz-09.jpg" 
-            alt="Sembol Nakliyat" 
-            className="w-full max-w-[180px] object-contain mb-2" 
-            onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="flex items-center gap-4"><div class="shrink-0 w-16 h-16 flex items-center justify-center overflow-hidden rounded-full border-2 border-neutral-800/50 bg-red-600"><span class="font-black text-3xl text-white">S</span></div><div><h1 class="text-2xl font-black leading-tight text-white tracking-widest">SEMBOL</h1></div></div>'; }} 
-          />
-          <p className="text-red-600 text-[10px] font-bold mt-0.5 tracking-[0.2em] bg-red-600/10 px-3 py-1 rounded-full border border-red-600/20">OPERASYON MERKEZİ</p>
+        <div className="p-6 flex items-center gap-4 border-b border-neutral-800">
+          <div className="shrink-0 w-16 h-16 flex items-center justify-center overflow-hidden rounded-full border-2 border-neutral-800/50 bg-red-600">
+             <span className="font-black text-3xl text-white">S</span>
+          </div>
+          <div>
+            <h1 className="text-2xl font-black leading-tight text-white tracking-widest">SEMBOL</h1>
+            <p className="text-red-600 text-[10px] font-bold mt-0.5 tracking-[0.2em]">OPERASYON MERKEZİ</p>
+          </div>
         </div>
 
         <div className="px-6 py-4 bg-neutral-900/50 border-b border-neutral-800 flex flex-col">
@@ -4726,21 +4638,21 @@ export default function App() {
         <nav className="flex flex-col mt-4 px-4 gap-2 overflow-y-auto flex-1 pb-6 custom-scrollbar">
           
           <button 
-            onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+            onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
             className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'dashboard' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
           >
             <Calendar className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Anasayfa</span>
           </button>
           
           <button 
-            onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+            onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
             className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'calendar' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
           >
             <CalendarDays className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Takvim</span>
           </button>
 
           <button 
-            onClick={() => { setActiveTab('profile'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+            onClick={() => { setActiveTab('profile'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
             className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'profile' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
           >
             <div className="flex items-center gap-3">
@@ -4755,7 +4667,7 @@ export default function App() {
           {hasJobAccess && (
             <div className="flex flex-col gap-1">
               <button 
-                onClick={() => { setIsSubMenuOpen(!isSubMenuOpen); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                onClick={() => { setIsSubMenuOpen(!isSubMenuOpen); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
@@ -4795,7 +4707,7 @@ export default function App() {
           {hasJobAccess && (
             <div className="flex flex-col gap-1">
               <button 
-                onClick={() => { setIsJobSubMenuOpen(!isJobSubMenuOpen); setIsCustomerSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                onClick={() => { setIsJobSubMenuOpen(!isJobSubMenuOpen); setIsCustomerSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'currentJobs' || activeTab === 'allJobs' || activeTab === 'completedJobs' || activeTab === 'cancelledJobs') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
@@ -4839,7 +4751,7 @@ export default function App() {
           {hasTaskAccess && (
             <div className="flex flex-col gap-1">
               <button 
-                onClick={() => { setIsTaskSubMenuOpen(!isTaskSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                onClick={() => { setIsTaskSubMenuOpen(!isTaskSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addTask' || activeTab === 'taskList') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
@@ -4871,7 +4783,7 @@ export default function App() {
           {hasJobAccess && (
             <div className="flex flex-col gap-1">
               <button 
-                onClick={() => { setIsCustomerSubMenuOpen(!isCustomerSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                onClick={() => { setIsCustomerSubMenuOpen(!isCustomerSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'specialCustomers' || activeTab === 'allCustomers' || activeTab === 'customerBlacklist') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
@@ -4909,7 +4821,7 @@ export default function App() {
           {hasResourceAccess && (
             <div className="flex flex-col gap-1">
               <button 
-                onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'maviPersonnel' || activeTab === 'beyazPersonnel') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
@@ -5094,16 +5006,22 @@ export default function App() {
             <div className="flex flex-col gap-1">
               <button 
                 onClick={() => { setIsSystemFilesSubMenuOpen(!isSystemFilesSubMenuOpen); setIsAuthSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'backupSystem') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'backupSystem' || activeTab === 'systemLogs') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
-                  <FileText className={`w-5 h-5 shrink-0 ${(activeTab === 'backupSystem') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Sistem Dosyaları</span>
+                  <FileText className={`w-5 h-5 shrink-0 ${(activeTab === 'backupSystem' || activeTab === 'systemLogs') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Sistem Ayarları</span>
                 </div>
                 {isSystemFilesSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
               
               {isSystemFilesSubMenuOpen && (
                 <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                  <button 
+                    onClick={() => { setActiveTab('systemLogs'); setIsSidebarOpen(false); }}
+                    className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'systemLogs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  >
+                    <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'systemLogs' ? 'bg-white' : 'bg-red-600'}`}></div> Sistem Kayıtları
+                  </button>
                   <button 
                     onClick={() => { setActiveTab('backupSystem'); setIsSidebarOpen(false); }}
                     className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'backupSystem' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -5113,6 +5031,20 @@ export default function App() {
                 </div>
               )}
             </div>
+          )}
+
+          {hasFullAccess && (
+            <>
+              {/* ESKİ VERİLERİ KURTARMA BUTONU BURADA */}
+              {!isDataMigrated && (
+                <button 
+                  onClick={handleSyncOldData}
+                  className="w-full py-3 px-4 mt-4 text-sm font-black transition flex justify-center items-center gap-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-600/30 animate-pulse border border-orange-500"
+                >
+                  🔄 Eski Verileri Kurtar
+                </button>
+              )}
+            </>
           )}
 
         </nav>
@@ -5356,7 +5288,102 @@ export default function App() {
         </div>
       )}
 
-      {/* GENEL YAPAY ZEKA MODALI (MESAJ / MALZEME TAHMİNİ / ÖZET) */}
+      {/* İŞİ SONLANDIR MODALI (YENİ EKLENDİ) */}
+      {showEndJobModal && jobToEnd && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[95vh] flex flex-col">
+            <div className="bg-green-600 text-white p-4 flex justify-between items-center border-b-4 border-green-800 shrink-0">
+              <h3 className="font-bold text-lg flex items-center gap-2">
+                <CheckCircle className="w-5 h-5" /> İşi Sonlandır
+              </h3>
+              <button onClick={() => setShowEndJobModal(false)} className="text-white/80 hover:text-white transition"><X className="w-6 h-6" /></button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+              <form onSubmit={submitEndJob} className="space-y-6">
+                <p className="text-sm text-neutral-600 pb-2 border-b border-neutral-100">
+                  <b className="text-black">Müşteri:</b> {jobToEnd.customerName} <br/>
+                  <b className="text-black">Operasyon Tarihi:</b> {jobToEnd.date}
+                </p>
+
+                <div>
+                  <label className="block text-sm font-bold text-black mb-2">İşin Ödemesi Nereye Yapıldı?</label>
+                  <select required value={endJobData.paymentMethod} onChange={(e) => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
+                    <option value="Nakit">Nakit</option>
+                    <option value="İban">İban</option>
+                    <option value="Kredi Kartı">Kredi Kartı</option>
+                    <option value="Alınmadı">Alınmadı</option>
+                  </select>
+                </div>
+
+                <div className="border-t border-neutral-100 pt-4">
+                  <label className="block text-sm font-bold text-black mb-2">Kamyon Kasasının Son Hali (Fotoğraf)</label>
+                  <label className="cursor-pointer bg-neutral-50 border border-neutral-300 text-neutral-600 p-3 rounded-xl font-bold hover:bg-neutral-100 transition flex items-center justify-center gap-2 w-full border-dashed">
+                    <Camera className="w-5 h-5 text-neutral-500" /> 
+                    {endJobData.truckImage ? '📷 ' + endJobData.truckImage : 'Fotoğraf Yükle (Zorunlu Değil)'}
+                    <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+                      if(e.target.files && e.target.files[0]) {
+                        setEndJobData({...endJobData, truckImage: e.target.files[0].name});
+                      }
+                    }} />
+                  </label>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-black mb-2">Kamyonda Sorun Var Mı?</label>
+                  <select required value={endJobData.truckStatus} onChange={(e) => setEndJobData({...endJobData, truckStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
+                    <option value="Herhangi bir sorun yok">Herhangi bir sorun yok</option>
+                    <option value="Kamyonda sorun var">Kamyonda sorun var</option>
+                  </select>
+                </div>
+
+                {endJobData.truckStatus === 'Kamyonda sorun var' && (
+                  <div className="animate-in fade-in slide-in-from-top-2">
+                    <label className="block text-sm font-bold text-red-600 mb-2">Kamyondaki Sorunun Detayı</label>
+                    <textarea required value={endJobData.truckIssueDetails} onChange={(e) => setEndJobData({...endJobData, truckIssueDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none transition text-sm" placeholder="Araçta oluşan arıza, çizik vb. detayları yazın..." />
+                  </div>
+                )}
+
+                <div className="border-t border-neutral-100 pt-4">
+                  <label className="block text-sm font-bold text-black mb-2">Eşyada Herhangi Bir Hasar Oluştu mu?</label>
+                  <select required value={endJobData.damageStatus} onChange={(e) => setEndJobData({...endJobData, damageStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
+                    <option value="Hasarsız teslim edildi">Hasarsız teslim edildi</option>
+                    <option value="Hasar oluştu">Hasar oluştu</option>
+                  </select>
+                </div>
+
+                {endJobData.damageStatus === 'Hasar oluştu' && (
+                  <div className="animate-in fade-in slide-in-from-top-2">
+                    <label className="block text-sm font-bold text-red-600 mb-2">Hasar Detaylarını Yazın</label>
+                    <textarea required value={endJobData.damageDetails} onChange={(e) => setEndJobData({...endJobData, damageDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none transition text-sm" placeholder="Oluşan hasarın detaylarını, nerede ve nasıl olduğunu belirtin..." />
+                  </div>
+                )}
+
+                <div className="border-t border-neutral-100 pt-4">
+                  <label className="block text-sm font-bold text-black mb-2">Müşteri Memnun Kaldı Mı?</label>
+                  <select required value={endJobData.customerSatisfaction} onChange={(e) => setEndJobData({...endJobData, customerSatisfaction: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
+                    <option value="Yorum Yazdı .">Yorum Yazdı.</option>
+                    <option value="Video Alındı.">Video Alındı.</option>
+                    <option value="Yazı Alındı.">Yazı Alındı.</option>
+                    <option value="Herhangi bir şey yapmadı.">Herhangi bir şey yapmadı.</option>
+                  </select>
+                </div>
+
+                <div className="bg-green-50 p-3 rounded-xl border border-green-100 text-xs font-medium text-green-700 flex items-start gap-2">
+                  <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" /> 
+                  Formu onayladığınızda iş başarıyla sonlandırılacak ve rapor yöneticilere iletilecektir.
+                </div>
+
+                <button type="submit" className="w-full py-4 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition flex justify-center items-center gap-2 shadow-lg shadow-green-600/20 mt-4">
+                  <CheckCircle className="w-5 h-5" /> Formu Onayla ve İşi Bitir
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI MÜŞTERİ MESAJI MODALI */}
       {aiModal.isOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
           <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
@@ -5466,7 +5493,13 @@ export default function App() {
               <button onClick={() => setEditingTask(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
             </div>
             
-            <form onSubmit={handleUpdateTask} className="p-6 space-y-4">
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              if (!firebaseUser) return;
+              updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', editingTask.id), editingTask)
+                .then(() => setEditingTask(null))
+                .catch(console.error);
+            }} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
                 <input required type="text" value={editingTask.title} onChange={(e) => setEditingTask({...editingTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" />
@@ -5499,143 +5532,6 @@ export default function App() {
           </div>
         </div>
       )}
-
-      {/* İŞ SONLANDIRMA MODALI (TESLİM KODU ONAYI İLE) */}
-      {showEndJobModal && jobToEnd && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[95vh] flex flex-col">
-            <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-red-600 shrink-0">
-              <h3 className="font-bold text-lg">Operasyonu Sonlandır</h3>
-              <button onClick={() => setShowEndJobModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
-            </div>
-            
-            <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
-              {endJobError && (
-                <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100 mb-4">
-                  <AlertTriangle className="w-5 h-5 shrink-0" /> {endJobError}
-                </div>
-              )}
-              <form onSubmit={submitEndJob} className="space-y-4">
-                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 mb-4 text-center">
-                   <Key className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
-                   <label className="block text-sm font-bold text-emerald-900 mb-2">Müşteri Teslim Kodunu Giriniz *</label>
-                   <input required type="text" value={endJobData.enteredCode || ''} onChange={e => setEndJobData({...endJobData, enteredCode: e.target.value.toUpperCase()})} className="w-full p-3 border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none transition font-mono tracking-widest uppercase text-center text-xl font-black text-emerald-800 placeholder-emerald-300" placeholder="6 HANELİ KOD" />
-                   <p className="text-[10px] text-emerald-700 mt-2 font-medium">İşi başarıyla sonlandırmak için müşteriden teslim kodunu isteyip yukarıdaki alana girin.</p>
-                </div>
-
-                <div>
-                   <label className="block text-sm font-bold text-black mb-1">Ödeme Yöntemi</label>
-                   <select value={endJobData.paymentMethod} onChange={e => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
-                      <option value="Nakit">Nakit</option>
-                      <option value="Havale/EFT">Havale/EFT</option>
-                      <option value="Kredi Kartı">Kredi Kartı</option>
-                      <option value="Ödeme Yapmadı">Ödeme Yapmadı</option>
-                   </select>
-                </div>
-
-                <div>
-                   <label className="block text-sm font-bold text-black mb-1">Müşteri Memnuniyeti</label>
-                   <select value={endJobData.customerSatisfaction} onChange={e => setEndJobData({...endJobData, customerSatisfaction: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
-                      <option value="Yorum yazdı.">Yorum yazdı.</option>
-                      <option value="Video alındı.">Video alındı.</option>
-                      <option value="Şirketle İletişime Geçti.">Şirketle İletişime Geçti.</option>
-                      <option value="Herhangi bir işlem yapmadı.">Herhangi bir işlem yapmadı.</option>
-                   </select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                     <label className="block text-sm font-bold text-black mb-1">Hasar Durumu</label>
-                     <select value={endJobData.damageStatus} onChange={e => setEndJobData({...endJobData, damageStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
-                        <option value="Hasarsız teslim edildi">Hasarsız</option>
-                        <option value="Hasar var">Hasar var</option>
-                     </select>
-                  </div>
-                  <div>
-                     <label className="block text-sm font-bold text-black mb-1">Kamyon Durumu</label>
-                     <select value={endJobData.truckStatus} onChange={e => setEndJobData({...endJobData, truckStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
-                        <option value="Herhangi bir sorun yok">Sorun yok</option>
-                        <option value="Sorun var">Sorun var</option>
-                     </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold text-black mb-1">Kamyon Kasası Fotoğrafı / Videosu (İş Sonu)</label>
-                  <div className="flex items-center gap-2">
-                    <label className="flex-1 cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
-                      <Camera className="w-5 h-5 text-neutral-500" />
-                      <span className="text-sm font-bold text-neutral-600 truncate">{endJobData.truckImage || 'Görsel veya Video Yükle'}</span>
-                      <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => setEndJobData({...endJobData, truckImage: e.target.files[0]?.name || ''})} />
-                    </label>
-                    {endJobData.truckImage && <button type="button" onClick={() => setEndJobData({...endJobData, truckImage: ''})} className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition"><X className="w-5 h-5"/></button>}
-                  </div>
-                </div>
-
-                {endJobData.damageStatus === 'Hasar var' && (
-                   <div className="bg-red-50 p-4 rounded-xl border border-red-200">
-                      <label className="block text-sm font-bold text-red-900 mb-1">Hasar Detayı (Müşteriye de iletilecek)</label>
-                      <textarea required value={endJobData.damageDetails} onChange={e => setEndJobData({...endJobData, damageDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl outline-none resize-none h-16 text-sm mb-3" placeholder="Hasar hakkında detaylı bilgi..."></textarea>
-                      
-                      <label className="block text-sm font-bold text-red-900 mb-1 mt-2">Hasar Fotoğrafı</label>
-                      <div className="flex items-center gap-2 mb-3">
-                        <label className="flex-1 cursor-pointer bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
-                          <Camera className="w-5 h-5 text-red-500" />
-                          <span className="text-sm font-bold text-red-600 truncate">{endJobData.damageImage || 'Hasarın Fotoğrafını Yükle'}</span>
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => setEndJobData({...endJobData, damageImage: e.target.files[0]?.name || ''})} />
-                        </label>
-                        {endJobData.damageImage && <button type="button" onClick={() => setEndJobData({...endJobData, damageImage: ''})} className="p-3 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition"><X className="w-5 h-5"/></button>}
-                      </div>
-                      
-                      {endJobData.damageDetails.trim().length > 0 && (
-                        <div className="flex flex-col sm:flex-row gap-2 animate-in fade-in">
-                          <button
-                             type="button"
-                             onClick={() => {
-                               let phone = jobToEnd.customerPhone.replace(/\D/g, '');
-                               if (phone.startsWith('0')) phone = '90' + phone.substring(1);
-                               else if (!phone.startsWith('90')) phone = '90' + phone;
-                               const msg = `Sayın *${jobToEnd.customerName}*,\n\nSembol Nakliyat olarak taşıma işleminizi tamamlamış bulunmaktayız. Ekibimiz tarafından teslimat sırasında aşağıdaki durum tutanak altına alınarak operasyon merkezimize raporlanmıştır:\n\n⚠️ *Hasar / Sorun Bildirimi:*\n_${endJobData.damageDetails}_\n\nMüşteri memnuniyeti bizim için en öncelikli konudur. Konuyla ilgili operasyon sorumlumuz en kısa sürede sizinle iletişime geçerek sürecin takibini sağlayacaktır.\n\nAnlayışınız için teşekkür ederiz.\n*Sembol Nakliyat Yönetimi*`;
-                               window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
-                             }}
-                             className="flex-1 px-3 py-2 bg-[#25D366] text-white text-xs font-bold rounded-lg hover:bg-[#128C7E] transition flex items-center justify-center gap-1.5 shadow-sm"
-                          >
-                            <MessageCircle className="w-4 h-4 shrink-0" /> Müşteriye Bildir (WA)
-                          </button>
-
-                          <button
-                             type="button"
-                             onClick={() => {
-                               let phone = jobToEnd.customerPhone.replace(/\D/g, '');
-                               const msg = `Sayın ${jobToEnd.customerName},\nSembol Nakliyat olarak isinizi tamamladik. Ekibimiz tarafindan bir hasar durumu (${endJobData.damageDetails}) raporlanmistir. Operasyon sorumlumuz sizinle iletisime gececektir.`;
-                               const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-                               const separator = isIOS ? '&' : '?';
-                               window.open(`sms:${phone}${separator}body=${encodeURIComponent(msg)}`, '_self');
-                             }}
-                             className="flex-1 px-3 py-2 bg-indigo-500 text-white text-xs font-bold rounded-lg hover:bg-indigo-600 transition flex items-center justify-center gap-1.5 shadow-sm"
-                          >
-                            <MessageSquareText className="w-4 h-4 shrink-0" /> Müşteriye Bildir (SMS)
-                          </button>
-                        </div>
-                      )}
-                   </div>
-                )}
-                
-                {endJobData.truckStatus === 'Sorun var' && (
-                   <div>
-                      <label className="block text-sm font-bold text-black mb-1">Kamyon Sorunu Detayı</label>
-                      <textarea required value={endJobData.truckIssueDetails} onChange={e => setEndJobData({...endJobData, truckIssueDetails: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none resize-none h-16 text-sm" placeholder="Araçtaki arıza/sorun..."></textarea>
-                   </div>
-                )}
-
-                <button type="submit" className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
-                   <CheckCircle className="w-5 h-5" /> Kodu Doğrula ve İşi Bitir
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
       
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar {
@@ -5645,8 +5541,11 @@ export default function App() {
           background: transparent;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
-          background-color: rgba(255, 255, 255, 0.1);
+          background-color: rgba(0, 0, 0, 0.1);
           border-radius: 10px;
+        }
+        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
+          background-color: rgba(255, 255, 255, 0.1);
         }
       `}} />
     </div>
