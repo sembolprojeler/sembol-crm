@@ -4119,18 +4119,18 @@ export default function App() {
     const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
     const unsubs = [];
 
-    // Koleksiyon Dinleyicileri
-    unsubs.push(onSnapshot(getCol('jobs'), snap => { setJobs(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
-    unsubs.push(onSnapshot(getCol('transactions'), snap => { setTransactions(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
-    unsubs.push(onSnapshot(getCol('tasks'), snap => { setTasks(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
-    unsubs.push(onSnapshot(getCol('notifications'), snap => { setNotifications(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
-    unsubs.push(onSnapshot(getCol('messages'), snap => { setMessages(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, msg: true})); }, console.error));
-    unsubs.push(onSnapshot(getCol('systemLogs'), snap => { setSystemLogs(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
-    unsubs.push(onSnapshot(getCol('vehicles'), snap => { setVehicles(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, veh: true})); }, console.error));
-    unsubs.push(onSnapshot(getCol('materials'), snap => { setMaterials(snap.docs.map(d => ({id: d.id, ...d.data()}))); setDataLoadStatus(p => ({...p, mat: true})); }, console.error));
+// Koleksiyon Dinleyicileri
+    unsubs.push(onSnapshot(getCol('jobs'), snap => { setJobs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('transactions'), snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('tasks'), snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('notifications'), snap => { setNotifications(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('messages'), snap => { setMessages(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, msg: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('systemLogs'), snap => { setSystemLogs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('vehicles'), snap => { setVehicles(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, veh: true})); }, console.error));
+    unsubs.push(onSnapshot(getCol('materials'), snap => { setMaterials(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, mat: true})); }, console.error));
 
     unsubs.push(onSnapshot(getCol('personnelList'), async snap => {
-      const list = snap.docs.map(d => ({id: d.id, ...d.data()}));
+      const list = snap.docs.map(d => ({...d.data(), id: d.id})); // Hatanın çözümü bu ters çevirme işlemidir
       setPersonnelList(list);
       if (snap.empty) {
         await addDoc(getCol('personnelList'), {
