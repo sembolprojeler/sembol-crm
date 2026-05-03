@@ -5380,14 +5380,41 @@ const handleDeleteTask = async (taskId) => {
             </div>
             
             <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
-              <form onSubmit={submitEndJob} className="space-y-6">
-                <p className="text-sm text-neutral-600 pb-2 border-b border-neutral-100">
-                  <b className="text-black">Müşteri:</b> {jobToEnd.customerName} <br/>
-                  <b className="text-black">Operasyon Tarihi:</b> {jobToEnd.date}
-                </p>
+<form onSubmit={submitEndJob} className="space-y-6">
+              <p className="text-sm text-neutral-600 pb-2 border-b border-neutral-100">
+                <b className="text-black">Müşteri:</b> {jobToEnd.customerName} <br/>
+                <b className="text-black">Operasyon Tarihi:</b> {jobToEnd.date}
+              </p>
 
-                <div>
-                  <label className="block text-sm font-bold text-black mb-2">İşin Ödemesi Nereye Yapıldı?</label>
+              {/* Hata Mesajı (Kod yanlış girilirse çıkacak) */}
+              {endJobError && (
+                <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100 mb-4 animate-in fade-in">
+                  <AlertTriangle className="w-5 h-5 shrink-0" /> {endJobError}
+                </div>
+              )}
+
+              {/* YENİ EKLENEN: Müşteri Teslim Kodu Alanı (Sadece kod atandıysa görünür) */}
+              {jobToEnd.deliveryCode && (
+                <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-200 text-center mb-4">
+                  <Key className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+                  <label className="block text-sm font-bold text-emerald-800 mb-3">Müşteri Teslim Kodunu Giriniz *</label>
+                  <input 
+                    required 
+                    type="text" 
+                    maxLength={6}
+                    value={endJobData.enteredCode} 
+                    onChange={(e) => setEndJobData({...endJobData, enteredCode: e.target.value.toUpperCase()})} 
+                    className="w-full p-4 border-2 border-emerald-300 rounded-xl focus:ring-4 focus:ring-emerald-500/30 focus:border-emerald-500 outline-none text-center font-black text-2xl tracking-[0.5em] text-emerald-700 bg-white placeholder:text-emerald-200 uppercase transition-all shadow-inner" 
+                    placeholder="6 HANELİ KOD" 
+                  />
+                  <p className="text-xs text-emerald-700 mt-4 font-medium px-2">
+                    İşi başarıyla sonlandırmak için müşteriden teslim kodunu isteyip yukarıdaki alana girin.
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-bold text-black mb-2">İşin Ödemesi Nereye Yapıldı?</label>
                   <select required value={endJobData.paymentMethod} onChange={(e) => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
                     <option value="Nakit">Nakit</option>
                     <option value="İban">İban</option>
