@@ -2870,18 +2870,18 @@ const AddTaskFormView = ({ newTask, setNewTask, handleAddTask, personnelList }) 
     <form onSubmit={handleAddTask} className="space-y-4">
       <div>
         <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
-        <input required type="text" value={newTask.title} onChange={(e) => setNewTask({...newTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" placeholder="Örn: Müşteri aramaları yapılacak" />
+        <input required type="text" value={newTask?.title || ''} onChange={(e) => setNewTask({...newTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" placeholder="Örn: Müşteri aramaları yapılacak" />
       </div>
       
       <div>
         <label className="block text-sm font-bold text-black mb-1">Detaylar</label>
-        <textarea required value={newTask.description} onChange={(e) => setNewTask({...newTask, description: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none h-24 resize-none transition" placeholder="Görev açıklaması..." />
+        <textarea required value={newTask?.description || ''} onChange={(e) => setNewTask({...newTask, description: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none h-24 resize-none transition" placeholder="Görev açıklaması..." />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-bold text-black mb-1">Görevli</label>
-          <select value={newTask.assignee} onChange={(e) => setNewTask({...newTask, assignee: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none bg-white transition">
+          <select value={newTask?.assignee || ''} onChange={(e) => setNewTask({...newTask, assignee: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none bg-white transition">
             {personnelList.map(person => <option key={person.id} value={person.fullName}>{person.fullName}</option>)}
             <option value="Muhasebe">Muhasebe Departmanı</option>
             <option value="Yönetim">Yönetim Kurulu</option>
@@ -2889,7 +2889,7 @@ const AddTaskFormView = ({ newTask, setNewTask, handleAddTask, personnelList }) 
         </div>
         <div>
           <label className="block text-sm font-bold text-black mb-1">Tarih</label>
-          <input required type="date" value={newTask.date} onChange={(e) => setNewTask({...newTask, date: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" />
+          <input required type="date" value={newTask?.date || ''} onChange={(e) => setNewTask({...newTask, date: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" />
         </div>
       </div>
 
@@ -2900,7 +2900,7 @@ const AddTaskFormView = ({ newTask, setNewTask, handleAddTask, personnelList }) 
   </div>
 );
 
-const TaskManagerView = ({ tasks, setTasks, setShowTaskModal, draggingTask, setDraggingTask, openEditTask }) => {
+const TaskManagerView = ({ tasks, setTasks, setShowTaskModal, draggingTask, setDraggingTask, openEditTask, onUpdateTaskStatus, onDeleteTask }) => {
   const columns = [
     { id: 'todo', title: 'YAPILACAKLAR', color: 'bg-neutral-800' },
     { id: 'in-progress', title: 'DEVAM EDENLER', color: 'bg-red-600' },
@@ -2914,7 +2914,11 @@ const TaskManagerView = ({ tasks, setTasks, setShowTaskModal, draggingTask, setD
   const handleDrop = (e, status) => {
     e.preventDefault();
     if (draggingTask) {
-      setTasks(tasks.map(t => t.id === draggingTask ? { ...t, status } : t));
+      if (onUpdateTaskStatus) {
+        onUpdateTaskStatus(draggingTask, status);
+      } else if (setTasks) {
+        setTasks(tasks.map(t => t.id === draggingTask ? { ...t, status } : t));
+      }
       setDraggingTask(null);
     }
   };
@@ -2924,7 +2928,13 @@ const TaskManagerView = ({ tasks, setTasks, setShowTaskModal, draggingTask, setD
   };
 
   const deleteTask = (taskId) => {
-    setTasks(tasks.filter(t => t.id !== taskId));
+    if (window.confirm('Görevi silmek istediğinize emin misiniz?')) {
+      if (onDeleteTask) {
+        onDeleteTask(taskId);
+      } else if (setTasks) {
+        setTasks(tasks.filter(t => t.id !== taskId));
+      }
+    }
   };
 
   return (
@@ -4305,9 +4315,13 @@ export default function App() {
     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', taskId), { status });
   };
   
-  const handleDeleteTask = async (taskId) => {
+const handleDeleteTask = async (taskId) => {
     if (!firebaseUser) return;
     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', taskId));
+  };
+
+  const openEditTask = (task) => {
+    setEditingTask(task);
   };
 
   const handleAddTransaction = async (e) => {
@@ -5183,7 +5197,7 @@ export default function App() {
               personnelList={personnelList}
             />
           }
-          {activeTab === 'taskList' && hasTaskAccess &&
+{activeTab === 'taskList' && hasTaskAccess &&
             <TaskManagerView 
               tasks={tasks}
               setTasks={setTasks}
@@ -5191,6 +5205,8 @@ export default function App() {
               draggingTask={draggingTask}
               setDraggingTask={setDraggingTask}
               openEditTask={openEditTask}
+              onUpdateTaskStatus={handleUpdateTaskStatus}
+              onDeleteTask={handleDeleteTask}
             />
           }
           
