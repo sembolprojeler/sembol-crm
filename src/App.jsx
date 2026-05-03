@@ -3944,6 +3944,64 @@ const LoginScreen = ({ onLogin, error }) => {
   );
 };
 
+const CustomerListView = ({ jobs, title, handleEditJob }) => {
+  // Müşterileri telefon numaralarına göre tekilleştirip filtreliyoruz
+  const uniqueCustomers = jobs
+    .filter(j => title === 'Özel Müşteriler' ? j.isSpecial : true)
+    .reduce((acc, current) => {
+      const x = acc.find(item => item.customerPhone === current.customerPhone);
+      if (!x) {
+        return acc.concat([current]);
+      } else {
+        return acc;
+      }
+    }, []);
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+      <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
+        <Users className="w-6 h-6 text-red-600" /> {title}
+      </h2>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-black text-white border-b border-neutral-200">
+            <tr>
+              <th className="p-4 font-bold rounded-tl-xl">Müşteri Adı</th>
+              <th className="p-4 font-bold">Telefon Numarası</th>
+              <th className="p-4 font-bold">Müşteri Tipi</th>
+              <th className="p-4 font-bold">Son İşlem Tarihi</th>
+              <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-neutral-100">
+            {uniqueCustomers.map(customer => (
+              <tr key={customer.id} className="hover:bg-neutral-50 transition">
+                <td className="p-4 font-bold text-black flex items-center gap-2">
+                  {customer.isSpecial && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
+                  {customer.customerName}
+                </td>
+                <td className="p-4 text-neutral-600 font-bold">{customer.customerPhone}</td>
+                <td className="p-4 text-neutral-600">{customer.customerType || 'Bireysel'}</td>
+                <td className="p-4 text-neutral-600">{customer.date}</td>
+                <td className="p-4">
+                  <button onClick={() => handleEditJob(customer)} className="p-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg transition" title="Müşteri Kaydını Düzenle">
+                    <Edit className="w-4 h-4" />
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {uniqueCustomers.length === 0 && (
+              <tr>
+                <td colSpan="5" className="p-6 text-center text-neutral-500 font-medium">Bu listede müşteri bulunmuyor.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+};
+
 // --- ANA UYGULAMA (APP) ---
 export default function App() {
   const [firebaseUser, setFirebaseUser] = useState(null);
@@ -4220,6 +4278,10 @@ export default function App() {
   const handleDeleteVehicle = async (id) => {
     if (!firebaseUser) return;
     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'vehicles', id));
+  };
+
+  const openEditTask = (task) => {
+    setEditingTask(task);
   };
 
   const handleAddMaterial = async (newMaterial) => {
@@ -4572,7 +4634,7 @@ export default function App() {
   const hasFinanceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); 
   const hasTaskAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); 
   const hasAdminAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); 
-  
+  const hasFullAccess = isManager; // <-- EKSİK OLAN SATIR EKLENDİ
   const visibleJobs = hasJobAccess ? jobs : jobs.filter(j => {
     const isMyJob = j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id;
     if (!isMyJob) return false;
