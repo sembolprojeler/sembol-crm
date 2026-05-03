@@ -14,7 +14,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
 import { 
   getFirestore, collection, addDoc, onSnapshot, 
-  doc, updateDoc, deleteDoc, setDoc 
+  doc, updateDoc, deleteDoc, setDoc, getDocs 
 } from "firebase/firestore";
 
 // YEREL (VS CODE) VE BULUT ORTAMI UYUM KONTROLÜ
@@ -835,8 +835,12 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
   const [activeChatUserId, setActiveChatUserId] = useState(null);
   const [newMessage, setNewMessage] = useState('');
 
-  const myJobs = jobs.filter(j => j.assignedPersonnelIds?.includes(currentUser.id) || j.assignedPersonnelId === currentUser.id);
-  const myNotifications = notifications.filter(n => n.userId === currentUser.id);
+  const myJobs = jobs.filter(j => 
+    j.assignedPersonnelIds?.some(id => String(id) === String(currentUser.id)) || 
+    String(j.assignedPersonnelId) === String(currentUser.id)
+  );
+  
+  const myNotifications = notifications.filter(n => String(n.userId) === String(currentUser.id));
 
   // Profil sekmesi açıldığında bildirimleri okundu olarak işaretle
   React.useEffect(() => {
@@ -864,7 +868,7 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
   React.useEffect(() => {
     if (activeChatUserId) {
       messages.forEach(m => {
-        if (m.senderId === activeChatUserId && m.receiverId === currentUser.id && !m.read) {
+        if (String(m.senderId) === String(activeChatUserId) && String(m.receiverId) === String(currentUser.id) && !m.read) {
           onMarkMessageAsRead(m.id);
         }
       });
@@ -879,20 +883,20 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
         <div className="md:col-span-1 space-y-6">
           <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
             <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center font-black text-3xl mb-4 mx-auto border-4 border-white shadow-lg">
-              {currentUser.fullName.charAt(0)}
+              {(currentUser?.fullName || '?').charAt(0)}
             </div>
-            <h2 className="text-xl font-black text-center text-black mb-1">{currentUser.fullName}</h2>
-            <p className="text-center text-neutral-500 text-sm font-medium mb-6">{currentUser.position} - {currentUser.rank}</p>
+            <h2 className="text-xl font-black text-center text-black mb-1">{currentUser?.fullName}</h2>
+            <p className="text-center text-neutral-500 text-sm font-medium mb-6">{currentUser?.position} - {currentUser?.rank}</p>
             
             <div className="space-y-3 text-sm">
               <div className="flex items-center gap-3 bg-neutral-50 p-3 rounded-xl border border-neutral-100">
-                <Phone className="w-4 h-4 text-neutral-400" /> <span className="font-bold text-neutral-700">{currentUser.personalPhone || 'Belirtilmedi'}</span>
+                <Phone className="w-4 h-4 text-neutral-400" /> <span className="font-bold text-neutral-700">{currentUser?.personalPhone || 'Belirtilmedi'}</span>
               </div>
               <div className="flex items-center gap-3 bg-neutral-50 p-3 rounded-xl border border-neutral-100">
-                <Mail className="w-4 h-4 text-neutral-400" /> <span className="font-bold text-neutral-700">{currentUser.email}</span>
+                <Mail className="w-4 h-4 text-neutral-400" /> <span className="font-bold text-neutral-700">{currentUser?.email}</span>
               </div>
               <div className="flex items-center gap-3 bg-green-50 p-3 rounded-xl border border-green-100 text-green-700">
-                <Shield className="w-4 h-4" /> <span className="font-bold">{currentUser.safetyTraining}</span>
+                <Shield className="w-4 h-4" /> <span className="font-bold">{currentUser?.safetyTraining}</span>
               </div>
             </div>
           </div>
@@ -934,7 +938,7 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
                 className={`pb-3 font-bold transition flex items-center gap-2 relative ${activeProfileTab === 'messages' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
               >
                 <MessageCircle className="w-5 h-5" /> Şirket İçi Mesajlaşma
-                {messages.filter(m => m.receiverId === currentUser.id && !m.read).length > 0 && (
+                {messages.filter(m => String(m.receiverId) === String(currentUser?.id) && !m.read).length > 0 && (
                   <span className="absolute -top-1 -right-3 flex h-3 w-3">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
@@ -1042,8 +1046,8 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
               <div className="flex flex-1 h-[450px] border border-neutral-200 rounded-xl overflow-hidden animate-in fade-in">
                 {/* Personel Listesi (Sol Kenar Çubuğu) */}
                 <div className="w-1/3 bg-neutral-50 border-r border-neutral-200 overflow-y-auto custom-scrollbar">
-                  {personnelList.filter(p => p.id !== currentUser.id).map(user => {
-                    const unreadCount = messages.filter(m => m.senderId === user.id && m.receiverId === currentUser.id && !m.read).length;
+                  {personnelList.filter(p => String(p.id) !== String(currentUser?.id)).map(user => {
+                    const unreadCount = messages.filter(m => String(m.senderId) === String(user.id) && String(m.receiverId) === String(currentUser?.id) && !m.read).length;
                     return (
                       <button 
                         key={user.id} 
@@ -1052,11 +1056,11 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
                       >
                         <div className="flex items-center gap-3 overflow-hidden">
                           <div className="w-10 h-10 shrink-0 rounded-full bg-neutral-200 flex items-center justify-center font-bold text-neutral-600">
-                            {user.fullName.charAt(0)}
+                            {(user?.fullName || '?').charAt(0)}
                           </div>
                           <div className="truncate">
-                            <p className="font-bold text-black text-sm truncate">{user.fullName}</p>
-                            <p className="text-xs text-neutral-500 truncate">{user.position}</p>
+                            <p className="font-bold text-black text-sm truncate">{user?.fullName}</p>
+                            <p className="text-xs text-neutral-500 truncate">{user?.position}</p>
                           </div>
                         </div>
                         {unreadCount > 0 && <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shrink-0">{unreadCount}</span>}
@@ -1072,26 +1076,26 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
                       {/* Sohbet Üst Bilgi */}
                       <div className="p-4 border-b border-neutral-200 flex items-center gap-3 bg-white">
                         <div className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold shrink-0">
-                          {personnelList.find(p => p.id === activeChatUserId)?.fullName.charAt(0)}
+                          {(personnelList.find(p => String(p.id) === String(activeChatUserId))?.fullName || '?').charAt(0)}
                         </div>
                         <div>
-                           <h3 className="font-bold text-black text-sm">{personnelList.find(p => p.id === activeChatUserId)?.fullName}</h3>
+                           <h3 className="font-bold text-black text-sm">{personnelList.find(p => String(p.id) === String(activeChatUserId))?.fullName}</h3>
                            <p className="text-[10px] text-neutral-500">Sistem İçi Sohbet</p>
                         </div>
                       </div>
                       
                       {/* Mesaj Listesi */}
                       <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-neutral-50/50 custom-scrollbar flex flex-col">
-                        {messages.filter(m => (m.senderId === currentUser.id && m.receiverId === activeChatUserId) || (m.senderId === activeChatUserId && m.receiverId === currentUser.id)).length === 0 ? (
+                        {messages.filter(m => (String(m.senderId) === String(currentUser?.id) && String(m.receiverId) === String(activeChatUserId)) || (String(m.senderId) === String(activeChatUserId) && String(m.receiverId) === String(currentUser?.id))).length === 0 ? (
                            <div className="m-auto text-center text-neutral-400 text-sm">Mesajlaşma geçmişiniz yok. Merhaba deyin! 👋</div>
                         ) : (
-                           messages.filter(m => (m.senderId === currentUser.id && m.receiverId === activeChatUserId) || (m.senderId === activeChatUserId && m.receiverId === currentUser.id)).map(m => (
-                             <div key={m.id} className={`flex ${m.senderId === currentUser.id ? 'justify-end' : 'justify-start'}`}>
-                               <div className={`max-w-[75%] p-3 rounded-2xl text-sm shadow-sm ${m.senderId === currentUser.id ? 'bg-red-600 text-white rounded-br-none' : 'bg-white border border-neutral-200 text-black rounded-bl-none'}`}>
+                           messages.filter(m => (String(m.senderId) === String(currentUser?.id) && String(m.receiverId) === String(activeChatUserId)) || (String(m.senderId) === String(activeChatUserId) && String(m.receiverId) === String(currentUser?.id))).map(m => (
+                             <div key={m.id} className={`flex ${String(m.senderId) === String(currentUser?.id) ? 'justify-end' : 'justify-start'}`}>
+                               <div className={`max-w-[75%] p-3 rounded-2xl text-sm shadow-sm ${String(m.senderId) === String(currentUser?.id) ? 'bg-red-600 text-white rounded-br-none' : 'bg-white border border-neutral-200 text-black rounded-bl-none'}`}>
                                  <p className="break-words">{m.text}</p>
-                                 <div className={`text-[10px] text-right mt-1.5 flex items-center justify-end gap-1 ${m.senderId === currentUser.id ? 'text-red-200' : 'text-neutral-400'}`}>
+                                 <div className={`text-[10px] text-right mt-1.5 flex items-center justify-end gap-1 ${String(m.senderId) === String(currentUser?.id) ? 'text-red-200' : 'text-neutral-400'}`}>
                                     {m.timestamp}
-                                    {m.senderId === currentUser.id && (m.read ? <CheckCircle className="w-3 h-3 text-red-200"/> : <Clock className="w-3 h-3"/>)}
+                                    {String(m.senderId) === String(currentUser?.id) && (m.read ? <CheckCircle className="w-3 h-3 text-red-200"/> : <Clock className="w-3 h-3"/>)}
                                  </div>
                                </div>
                              </div>
@@ -1957,6 +1961,9 @@ export default function App() {
 
   const [aiMessageModal, setAiMessageModal] = useState({ isOpen: false, loading: false, content: '', job: null });
 
+  // Eski veri aktarımı yapılıp yapılmadığını kontrol eden state
+  const [isDataMigrated, setIsDataMigrated] = useState(() => localStorage.getItem('sembol_data_migrated') === 'true');
+
   // Bulut tabanlı veri states
   const [notifications, setNotifications] = useState([]);
   const [messages, setMessages] = useState([]);
@@ -1992,6 +1999,35 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Eski verileri kök dizinden yeni dizine kopyalayan fonksiyon
+  const handleSyncOldData = async () => {
+    try {
+      const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
+      
+      const jobsSnap = await getDocs(collection(db, 'jobs'));
+      for (const docSnap of jobsSnap.docs) {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', docSnap.id), docSnap.data());
+      }
+
+      const personnelSnap = await getDocs(collection(db, 'personnel'));
+      for (const docSnap of personnelSnap.docs) {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', docSnap.id), docSnap.data());
+      }
+
+      const transSnap = await getDocs(collection(db, 'transactions'));
+      for (const docSnap of transSnap.docs) {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', docSnap.id), docSnap.data());
+      }
+
+      localStorage.setItem('sembol_data_migrated', 'true');
+      setIsDataMigrated(true);
+      alert("Harika! Kök dizindeki eski verileriniz yeni güvenli sisteme aktarıldı. Verilerin yüklenmesi için sayfayı yenileyebilirsiniz.");
+    } catch (err) {
+      console.error(err);
+      alert("Veri çekilirken hata oluştu: " + err.message);
+    }
+  };
 
   // Firebase Data Sync Effect
   useEffect(() => {
@@ -2267,7 +2303,7 @@ export default function App() {
     e.preventDefault();
     if(!assigneeId || !firebaseUser) return;
 
-    const mainPerson = personnelList.find(p => p.id === assigneeId);
+    const mainPerson = personnelList.find(p => String(p.id) === String(assigneeId));
     if(!mainPerson) return;
 
     const additionalPersons = personnelList.filter(p => additionalAssignees.includes(p.id));
@@ -2382,7 +2418,7 @@ export default function App() {
 
   const markNotificationsAsRead = async (userId) => {
     if (!firebaseUser) return;
-    const unreadNotifs = notifications.filter(n => n.userId === userId && !n.read);
+    const unreadNotifs = notifications.filter(n => String(n.userId) === String(userId) && !n.read);
     for (const n of unreadNotifs) {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notifications', n.id), { read: true });
     }
@@ -2406,7 +2442,7 @@ export default function App() {
 
   const handleLogin = (email, password, rememberMe) => {
     const user = personnelList.find(p => 
-      (p.email === email || p.fullName.toLowerCase() === email.toLowerCase()) && 
+      (p.email === email || p.fullName?.toLowerCase() === email.toLowerCase()) && 
       p.password === password
     );
     if (user) {
@@ -2446,10 +2482,13 @@ export default function App() {
   }
 
   const hasFullAccess = currentUser?.permissions?.canEdit || currentUser?.position?.includes('Yönetici');
-  const visibleJobs = hasFullAccess ? jobs : jobs.filter(j => j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id);
+  const visibleJobs = hasFullAccess ? jobs : jobs.filter(j => 
+    j.assignedPersonnelIds?.some(id => String(id) === String(currentUser?.id)) || 
+    String(j.assignedPersonnelId) === String(currentUser?.id)
+  );
   
-  const unreadNotifCount = notifications.filter(n => n.userId === currentUser?.id && !n.read).length;
-  const unreadMessageCount = messages.filter(m => m.receiverId === currentUser?.id && !m.read).length;
+  const unreadNotifCount = notifications.filter(n => String(n.userId) === String(currentUser?.id) && !n.read).length;
+  const unreadMessageCount = messages.filter(m => String(m.receiverId) === String(currentUser?.id) && !m.read).length;
   const totalUnreadCount = unreadNotifCount + unreadMessageCount;
 
   return (
@@ -2822,12 +2861,24 @@ export default function App() {
           )}
 
           {hasFullAccess && (
-            <button 
-              onClick={() => { setActiveTab('transactionTracking'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-              className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'transactionTracking' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-            >
-              <Activity className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">İşlem Takibi</span>
-            </button>
+            <>
+              <button 
+                onClick={() => { setActiveTab('transactionTracking'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'transactionTracking' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+              >
+                <Activity className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">İşlem Takibi</span>
+              </button>
+              
+              {/* ESKİ VERİLERİ KURTARMA BUTONU BURADA */}
+              {!isDataMigrated && (
+                <button 
+                  onClick={handleSyncOldData}
+                  className="w-full py-3 px-4 mt-4 text-sm font-black transition flex justify-center items-center gap-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-600/30 animate-pulse border border-orange-500"
+                >
+                  🔄 Eski Verileri Kurtar
+                </button>
+              )}
+            </>
           )}
 
         </nav>
@@ -2958,7 +3009,7 @@ export default function App() {
                       <Users className="w-4 h-4 text-red-600" /> Beraber Gidecek Diğer Personeller
                     </label>
                     <div className="max-h-40 overflow-y-auto border border-neutral-300 rounded-xl p-2 bg-white space-y-1 custom-scrollbar">
-                      {personnelList.filter(p => p.id !== assigneeId).map(person => (
+                      {personnelList.filter(p => String(p.id) !== String(assigneeId)).map(person => (
                         <label key={person.id} className="flex items-center gap-3 p-2 hover:bg-neutral-50 rounded-lg cursor-pointer transition border border-transparent hover:border-neutral-200">
                           <input 
                             type="checkbox" 
@@ -2972,7 +3023,7 @@ export default function App() {
                           <span className="text-sm font-medium text-black flex-1">{person.fullName} <span className="text-xs text-neutral-500 ml-1">({person.position})</span></span>
                         </label>
                       ))}
-                      {personnelList.filter(p => p.id !== assigneeId).length === 0 && (
+                      {personnelList.filter(p => String(p.id) !== String(assigneeId)).length === 0 && (
                          <p className="text-xs text-neutral-500 p-2">Eklenebilecek başka personel bulunmuyor.</p>
                       )}
                     </div>
