@@ -17,11 +17,22 @@ import {
   doc, updateDoc, deleteDoc, setDoc 
 } from "firebase/firestore";
 
-const firebaseConfig = JSON.parse(__firebase_config);
+// YEREL (VS CODE) VE BULUT ORTAMI UYUM KONTROLÜ
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
+      authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
+      projectId: "sembol-operasyon-merkezi",
+      storageBucket: "sembol-operasyon-merkezi.firebasestorage.app",
+      messagingSenderId: "1054049299174",
+      appId: "1:1054049299174:web:2193f916a3501543d92927"
+    };
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
 // ----------------------------
 
 // TÜRKİYE İL VE İLÇE VERİTABANI
