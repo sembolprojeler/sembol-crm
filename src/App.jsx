@@ -4481,18 +4481,15 @@ const submitEndJob = async (e) => {
     e.preventDefault();
     if (!firebaseUser) return;
     
-    // Güvenli eşleşme: Sadece alfanümerik karakterleri al ve büyük harfe çevir
-    const userCode = (endJobData.enteredCode || '').toString().trim().toUpperCase();
-    const realCode = (jobToEnd.deliveryCode || '').toString().trim().toUpperCase();
+    // Kodların etrafındaki boşlukları temizleyip büyük harfe çevirerek eşleştirme garantisi sağlıyoruz
+    const userCode = (endJobData.enteredCode || '').trim().toUpperCase();
+    const realCode = (jobToEnd.deliveryCode || '').trim().toUpperCase();
 
-    // Hata Kontrolü:
-    // Sadece eğer işin bir kodu varsa (realCode mevcutsa) VE girilen kodla uyuşmuyorsa hata ver.
-    if (realCode && userCode !== realCode) {
-      setEndJobError(`Girdiğiniz kod hatalı. Müşteriden "${realCode}" kodunu istemelisiniz.`); 
+    if (jobToEnd.deliveryCode && userCode !== realCode) {
+      // Hata mesajının içine test etmeniz için kopya (doğru) kodu ekledik!
+      setEndJobError(`Girdiğiniz teslim kodu hatalı! Lütfen kontrol edin. (Test Kodu: ${realCode})`); 
       return;
     }
-
-    setEndJobError(''); // Hata yoksa eski hatayı temizle
 
     if (!jobToEnd.materialsDeducted) {
       const estData = calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking);
@@ -4511,8 +4508,7 @@ const submitEndJob = async (e) => {
     }
 
     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobToEnd.id), { status: 'completed', endJobDetails: endJobData, materialsDeducted: true });
-    setShowEndJobModal(false); 
-    setJobToEnd(null);
+    setShowEndJobModal(false); setJobToEnd(null);
   };
 
   const handleGenerateMessage = async (job) => {
@@ -5352,6 +5348,7 @@ const submitEndJob = async (e) => {
               )}
 
               {/* YENİ EKLENEN: Müşteri Teslim Kodu Alanı (Sadece kod atandıysa görünür) */}
+{/* YENİ EKLENEN: Müşteri Teslim Kodu Alanı (Sadece kod atandıysa görünür) */}
               {jobToEnd.deliveryCode && (
                 <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-200 text-center mb-4">
                   <Key className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
@@ -5360,7 +5357,7 @@ const submitEndJob = async (e) => {
                     required 
                     type="text" 
                     maxLength={6}
-                    value={endJobData.enteredCode} 
+                    value={endJobData.enteredCode || ''} 
                     onChange={(e) => setEndJobData({...endJobData, enteredCode: e.target.value.toUpperCase()})} 
                     className="w-full p-4 border-2 border-emerald-300 rounded-xl focus:ring-4 focus:ring-emerald-500/30 focus:border-emerald-500 outline-none text-center font-black text-2xl tracking-[0.5em] text-emerald-700 bg-white placeholder:text-emerald-200 uppercase transition-all shadow-inner" 
                     placeholder="6 HANELİ KOD" 
