@@ -93,7 +93,7 @@ const DEPO_LOCATIONS = [
 
 // --- GEMINI API CALLER ---
 const callGeminiAPI = async (prompt, isJson = false) => {
-  const apiKey = ""; // Sistem runtime'da otomatik tanımlar
+  const apiKey = "AIzaSyDtDpokczEqSbrnv2elQqzxg0Hb9KQFr68"; // Sistem runtime'da otomatik tanımlar
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
 
   const payload = {
@@ -4278,10 +4278,6 @@ export default function App() {
   const handleDeleteVehicle = async (id) => {
     if (!firebaseUser) return;
     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'vehicles', id));
-  };
-
-  const openEditTask = (task) => {
-    setEditingTask(task);
   };
 
   const handleAddMaterial = async (newMaterial) => {
