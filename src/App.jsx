@@ -5532,16 +5532,27 @@ const submitEndJob = async (e) => {
               <h3 className="font-bold text-lg">{viewingImage.title}</h3>
               <button onClick={() => setViewingImage(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
             </div>
-            <div className="p-6 flex flex-col items-center">
-              <div className="w-full aspect-video bg-neutral-50 rounded-xl border-2 border-dashed border-neutral-300 flex flex-col items-center justify-center mb-4 overflow-hidden relative shadow-inner">
-                {/* Sahte görsel arka planı efekti */}
-                <div className="absolute inset-0 opacity-5" style={{backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'20\' height=\'20\' viewBox=\'0 0 20 20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%23000000\' fill-opacity=\'1\' fill-rule=\'evenodd\'%3E%3Ccircle cx=\'3\' cy=\'3\' r=\'3\'/%3E%3Ccircle cx=\'13\' cy=\'13\' r=\'3\'/%3E%3C/g%3E%3C/svg%3E")'}}></div>
-                <Camera className="w-12 h-12 mb-3 text-neutral-300 z-10" />
-                <p className="font-bold text-sm text-center px-4 z-10 text-neutral-500">Bulut Depolama Modülü</p>
-                <p className="text-xs mt-1 text-center px-4 z-10 text-neutral-400 font-medium">Demo ortamında gerçek dosya sistemi aktif değildir.</p>
-                <p className="text-sm mt-4 font-black text-black z-10 bg-white px-4 py-2 rounded-lg shadow-sm border border-neutral-200">{viewingImage.name}</p>
+            <div className="p-6 flex flex-col items-center w-full">
+              <div className="w-full aspect-video bg-neutral-100 rounded-xl border border-neutral-300 flex flex-col items-center justify-center mb-4 overflow-hidden relative shadow-inner">
+                {viewingImage.name.startsWith('http') ? (
+                  <img src={viewingImage.name} alt="Görsel" className="w-full h-full object-contain z-10" />
+                ) : (
+                  <Camera className="w-16 h-16 text-neutral-300 z-10" />
+                )}
               </div>
-              <button onClick={() => setViewingImage(null)} className="w-full py-4 bg-black hover:bg-neutral-800 text-white font-bold rounded-xl transition shadow-lg">Kapat</button>
+              
+              {viewingImage.name.startsWith('http') && (
+                <div className="w-full flex flex-col gap-2 mb-4">
+                  <a href={viewingImage.name} target="_blank" rel="noreferrer" className="w-full py-3 bg-red-50 text-red-600 hover:bg-red-100 font-bold rounded-xl transition flex justify-center items-center gap-2 border border-red-200">
+                    <ArrowUpRight className="w-5 h-5" /> Görseli / Dosyayı Aç
+                  </a>
+                  <p className="text-[10px] text-neutral-400 text-center truncate px-2">
+                    Link: {viewingImage.name}
+                  </p>
+                </div>
+              )}
+              
+              <button onClick={() => setViewingImage(null)} className="w-full py-4 bg-black hover:bg-neutral-800 text-white font-bold rounded-xl transition shadow-lg mt-auto">Kapat</button>
             </div>
           </div>
         </div>
