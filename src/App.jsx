@@ -5441,13 +5441,18 @@ const submitEndJob = async (e) => {
               <button onClick={() => setViewingImage(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
             </div>
             <div className="p-6 flex flex-col items-center">
-              <div className="w-full aspect-video bg-neutral-50 rounded-xl border-2 border-dashed border-neutral-300 flex flex-col items-center justify-center mb-4 overflow-hidden relative shadow-inner">
-                {/* Sahte görsel arka planı efekti */}
-                <div className="absolute inset-0 opacity-5" style={{backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'20\' height=\'20\' viewBox=\'0 0 20 20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%23000000\' fill-opacity=\'1\' fill-rule=\'evenodd\'%3E%3Ccircle cx=\'3\' cy=\'3\' r=\'3\'/%3E%3Ccircle cx=\'13\' cy=\'13\' r=\'3\'/%3E%3C/g%3E%3C/svg%3E")'}}></div>
-                <Camera className="w-12 h-12 mb-3 text-neutral-300 z-10" />
-                <p className="font-bold text-sm text-center px-4 z-10 text-neutral-500">Bulut Depolama Modülü</p>
-                <p className="text-xs mt-1 text-center px-4 z-10 text-neutral-400 font-medium">Demo ortamında gerçek dosya sistemi aktif değildir.</p>
-                <p className="text-sm mt-4 font-black text-black z-10 bg-white px-4 py-2 rounded-lg shadow-sm border border-neutral-200">{viewingImage.name}</p>
+<div className="w-full aspect-video bg-neutral-50 rounded-xl border-2 border-dashed border-neutral-300 flex flex-col items-center justify-center mb-4 overflow-hidden relative shadow-inner">
+                {viewingImage.name.startsWith('http') ? (
+                  <img src={viewingImage.name} alt="Operasyon Görseli" className="w-full h-full object-contain z-10" />
+                ) : (
+                  <>
+                    <div className="absolute inset-0 opacity-5" style={{backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'20\' height=\'20\' viewBox=\'0 0 20 20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%23000000\' fill-opacity=\'1\' fill-rule=\'evenodd\'%3E%3Ccircle cx=\'3\' cy=\'3\' r=\'3\'/%3E%3Ccircle cx=\'13\' cy=\'13\' r=\'3\'/%3E%3C/g%3E%3C/svg%3E")'}}></div>
+                    <Camera className="w-12 h-12 mb-3 text-neutral-300 z-10" />
+                    <p className="font-bold text-sm text-center px-4 z-10 text-neutral-500">Görsel Bulunamadı</p>
+                    <p className="text-xs mt-1 text-center px-4 z-10 text-neutral-400 font-medium">Sadece eski/yerel kayıt isimleri mevcuttur.</p>
+                    <p className="text-sm mt-4 font-black text-black z-10 bg-white px-4 py-2 rounded-lg shadow-sm border border-neutral-200">{viewingImage.name}</p>
+                  </>
+                )}
               </div>
               <button onClick={() => setViewingImage(null)} className="w-full py-4 bg-black hover:bg-neutral-800 text-white font-bold rounded-xl transition shadow-lg">Kapat</button>
             </div>
@@ -5607,7 +5612,11 @@ const submitEndJob = async (e) => {
                     <label className="flex-1 cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
                       <Camera className="w-5 h-5 text-neutral-500" />
                       <span className="text-sm font-bold text-neutral-600 truncate">{endJobData.truckImage || 'Görsel veya Video Yükle'}</span>
-                      <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => setEndJobData({...endJobData, truckImage: e.target.files[0]?.name || ''})} />
+                      <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => {
+  if(e.target.files && e.target.files[0]) {
+    setEndJobData({...endJobData, truckImage: e.target.files[0].name, truckImageFile: e.target.files[0]});
+  }
+}} />
                     </label>
                     {endJobData.truckImage && <button type="button" onClick={() => setEndJobData({...endJobData, truckImage: ''})} className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition"><X className="w-5 h-5"/></button>}
                   </div>
@@ -5623,7 +5632,11 @@ const submitEndJob = async (e) => {
                         <label className="flex-1 cursor-pointer bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
                           <Camera className="w-5 h-5 text-red-500" />
                           <span className="text-sm font-bold text-red-600 truncate">{endJobData.damageImage || 'Hasarın Fotoğrafını Yükle'}</span>
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => setEndJobData({...endJobData, damageImage: e.target.files[0]?.name || ''})} />
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => {
+  if(e.target.files && e.target.files[0]) {
+    setEndJobData({...endJobData, damageImage: e.target.files[0].name, damageImageFile: e.target.files[0]});
+  }
+}} />
                         </label>
                         {endJobData.damageImage && <button type="button" onClick={() => setEndJobData({...endJobData, damageImage: ''})} className="p-3 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition"><X className="w-5 h-5"/></button>}
                       </div>
