@@ -32,43 +32,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
-// ----------------------------
-
-function useCloudState(key, initialValue, authUser) {
-  const [state, setState] = useState(initialValue);
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  useEffect(() => {
-    if (!authUser) return;
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sembol_cloud_state', key);
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists()) {
-        setState(docSnap.data().value);
-      } else {
-        setDoc(docRef, { value: initialValue }).catch(console.error);
-        setState(initialValue);
-      }
-      setIsLoaded(true);
-    }, (err) => {
-      console.error(err);
-      setIsLoaded(true);
-    });
-    return () => unsubscribe();
-  }, [authUser, key]);
-
-  const setCloudState = (newValue) => {
-    setState((prevState) => {
-      const evaluated = typeof newValue === 'function' ? newValue(prevState) : newValue;
-      if (authUser) {
-         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sembol_cloud_state', key);
-         setDoc(docRef, { value: evaluated }).catch(console.error);
-      }
-      return evaluated;
-    });
-  };
-
-  return [state, setCloudState, isLoaded];
-}
 
 // TÜRKİYE İL VE İLÇE VERİTABANI
 const TURKEY_LOCATIONS = {
@@ -77,10 +40,87 @@ const TURKEY_LOCATIONS = {
   "Ankara": ["Akyurt", "Altındağ", "Ayaş", "Bala", "Beypazarı", "Çamlıdere", "Çankaya", "Çubuk", "Elmadağ", "Etimesgut", "Evren", "Gölbaşı", "Güdül", "Haymana", "Kahramankazan", "Kalecik", "Keçiören", "Kızılcahamam", "Mamak", "Nallıhan", "Polatlı", "Pursaklar", "Sincan", "Şereflikoçhisar", "Yenimahalle"],
   "İzmir": ["Aliağa", "Balçova", "Bayındır", "Bayraklı", "Bergama", "Beydağ", "Bornova", "Buca", "Çeşme", "Çiğli", "Dikili", "Foça", "Gaziemir", "Güzelbahçe", "Karabağlar", "Karaburun", "Karşıyaka", "Kemalpaşa", "Kınık", "Kiraz", "Konak", "Menderes", "Menemen", "Narlıdere", "Ödemiş", "Seferihisar", "Selçuk", "Tire", "Torbalı", "Urla"],
   "Adana": ["Aladağ", "Ceyhan", "Çukurova", "Feke", "İmamoğlu", "Karaisalı", "Karataş", "Kozan", "Pozantı", "Saimbeyli", "Sarıçam", "Seyhan", "Tufanbeyli", "Yumurtalık", "Yüreğir"],
+  "Adıyaman": ["Besni", "Çelikhan", "Gerger", "Gölbaşı", "Kâhta", "Merkez", "Samsat", "Sincik", "Tut"],
+  "Afyonkarahisar": ["Başmakçı", "Bayat", "Bolvadin", "Çay", "Çobanlar", "Dazkırı", "Dinar", "Emirdağ", "Evciler", "Hocalar", "İhsaniye", "İscehisar", "Kızılören", "Merkez", "Sandıklı", "Sinanpaşa", "Sultandağı", "Şuhut"],
+  "Ağrı": ["Diyadin", "Doğubayazıt", "Eleşkirt", "Hamur", "Merkez", "Patnos", "Taşlıçay", "Tutak"],
+  "Aksaray": ["Ağaçören", "Eskil", "Gülağaç", "Güzelyurt", "Merkez", "Ortaköy", "Sarıyahşi", "Sultanhanı"],
+  "Amasya": ["Göynücek", "Gümüşhacıköy", "Hamamözü", "Merkez", "Merzifon", "Suluova", "Taşova"],
   "Antalya": ["Akseki", "Aksu", "Alanya", "Demre", "Döşemealtı", "Elmalı", "Finike", "Gazipaşa", "Gündoğmuş", "İbradı", "Kaş", "Kemer", "Kepez", "Konyaaltı", "Korkuteli", "Kumluca", "Manavgat", "Muratpaşa", "Serik"],
-  "Bursa": ["Büyükorhan", "Gemlik", "Gürsu", "Harmancık", "İnegöl", "İznik", "Karacabey", "Keles", "Kestel", "Mudanya", "Mustafakemalpaşa", "Nilüfer", "Orhaneli", "Orhangazi", "Osmangazi", "Yenişehir", "Yıldırım"]
+  "Ardahan": ["Çıldır", "Damal", "Göle", "Hanak", "Merkez", "Posof"],
+  "Artvin": ["Ardanuç", "Arhavi", "Borçka", "Hopa", "Kemalpaşa", "Merkez", "Murgul", "Şavşat", "Yusufeli"],
+  "Aydın": ["Bozdoğan", "Buharkent", "Çine", "Didim", "Efeler", "İncirliova", "Karacasu", "Karpuzlu", "Koçarlı", "Köşk", "Kuşadası", "Kuyucak", "Nazilli", "Söke", "Sultanhisar", "Yenipazar"],
+  "Balıkesir": ["Altıeylül", "Ayvalık", "Balya", "Bandırma", "Bigadiç", "Burhaniye", "Dursunbey", "Edremit", "Erdek", "Gömeç", "Gönen", "Havran", "İvrindi", "Karesi", "Kepsut", "Manyas", "Marmara", "Savaştepe", "Sındırgı", "Susurluk"],
+  "Bartın": ["Amasra", "Kurucaşile", "Merkez", "Ulus"],
+  "Batman": ["Beşiri", "Gercüş", "Hasankeyf", "Kozluk", "Merkez", "Sason"],
+  "Bayburt": ["Aydıntepe", "Demirözü", "Merkez"],
+  "Bilecik": ["Bozüyük", "Gölpazarı", "İnhisar", "Merkez", "Osmaneli", "Pazaryeri", "Söğüt", "Yenipazar"],
+  "Bingöl": ["Adaklı", "Genç", "Karlıova", "Kiğı", "Merkez", "Solhan", "Yayladere", "Yedisu"],
+  "Bitlis": ["Adilcevaz", "Ahlat", "Güroymak", "Hizan", "Merkez", "Mutki", "Tatvan"],
+  "Bolu": ["Dörtdivan", "Gerede", "Göynük", "Kıbrıscık", "Mengen", "Merkez", "Mudurnu", "Seben", "Yeniçağa"],
+  "Burdur": ["Ağlasun", "Altınyayla", "Bucak", "Çavdır", "Çeltikçi", "Gölhisar", "Karamanlı", "Kemer", "Merkez", "Tefenni", "Yeşilova"],
+  "Bursa": ["Büyükorhan", "Gemlik", "Gürsu", "Harmancık", "İnegöl", "İznik", "Karacabey", "Keles", "Kestel", "Mudanya", "Mustafakemalpaşa", "Nilüfer", "Orhaneli", "Orhangazi", "Osmangazi", "Yenişehir", "Yıldırım"],
+  "Çanakkale": ["Ayvacık", "Bayramiç", "Biga", "Bozcaada", "Çan", "Eceabat", "Ezine", "Gelibolu", "Gökçeada", "Lapseki", "Merkez", "Yenice"],
+  "Çankırı": ["Atkaracalar", "Bayramören", "Çerkeş", "Eldivan", "Ilgaz", "Kızılırmak", "Korgun", "Kurşunlu", "Merkez", "Orta", "Şabanözü", "Yapraklı"],
+  "Çorum": ["Alaca", "Bayat", "Boğazkale", "Dodurga", "İskilip", "Kargı", "Laçin", "Mecitözü", "Merkez", "Oğuzlar", "Ortaköy", "Osmancık", "Sungurlu", "Uğurludağ"],
+  "Denizli": ["Acıpayam", "Babadağ", "Baklan", "Bekilli", "Beyağaç", "Bozkurt", "Buldan", "Çal", "Çameli", "Çardak", "Çivril", "Güney", "Honaz", "Kale", "Merkezefendi", "Pamukkale", "Sarayköy", "Serinhisar", "Tavas"],
+  "Diyarbakır": ["Bağlar", "Bismil", "Çermik", "Çınar", "Çüngüş", "Dicle", "Eğil", "Ergani", "Hani", "Hazro", "Kayapınar", "Kocaköy", "Kulp", "Lice", "Silvan", "Sur", "Yenişehir"],
+  "Düzce": ["Akçakoca", "Cumayeri", "Çilimli", "Gölyaka", "Gümüşova", "Kaynaşlı", "Merkez", "Yığılca"],
+  "Edirne": ["Enez", "Havsa", "İpsala", "Keşan", "Lalapaşa", "Meriç", "Merkez", "Süloğlu", "Uzunköprü"],
+  "Elazığ": ["Ağın", "Alacakaya", "Arıcak", "Baskil", "Karakoçan", "Keban", "Kovancılar", "Maden", "Merkez", "Palu", "Sivrice"],
+  "Erzincan": ["Çayırlı", "İliç", "Kemah", "Kemaliye", "Merkez", "Otlukbeli", "Refahiye", "Tercan", "Üzümlü"],
+  "Erzurum": ["Aşkale", "Aziziye", "Çat", "Hınıs", "Horasan", "İspir", "Karaçoban", "Karayazı", "Köprüköy", "Narman", "Oltu", "Olur", "Palandöken", "Pasinler", "Pazaryolu", "Şenkaya", "Tekman", "Tortum", "Uzundere", "Yakutiye"],
+  "Eskişehir": ["Alpu", "Beylikova", "Çifteler", "Günyüzü", "Han", "İnönü", "Mahmudiye", "Mihalgazi", "Mihalıççık", "Odunpazarı", "Sarıcakaya", "Seyitgazi", "Sivrihisar", "Tepebaşı"],
+  "Gaziantep": ["Araban", "İslahiye", "Karkamış", "Nizip", "Nurdağı", "Oğuzeli", "Şahinbey", "Şehitkamil", "Yavuzeli"],
+  "Giresun": ["Alucra", "Bulancak", "Çamoluk", "Çanakçı", "Dereli", "Doğankent", "Espiye", "Eynesil", "Görele", "Güce", "Keşap", "Merkez", "Piraziz", "Şebinkarahisar", "Tirebolu", "Yağlıdere"],
+  "Gümüşhane": ["Kelkit", "Köse", "Kürtün", "Merkez", "Şiran", "Torul"],
+  "Hakkari": ["Çukurca", "Derecik", "Merkez", "Şemdinli", "Yüksekova"],
+  "Hatay": ["Altınözü", "Antakya", "Arsuz", "Belen", "Defne", "Dörtyol", "Erzin", "Hassa", "İskenderun", "Kırıkhan", "Kumlu", "Payas", "Reyhanlı", "Samandağ", "Yayladağı"],
+  "Iğdır": ["Aralık", "Karakoyunlu", "Merkez", "Tuzluca"],
+  "Isparta": ["Aksu", "Atabey", "Eğirdir", "Gelendost", "Gönen", "Keçiborlu", "Merkez", "Senirkent", "Sütçüler", "Şarkikaraağaç", "Uluborlu", "Yalvaç", "Yenişarbademli"],
+  "Kahramanmaraş": ["Afşin", "Andırın", "Çağlayancerit", "Dulkadiroğlu", "Ekinözü", "Elbistan", "Göksun", "Nurhak", "Onikişubat", "Pazarcık", "Türkoğlu"],
+  "Karabük": ["Eflani", "Eskipazar", "Merkez", "Ovacık", "Safranbolu", "Yenice"],
+  "Karaman": ["Ayrancı", "Başyayla", "Ermenek", "Kazımkarabekir", "Merkez", "Sarıveliler"],
+  "Kars": ["Akyaka", "Arpaçay", "Digor", "Kağızman", "Merkez", "Sarıkamış", "Selim", "Susuz"],
+  "Kastamonu": ["Abana", "Ağlı", "Araç", "Azdavay", "Bozkurt", "Cide", "Çatalzeytin", "Daday", "Devrekani", "Doğanyurt", "Hanönü", "İhsangazi", "İnebolu", "Küre", "Merkez", "Pınarbaşı", "Seydiler", "Şenpazar", "Taşköprü", "Tosya"],
+  "Kayseri": ["Akkışla", "Bünyan", "Develi", "Felahiye", "Hacılar", "İncesu", "Kocasinan", "Melikgazi", "Özvatan", "Pınarbaşı", "Sarıoğlan", "Sarız", "Talas", "Tomarza", "Yahyalı", "Yeşilhisar"],
+  "Kırıkkale": ["Bahşılı", "Balışeyh", "Çelebi", "Delice", "Karakeçili", "Keskin", "Merkez", "Sulakyurt", "Yahşihan"],
+  "Kırklareli": ["Babaeski", "Demirköy", "Kofçaz", "Lüleburgaz", "Merkez", "Pehlivanköy", "Pınarhisar", "Vize"],
+  "Kırşehir": ["Akçakent", "Akpınar", "Boztepe", "Çiçekdağı", "Kaman", "Merkez", "Mucur"],
+  "Kilis": ["Elbeyli", "Musabeyli", "Polateli", "Merkez"],
+  "Kocaeli": ["Başiskele", "Çayırova", "Darıca", "Derince", "Dilovası", "Gebze", "Gölcük", "İzmit", "Kandıra", "Karamürsel", "Kartepe", "Körfez"],
+  "Konya": ["Ahırlı", "Akören", "Akşehir", "Altınekin", "Beyşehir", "Bozkır", "Cihanbeyli", "Çeltik", "Çumra", "Derbent", "Derebucak", "Doğanhisar", "Emirgazi", "Ereğli", "Güneysınır", "Hadim", "Halkapınar", "Hüyük", "Ilgın", "Kadınhanı", "Karapınar", "Karatay", "Kulu", "Meram", "Sarayönü", "Selçuklu", "Seydişehir", "Taşkent", "Tuzlukçu", "Yalıhüyük", "Yunak"],
+  "Kütahya": ["Altıntaş", "Aslanapa", "Çavdarhisar", "Domaniç", "Dumlupınar", "Emet", "Gediz", "Hisarcık", "Merkez", "Pazarlar", "Şaphane", "Simav", "Tavşanlı"],
+  "Malatya": ["Akçadağ", "Arapgir", "Arguvan", "Battalgazi", "Darende", "Doğanşehir", "Doğanyol", "Hekimhan", "Kale", "Kuluncak", "Pütürge", "Yazıhan", "Yeşilyurt"],
+  "Manisa": ["Ahmetli", "Akhisar", "Alaşehir", "Demirci", "Gölmarmara", "Gördes", "Kırkağaç", "Köprübaşı", "Kula", "Salihli", "Sarıgöl", "Saruhanlı", "Selendi", "Soma", "Şehzadeler", "Turgutlu", "Yunusemre"],
+  "Mardin": ["Artuklu", "Dargeçit", "Derik", "Kızıltepe", "Mazıdağı", "Midyat", "Nusaybin", "Ömerli", "Savur", "Yeşilli"],
+  "Mersin": ["Akdeniz", "Anamur", "Aydıncık", "Bozyazı", "Çamlıyayla", "Erdemli", "Gülnar", "Mezitli", "Mut", "Silifke", "Tarsus", "Toroslar", "Yenişehir"],
+  "Muğla": ["Bodrum", "Dalaman", "Datça", "Fethiye", "Kavaklıdere", "Köyceğiz", "Marmaris", "Menteşe", "Milas", "Ortaca", "Seydikemer", "Ula", "Yatağan"],
+  "Muş": ["Bulanık", "Hasköy", "Korkut", "Malazgirt", "Merkez", "Varto"],
+  "Nevşehir": ["Acıgöl", "Avanos", "Derinkuyu", "Gülşehir", "Hacıbektaş", "Kozaklı", "Merkez", "Ürgüp"],
+  "Niğde": ["Altunhisar", "Bor", "Çamardı", "Çiftlik", "Merkez", "Ulukışla"],
+  "Ordu": ["Akkuş", "Altınordu", "Aybastı", "Çamaş", "Çatalpınar", "Çaybaşı", "Fatsa", "Gölköy", "Gülyalı", "Gürgentepe", "İkizce", "Kabadüz", "Kabataş", "Korgan", "Kumru", "Mesudiye", "Perşembe", "Ulubey", "Ünye"],
+  "Osmaniye": ["Bahçe", "Düziçi", "Hasanbeyli", "Kadirli", "Merkez", "Sumbas", "Toprakkale"],
+  "Rize": ["Ardeşen", "Çamlıhemşin", "Çayeli", "Derepazarı", "Fındıklı", "Güneysu", "Hemşin", "İkizdere", "İyidere", "Kalkandere", "Merkez", "Pazar"],
+  "Sakarya": ["Adapazarı", "Akyazı", "Arifiye", "Erenler", "Ferizli", "Geyve", "Hendek", "Karapürçek", "Karasu", "Kaynarca", "Kocaali", "Pamukova", "Sapanca", "Serdivan", "Söğütlü", "Taraklı"],
+  "Samsun": ["19 Mayıs", "Alaçam", "Asarcık", "Atakum", "Ayvacık", "Bafra", "Canik", "Çarşamba", "Havza", "İlkadım", "Kavak", "Ladik", "Salıpazarı", "Tekkeköy", "Terme", "Vezirköprü", "Yakakent"],
+  "Siirt": ["Baykan", "Eruh", "Kurtalan", "Merkez", "Pervari", "Şirvan", "Tillo"],
+  "Sinop": ["Ayancık", "Boyabat", "Dikmen", "Durağan", "Erfelek", "Gerze", "Merkez", "Saraydüzü", "Türkeli"],
+  "Sivas": ["Akıncılar", "Altınyayla", "Divriği", "Doğanşar", "Gemerek", "Gölova", "Gürün", "Hafik", "İmranlı", "Kangal", "Koyulhisar", "Merkez", "Suşehri", "Şarkışla", "Ulaş", "Yıldızeli", "Zara"],
+  "Şanlıurfa": ["Akçakale", "Birecik", "Bozova", "Ceylanpınar", "Eyyübiye", "Halfeti", "Haliliye", "Harran", "Hilvan", "Karaköprü", "Siverek", "Suruç", "Viranşehir"],
+  "Şırnak": ["Beytüşşebap", "Cizre", "Güçlükonak", "İdil", "Merkez", "Silopi", "Uludere"],
+  "Tekirdağ": ["Çerkezköy", "Çorlu", "Ergene", "Hayrabolu", "Kapaklı", "Malkara", "Marmaraereğlisi", "Muratlı", "Saray", "Süleymanpaşa", "Şarköy"],
+  "Tokat": ["Almus", "Artova", "Başçiftlik", "Erbaa", "Niksar", "Pazar", "Reşadiye", "Sulusaray", "Turhal", "Yeşilyurt", "Zile", "Merkez"],
+  "Trabzon": ["Akçaabat", "Araklı", "Arsin", "Beşikdüzü", "Çarşıbaşı", "Çaykara", "Dernekpazarı", "Düzköy", "Hayrat", "Köprübaşı", "Maçka", "Of", "Ortahisar", "Sürmene", "Şalpazarı", "Tonya", "Vakfıkebir", "Yomra"],
+  "Tunceli": ["Çemişgezek", "Hozat", "Mazgirt", "Merkez", "Nazımiye", "Ovacık", "Pertek", "Pülümür"],
+  "Uşak": ["Banaz", "Eşme", "Karahallı", "Merkez", "Sivaslı", "Ulubey"],
+  "Van": ["Bahçesaray", "Başkale", "Çaldıran", "Çatak", "Edremit", "Erciş", "Gevaş", "Gürpınar", "İpekyolu", "Muradiye", "Özalp", "Saray", "Tuşba"],
+  "Yalova": ["Altınova", "Armutlu", "Çınarcık", "Çiftlikköy", "Merkez", "Termal"],
+  "Yozgat": ["Akdağmadeni", "Aydıncık", "Boğazlıyan", "Çandır", "Çayıralan", "Çekerek", "Kadışehri", "Saraykent", "Sarıkaya", "Sorgun", "Şefaatli", "Yenifakılı", "Yerköy", "Merkez"],
+  "Zonguldak": ["Alaplı", "Çaycuma", "Devrek", "Ereğli", "Gökçebey", "Kilimli", "Kozlu", "Merkez"]
 };
-const PROVINCES = Object.keys(TURKEY_LOCATIONS);
+const baseProvinces = Object.keys(TURKEY_LOCATIONS).filter(p => p !== "İstanbul (Anadolu)" && p !== "İstanbul (Avrupa)");
+baseProvinces.sort((a, b) => a.localeCompare(b, 'tr'));
+const PROVINCES = ["İstanbul (Anadolu)", "İstanbul (Avrupa)", ...baseProvinces];
 const FLOORS = ['Bodrum Kat', 'Giriş Kat', 'Müstakil / Villa', ...Array.from({ length: 30 }, (_, i) => `${i + 1}. Kat`)];
 
 // DEPOEVİM TESİSLERİ
@@ -401,9 +441,9 @@ const generateContractPDF = (job) => {
   printWindow.document.close();
 };
 
-// --- BİLEŞENLER ---
+// --- DIŞARI ÇIKARTILAN BİLEŞENLER ---
 
-const DashboardView = ({ jobs, handleGenerateDailySummary }) => (
+const DashboardView = ({ jobs }) => (
   <div className="space-y-6 animate-in fade-in">
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
@@ -427,13 +467,6 @@ const DashboardView = ({ jobs, handleGenerateDailySummary }) => (
         <Calendar className="w-12 h-12 text-neutral-300 mb-4" />
         <h2 className="text-lg font-bold text-neutral-700 mb-2">Operasyon Özeti</h2>
         <p className="text-sm text-neutral-500 mb-2">Bugünkü ve yaklaşan işlerinizi görmek için sol menüden sekmeleri kullanabilirsiniz.</p>
-        
-        <button 
-          onClick={() => handleGenerateDailySummary(jobs)} 
-          className="mt-4 px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-purple-600/30"
-        >
-          <Sparkles className="w-5 h-5"/> ✨ Yapay Zeka Ekip Sabah Brifingi
-        </button>
     </div>
   </div>
 );
@@ -442,41 +475,6 @@ const AddJobView = ({
   type, formData, setFormData, handleInputChange, handleProvinceChange,
   handleDepoChange, toggleDepoDirection, handleAddJob, editingJobId, handleSwapAddresses
 }) => {
-  const [aiText, setAiText] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [aiError, setAiError] = useState('');
-
-  const handleAIFill = async () => {
-    if(!aiText.trim()) return;
-    setIsAiLoading(true);
-    setAiError('');
-    try {
-      const prompt = `Nakliyat müşterisinden gelen mesajdan kayıt formu bilgilerini çıkar:
-      Mesaj: "${aiText}"
-      Bulabildiklerini doldur, bulamadıklarını boş bırak. summaryNotes kısmına detayları özetle.
-      Sadece JSON döndür.`;
-      
-      const res = await callGeminiAPI(prompt, true);
-      let cleanRes = res.replace(/```json/gi, '').replace(/```/g, '').trim();
-      const data = JSON.parse(cleanRes);
-      
-      setFormData(prev => ({
-        ...prev,
-        customerName: data.customerName || prev.customerName,
-        customerPhone: data.customerPhone || prev.customerPhone,
-        date: data.date || prev.date,
-        price: data.price || prev.price,
-        notes: data.summaryNotes ? (prev.notes ? prev.notes + '\n\n✨ AI Özet: ' + data.summaryNotes : '✨ AI Özet: ' + data.summaryNotes) : prev.notes
-      }));
-      setAiText('');
-    } catch (e) {
-      console.error("AI Error:", e);
-      setAiError('Yapay zeka asistanı mesajı okuyamadı veya geçici bir sorun yaşandı.');
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
   return (
     <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
       <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
@@ -493,37 +491,6 @@ const AddJobView = ({
           <Star className={`w-8 h-8 transition ${formData.isSpecial ? 'text-yellow-400 fill-yellow-400 drop-shadow-md scale-110' : 'text-neutral-300 group-hover:text-yellow-200'}`} />
           <span className={`text-[10px] font-bold mt-1 ${formData.isSpecial ? 'text-yellow-600' : 'text-neutral-400'}`}>ÖZEL</span>
         </button>
-      </div>
-
-      {/* YAPAY ZEKA ASİSTANI */}
-      <div className="bg-gradient-to-r from-purple-50 to-pink-50 p-5 rounded-2xl border border-purple-100 mb-6 shadow-inner">
-        <h3 className="font-bold text-purple-900 mb-3 flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-purple-600" /> ✨ Yapay Zeka ile Hızlı Doldur
-        </h3>
-        <p className="text-sm text-purple-800 mb-3">Müşterinin WhatsApp mesajını veya dağınık notlarınızı buraya yapıştırın, formu otomatik dolduralım.</p>
-        <div className="flex flex-col gap-2">
-          <div className="flex flex-col md:flex-row gap-3">
-            <textarea 
-              value={aiText} 
-              onChange={(e) => setAiText(e.target.value)} 
-              className="flex-1 p-3 border border-purple-200 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none h-14 resize-none transition bg-white text-sm" 
-              placeholder="Örn: Merhaba, haftaya Salı Kadıköy'den Ümraniye'ye 3+1 ev taşıyacağız, Ahmet Yılmaz 0555123..." 
-            />
-            <button 
-              type="button"
-              onClick={handleAIFill}
-              disabled={isAiLoading || !aiText.trim()}
-              className="bg-purple-600 text-white font-bold px-6 py-3 rounded-xl hover:bg-purple-700 transition disabled:opacity-50 flex items-center justify-center gap-2 whitespace-nowrap shadow-md shadow-purple-600/30"
-            >
-              {isAiLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <><Sparkles className="w-5 h-5" /> Formu Doldur</>}
-            </button>
-          </div>
-          {aiError && (
-            <p className="text-xs font-bold text-red-600 flex items-center gap-1 mt-1">
-              <AlertTriangle className="w-4 h-4" /> {aiError}
-            </p>
-          )}
-        </div>
       </div>
 
       <form onSubmit={handleAddJob} className="space-y-6">
@@ -694,10 +661,7 @@ const AddJobView = ({
               </div>
               <div className="col-span-1">
                 <label className="block text-sm font-bold text-neutral-700 mb-1">İlçe *</label>
-                <select required name="fromDistrict" value={formData.fromDistrict} onChange={handleInputChange} disabled={!formData.fromProvince} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
-                  <option value="">İlçe Seçiniz</option>
-                  {formData.fromProvince && TURKEY_LOCATIONS[formData.fromProvince]?.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
+                <input required type="text" name="fromDistrict" value={formData.fromDistrict} onChange={handleInputChange} placeholder="İlçe giriniz" className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
               </div>
            </div>
            <div>
@@ -832,15 +796,13 @@ const AddJobView = ({
                  </div>
                  <div className="col-span-1">
                    <label className="block text-sm font-bold text-neutral-700 mb-1">İlçe</label>
-                   <select 
+                   <input 
+                     type="text"
                      value={addr.district} 
                      onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, district: e.target.value } : a) }))} 
-                     disabled={!addr.province} 
-                     className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
-                   >
-                     <option value="">İlçe Seçiniz</option>
-                     {addr.province && TURKEY_LOCATIONS[addr.province]?.map(d => <option key={d} value={d}>{d}</option>)}
-                   </select>
+                     placeholder="İlçe giriniz"
+                     className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition"
+                   />
                  </div>
                </div>
                <div>
@@ -962,10 +924,7 @@ const AddJobView = ({
               </div>
               <div className="col-span-1">
                 <label className="block text-sm font-bold text-neutral-700 mb-1">İlçe *</label>
-                <select required name="toDistrict" value={formData.toDistrict} onChange={handleInputChange} disabled={!formData.toProvince} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
-                  <option value="">İlçe Seçiniz</option>
-                  {formData.toProvince && TURKEY_LOCATIONS[formData.toProvince]?.map(d => <option key={d} value={d}>{d}</option>)}
-                </select>
+                <input required type="text" name="toDistrict" value={formData.toDistrict} onChange={handleInputChange} placeholder="İlçe giriniz" className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
               </div>
            </div>
            <div>
@@ -1064,15 +1023,13 @@ const AddJobView = ({
                  </div>
                  <div className="col-span-1">
                    <label className="block text-sm font-bold text-neutral-700 mb-1">İlçe</label>
-                   <select 
+                   <input 
+                     type="text"
                      value={addr.district} 
                      onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, district: e.target.value } : a) }))} 
-                     disabled={!addr.province} 
-                     className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
-                   >
-                     <option value="">İlçe Seçiniz</option>
-                     {addr.province && TURKEY_LOCATIONS[addr.province]?.map(d => <option key={d} value={d}>{d}</option>)}
-                   </select>
+                     placeholder="İlçe giriniz"
+                     className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition"
+                   />
                  </div>
                </div>
                <div>
@@ -1179,6 +1136,7 @@ const CurrentJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGen
   const dateStr = `${year}-${month}-${day}`;
   
   const formattedDate = viewDate.toLocaleDateString('tr-TR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+  // İptal edilen işleri mevcut işler listesinden gizliyoruz
   const dailyJobs = jobs.filter(j => j.date === dateStr && j.status !== 'cancelled');
 
   return (
@@ -1412,9 +1370,6 @@ const CurrentJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGen
                 <MessageSquareText className="w-4 h-4"/> Randevu Onayı (SMS)
               </button>
 
-              <button onClick={() => handleGenerateMessage(job)} className="px-3 py-2 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5" title="Yapay Zeka ile Özel Mesaj">
-                <Sparkles className="w-4 h-4"/> AI Mesaj
-              </button>
               <button onClick={() => handleEstimateMaterials(job)} className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
                 <Package className="w-4 h-4"/> ✨ Malzeme Tahmini
               </button>
@@ -1428,6 +1383,117 @@ const CurrentJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGen
         </div>
       ))
         )}
+      </div>
+    </div>
+  );
+};
+
+const CustomerListView = ({ jobs, title, handleEditJob }) => {
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Sadece başlığa göre filtreleme yapıyoruz
+  const relevantJobs = title === 'Özel Müşteriler' ? jobs.filter(j => j.isSpecial) : jobs;
+
+  // Müşterileri telefon numaralarına göre gruplayıp tekilleştiriyoruz
+  const customersMap = new Map();
+  relevantJobs.forEach(job => {
+    if (!job.customerPhone) return;
+    if (!customersMap.has(job.customerPhone)) {
+       customersMap.set(job.customerPhone, {
+          name: job.customerName,
+          phone: job.customerPhone,
+          type: job.customerType || 'Bireysel',
+          isSpecial: job.isSpecial,
+          jobCount: 1,
+          totalRevenue: Number(job.price) || 0,
+          lastJobDate: job.date,
+          latestJob: job
+       });
+    } else {
+       const c = customersMap.get(job.customerPhone);
+       c.jobCount += 1;
+       c.totalRevenue += (Number(job.price) || 0);
+       if (new Date(job.date) > new Date(c.lastJobDate)) {
+           c.lastJobDate = job.date;
+           c.latestJob = job;
+       }
+       if (job.isSpecial) c.isSpecial = true;
+    }
+  });
+
+  const customers = Array.from(customersMap.values())
+    .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.phone.includes(searchQuery))
+    .sort((a, b) => new Date(b.lastJobDate) - new Date(a.lastJobDate));
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4">
+        <h2 className="text-xl font-bold text-black flex items-center gap-2 shrink-0">
+          <Users className="w-6 h-6 text-red-600" /> {title}
+        </h2>
+        <div className="relative w-full md:w-64">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <input
+            type="text"
+            placeholder="Müşteri Adı veya Telefon..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-600 transition"
+          />
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-black text-white border-b border-neutral-200">
+            <tr>
+              <th className="p-4 font-bold rounded-tl-xl">Müşteri Bilgisi</th>
+              <th className="p-4 font-bold">İletişim</th>
+              <th className="p-4 font-bold text-center">Toplam İşlem</th>
+              <th className="p-4 font-bold text-right">Toplam Hacim</th>
+              <th className="p-4 font-bold">Son İşlem Tarihi</th>
+              <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-neutral-100">
+            {customers.map((c, index) => (
+              <tr key={index} className="hover:bg-neutral-50 transition">
+                <td className="p-4 font-bold text-black">
+                  <div className="flex items-center gap-2">
+                    {c.isSpecial && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500 drop-shadow-sm shrink-0" />}
+                    <div>
+                      {c.name}
+                      <span className="block text-[10px] text-neutral-500 font-medium">{c.type} Müşteri</span>
+                    </div>
+                  </div>
+                </td>
+                <td className="p-4 text-neutral-600 font-medium">
+                  <a href={"tel:" + c.phone} className="flex items-center gap-1.5 hover:text-red-600 transition">
+                    <Phone className="w-3.5 h-3.5" /> {c.phone}
+                  </a>
+                </td>
+                <td className="p-4 text-center font-bold text-neutral-700">
+                  <span className="bg-neutral-100 px-2.5 py-1 rounded-lg border border-neutral-200">{c.jobCount} İşlem</span>
+                </td>
+                <td className="p-4 text-right font-black text-green-600">
+                  ₺{c.totalRevenue.toLocaleString('tr-TR')}
+                </td>
+                <td className="p-4 text-neutral-600">
+                  <span className="flex items-center gap-1.5"><CalendarDays className="w-3.5 h-3.5 text-neutral-400" /> {c.lastJobDate}</span>
+                </td>
+                <td className="p-4">
+                  <button onClick={() => handleEditJob(c.latestJob)} className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5 w-max">
+                    <Edit className="w-3.5 h-3.5" /> Son İşe Git
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {customers.length === 0 && (
+              <tr>
+                <td colSpan="6" className="p-6 text-center text-neutral-500">Müşteri kaydı bulunamadı.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   );
@@ -1708,10 +1774,10 @@ const CalendarView = ({ jobs, handleEditJob }) => {
   };
 
   const getCapacityBadge = (coreJobCount) => {
-    if (coreJobCount === 0) return <span className="text-xs text-neutral-400 font-medium">Boş</span>;
-    if (coreJobCount <= 3) return <span className="text-xs text-black font-bold bg-neutral-200 px-2 py-0.5 rounded-full">{coreJobCount} İş (Müsait)</span>;
-    if (coreJobCount === 4) return <span className="text-xs text-red-600 font-bold bg-red-100 px-2 py-0.5 rounded-full">{coreJobCount} İş (Yoğun)</span>;
-    return <span className="text-xs text-white font-bold bg-neutral-800 px-2 py-0.5 rounded-full">{coreJobCount} İş (Dolu)</span>;
+    if (coreJobCount === 0) return <span className="text-[9px] text-neutral-400 font-bold leading-none">Boş</span>;
+    if (coreJobCount <= 3) return <span className="text-[9px] text-black font-bold bg-neutral-200 px-1 py-0.5 rounded leading-none">{coreJobCount} İş</span>;
+    if (coreJobCount === 4) return <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1 py-0.5 rounded leading-none">{coreJobCount} İş</span>;
+    return <span className="text-[9px] text-white font-bold bg-neutral-800 px-1 py-0.5 rounded leading-none">{coreJobCount} İş</span>;
   };
 
   return (
@@ -1724,23 +1790,23 @@ const CalendarView = ({ jobs, handleEditJob }) => {
         </div>
         
         <div className="flex flex-col gap-2 items-end">
-          <div className="flex flex-wrap gap-3 text-xs bg-neutral-50 p-2 rounded-xl border border-neutral-200">
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-red-600"></div> Nakliye</div>
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-blue-600"></div> Depo</div>
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-green-500"></div> Asansör</div>
+          <div className="flex flex-wrap gap-2 text-[10px] font-bold bg-neutral-50 p-1.5 rounded-xl border border-neutral-200">
+            <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-red-600"></div> Nakliye</div>
+            <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-blue-600"></div> Depo</div>
+            <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-green-500"></div> Asansör</div>
           </div>
-          <div className="flex flex-wrap gap-3 text-xs bg-neutral-50 p-2 rounded-xl border border-neutral-200">
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-white border border-neutral-300"></div> Boş (0)</div>
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-neutral-300"></div> Müsait (1-3)</div>
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-red-600"></div> Yoğun (4)</div>
-            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-black"></div> Dolu (5+)</div>
+          <div className="flex flex-wrap gap-2 text-[10px] font-bold bg-neutral-50 p-1.5 rounded-xl border border-neutral-200">
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-white border border-neutral-300"></div> Boş (0)</div>
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-neutral-300"></div> Müsait (1-3)</div>
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-600"></div> Yoğun (4)</div>
+            <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-black"></div> Dolu (5+)</div>
           </div>
         </div>
       </div>
 
-      <div className="grid grid-cols-7 gap-2">
+      <div className="grid grid-cols-7 gap-1 md:gap-2">
         {dayNames.map(day => (
-          <div key={day} className="text-center font-bold text-neutral-500 text-sm py-2">
+          <div key={day} className="text-center font-bold text-neutral-500 text-xs py-2">
             {day}
           </div>
         ))}
@@ -1755,38 +1821,38 @@ const CalendarView = ({ jobs, handleEditJob }) => {
             <div 
               key={index} 
               onClick={() => item && setSelectedDate(item.date)}
-              className={`min-h-[100px] p-2 rounded-xl border transition cursor-pointer flex flex-col justify-between ${item ? getCapacityColor(coreJobs.length) : 'bg-transparent border-transparent'} ${item && selectedDate === item.date ? 'ring-2 ring-red-600 ring-offset-2' : ''}`}
+              className={`aspect-square p-1.5 rounded-xl border transition cursor-pointer flex flex-col justify-between overflow-hidden ${item ? getCapacityColor(coreJobs.length) : 'bg-transparent border-transparent'} ${item && selectedDate === item.date ? 'ring-2 ring-red-600 ring-offset-1' : ''}`}
             >
               {item && (
                 <>
-                  <div className="flex justify-between items-start mb-2">
-                    <span className={`text-lg font-bold ${isToday ? 'bg-red-600 text-white w-7 h-7 rounded-full flex items-center justify-center' : (isFull ? 'text-white' : 'text-black')}`}>
+                  <div className="flex justify-between items-start mb-0.5">
+                    <span className={`text-[11px] font-bold ${isToday ? 'bg-red-600 text-white w-5 h-5 rounded-full flex items-center justify-center' : (isFull ? 'text-white' : 'text-black')}`}>
                       {item.day}
                     </span>
                   </div>
                   
-                  <div className="flex flex-col gap-1 items-start w-full">
+                  <div className="flex flex-col gap-0.5 items-start w-full">
                     {getCapacityBadge(coreJobs.length)}
                     
-                    <div className="mt-1 flex flex-col gap-1 w-full">
+                    <div className="mt-1 flex flex-col gap-0.5 w-full">
                       {coreJobs.length > 0 && (
-                        <div className="flex flex-wrap gap-1 items-center">
-                          {coreJobs.map(job => (
+                        <div className="flex flex-wrap gap-0.5 items-center">
+                          {coreJobs.slice(0, 5).map(job => (
                             job.isSpecial ? 
-                              <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
+                              <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
                             :
-                              <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className={`w-2.5 h-2.5 rounded-full ${job.type === 'Depo' ? 'bg-blue-600' : 'bg-red-600'}`}></div>
+                              <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className={`w-2 h-2 rounded-full ${job.type === 'Depo' ? 'bg-blue-600' : 'bg-red-600'}`}></div>
                           ))}
                         </div>
                       )}
                       
                       {asansorJobs.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-0.5 pt-1 border-t border-black/10 w-full items-center">
-                          {asansorJobs.map(job => (
+                        <div className="flex flex-wrap gap-0.5 mt-0.5 pt-0.5 border-t border-black/10 w-full items-center">
+                          {asansorJobs.slice(0, 5).map(job => (
                             job.isSpecial ?
-                              <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-3 h-3 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
+                              <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-2 h-2 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
                             :
-                              <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-2 h-2 rounded-full bg-green-500"></div>
+                              <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
                           ))}
                         </div>
                       )}
@@ -1807,56 +1873,119 @@ const CalendarView = ({ jobs, handleEditJob }) => {
             {selectedDate.split('-').reverse().join('.')} Tarihindeki Operasyonlar
           </h3>
           
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {(!jobsByDate[selectedDate] || jobsByDate[selectedDate].length === 0) ? (
-              <div className="p-6 bg-neutral-50 rounded-xl border border-neutral-200 text-center text-neutral-500 font-medium">
+              <div className="p-6 bg-neutral-50 rounded-xl border border-neutral-200 text-center text-neutral-500 font-medium text-sm">
                 Bu tarihte kayıtlı herhangi bir operasyon bulunmuyor.
               </div>
             ) : (
               jobsByDate[selectedDate].map(job => (
-                <div key={job.id} className={`p-4 bg-white border rounded-xl hover:border-red-600 transition shadow-sm flex flex-col md:flex-row gap-4 justify-between md:items-center ${job.isSpecial ? 'border-yellow-400 ring-2 ring-yellow-50 bg-yellow-50/10' : 'border-neutral-200'}`}>
-                  <div>
-                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                      <span className="font-bold text-black text-base flex items-center gap-1.5">
-                        {job.isSpecial && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
+                <div key={job.id} className={`bg-white p-3.5 rounded-xl shadow-sm border ${job.status === 'cancelled' ? 'border-red-400 bg-red-50/40' : job.isSpecial ? 'border-yellow-400 ring-1 ring-yellow-100 bg-yellow-50/20' : 'border-neutral-200 hover:border-red-400'} flex flex-col gap-2.5 transition group`}>
+                  <div className="flex justify-between items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-bold text-sm text-black flex items-center gap-1">
+                        {job.isSpecial && <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500 drop-shadow-sm" />}
                         {job.customerName}
                       </span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold text-white uppercase tracking-wider ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
                         {job.type || 'Nakliye'}
                       </span>
-                      <span className="text-[10px] font-black bg-neutral-100 text-neutral-600 px-2 py-0.5 rounded-md flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> {job.time}
-                      </span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
                         job.status === 'completed' ? 'bg-black text-white' :
-                        job.status === 'in-progress' ? 'bg-red-600 text-white' :
-                        'bg-neutral-200 text-neutral-700'
+                        job.status === 'in-progress' ? 'bg-red-600 text-white shadow-sm' :
+                        job.status === 'cancelled' ? 'bg-red-100 text-red-800 border border-red-200' :
+                        'bg-neutral-100 text-neutral-700 border border-neutral-200'
                       }`}>
-                        {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
+                        {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : job.status === 'cancelled' ? 'İptal' : 'Bekliyor'}
                       </span>
+                      <span className="text-[10px] font-black text-neutral-600 flex items-center gap-1 ml-1"><Clock className="w-3 h-3" /> {job.time}</span>
                     </div>
-                    <div className="text-xs text-neutral-600 flex items-center gap-3 mb-2 font-medium flex-wrap">
-                      <span className={`flex items-center gap-1 px-2 py-1 rounded-lg border ${job.team === 'Atanmadı' ? 'bg-yellow-50 text-yellow-700 border-yellow-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}><User className="w-3.5 h-3.5" /> {job.team}</span>
-                      {job.assignedVehiclePlate && <span className="flex items-center gap-1 bg-purple-50 px-2 py-1 rounded-lg border border-purple-100 text-purple-700"><Truck className="w-3.5 h-3.5" /> {job.assignedVehiclePlate}</span>}
-                      <span className="flex items-center gap-1 bg-neutral-50 px-2 py-1 rounded-lg border border-neutral-200"><Phone className="w-3.5 h-3.5" /> {job.customerPhone}</span>
-                    </div>
-                    <div className="text-xs text-neutral-500 space-y-1 bg-neutral-50 p-2 rounded-lg border border-neutral-100">
-                      <div className="flex items-start gap-1.5"><MapPin className="w-3.5 h-3.5 text-neutral-400 mt-0.5 shrink-0" /> <div><b className="text-neutral-700">{job.extraLoadingAddresses?.length > 0 ? '1. AL:' : 'AL:'}</b> {job.fromProvince}/{job.fromDistrict} - {job.fromAddress}</div></div>
-                      {job.extraLoadingAddresses?.map((addr, idx) => (
-                        <div key={addr.id} className="flex items-start gap-1.5"><MapPin className="w-3.5 h-3.5 text-neutral-400 mt-0.5 shrink-0" /> <div><b className="text-neutral-700">{idx + 2}. AL:</b> {addr.province}/{addr.district} - {addr.address}</div></div>
-                      ))}
-                      
-                      {job.toProvince && <div className="flex items-start gap-1.5 mt-1 pt-1 border-t border-neutral-200"><MapPin className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" /> <div><b className="text-neutral-700">{job.extraUnloadingAddresses?.length > 0 ? '1. VR:' : 'VR:'}</b> {job.toProvince}/{job.toDistrict} - {job.toAddress}</div></div>}
-                      {job.extraUnloadingAddresses?.map((addr, idx) => (
-                        <div key={addr.id} className="flex items-start gap-1.5"><MapPin className="w-3.5 h-3.5 text-red-400 mt-0.5 shrink-0" /> <div><b className="text-neutral-700">{idx + 2}. VR:</b> {addr.province}/{addr.district} - {addr.address}</div></div>
-                      ))}
-                    </div>
+                    {job.price && (
+                      <div className="text-right shrink-0 leading-none">
+                        <span className="block text-sm font-black text-green-600">₺{parseInt(job.price).toLocaleString('tr-TR')}</span>
+                      </div>
+                    )}
+                  </div>
 
-                    <div className="mt-3 pt-3 border-t border-neutral-100 flex flex-wrap gap-2">
-                      <button onClick={() => handleEditJob(job)} className="px-2.5 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[11px] font-bold rounded-lg transition flex items-center gap-1.5">
-                        <Edit className="w-3 h-3"/> Bilgileri Düzenle
-                      </button>
+                  <div className="text-[11px] text-neutral-600 flex flex-col gap-1.5 bg-neutral-50 p-2.5 rounded-lg border border-neutral-100">
+                    <div className="flex items-start gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-neutral-400 shrink-0 mt-0.5" /> 
+                      <div className="flex-1 leading-tight">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
+                          <span className="text-black font-bold">{job.extraLoadingAddresses?.length > 0 ? '1. AL:' : 'AL:'} {job.fromProvince}/{job.fromDistrict}</span>
+                          <span className="text-[9px] font-medium text-neutral-500">{job.fromRoomCount} • {job.fromFloor} • {job.fromTransportMethod} • {job.fromPacking}</span>
+                        </div>
+                        <div className="text-[10px] text-neutral-500">{job.fromAddress}</div>
+                      </div>
                     </div>
+                    
+                    {job.extraLoadingAddresses?.map((addr, idx) => (
+                      <div key={addr.id} className="flex items-start gap-1.5 pt-1.5 border-t border-neutral-200/60">
+                        <MapPin className="w-3.5 h-3.5 text-neutral-400 shrink-0 mt-0.5" /> 
+                        <div className="flex-1 leading-tight">
+                          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
+                            <span className="text-black font-bold">{idx + 2}. Yükleme: {addr.province}/{addr.district}</span>
+                            <span className="text-[9px] font-medium text-neutral-500">{addr.roomCount} • {addr.floor} • {addr.transportMethod} • {addr.packing}</span>
+                          </div>
+                          <div className="text-[10px] text-neutral-500">{addr.address}</div>
+                        </div>
+                      </div>
+                    ))}
+                    
+                    {job.toProvince && (
+                      <>
+                        <div className="flex items-start gap-1.5 pt-1.5 border-t border-neutral-200/80">
+                          <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" /> 
+                          <div className="flex-1 leading-tight">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
+                              <span className="text-red-900 font-bold">{job.extraUnloadingAddresses?.length > 0 ? '1. Boşaltma:' : 'VR:'} {job.toProvince}/{job.toDistrict}</span>
+                              <span className="text-[9px] font-medium text-red-600/80">{job.toRoomCount} • {job.toFloor} • {job.toTransportMethod} • {job.toPacking}</span>
+                            </div>
+                            <div className="text-[10px] text-neutral-500">{job.toAddress}</div>
+                          </div>
+                        </div>
+                        {job.extraUnloadingAddresses?.map((addr, idx) => (
+                          <div key={addr.id} className="flex items-start gap-1.5 pt-1.5 border-t border-neutral-200/60">
+                            <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" /> 
+                            <div className="flex-1 leading-tight">
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
+                                <span className="text-red-900 font-bold">{idx + 2}. Boşaltma: {addr.province}/{addr.district}</span>
+                                <span className="text-[9px] font-medium text-red-600/80">{addr.roomCount} • {addr.floor} • {addr.transportMethod} • {addr.packing}</span>
+                              </div>
+                              <div className="text-[10px] text-neutral-500">{addr.address}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+
+                  {(job.contractDetails || job.notes) && (
+                    <div className="grid grid-cols-1 gap-1.5 mt-0.5">
+                      {job.contractDetails && (
+                        <div className="text-[10px] font-medium bg-blue-50 text-blue-800 p-2 rounded-lg border border-blue-200 flex items-start gap-1.5 leading-tight">
+                          <FileText className="w-3 h-3 shrink-0 text-blue-600" /> 
+                          <span><b className="text-blue-900">Sözleşme:</b> {job.contractDetails}</span>
+                        </div>
+                      )}
+                      {job.notes && (
+                        <div className="text-[10px] font-medium bg-yellow-50 text-yellow-800 p-2 rounded-lg border border-yellow-200 flex items-start gap-1.5 leading-tight whitespace-pre-wrap">
+                          <AlertTriangle className="w-3 h-3 shrink-0 text-yellow-600" /> 
+                          <span><b className="text-yellow-900">Not:</b> {job.notes}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 mt-0.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="flex items-center gap-1 text-[10px] font-bold bg-white text-neutral-700 px-2 py-1 rounded border border-neutral-200"><Phone className="w-3 h-3 text-black" /> {job.customerPhone}</span>
+                      <span className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border ${job.team === 'Atanmadı' ? 'bg-yellow-50 text-yellow-700 border-yellow-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}><User className="w-3 h-3" /> {job.team}</span>
+                      {job.assignedVehiclePlate && <span className="flex items-center gap-1 text-[10px] font-bold bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100"><Truck className="w-3 h-3" /> {job.assignedVehiclePlate}</span>}
+                    </div>
+                    <button onClick={() => handleEditJob(job)} className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-neutral-200">
+                      <Edit className="w-3 h-3"/> Düzenle
+                    </button>
                   </div>
                 </div>
               ))
@@ -1868,107 +1997,6 @@ const CalendarView = ({ jobs, handleEditJob }) => {
   );
 };
 
-const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage }) => {
-  const completedJobs = jobs.filter(j => j.status === 'completed').sort((a, b) => new Date(b.date) - new Date(a.date));
-
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-      <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
-        <h2 className="text-xl font-bold text-black flex items-center gap-2">
-          <CheckCircle className="w-6 h-6 text-green-600" /> Tamamlanan İşler
-        </h2>
-      </div>
-      <div className="space-y-4">
-        {completedJobs.length === 0 ? (
-          <div className="p-8 text-center text-neutral-500 font-medium bg-neutral-50 rounded-xl border border-neutral-200">
-            Kayıtlı tamamlanmış bir operasyon bulunmuyor.
-          </div>
-        ) : (
-          completedJobs.map(job => (
-            <div key={job.id} className="p-5 border border-green-200 bg-green-50/30 rounded-xl flex flex-col md:flex-row gap-4 justify-between md:items-start">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <h3 className="font-bold text-black text-lg">{job.customerName}</h3>
-                  <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold border border-green-200">TAMAMLANDI</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
-                    {job.type || 'Nakliye'}
-                  </span>
-                </div>
-                
-                {/* Temel Bilgiler */}
-                <div className="text-sm text-neutral-600 flex flex-wrap items-center gap-3 mb-3">
-                    <span className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-neutral-400" /> {job.date} - {job.time}</span>
-                    <span className="flex items-center gap-1.5"><MapPin className="w-4 h-4 text-neutral-400" /> {job.fromDistrict} <ArrowRightLeft className="w-3 h-3 text-neutral-300 mx-1" /> {job.toDistrict || 'Belirtilmedi'}</span>
-                    {job.price && (
-                      <span className="flex items-center gap-1.5 bg-green-50 border border-green-200 px-2 py-0.5 rounded-md text-green-700 font-bold">
-                        <DollarSign className="w-3.5 h-3.5" /> ₺{parseInt(job.price).toLocaleString('tr-TR')}
-                      </span>
-                    )}
-                </div>
-
-                {/* Ekip ve Araç */}
-                <div className="flex flex-wrap items-center gap-2 mb-3">
-                    <span className="flex items-center gap-1.5 bg-white border border-neutral-200 px-2 py-1 rounded-md text-xs font-bold text-blue-700">
-                      <Users className="w-3.5 h-3.5" /> {(job.teamNames && job.teamNames.length > 0) ? job.teamNames.join(', ') : job.team}
-                    </span>
-                    {job.assignedVehiclePlate && (
-                      <span className="flex items-center gap-1.5 bg-white border border-neutral-200 px-2 py-1 rounded-md text-xs font-bold text-purple-700">
-                        <Truck className="w-3.5 h-3.5" /> {job.assignedVehiclePlate}
-                      </span>
-                    )}
-                </div>
-                
-                {/* İş Sonu Formu Detayları */}
-                {job.endJobDetails && (
-                  <div className="mt-4 text-xs font-medium bg-white p-4 rounded-xl border border-green-100 flex flex-col gap-3 shadow-sm">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 pb-3 border-b border-neutral-100">
-                      <p><b className="text-neutral-700 block mb-0.5">Ödeme Durumu:</b> <span className={`font-bold ${job.endJobDetails.paymentMethod === 'Ödeme Yapmadı' ? 'text-red-600' : 'text-green-700'}`}>{job.endJobDetails.paymentMethod}</span></p>
-                      <p><b className="text-neutral-700 block mb-0.5">Hasar Durumu:</b> <span className={job.endJobDetails.damageStatus === 'Hasar var' ? 'text-red-600 font-bold' : ''}>{job.endJobDetails.damageStatus}</span></p>
-                      <p><b className="text-neutral-700 block mb-0.5">Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <p className="text-neutral-700 mb-1"><b className="flex items-center gap-1"><Truck className="w-3.5 h-3.5"/> Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
-                        {job.endJobDetails.truckIssueDetails && <p className="text-red-600 bg-red-50 p-2 rounded border border-red-100 mt-1"><b>Sorun Detayı:</b> {job.endJobDetails.truckIssueDetails}</p>}
-                        {job.endJobDetails.truckImage && (
-                          <button onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Görseli', name: job.endJobDetails.truckImage}); }} className="text-blue-700 flex items-center justify-between gap-2 mt-2 bg-blue-50 p-2.5 rounded-lg border border-blue-200 hover:bg-blue-100 transition w-full text-left shadow-sm">
-                            <span className="flex items-center gap-1.5 truncate"><Camera className="w-4 h-4 shrink-0" /> <b className="shrink-0">Kasa:</b> <span className="truncate">{job.endJobDetails.truckImage}</span></span>
-                            <span className="text-[10px] font-bold bg-white px-2 py-1 rounded border border-blue-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
-                          </button>
-                        )}
-                      </div>
-                      
-                      {(job.endJobDetails.damageStatus === 'Hasar var' || job.endJobDetails.damageDetails || job.endJobDetails.damageImage) && (
-                        <div>
-                          <p className="text-red-700 mb-1"><b className="flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5"/> Hasar Raporu</b></p>
-                          {job.endJobDetails.damageDetails && <p className="text-red-600 bg-red-50 p-2 rounded border border-red-100 mt-1"><b>Detay:</b> {job.endJobDetails.damageDetails}</p>}
-                          {job.endJobDetails.damageImage && (
-                            <button onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Görseli', name: job.endJobDetails.damageImage}); }} className="text-orange-700 flex items-center justify-between gap-2 mt-2 bg-orange-50 p-2.5 rounded-lg border border-orange-200 hover:bg-orange-100 transition w-full text-left shadow-sm">
-                              <span className="flex items-center gap-1.5 truncate"><Camera className="w-4 h-4 shrink-0" /> <b className="shrink-0">Görsel:</b> <span className="truncate">{job.endJobDetails.damageImage}</span></span>
-                              <span className="text-[10px] font-bold bg-white px-2 py-1 rounded border border-orange-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-              <div className="flex flex-col gap-2 shrink-0">
-                <button onClick={() => handleEditJob(job)} className="px-4 py-2.5 bg-white text-blue-700 font-bold rounded-xl hover:bg-blue-50 transition flex items-center justify-center gap-2 text-sm border border-blue-200 shadow-sm w-full md:w-auto">
-                  <Edit className="w-4 h-4" /> Detayları Gör
-                </button>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-};
-
-// --- YENİ EKLENEN PROFİL VE MESAJLAŞMA BİLEŞENİ ---
 const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead, personnelList, messages, setMessages, handleOpenEndJobModal, setViewingImage, handleUpdatePersonnel }) => {
   const [activeProfileTab, setActiveProfileTab] = useState('jobs'); // 'jobs' | 'messages' | 'settings'
   const [activeChatUserId, setActiveChatUserId] = useState(null);
@@ -1979,6 +2007,7 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
 
   const myJobs = jobs.filter(j => j.assignedPersonnelIds?.includes(currentUser.id) || j.assignedPersonnelId === currentUser.id);
   const myNotifications = notifications.filter(n => n.userId === currentUser.id);
+  const isLeader = ['Müdür', 'Ekip Şefi', 'Kalfa'].includes(currentUser.rank) || currentUser.permissions?.canEdit;
 
   // Profil sekmesi açıldığında bildirimleri okundu olarak işaretle
   React.useEffect(() => {
@@ -2067,7 +2096,7 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
                   <div key={notif.id} className={`p-4 ${notif.read ? 'opacity-60' : 'bg-red-50/30'}`}>
                     <p className="text-xs text-neutral-400 font-bold mb-1">{notif.date}</p>
                     <p className="text-sm font-bold text-black">{notif.title}</p>
-                    <p className="text-sm text-neutral-600">{notif.message}</p>
+                    <p className="text-sm text-neutral-600 whitespace-pre-wrap mt-1">{notif.message}</p>
                   </div>
                 ))
               )}
@@ -2116,253 +2145,292 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
                     <p className="font-bold">Şu anda size atanmış aktif bir operasyon bulunmuyor.</p>
                   </div>
                 ) : (
-                  myJobs.map(job => (
-                    <div key={job.id} className={`p-5 rounded-2xl border transition group ${job.isSpecial ? 'bg-yellow-50/20 border-yellow-400 ring-2 ring-yellow-100 hover:border-yellow-500' : 'bg-neutral-50 border-neutral-200 hover:border-red-400'}`}>
-                      <div className="flex justify-between items-start mb-3">
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-lg text-black flex items-center gap-1.5">
-                            {job.isSpecial && <Star className="w-5 h-5 text-yellow-500 fill-yellow-500 drop-shadow-sm" />}
-                            {job.customerName}
-                          </span>
-                          <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
-                            {job.type || 'Nakliye'}
+                  myJobs.map(job => {
+                    // YETKİ KONTROLÜ: Asıl atanmış şef mi veya genel yönetici mi?
+                    const isMainAssignee = job.assignedPersonnelId === currentUser.id;
+                    const isManager = ['Müdür', 'Firma Sahibi', 'Operasyon'].some(role => currentUser.position.includes(role) || currentUser.rank === role);
+                    const canViewDetails = isMainAssignee || isManager;
+
+                    return (
+                      <div key={job.id} className={`p-5 rounded-2xl border transition group ${job.isSpecial ? 'bg-yellow-50/20 border-yellow-400 ring-2 ring-yellow-100 hover:border-yellow-500' : 'bg-neutral-50 border-neutral-200 hover:border-red-400'}`}>
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-lg text-black flex items-center gap-1.5">
+                              {isLeader ? (
+                                <>
+                                  {job.isSpecial && <Star className="w-5 h-5 text-yellow-500 fill-yellow-500 drop-shadow-sm" />}
+                                  {job.customerName}
+                                </>
+                              ) : (
+                                <><ClipboardList className="w-5 h-5 text-red-600" /> Operasyon Görevi</>
+                              )}
+                            </span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                              {job.type || 'Nakliye'}
+                            </span>
+                          </div>
+                          <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase whitespace-nowrap ${
+                            job.status === 'completed' ? 'bg-black text-white' :
+                            job.status === 'in-progress' ? 'bg-red-600 text-white shadow-sm' :
+                            'bg-white border border-neutral-300 text-neutral-700'
+                          }`}>
+                            {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
                           </span>
                         </div>
-                        <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase whitespace-nowrap ${
-                          job.status === 'completed' ? 'bg-black text-white' :
-                          job.status === 'in-progress' ? 'bg-red-600 text-white shadow-sm' :
-                          'bg-white border border-neutral-300 text-neutral-700'
-                        }`}>
-                          {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
-                        </span>
-                      </div>
 
-                      <div className="flex flex-wrap items-center gap-3 mb-4 text-xs">
-                        <span className="flex items-center gap-1.5 font-bold bg-white text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><CalendarDays className="w-3.5 h-3.5" /> {job.date}</span>
-                        <span className="flex items-center gap-1.5 font-bold bg-white text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><Clock className="w-3.5 h-3.5" /> {job.time}</span>
-                        <a href={`tel:${job.customerPhone}`} className="flex items-center gap-1.5 font-bold bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border border-green-200 hover:bg-green-100 transition shadow-sm">
-                          <Phone className="w-3.5 h-3.5" /> {job.customerPhone} (Ara)
-                        </a>
-                        {job.price && (
-                          <span className="flex items-center gap-1.5 font-bold bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200">
-                            <DollarSign className="w-3.5 h-3.5" /> Fiyat: ₺{parseInt(job.price).toLocaleString('tr-TR')}
-                          </span>
-                        )}
-                        
-                        {(job.teamNames || (job.team && job.team !== 'Atanmadı' ? [job.team] : [])).length > 0 && (
-                           <div className="flex flex-wrap gap-1.5">
-                             {(job.teamNames || [job.team]).map((name, i) => (
-                                <span key={i} className="flex items-center gap-1 font-bold bg-neutral-100 text-neutral-700 px-2 py-1.5 rounded-lg border border-neutral-200">
-                                  <User className="w-3.5 h-3.5" /> {name}
-                                </span>
-                             ))}
-                           </div>
-                        )}
-                        {job.assignedVehiclePlate && (
-                          <span className="flex items-center gap-1.5 font-bold bg-purple-50 text-purple-700 px-3 py-1.5 rounded-lg border border-purple-100">
-                            <Truck className="w-3.5 h-3.5" /> {job.assignedVehiclePlate}
-                          </span>
-                        )}
-                      </div>
+                        <div className="flex flex-wrap items-center gap-3 mb-4 text-xs">
+                          <span className="flex items-center gap-1.5 font-bold bg-white text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><CalendarDays className="w-3.5 h-3.5" /> {job.date}</span>
+                          <span className="flex items-center gap-1.5 font-bold bg-white text-neutral-700 px-3 py-1.5 rounded-lg border border-neutral-200"><Clock className="w-3.5 h-3.5" /> {job.time}</span>
+                          
+                          {canViewDetails && (
+                            <a href={`tel:${job.customerPhone}`} className="flex items-center gap-1.5 font-bold bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border border-green-200 hover:bg-green-100 transition shadow-sm">
+                              <Phone className="w-3.5 h-3.5" /> {job.customerPhone} (Ara)
+                            </a>
+                          )}
 
-                      <div className="text-sm text-neutral-600 space-y-4 bg-white p-4 rounded-xl border border-neutral-200">
-                        {/* 1. Yükleme Adresi */}
-                        <div className="flex items-start gap-2">
-                          <MapPin className="w-5 h-5 text-neutral-400 mt-0.5 shrink-0" /> 
-                          <div className="flex-1">
-                            <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-2 mb-1">
-                              <b className="text-black text-base">{job.extraLoadingAddresses?.length > 0 ? '1. Yükleme:' : 'AL:'} {job.fromProvince}/{job.fromDistrict}</b>
-                              <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.fromProvince + ' ' + job.fromDistrict + ' ' + job.fromAddress)}`} target="_blank" rel="noreferrer" className="text-[10px] bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 hover:bg-blue-200 transition shrink-0 w-fit">
-                                <ArrowUpRight className="w-3.5 h-3.5" /> Yol Tarifi Al
-                              </a>
-                            </div>
-                            <div className="text-neutral-700">{job.fromAddress}</div>
-                            <div className="text-[10px] text-neutral-500 mt-2 flex gap-2 flex-wrap">
-                               <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">{job.fromRoomCount}</span>
-                               <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">{job.fromFloor}</span>
-                               <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">{job.fromTransportMethod}</span>
-                               <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">{job.fromPacking}</span>
-                            </div>
-                          </div>
+                          {canViewDetails && job.price && (
+                            <span className="flex items-center gap-1.5 font-bold bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-200">
+                              <DollarSign className="w-3.5 h-3.5" /> Fiyat: ₺{parseInt(job.price).toLocaleString('tr-TR')}
+                            </span>
+                          )}
+                          
+                          {(job.teamNames || (job.team && job.team !== 'Atanmadı' ? [job.team] : [])).length > 0 && (
+                             <div className="flex flex-wrap gap-1.5">
+                               {(job.teamNames || [job.team]).map((name, i) => (
+                                  <span key={i} className={`flex items-center gap-1 font-bold px-2 py-1.5 rounded-lg border ${name === currentUser.fullName ? 'bg-red-50 text-red-700 border-red-200' : 'bg-neutral-100 text-neutral-700 border-neutral-200'}`}>
+                                    <User className="w-3.5 h-3.5" /> {name}
+                                  </span>
+                               ))}
+                             </div>
+                          )}
+                          {job.assignedVehiclePlate && (
+                            <span className="flex items-center gap-1.5 font-bold bg-purple-50 text-purple-700 px-3 py-1.5 rounded-lg border border-purple-100">
+                              <Truck className="w-3.5 h-3.5" /> {job.assignedVehiclePlate}
+                            </span>
+                          )}
                         </div>
 
-                        {/* Ekstra Yükleme Adresleri */}
-                        {job.extraLoadingAddresses?.map((addr, idx) => (
-                          <div key={addr.id} className="flex items-start gap-2 pt-3 border-t border-neutral-100">
-                            <MapPin className="w-5 h-5 text-neutral-400 mt-0.5 shrink-0" /> 
-                            <div className="flex-1">
-                              <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-2 mb-1">
-                                <b className="text-black text-base">{idx + 2}. Yükleme: {addr.province}/{addr.district}</b>
-                                <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr.province + ' ' + addr.district + ' ' + addr.address)}`} target="_blank" rel="noreferrer" className="text-[10px] bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 hover:bg-blue-200 transition shrink-0 w-fit">
-                                  <ArrowUpRight className="w-3.5 h-3.5" /> Yol Tarifi Al
-                                </a>
-                              </div>
-                              <div className="text-neutral-700">{addr.address}</div>
-                              <div className="text-[10px] text-neutral-500 mt-2 flex gap-2 flex-wrap">
-                                 <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">{addr.roomCount}</span>
-                                 <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">{addr.floor}</span>
-                                 <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">{addr.transportMethod}</span>
-                                 <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">{addr.packing}</span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-
-                        {/* Boşaltma Adresleri */}
-                        {job.toProvince && (
-                          <>
-                            <div className="w-full h-0.5 bg-neutral-200 my-2"></div>
+                        {canViewDetails && (
+                          <div className="text-sm text-neutral-600 space-y-4 bg-white p-4 rounded-xl border border-neutral-200">
+                            {/* 1. Yükleme Adresi */}
                             <div className="flex items-start gap-2">
-                              <MapPin className="w-5 h-5 text-red-500 mt-0.5 shrink-0" /> 
+                              <MapPin className="w-5 h-5 text-neutral-400 mt-0.5 shrink-0" /> 
                               <div className="flex-1">
                                 <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-2 mb-1">
-                                  <b className="text-red-800 text-base">{job.extraUnloadingAddresses?.length > 0 ? '1. Boşaltma:' : 'VR:'} {job.toProvince}/{job.toDistrict}</b>
-                                  <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.toProvince + ' ' + job.toDistrict + ' ' + job.toAddress)}`} target="_blank" rel="noreferrer" className="text-[10px] bg-red-100 text-red-700 border border-red-200 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 hover:bg-red-200 transition shrink-0 w-fit">
-                                    <ArrowUpRight className="w-3.5 h-3.5" /> Yol Tarifi Al
-                                  </a>
+                                  <b className="text-black text-base">{job.extraLoadingAddresses?.length > 0 ? '1. Yükleme:' : 'AL:'} {job.fromProvince}/{job.fromDistrict}</b>
+                                  {canViewDetails && (
+                                    <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.fromProvince + ' ' + job.fromDistrict + ' ' + job.fromAddress)}`} target="_blank" rel="noreferrer" className="text-[10px] bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 hover:bg-blue-200 transition shrink-0 w-fit">
+                                      <ArrowUpRight className="w-3.5 h-3.5" /> Yol Tarifi Al
+                                    </a>
+                                  )}
                                 </div>
-                                <div className="text-neutral-700">{job.toAddress}</div>
+                                <div className={canViewDetails ? 'text-neutral-700' : 'text-neutral-400 italic'}>
+                                  {canViewDetails ? job.fromAddress : '*** Açık adres detayı ekip şefindedir.'}
+                                </div>
                                 <div className="text-[10px] text-neutral-500 mt-2 flex gap-2 flex-wrap">
-                                   <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">{job.toRoomCount}</span>
-                                   <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">{job.toFloor}</span>
-                                   <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">{job.toTransportMethod}</span>
-                                   <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">{job.toPacking}</span>
+                                   <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">Oda: {job.fromRoomCount}</span>
+                                   <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">Kat: {job.fromFloor}</span>
+                                   <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">Taşıma: {job.fromTransportMethod}</span>
+                                   <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">Ambalaj: {job.fromPacking}</span>
                                 </div>
                               </div>
                             </div>
-                            
-                            {/* Ekstra Boşaltma Adresleri */}
-                            {job.extraUnloadingAddresses?.map((addr, idx) => (
+
+                            {/* Ekstra Yükleme Adresleri */}
+                            {job.extraLoadingAddresses?.map((addr, idx) => (
                               <div key={addr.id} className="flex items-start gap-2 pt-3 border-t border-neutral-100">
-                                <MapPin className="w-5 h-5 text-red-500 mt-0.5 shrink-0" /> 
+                                <MapPin className="w-5 h-5 text-neutral-400 mt-0.5 shrink-0" /> 
                                 <div className="flex-1">
                                   <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-2 mb-1">
-                                    <b className="text-red-800 text-base">{idx + 2}. Boşaltma: {addr.province}/{addr.district}</b>
-                                    <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr.province + ' ' + addr.district + ' ' + addr.address)}`} target="_blank" rel="noreferrer" className="text-[10px] bg-red-100 text-red-700 border border-red-200 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 hover:bg-red-200 transition shrink-0 w-fit">
-                                      <ArrowUpRight className="w-3.5 h-3.5" /> Yol Tarifi Al
-                                    </a>
+                                    <b className="text-black text-base">{idx + 2}. Yükleme: {addr.province}/{addr.district}</b>
+                                    {canViewDetails && (
+                                      <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr.province + ' ' + addr.district + ' ' + addr.address)}`} target="_blank" rel="noreferrer" className="text-[10px] bg-blue-100 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 hover:bg-blue-200 transition shrink-0 w-fit">
+                                        <ArrowUpRight className="w-3.5 h-3.5" /> Yol Tarifi Al
+                                      </a>
+                                    )}
                                   </div>
-                                  <div className="text-neutral-700">{addr.address}</div>
+                                  <div className={canViewDetails ? 'text-neutral-700' : 'text-neutral-400 italic'}>
+                                    {canViewDetails ? addr.address : '*** Açık adres detayı ekip şefindedir.'}
+                                  </div>
                                   <div className="text-[10px] text-neutral-500 mt-2 flex gap-2 flex-wrap">
-                                     <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">{addr.roomCount}</span>
-                                     <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">{addr.floor}</span>
-                                     <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">{addr.transportMethod}</span>
-                                     <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">{addr.packing}</span>
+                                     <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">Oda: {addr.roomCount}</span>
+                                     <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">Kat: {addr.floor}</span>
+                                     <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">Taşıma: {addr.transportMethod}</span>
+                                     <span className="bg-neutral-100 px-2 py-1 rounded border border-neutral-200 text-black font-bold">Ambalaj: {addr.packing}</span>
                                   </div>
                                 </div>
                               </div>
                             ))}
-                          </>
-                        )}
-                      </div>
 
-                      {job.notes && (
-                        <div className="mt-4 text-xs font-medium bg-yellow-50 text-yellow-800 p-3 rounded-xl border border-yellow-200 flex items-start gap-2">
-                          <FileText className="w-4 h-4 shrink-0 mt-0.5 text-yellow-600" /> {job.notes}
-                        </div>
-                      )}
-
-                      {/* Tahmini Malzeme Bölümü */}
-                      <div className="mt-4 text-xs font-medium bg-amber-50 text-amber-800 p-3 rounded-xl border border-amber-200 flex flex-col md:flex-row gap-x-3 gap-y-2 md:items-center">
-                        <div className="flex items-center gap-1.5 shrink-0"><Package className="w-4 h-4 text-amber-600" /> <b className="text-amber-900">Sistem Malzeme Tahmini:</b></div>
-                        <div className="flex gap-3 flex-wrap flex-1">
-                          {(() => {
-                            const est = calculateMaterials(job.fromRoomCount, job.fromPacking);
-                            return (
+                            {/* Boşaltma Adresleri */}
+                            {job.toProvince && (
                               <>
-                                <span><b>{est.strec}</b> Streç</span>
-                                <span><b>{est.bant}</b> Bant</span>
-                                <span><b>{est.poset}</b> Poşet</span>
-                                <span><b>{est.kagit}kg</b> Kağıt</span>
-                                <span><b>{est.koli}</b> Koli</span>
+                                <div className="w-full h-0.5 bg-neutral-200 my-2"></div>
+                                <div className="flex items-start gap-2">
+                                  <MapPin className="w-5 h-5 text-red-500 mt-0.5 shrink-0" /> 
+                                  <div className="flex-1">
+                                    <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-2 mb-1">
+                                      <b className="text-red-800 text-base">{job.extraUnloadingAddresses?.length > 0 ? '1. Boşaltma:' : 'VR:'} {job.toProvince}/{job.toDistrict}</b>
+                                      {canViewDetails && (
+                                        <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(job.toProvince + ' ' + job.toDistrict + ' ' + job.toAddress)}`} target="_blank" rel="noreferrer" className="text-[10px] bg-red-100 text-red-700 border border-red-200 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 hover:bg-red-200 transition shrink-0 w-fit">
+                                          <ArrowUpRight className="w-3.5 h-3.5" /> Yol Tarifi Al
+                                        </a>
+                                      )}
+                                    </div>
+                                    <div className={canViewDetails ? 'text-neutral-700' : 'text-neutral-400 italic'}>
+                                      {canViewDetails ? job.toAddress : '*** Açık adres detayı ekip şefindedir.'}
+                                    </div>
+                                    <div className="text-[10px] text-neutral-500 mt-2 flex gap-2 flex-wrap">
+                                       <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">Oda: {job.toRoomCount}</span>
+                                       <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">Kat: {job.toFloor}</span>
+                                       <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">Taşıma: {job.toTransportMethod}</span>
+                                       <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">Ambalaj: {job.toPacking}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                                
+                                {/* Ekstra Boşaltma Adresleri */}
+                                {job.extraUnloadingAddresses?.map((addr, idx) => (
+                                  <div key={addr.id} className="flex items-start gap-2 pt-3 border-t border-neutral-100">
+                                    <MapPin className="w-5 h-5 text-red-500 mt-0.5 shrink-0" /> 
+                                    <div className="flex-1">
+                                      <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-2 mb-1">
+                                        <b className="text-red-800 text-base">{idx + 2}. Boşaltma: {addr.province}/{addr.district}</b>
+                                        {canViewDetails && (
+                                          <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(addr.province + ' ' + addr.district + ' ' + addr.address)}`} target="_blank" rel="noreferrer" className="text-[10px] bg-red-100 text-red-700 border border-red-200 px-2.5 py-1.5 rounded-lg font-bold flex items-center gap-1 hover:bg-red-200 transition shrink-0 w-fit">
+                                            <ArrowUpRight className="w-3.5 h-3.5" /> Yol Tarifi Al
+                                          </a>
+                                        )}
+                                      </div>
+                                      <div className={canViewDetails ? 'text-neutral-700' : 'text-neutral-400 italic'}>
+                                        {canViewDetails ? addr.address : '*** Açık adres detayı ekip şefindedir.'}
+                                      </div>
+                                      <div className="text-[10px] text-neutral-500 mt-2 flex gap-2 flex-wrap">
+                                         <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">Oda: {addr.roomCount}</span>
+                                         <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">Kat: {addr.floor}</span>
+                                         <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">Taşıma: {addr.transportMethod}</span>
+                                         <span className="bg-red-50 px-2 py-1 rounded border border-red-100 text-red-700 font-bold">Ambalaj: {addr.packing}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ))}
                               </>
-                            );
-                          })()}
-                        </div>
-                        {job.materialsDeducted && <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold text-[10px] ml-auto uppercase tracking-wider shrink-0 border border-green-200">Stoktan Düşüldü</span>}
-                      </div>
-
-                      {/* İş Sonu Formu Gösterimi */}
-                      {job.endJobDetails && (
-                        <div className="mt-4 text-xs font-medium bg-green-50 text-green-800 p-4 rounded-xl border border-green-200 flex flex-col gap-3">
-                           <div className="flex items-center gap-2 border-b border-green-200/50 pb-2">
-                             <CheckCircle className="w-5 h-5 shrink-0 text-green-600" />
-                             <b className="text-green-900 text-sm">İş Tarafınızca Sonlandırıldı</b>
-                           </div>
-                           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
-                             <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
-                             <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
-                             <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
-                             <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
-                             {job.endJobDetails.truckImage && (
-                               <button type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Fotoğrafı', name: job.endJobDetails.truckImage}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
-                                 <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kasa Fotoğrafı:</b> {job.endJobDetails.truckImage}</span>
-                                 <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
-                               </button>
-                             )}
-                             {job.endJobDetails.damageImage && (
-                               <button type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: job.endJobDetails.damageImage}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
-                                 <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı:</b> {job.endJobDetails.damageImage}</span>
-                                 <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-red-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
-                               </button>
-                             )}
-                             {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
-                             {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
-                           </div>
-                        </div>
-                      )}
-
-                      {/* İŞLEM BUTONLARI (WHATSAPP, SMS VE SONLANDIRMA) */}
-                      {job.status !== 'completed' && (
-                        <div className="mt-4 pt-4 border-t border-neutral-100 flex flex-col xl:flex-row justify-between gap-3">
-                          
-                          <div className="flex flex-col sm:flex-row gap-2">
-                            <button
-                               onClick={() => {
-                                 let phone = job.customerPhone.replace(/\D/g, '');
-                                 if (phone.startsWith('0')) phone = '90' + phone.substring(1);
-                                 else if (!phone.startsWith('90')) phone = '90' + phone;
-                                 const msg = `Merhaba ${job.customerName},\n\nSembol Nakliyat ekibi olarak operasyonunuz için yola çıkmış bulunmaktayız. 🚚\n\n📍 *Önemli Not:* Açık adresinize doğru hareket ettik, ancak adresi daha kolay ve hızlı bulabilmemiz için bize bu sohbet üzerinden *konum gönderirseniz* çok seviniriz.\n\nAnlayışınız için teşekkür ederiz, görüşmek üzere!`;
-                                 window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
-                               }}
-                               className="flex-1 sm:flex-none px-4 py-2 bg-[#25D366] text-white text-xs font-bold rounded-xl hover:bg-[#128C7E] transition flex items-center justify-center gap-2 shadow-lg shadow-green-500/20"
-                            >
-                              <MessageCircle className="w-4 h-4 shrink-0" /> WhatsApp'tan İste
-                            </button>
-
-                            <button
-                               onClick={() => {
-                                 let phone = job.customerPhone.replace(/\D/g, '');
-                                 const msg = `Merhaba ${job.customerName},\n\nSembol Nakliyat ekibi olarak operasyonunuz için yola çıkmış bulunmaktayız.\n\nAçık adresinize doğru hareket ettik, ancak adresi daha kolay bulabilmemiz için bize konum gönderirseniz çok seviniriz. Görüşmek üzere!`;
-                                 const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-                                 const separator = isIOS ? '&' : '?';
-                                 window.open(`sms:${phone}${separator}body=${encodeURIComponent(msg)}`, '_self');
-                               }}
-                               className="flex-1 sm:flex-none px-4 py-2 bg-indigo-500 text-white text-xs font-bold rounded-xl hover:bg-indigo-600 transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20"
-                            >
-                              <MessageSquareText className="w-4 h-4 shrink-0" /> SMS'ten İste
-                            </button>
-                          </div>
-
-                          <div className="w-full xl:w-auto flex justify-end">
-                            {['Ekip Şefi', 'Kalfa'].includes(currentUser.rank) ? (
-                              <button
-                                onClick={() => handleOpenEndJobModal(job)}
-                                className="w-full xl:w-auto px-4 py-2 bg-black text-white text-xs font-bold rounded-xl hover:bg-neutral-800 transition flex items-center justify-center gap-2 shadow-lg"
-                              >
-                                <CheckCircle className="w-4 h-4 shrink-0" /> İşi Sonlandır
-                              </button>
-                            ) : (
-                              <p className="text-xs text-red-500 font-bold flex items-center gap-1.5 w-full justify-center bg-red-50 p-2 rounded-lg border border-red-100">
-                                <AlertTriangle className="w-4 h-4 shrink-0"/> Sadece Şef / Kalfa sonlandırabilir.
-                              </p>
                             )}
                           </div>
+                        )}
 
+                        {canViewDetails && (job.contractDetails || job.notes) && (
+                          <div className="mt-4 text-xs font-medium bg-yellow-50 text-yellow-800 p-3 rounded-xl border border-yellow-200 flex items-start gap-2">
+                            <FileText className="w-4 h-4 shrink-0 mt-0.5 text-yellow-600" /> 
+                            <div>
+                              {job.contractDetails && <p className="mb-1"><b className="text-yellow-900">Sözleşme:</b> {job.contractDetails}</p>}
+                              {job.notes && <p><b className="text-yellow-900">Operasyon Notu:</b> {job.notes}</p>}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Tahmini Malzeme Bölümü (Herkes Görebilir) */}
+                        <div className="mt-4 text-xs font-medium bg-amber-50 text-amber-800 p-3 rounded-xl border border-amber-200 flex flex-col md:flex-row gap-x-3 gap-y-2 md:items-center">
+                          <div className="flex items-center gap-1.5 shrink-0"><Package className="w-4 h-4 text-amber-600" /> <b className="text-amber-900">Sistem Malzeme Tahmini:</b></div>
+                          <div className="flex gap-3 flex-wrap flex-1">
+                            {(() => {
+                              const est = calculateMaterials(job.fromRoomCount, job.fromPacking);
+                              return (
+                                <>
+                                  <span><b>{est.strec}</b> Streç</span>
+                                  <span><b>{est.bant}</b> Bant</span>
+                                  <span><b>{est.poset}</b> Poşet</span>
+                                  <span><b>{est.kagit}kg</b> Kağıt</span>
+                                  <span><b>{est.koli}</b> Koli</span>
+                                </>
+                              );
+                            })()}
+                          </div>
+                          {job.materialsDeducted && <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold text-[10px] ml-auto uppercase tracking-wider shrink-0 border border-green-200">Stoktan Düşüldü</span>}
                         </div>
-                      )}
-                    </div>
-                  ))
+
+                        {/* İş Sonu Formu Gösterimi - Sadece Lidere Açık */}
+                        {canViewDetails && job.endJobDetails && (
+                          <div className="mt-4 text-xs font-medium bg-green-50 text-green-800 p-4 rounded-xl border border-green-200 flex flex-col gap-3">
+                             <div className="flex items-center gap-2 border-b border-green-200/50 pb-2">
+                               <CheckCircle className="w-5 h-5 shrink-0 text-green-600" />
+                               <b className="text-green-900 text-sm">İş Tarafınızca Sonlandırıldı</b>
+                             </div>
+                             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                               <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
+                               <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
+                               <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
+                               <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
+                               {job.endJobDetails.truckImage && (
+                                 <button type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Fotoğrafı', name: job.endJobDetails.truckImage}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
+                                   <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kasa Fotoğrafı:</b> {job.endJobDetails.truckImage}</span>
+                                   <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
+                                 </button>
+                               )}
+                               {job.endJobDetails.damageImage && (
+                                 <button type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: job.endJobDetails.damageImage}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
+                                   <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı:</b> {job.endJobDetails.damageImage}</span>
+                                   <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-red-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
+                                 </button>
+                               )}
+                               {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
+                               {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
+                             </div>
+                          </div>
+                        )}
+
+                        {/* İŞLEM BUTONLARI (WHATSAPP, SMS VE SONLANDIRMA) - Sadece Lidere Açık */}
+                        {canViewDetails && job.status !== 'completed' && (
+                          <div className="mt-4 pt-4 border-t border-neutral-100 flex flex-col xl:flex-row justify-between gap-3">
+                            <div className="flex flex-col sm:flex-row gap-2">
+                              <button
+                                 onClick={() => {
+                                   let phone = job.customerPhone.replace(/\D/g, '');
+                                   if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+                                   else if (!phone.startsWith('90')) phone = '90' + phone;
+                                   const msg = `Merhaba ${job.customerName},\n\nSembol Nakliyat ekibi olarak operasyonunuz için yola çıkmış bulunmaktayız. 🚚\n\n📍 *Önemli Not:* Açık adresinize doğru hareket ettik, ancak adresi daha kolay ve hızlı bulabilmemiz için bize bu sohbet üzerinden *konum gönderirseniz* çok seviniriz.\n\nAnlayışınız için teşekkür ederiz, görüşmek üzere!`;
+                                   window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+                                 }}
+                                 className="flex-1 sm:flex-none px-4 py-2 bg-[#25D366] text-white text-xs font-bold rounded-xl hover:bg-[#128C7E] transition flex items-center justify-center gap-2 shadow-lg shadow-green-500/20"
+                              >
+                                <MessageCircle className="w-4 h-4 shrink-0" /> WhatsApp'tan İste
+                              </button>
+
+                              <button
+                                 onClick={() => {
+                                   let phone = job.customerPhone.replace(/\D/g, '');
+                                   const msg = `Merhaba ${job.customerName},\n\nSembol Nakliyat ekibi olarak operasyonunuz için yola çıkmış bulunmaktayız.\n\nAçık adresinize doğru hareket ettik, ancak adresi daha kolay bulabilmemiz için bize konum gönderirseniz çok seviniriz. Görüşmek üzere!`;
+                                   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+                                   const separator = isIOS ? '&' : '?';
+                                   window.open(`sms:${phone}${separator}body=${encodeURIComponent(msg)}`, '_self');
+                                 }}
+                                 className="flex-1 sm:flex-none px-4 py-2 bg-indigo-500 text-white text-xs font-bold rounded-xl hover:bg-indigo-600 transition flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/20"
+                              >
+                                <MessageSquareText className="w-4 h-4 shrink-0" /> SMS'ten İste
+                              </button>
+                            </div>
+
+                            <div className="w-full xl:w-auto flex justify-end">
+                                <button
+                                  onClick={() => handleOpenEndJobModal(job)}
+                                  className="w-full xl:w-auto px-4 py-2 bg-black text-white text-xs font-bold rounded-xl hover:bg-neutral-800 transition flex items-center justify-center gap-2 shadow-lg"
+                                >
+                                  <CheckCircle className="w-4 h-4 shrink-0" /> İşi Sonlandır
+                                </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {!canViewDetails && job.status !== 'completed' && (
+                          <div className="mt-4 pt-4 border-t border-neutral-100">
+                             <p className="text-xs text-neutral-500 font-bold bg-neutral-100 p-2.5 rounded-lg flex items-center justify-center gap-2 border border-neutral-200">
+                               <Shield className="w-4 h-4 text-neutral-400" /> Operasyon adres detayları ve yönetimi ekip şefindedir.
+                             </p>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
                 )}
               </div>
             )}
@@ -2870,18 +2938,18 @@ const AddTaskFormView = ({ newTask, setNewTask, handleAddTask, personnelList }) 
     <form onSubmit={handleAddTask} className="space-y-4">
       <div>
         <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
-        <input required type="text" value={newTask?.title || ''} onChange={(e) => setNewTask({...newTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" placeholder="Örn: Müşteri aramaları yapılacak" />
+        <input required type="text" value={newTask.title} onChange={(e) => setNewTask({...newTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" placeholder="Örn: Müşteri aramaları yapılacak" />
       </div>
       
       <div>
         <label className="block text-sm font-bold text-black mb-1">Detaylar</label>
-        <textarea required value={newTask?.description || ''} onChange={(e) => setNewTask({...newTask, description: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none h-24 resize-none transition" placeholder="Görev açıklaması..." />
+        <textarea required value={newTask.description} onChange={(e) => setNewTask({...newTask, description: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none h-24 resize-none transition" placeholder="Görev açıklaması..." />
       </div>
 
       <div className="grid grid-cols-2 gap-4">
         <div>
           <label className="block text-sm font-bold text-black mb-1">Görevli</label>
-          <select value={newTask?.assignee || ''} onChange={(e) => setNewTask({...newTask, assignee: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none bg-white transition">
+          <select value={newTask.assignee} onChange={(e) => setNewTask({...newTask, assignee: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none bg-white transition">
             {personnelList.map(person => <option key={person.id} value={person.fullName}>{person.fullName}</option>)}
             <option value="Muhasebe">Muhasebe Departmanı</option>
             <option value="Yönetim">Yönetim Kurulu</option>
@@ -2889,7 +2957,7 @@ const AddTaskFormView = ({ newTask, setNewTask, handleAddTask, personnelList }) 
         </div>
         <div>
           <label className="block text-sm font-bold text-black mb-1">Tarih</label>
-          <input required type="date" value={newTask?.date || ''} onChange={(e) => setNewTask({...newTask, date: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" />
+          <input required type="date" value={newTask.date} onChange={(e) => setNewTask({...newTask, date: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" />
         </div>
       </div>
 
@@ -2900,7 +2968,7 @@ const AddTaskFormView = ({ newTask, setNewTask, handleAddTask, personnelList }) 
   </div>
 );
 
-const TaskManagerView = ({ tasks, setTasks, setShowTaskModal, draggingTask, setDraggingTask, openEditTask, onUpdateTaskStatus, onDeleteTask }) => {
+const TaskManagerView = ({ tasks, setTasks, setShowTaskModal, draggingTask, setDraggingTask, openEditTask }) => {
   const columns = [
     { id: 'todo', title: 'YAPILACAKLAR', color: 'bg-neutral-800' },
     { id: 'in-progress', title: 'DEVAM EDENLER', color: 'bg-red-600' },
@@ -2914,11 +2982,7 @@ const TaskManagerView = ({ tasks, setTasks, setShowTaskModal, draggingTask, setD
   const handleDrop = (e, status) => {
     e.preventDefault();
     if (draggingTask) {
-      if (onUpdateTaskStatus) {
-        onUpdateTaskStatus(draggingTask, status);
-      } else if (setTasks) {
-        setTasks(tasks.map(t => t.id === draggingTask ? { ...t, status } : t));
-      }
+      setTasks(tasks.map(t => t.id === draggingTask ? { ...t, status } : t));
       setDraggingTask(null);
     }
   };
@@ -2928,13 +2992,11 @@ const TaskManagerView = ({ tasks, setTasks, setShowTaskModal, draggingTask, setD
   };
 
   const deleteTask = (taskId) => {
-    if (window.confirm('Görevi silmek istediğinize emin misiniz?')) {
-      if (onDeleteTask) {
-        onDeleteTask(taskId);
-      } else if (setTasks) {
-        setTasks(tasks.filter(t => t.id !== taskId));
-      }
-    }
+    setTasks(tasks.filter(t => t.id !== taskId));
+  };
+
+  const changeTaskStatus = (taskId, newStatus) => {
+    setTasks(tasks.map(t => t.id === taskId ? { ...t, status: newStatus } : t));
   };
 
   return (
@@ -3004,6 +3066,24 @@ const TaskManagerView = ({ tasks, setTasks, setShowTaskModal, draggingTask, setD
                     </div>
                     <GripVertical className="w-4 h-4 text-neutral-300" />
                   </div>
+
+                  {/* HIZLI İŞLEM BUTONLARI */}
+                  <div className="flex flex-wrap gap-1.5 mt-3 pt-3 border-t border-neutral-100">
+                    <button onClick={() => deleteTask(task.id)} className="flex-1 py-1.5 px-1 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-bold rounded-lg transition border border-red-100 text-center">Görevi Sil</button>
+                    {task.status === 'todo' && (
+                      <>
+                        <button onClick={() => changeTaskStatus(task.id, 'in-progress')} className="flex-1 py-1.5 px-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[10px] font-bold rounded-lg transition border border-blue-100 text-center">İşleme Alındı</button>
+                        <button onClick={() => changeTaskStatus(task.id, 'completed')} className="flex-1 py-1.5 px-1 bg-green-50 hover:bg-green-100 text-green-700 text-[10px] font-bold rounded-lg transition border border-green-100 text-center">Tamamlandı</button>
+                      </>
+                    )}
+                    {task.status === 'in-progress' && (
+                      <button onClick={() => changeTaskStatus(task.id, 'completed')} className="flex-1 py-1.5 px-1 bg-green-50 hover:bg-green-100 text-green-700 text-[10px] font-bold rounded-lg transition border border-green-100 text-center">Tamamlandı</button>
+                    )}
+                    {task.status === 'completed' && (
+                      <button onClick={() => changeTaskStatus(task.id, 'todo')} className="flex-1 py-1.5 px-1 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[10px] font-bold rounded-lg transition border border-neutral-200 text-center">Geri Al</button>
+                    )}
+                  </div>
+
                 </div>
               ))}
             </div>
@@ -3953,64 +4033,6 @@ const LoginScreen = ({ onLogin, error }) => {
   );
 };
 
-const CustomerListView = ({ jobs, title, handleEditJob }) => {
-  // Müşterileri telefon numaralarına göre tekilleştirip filtreliyoruz
-  const uniqueCustomers = jobs
-    .filter(j => title === 'Özel Müşteriler' ? j.isSpecial : true)
-    .reduce((acc, current) => {
-      const x = acc.find(item => item.customerPhone === current.customerPhone);
-      if (!x) {
-        return acc.concat([current]);
-      } else {
-        return acc;
-      }
-    }, []);
-
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-      <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
-        <Users className="w-6 h-6 text-red-600" /> {title}
-      </h2>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-black text-white border-b border-neutral-200">
-            <tr>
-              <th className="p-4 font-bold rounded-tl-xl">Müşteri Adı</th>
-              <th className="p-4 font-bold">Telefon Numarası</th>
-              <th className="p-4 font-bold">Müşteri Tipi</th>
-              <th className="p-4 font-bold">Son İşlem Tarihi</th>
-              <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-neutral-100">
-            {uniqueCustomers.map(customer => (
-              <tr key={customer.id} className="hover:bg-neutral-50 transition">
-                <td className="p-4 font-bold text-black flex items-center gap-2">
-                  {customer.isSpecial && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500" />}
-                  {customer.customerName}
-                </td>
-                <td className="p-4 text-neutral-600 font-bold">{customer.customerPhone}</td>
-                <td className="p-4 text-neutral-600">{customer.customerType || 'Bireysel'}</td>
-                <td className="p-4 text-neutral-600">{customer.date}</td>
-                <td className="p-4">
-                  <button onClick={() => handleEditJob(customer)} className="p-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg transition" title="Müşteri Kaydını Düzenle">
-                    <Edit className="w-4 h-4" />
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {uniqueCustomers.length === 0 && (
-              <tr>
-                <td colSpan="5" className="p-6 text-center text-neutral-500 font-medium">Bu listede müşteri bulunmuyor.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-};
-
 // --- ANA UYGULAMA (APP) ---
 export default function App() {
   const [firebaseUser, setFirebaseUser] = useState(null);
@@ -4128,7 +4150,6 @@ export default function App() {
     const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
     const unsubs = [];
 
-// Koleksiyon Dinleyicileri
     unsubs.push(onSnapshot(getCol('jobs'), snap => { setJobs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
     unsubs.push(onSnapshot(getCol('transactions'), snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
     unsubs.push(onSnapshot(getCol('tasks'), snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
@@ -4139,7 +4160,7 @@ export default function App() {
     unsubs.push(onSnapshot(getCol('materials'), snap => { setMaterials(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, mat: true})); }, console.error));
 
     unsubs.push(onSnapshot(getCol('personnelList'), async snap => {
-      const list = snap.docs.map(d => ({...d.data(), id: d.id})); // Hatanın çözümü bu ters çevirme işlemidir
+      const list = snap.docs.map(d => ({...d.data(), id: d.id})); 
       setPersonnelList(list);
       if (snap.empty) {
         await addDoc(getCol('personnelList'), {
@@ -4168,7 +4189,6 @@ export default function App() {
     return () => unsubs.forEach(unsub => unsub());
   }, [firebaseUser]);
 
-  // Oturum Kontrolü (Yerel Önbellek)
   useEffect(() => {
     if (personnelList.length > 0 && !isAuthenticated) {
       try {
@@ -4315,7 +4335,7 @@ export default function App() {
     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', taskId), { status });
   };
   
-const handleDeleteTask = async (taskId) => {
+  const handleDeleteTask = async (taskId) => {
     if (!firebaseUser) return;
     await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', taskId));
   };
@@ -4539,13 +4559,12 @@ const submitEndJob = async (e) => {
     const realCode = (jobToEnd.deliveryCode || '').toString().trim().toUpperCase();
 
     // Hata Kontrolü:
-    // Sadece eğer işin bir kodu varsa (realCode mevcutsa) VE girilen kodla uyuşmuyorsa hata ver.
     if (realCode && userCode !== realCode) {
       setEndJobError(`Girdiğiniz kod hatalı. Müşteriden "${realCode}" kodunu istemelisiniz.`); 
       return;
     }
 
-    setEndJobError(''); // Hata yoksa eski hatayı temizle
+    setEndJobError('');
 
     if (!jobToEnd.materialsDeducted) {
       const estData = calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking);
@@ -4631,50 +4650,69 @@ const submitEndJob = async (e) => {
 
   const allDataLoaded = Object.values(dataLoadStatus).every(v => v === true);
 
-  if (isAuthChecking || !allDataLoaded) {
+  if (isAuthChecking) {
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
-         <div className="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-4 animate-pulse">S</div>
-         <p className="font-bold tracking-widest text-neutral-400">SİSTEM YÜKLENİYOR VE BULUTA BAĞLANIYOR...</p>
+         <img 
+           src="sembol-nakliyat-logo-zeminsiz-09.jpg" 
+           alt="Sembol Nakliyat" 
+           className="w-auto h-24 object-contain mb-6 animate-pulse drop-shadow-2xl" 
+           onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-4 animate-pulse">S</div>'; }} 
+         />
+         <p className="font-bold tracking-widest text-neutral-400">SİSTEM YÜKLENİYOR...</p>
       </div>
     );
   }
 
-  if (!isAuthenticated) return <LoginScreen onLogin={handleLogin} error={loginError} />;
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={handleLogin} error={loginError} />;
+  }
 
-// --- YETKİLENDİRME VE GÜVENLİK KONTROLLERİ ---
+  if (!allDataLoaded) {
+    return (
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
+         <Loader2 className="w-12 h-12 text-red-600 animate-spin mb-4" />
+         <p className="font-bold tracking-widest text-neutral-400">BULUT VERİLERİ EŞİTLENİYOR...</p>
+      </div>
+    );
+  }
+
   const userPos = currentUser?.position || '';
-  const userRank = currentUser?.rank || '';
-  const canEdit = currentUser?.permissions?.canEdit;
-
-  const isOwner = userPos.includes('Firma Sahibi');
-  const isManager = userPos.includes('Yönetici') || isOwner || userRank === 'Müdür';
+  const isSales = userPos.includes('Satış');
   const isMuhasebe = userPos.includes('Muhasebe');
   const isDepo = userPos.includes('Depo Sorumlusu') || userPos.includes('Depo');
-  const isSales = userPos.includes('Satış');
-  const isOperasyon = userPos.includes('Operasyon');
+  const isManager = userPos.includes('Yönetici') || userPos.includes('Firma Sahibi') || currentUser?.rank === 'Müdür';
+  const canEdit = currentUser?.permissions?.canEdit;
 
-  // MENÜ ERİŞİM KURALLARI (Kesin ve Sıkı Sınırlar)
-  const hasJobAccess = isManager || isOperasyon || isSales || isMuhasebe || isDepo || canEdit; 
-  const hasResourceAccess = isManager || isOperasyon; // Araç, Personel, Malzeme (Sadece Yönetici ve Operasyon)
-  const hasFinanceAccess = isManager || isMuhasebe; // Finans Kasa (Sadece Yönetici ve Muhasebe)
-  const hasTaskAccess = isManager || isOperasyon || isMuhasebe; // Görevler
-  const hasAdminAccess = isManager; // ŞİFRELER VE YETKİLER (SADECE MÜDÜR VEYA FİRMA SAHİBİ)
-  const hasFullAccess = isManager; // Eski verileri kurtarma vs.
-  // ----------------------------------------------
+  // İşlem yetkisi olanlar veya yöneticiler (Kayıt, İşler ve Müşteriler için tam yetki)
+  const hasJobAccess = canEdit || isManager || isMuhasebe || isDepo;
+  
+  // Spesifik modül erişim yetkileri
+  const hasResourceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); // Personel, Araç, Malzeme
+  const hasFinanceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); // Finans
+  const hasTaskAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); // Görev Listesi
+  const hasAdminAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); // Yetkilendirme, Sistem
+  
   const visibleJobs = hasJobAccess ? jobs : jobs.filter(j => {
     const isMyJob = j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id;
     if (!isMyJob) return false;
+
+    // Personel için: İş tamamlanmışsa ve üzerinden 1 gün geçmişse gizle
     if (j.status === 'completed') {
-      const today = new Date(); today.setHours(0, 0, 0, 0);
-      const jobDate = new Date(j.date); jobDate.setHours(0, 0, 0, 0);
-      if (jobDate < today) return false;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const jobDate = new Date(j.date);
+      jobDate.setHours(0, 0, 0, 0);
+      
+      if (jobDate < today) {
+        return false;
+      }
     }
     return true;
   });
   
-  const unreadNotifCount = notifications.filter(n => String(n.userId) === String(currentUser?.id) && !n.read).length;
-  const unreadMessageCount = messages.filter(m => String(m.receiverId) === String(currentUser?.id) && !m.read).length;
+  const unreadNotifCount = notifications.filter(n => n.userId === currentUser?.id && !n.read).length;
+  const unreadMessageCount = messages.filter(m => m.receiverId === currentUser?.id && !m.read).length;
   const totalUnreadCount = unreadNotifCount + unreadMessageCount;
 
   return (
@@ -4683,10 +4721,12 @@ const submitEndJob = async (e) => {
       {/* Mobil Header & Menü Butonu */}
       <div className="md:hidden absolute top-0 left-0 right-0 h-16 bg-black text-white flex items-center justify-between px-4 z-30 shadow-md border-b border-red-600">
         <div className="flex items-center gap-2">
-          <div className="w-10 h-10 flex items-center justify-center shrink-0 overflow-hidden">
-             <div className="w-full h-full bg-red-600 flex items-center justify-center rounded-lg font-black text-white">S</div>
-          </div>
-          <h1 className="font-bold text-lg">Sembol Nakliyat</h1>
+          <img 
+            src="sembol-nakliyat-logo-zeminsiz-09.jpg" 
+            alt="Sembol Nakliyat" 
+            className="h-10 w-auto object-contain" 
+            onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="flex items-center gap-2"><div class="w-8 h-8 bg-red-600 flex items-center justify-center rounded-lg font-black text-white">S</div><h1 class="font-bold text-lg">Sembol Nakliyat</h1></div>'; }} 
+          />
         </div>
         <button 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
@@ -4705,14 +4745,14 @@ const submitEndJob = async (e) => {
 
       {/* Sol Menü (Dikey Sidebar) */}
       <aside className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative top-0 left-0 z-40 w-64 md:min-w-[256px] bg-black text-white flex flex-col shadow-2xl shrink-0 h-full transition-transform duration-300 ease-in-out border-r border-neutral-800`}>
-        <div className="p-6 flex items-center gap-4 border-b border-neutral-800">
-          <div className="shrink-0 w-16 h-16 flex items-center justify-center overflow-hidden rounded-full border-2 border-neutral-800/50 bg-red-600">
-             <span className="font-black text-3xl text-white">S</span>
-          </div>
-          <div>
-            <h1 className="text-2xl font-black leading-tight text-white tracking-widest">SEMBOL</h1>
-            <p className="text-red-600 text-[10px] font-bold mt-0.5 tracking-[0.2em]">OPERASYON MERKEZİ</p>
-          </div>
+        <div className="p-6 flex flex-col items-center gap-2 border-b border-neutral-800 text-center">
+          <img 
+            src="sembol-nakliyat-logo-zeminsiz-09.jpg" 
+            alt="Sembol Nakliyat" 
+            className="w-full max-w-[180px] object-contain mb-2" 
+            onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="flex items-center gap-4"><div class="shrink-0 w-16 h-16 flex items-center justify-center overflow-hidden rounded-full border-2 border-neutral-800/50 bg-red-600"><span class="font-black text-3xl text-white">S</span></div><div><h1 class="text-2xl font-black leading-tight text-white tracking-widest">SEMBOL</h1></div></div>'; }} 
+          />
+          <p className="text-red-600 text-[10px] font-bold mt-0.5 tracking-[0.2em] bg-red-600/10 px-3 py-1 rounded-full border border-red-600/20">OPERASYON MERKEZİ</p>
         </div>
 
         <div className="px-6 py-4 bg-neutral-900/50 border-b border-neutral-800 flex flex-col">
@@ -4727,21 +4767,21 @@ const submitEndJob = async (e) => {
         <nav className="flex flex-col mt-4 px-4 gap-2 overflow-y-auto flex-1 pb-6 custom-scrollbar">
           
           <button 
-            onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+            onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
             className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'dashboard' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
           >
             <Calendar className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Anasayfa</span>
           </button>
           
           <button 
-            onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+            onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
             className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'calendar' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
           >
             <CalendarDays className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Takvim</span>
           </button>
 
           <button 
-            onClick={() => { setActiveTab('profile'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+            onClick={() => { setActiveTab('profile'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
             className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'profile' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
           >
             <div className="flex items-center gap-3">
@@ -4756,7 +4796,7 @@ const submitEndJob = async (e) => {
           {hasJobAccess && (
             <div className="flex flex-col gap-1">
               <button 
-                onClick={() => { setIsSubMenuOpen(!isSubMenuOpen); setIsVehicleSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                onClick={() => { setIsSubMenuOpen(!isSubMenuOpen); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
@@ -4796,7 +4836,7 @@ const submitEndJob = async (e) => {
           {hasJobAccess && (
             <div className="flex flex-col gap-1">
               <button 
-                onClick={() => { setIsJobSubMenuOpen(!isJobSubMenuOpen); setIsCustomerSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                onClick={() => { setIsJobSubMenuOpen(!isJobSubMenuOpen); setIsCustomerSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'currentJobs' || activeTab === 'allJobs' || activeTab === 'completedJobs' || activeTab === 'cancelledJobs') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
@@ -4840,7 +4880,7 @@ const submitEndJob = async (e) => {
           {hasTaskAccess && (
             <div className="flex flex-col gap-1">
               <button 
-                onClick={() => { setIsTaskSubMenuOpen(!isTaskSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                onClick={() => { setIsTaskSubMenuOpen(!isTaskSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addTask' || activeTab === 'taskList') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
@@ -4872,7 +4912,7 @@ const submitEndJob = async (e) => {
           {hasJobAccess && (
             <div className="flex flex-col gap-1">
               <button 
-                onClick={() => { setIsCustomerSubMenuOpen(!isCustomerSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                onClick={() => { setIsCustomerSubMenuOpen(!isCustomerSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'specialCustomers' || activeTab === 'allCustomers' || activeTab === 'customerBlacklist') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
@@ -4910,7 +4950,7 @@ const submitEndJob = async (e) => {
           {hasResourceAccess && (
             <div className="flex flex-col gap-1">
               <button 
-                onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
+                onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'maviPersonnel' || activeTab === 'beyazPersonnel') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
@@ -5095,22 +5135,16 @@ const submitEndJob = async (e) => {
             <div className="flex flex-col gap-1">
               <button 
                 onClick={() => { setIsSystemFilesSubMenuOpen(!isSystemFilesSubMenuOpen); setIsAuthSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'backupSystem' || activeTab === 'systemLogs') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'backupSystem') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
               >
                 <div className="flex items-center gap-3">
-                  <FileText className={`w-5 h-5 shrink-0 ${(activeTab === 'backupSystem' || activeTab === 'systemLogs') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Sistem Ayarları</span>
+                  <FileText className={`w-5 h-5 shrink-0 ${(activeTab === 'backupSystem') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Sistem Dosyaları</span>
                 </div>
                 {isSystemFilesSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
               </button>
               
               {isSystemFilesSubMenuOpen && (
                 <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
-                  <button 
-                    onClick={() => { setActiveTab('systemLogs'); setIsSidebarOpen(false); }}
-                    className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'systemLogs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                  >
-                    <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'systemLogs' ? 'bg-white' : 'bg-red-600'}`}></div> Sistem Kayıtları
-                  </button>
                   <button 
                     onClick={() => { setActiveTab('backupSystem'); setIsSidebarOpen(false); }}
                     className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'backupSystem' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -5120,20 +5154,6 @@ const submitEndJob = async (e) => {
                 </div>
               )}
             </div>
-          )}
-
-          {hasFullAccess && (
-            <>
-              {/* ESKİ VERİLERİ KURTARMA BUTONU BURADA */}
-              {!isDataMigrated && (
-                <button 
-                  onClick={handleSyncOldData}
-                  className="w-full py-3 px-4 mt-4 text-sm font-black transition flex justify-center items-center gap-2 rounded-xl bg-orange-600 hover:bg-orange-700 text-white shadow-lg shadow-orange-600/30 animate-pulse border border-orange-500"
-                >
-                  🔄 Eski Verileri Kurtar
-                </button>
-              )}
-            </>
           )}
 
         </nav>
@@ -5151,7 +5171,7 @@ const submitEndJob = async (e) => {
       {/* Main Content Area */}
       <main className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
         <div className="max-w-6xl mx-auto">
-          {activeTab === 'dashboard' && <DashboardView jobs={visibleJobs} handleGenerateDailySummary={handleGenerateDailySummary} />}
+          {activeTab === 'dashboard' && <DashboardView jobs={visibleJobs} />}
           {activeTab === 'calendar' && <CalendarView jobs={visibleJobs} handleEditJob={handleEditJob} />}
           {activeTab === 'profile' && <ProfileView currentUser={currentUser} jobs={visibleJobs} notifications={notifications} markNotificationsAsRead={markNotificationsAsRead} personnelList={personnelList} messages={messages} setMessages={setMessages} handleOpenEndJobModal={handleOpenEndJobModal} setViewingImage={setViewingImage} handleUpdatePersonnel={handleUpdatePersonnel} />}
           
@@ -5208,7 +5228,7 @@ const submitEndJob = async (e) => {
               personnelList={personnelList}
             />
           }
-{activeTab === 'taskList' && hasTaskAccess &&
+          {activeTab === 'taskList' && hasTaskAccess &&
             <TaskManagerView 
               tasks={tasks}
               setTasks={setTasks}
@@ -5216,8 +5236,6 @@ const submitEndJob = async (e) => {
               draggingTask={draggingTask}
               setDraggingTask={setDraggingTask}
               openEditTask={openEditTask}
-              onUpdateTaskStatus={handleUpdateTaskStatus}
-              onDeleteTask={handleDeleteTask}
             />
           }
           
@@ -5379,133 +5397,7 @@ const submitEndJob = async (e) => {
         </div>
       )}
 
-      {/* İŞİ SONLANDIR MODALI (YENİ EKLENDİ) */}
-      {showEndJobModal && jobToEnd && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[95vh] flex flex-col">
-            <div className="bg-green-600 text-white p-4 flex justify-between items-center border-b-4 border-green-800 shrink-0">
-              <h3 className="font-bold text-lg flex items-center gap-2">
-                <CheckCircle className="w-5 h-5" /> İşi Sonlandır
-              </h3>
-              <button onClick={() => setShowEndJobModal(false)} className="text-white/80 hover:text-white transition"><X className="w-6 h-6" /></button>
-            </div>
-            
-            <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
-<form onSubmit={submitEndJob} className="space-y-6">
-              <p className="text-sm text-neutral-600 pb-2 border-b border-neutral-100">
-                <b className="text-black">Müşteri:</b> {jobToEnd.customerName} <br/>
-                <b className="text-black">Operasyon Tarihi:</b> {jobToEnd.date}
-              </p>
-
-              {/* Hata Mesajı (Kod yanlış girilirse çıkacak) */}
-              {endJobError && (
-                <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100 mb-4 animate-in fade-in">
-                  <AlertTriangle className="w-5 h-5 shrink-0" /> {endJobError}
-                </div>
-              )}
-
-{/* YENİ EKLENEN: Müşteri Teslim Kodu Alanı (Sadece kod atandıysa görünür) */}
-              {jobToEnd.deliveryCode && (
-                <div className="bg-emerald-50 p-6 rounded-2xl border border-emerald-200 text-center mb-4">
-                  <Key className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
-                  <label className="block text-sm font-bold text-emerald-800 mb-3">Müşteri Teslim Kodunu Giriniz *</label>
-                  <input 
-                    required 
-                    type="text" 
-                    maxLength={6}
-                    value={endJobData.enteredCode || ''} 
-                    onChange={(e) => {
-                      // Kullanıcı yazarken harfleri anında büyüt ve boşlukları yut
-                      const cleanValue = e.target.value.replace(/\s+/g, '').toUpperCase();
-                      setEndJobData({...endJobData, enteredCode: cleanValue});
-                    }} 
-                    className="w-full p-4 border-2 border-emerald-300 rounded-xl focus:ring-4 focus:ring-emerald-500/30 focus:border-emerald-500 outline-none text-center font-black text-2xl tracking-[0.5em] text-emerald-700 bg-white placeholder:text-emerald-200 uppercase transition-all shadow-inner" 
-                    placeholder="6 HANELİ KOD" 
-                  />
-                  <p className="text-xs text-emerald-700 mt-4 font-medium px-2">
-                    İşi başarıyla sonlandırmak için müşteriden teslim kodunu isteyip yukarıdaki alana girin.
-                  </p>
-                </div>
-              )}
-              
-              <div>
-                <label className="block text-sm font-bold text-black mb-2">İşin Ödemesi Nereye Yapıldı?</label>
-                  <select required value={endJobData.paymentMethod} onChange={(e) => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
-                    <option value="Nakit">Nakit</option>
-                    <option value="İban">İban</option>
-                    <option value="Kredi Kartı">Kredi Kartı</option>
-                    <option value="Alınmadı">Alınmadı</option>
-                  </select>
-                </div>
-
-                <div className="border-t border-neutral-100 pt-4">
-                  <label className="block text-sm font-bold text-black mb-2">Kamyon Kasasının Son Hali (Fotoğraf)</label>
-                  <label className="cursor-pointer bg-neutral-50 border border-neutral-300 text-neutral-600 p-3 rounded-xl font-bold hover:bg-neutral-100 transition flex items-center justify-center gap-2 w-full border-dashed">
-                    <Camera className="w-5 h-5 text-neutral-500" /> 
-                    {endJobData.truckImage ? '📷 ' + endJobData.truckImage : 'Fotoğraf Yükle (Zorunlu Değil)'}
-                    <input type="file" accept="image/*" className="hidden" onChange={(e) => {
-                      if(e.target.files && e.target.files[0]) {
-                        setEndJobData({...endJobData, truckImage: e.target.files[0].name});
-                      }
-                    }} />
-                  </label>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-bold text-black mb-2">Kamyonda Sorun Var Mı?</label>
-                  <select required value={endJobData.truckStatus} onChange={(e) => setEndJobData({...endJobData, truckStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
-                    <option value="Herhangi bir sorun yok">Herhangi bir sorun yok</option>
-                    <option value="Kamyonda sorun var">Kamyonda sorun var</option>
-                  </select>
-                </div>
-
-                {endJobData.truckStatus === 'Kamyonda sorun var' && (
-                  <div className="animate-in fade-in slide-in-from-top-2">
-                    <label className="block text-sm font-bold text-red-600 mb-2">Kamyondaki Sorunun Detayı</label>
-                    <textarea required value={endJobData.truckIssueDetails} onChange={(e) => setEndJobData({...endJobData, truckIssueDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none transition text-sm" placeholder="Araçta oluşan arıza, çizik vb. detayları yazın..." />
-                  </div>
-                )}
-
-                <div className="border-t border-neutral-100 pt-4">
-                  <label className="block text-sm font-bold text-black mb-2">Eşyada Herhangi Bir Hasar Oluştu mu?</label>
-                  <select required value={endJobData.damageStatus} onChange={(e) => setEndJobData({...endJobData, damageStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
-                    <option value="Hasarsız teslim edildi">Hasarsız teslim edildi</option>
-                    <option value="Hasar oluştu">Hasar oluştu</option>
-                  </select>
-                </div>
-
-                {endJobData.damageStatus === 'Hasar oluştu' && (
-                  <div className="animate-in fade-in slide-in-from-top-2">
-                    <label className="block text-sm font-bold text-red-600 mb-2">Hasar Detaylarını Yazın</label>
-                    <textarea required value={endJobData.damageDetails} onChange={(e) => setEndJobData({...endJobData, damageDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none transition text-sm" placeholder="Oluşan hasarın detaylarını, nerede ve nasıl olduğunu belirtin..." />
-                  </div>
-                )}
-
-                <div className="border-t border-neutral-100 pt-4">
-                  <label className="block text-sm font-bold text-black mb-2">Müşteri Memnun Kaldı Mı?</label>
-                  <select required value={endJobData.customerSatisfaction} onChange={(e) => setEndJobData({...endJobData, customerSatisfaction: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-600 outline-none bg-white transition font-medium">
-                    <option value="Yorum Yazdı .">Yorum Yazdı.</option>
-                    <option value="Video Alındı.">Video Alındı.</option>
-                    <option value="Yazı Alındı.">Yazı Alındı.</option>
-                    <option value="Herhangi bir şey yapmadı.">Herhangi bir şey yapmadı.</option>
-                  </select>
-                </div>
-
-                <div className="bg-green-50 p-3 rounded-xl border border-green-100 text-xs font-medium text-green-700 flex items-start gap-2">
-                  <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" /> 
-                  Formu onayladığınızda iş başarıyla sonlandırılacak ve rapor yöneticilere iletilecektir.
-                </div>
-
-                <button type="submit" className="w-full py-4 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition flex justify-center items-center gap-2 shadow-lg shadow-green-600/20 mt-4">
-                  <CheckCircle className="w-5 h-5" /> Formu Onayla ve İşi Bitir
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* AI MÜŞTERİ MESAJI MODALI */}
+      {/* GENEL YAPAY ZEKA MODALI (MESAJ / MALZEME TAHMİNİ / ÖZET) */}
       {aiModal.isOpen && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
           <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
@@ -5615,13 +5507,7 @@ const submitEndJob = async (e) => {
               <button onClick={() => setEditingTask(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
             </div>
             
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              if (!firebaseUser) return;
-              updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', editingTask.id), editingTask)
-                .then(() => setEditingTask(null))
-                .catch(console.error);
-            }} className="p-6 space-y-4">
+            <form onSubmit={handleUpdateTask} className="p-6 space-y-4">
               <div>
                 <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
                 <input required type="text" value={editingTask.title} onChange={(e) => setEditingTask({...editingTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" />
@@ -5654,6 +5540,143 @@ const submitEndJob = async (e) => {
           </div>
         </div>
       )}
+
+      {/* İŞ SONLANDIRMA MODALI (TESLİM KODU ONAYI İLE) */}
+      {showEndJobModal && jobToEnd && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[95vh] flex flex-col">
+            <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-red-600 shrink-0">
+              <h3 className="font-bold text-lg">Operasyonu Sonlandır</h3>
+              <button onClick={() => setShowEndJobModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+            </div>
+            
+            <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+              {endJobError && (
+                <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100 mb-4">
+                  <AlertTriangle className="w-5 h-5 shrink-0" /> {endJobError}
+                </div>
+              )}
+              <form onSubmit={submitEndJob} className="space-y-4">
+                <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 mb-4 text-center">
+                   <Key className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+                   <label className="block text-sm font-bold text-emerald-900 mb-2">Müşteri Teslim Kodunu Giriniz *</label>
+                   <input required type="text" value={endJobData.enteredCode || ''} onChange={e => setEndJobData({...endJobData, enteredCode: e.target.value.toUpperCase()})} className="w-full p-3 border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none transition font-mono tracking-widest uppercase text-center text-xl font-black text-emerald-800 placeholder-emerald-300" placeholder="6 HANELİ KOD" />
+                   <p className="text-[10px] text-emerald-700 mt-2 font-medium">İşi başarıyla sonlandırmak için müşteriden teslim kodunu isteyip yukarıdaki alana girin.</p>
+                </div>
+
+                <div>
+                   <label className="block text-sm font-bold text-black mb-1">Ödeme Yöntemi</label>
+                   <select value={endJobData.paymentMethod} onChange={e => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                      <option value="Nakit">Nakit</option>
+                      <option value="Havale/EFT">Havale/EFT</option>
+                      <option value="Kredi Kartı">Kredi Kartı</option>
+                      <option value="Ödeme Yapmadı">Ödeme Yapmadı</option>
+                   </select>
+                </div>
+
+                <div>
+                   <label className="block text-sm font-bold text-black mb-1">Müşteri Memnuniyeti</label>
+                   <select value={endJobData.customerSatisfaction} onChange={e => setEndJobData({...endJobData, customerSatisfaction: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                      <option value="Yorum yazdı.">Yorum yazdı.</option>
+                      <option value="Video alındı.">Video alındı.</option>
+                      <option value="Şirketle İletişime Geçti.">Şirketle İletişime Geçti.</option>
+                      <option value="Herhangi bir işlem yapmadı.">Herhangi bir işlem yapmadı.</option>
+                   </select>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                     <label className="block text-sm font-bold text-black mb-1">Hasar Durumu</label>
+                     <select value={endJobData.damageStatus} onChange={e => setEndJobData({...endJobData, damageStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                        <option value="Hasarsız teslim edildi">Hasarsız</option>
+                        <option value="Hasar var">Hasar var</option>
+                     </select>
+                  </div>
+                  <div>
+                     <label className="block text-sm font-bold text-black mb-1">Kamyon Durumu</label>
+                     <select value={endJobData.truckStatus} onChange={e => setEndJobData({...endJobData, truckStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                        <option value="Herhangi bir sorun yok">Sorun yok</option>
+                        <option value="Sorun var">Sorun var</option>
+                     </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Kamyon Kasası Fotoğrafı / Videosu (İş Sonu)</label>
+                  <div className="flex items-center gap-2">
+                    <label className="flex-1 cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
+                      <Camera className="w-5 h-5 text-neutral-500" />
+                      <span className="text-sm font-bold text-neutral-600 truncate">{endJobData.truckImage || 'Görsel veya Video Yükle'}</span>
+                      <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => setEndJobData({...endJobData, truckImage: e.target.files[0]?.name || ''})} />
+                    </label>
+                    {endJobData.truckImage && <button type="button" onClick={() => setEndJobData({...endJobData, truckImage: ''})} className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition"><X className="w-5 h-5"/></button>}
+                  </div>
+                </div>
+
+                {endJobData.damageStatus === 'Hasar var' && (
+                   <div className="bg-red-50 p-4 rounded-xl border border-red-200">
+                      <label className="block text-sm font-bold text-red-900 mb-1">Hasar Detayı (Müşteriye de iletilecek)</label>
+                      <textarea required value={endJobData.damageDetails} onChange={e => setEndJobData({...endJobData, damageDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl outline-none resize-none h-16 text-sm mb-3" placeholder="Hasar hakkında detaylı bilgi..."></textarea>
+                      
+                      <label className="block text-sm font-bold text-red-900 mb-1 mt-2">Hasar Fotoğrafı</label>
+                      <div className="flex items-center gap-2 mb-3">
+                        <label className="flex-1 cursor-pointer bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
+                          <Camera className="w-5 h-5 text-red-500" />
+                          <span className="text-sm font-bold text-red-600 truncate">{endJobData.damageImage || 'Hasarın Fotoğrafını Yükle'}</span>
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => setEndJobData({...endJobData, damageImage: e.target.files[0]?.name || ''})} />
+                        </label>
+                        {endJobData.damageImage && <button type="button" onClick={() => setEndJobData({...endJobData, damageImage: ''})} className="p-3 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition"><X className="w-5 h-5"/></button>}
+                      </div>
+                      
+                      {endJobData.damageDetails.trim().length > 0 && (
+                        <div className="flex flex-col sm:flex-row gap-2 animate-in fade-in">
+                          <button
+                             type="button"
+                             onClick={() => {
+                               let phone = jobToEnd.customerPhone.replace(/\D/g, '');
+                               if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+                               else if (!phone.startsWith('90')) phone = '90' + phone;
+                               const msg = `Sayın *${jobToEnd.customerName}*,\n\nSembol Nakliyat olarak taşıma işleminizi tamamlamış bulunmaktayız. Ekibimiz tarafından teslimat sırasında aşağıdaki durum tutanak altına alınarak operasyon merkezimize raporlanmıştır:\n\n⚠️ *Hasar / Sorun Bildirimi:*\n_${endJobData.damageDetails}_\n\nMüşteri memnuniyeti bizim için en öncelikli konudur. Konuyla ilgili operasyon sorumlumuz en kısa sürede sizinle iletişime geçerek sürecin takibini sağlayacaktır.\n\nAnlayışınız için teşekkür ederiz.\n*Sembol Nakliyat Yönetimi*`;
+                               window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+                             }}
+                             className="flex-1 px-3 py-2 bg-[#25D366] text-white text-xs font-bold rounded-lg hover:bg-[#128C7E] transition flex items-center justify-center gap-1.5 shadow-sm"
+                          >
+                            <MessageCircle className="w-4 h-4 shrink-0" /> Müşteriye Bildir (WA)
+                          </button>
+
+                          <button
+                             type="button"
+                             onClick={() => {
+                               let phone = jobToEnd.customerPhone.replace(/\D/g, '');
+                               const msg = `Sayın ${jobToEnd.customerName},\nSembol Nakliyat olarak isinizi tamamladik. Ekibimiz tarafindan bir hasar durumu (${endJobData.damageDetails}) raporlanmistir. Operasyon sorumlumuz sizinle iletisime gececektir.`;
+                               const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+                               const separator = isIOS ? '&' : '?';
+                               window.open(`sms:${phone}${separator}body=${encodeURIComponent(msg)}`, '_self');
+                             }}
+                             className="flex-1 px-3 py-2 bg-indigo-500 text-white text-xs font-bold rounded-lg hover:bg-indigo-600 transition flex items-center justify-center gap-1.5 shadow-sm"
+                          >
+                            <MessageSquareText className="w-4 h-4 shrink-0" /> Müşteriye Bildir (SMS)
+                          </button>
+                        </div>
+                      )}
+                   </div>
+                )}
+                
+                {endJobData.truckStatus === 'Sorun var' && (
+                   <div>
+                      <label className="block text-sm font-bold text-black mb-1">Kamyon Sorunu Detayı</label>
+                      <textarea required value={endJobData.truckIssueDetails} onChange={e => setEndJobData({...endJobData, truckIssueDetails: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none resize-none h-16 text-sm" placeholder="Araçtaki arıza/sorun..."></textarea>
+                   </div>
+                )}
+
+                <button type="submit" className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                   <CheckCircle className="w-5 h-5" /> Kodu Doğrula ve İşi Bitir
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
       
       <style dangerouslySetInnerHTML={{__html: `
         .custom-scrollbar::-webkit-scrollbar {
@@ -5663,11 +5686,8 @@ const submitEndJob = async (e) => {
           background: transparent;
         }
         .custom-scrollbar::-webkit-scrollbar-thumb {
-          background-color: rgba(0, 0, 0, 0.1);
-          border-radius: 10px;
-        }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb {
           background-color: rgba(255, 255, 255, 0.1);
+          border-radius: 10px;
         }
       `}} />
     </div>
