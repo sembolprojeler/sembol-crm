@@ -1669,6 +1669,69 @@ const AllJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerat
   );
 };
 
+const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage }) => {
+  const completedJobs = jobs.filter(j => j.status === 'completed').sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+      <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
+        <h2 className="text-xl font-bold text-black flex items-center gap-2">
+          <CheckCircle className="w-6 h-6 text-green-600" /> Tamamlanan İşler
+        </h2>
+      </div>
+      <div className="space-y-4">
+        {completedJobs.length === 0 ? (
+          <div className="p-8 text-center text-neutral-500 font-medium bg-neutral-50 rounded-xl border border-neutral-200">
+            Kayıtlı tamamlanmış iş bulunmuyor.
+          </div>
+        ) : (
+          completedJobs.map(job => (
+            <div key={job.id} className="p-4 border border-green-200 bg-green-50/30 rounded-xl flex flex-col md:flex-row gap-4 justify-between md:items-center hover:border-green-400 transition">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <h3 className="font-bold text-black text-lg">{job.customerName}</h3>
+                  <span className="text-[10px] bg-black text-white px-2 py-0.5 rounded-full font-bold shadow-sm">TAMAMLANDI</span>
+                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase shadow-sm ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                    {job.type || 'Nakliye'}
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center gap-3 text-sm text-neutral-600 mb-2">
+                  <span className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-neutral-400" /> {job.date} - {job.time}</span>
+                  <span className="flex items-center gap-1.5"><Phone className="w-4 h-4 text-neutral-400" /> {job.customerPhone}</span>
+                </div>
+                <p className="text-sm text-neutral-600 mb-3"><MapPin className="w-4 h-4 inline mr-1 text-neutral-400" /> {job.fromDistrict} <ArrowRightLeft className="w-3 h-3 inline mx-1 text-neutral-300" /> {job.toDistrict || 'Belirtilmedi'}</p>
+                
+                {job.endJobDetails && (
+                  <div className="text-xs flex flex-wrap gap-2 mt-2 bg-white p-3 rounded-lg border border-green-100">
+                    <span className="bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200 font-medium">Ödeme: <b className="font-bold">{job.endJobDetails.paymentMethod}</b></span>
+                    <span className="bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200 font-medium">Hasar Durumu: <b className="font-bold">{job.endJobDetails.damageStatus}</b></span>
+                    <span className="bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200 font-medium">Memnuniyet: <b className="font-bold">{job.endJobDetails.customerSatisfaction}</b></span>
+                  </div>
+                )}
+              </div>
+              <div className="flex flex-col gap-2 min-w-[140px]">
+                {job.price && (
+                  <div className="text-right mb-2">
+                    <span className="block text-lg font-black text-green-600">₺{parseInt(job.price).toLocaleString('tr-TR')}</span>
+                  </div>
+                )}
+                <button onClick={() => handleEditJob(job)} className="w-full px-4 py-2 bg-blue-50 text-blue-600 font-bold rounded-xl hover:bg-blue-100 transition flex justify-center items-center gap-2 text-sm border border-blue-100">
+                  <Edit className="w-4 h-4" /> Düzenle
+                </button>
+                {job.endJobDetails?.truckImage && (
+                   <button onClick={() => setViewingImage({title: 'Kasa Fotoğrafı', name: job.endJobDetails.truckImage})} className="w-full px-4 py-2 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition flex justify-center items-center gap-2 text-sm border border-neutral-200">
+                     <Camera className="w-4 h-4" /> Kasa Görseli
+                   </button>
+                )}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
 const CancelledJobsView = ({ jobs, handleEditJob, handleRestoreJob }) => {
   const cancelledJobs = jobs.filter(j => j.status === 'cancelled');
 
@@ -1773,13 +1836,6 @@ const CalendarView = ({ jobs, handleEditJob }) => {
     return 'bg-black border-black text-white hover:bg-neutral-900';
   };
 
-  const getCapacityBadge = (coreJobCount) => {
-    if (coreJobCount === 0) return <span className="text-[9px] text-neutral-400 font-bold leading-none">Boş</span>;
-    if (coreJobCount <= 3) return <span className="text-[9px] text-black font-bold bg-neutral-200 px-1 py-0.5 rounded leading-none">{coreJobCount} İş</span>;
-    if (coreJobCount === 4) return <span className="text-[9px] text-red-600 font-bold bg-red-100 px-1 py-0.5 rounded leading-none">{coreJobCount} İş</span>;
-    return <span className="text-[9px] text-white font-bold bg-neutral-800 px-1 py-0.5 rounded leading-none">{coreJobCount} İş</span>;
-  };
-
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
       <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
@@ -1821,20 +1877,23 @@ const CalendarView = ({ jobs, handleEditJob }) => {
             <div 
               key={index} 
               onClick={() => item && setSelectedDate(item.date)}
-              className={`aspect-square p-1.5 rounded-xl border transition cursor-pointer flex flex-col justify-between overflow-hidden ${item ? getCapacityColor(coreJobs.length) : 'bg-transparent border-transparent'} ${item && selectedDate === item.date ? 'ring-2 ring-red-600 ring-offset-1' : ''}`}
+              className={`min-h-[64px] p-1.5 rounded-xl border transition cursor-pointer flex flex-col overflow-hidden ${item ? getCapacityColor(coreJobs.length) : 'bg-transparent border-transparent'} ${item && selectedDate === item.date ? 'ring-2 ring-red-600 ring-offset-1' : ''}`}
             >
               {item && (
                 <>
-                  <div className="flex justify-between items-start mb-0.5">
+                  <div className="flex justify-between items-center mb-1">
                     <span className={`text-[11px] font-bold ${isToday ? 'bg-red-600 text-white w-5 h-5 rounded-full flex items-center justify-center' : (isFull ? 'text-white' : 'text-black')}`}>
                       {item.day}
                     </span>
+                    {coreJobs.length > 0 && (
+                      <span className={`text-[9px] font-bold ${isFull ? 'text-neutral-300' : 'text-neutral-500'}`}>
+                        {coreJobs.length} İş
+                      </span>
+                    )}
                   </div>
                   
-                  <div className="flex flex-col gap-0.5 items-start w-full">
-                    {getCapacityBadge(coreJobs.length)}
-                    
-                    <div className="mt-1 flex flex-col gap-0.5 w-full">
+                  <div className="flex flex-col gap-0.5 items-start w-full mt-auto">
+                    <div className="flex flex-col gap-0.5 w-full">
                       {coreJobs.length > 0 && (
                         <div className="flex flex-wrap gap-0.5 items-center">
                           {coreJobs.slice(0, 5).map(job => (
@@ -4550,6 +4609,39 @@ export default function App() {
     setShowEndJobModal(true);
   };
 
+  const handleFileUpload = async (e, type) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    if (type === 'truck') setEndJobData(prev => ({ ...prev, truckImage: 'Yükleniyor...' }));
+    else setEndJobData(prev => ({ ...prev, damageImage: 'Yükleniyor...' }));
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+      const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', {
+        method: 'POST',
+        body: formData,
+      });
+      const text = await res.text();
+      let uploadedUrl = file.name;
+      try {
+        const json = JSON.parse(text);
+        uploadedUrl = json.url || json.fileName || json.file || text;
+      } catch (err) {
+        uploadedUrl = text.trim();
+      }
+      
+      if (type === 'truck') setEndJobData(prev => ({ ...prev, truckImage: uploadedUrl }));
+      else setEndJobData(prev => ({ ...prev, damageImage: uploadedUrl }));
+    } catch (err) {
+      console.error("Yükleme hatası:", err);
+      if (type === 'truck') setEndJobData(prev => ({ ...prev, truckImage: file.name }));
+      else setEndJobData(prev => ({ ...prev, damageImage: file.name }));
+    }
+  };
+
 const submitEndJob = async (e) => {
     e.preventDefault();
     if (!firebaseUser) return;
@@ -5441,18 +5533,13 @@ const submitEndJob = async (e) => {
               <button onClick={() => setViewingImage(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
             </div>
             <div className="p-6 flex flex-col items-center">
-<div className="w-full aspect-video bg-neutral-50 rounded-xl border-2 border-dashed border-neutral-300 flex flex-col items-center justify-center mb-4 overflow-hidden relative shadow-inner">
-                {viewingImage.name.startsWith('http') ? (
-                  <img src={viewingImage.name} alt="Operasyon Görseli" className="w-full h-full object-contain z-10" />
-                ) : (
-                  <>
-                    <div className="absolute inset-0 opacity-5" style={{backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'20\' height=\'20\' viewBox=\'0 0 20 20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%23000000\' fill-opacity=\'1\' fill-rule=\'evenodd\'%3E%3Ccircle cx=\'3\' cy=\'3\' r=\'3\'/%3E%3Ccircle cx=\'13\' cy=\'13\' r=\'3\'/%3E%3C/g%3E%3C/svg%3E")'}}></div>
-                    <Camera className="w-12 h-12 mb-3 text-neutral-300 z-10" />
-                    <p className="font-bold text-sm text-center px-4 z-10 text-neutral-500">Görsel Bulunamadı</p>
-                    <p className="text-xs mt-1 text-center px-4 z-10 text-neutral-400 font-medium">Sadece eski/yerel kayıt isimleri mevcuttur.</p>
-                    <p className="text-sm mt-4 font-black text-black z-10 bg-white px-4 py-2 rounded-lg shadow-sm border border-neutral-200">{viewingImage.name}</p>
-                  </>
-                )}
+              <div className="w-full aspect-video bg-neutral-50 rounded-xl border-2 border-dashed border-neutral-300 flex flex-col items-center justify-center mb-4 overflow-hidden relative shadow-inner">
+                {/* Sahte görsel arka planı efekti */}
+                <div className="absolute inset-0 opacity-5" style={{backgroundImage: 'url("data:image/svg+xml,%3Csvg width=\'20\' height=\'20\' viewBox=\'0 0 20 20\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cg fill=\'%23000000\' fill-opacity=\'1\' fill-rule=\'evenodd\'%3E%3Ccircle cx=\'3\' cy=\'3\' r=\'3\'/%3E%3Ccircle cx=\'13\' cy=\'13\' r=\'3\'/%3E%3C/g%3E%3C/svg%3E")'}}></div>
+                <Camera className="w-12 h-12 mb-3 text-neutral-300 z-10" />
+                <p className="font-bold text-sm text-center px-4 z-10 text-neutral-500">Bulut Depolama Modülü</p>
+                <p className="text-xs mt-1 text-center px-4 z-10 text-neutral-400 font-medium">Demo ortamında gerçek dosya sistemi aktif değildir.</p>
+                <p className="text-sm mt-4 font-black text-black z-10 bg-white px-4 py-2 rounded-lg shadow-sm border border-neutral-200">{viewingImage.name}</p>
               </div>
               <button onClick={() => setViewingImage(null)} className="w-full py-4 bg-black hover:bg-neutral-800 text-white font-bold rounded-xl transition shadow-lg">Kapat</button>
             </div>
@@ -5612,13 +5699,9 @@ const submitEndJob = async (e) => {
                     <label className="flex-1 cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
                       <Camera className="w-5 h-5 text-neutral-500" />
                       <span className="text-sm font-bold text-neutral-600 truncate">{endJobData.truckImage || 'Görsel veya Video Yükle'}</span>
-                      <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => {
-  if(e.target.files && e.target.files[0]) {
-    setEndJobData({...endJobData, truckImage: e.target.files[0].name, truckImageFile: e.target.files[0]});
-  }
-}} />
+                      <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => handleFileUpload(e, 'truck')} />
                     </label>
-                    {endJobData.truckImage && <button type="button" onClick={() => setEndJobData({...endJobData, truckImage: ''})} className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition"><X className="w-5 h-5"/></button>}
+                    {endJobData.truckImage && endJobData.truckImage !== 'Yükleniyor...' && <button type="button" onClick={() => setEndJobData({...endJobData, truckImage: ''})} className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition"><X className="w-5 h-5"/></button>}
                   </div>
                 </div>
 
@@ -5632,13 +5715,9 @@ const submitEndJob = async (e) => {
                         <label className="flex-1 cursor-pointer bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
                           <Camera className="w-5 h-5 text-red-500" />
                           <span className="text-sm font-bold text-red-600 truncate">{endJobData.damageImage || 'Hasarın Fotoğrafını Yükle'}</span>
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => {
-  if(e.target.files && e.target.files[0]) {
-    setEndJobData({...endJobData, damageImage: e.target.files[0].name, damageImageFile: e.target.files[0]});
-  }
-}} />
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'damage')} />
                         </label>
-                        {endJobData.damageImage && <button type="button" onClick={() => setEndJobData({...endJobData, damageImage: ''})} className="p-3 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition"><X className="w-5 h-5"/></button>}
+                        {endJobData.damageImage && endJobData.damageImage !== 'Yükleniyor...' && <button type="button" onClick={() => setEndJobData({...endJobData, damageImage: ''})} className="p-3 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition"><X className="w-5 h-5"/></button>}
                       </div>
                       
                       {endJobData.damageDetails.trim().length > 0 && (
