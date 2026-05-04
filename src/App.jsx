@@ -1332,18 +1332,18 @@ const CurrentJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGen
                    <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
                    <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
                    <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
-                   {job.endJobDetails.truckImage && (
-                     <button type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Fotoğrafı', name: job.endJobDetails.truckImage}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
-                       <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kasa Fotoğrafı:</b> {job.endJobDetails.truckImage}</span>
+                   {(job.endJobDetails.truckImages || (job.endJobDetails.truckImage ? [job.endJobDetails.truckImage] : [])).map((img, idx) => (
+                     <button key={'truck'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
+                       <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kasa Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
                        <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
                      </button>
-                   )}
-                   {job.endJobDetails.damageImage && (
-                     <button type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: job.endJobDetails.damageImage}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
-                       <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı:</b> {job.endJobDetails.damageImage}</span>
+                   ))}
+                   {(job.endJobDetails.damageImages || (job.endJobDetails.damageImage ? [job.endJobDetails.damageImage] : [])).map((img, idx) => (
+                     <button key={'damage'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
+                       <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
                        <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-red-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
                      </button>
-                   )}
+                   ))}
                    {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
                    {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
                  </div>
@@ -1718,11 +1718,11 @@ const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage }) => {
                 <button onClick={() => handleEditJob(job)} className="w-full px-4 py-2 bg-blue-50 text-blue-600 font-bold rounded-xl hover:bg-blue-100 transition flex justify-center items-center gap-2 text-sm border border-blue-100">
                   <Edit className="w-4 h-4" /> Düzenle
                 </button>
-                {job.endJobDetails?.truckImage && (
-                   <button onClick={() => setViewingImage({title: 'Kasa Fotoğrafı', name: job.endJobDetails.truckImage})} className="w-full px-4 py-2 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition flex justify-center items-center gap-2 text-sm border border-neutral-200">
-                     <Camera className="w-4 h-4" /> Kasa Görseli
+                {(job.endJobDetails?.truckImages || (job.endJobDetails?.truckImage ? [job.endJobDetails.truckImage] : [])).map((img, idx) => (
+                   <button key={idx} onClick={() => setViewingImage({title: 'Kasa Fotoğrafı', name: img})} className="w-full px-4 py-2 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition flex justify-center items-center gap-2 text-sm border border-neutral-200">
+                     <Camera className="w-4 h-4" /> Kasa Görseli {idx > 0 ? idx+1 : ''}
                    </button>
-                )}
+                ))}
               </div>
             </div>
           ))
@@ -2420,18 +2420,18 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
                                <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
                                <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
                                <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
-                               {job.endJobDetails.truckImage && (
-                                 <button type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Fotoğrafı', name: job.endJobDetails.truckImage}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
-                                   <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kasa Fotoğrafı:</b> {job.endJobDetails.truckImage}</span>
+                               {(job.endJobDetails.truckImages || (job.endJobDetails.truckImage ? [job.endJobDetails.truckImage] : [])).map((img, idx) => (
+                                 <button key={'truck'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
+                                   <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kasa Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
                                    <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
                                  </button>
-                               )}
-                               {job.endJobDetails.damageImage && (
-                                 <button type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: job.endJobDetails.damageImage}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
-                                   <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı:</b> {job.endJobDetails.damageImage}</span>
+                               ))}
+                               {(job.endJobDetails.damageImages || (job.endJobDetails.damageImage ? [job.endJobDetails.damageImage] : [])).map((img, idx) => (
+                                 <button key={'damage'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
+                                   <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
                                    <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-red-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
                                  </button>
-                               )}
+                               ))}
                                {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
                                {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
                              </div>
@@ -4137,8 +4137,8 @@ export default function App() {
     paymentMethod: 'Nakit', 
     damageStatus: 'Hasarsız teslim edildi', 
     damageDetails: '',
-    damageImage: '',
-    truckImage: '',
+    damageImages: [],
+    truckImages: [],
     truckStatus: 'Herhangi bir sorun yok',
     truckIssueDetails: '',
     customerSatisfaction: 'Herhangi bir işlem yapmadı.',
@@ -4605,7 +4605,7 @@ export default function App() {
   const handleOpenEndJobModal = (job) => {
     setJobToEnd(job);
     setEndJobError('');
-    setEndJobData({ paymentMethod: 'Nakit', damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImage: '', truckImage: '', truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '' });
+    setEndJobData({ paymentMethod: 'Nakit', damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '' });
     setShowEndJobModal(true);
   };
 
@@ -4613,8 +4613,8 @@ export default function App() {
     const file = e.target.files[0];
     if (!file) return;
     
-    if (type === 'truck') setEndJobData(prev => ({ ...prev, truckImage: 'Yükleniyor...' }));
-    else setEndJobData(prev => ({ ...prev, damageImage: 'Yükleniyor...' }));
+    if (type === 'truck') setEndJobData(prev => ({ ...prev, truckImages: [...(prev.truckImages || []), 'Yükleniyor...'] }));
+    else setEndJobData(prev => ({ ...prev, damageImages: [...(prev.damageImages || []), 'Yükleniyor...'] }));
 
     const formData = new FormData();
     formData.append('file', file);
@@ -4633,12 +4633,18 @@ export default function App() {
         uploadedUrl = text.trim();
       }
       
-      if (type === 'truck') setEndJobData(prev => ({ ...prev, truckImage: uploadedUrl }));
-      else setEndJobData(prev => ({ ...prev, damageImage: uploadedUrl }));
+      if (type === 'truck') {
+        setEndJobData(prev => ({ ...prev, truckImages: prev.truckImages.map(img => img === 'Yükleniyor...' ? uploadedUrl : img) }));
+      } else {
+        setEndJobData(prev => ({ ...prev, damageImages: prev.damageImages.map(img => img === 'Yükleniyor...' ? uploadedUrl : img) }));
+      }
     } catch (err) {
       console.error("Yükleme hatası:", err);
-      if (type === 'truck') setEndJobData(prev => ({ ...prev, truckImage: file.name }));
-      else setEndJobData(prev => ({ ...prev, damageImage: file.name }));
+      if (type === 'truck') {
+        setEndJobData(prev => ({ ...prev, truckImages: prev.truckImages.map(img => img === 'Yükleniyor...' ? file.name : img) }));
+      } else {
+        setEndJobData(prev => ({ ...prev, damageImages: prev.damageImages.map(img => img === 'Yükleniyor...' ? file.name : img) }));
+      }
     }
   };
 
@@ -5706,13 +5712,21 @@ const submitEndJob = async (e) => {
 
                 <div>
                   <label className="block text-sm font-bold text-black mb-1">Kamyon Kasası Fotoğrafı / Videosu (İş Sonu)</label>
-                  <div className="flex items-center gap-2">
-                    <label className="flex-1 cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
-                      <Camera className="w-5 h-5 text-neutral-500" />
-                      <span className="text-sm font-bold text-neutral-600 truncate">{endJobData.truckImage || 'Görsel veya Video Yükle'}</span>
+                  <div className="flex flex-col gap-2">
+                    {(endJobData.truckImages || []).map((img, idx) => (
+                      <div key={'timg'+idx} className="flex items-center gap-2 bg-neutral-50 p-2 rounded-xl border border-neutral-200">
+                        <Camera className="w-4 h-4 text-neutral-500 shrink-0" />
+                        <span className="text-sm font-medium text-neutral-600 flex-1 truncate">{img}</span>
+                        {img !== 'Yükleniyor...' && (
+                          <button type="button" onClick={() => setEndJobData(prev => ({...prev, truckImages: prev.truckImages.filter((_, i) => i !== idx)}))} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"><X className="w-4 h-4"/></button>
+                        )}
+                      </div>
+                    ))}
+                    <label className="cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
+                      <PlusCircle className="w-5 h-5 text-neutral-500" />
+                      <span className="text-sm font-bold text-neutral-600">Yeni Görsel Ekle</span>
                       <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => handleFileUpload(e, 'truck')} />
                     </label>
-                    {endJobData.truckImage && endJobData.truckImage !== 'Yükleniyor...' && <button type="button" onClick={() => setEndJobData({...endJobData, truckImage: ''})} className="p-3 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition"><X className="w-5 h-5"/></button>}
                   </div>
                 </div>
 
@@ -5722,13 +5736,21 @@ const submitEndJob = async (e) => {
                       <textarea required value={endJobData.damageDetails} onChange={e => setEndJobData({...endJobData, damageDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl outline-none resize-none h-16 text-sm mb-3" placeholder="Hasar hakkında detaylı bilgi..."></textarea>
                       
                       <label className="block text-sm font-bold text-red-900 mb-1 mt-2">Hasar Fotoğrafı</label>
-                      <div className="flex items-center gap-2 mb-3">
-                        <label className="flex-1 cursor-pointer bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
-                          <Camera className="w-5 h-5 text-red-500" />
-                          <span className="text-sm font-bold text-red-600 truncate">{endJobData.damageImage || 'Hasarın Fotoğrafını Yükle'}</span>
+                      <div className="flex flex-col gap-2 mb-3">
+                        {(endJobData.damageImages || []).map((img, idx) => (
+                          <div key={'dimg'+idx} className="flex items-center gap-2 bg-white p-2 rounded-xl border border-red-200">
+                            <Camera className="w-4 h-4 text-red-500 shrink-0" />
+                            <span className="text-sm font-medium text-red-600 flex-1 truncate">{img}</span>
+                            {img !== 'Yükleniyor...' && (
+                              <button type="button" onClick={() => setEndJobData(prev => ({...prev, damageImages: prev.damageImages.filter((_, i) => i !== idx)}))} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition"><X className="w-4 h-4"/></button>
+                            )}
+                          </div>
+                        ))}
+                        <label className="cursor-pointer bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
+                          <PlusCircle className="w-5 h-5 text-red-500" />
+                          <span className="text-sm font-bold text-red-600">Yeni Hasar Fotoğrafı Ekle</span>
                           <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'damage')} />
                         </label>
-                        {endJobData.damageImage && endJobData.damageImage !== 'Yükleniyor...' && <button type="button" onClick={() => setEndJobData({...endJobData, damageImage: ''})} className="p-3 bg-red-100 text-red-600 rounded-xl hover:bg-red-200 transition"><X className="w-5 h-5"/></button>}
                       </div>
                       
                       {endJobData.damageDetails.trim().length > 0 && (
