@@ -1099,7 +1099,7 @@ const AddJobView = ({
   );
 };
 
-const CurrentJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerateMessage, handleEstimateMaterials, setCancelJobId, setViewingImage }) => {
+const CurrentJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerateMessage, handleEstimateMaterials, setCancelJobId, setViewingImage, setDeleteJobId }) => {
   const [viewDate, setViewDate] = useState(new Date());
 
   const sendAppointmentMessage = (job, method) => {
@@ -1378,6 +1378,9 @@ const CurrentJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGen
                   <Ban className="w-4 h-4"/> İşi İptal Et
                 </button>
               )}
+              <button onClick={(e) => { e.stopPropagation(); setDeleteJobId(job.id); }} className="px-3 py-2 bg-neutral-100 hover:bg-red-100 text-red-600 text-xs font-bold rounded-lg transition flex items-center gap-1.5 border border-neutral-200 hover:border-red-200">
+                <X className="w-4 h-4"/> Kalıcı Sil
+              </button>
             </div>
           </div>
         </div>
@@ -1672,7 +1675,7 @@ const AllJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerat
   );
 };
 
-const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage }) => {
+const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage, setDeleteJobId }) => {
   const completedJobs = jobs.filter(j => j.status === 'completed').sort((a, b) => new Date(b.date) - new Date(a.date));
 
   return (
@@ -1726,53 +1729,8 @@ const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage }) => {
                      <Camera className="w-4 h-4" /> Kasa Görseli {idx > 0 ? idx+1 : ''}
                    </button>
                 ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-};
-
-const CancelledJobsView = ({ jobs, handleEditJob, handleRestoreJob, setDeleteJobId }) => {
-  const cancelledJobs = jobs.filter(j => j.status === 'cancelled');
-
-  return (
-    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-      <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
-        <h2 className="text-xl font-bold text-black flex items-center gap-2">
-          <Ban className="w-6 h-6 text-red-600" /> İptal Edilen İşler
-        </h2>
-      </div>
-      <div className="space-y-4">
-        {cancelledJobs.length === 0 ? (
-          <div className="p-8 text-center text-neutral-500 font-medium bg-neutral-50 rounded-xl border border-neutral-200">
-            Kayıtlı iptal edilmiş iş bulunmuyor.
-          </div>
-        ) : (
-          cancelledJobs.map(job => (
-            <div key={job.id} className="p-4 border border-red-200 bg-red-50/30 rounded-xl flex flex-col md:flex-row gap-4 justify-between md:items-center">
-              <div>
-                <div className="flex items-center gap-2 mb-1.5">
-                  <h3 className="font-bold text-black text-lg">{job.customerName}</h3>
-                  <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded-full font-bold border border-red-200">İPTAL EDİLDİ</span>
-                  <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
-                    {job.type || 'Nakliye'}
-                  </span>
-                </div>
-                <p className="text-sm text-neutral-600"><Clock className="w-3.5 h-3.5 inline mr-1" /> {job.date} - {job.time}</p>
-                <p className="text-sm text-neutral-600 mt-1"><MapPin className="w-3.5 h-3.5 inline mr-1 text-neutral-400" /> {job.fromDistrict} <ArrowRightLeft className="w-3 h-3 inline mx-1 text-neutral-300" /> {job.toDistrict || 'Belirtilmedi'}</p>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={() => handleRestoreJob(job.id)} className="px-4 py-2 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition flex items-center gap-2 text-sm shadow-md">
-                  <ArrowRightLeft className="w-4 h-4" /> Geri Al (Aktif Et)
-                </button>
-                <button onClick={() => handleEditJob(job)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex items-center gap-2 text-sm shadow-md">
-                  <Edit className="w-4 h-4" /> Düzenle
-                </button>
-                <button onClick={() => setDeleteJobId(job.id)} className="px-4 py-2 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition flex items-center gap-2 text-sm shadow-md">
-                  <X className="w-4 h-4" /> Sil
+                <button onClick={(e) => { e.stopPropagation(); setDeleteJobId(job.id); }} className="w-full px-4 py-2 bg-red-50 text-red-600 font-bold rounded-xl hover:bg-red-100 transition flex justify-center items-center gap-2 text-sm border border-red-100">
+                  <X className="w-4 h-4" /> Kalıcı Sil
                 </button>
               </div>
             </div>
@@ -5308,8 +5266,8 @@ const submitEndJob = async (e) => {
           {activeTab === 'specialCustomers' && hasJobAccess && <CustomerListView jobs={jobs} title="Özel Müşteriler" handleEditJob={handleEditJob} />}
 
           {/* İş Listesi Modülleri */}
-          {activeTab === 'currentJobs' && hasJobAccess && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} />}
-          {activeTab === 'completedJobs' && hasJobAccess && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} />}
+          {activeTab === 'currentJobs' && hasJobAccess && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
+          {activeTab === 'completedJobs' && hasJobAccess && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
           {activeTab === 'allJobs' && hasJobAccess && <AllJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} />}
           {activeTab === 'cancelledJobs' && hasJobAccess && <CancelledJobsView jobs={jobs} handleEditJob={handleEditJob} handleRestoreJob={handleRestoreJob} setDeleteJobId={setDeleteJobId} />}
 
