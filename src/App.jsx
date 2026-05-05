@@ -1499,7 +1499,7 @@ const CustomerListView = ({ jobs, title, handleEditJob }) => {
   );
 };
 
-const AllJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerateMessage, handleEstimateMaterials, setCancelJobId }) => {
+const AllJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerateMessage, handleEstimateMaterials, setCancelJobId, setDeleteJobId }) => {
   const [sortOrder, setSortOrder] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
   
@@ -1653,6 +1653,9 @@ const AllJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerat
                         <Ban className="w-4 h-4" />
                       </button>
                     )}
+                    <button onClick={() => setDeleteJobId(job.id)} className="p-2 bg-neutral-100 hover:bg-red-100 text-red-600 rounded-lg transition" title="Kalıcı Olarak Sil">
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -1732,7 +1735,7 @@ const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage }) => {
   );
 };
 
-const CancelledJobsView = ({ jobs, handleEditJob, handleRestoreJob }) => {
+const CancelledJobsView = ({ jobs, handleEditJob, handleRestoreJob, setDeleteJobId }) => {
   const cancelledJobs = jobs.filter(j => j.status === 'cancelled');
 
   return (
@@ -1767,6 +1770,9 @@ const CancelledJobsView = ({ jobs, handleEditJob, handleRestoreJob }) => {
                 </button>
                 <button onClick={() => handleEditJob(job)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex items-center gap-2 text-sm shadow-md">
                   <Edit className="w-4 h-4" /> Düzenle
+                </button>
+                <button onClick={() => setDeleteJobId(job.id)} className="px-4 py-2 bg-red-100 text-red-700 font-bold rounded-xl hover:bg-red-200 transition flex items-center gap-2 text-sm shadow-md">
+                  <X className="w-4 h-4" /> Sil
                 </button>
               </div>
             </div>
@@ -4118,6 +4124,7 @@ export default function App() {
   const [transactionType, setTransactionType] = useState('income');
   const [editingJobId, setEditingJobId] = useState(null); 
   const [cancelJobId, setCancelJobId] = useState(null); 
+  const [deleteJobId, setDeleteJobId] = useState(null);
 
   const [showSecondFromAddress, setShowSecondFromAddress] = useState(false);
   const [showSecondToAddress, setShowSecondToAddress] = useState(false);
@@ -4499,6 +4506,12 @@ export default function App() {
     if (!firebaseUser) return;
     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id), { status: 'pending' });
     addSystemLog('İş Geri Alındı', `İptal edilen bir operasyon geri alındı.`);
+  };
+
+  const handleCompletelyDeleteJob = async (id) => {
+    if (!firebaseUser) return;
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id));
+    addSystemLog('İş Kalıcı Olarak Silindi', `Sistem üzerinden bir operasyon kalıcı olarak silindi.`);
   };
 
   const handleAddJob = async (e) => {
@@ -5297,8 +5310,8 @@ const submitEndJob = async (e) => {
           {/* İş Listesi Modülleri */}
           {activeTab === 'currentJobs' && hasJobAccess && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} />}
           {activeTab === 'completedJobs' && hasJobAccess && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} />}
-          {activeTab === 'allJobs' && hasJobAccess && <AllJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} />}
-          {activeTab === 'cancelledJobs' && hasJobAccess && <CancelledJobsView jobs={jobs} handleEditJob={handleEditJob} handleRestoreJob={handleRestoreJob} />}
+          {activeTab === 'allJobs' && hasJobAccess && <AllJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} />}
+          {activeTab === 'cancelledJobs' && hasJobAccess && <CancelledJobsView jobs={jobs} handleEditJob={handleEditJob} handleRestoreJob={handleRestoreJob} setDeleteJobId={setDeleteJobId} />}
 
           {activeTab === 'customerBlacklist' && hasJobAccess && <PlaceholderView title="Müşteri Kara Listesi" icon={AlertTriangle} />}
           
@@ -5359,6 +5372,21 @@ const submitEndJob = async (e) => {
             <div className="flex gap-3">
               <button onClick={() => setCancelJobId(null)} className="flex-1 p-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">Vazgeç</button>
               <button onClick={() => { handleCancelJob(cancelJobId); setCancelJobId(null); }} className="flex-1 p-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30">Evet, İptal Et</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* KALICI SİLME ONAY MODALI */}
+      {deleteJobId && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+          <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center animate-in zoom-in-95 shadow-2xl">
+            <AlertTriangle className="w-16 h-16 text-red-600 mx-auto mb-4" />
+            <h3 className="font-black text-xl text-black mb-2">Kalıcı Olarak Sil</h3>
+            <p className="text-neutral-600 mb-6 text-sm font-medium">Bu operasyonu sistemden kalıcı olarak silmek istediğinize emin misiniz? Bu işlem geri alınamaz.</p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteJobId(null)} className="flex-1 p-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">Vazgeç</button>
+              <button onClick={() => { handleCompletelyDeleteJob(deleteJobId); setDeleteJobId(null); }} className="flex-1 p-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30">Evet, Tamamen Sil</button>
             </div>
           </div>
         </div>
