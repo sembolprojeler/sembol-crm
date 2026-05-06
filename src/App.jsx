@@ -13,14 +13,6 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
-// --- FIREBASE BAĞLANTISI ---
-import { initializeApp } from "firebase/app";
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
-import { 
-  getFirestore, collection, addDoc, onSnapshot, 
-  doc, updateDoc, deleteDoc, setDoc, getDocs 
-} from "firebase/firestore";
-
 // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
 const defaultFirebaseConfig = {
   apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
@@ -30,11 +22,11 @@ const defaultFirebaseConfig = {
   messagingSenderId: "1054049299174",
   appId: "1:1054049299174:web:2193f916a3501543d92927"
 };
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
+const firebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_config ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-demo';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
 
 function useCloudState(key, initialValue, authUser) {
   const [state, setState] = useState(initialValue);
