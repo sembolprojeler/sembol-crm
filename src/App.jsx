@@ -4402,6 +4402,23 @@ export default function App() {
       const savedUser = localStorage.getItem('sembol_crm_user');
       if (savedUser) {
         const parsed = JSON.parse(savedUser);
+        
+        // Ana Yönetici (Master Admin) Otomatik Giriş Kontrolü
+        if (parsed.email === 'admin' && parsed.password === '123456') {
+          setCurrentUser({
+            id: 'master-admin',
+            fullName: 'Sistem Yöneticisi',
+            email: 'admin',
+            password: '***',
+            position: 'Firma Sahibi',
+            rank: 'Müdür',
+            permissions: { canView: true, canEdit: true }
+          });
+          setIsAuthenticated(true);
+          setIsAuthChecking(false);
+          return;
+        }
+
         const user = personnelList.find(p => 
           (p.email === parsed.email || p.fullName.toLowerCase() === parsed.email?.toLowerCase()) && 
           p.password === parsed.password
@@ -4743,6 +4760,28 @@ export default function App() {
   };
 
   const handleLogin = (email, password, rememberMe) => {
+    // Ana Yönetici (Master Admin) Giriş Kontrolü
+    if (email === 'admin' && password === '123456') {
+      const adminUser = {
+        id: 'master-admin',
+        fullName: 'Sistem Yöneticisi',
+        email: 'admin',
+        password: '***',
+        position: 'Firma Sahibi',
+        rank: 'Müdür',
+        permissions: { canView: true, canEdit: true }
+      };
+      setCurrentUser(adminUser);
+      setIsAuthenticated(true);
+      setLoginError('');
+      if (rememberMe) {
+        try { localStorage.setItem('sembol_crm_user', JSON.stringify({ email, password })); } catch (e) { }
+      } else {
+        try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
+      }
+      return;
+    }
+
     const user = personnelList.find(p => 
       (p.email === email || p.fullName.toLowerCase() === email.toLowerCase()) && 
       p.password === password
