@@ -26,13 +26,17 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// Canvas ortamındaki DOĞRU veri yolunu tanımlıyoruz (1. resimdeki yapı)
+const targetAppId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
+
 // Orijinal tabloları (Collection) dinleyen ve array güncellemelerini Firebase ile senkronize eden yapı
 function useFirebaseCollection(collectionName, initialValue = []) {
   const [state, setState] = useState(initialValue);
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const colRef = collection(db, collectionName);
+    // DOĞRU YOL: artifacts -> [appId] -> public -> data -> [koleksiyon_adi]
+    const colRef = collection(db, 'artifacts', targetAppId, 'public', 'data', collectionName);
     const unsubscribe = onSnapshot(colRef, (snapshot) => {
       const items = [];
       snapshot.forEach(document => {
@@ -58,18 +62,20 @@ function useFirebaseCollection(collectionName, initialValue = []) {
       });
       const deleted = state.filter(s => !evaluated.find(e => String(e.id) === String(s.id)));
 
+      const colRef = collection(db, 'artifacts', targetAppId, 'public', 'data', collectionName);
+
       for (const item of added) {
         const itemData = { ...item };
-        const docRef = item.id ? doc(db, collectionName, String(item.id)) : doc(collection(db, collectionName));
+        const docRef = item.id ? doc(colRef, String(item.id)) : doc(colRef);
         if (!itemData.id) itemData.id = docRef.id;
         await setDoc(docRef, itemData).catch(console.error);
       }
       for (const item of updated) {
-        const docRef = doc(db, collectionName, String(item.id));
+        const docRef = doc(colRef, String(item.id));
         await updateDoc(docRef, item).catch(console.error);
       }
       for (const item of deleted) {
-        const docRef = doc(db, collectionName, String(item.id));
+        const docRef = doc(colRef, String(item.id));
         await deleteDoc(docRef).catch(console.error);
       }
     }
@@ -85,7 +91,7 @@ function useFirebaseDocState(key, initialValue) {
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    const docRef = doc(db, 'system_settings', key);
+    const docRef = doc(db, 'artifacts', targetAppId, 'public', 'data', 'system_settings', key);
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         setState(docSnap.data().value);
@@ -104,7 +110,7 @@ function useFirebaseDocState(key, initialValue) {
   const setCloudState = (newValue) => {
     setState((prevState) => {
       const evaluated = typeof newValue === 'function' ? newValue(prevState) : newValue;
-      setDoc(doc(db, 'system_settings', key), { value: evaluated }).catch(console.error);
+      setDoc(doc(db, 'artifacts', targetAppId, 'public', 'data', 'system_settings', key), { value: evaluated }).catch(console.error);
       return evaluated;
     });
   };
@@ -4394,7 +4400,7 @@ export default function App() {
   const handleAddRank = (newRank) => { setRanks([...ranks, newRank]); };
   const handleDeleteRank = (rankToDelete) => { setRanks(ranks.filter(r => r !== rankToDelete)); };
 
-  const [personnelList, setPersonnelList, isPersonnelLoaded] = useFirebaseCollection('personnelList', []);
+  const [personnelList, setPersonnelList, isPersonnelLoaded] = useFirebaseCollection('personnel', []);
 
   React.useEffect(() => {
     if (!isPersonnelLoaded) return;
@@ -6077,4 +6083,4 @@ export default function App() {
       `}} />
     </div>
   );
-} 
+}
