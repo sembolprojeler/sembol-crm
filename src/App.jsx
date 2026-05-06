@@ -10,31 +10,82 @@ import {
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, onSnapshot, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore';
 
-// FIREBASE AYARLARI (STACKBLITZ İÇİN BURAYI KENDİ BİLGİLERİNİZLE GÜNCELLEYİN)
-const defaultFirebaseConfig = {
-  apiKey: "API_KEY_GIRIN",
-  authDomain: "proje.firebaseapp.com",
-  projectId: "proje-id",
-  storageBucket: "proje.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "app-id"
+// FIREBASE AYARLARI (GERÇEK VERİTABANI BAĞLANTISI)
+const firebaseConfig = {
+  apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
+  authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
+  projectId: "sembol-operasyon-merkezi",
+  storageBucket: "sembol-operasyon-merkezi.firebasestorage.app",
+  messagingSenderId: "1054049299174",
+  appId: "1:1054049299174:web:2193f916a3501543d92927"
 };
-const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-demo';
 
-function useCloudState(key, initialValue, authUser) {
+// Orijinal tabloları (Collection) dinleyen ve array güncellemelerini Firebase ile senkronize eden yapı
+function useFirebaseCollection(collectionName, initialValue = []) {
   const [state, setState] = useState(initialValue);
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    if (!authUser) return;
-    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sembol_cloud_state', key);
+    const colRef = collection(db, collectionName);
+    const unsubscribe = onSnapshot(colRef, (snapshot) => {
+      const items = [];
+      snapshot.forEach(document => {
+         items.push({ ...document.data(), id: document.id });
+      });
+      setState(items);
+      setIsLoaded(true);
+    }, (err) => {
+      console.error(err);
+      setIsLoaded(true);
+    });
+    return () => unsubscribe();
+  }, [collectionName]);
+
+  const setCloudState = async (newValue) => {
+    const evaluated = typeof newValue === 'function' ? newValue(state) : newValue;
+    
+    if (Array.isArray(evaluated)) {
+      const added = evaluated.filter(e => !state.find(s => String(s.id) === String(e.id)));
+      const updated = evaluated.filter(e => {
+        const old = state.find(s => String(s.id) === String(e.id));
+        return old && JSON.stringify(old) !== JSON.stringify(e);
+      });
+      const deleted = state.filter(s => !evaluated.find(e => String(e.id) === String(s.id)));
+
+      for (const item of added) {
+        const itemData = { ...item };
+        const docRef = item.id ? doc(db, collectionName, String(item.id)) : doc(collection(db, collectionName));
+        if (!itemData.id) itemData.id = docRef.id;
+        await setDoc(docRef, itemData).catch(console.error);
+      }
+      for (const item of updated) {
+        const docRef = doc(db, collectionName, String(item.id));
+        await updateDoc(docRef, item).catch(console.error);
+      }
+      for (const item of deleted) {
+        const docRef = doc(db, collectionName, String(item.id));
+        await deleteDoc(docRef).catch(console.error);
+      }
+    }
+    setState(evaluated);
+  };
+
+  return [state, setCloudState, isLoaded];
+}
+
+// Basit array state'leri (Rütbeler, Pozisyonlar vb.) için tek document yapısı
+function useFirebaseDocState(key, initialValue) {
+  const [state, setState] = useState(initialValue);
+  const [isLoaded, setIsLoaded] = useState(false);
+
+  useEffect(() => {
+    const docRef = doc(db, 'system_settings', key);
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         setState(docSnap.data().value);
@@ -48,15 +99,12 @@ function useCloudState(key, initialValue, authUser) {
       setIsLoaded(true);
     });
     return () => unsubscribe();
-  }, [authUser, key]);
+  }, [key]);
 
   const setCloudState = (newValue) => {
     setState((prevState) => {
       const evaluated = typeof newValue === 'function' ? newValue(prevState) : newValue;
-      if (authUser) {
-         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sembol_cloud_state', key);
-         setDoc(docRef, { value: evaluated }).catch(console.error);
-      }
+      setDoc(doc(db, 'system_settings', key), { value: evaluated }).catch(console.error);
       return evaluated;
     });
   };
@@ -4255,11 +4303,7 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
-        } else {
-          await signInAnonymously(auth);
-        }
+        await signInAnonymously(auth);
       } catch (error) {
         console.error('Auth hatası:', error);
       }
@@ -4317,9 +4361,9 @@ export default function App() {
   const [aiModal, setAiModal] = useState({ isOpen: false, loading: false, content: '', title: '', type: '' });
   const [viewingImage, setViewingImage] = useState(null); // Görsel önizleme state'i
 
-  const [notifications, setNotifications, isNotifLoaded] = useCloudState('notifications', [], authUser);
-  const [messages, setMessages, isMsgLoaded] = useCloudState('messages', [], authUser);
-  const [systemLogs, setSystemLogs, isLogsLoaded] = useCloudState('systemLogs', [], authUser);
+  const [notifications, setNotifications, isNotifLoaded] = useFirebaseCollection('notifications', []);
+  const [messages, setMessages, isMsgLoaded] = useFirebaseCollection('messages', []);
+  const [systemLogs, setSystemLogs, isLogsLoaded] = useFirebaseCollection('systemLogs', []);
 
   const addSystemLog = (action, details) => {
     const newLog = {
@@ -4332,58 +4376,28 @@ export default function App() {
     setSystemLogs(prev => [newLog, ...prev]);
   };
 
-  const [positions, setPositions, isPosLoaded] = useCloudState('positions', [
+  const [positions, setPositions, isPosLoaded] = useFirebaseDocState('positions', [
       'Şoför', 'Taşıma Elemanı', 'Muhasebe', 
       'Mobilya Ustası', 'Satış Personeli', 
       'Depo Sorumlusu', 'Temizlik Görevlisi', 
       'Operasyon', 'Firma Sahibi'
-    ], authUser);
+    ]);
 
   const handleAddPosition = (newPos) => { setPositions([...positions, newPos]); };
   const handleDeletePosition = (posToDelete) => { setPositions(positions.filter(p => p !== posToDelete)); };
 
-  const [ranks, setRanks, isRanksLoaded] = useCloudState('ranks', [
+  const [ranks, setRanks, isRanksLoaded] = useFirebaseDocState('ranks', [
       'Müdür', 'Ekip Şefi', 'Asistan', 
       'Standart', 'Kalfa'
-    ], authUser);
+    ]);
 
   const handleAddRank = (newRank) => { setRanks([...ranks, newRank]); };
   const handleDeleteRank = (rankToDelete) => { setRanks(ranks.filter(r => r !== rankToDelete)); };
 
-  const defaultPersonnelList = [
-    { id: 1, fullName: 'Mustafa Beşinci', tcNo: '11111111111', birthDate: '1980-01-01', companyPhone: '05320000000', personalPhone: '05320000000', position: 'Firma Sahibi', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'mustafa', password: 'mustafa', permissions: { canView: true, canEdit: true } },
-    { id: 2, fullName: 'Şenol Beşinci', tcNo: '12345678901', birthDate: '1985-05-15', companyPhone: '05551112233', personalPhone: '05321112233', position: 'Firma Sahibi', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'senol@sembolnakliyat.com', password: 'pass.senol123', permissions: { canView: true, canEdit: true } },
-    { id: 3, fullName: 'Mehmet Şen', tcNo: '98765432109', birthDate: '1990-08-22', companyPhone: '', personalPhone: '05441112233', position: 'Operasyon', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'mustafa@sembolnakliyat.com', password: 'pass.mustafa123', permissions: { canView: true, canEdit: true } },
-    { id: 4, fullName: 'Ahmet Öztürk', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ahmet', password: 'ahmet', permissions: { canView: true, canEdit: false } },
-    { id: 5, fullName: 'Azat Allakulyyev', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'azat.allakulyyev@sembolnakliyat.com', password: 'pass.azat123', permissions: { canView: true, canEdit: false } },
-    { id: 6, fullName: 'Atamurad Razakulov', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'atamurad.razakulov@sembolnakliyat.com', password: 'pass.atamurad123', permissions: { canView: true, canEdit: false } },
-    { id: 7, fullName: 'Batuhan Bagana', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'batuhan.bagana@sembolnakliyat.com', password: 'pass.batuhan123', permissions: { canView: true, canEdit: false } },
-    { id: 8, fullName: 'Berdimyrat Artykov', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'berdimyrat.artykov@sembolnakliyat.com', password: 'pass.berdimyrat123', permissions: { canView: true, canEdit: false } },
-    { id: 9, fullName: 'Berna Çelik', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Muhasebe', rank: 'Asistan', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'berna.celik@sembolnakliyat.com', password: 'pass.berna123', permissions: { canView: true, canEdit: false } },
-    { id: 10, fullName: 'Cengiz Çakar', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'cengiz.cakar@sembolnakliyat.com', password: 'pass.cengiz123', permissions: { canView: true, canEdit: false } },
-    { id: 11, fullName: 'Erkan Kurt', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'erkan.kurt@sembolnakliyat.com', password: 'pass.erkan123', permissions: { canView: true, canEdit: false } },
-    { id: 12, fullName: 'Ferhat Arslan', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ferhat.arslan@sembolnakliyat.com', password: 'pass.ferhat123', permissions: { canView: true, canEdit: false } },
-    { id: 13, fullName: 'Fatma Koçak', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Muhasebe', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'fatma.kocak@sembolnakliyat.com', password: 'pass.fatma123', permissions: { canView: true, canEdit: false } },
-    { id: 14, fullName: 'Kamil Kılınç', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'kamil.kilinc@sembolnakliyat.com', password: 'pass.kamil123', permissions: { canView: true, canEdit: false } },
-    { id: 15, fullName: 'Korhan Taşkaya', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'korhan.taskaya@sembolnakliyat.com', password: 'pass.korhan123', permissions: { canView: true, canEdit: false } },
-    { id: 17, fullName: 'Mesut İnan', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'mesut.inan@sembolnakliyat.com', password: 'pass.mesut123', permissions: { canView: true, canEdit: false } },
-    { id: 18, fullName: 'Muhammet Gök', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'muhammet.gok@sembolnakliyat.com', password: 'pass.muhammet123', permissions: { canView: true, canEdit: false } },
-    { id: 19, fullName: 'Oğuzhan Çakır', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'oguzhan.cakir@sembolnakliyat.com', password: 'pass.oguzhan123', permissions: { canView: true, canEdit: false } },
-    { id: 20, fullName: 'Ömer Akmeşe', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'omer.akmese@sembolnakliyat.com', password: 'pass.omer123', permissions: { canView: true, canEdit: false } },
-    { id: 21, fullName: 'Ömer Yıldız', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'omer.yildiz@sembolnakliyat.com', password: 'pass.omer1234', permissions: { canView: true, canEdit: false } },
-    { id: 22, fullName: 'Oğuzhan Akbulut', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'oguzhan.akbulut@sembolnakliyat.com', password: 'pass.oguzhan1234', permissions: { canView: true, canEdit: false } },
-    { id: 23, fullName: 'Ruslan Muradov', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ruslan.muradov@sembolnakliyat.com', password: 'pass.ruslan123', permissions: { canView: true, canEdit: false } },
-    { id: 24, fullName: 'Sedat Uslu', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'sedat.uslu@sembolnakliyat.com', password: 'pass.sedat123', permissions: { canView: true, canEdit: false } },
-    { id: 25, fullName: 'Vehbi Çirgin', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'vehbi.cirgin@sembolnakliyat.com', password: 'pass.vehbi123', permissions: { canView: true, canEdit: false } },
-    { id: 26, fullName: 'Tayfur Akyüz', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'tayfur.akyuz@sembolnakliyat.com', password: 'pass.tayfur123', permissions: { canView: true, canEdit: false } },
-    { id: 27, fullName: 'Ozan İbiş', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ozan.ibis@sembolnakliyat.com', password: 'pass.ozan123', permissions: { canView: true, canEdit: false } },
-    { id: 28, fullName: 'Rafet Tarakçı', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'rafet.tarakci@sembolnakliyat.com', password: 'pass.rafet123', permissions: { canView: true, canEdit: false } },
-    { id: 29, fullName: 'Erdem Yaman', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'erdem.yaman@sembolnakliyat.com', password: 'pass.erdem123', permissions: { canView: true, canEdit: false } }
-  ];
-
-  const [personnelList, setPersonnelList, isPersonnelLoaded] = useCloudState('personnelList', defaultPersonnelList, authUser);
+  const [personnelList, setPersonnelList, isPersonnelLoaded] = useFirebaseCollection('personnelList', []);
 
   React.useEffect(() => {
+    if (!isPersonnelLoaded) return;
     try {
       const savedUser = localStorage.getItem('sembol_crm_user');
       if (savedUser) {
@@ -4402,7 +4416,7 @@ export default function App() {
     } finally {
       setIsAuthChecking(false);
     }
-  }, []); 
+  }, [isPersonnelLoaded, personnelList]); 
 
   const handleAddPersonnel = (newPersonnel) => {
     setPersonnelList(prev => [{ ...newPersonnel, permissions: { canView: true, canEdit: false } }, ...prev]);
@@ -4440,13 +4454,13 @@ export default function App() {
     }));
   };
 
-  const [tasks, setTasks, isTasksLoaded] = useFirestoreCollection('tasks', authUser);
+  const [tasks, setTasks, isTasksLoaded] = useFirebaseCollection('tasks', []);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [draggingTask, setDraggingTask] = useState(null);
-  const [newTask, setNewTask] = useState({ title: '', description: '', assignee: 'Mustafa Beşinci', date: new Date().toISOString().split('T')[0] });
+  const [newTask, setNewTask] = useState({ title: '', description: '', assignee: personnelList.length > 0 ? personnelList[0].fullName : 'Yönetim', date: new Date().toISOString().split('T')[0] });
 
-  const [vehicles, setVehicles, isVehiclesLoaded] = useFirestoreCollection('vehicles', authUser);
+  const [vehicles, setVehicles, isVehiclesLoaded] = useFirebaseCollection('vehicles', []);
 
   const handleAddVehicle = (newVehicle) => {
     setVehicles([{ id: Date.now(), ...newVehicle }, ...vehicles]);
@@ -4457,7 +4471,7 @@ export default function App() {
     setVehicles(vehicles.filter(v => v.id !== id));
   };
 
-  const [materials, setMaterials, isMaterialsLoaded] = useFirestoreCollection('materials', authUser);
+  const [materials, setMaterials, isMaterialsLoaded] = useFirebaseCollection('materials', []);
 
   const handleAddMaterial = (newMaterial) => {
     setMaterials([{ id: Date.now(), ...newMaterial }, ...materials]);
@@ -4471,7 +4485,7 @@ export default function App() {
     if (mToDelete) addSystemLog('Malzeme Silindi', `${mToDelete.name} adlı malzeme sistemden silindi.`);
   };
 
-  const [jobs, setJobs, isJobsLoaded] = useFirestoreCollection('jobs', authUser);
+  const [jobs, setJobs, isJobsLoaded] = useFirebaseCollection('jobs', []);
 
   const [formData, setFormData] = useState({
     isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo',
