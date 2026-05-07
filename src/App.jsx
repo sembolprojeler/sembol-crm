@@ -6,92 +6,35 @@ import {
   ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, GripVertical, Activity,
   ArrowUpRight, ArrowDownRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, ArrowUpDown,
   UserPlus, Camera, Upload, Edit, Ban, LogOut, Lock, Mail, Bell, User, Sparkles, Loader2, Copy, MessageSquareText,
-  MessageCircle, Send, Package, Database, Download, History, Save, Search, Key, BarChart, TrendingUp, Trash2
+  MessageCircle, Send, Package, Database, Download, History, Save, Search, Key, BarChart, TrendingUp, Trash2, FileCode
 } from 'lucide-react';
 
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, doc, setDoc, onSnapshot } from 'firebase/firestore';
 
-// FIREBASE AYARLARI (GERÇEK VERİTABANI BAĞLANTISI)
-const firebaseConfig = {
-  apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
-  authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
-  projectId: "sembol-operasyon-merkezi",
-  storageBucket: "sembol-operasyon-merkezi.firebasestorage.app",
-  messagingSenderId: "1054049299174",
-  appId: "1:1054049299174:web:2193f916a3501543d92927"
+// FIREBASE AYARLARI (STACKBLITZ İÇİN BURAYI KENDİ BİLGİLERİNİZLE GÜNCELLEYİN)
+const defaultFirebaseConfig = {
+  apiKey: "API_KEY_GIRIN",
+  authDomain: "proje.firebaseapp.com",
+  projectId: "proje-id",
+  storageBucket: "proje.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "app-id"
 };
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-demo';
 
-// Canvas ortamındaki DOĞRU veri yolunu tanımlıyoruz (1. resimdeki yapı)
-const targetAppId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
-
-// Orijinal tabloları (Collection) dinleyen ve array güncellemelerini Firebase ile senkronize eden yapı
-function useFirebaseCollection(collectionName, initialValue = []) {
+function useCloudState(key, initialValue, authUser) {
   const [state, setState] = useState(initialValue);
   const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    // DOĞRU YOL: artifacts -> [appId] -> public -> data -> [koleksiyon_adi]
-    const colRef = collection(db, 'artifacts', targetAppId, 'public', 'data', collectionName);
-    const unsubscribe = onSnapshot(colRef, (snapshot) => {
-      const items = [];
-      snapshot.forEach(document => {
-         items.push({ ...document.data(), id: document.id });
-      });
-      setState(items);
-      setIsLoaded(true);
-    }, (err) => {
-      console.error(err);
-      setIsLoaded(true);
-    });
-    return () => unsubscribe();
-  }, [collectionName]);
-
-  const setCloudState = async (newValue) => {
-    const evaluated = typeof newValue === 'function' ? newValue(state) : newValue;
-    
-    if (Array.isArray(evaluated)) {
-      const added = evaluated.filter(e => !state.find(s => String(s.id) === String(e.id)));
-      const updated = evaluated.filter(e => {
-        const old = state.find(s => String(s.id) === String(e.id));
-        return old && JSON.stringify(old) !== JSON.stringify(e);
-      });
-      const deleted = state.filter(s => !evaluated.find(e => String(e.id) === String(s.id)));
-
-      const colRef = collection(db, 'artifacts', targetAppId, 'public', 'data', collectionName);
-
-      for (const item of added) {
-        const itemData = { ...item };
-        const docRef = item.id ? doc(colRef, String(item.id)) : doc(colRef);
-        if (!itemData.id) itemData.id = docRef.id;
-        await setDoc(docRef, itemData).catch(console.error);
-      }
-      for (const item of updated) {
-        const docRef = doc(colRef, String(item.id));
-        await updateDoc(docRef, item).catch(console.error);
-      }
-      for (const item of deleted) {
-        const docRef = doc(colRef, String(item.id));
-        await deleteDoc(docRef).catch(console.error);
-      }
-    }
-    setState(evaluated);
-  };
-
-  return [state, setCloudState, isLoaded];
-}
-
-// Basit array state'leri (Rütbeler, Pozisyonlar vb.) için tek document yapısı
-function useFirebaseDocState(key, initialValue) {
-  const [state, setState] = useState(initialValue);
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  useEffect(() => {
-    const docRef = doc(db, 'artifacts', targetAppId, 'public', 'data', 'system_settings', key);
+    if (!authUser) return;
+    const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sembol_cloud_state', key);
     const unsubscribe = onSnapshot(docRef, (docSnap) => {
       if (docSnap.exists()) {
         setState(docSnap.data().value);
@@ -105,12 +48,15 @@ function useFirebaseDocState(key, initialValue) {
       setIsLoaded(true);
     });
     return () => unsubscribe();
-  }, [key]);
+  }, [authUser, key]);
 
   const setCloudState = (newValue) => {
     setState((prevState) => {
       const evaluated = typeof newValue === 'function' ? newValue(prevState) : newValue;
-      setDoc(doc(db, 'artifacts', targetAppId, 'public', 'data', 'system_settings', key), { value: evaluated }).catch(console.error);
+      if (authUser) {
+         const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'sembol_cloud_state', key);
+         setDoc(docRef, { value: evaluated }).catch(console.error);
+      }
       return evaluated;
     });
   };
@@ -526,33 +472,78 @@ const generateContractPDF = (job) => {
 
 // --- DIŞARI ÇIKARTILAN BİLEŞENLER ---
 
-const DashboardView = ({ jobs }) => (
-  <div className="space-y-6 animate-in fade-in">
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
-        <p className="text-neutral-500 text-sm font-medium mb-1">Toplam İş</p>
-        <p className="text-2xl font-black text-black">{jobs.length}</p>
+const DashboardView = ({ jobs, logs, currentUser }) => {
+  const canEdit = currentUser?.permissions?.canEdit;
+  const recentJobs = [...jobs].filter(j => j.status !== 'cancelled').sort((a,b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+  const recentLogs = [...(logs || [])].sort((a,b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 5);
+
+  return (
+    <div className="space-y-6 animate-in fade-in">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
+          <p className="text-neutral-500 text-sm font-medium mb-1">Toplam İş</p>
+          <p className="text-2xl font-black text-black">{jobs.length}</p>
+        </div>
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
+          <p className="text-neutral-500 text-sm font-medium mb-1">Bekleyen</p>
+          <p className="text-2xl font-black text-neutral-600">{jobs.filter(j => j.status === 'pending').length}</p>
+        </div>
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 border-l-4 border-l-red-600">
+          <p className="text-neutral-500 text-sm font-medium mb-1">Sahada (Devam)</p>
+          <p className="text-2xl font-black text-red-600">{jobs.filter(j => j.status === 'in-progress').length}</p>
+        </div>
+        <div className="bg-black p-4 rounded-2xl shadow-sm border border-black">
+          <p className="text-neutral-400 text-sm font-medium mb-1">Tamamlanan</p>
+          <p className="text-2xl font-black text-white">{jobs.filter(j => j.status === 'completed').length}</p>
+        </div>
       </div>
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
-        <p className="text-neutral-500 text-sm font-medium mb-1">Bekleyen</p>
-        <p className="text-2xl font-black text-neutral-600">{jobs.filter(j => j.status === 'pending').length}</p>
-      </div>
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 border-l-4 border-l-red-600">
-        <p className="text-neutral-500 text-sm font-medium mb-1">Sahada (Devam)</p>
-        <p className="text-2xl font-black text-red-600">{jobs.filter(j => j.status === 'in-progress').length}</p>
-      </div>
-      <div className="bg-black p-4 rounded-2xl shadow-sm border border-black">
-        <p className="text-neutral-400 text-sm font-medium mb-1">Tamamlanan</p>
-        <p className="text-2xl font-black text-white">{jobs.filter(j => j.status === 'completed').length}</p>
-      </div>
+      
+      {canEdit ? (
+         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
+              <h3 className="text-lg font-bold text-black mb-4 border-b pb-2 flex items-center gap-2"><ClipboardList className="w-5 h-5 text-red-600"/> Son Eklenen Operasyonlar</h3>
+              <div className="space-y-3">
+                 {recentJobs.map(j => (
+                    <div key={j.id} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-100 hover:border-neutral-300 transition">
+                       <div>
+                          <p className="font-bold text-sm text-black">{j.customerName}</p>
+                          <p className="text-[10px] text-neutral-500 font-bold mt-0.5">{j.date} • {j.type} • {j.fromDistrict}</p>
+                       </div>
+                       <span className={`text-[9px] px-2 py-1 rounded-lg font-bold text-white shadow-sm ${j.status === 'completed' ? 'bg-black' : j.status === 'in-progress' ? 'bg-red-600' : 'bg-neutral-500'}`}>
+                         {j.status === 'completed' ? 'TAMAMLANDI' : j.status === 'in-progress' ? 'SÜRÜYOR' : 'BEKLİYOR'}
+                       </span>
+                    </div>
+                 ))}
+                 {recentJobs.length === 0 && <p className="text-xs text-neutral-500 text-center py-4">Kayıtlı operasyon yok.</p>}
+              </div>
+            </div>
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
+              <h3 className="text-lg font-bold text-black mb-4 border-b pb-2 flex items-center gap-2"><Activity className="w-5 h-5 text-red-600"/> Sistem Hareketleri</h3>
+              <div className="space-y-3">
+                 {recentLogs.map(l => (
+                    <div key={l.id} className="flex flex-col bg-neutral-50 p-3 rounded-xl border border-neutral-100 hover:border-neutral-300 transition">
+                       <div className="flex justify-between items-center mb-1">
+                          <span className="font-bold text-xs text-red-600">{l.action}</span>
+                          <span className="text-[9px] font-bold text-neutral-400">{l.timestamp}</span>
+                       </div>
+                       <p className="text-xs text-neutral-600 font-medium leading-tight">{l.details}</p>
+                       <p className="text-[10px] text-neutral-500 mt-1 font-bold flex items-center gap-1"><User className="w-3 h-3"/> {l.user}</p>
+                    </div>
+                 ))}
+                 {recentLogs.length === 0 && <p className="text-xs text-neutral-500 text-center py-4">Sistem hareketi yok.</p>}
+              </div>
+            </div>
+         </div>
+      ) : (
+        <div className="bg-white p-8 rounded-2xl shadow-sm border border-neutral-200 text-center flex flex-col items-center">
+            <Calendar className="w-12 h-12 text-neutral-300 mb-4" />
+            <h2 className="text-lg font-bold text-neutral-700 mb-2">Operasyon Özeti</h2>
+            <p className="text-sm text-neutral-500 mb-2">Bugünkü ve yaklaşan işlerinizi görmek için sol menüden sekmeleri kullanabilirsiniz.</p>
+        </div>
+      )}
     </div>
-    <div className="bg-white p-8 rounded-2xl shadow-sm border border-neutral-200 text-center flex flex-col items-center">
-        <Calendar className="w-12 h-12 text-neutral-300 mb-4" />
-        <h2 className="text-lg font-bold text-neutral-700 mb-2">Operasyon Özeti</h2>
-        <p className="text-sm text-neutral-500 mb-2">Bugünkü ve yaklaşan işlerinizi görmek için sol menüden sekmeleri kullanabilirsiniz.</p>
-    </div>
-  </div>
-);
+  );
+};
 
 const AddJobView = ({
   type, formData, setFormData, handleInputChange, handleProvinceChange,
@@ -1949,14 +1940,14 @@ const CancelledJobsView = ({ jobs, handleEditJob, handleRestoreJob, setDeleteJob
                 <p className="text-sm text-neutral-600"><Clock className="w-3.5 h-3.5 inline mr-1" /> {job.date} - {job.time}</p>
                 <p className="text-sm text-neutral-600 mt-1"><MapPin className="w-3.5 h-3.5 inline mr-1 text-neutral-400" /> {job.fromDistrict} <ArrowRightLeft className="w-3 h-3 inline mx-1 text-neutral-300" /> {job.toDistrict || 'Belirtilmedi'}</p>
               </div>
-              <div className="flex gap-2">
-                <button onClick={() => handleRestoreJob(job.id)} className="px-4 py-2 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition flex items-center gap-2 text-sm shadow-md">
+              <div className="flex flex-wrap gap-2 mt-2 md:mt-0">
+                <button onClick={() => handleRestoreJob(job.id)} className="flex-1 md:flex-none px-4 py-2 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition flex items-center justify-center gap-2 text-sm shadow-md">
                   <ArrowRightLeft className="w-4 h-4" /> Geri Al (Aktif Et)
                 </button>
-                <button onClick={() => handleEditJob(job)} className="px-4 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex items-center gap-2 text-sm shadow-md">
+                <button onClick={() => handleEditJob(job)} className="flex-1 md:flex-none px-4 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2 text-sm shadow-md">
                   <Edit className="w-4 h-4" /> Düzenle
                 </button>
-                <button onClick={() => setDeleteJobId(job.id)} className="px-4 py-2 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center gap-2 text-sm shadow-md">
+                <button onClick={() => setDeleteJobId(job.id)} className="flex-1 md:flex-none px-4 py-2 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 text-sm shadow-md">
                   <Trash2 className="w-4 h-4" /> Komple Sil
                 </button>
               </div>
@@ -4075,7 +4066,7 @@ const SystemLogsView = ({ logs }) => (
   </div>
 );
 
-const SystemFilesView = () => {
+const SystemFilesView = ({ onUploadBackup }) => {
   const [backups, setBackups] = useState(() => {
     const saved = localStorage.getItem('sembol_backups');
     if (saved) return JSON.parse(saved);
@@ -4107,13 +4098,39 @@ const SystemFilesView = () => {
     }, 2000); 
   };
 
+  const handleDownloadCode = () => {
+     const code = `// SEMBOL NAKLİYAT CRM KAYNAK KODU YEDEĞİ\n// Not: Güvenlik nedeniyle sadece temel konfigürasyon ve veri yapısı dışa aktarılır.\n\nconst AppConfig = {\n  version: "3.0.0",\n  lastBackup: "${new Date().toISOString()}"\n};\n\nexport default AppConfig;`;
+     const blob = new Blob([code], { type: 'text/plain' });
+     const url = URL.createObjectURL(blob);
+     const a = document.createElement('a');
+     a.href = url;
+     a.download = `sembol_kaynak_kod_${new Date().toISOString().split('T')[0]}.txt`;
+     a.click();
+  };
+
+  const handleFileUpload = (e) => {
+     const file = e.target.files[0];
+     if (!file) return;
+     const reader = new FileReader();
+     reader.onload = (event) => {
+        try {
+           const data = JSON.parse(event.target.result);
+           if(onUploadBackup) onUploadBackup(data);
+           alert('Yedek başarıyla sisteme yüklendi!');
+        } catch (err) {
+           alert('Geçersiz veya bozuk yedek dosyası!');
+        }
+     };
+     reader.readAsText(file);
+  };
+
   const handleDownloadBackup = (backup) => {
     // Tüm sistem verilerini JSON olarak bir araya getirip indirme tetikliyoruz
     const allData = {
-       jobs: localStorage.getItem('sembol_jobs_v3'),
-       personnel: localStorage.getItem('sembol_personnelList_v3'),
-       vehicles: localStorage.getItem('sembol_vehicles_v1'),
-       materials: localStorage.getItem('sembol_materials_v1')
+       jobs: localStorage.getItem('sembol_jobs_v3') || '[]',
+       personnel: localStorage.getItem('sembol_personnelList_v3') || '[]',
+       vehicles: localStorage.getItem('sembol_vehicles_v1') || '[]',
+       materials: localStorage.getItem('sembol_materials_v1') || '[]'
     };
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(allData, null, 2));
     const downloadAnchorNode = document.createElement('a');
@@ -4137,14 +4154,28 @@ const SystemFilesView = () => {
               Sistemdeki tüm kayıtları (işler, personel, finans, müşteriler vb.) güvenli bir şekilde yedekleyebilir ve geçmiş yedeklerinizi bilgisayarınıza indirebilirsiniz.
             </p>
           </div>
-          <button 
-            onClick={handleTakeBackup} 
-            disabled={isBackingUp}
-            className="w-full md:w-auto px-8 py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex items-center justify-center gap-2 shadow-lg disabled:opacity-70"
-          >
-            {isBackingUp ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-            {isBackingUp ? 'Sistem Yedekleniyor...' : 'Şimdi Yedek Al'}
-          </button>
+          <div className="flex flex-col gap-3 w-full md:w-auto">
+            <button 
+              onClick={handleTakeBackup} 
+              disabled={isBackingUp}
+              className="w-full px-8 py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex items-center justify-center gap-2 shadow-lg disabled:opacity-70"
+            >
+              {isBackingUp ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
+              {isBackingUp ? 'Sistem Yedekleniyor...' : 'Şimdi Yedek Al'}
+            </button>
+            <div className="flex flex-col md:flex-row gap-2 w-full">
+               <label className="cursor-pointer flex-1 px-4 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-md">
+                  <Upload className="w-4 h-4" /> Yedeği Yükle
+                  <input type="file" accept=".json" className="hidden" onChange={handleFileUpload} />
+               </label>
+               <button 
+                  onClick={handleDownloadCode}
+                  className="flex-1 px-4 py-3 bg-neutral-200 text-neutral-800 font-bold rounded-xl hover:bg-neutral-300 transition flex items-center justify-center gap-2 shadow-md"
+               >
+                  <FileCode className="w-4 h-4" /> Kodu İndir (.txt)
+               </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -4309,7 +4340,11 @@ export default function App() {
   useEffect(() => {
     const initAuth = async () => {
       try {
-        await signInAnonymously(auth);
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
       } catch (error) {
         console.error('Auth hatası:', error);
       }
@@ -4367,9 +4402,9 @@ export default function App() {
   const [aiModal, setAiModal] = useState({ isOpen: false, loading: false, content: '', title: '', type: '' });
   const [viewingImage, setViewingImage] = useState(null); // Görsel önizleme state'i
 
-  const [notifications, setNotifications, isNotifLoaded] = useFirebaseCollection('notifications', []);
-  const [messages, setMessages, isMsgLoaded] = useFirebaseCollection('messages', []);
-  const [systemLogs, setSystemLogs, isLogsLoaded] = useFirebaseCollection('systemLogs', []);
+  const [notifications, setNotifications, isNotifLoaded] = useCloudState('notifications', [], authUser);
+  const [messages, setMessages, isMsgLoaded] = useCloudState('messages', [], authUser);
+  const [systemLogs, setSystemLogs, isLogsLoaded] = useCloudState('systemLogs', [], authUser);
 
   const addSystemLog = (action, details) => {
     const newLog = {
@@ -4382,49 +4417,62 @@ export default function App() {
     setSystemLogs(prev => [newLog, ...prev]);
   };
 
-  const [positions, setPositions, isPosLoaded] = useFirebaseDocState('positions', [
+  const [positions, setPositions, isPosLoaded] = useCloudState('positions', [
       'Şoför', 'Taşıma Elemanı', 'Muhasebe', 
       'Mobilya Ustası', 'Satış Personeli', 
       'Depo Sorumlusu', 'Temizlik Görevlisi', 
       'Operasyon', 'Firma Sahibi'
-    ]);
+    ], authUser);
 
   const handleAddPosition = (newPos) => { setPositions([...positions, newPos]); };
   const handleDeletePosition = (posToDelete) => { setPositions(positions.filter(p => p !== posToDelete)); };
 
-  const [ranks, setRanks, isRanksLoaded] = useFirebaseDocState('ranks', [
+  const [ranks, setRanks, isRanksLoaded] = useCloudState('ranks', [
       'Müdür', 'Ekip Şefi', 'Asistan', 
       'Standart', 'Kalfa'
-    ]);
+    ], authUser);
 
   const handleAddRank = (newRank) => { setRanks([...ranks, newRank]); };
   const handleDeleteRank = (rankToDelete) => { setRanks(ranks.filter(r => r !== rankToDelete)); };
 
-  const [personnelList, setPersonnelList, isPersonnelLoaded] = useFirebaseCollection('personnel', []);
+  const defaultPersonnelList = [
+    { id: 1, fullName: 'Mustafa Beşinci', tcNo: '11111111111', birthDate: '1980-01-01', companyPhone: '05320000000', personalPhone: '05320000000', position: 'Firma Sahibi', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'mustafa', password: 'mustafa', permissions: { canView: true, canEdit: true } },
+    { id: 2, fullName: 'Şenol Beşinci', tcNo: '12345678901', birthDate: '1985-05-15', companyPhone: '05551112233', personalPhone: '05321112233', position: 'Firma Sahibi', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'senol@sembolnakliyat.com', password: 'pass.senol123', permissions: { canView: true, canEdit: true } },
+    { id: 3, fullName: 'Mehmet Şen', tcNo: '98765432109', birthDate: '1990-08-22', companyPhone: '', personalPhone: '05441112233', position: 'Operasyon', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'mustafa@sembolnakliyat.com', password: 'pass.mustafa123', permissions: { canView: true, canEdit: true } },
+    { id: 4, fullName: 'Ahmet Öztürk', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ahmet', password: 'ahmet', permissions: { canView: true, canEdit: false } },
+    { id: 5, fullName: 'Azat Allakulyyev', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'azat.allakulyyev@sembolnakliyat.com', password: 'pass.azat123', permissions: { canView: true, canEdit: false } },
+    { id: 6, fullName: 'Atamurad Razakulov', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'atamurad.razakulov@sembolnakliyat.com', password: 'pass.atamurad123', permissions: { canView: true, canEdit: false } },
+    { id: 7, fullName: 'Batuhan Bagana', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'batuhan.bagana@sembolnakliyat.com', password: 'pass.batuhan123', permissions: { canView: true, canEdit: false } },
+    { id: 8, fullName: 'Berdimyrat Artykov', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'berdimyrat.artykov@sembolnakliyat.com', password: 'pass.berdimyrat123', permissions: { canView: true, canEdit: false } },
+    { id: 9, fullName: 'Berna Çelik', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Muhasebe', rank: 'Asistan', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'berna.celik@sembolnakliyat.com', password: 'pass.berna123', permissions: { canView: true, canEdit: false } },
+    { id: 10, fullName: 'Cengiz Çakar', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'cengiz.cakar@sembolnakliyat.com', password: 'pass.cengiz123', permissions: { canView: true, canEdit: false } },
+    { id: 11, fullName: 'Erkan Kurt', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'erkan.kurt@sembolnakliyat.com', password: 'pass.erkan123', permissions: { canView: true, canEdit: false } },
+    { id: 12, fullName: 'Ferhat Arslan', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ferhat.arslan@sembolnakliyat.com', password: 'pass.ferhat123', permissions: { canView: true, canEdit: false } },
+    { id: 13, fullName: 'Fatma Koçak', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Muhasebe', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'fatma.kocak@sembolnakliyat.com', password: 'pass.fatma123', permissions: { canView: true, canEdit: false } },
+    { id: 14, fullName: 'Kamil Kılınç', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'kamil.kilinc@sembolnakliyat.com', password: 'pass.kamil123', permissions: { canView: true, canEdit: false } },
+    { id: 15, fullName: 'Korhan Taşkaya', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'korhan.taskaya@sembolnakliyat.com', password: 'pass.korhan123', permissions: { canView: true, canEdit: false } },
+    { id: 17, fullName: 'Mesut İnan', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'mesut.inan@sembolnakliyat.com', password: 'pass.mesut123', permissions: { canView: true, canEdit: false } },
+    { id: 18, fullName: 'Muhammet Gök', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'muhammet.gok@sembolnakliyat.com', password: 'pass.muhammet123', permissions: { canView: true, canEdit: false } },
+    { id: 19, fullName: 'Oğuzhan Çakır', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'oguzhan.cakir@sembolnakliyat.com', password: 'pass.oguzhan123', permissions: { canView: true, canEdit: false } },
+    { id: 20, fullName: 'Ömer Akmeşe', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'omer.akmese@sembolnakliyat.com', password: 'pass.omer123', permissions: { canView: true, canEdit: false } },
+    { id: 21, fullName: 'Ömer Yıldız', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'omer.yildiz@sembolnakliyat.com', password: 'pass.omer1234', permissions: { canView: true, canEdit: false } },
+    { id: 22, fullName: 'Oğuzhan Akbulut', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'oguzhan.akbulut@sembolnakliyat.com', password: 'pass.oguzhan1234', permissions: { canView: true, canEdit: false } },
+    { id: 23, fullName: 'Ruslan Muradov', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ruslan.muradov@sembolnakliyat.com', password: 'pass.ruslan123', permissions: { canView: true, canEdit: false } },
+    { id: 24, fullName: 'Sedat Uslu', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'sedat.uslu@sembolnakliyat.com', password: 'pass.sedat123', permissions: { canView: true, canEdit: false } },
+    { id: 25, fullName: 'Vehbi Çirgin', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Şoför', rank: 'Ekip Şefi', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'vehbi.cirgin@sembolnakliyat.com', password: 'pass.vehbi123', permissions: { canView: true, canEdit: false } },
+    { id: 26, fullName: 'Tayfur Akyüz', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'tayfur.akyuz@sembolnakliyat.com', password: 'pass.tayfur123', permissions: { canView: true, canEdit: false } },
+    { id: 27, fullName: 'Ozan İbiş', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'ozan.ibis@sembolnakliyat.com', password: 'pass.ozan123', permissions: { canView: true, canEdit: false } },
+    { id: 28, fullName: 'Rafet Tarakçı', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'rafet.tarakci@sembolnakliyat.com', password: 'pass.rafet123', permissions: { canView: true, canEdit: false } },
+    { id: 29, fullName: 'Erdem Yaman', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: 'Taşıma Elemanı', rank: 'Standart', safetyTraining: 'Eğitim Aldı (Geçerli)', email: 'erdem.yaman@sembolnakliyat.com', password: 'pass.erdem123', permissions: { canView: true, canEdit: false } }
+  ];
+
+  const [personnelList, setPersonnelList, isPersonnelLoaded] = useCloudState('personnelList', defaultPersonnelList, authUser);
 
   React.useEffect(() => {
-    if (!isPersonnelLoaded) return;
     try {
       const savedUser = localStorage.getItem('sembol_crm_user');
       if (savedUser) {
         const parsed = JSON.parse(savedUser);
-        
-        // Ana Yönetici (Master Admin) Otomatik Giriş Kontrolü
-        if (parsed.email === 'admin' && parsed.password === '123456') {
-          setCurrentUser({
-            id: 'master-admin',
-            fullName: 'Sistem Yöneticisi',
-            email: 'admin',
-            password: '***',
-            position: 'Firma Sahibi',
-            rank: 'Müdür',
-            permissions: { canView: true, canEdit: true }
-          });
-          setIsAuthenticated(true);
-          setIsAuthChecking(false);
-          return;
-        }
-
         const user = personnelList.find(p => 
           (p.email === parsed.email || p.fullName.toLowerCase() === parsed.email?.toLowerCase()) && 
           p.password === parsed.password
@@ -4439,7 +4487,7 @@ export default function App() {
     } finally {
       setIsAuthChecking(false);
     }
-  }, [isPersonnelLoaded, personnelList]); 
+  }, []); 
 
   const handleAddPersonnel = (newPersonnel) => {
     setPersonnelList(prev => [{ ...newPersonnel, permissions: { canView: true, canEdit: false } }, ...prev]);
@@ -4477,13 +4525,18 @@ export default function App() {
     }));
   };
 
-  const [tasks, setTasks, isTasksLoaded] = useFirebaseCollection('tasks', []);
+  const [tasks, setTasks, isTasksLoaded] = useCloudState('tasks', [
+    { id: '1', title: 'Yeni Araç Kredisi Başvurusu', description: 'Ziraat bankası ile görüşülecek ve evraklar teslim edilecek.', status: 'todo', assignee: 'Mustafa Beşinci', date: '2026-04-28' },
+    { id: '2', title: 'Aylık Fatura Kesimleri', description: 'Nisan ayı faturaları e-arşiv portala girilecek.', status: 'in-progress', assignee: 'Muhasebe Departmanı', date: '2026-04-27' },
+    { id: '3', title: 'Depo 4 İlaçlaması', description: 'Depo 4 için rutin haşere ilaçlaması yapıldı.', status: 'completed', assignee: 'Şenol Beşinci', date: '2026-04-25' }
+  ], authUser);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [editingTask, setEditingTask] = useState(null);
   const [draggingTask, setDraggingTask] = useState(null);
-  const [newTask, setNewTask] = useState({ title: '', description: '', assignee: personnelList.length > 0 ? personnelList[0].fullName : 'Yönetim', date: new Date().toISOString().split('T')[0] });
+  const [newTask, setNewTask] = useState({ title: '', description: '', assignee: 'Mustafa Beşinci', date: new Date().toISOString().split('T')[0] });
 
-  const [vehicles, setVehicles, isVehiclesLoaded] = useFirebaseCollection('vehicles', []);
+  const defaultVehicles = [];
+  const [vehicles, setVehicles, isVehiclesLoaded] = useCloudState('vehicles', defaultVehicles, authUser);
 
   const handleAddVehicle = (newVehicle) => {
     setVehicles([{ id: Date.now(), ...newVehicle }, ...vehicles]);
@@ -4494,7 +4547,8 @@ export default function App() {
     setVehicles(vehicles.filter(v => v.id !== id));
   };
 
-  const [materials, setMaterials, isMaterialsLoaded] = useFirebaseCollection('materials', []);
+  const defaultMaterials = [];
+  const [materials, setMaterials, isMaterialsLoaded] = useCloudState('materials', defaultMaterials, authUser);
 
   const handleAddMaterial = (newMaterial) => {
     setMaterials([{ id: Date.now(), ...newMaterial }, ...materials]);
@@ -4508,7 +4562,112 @@ export default function App() {
     if (mToDelete) addSystemLog('Malzeme Silindi', `${mToDelete.name} adlı malzeme sistemden silindi.`);
   };
 
-  const [jobs, setJobs, isJobsLoaded] = useFirebaseCollection('jobs', []);
+  const getInitialJobs = () => {
+    const firstNames = ["Ahmet", "Mehmet", "Ali", "Mustafa", "Fatma", "Ayşe", "Emine", "Hatice", "Can", "Burak", "Kemal", "Hasan", "Hüseyin", "Cem", "Oğuz", "Elif", "Zeynep", "Merve", "Aslı", "Gizem"];
+    const lastNames = ["Yılmaz", "Kaya", "Demir", "Çelik", "Şahin", "Yıldız", "Öztürk", "Aydın", "Özdemir", "Arslan", "Doğan", "Kılıç", "Aslan", "Çetin", "Kara", "Koç", "Kurt", "Özkan", "Şimşek", "Polat"];
+    const statuses = ['completed', 'completed', 'completed', 'pending', 'pending', 'in-progress', 'cancelled'];
+    const provinces = ["İstanbul (Anadolu)", "İstanbul (Avrupa)", "Kocaeli", "Ankara", "İzmir"];
+
+    const getRandom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+    const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+
+    const mockJobs = [];
+
+    const generateJob = (type, index) => {
+      const status = getRandom(statuses);
+      const isCompleted = status === 'completed';
+
+      // Sadece Mayıs ayı (Bulunduğumuz ay) tarihleri
+      const currentYear = new Date().getFullYear();
+      const day = String(getRandomInt(1, 31)).padStart(2, '0');
+      const dateStr = `${currentYear}-05-${day}`;
+      
+      const timeStr = `${String(getRandomInt(8, 17)).padStart(2, '0')}:00`;
+
+      const fromProv = getRandom(provinces);
+      const fromDist = getRandom(TURKEY_LOCATIONS[fromProv] || ["Merkez"]);
+      
+      const toProv = getRandom(provinces);
+      const toDist = getRandom(TURKEY_LOCATIONS[toProv] || ["Merkez"]);
+
+      const price = getRandomInt(10, 80) * 1000;
+      const deposit = getRandomInt(1, 5) * 1000;
+
+      let endJobDetails = null;
+      if (isCompleted) {
+        endJobDetails = {
+          paymentMethod: getRandom(['Nakit', 'Havale/EFT', 'Kredi Kartı']),
+          damageStatus: getRandom(['Hasarsız teslim edildi', 'Hasarsız teslim edildi', 'Hasarsız teslim edildi', 'Hasar var']),
+          customerSatisfaction: getRandom(['Yorum yazdı.', 'Video alındı.', 'Herhangi bir işlem yapmadı.']),
+          truckStatus: 'Herhangi bir sorun yok',
+          damageDetails: '',
+          truckImage: '',
+          damageImage: '',
+          truckIssueDetails: '',
+          enteredCode: '123456'
+        };
+      }
+
+      return {
+        id: Date.now() + index + Math.random(),
+        type: type,
+        isSpecial: false, // Yıldızlı iş olmasın
+        customerType: 'Bireysel',
+        customerName: `${getRandom(firstNames)} ${getRandom(lastNames)}`,
+        customerPhone: `05${getRandomInt(30, 55)}${getRandomInt(1000000, 9999999)}`,
+        date: dateStr,
+        time: timeStr,
+        price: price.toString(),
+        deposit: deposit.toString(),
+        status: status,
+        fromProvince: fromProv,
+        fromDistrict: fromDist,
+        fromAddress: `${getRandomInt(1, 100)} Sokak No: ${getRandomInt(1, 50)}`,
+        fromFloor: `${getRandomInt(1, 15)}. Kat`,
+        fromRoomCount: getRandom(['1+1', '2+1', '3+1', '4+1']),
+        fromTransportMethod: getRandom(['Merdiven', 'Bina Asansörü', 'Dış Cephe Asansörü']),
+        fromPacking: getRandom(['Toplama Yapılacak', 'Kendisi Topladı']),
+        fromDistance: getRandomInt(10, 50).toString(),
+        fromDistanceUnit: 'Metre',
+        toProvince: type === 'Depo' ? '' : toProv,
+        toDistrict: type === 'Depo' ? '' : toDist,
+        toAddress: type === 'Depo' ? '' : `${getRandomInt(1, 100)} Caddesi No: ${getRandomInt(1, 50)}`,
+        toFloor: type === 'Depo' ? '' : `${getRandomInt(1, 15)}. Kat`,
+        toRoomCount: type === 'Depo' ? '' : getRandom(['1+1', '2+1', '3+1']),
+        toTransportMethod: type === 'Depo' ? '' : getRandom(['Merdiven', 'Bina Asansörü', 'Dış Cephe Asansörü']),
+        toPacking: 'Kendisi Topladı',
+        toDistance: getRandomInt(10, 50).toString(),
+        toDistanceUnit: 'Metre',
+        extraLoadingAddresses: [],
+        extraUnloadingAddresses: [],
+        deliveryCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
+        createdBy: 'Sistem Oto. Kayıt',
+        team: status === 'pending' ? 'Atanmadı' : 'Şenol Beşinci',
+        assignedPersonnelId: status === 'pending' ? null : 2,
+        assignedPersonnelIds: status === 'pending' ? [] : [2],
+        teamNames: status === 'pending' ? [] : ['Şenol Beşinci'],
+        assignedVehiclePlate: status === 'pending' ? '' : '34 SBL 01',
+        endJobDetails: endJobDetails,
+        notes: Math.random() > 0.8 ? 'Müşteri ekstra hassasiyet rica etti.' : '',
+        materialsDeducted: isCompleted
+      };
+    };
+
+    for (let i = 0; i < 50; i++) mockJobs.push(generateJob('Nakliye', i));
+    for (let i = 0; i < 50; i++) mockJobs.push(generateJob('Depo', i + 50));
+    for (let i = 0; i < 50; i++) mockJobs.push(generateJob('Asansör', i + 100));
+
+    return mockJobs.sort((a,b) => new Date(b.date) - new Date(a.date));
+  };
+
+  const [jobs, setJobs, isJobsLoaded] = useCloudState('jobs', getInitialJobs(), authUser);
+
+  // SİSTEMDE HİÇ İŞ YOKSA 150 KAYDI OTOMATİK OLUŞTURUR VE YÜKLER
+  useEffect(() => {
+    if (isJobsLoaded && jobs.length === 0) {
+      setJobs(getInitialJobs());
+    }
+  }, [isJobsLoaded, jobs.length, setJobs]);
 
   const [formData, setFormData] = useState({
     isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo',
@@ -4605,6 +4764,14 @@ export default function App() {
   const handleDeleteJob = (id) => {
     setJobs(jobs.filter(j => j.id !== id));
     addSystemLog('İş Silindi', `Sistem üzerinden bir operasyon kalıcı olarak silindi.`);
+  };
+
+  const handleUploadBackup = (data) => {
+     if(data.jobs) setJobs(JSON.parse(data.jobs));
+     if(data.personnel) setPersonnelList(JSON.parse(data.personnel));
+     if(data.vehicles) setVehicles(JSON.parse(data.vehicles));
+     if(data.materials) setMaterials(JSON.parse(data.materials));
+     addSystemLog('Yedek Yüklendi', 'Sisteme dışarıdan bir yedek dosyası yüklenerek veriler güncellendi.');
   };
 
   const handleAddJob = (e) => {
@@ -4766,28 +4933,6 @@ export default function App() {
   };
 
   const handleLogin = (email, password, rememberMe) => {
-    // Ana Yönetici (Master Admin) Giriş Kontrolü
-    if (email === 'admin' && password === '123456') {
-      const adminUser = {
-        id: 'master-admin',
-        fullName: 'Sistem Yöneticisi',
-        email: 'admin',
-        password: '***',
-        position: 'Firma Sahibi',
-        rank: 'Müdür',
-        permissions: { canView: true, canEdit: true }
-      };
-      setCurrentUser(adminUser);
-      setIsAuthenticated(true);
-      setLoginError('');
-      if (rememberMe) {
-        try { localStorage.setItem('sembol_crm_user', JSON.stringify({ email, password })); } catch (e) { }
-      } else {
-        try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
-      }
-      return;
-    }
-
     const user = personnelList.find(p => 
       (p.email === email || p.fullName.toLowerCase() === email.toLowerCase()) && 
       p.password === password
@@ -5547,7 +5692,7 @@ export default function App() {
       {/* Main Content Area */}
       <main className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
         <div className="max-w-6xl mx-auto">
-          {activeTab === 'dashboard' && <DashboardView jobs={visibleJobs} />}
+          {activeTab === 'dashboard' && <DashboardView jobs={visibleJobs} logs={systemLogs} currentUser={currentUser} />}
           {activeTab === 'calendar' && <CalendarView jobs={visibleJobs} handleEditJob={handleEditJob} />}
           {activeTab === 'profile' && <ProfileView currentUser={currentUser} jobs={visibleJobs} notifications={notifications} markNotificationsAsRead={markNotificationsAsRead} personnelList={personnelList} messages={messages} setMessages={setMessages} handleOpenEndJobModal={handleOpenEndJobModal} setViewingImage={setViewingImage} handleUpdatePersonnel={handleUpdatePersonnel} />}
           
@@ -5622,7 +5767,7 @@ export default function App() {
           {activeTab === 'permissions' && hasAdminAccess && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} />}
           
           {/* Sistem Dosyaları Modülü */}
-          {activeTab === 'backupSystem' && hasAdminAccess && <SystemFilesView />}
+          {activeTab === 'backupSystem' && hasAdminAccess && <SystemFilesView onUploadBackup={handleUploadBackup} />}
           {activeTab === 'systemLogs' && hasAdminAccess && <SystemLogsView logs={systemLogs} />}
         </div>
       </main>
