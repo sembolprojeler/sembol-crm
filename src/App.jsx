@@ -440,10 +440,10 @@ const generateContractPDF = (job) => {
   printWindow.document.write(html);
   printWindow.document.close();
 };
+const DashboardView = ({ jobs, personnelList = [], vehicles = [], materials = [], systemLogs = [], currentUser }) => {
+  const isAdmin = currentUser?.permissions?.canEdit || ['Müdür', 'Firma Sahibi', 'Operasyon'].some(role => currentUser?.position?.includes(role) || currentUser?.rank === role);
 
-// --- DIŞARI ÇIKARTILAN BİLEŞENLER ---
-
-const DashboardView = ({ jobs }) => (
+  return (
   <div className="space-y-6 animate-in fade-in">
     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
@@ -490,15 +490,59 @@ const DashboardView = ({ jobs }) => (
             <Activity className="w-5 h-5 text-red-600" /> Sistem Hareketleri
           </h3>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
-             <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-100 text-sm">
-                 <p className="font-bold text-black mb-0.5">Sistem Özeti</p>
-                 <p className="text-xs text-neutral-600">Sol menüden "Yetkilendirme {'->'} Sistem Dosyaları" sekmesinden detaylı logları görebilirsiniz.</p>
-             </div>
+             {systemLogs?.length > 0 ? systemLogs.slice().sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 5).map(log => (
+                <div key={log.id} className="p-3 bg-neutral-50 rounded-xl border border-neutral-100 text-sm">
+                   <p className="font-bold text-black mb-0.5">{log.action}</p>
+                   <p className="text-xs text-neutral-600">{log.details}</p>
+                   <p className="text-[10px] text-neutral-400 mt-1">{log.user} - {log.timestamp}</p>
+                </div>
+             )) : (
+               <div className="p-3 bg-neutral-50 rounded-xl border border-neutral-100 text-sm">
+                   <p className="font-bold text-black mb-0.5">Sistem Özeti</p>
+                   <p className="text-xs text-neutral-600">Sol menüden "Yetkilendirme {'->'} Sistem Dosyaları" sekmesinden detaylı logları görebilirsiniz.</p>
+               </div>
+             )}
           </div>
       </div>
     </div>
+
+    {isAdmin && (
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in slide-in-from-bottom-4">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-64 flex flex-col">
+          <h3 className="text-sm font-bold text-black mb-3 flex items-center gap-2 border-b border-neutral-100 pb-2"><Briefcase className="w-4 h-4 text-red-600"/> Sistemdeki Personeller</h3>
+          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
+            {personnelList.slice(0, 5).map(p => (
+              <div key={p.id} className="text-xs flex justify-between p-2 bg-neutral-50 rounded-lg border border-neutral-100">
+                <span className="font-bold text-black">{p.fullName}</span><span className="text-neutral-500">{p.position}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-64 flex flex-col">
+          <h3 className="text-sm font-bold text-black mb-3 flex items-center gap-2 border-b border-neutral-100 pb-2"><Car className="w-4 h-4 text-red-600"/> Aktif Araçlar</h3>
+          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
+            {vehicles.slice(0, 5).map(v => (
+              <div key={v.id} className="text-xs flex justify-between p-2 bg-neutral-50 rounded-lg border border-neutral-100">
+                <span className="font-bold text-black">{v.plate}</span><span className="text-neutral-500">{v.type}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-64 flex flex-col">
+          <h3 className="text-sm font-bold text-black mb-3 flex items-center gap-2 border-b border-neutral-100 pb-2"><Package className="w-4 h-4 text-red-600"/> Stok Durumu (Kritik)</h3>
+          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
+            {materials.sort((a,b)=>a.stock - b.stock).slice(0, 5).map(m => (
+              <div key={m.id} className="text-xs flex justify-between items-center p-2 bg-neutral-50 rounded-lg border border-neutral-100">
+                <span className="font-bold text-black">{m.name}</span>
+                <span className={`font-black px-2 py-0.5 rounded ${m.stock <= 10 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>{m.stock} {m.unit}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    )}
   </div>
-);
+)};
 
 const AddJobView = ({
   type, formData, setFormData, handleInputChange, handleProvinceChange,
@@ -2092,9 +2136,14 @@ const CalendarView = ({ jobs, handleEditJob }) => {
                       <span className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border ${job.team === 'Atanmadı' ? 'bg-yellow-50 text-yellow-700 border-yellow-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}><User className="w-3 h-3" /> {job.team}</span>
                       {job.assignedVehiclePlate && <span className="flex items-center gap-1 text-[10px] font-bold bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100"><Truck className="w-3 h-3" /> {job.assignedVehiclePlate}</span>}
                     </div>
-                    <button onClick={() => handleEditJob(job)} className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-neutral-200">
-                      <Edit className="w-3 h-3"/> Düzenle
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                       <button onClick={() => generateContractPDF(job)} className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-green-200">
+                         <FileText className="w-3 h-3"/> PDF
+                       </button>
+                       <button onClick={() => handleEditJob(job)} className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-neutral-200">
+                         <Edit className="w-3 h-3"/> Düzenle
+                       </button>
+                    </div>
                   </div>
                 </div>
               ))
@@ -2118,11 +2167,11 @@ const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
 
-  // Filtreleme: Yalnızca bugünün işleri görünsün
+  // Filtreleme: Bugün ve Gelecekteki işler görünsün
   const myJobs = jobs.filter(j => 
     (j.assignedPersonnelIds?.includes(currentUser.id) || j.assignedPersonnelId === currentUser.id) &&
-    j.date === todayStr
-  );
+    (j.date >= todayStr || j.status === 'in-progress')
+  ).sort((a, b) => new Date(a.date) - new Date(b.date));
   
   const myNotifications = notifications.filter(n => n.userId === currentUser.id);
   const isLeader = ['Müdür', 'Ekip Şefi', 'Kalfa'].includes(currentUser.rank) || currentUser.permissions?.canEdit;
@@ -3928,17 +3977,17 @@ const SystemLogsView = ({ logs }) => (
   </div>
 );
 
-const SystemFilesView = () => {
+const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, addSystemLog }) => {
   const [backups, setBackups] = useState(() => {
     const saved = localStorage.getItem('sembol_backups');
     if (saved) return JSON.parse(saved);
     return [
-      { id: 1, date: '2026-04-20', time: '18:30', size: '1.2 MB', description: 'Otomatik Sistem Yedeği', status: 'success' },
-      { id: 2, date: '2026-04-25', time: '09:15', size: '1.5 MB', description: 'Manuel Kullanıcı Yedeği', status: 'success' }
+      { id: 1, date: '2026-04-20', time: '18:30', size: '1.2 MB', description: 'Sistem Yedeği', status: 'success' }
     ];
   });
   const [isBackingUp, setIsBackingUp] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
+  const fileInputRef = React.useRef(null);
 
   useEffect(() => {
     localStorage.setItem('sembol_backups', JSON.stringify(backups));
@@ -3946,27 +3995,65 @@ const SystemFilesView = () => {
 
   const handleTakeBackup = () => {
     setIsBackingUp(true);
-    // Gerçekçi bir yedekleme süresi simüle ediyoruz
     setTimeout(() => {
+      // Gerçek Firebase verilerini kullanarak yedekleme dosyasını oluştur
+      const allData = { jobs, personnelList, vehicles, materials };
+      const jsonStr = JSON.stringify(allData, null, 2);
+      
       const newBackup = {
         id: Date.now(),
         date: new Date().toISOString().split('T')[0],
         time: new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }),
-        size: (Math.random() * (3.0 - 1.5) + 1.5).toFixed(2) + ' MB',
-        description: 'Manuel Sistem Yedeği (Kullanıcı Talebi)',
+        size: (new Blob([jsonStr]).size / (1024 * 1024)).toFixed(2) + ' MB',
+        description: 'Manuel Sistem Yedeği',
         status: 'success'
       };
       setBackups([newBackup, ...backups]);
+      
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(jsonStr);
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", `sembol_yedek_${newBackup.date}_${newBackup.time.replace(':','')}.json`);
+      document.body.appendChild(downloadAnchorNode); 
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+      
+      addSystemLog('Yedek Alındı', 'Sistem üzerinden manuel olarak yedek dosyası indirildi.');
       setIsBackingUp(false);
-    }, 2000); 
+    }, 1000); 
   };
 
-  const handleRestoreBackup = () => {
+  const handleRestoreFileSelect = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
     setIsRestoring(true);
-    setTimeout(() => {
-       alert("Sistem yedeği başarıyla geri yüklendi! (Sanal İşlem)");
-       setIsRestoring(false);
-    }, 1500);
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const parsed = JSON.parse(event.target.result);
+        const collectionsToRestore = ['jobs', 'personnelList', 'vehicles', 'materials'];
+        
+        for (const colName of collectionsToRestore) {
+          if (parsed[colName] && Array.isArray(parsed[colName])) {
+            for (const item of parsed[colName]) {
+               const { id, ...data } = item;
+               if(id) {
+                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', colName, id), data);
+               }
+            }
+          }
+        }
+        alert("Sistem yedeği başarıyla yüklendi! Lütfen sayfayı yenileyin.");
+        addSystemLog('Yedek Yüklendi', `${file.name} dosyasından sisteme veri aktarıldı.`);
+      } catch (err) {
+        console.error(err);
+        alert("Yedek dosyası okunamadı veya formatı hatalı.");
+      }
+      setIsRestoring(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+    reader.readAsText(file);
   };
 
   const handleDownloadCode = () => {
@@ -4024,11 +4111,12 @@ export default function App() {
               className="w-full px-8 py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex items-center justify-center gap-2 shadow-lg disabled:opacity-70"
             >
               {isBackingUp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-              {isBackingUp ? 'Yedekleniyor...' : 'Şimdi Yedek Al'}
+              {isBackingUp ? 'Yedekleniyor...' : 'Şimdi Yedek Al (.json)'}
             </button>
             <div className="flex gap-2">
+                <input type="file" accept=".json" ref={fileInputRef} className="hidden" onChange={handleRestoreFileSelect} />
                 <button 
-                  onClick={handleRestoreBackup} 
+                  onClick={() => fileInputRef.current?.click()} 
                   disabled={isRestoring}
                   className="flex-1 px-4 py-3 bg-blue-50 text-blue-700 border border-blue-200 font-bold rounded-xl hover:bg-blue-100 transition flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-70 text-xs"
                 >
@@ -5409,7 +5497,7 @@ const submitEndJob = async (e) => {
       {/* Main Content Area */}
       <main className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
         <div className="max-w-6xl mx-auto">
-          {activeTab === 'dashboard' && <DashboardView jobs={visibleJobs} />}
+          {activeTab === 'dashboard' && <DashboardView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} />}
           {activeTab === 'calendar' && <CalendarView jobs={visibleJobs} handleEditJob={handleEditJob} />}
           {activeTab === 'profile' && <ProfileView currentUser={currentUser} jobs={visibleJobs} notifications={notifications} markNotificationsAsRead={markNotificationsAsRead} personnelList={personnelList} messages={messages} setMessages={setMessages} handleOpenEndJobModal={handleOpenEndJobModal} setViewingImage={setViewingImage} handleUpdatePersonnel={handleUpdatePersonnel} />}
           
@@ -5484,7 +5572,7 @@ const submitEndJob = async (e) => {
           {activeTab === 'permissions' && hasAdminAccess && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} />}
           
           {/* Sistem Dosyaları Modülü */}
-          {activeTab === 'backupSystem' && hasAdminAccess && <SystemFilesView />}
+          {activeTab === 'backupSystem' && hasAdminAccess && <SystemFilesView jobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} />}
           {activeTab === 'systemLogs' && hasAdminAccess && <SystemLogsView logs={systemLogs} />}
         </div>
       </main>
