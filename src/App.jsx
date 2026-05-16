@@ -2175,15 +2175,23 @@ import React, { useState, useEffect } from 'react';
       const isAssigned = j.assignedPersonnelIds?.includes(currentUser.id) || j.assignedPersonnelId === currentUser.id;
       if (!isAssigned) return false;
 
-      // Normal personel için: Atama yapıldığı gün işi görmesin, gece 00:00'dan itibaren (ertesi gün) görsün
-      if (!isManagerRole && j.assignedDate && todayStr <= j.assignedDate) {
+      // Normal personel için: Eğer iş bugün atanmışsa ve işin tarihi bugünden sonraysa gizle (gece 00:00'dan sonra görünecek)
+      // İş bugünün işi ise (acil atama) hemen göster
+      if (!isManagerRole && j.assignedDate === todayStr && j.date > todayStr) {
         return false;
       }
 
       return (j.date >= todayStr || j.status === 'in-progress');
     }).sort((a, b) => new Date(a.date) - new Date(b.date));
     
-    const myNotifications = notifications.filter(n => n.userId === currentUser.id);
+    const myNotifications = notifications.filter(n => {
+      if (n.userId !== currentUser.id) return false;
+      // Atama bildirimiyse ve iş yarına (veya sonrasına) aitse, bildirimi de ertesi güne kadar gizle
+      if (!isManagerRole && n.type === 'assignment' && n.assignedDate === todayStr && n.jobDate > todayStr) {
+        return false;
+      }
+      return true;
+    });
     const isLeader = ['Müdür', 'Ekip Şefi', 'Kalfa'].includes(currentUser.rank) || currentUser.permissions?.canEdit;
 
     // Profil sekmesi açıldığında bildirimleri okundu olarak işaretle
@@ -4817,9 +4825,11 @@ import React, { useState, useEffect } from 'react';
       });
       
       const notifsCol = collection(db, 'artifacts', appId, 'public', 'data', 'notifications');
+      const assignDateStr = new Date().toISOString().split('T')[0];
       for (const userId of allAssignedIds) {
         await addDoc(notifsCol, {
-          userId: userId, title: 'Yeni Görev Ataması', message: `${jobToAssign.customerName} operasyonu için görevlendirildiniz.`, date: new Date().toLocaleString('tr-TR'), read: false
+          userId: userId, title: 'Yeni Görev Ataması', message: `${jobToAssign.customerName} operasyonu için görevlendirildiniz.`, date: new Date().toLocaleString('tr-TR'), read: false,
+          type: 'assignment', assignedDate: assignDateStr, jobDate: jobToAssign.date
         });
       }
       
@@ -5047,7 +5057,16 @@ import React, { useState, useEffect } from 'react';
       return true;
     });
     
-    const unreadNotifCount = notifications.filter(n => n.userId === currentUser?.id && !n.read).length;
+    const todayStrApp = new Date().toISOString().split('T')[0];
+    const visibleNotifications = notifications.filter(n => {
+      if (n.userId !== currentUser?.id) return false;
+      if (!isManager && n.type === 'assignment' && n.assignedDate === todayStrApp && n.jobDate > todayStrApp) {
+        return false;
+      }
+      return true;
+    });
+
+    const unreadNotifCount = visibleNotifications.filter(n => !n.read).length;
     const unreadMessageCount = messages.filter(m => m.receiverId === currentUser?.id && !m.read).length;
     const totalUnreadCount = unreadNotifCount + unreadMessageCount;
 
