@@ -442,10 +442,21 @@ import React, { useState, useEffect } from 'react';
   };
   const DashboardView = ({ jobs, personnelList = [], vehicles = [], materials = [], systemLogs = [], currentUser }) => {
     const isAdmin = currentUser?.permissions?.canEdit || ['Müdür', 'Firma Sahibi', 'Operasyon'].some(role => currentUser?.position?.includes(role) || currentUser?.rank === role);
+    const canDelete = currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi' || currentUser?.permissions?.canEdit;
 
     const [announcements, setAnnouncements] = useState([]);
     const [posts, setPosts] = useState([]);
     const [bestEmployees, setBestEmployees] = useState([]);
+
+    const handleDeleteContent = async (type, id) => {
+        if (window.confirm("Bu içeriği silmek istediğinize emin misiniz?")) {
+            try {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', type, id));
+            } catch (error) {
+                console.error("Silme hatası:", error);
+            }
+        }
+    };
 
     useEffect(() => {
         const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
@@ -478,12 +489,17 @@ import React, { useState, useEffect } from 'react';
              </h3>
              <div className="space-y-3">
                  {announcements.map(ann => (
-                     <div key={ann.id} className="bg-white p-4 rounded-xl shadow-sm border border-red-100">
-                         <div className="flex justify-between items-start mb-1">
+                     <div key={ann.id} className="bg-white p-4 rounded-xl shadow-sm border border-red-100 relative group">
+                         <div className="flex justify-between items-start mb-1 pr-6">
                              <h4 className="font-bold text-black">{ann.title}</h4>
                              <span className="text-[10px] text-neutral-400 font-medium">{ann.dateStr}</span>
                          </div>
                          <p className="text-sm text-neutral-600 whitespace-pre-wrap">{ann.content}</p>
+                         {canDelete && (
+                             <button onClick={() => handleDeleteContent('announcements', ann.id)} className="absolute top-3 right-3 p-1.5 bg-red-50 text-red-600 rounded-lg opacity-0 group-hover:opacity-100 transition" title="Sil">
+                                 <X className="w-4 h-4" />
+                             </button>
+                         )}
                      </div>
                  ))}
              </div>
@@ -500,7 +516,12 @@ import React, { useState, useEffect } from 'react';
                   </h3>
                   <div className="overflow-y-auto custom-scrollbar flex-1 space-y-4 pr-2">
                       {posts.map(post => (
-                          <div key={post.id} className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden">
+                          <div key={post.id} className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden relative group">
+                              {canDelete && (
+                                  <button onClick={() => handleDeleteContent('posts', post.id)} className="absolute top-2 right-2 p-1.5 bg-black/50 hover:bg-red-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition z-10" title="Sil">
+                                      <X className="w-4 h-4" />
+                                  </button>
+                              )}
                               {post.imageUrl && (
                                   <div className="w-full aspect-video bg-neutral-100">
                                       <img src={post.imageUrl} alt={post.title} className="w-full h-full object-cover" />
@@ -524,7 +545,12 @@ import React, { useState, useEffect } from 'react';
                   </h3>
                   <div className="overflow-y-auto custom-scrollbar flex-1 space-y-3 pr-2">
                       {bestEmployees.map(best => (
-                          <div key={best.id} className="bg-white p-4 rounded-xl shadow-sm border border-yellow-100 flex items-center gap-4">
+                          <div key={best.id} className="bg-white p-4 rounded-xl shadow-sm border border-yellow-100 flex items-center gap-4 relative group">
+                              {canDelete && (
+                                  <button onClick={() => handleDeleteContent('bestEmployees', best.id)} className="absolute top-2 right-2 p-1.5 bg-red-50 text-red-600 rounded-lg opacity-0 group-hover:opacity-100 transition z-10" title="Sil">
+                                      <X className="w-4 h-4" />
+                                  </button>
+                              )}
                               <div className="w-12 h-12 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center font-black text-xl border-2 border-yellow-200 shrink-0 overflow-hidden">
                                   {personnelList.find(p => p.fullName === best.employeeName)?.profileImage ? (
                                       <img src={personnelList.find(p => p.fullName === best.employeeName)?.profileImage} alt={best.employeeName} className="w-full h-full object-cover" />
@@ -5685,18 +5711,18 @@ import React, { useState, useEffect } from 'react';
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addAsansor' ? 'bg-white' : 'bg-red-600'}`}></div> Asansör Kayıt
                     </button>
-                    <button 
-                      onClick={() => { setActiveTab('addInfo'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addInfo' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addInfo' ? 'bg-white' : 'bg-red-600'}`}></div> Bilgilendirme Ekle
-                    </button>
+                    {(currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi' || currentUser?.permissions?.canEdit) && (
+                      <button 
+                        onClick={() => { setActiveTab('addInfo'); setIsSidebarOpen(false); }}
+                        className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addInfo' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      >
+                        <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addInfo' ? 'bg-white' : 'bg-red-600'}`}></div> Bilgilendirme Ekle
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
             )}
-
-            <div className="w-full h-px bg-neutral-800 my-2"></div>
 
             {/* İş Listesi */}
             {hasJobAccess && (
@@ -6050,7 +6076,7 @@ import React, { useState, useEffect } from 'react';
             {activeTab === 'dashboard' && <DashboardView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} />}
             {activeTab === 'calendar' && <CalendarView jobs={visibleJobs} handleEditJob={handleEditJob} />}
             {activeTab === 'profile' && <ProfileView currentUser={currentUser} jobs={visibleJobs} notifications={notifications} markNotificationsAsRead={markNotificationsAsRead} personnelList={personnelList} messages={messages} setMessages={setMessages} handleOpenEndJobModal={handleOpenEndJobModal} setViewingImage={setViewingImage} handleUpdatePersonnel={handleUpdatePersonnel} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
-            {activeTab === 'addInfo' && hasJobAccess && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
+            {activeTab === 'addInfo' && hasJobAccess && (currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi' || currentUser?.permissions?.canEdit) && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
             
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && hasJobAccess &&
               <AddJobView 
