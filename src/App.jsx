@@ -3804,6 +3804,7 @@ import React, { useState, useEffect } from 'react';
   const PersonnelListView = ({ personnelList, onUpdate, positions = [], ranks = [], title = "Tüm Personel" }) => {
     const [editingPerson, setEditingPerson] = useState(null);
     const [editForm, setEditForm] = useState({});
+    const [isUploading, setIsUploading] = useState(false);
 
     const openEdit = (person) => {
       setEditingPerson(person);
@@ -3814,6 +3815,38 @@ import React, { useState, useEffect } from 'react';
       e.preventDefault();
       onUpdate(editForm);
       setEditingPerson(null);
+    };
+
+    const handleImageUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      setIsUploading(true);
+      setEditForm(prev => ({ ...prev, profileImage: 'Yükleniyor...' }));
+
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', {
+          method: 'POST',
+          body: uploadData,
+        });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try {
+          const json = JSON.parse(text);
+          uploadedUrl = json.url || json.fileName || json.file || text;
+        } catch (err) {
+          uploadedUrl = text.trim();
+        }
+        setEditForm(prev => ({ ...prev, profileImage: uploadedUrl }));
+      } catch (err) {
+        console.error("Yükleme hatası:", err);
+        alert("Görsel yüklenemedi.");
+        setEditForm(prev => ({ ...prev, profileImage: '' }));
+      }
+      setIsUploading(false);
     };
 
     return (
@@ -3848,6 +3881,14 @@ import React, { useState, useEffect } from 'react';
                     </div>
                   </td>
                   <td className="p-4 text-neutral-600">
+                    <div className="flex flex-col gap-1 text-xs font-medium">
+                      {person.personalPhone && <span className="flex items-center gap-1.5"><Phone className="w-3 h-3 text-neutral-400"/> {person.personalPhone}</span>}
+                      {person.companyPhone && <span className="flex items-center gap-1.5"><Phone className="w-3 h-3 text-neutral-400"/> Şirket: {person.companyPhone}</span>}
+                      {person.email && <span className="flex items-center gap-1.5"><Mail className="w-3 h-3 text-neutral-400"/> {person.email}</span>}
+                      {!person.personalPhone && !person.companyPhone && !person.email && <span className="text-neutral-400 italic">Belirtilmedi</span>}
+                    </div>
+                  </td>
+                  <td className="p-4 text-neutral-600">
                     <span className="font-bold">{person.position}</span><br/>
                     <span className="text-xs text-neutral-500">{person.rank}</span>
                   </td>
@@ -3877,38 +3918,148 @@ import React, { useState, useEffect } from 'react';
         </div>
 
         {editingPerson && (
-          <div className="fixed inset-0 bg-black/80 z-50 flex justify-center items-center p-4">
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md animate-in zoom-in-95">
-              <h3 className="font-bold text-lg mb-4 flex items-center gap-2 border-b border-neutral-200 pb-3">
-                <Edit className="w-5 h-5 text-red-600" /> Personel Bilgilerini Düzenle
+          <div className="fixed inset-0 bg-black/80 z-50 flex justify-center items-center p-4 overflow-y-auto">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-4xl animate-in zoom-in-95 my-8">
+              <h3 className="font-bold text-xl mb-4 flex items-center gap-2 border-b border-neutral-200 pb-3">
+                <Edit className="w-6 h-6 text-red-600" /> Personel Bilgilerini Düzenle
               </h3>
-              <form onSubmit={saveEdit} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-bold mb-1 text-neutral-700">Ad Soyad</label>
-                  <input required className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" value={editForm.fullName || ''} onChange={(e) => setEditForm({...editForm, fullName: e.target.value})} />
+              <form onSubmit={saveEdit} className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="md:col-span-2 mb-2 flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 bg-neutral-50 rounded-xl border border-neutral-200">
+                    <div className="w-20 h-20 rounded-full border-2 border-white shadow-sm overflow-hidden bg-neutral-200 flex items-center justify-center shrink-0">
+                      {editForm.profileImage === 'Yükleniyor...' ? (
+                        <span className="text-[10px] text-neutral-500 font-bold animate-pulse">Yükleniyor</span>
+                      ) : editForm.profileImage ? (
+                        <img src={editForm.profileImage} alt="Profil" className="w-full h-full object-cover" />
+                      ) : (
+                        <UserPlus className="w-8 h-8 text-neutral-400" />
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2 w-full sm:w-auto">
+                      <label className="block text-sm font-bold text-neutral-700">Profil Fotoğrafı</label>
+                      <label className="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-fit shadow-sm">
+                        <Upload className="w-4 h-4 text-neutral-600" />
+                        <span className="text-sm font-bold text-neutral-700">Fotoğraf Yükle</span>
+                        <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={isUploading} />
+                      </label>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Ad Soyad *</label>
+                    <input required type="text" value={editForm.fullName || ''} onChange={(e) => setEditForm({...editForm, fullName: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">TC Kimlik No</label>
+                    <input type="text" value={editForm.tcNo || ''} onChange={(e) => setEditForm({...editForm, tcNo: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Kişisel Telefon</label>
+                    <input type="tel" value={editForm.personalPhone || ''} onChange={(e) => setEditForm({...editForm, personalPhone: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Şirket Telefonu</label>
+                    <input type="tel" value={editForm.companyPhone || ''} onChange={(e) => setEditForm({...editForm, companyPhone: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-bold mb-1 text-neutral-700">Pozisyonu</label>
-                  <select required className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600 bg-white" value={editForm.position || ''} onChange={(e) => setEditForm({...editForm, position: e.target.value})}>
-                    <option value="">Seçiniz</option>
-                    {positions.map(pos => <option key={pos} value={pos}>{pos}</option>)}
-                  </select>
+                
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold mb-1 text-neutral-700">Pozisyonu *</label>
+                    <select required className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600 bg-white" value={editForm.position || ''} onChange={(e) => setEditForm({...editForm, position: e.target.value})}>
+                      <option value="">Seçiniz</option>
+                      {positions.map(pos => <option key={pos} value={pos}>{pos}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold mb-1 text-neutral-700">Rütbesi *</label>
+                    <select required className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600 bg-white" value={editForm.rank || ''} onChange={(e) => setEditForm({...editForm, rank: e.target.value})}>
+                      <option value="">Seçiniz</option>
+                      {ranks.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">İş Güvenliği Durumu</label>
+                    <select required value={editForm.safetyTraining || 'Eğitim Aldı (Geçerli)'} onChange={(e) => setEditForm({...editForm, safetyTraining: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                      <option value="Eğitim Aldı (Geçerli)">Eğitim Aldı (Geçerli)</option>
+                      <option value="Eğitim Süresi Doldu">Eğitim Süresi Doldu</option>
+                      <option value="Eğitim Almadı (Riskli)">Eğitim Almadı (Riskli)</option>
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-sm font-bold mb-1 text-neutral-700">Rütbesi</label>
-                  <select required className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600 bg-white" value={editForm.rank || ''} onChange={(e) => setEditForm({...editForm, rank: e.target.value})}>
-                    <option value="">Seçiniz</option>
-                    {ranks.map(r => <option key={r} value={r}>{r}</option>)}
-                  </select>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">E-Posta (Sisteme Giriş İçin)</label>
+                    <input type="email" value={editForm.email || ''} onChange={(e) => setEditForm({...editForm, email: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Şifre (Sisteme Giriş İçin)</label>
+                    <input type="text" value={editForm.password || ''} onChange={(e) => setEditForm({...editForm, password: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
                 </div>
-                <div className="flex gap-3 mt-6 pt-2">
-                  <button type="button" onClick={() => setEditingPerson(null)} className="flex-1 p-3 bg-neutral-100 text-neutral-700 rounded-xl font-bold hover:bg-neutral-200 transition">İptal</button>
-                  <button type="submit" className="flex-1 p-3 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition shadow-lg shadow-red-600/30">Değişiklikleri Kaydet</button>
+
+                <div className="flex gap-3 mt-6 pt-4 border-t border-neutral-200">
+                  <button type="button" onClick={() => setEditingPerson(null)} className="flex-1 py-4 bg-neutral-100 text-neutral-700 rounded-xl font-bold hover:bg-neutral-200 transition">İptal</button>
+                  <button type="submit" disabled={isUploading} className="flex-1 py-4 bg-red-600 text-white rounded-xl font-bold hover:bg-red-700 transition shadow-lg shadow-red-600/30 disabled:opacity-50">Değişiklikleri Kaydet</button>
                 </div>
               </form>
             </div>
           </div>
         )}
+      </div>
+    );
+  };
+
+  const ComplaintsView = ({ complaints, updateComplaintStatus, deleteComplaint }) => {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+        <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
+          <AlertTriangle className="w-6 h-6 text-red-600" /> Şikayet ve Bildirimler
+        </h2>
+        <div className="space-y-4">
+          {complaints.length === 0 ? (
+            <div className="p-8 text-center text-neutral-500 font-medium bg-neutral-50 rounded-xl border border-neutral-200">
+              Sistemde kayıtlı şikayet veya bildirim bulunmuyor.
+            </div>
+          ) : (
+            complaints.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp)).map(complaint => (
+              <div key={complaint.id} className={`p-5 rounded-xl border transition ${complaint.read ? 'bg-white border-neutral-200' : 'bg-red-50/30 border-red-200'}`}>
+                <div className="flex flex-col md:flex-row md:justify-between md:items-start mb-3 border-b border-neutral-100 pb-3 gap-3">
+                  <div>
+                    <h3 className="font-bold text-black text-lg flex items-center gap-2">
+                      {!complaint.read && <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse"></span>}
+                      {complaint.subject}
+                    </h3>
+                    <div className="text-xs text-neutral-500 mt-1 flex flex-wrap items-center gap-2">
+                      <span className="font-bold text-neutral-700">{complaint.senderName} ({complaint.senderPosition})</span>
+                      <span>•</span>
+                      <span>{complaint.dateStr}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <select 
+                      value={complaint.status}
+                      onChange={(e) => updateComplaintStatus(complaint.id, e.target.value, true)}
+                      className={`text-xs font-bold px-3 py-2 rounded-lg border outline-none cursor-pointer transition ${
+                        complaint.status === 'Yeni' ? 'bg-red-50 text-red-700 border-red-200 focus:ring-red-600' :
+                        complaint.status === 'İnceleniyor' ? 'bg-blue-50 text-blue-700 border-blue-200 focus:ring-blue-600' :
+                        'bg-green-50 text-green-700 border-green-200 focus:ring-green-600'
+                      }`}
+                    >
+                      <option value="Yeni">Yeni</option>
+                      <option value="İnceleniyor">İnceleniyor</option>
+                      <option value="Çözüldü">Çözüldü</option>
+                    </select>
+                    <button onClick={() => deleteComplaint(complaint.id)} className="p-2 bg-neutral-100 hover:bg-red-100 text-neutral-500 hover:text-red-600 rounded-lg transition" title="Sil">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+                <p className="text-sm text-neutral-700 whitespace-pre-wrap leading-relaxed">{complaint.content}</p>
+              </div>
+            ))
+          )}
+        </div>
       </div>
     );
   };
