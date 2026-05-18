@@ -14,7 +14,7 @@ import React, { useState, useEffect } from 'react';
   import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
   import { 
     getFirestore, collection, addDoc, onSnapshot, 
-    doc, updateDoc, deleteDoc, setDoc, getDocs 
+    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy
   } from "firebase/firestore";
 
   // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
@@ -347,7 +347,7 @@ import React, { useState, useEffect } from 'react';
           <tr><td class="label">Anlaşma Bedeli (TL):</td><td>${fiyat} ₺</td></tr>
           <tr><td class="label">Alınan Peşinat (Kapora):</td><td>${kapora} ₺</td></tr>
           <tr><td class="label">Kalan Bakiye (TL):</td><td>${bakiye} ₺</td></tr>
-          <tr><td class="label" style="background: #fee2e2; color: #dc2626;">Müşteri Teslim Kodu:</td><td style="font-size: 15px; font-weight: 900; letter-spacing: 3px; color: #dc2626; background: #fef2f2;">${job.deliveryCode || '--------'}</td></tr>
+          ${job.type === 'Asansör' ? '' : `<tr><td class="label" style="background: #fee2e2; color: #dc2626;">Müşteri Teslim Kodu:</td><td style="font-size: 15px; font-weight: 900; letter-spacing: 3px; color: #dc2626; background: #fef2f2;">${job.deliveryCode || '--------'}</td></tr>`}
         </table>
 
         <div class="signatures">
@@ -443,8 +443,109 @@ import React, { useState, useEffect } from 'react';
   const DashboardView = ({ jobs, personnelList = [], vehicles = [], materials = [], systemLogs = [], currentUser }) => {
     const isAdmin = currentUser?.permissions?.canEdit || ['Müdür', 'Firma Sahibi', 'Operasyon'].some(role => currentUser?.position?.includes(role) || currentUser?.rank === role);
 
+    const [announcements, setAnnouncements] = useState([]);
+    const [posts, setPosts] = useState([]);
+    const [bestEmployees, setBestEmployees] = useState([]);
+
+    useEffect(() => {
+        const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
+        const unsubs = [];
+
+        unsubs.push(onSnapshot(query(getCol('announcements'), orderBy('timestamp', 'desc')), snap => {
+            setAnnouncements(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+        }));
+
+        unsubs.push(onSnapshot(query(getCol('posts'), orderBy('timestamp', 'desc')), snap => {
+            setPosts(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+        }));
+
+        unsubs.push(onSnapshot(query(getCol('bestEmployees'), orderBy('timestamp', 'desc')), snap => {
+            setBestEmployees(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+        }));
+
+        return () => unsubs.forEach(unsub => unsub());
+    }, []);
+
     return (
     <div className="space-y-6 animate-in fade-in">
+
+      {/* --- DUYURULAR --- */}
+      {announcements.length > 0 && (
+          <div className="bg-red-50 border border-red-200 p-4 rounded-2xl shadow-sm relative overflow-hidden">
+             <div className="absolute top-0 left-0 w-1 h-full bg-red-600"></div>
+             <h3 className="text-red-800 font-black flex items-center gap-2 mb-3">
+                 <Bell className="w-5 h-5" /> Şirket Duyuruları
+             </h3>
+             <div className="space-y-3">
+                 {announcements.map(ann => (
+                     <div key={ann.id} className="bg-white p-4 rounded-xl shadow-sm border border-red-100">
+                         <div className="flex justify-between items-start mb-1">
+                             <h4 className="font-bold text-black">{ann.title}</h4>
+                             <span className="text-[10px] text-neutral-400 font-medium">{ann.dateStr}</span>
+                         </div>
+                         <p className="text-sm text-neutral-600 whitespace-pre-wrap">{ann.content}</p>
+                     </div>
+                 ))}
+             </div>
+          </div>
+      )}
+
+      {/* --- PAYLAŞIMLAR VE EN İYİLER --- */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {posts.length > 0 && (
+              <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl shadow-sm relative overflow-hidden h-96 flex flex-col">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
+                  <h3 className="text-blue-800 font-black flex items-center gap-2 mb-3 shrink-0">
+                      <Camera className="w-5 h-5" /> Saha Paylaşımları
+                  </h3>
+                  <div className="overflow-y-auto custom-scrollbar flex-1 space-y-4 pr-2">
+                      {posts.map(post => (
+                          <div key={post.id} className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden">
+                              {post.imageUrl && (
+                                  <div className="w-full aspect-video bg-neutral-100">
+                                      <img src={post.imageUrl} alt={post.title} className="w-full h-full object-cover" />
+                                  </div>
+                              )}
+                              <div className="p-3">
+                                  <h4 className="font-bold text-black text-sm mb-1">{post.title}</h4>
+                                  <span className="text-[10px] text-neutral-400 font-medium">{post.dateStr} - {post.author}</span>
+                              </div>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          )}
+
+          {bestEmployees.length > 0 && (
+              <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-2xl shadow-sm relative overflow-hidden h-96 flex flex-col">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500"></div>
+                  <h3 className="text-yellow-800 font-black flex items-center gap-2 mb-3 shrink-0">
+                      <Star className="w-5 h-5 fill-yellow-500" /> Ayın En İyileri
+                  </h3>
+                  <div className="overflow-y-auto custom-scrollbar flex-1 space-y-3 pr-2">
+                      {bestEmployees.map(best => (
+                          <div key={best.id} className="bg-white p-4 rounded-xl shadow-sm border border-yellow-100 flex items-center gap-4">
+                              <div className="w-12 h-12 rounded-full bg-yellow-100 text-yellow-600 flex items-center justify-center font-black text-xl border-2 border-yellow-200 shrink-0 overflow-hidden">
+                                  {personnelList.find(p => p.fullName === best.employeeName)?.profileImage ? (
+                                      <img src={personnelList.find(p => p.fullName === best.employeeName)?.profileImage} alt={best.employeeName} className="w-full h-full object-cover" />
+                                  ) : (
+                                      best.employeeName.charAt(0)
+                                  )}
+                              </div>
+                              <div>
+                                  <h4 className="font-bold text-black">{best.title}</h4>
+                                  <p className="text-sm text-neutral-600 font-medium mt-0.5">{best.employeeName}</p>
+                                  <span className="text-[10px] text-neutral-400 font-medium block mt-1">{best.dateStr}</span>
+                              </div>
+                              <Star className="w-8 h-8 text-yellow-400 fill-yellow-400 drop-shadow-sm ml-auto shrink-0 opacity-50" />
+                          </div>
+                      ))}
+                  </div>
+              </div>
+          )}
+      </div>
+
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
           <p className="text-neutral-500 text-sm font-medium mb-1">Toplam İş</p>
@@ -512,8 +613,18 @@ import React, { useState, useEffect } from 'react';
             <h3 className="text-sm font-bold text-black mb-3 flex items-center gap-2 border-b border-neutral-100 pb-2"><Briefcase className="w-4 h-4 text-red-600"/> Sistemdeki Personeller</h3>
             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
               {personnelList.slice(0, 5).map(p => (
-                <div key={p.id} className="text-xs flex justify-between p-2 bg-neutral-50 rounded-lg border border-neutral-100">
-                  <span className="font-bold text-black">{p.fullName}</span><span className="text-neutral-500">{p.position}</span>
+                <div key={p.id} className="text-xs flex justify-between items-center p-2 bg-neutral-50 rounded-lg border border-neutral-100">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0">
+                      {p.profileImage ? (
+                        <img src={p.profileImage} alt={p.fullName} className="w-full h-full object-cover" />
+                      ) : (
+                        p.fullName.charAt(0)
+                      )}
+                    </div>
+                    <span className="font-bold text-black">{p.fullName}</span>
+                  </div>
+                  <span className="text-neutral-500">{p.position}</span>
                 </div>
               ))}
             </div>
@@ -543,6 +654,175 @@ import React, { useState, useEffect } from 'react';
       )}
     </div>
   )};
+
+  const AddInfoView = ({ currentUser, personnelList, addSystemLog }) => {
+    const [infoType, setInfoType] = useState('Duyuru'); // Duyuru, Paylaşım, En İyiler
+    
+    // Form States
+    const [announcement, setAnnouncement] = useState({ title: '', content: '' });
+    const [post, setPost] = useState({ title: '', imageUrl: '' });
+    const [bestEmp, setBestEmp] = useState({ title: 'Ayın En İyi Personeli', employeeName: '' });
+    
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [successMsg, setSuccessMsg] = useState('');
+
+    const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        setIsSubmitting(true);
+        setPost(prev => ({ ...prev, imageUrl: 'Yükleniyor...' }));
+  
+        const formData = new FormData();
+        formData.append('file', file);
+  
+        try {
+          const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', {
+            method: 'POST',
+            body: formData,
+          });
+          const text = await res.text();
+          let uploadedUrl = file.name;
+          try {
+            const json = JSON.parse(text);
+            uploadedUrl = json.url || json.fileName || json.file || text;
+          } catch (err) {
+            uploadedUrl = text.trim();
+          }
+          setPost(prev => ({ ...prev, imageUrl: uploadedUrl }));
+        } catch (err) {
+          console.error("Yükleme hatası:", err);
+          alert("Görsel yüklenemedi.");
+          setPost(prev => ({ ...prev, imageUrl: '' }));
+        }
+        setIsSubmitting(false);
+      };
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setIsSubmitting(true);
+        try {
+            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 
+                infoType === 'Duyuru' ? 'announcements' : 
+                infoType === 'Paylaşım' ? 'posts' : 'bestEmployees'
+            );
+
+            const commonData = {
+                timestamp: new Date().getTime(),
+                dateStr: new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }),
+                author: currentUser.fullName
+            };
+
+            if (infoType === 'Duyuru') {
+                await addDoc(colRef, { ...announcement, ...commonData });
+                setAnnouncement({ title: '', content: '' });
+                addSystemLog('Duyuru Eklendi', `Sisteme yeni bir duyuru eklendi: ${announcement.title}`);
+            } else if (infoType === 'Paylaşım') {
+                await addDoc(colRef, { ...post, ...commonData });
+                setPost({ title: '', imageUrl: '' });
+                addSystemLog('Paylaşım Eklendi', `Sisteme yeni bir saha paylaşımı eklendi.`);
+            } else if (infoType === 'En İyiler') {
+                await addDoc(colRef, { ...bestEmp, ...commonData });
+                setBestEmp({ title: 'Ayın En İyi Personeli', employeeName: '' });
+                addSystemLog('En İyiler Eklendi', `Sisteme ayın en iyi personeli eklendi: ${bestEmp.employeeName}`);
+            }
+
+            setSuccessMsg('Bilgilendirme başarıyla yayınlandı!');
+            setTimeout(() => setSuccessMsg(''), 3000);
+        } catch (error) {
+            console.error("Hata:", error);
+            alert("İşlem sırasında bir hata oluştu.");
+        }
+        setIsSubmitting(false);
+    };
+
+    return (
+        <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+            <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
+                <Bell className="w-6 h-6 text-red-600" /> Bilgilendirme Ekle
+            </h2>
+
+            <div className="flex gap-2 p-1 bg-neutral-100 rounded-xl mb-6">
+                {['Duyuru', 'Paylaşım', 'En İyiler'].map(type => (
+                    <button
+                        key={type}
+                        type="button"
+                        onClick={() => setInfoType(type)}
+                        className={`flex-1 py-2 text-sm font-bold rounded-lg transition ${infoType === type ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+                    >
+                        {type}
+                    </button>
+                ))}
+            </div>
+
+            {successMsg && (
+                <div className="mb-6 p-3 bg-green-50 text-green-700 rounded-xl font-bold text-sm border border-green-200 flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5" /> {successMsg}
+                </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+                {infoType === 'Duyuru' && (
+                    <>
+                        <div>
+                            <label className="block text-sm font-bold text-black mb-1">Duyuru Başlığı</label>
+                            <input required type="text" value={announcement.title} onChange={e => setAnnouncement({...announcement, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Yeni Araç Filomuz Hakkında" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-black mb-1">Duyuru İçeriği</label>
+                            <textarea required value={announcement.content} onChange={e => setAnnouncement({...announcement, content: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-32 resize-none transition" placeholder="Tüm personelin göreceği detaylı duyuru metni..."></textarea>
+                        </div>
+                    </>
+                )}
+
+                {infoType === 'Paylaşım' && (
+                    <>
+                        <div>
+                            <label className="block text-sm font-bold text-black mb-1">Paylaşım Başlığı / Açıklaması</label>
+                            <input required type="text" value={post.title} onChange={e => setPost({...post, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Kadıköy operasyonundan kareler" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-black mb-1">Görsel Ekle</label>
+                            {post.imageUrl && post.imageUrl !== 'Yükleniyor...' && (
+                                <div className="mb-2 w-full max-h-48 overflow-hidden rounded-xl border border-neutral-200">
+                                    <img src={post.imageUrl} alt="Önizleme" className="w-full h-full object-contain bg-neutral-100" />
+                                </div>
+                            )}
+                            {post.imageUrl === 'Yükleniyor...' && <div className="p-4 text-center font-bold text-neutral-500 animate-pulse bg-neutral-50 rounded-xl border border-neutral-200 mb-2">Görsel Yükleniyor...</div>}
+                            <label className="cursor-pointer w-full py-4 bg-neutral-50 border border-neutral-300 border-dashed rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-100 transition">
+                                <Upload className="w-5 h-5 text-neutral-500" />
+                                <span className="text-sm font-bold text-neutral-600">Fotoğraf Yükle</span>
+                                <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} disabled={isSubmitting} />
+                            </label>
+                        </div>
+                    </>
+                )}
+
+                {infoType === 'En İyiler' && (
+                    <>
+                        <div>
+                            <label className="block text-sm font-bold text-black mb-1">Başlık</label>
+                            <input required type="text" value={bestEmp.title} onChange={e => setBestEmp({...bestEmp, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Ayın En İyi Şoförü" />
+                        </div>
+                        <div>
+                            <label className="block text-sm font-bold text-black mb-1">Personel Seçimi</label>
+                            <select required value={bestEmp.employeeName} onChange={e => setBestEmp({...bestEmp, employeeName: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-medium">
+                                <option value="">Lütfen personel seçin...</option>
+                                {personnelList.map(p => (
+                                    <option key={p.id} value={p.fullName}>{p.fullName} - {p.position}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </>
+                )}
+
+                <button type="submit" disabled={isSubmitting || post.imageUrl === 'Yükleniyor...'} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg disabled:opacity-50 mt-6">
+                    <Send className="w-5 h-5" /> Yayına Al
+                </button>
+            </form>
+        </div>
+    );
+  };
 
   const AddJobView = ({
     type, formData, setFormData, handleInputChange, handleProvinceChange,
@@ -1406,26 +1686,44 @@ import React, { useState, useEffect } from 'react';
                     <CheckCircle className="w-5 h-5 shrink-0 text-green-600" />
                     <b className="text-green-900 text-sm">Personel Tarafından İş Sonlandırıldı</b>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
-                    <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
-                    <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
-                    <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
-                    <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
-                    {(job.endJobDetails.truckImages || (job.endJobDetails.truckImage ? [job.endJobDetails.truckImage] : [])).map((img, idx) => (
-                      <button key={'truck'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
-                        <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kasa Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
-                        <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
-                      </button>
-                    ))}
-                    {(job.endJobDetails.damageImages || (job.endJobDetails.damageImage ? [job.endJobDetails.damageImage] : [])).map((img, idx) => (
-                      <button key={'damage'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
-                        <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
-                        <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-red-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
-                      </button>
-                    ))}
-                    {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
-                    {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
-                  </div>
+                  {job.type === 'Asansör' ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                      <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
+                      <p><b>Kurulum:</b> {job.endJobDetails.elevatorSetup}</p>
+                      {job.endJobDetails.elevatorSetup === 'Hayır' && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kurulmama Nedeni:</b> {job.endJobDetails.elevatorSetupReason}</p>}
+                      <p><b>Asansör Sorunu:</b> {job.endJobDetails.elevatorIssue}</p>
+                      {job.endJobDetails.elevatorIssue === 'Evet' && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Asansör Sorun Detayı:</b> {job.endJobDetails.elevatorIssueReason}</p>}
+                      <p><b>Araç Sorunu:</b> {job.endJobDetails.vehicleIssue}</p>
+                      {job.endJobDetails.vehicleIssue === 'Evet' && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Araç Sorun Detayı:</b> {job.endJobDetails.vehicleIssueReason}</p>}
+                      {(job.endJobDetails.elevatorImages || []).map((img, idx) => (
+                        <button key={'elev'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kurulum Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
+                          <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kurulum Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
+                          <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                      <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
+                      <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
+                      <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
+                      <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
+                      {(job.endJobDetails.truckImages || (job.endJobDetails.truckImage ? [job.endJobDetails.truckImage] : [])).map((img, idx) => (
+                        <button key={'truck'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
+                          <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kasa Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
+                          <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
+                        </button>
+                      ))}
+                      {(job.endJobDetails.damageImages || (job.endJobDetails.damageImage ? [job.endJobDetails.damageImage] : [])).map((img, idx) => (
+                        <button key={'damage'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
+                          <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
+                          <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-red-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
+                        </button>
+                      ))}
+                      {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
+                      {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
+                    </div>
+                  )}
                 </div>
               )}
               
@@ -1740,23 +2038,49 @@ import React, { useState, useEffect } from 'react';
   };
 
   const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage, setDeleteJobId }) => {
-    const completedJobs = jobs.filter(j => j.status === 'completed').sort((a, b) => new Date(b.date) - new Date(a.date));
+    const [viewDate, setViewDate] = useState(new Date());
+
+    const prevDay = () => {
+      const newDate = new Date(viewDate);
+      newDate.setDate(viewDate.getDate() - 1);
+      setViewDate(newDate);
+    };
+
+    const nextDay = () => {
+      const newDate = new Date(viewDate);
+      newDate.setDate(viewDate.getDate() + 1);
+      setViewDate(newDate);
+    };
+
+    const year = viewDate.getFullYear();
+    const month = String(viewDate.getMonth() + 1).padStart(2, '0');
+    const day = String(viewDate.getDate()).padStart(2, '0');
+    const dateStr = `${year}-${month}-${day}`;
+    
+    const formattedDate = viewDate.toLocaleDateString('tr-TR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+    const completedJobs = jobs.filter(j => j.status === 'completed' && j.date === dateStr).sort((a, b) => new Date(b.date) - new Date(a.date));
 
     return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-        <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
-          <h2 className="text-xl font-bold text-black flex items-center gap-2">
-            <CheckCircle className="w-6 h-6 text-green-600" /> Tamamlanan İşler
-          </h2>
+      <div className="space-y-6 animate-in fade-in">
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex justify-between items-center">
+          <button onClick={prevDay} className="p-4 bg-neutral-100 hover:bg-neutral-200 text-black rounded-xl transition"><ChevronLeft className="w-6 h-6" /></button>
+          <div className="text-center">
+            <h2 className="text-xl md:text-2xl font-bold text-green-600 flex justify-center items-center gap-2"><CheckCircle className="w-6 h-6"/> {formattedDate}</h2>
+            <p className="text-sm font-medium text-neutral-500 mt-1">Tamamlanan Operasyonlar</p>
+          </div>
+          <button onClick={nextDay} className="p-4 bg-neutral-100 hover:bg-neutral-200 text-black rounded-xl transition"><ChevronRight className="w-6 h-6" /></button>
         </div>
+
         <div className="space-y-4">
           {completedJobs.length === 0 ? (
-            <div className="p-8 text-center text-neutral-500 font-medium bg-neutral-50 rounded-xl border border-neutral-200">
-              Kayıtlı tamamlanmış iş bulunmuyor.
+            <div className="bg-white p-12 rounded-2xl shadow-sm border border-neutral-200 text-center text-neutral-500">
+              <CheckCircle className="w-16 h-16 mx-auto mb-4 text-neutral-300" />
+              <p className="text-lg font-medium">Bu tarihe kayıtlı tamamlanmış operasyon bulunmuyor.</p>
             </div>
           ) : (
             completedJobs.map(job => (
-              <div key={job.id} className="p-4 border border-green-200 bg-green-50/30 rounded-xl flex flex-col md:flex-row gap-4 justify-between md:items-center hover:border-green-400 transition">
+              <div key={job.id} className="p-4 border border-green-200 bg-white shadow-sm rounded-xl flex flex-col md:flex-row gap-4 justify-between md:items-center hover:border-green-400 transition">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-2">
                     <h3 className="font-bold text-black text-lg">{job.customerName}</h3>
@@ -1774,8 +2098,17 @@ import React, { useState, useEffect } from 'react';
                   {job.endJobDetails && (
                     <div className="text-xs flex flex-wrap gap-2 mt-2 bg-white p-3 rounded-lg border border-green-100">
                       <span className="bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200 font-medium">Ödeme: <b className="font-bold">{job.endJobDetails.paymentMethod}</b></span>
-                      <span className="bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200 font-medium">Hasar Durumu: <b className="font-bold">{job.endJobDetails.damageStatus}</b></span>
-                      <span className="bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200 font-medium">Memnuniyet: <b className="font-bold">{job.endJobDetails.customerSatisfaction}</b></span>
+                      {job.type === 'Asansör' ? (
+                        <>
+                          <span className="bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200 font-medium">Kurulum: <b className="font-bold">{job.endJobDetails.elevatorSetup}</b></span>
+                          <span className="bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200 font-medium">Asansör Sorunu: <b className="font-bold">{job.endJobDetails.elevatorIssue}</b></span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200 font-medium">Hasar Durumu: <b className="font-bold">{job.endJobDetails.damageStatus}</b></span>
+                          <span className="bg-green-50 text-green-700 px-2 py-1 rounded border border-green-200 font-medium">Memnuniyet: <b className="font-bold">{job.endJobDetails.customerSatisfaction}</b></span>
+                        </>
+                      )}
                     </div>
                   )}
                 </div>
@@ -2155,13 +2488,17 @@ import React, { useState, useEffect } from 'react';
     );
   };
 
-  const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead, personnelList, messages, setMessages, handleOpenEndJobModal, setViewingImage, handleUpdatePersonnel }) => {
-    const [activeProfileTab, setActiveProfileTab] = useState('jobs'); // 'jobs' | 'messages' | 'settings'
+  const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead, personnelList, messages, setMessages, handleOpenEndJobModal, setViewingImage, handleUpdatePersonnel, tasks = [], handleUpdateTaskStatus }) => {
+    const [activeProfileTab, setActiveProfileTab] = useState('jobs'); // 'jobs' | 'messages' | 'settings' | 'tasks' | 'complaint'
     const [activeChatUserId, setActiveChatUserId] = useState(null);
     const [newMessage, setNewMessage] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const [editProfileData, setEditProfileData] = useState({ fullName: currentUser.fullName, password: currentUser.password });
     const [updateSuccess, setUpdateSuccess] = useState(false);
+    
+    // Şikayet State'leri
+    const [complaintData, setComplaintData] = useState({ subject: '', content: '' });
+    const [complaintSuccess, setComplaintSuccess] = useState(false);
 
     // BUGÜNÜN TARİHİ HESAPLAMASI
     const today = new Date();
@@ -2184,6 +2521,13 @@ import React, { useState, useEffect } from 'react';
       return (j.date >= todayStr || j.status === 'in-progress');
     }).sort((a, b) => new Date(a.date) - new Date(b.date));
     
+    // YENİ: Özel Görevler Filtresi
+    const myTasks = tasks.filter(t => t.assignee === currentUser.fullName || t.assignee === 'Tüm Personeller').sort((a, b) => {
+      if (a.status === 'todo' && b.status !== 'todo') return -1;
+      if (a.status !== 'todo' && b.status === 'todo') return 1;
+      return new Date(b.date) - new Date(a.date);
+    });
+
     const myNotifications = notifications.filter(n => {
       if (n.userId !== currentUser.id) return false;
       // Atama bildirimiyse ve iş yarına (veya sonrasına) aitse, bildirimi de ertesi güne kadar gizle
@@ -2243,6 +2587,33 @@ import React, { useState, useEffect } from 'react';
       setTimeout(() => setUpdateSuccess(false), 3000);
     };
 
+    const handleSendComplaint = async (e) => {
+      e.preventDefault();
+      if (!complaintData.subject.trim() || !complaintData.content.trim()) return;
+
+      try {
+        const db = getFirestore();
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'complaints'), {
+          senderId: currentUser.id,
+          senderName: currentUser.fullName,
+          senderPosition: currentUser.position,
+          subject: complaintData.subject,
+          content: complaintData.content,
+          timestamp: new Date().toISOString(),
+          dateStr: new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }),
+          status: 'Yeni', // Yeni, İnceleniyor, Çözüldü
+          read: false
+        });
+        setComplaintSuccess(true);
+        setComplaintData({ subject: '', content: '' });
+        setTimeout(() => setComplaintSuccess(false), 3000);
+      } catch (error) {
+        console.error("Şikayet gönderilirken hata oluştu:", error);
+        alert("Şikayet gönderilemedi, lütfen daha sonra tekrar deneyin.");
+      }
+    };
+
     return (
       <div className="space-y-6 animate-in fade-in">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2250,8 +2621,12 @@ import React, { useState, useEffect } from 'react';
           {/* SOL: Profil Bilgileri & Bildirimler */}
           <div className="md:col-span-1 space-y-6">
             <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-              <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center font-black text-3xl mb-4 mx-auto border-4 border-white shadow-lg">
-                {currentUser.fullName.charAt(0)}
+              <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center font-black text-3xl mb-4 mx-auto border-4 border-white shadow-lg overflow-hidden">
+                {currentUser.profileImage ? (
+                  <img src={currentUser.profileImage} alt={currentUser.fullName} className="w-full h-full object-cover" />
+                ) : (
+                  currentUser.fullName.charAt(0)
+                )}
               </div>
               <h2 className="text-xl font-black text-center text-black mb-1">{currentUser.fullName}</h2>
               <p className="text-center text-neutral-500 text-sm font-medium mb-6">{currentUser.position} - {currentUser.rank}</p>
@@ -2294,12 +2669,24 @@ import React, { useState, useEffect } from 'react';
             <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 h-full flex flex-col">
               
               {/* Profil Sağ Sekmeleri */}
-              <div className="flex gap-6 border-b border-neutral-200 mb-6">
+              <div className="flex flex-wrap gap-x-6 gap-y-2 border-b border-neutral-200 mb-6">
                 <button 
                   onClick={() => setActiveProfileTab('jobs')} 
                   className={`pb-3 font-bold transition flex items-center gap-2 ${activeProfileTab === 'jobs' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
                 >
                   <ClipboardList className="w-5 h-5" /> Bana Atanan Görevler
+                </button>
+                <button 
+                  onClick={() => setActiveProfileTab('tasks')} 
+                  className={`pb-3 font-bold transition flex items-center gap-2 relative ${activeProfileTab === 'tasks' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
+                >
+                  <CheckSquare className="w-5 h-5" /> Özel Görevler
+                  {myTasks.filter(t => t.status === 'todo').length > 0 && (
+                    <span className="absolute -top-1 -right-3 flex h-3 w-3">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600 text-[10px] items-center justify-center text-white font-black">{myTasks.filter(t => t.status === 'todo').length}</span>
+                    </span>
+                  )}
                 </button>
                 <button 
                   onClick={() => setActiveProfileTab('messages')} 
@@ -2318,6 +2705,12 @@ import React, { useState, useEffect } from 'react';
                   className={`pb-3 font-bold transition flex items-center gap-2 ${activeProfileTab === 'settings' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
                 >
                   <Lock className="w-5 h-5" /> Hesap Ayarları
+                </button>
+                <button 
+                  onClick={() => setActiveProfileTab('complaint')} 
+                  className={`pb-3 font-bold transition flex items-center gap-2 ${activeProfileTab === 'complaint' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
+                >
+                  <AlertTriangle className="w-5 h-5" /> Şikayet / Bildirim
                 </button>
               </div>
               
@@ -2541,26 +2934,44 @@ import React, { useState, useEffect } from 'react';
                                 <CheckCircle className="w-5 h-5 shrink-0 text-green-600" />
                                 <b className="text-green-900 text-sm">İş Tarafınızca Sonlandırıldı</b>
                               </div>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
-                                <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
-                                <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
-                                <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
-                                <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
-                                {(job.endJobDetails.truckImages || (job.endJobDetails.truckImage ? [job.endJobDetails.truckImage] : [])).map((img, idx) => (
-                                  <button key={'truck'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
-                                    <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kasa Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
-                                    <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
-                                  </button>
-                                ))}
-                                {(job.endJobDetails.damageImages || (job.endJobDetails.damageImage ? [job.endJobDetails.damageImage] : [])).map((img, idx) => (
-                                  <button key={'damage'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
-                                    <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
-                                    <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-red-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
-                                  </button>
-                                ))}
-                                {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
-                                {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
-                              </div>
+                              {job.type === 'Asansör' ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                                  <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
+                                  <p><b>Kurulum:</b> {job.endJobDetails.elevatorSetup}</p>
+                                  {job.endJobDetails.elevatorSetup === 'Hayır' && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kurulmama Nedeni:</b> {job.endJobDetails.elevatorSetupReason}</p>}
+                                  <p><b>Asansör Sorunu:</b> {job.endJobDetails.elevatorIssue}</p>
+                                  {job.endJobDetails.elevatorIssue === 'Evet' && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Asansör Sorun Detayı:</b> {job.endJobDetails.elevatorIssueReason}</p>}
+                                  <p><b>Araç Sorunu:</b> {job.endJobDetails.vehicleIssue}</p>
+                                  {job.endJobDetails.vehicleIssue === 'Evet' && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Araç Sorun Detayı:</b> {job.endJobDetails.vehicleIssueReason}</p>}
+                                  {(job.endJobDetails.elevatorImages || []).map((img, idx) => (
+                                    <button key={'elev'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kurulum Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
+                                      <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kurulum Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
+                                      <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
+                                    </button>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-2">
+                                  <p><b>Ödeme:</b> {job.endJobDetails.paymentMethod}</p>
+                                  <p><b>Müşteri Memnuniyeti:</b> {job.endJobDetails.customerSatisfaction}</p>
+                                  <p><b>Eşya Hasarı:</b> {job.endJobDetails.damageStatus}</p>
+                                  <p><b>Kamyon Durumu:</b> {job.endJobDetails.truckStatus}</p>
+                                  {(job.endJobDetails.truckImages || (job.endJobDetails.truckImage ? [job.endJobDetails.truckImage] : [])).map((img, idx) => (
+                                    <button key={'truck'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Kasa Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-green-700 bg-green-50 p-2.5 rounded-lg border border-green-200 hover:bg-green-100 transition flex justify-between items-center shadow-sm">
+                                      <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Kasa Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
+                                      <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
+                                    </button>
+                                  ))}
+                                  {(job.endJobDetails.damageImages || (job.endJobDetails.damageImage ? [job.endJobDetails.damageImage] : [])).map((img, idx) => (
+                                    <button key={'damage'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
+                                      <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
+                                      <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-red-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
+                                    </button>
+                                  ))}
+                                  {job.endJobDetails.damageDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Hasar Detayı:</b> {job.endJobDetails.damageDetails}</p>}
+                                  {job.endJobDetails.truckIssueDetails && <p className="md:col-span-2 text-red-600 font-bold bg-red-50 p-2 rounded border border-red-100"><b>Kamyon Sorunu:</b> {job.endJobDetails.truckIssueDetails}</p>}
+                                </div>
+                              )}
                             </div>
                           )}
 
@@ -2620,6 +3031,47 @@ import React, { useState, useEffect } from 'react';
                 </div>
               )}
 
+              {/* Özel Görevler Sekmesi */}
+              {activeProfileTab === 'tasks' && (
+                <div className="space-y-4 overflow-y-auto flex-1 custom-scrollbar pr-2">
+                  {myTasks.length === 0 ? (
+                    <div className="p-10 text-center text-neutral-500 bg-neutral-50 rounded-2xl border border-neutral-200">
+                      <CheckSquare className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
+                      <p className="font-bold">Şu anda size atanmış özel bir görev bulunmuyor.</p>
+                    </div>
+                  ) : (
+                    myTasks.map(task => (
+                      <div key={task.id} className="p-5 rounded-2xl border bg-white border-neutral-200 hover:border-red-400 transition flex flex-col gap-3">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h4 className="font-bold text-black text-lg">{task.title}</h4>
+                            <p className="text-xs text-neutral-500 flex items-center gap-1 mt-1"><CalendarDays className="w-3.5 h-3.5" /> Son Tarih: {task.date} • Atanan: {task.assignee}</p>
+                          </div>
+                          <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase ${
+                            task.status === 'completed' ? 'bg-black text-white' :
+                            task.status === 'in-progress' ? 'bg-red-600 text-white shadow-sm' :
+                            'bg-neutral-100 border border-neutral-300 text-neutral-700'
+                          }`}>
+                            {task.status === 'completed' ? 'Tamamlandı' : task.status === 'in-progress' ? 'İşleniyor' : 'Bekliyor'}
+                          </span>
+                        </div>
+                        <div className="bg-neutral-50 p-3 rounded-xl border border-neutral-100 text-sm text-neutral-700 whitespace-pre-wrap">
+                          {task.description}
+                        </div>
+                        {task.status !== 'completed' && handleUpdateTaskStatus && (
+                          <div className="flex gap-2 mt-2 border-t border-neutral-100 pt-3">
+                            {task.status === 'todo' && (
+                              <button onClick={() => handleUpdateTaskStatus(task.id, 'in-progress')} className="flex-1 py-2 bg-blue-50 text-blue-700 font-bold rounded-xl hover:bg-blue-100 transition text-xs border border-blue-100">İşleme Alındı</button>
+                            )}
+                            <button onClick={() => handleUpdateTaskStatus(task.id, 'completed')} className="flex-1 py-2 bg-green-50 text-green-700 font-bold rounded-xl hover:bg-green-100 transition text-xs border border-green-100">Görevi Tamamla</button>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
               {/* Mesajlaşma Sekmesi */}
               {activeProfileTab === 'messages' && (
                 <div className="flex flex-1 h-[450px] border border-neutral-200 rounded-xl overflow-hidden animate-in fade-in">
@@ -2652,8 +3104,12 @@ import React, { useState, useEffect } from 'react';
                             className={`w-full text-left p-4 hover:bg-neutral-100 transition border-b border-neutral-200 flex items-center justify-between ${activeChatUserId === user.id ? 'bg-red-50/50 border-l-4 border-l-red-600' : 'border-l-4 border-l-transparent'}`}
                           >
                             <div className="flex items-center gap-3 overflow-hidden">
-                              <div className="w-10 h-10 shrink-0 rounded-full bg-neutral-200 flex items-center justify-center font-bold text-neutral-600">
-                                {user.fullName.charAt(0)}
+                              <div className="w-10 h-10 shrink-0 rounded-full bg-neutral-200 flex items-center justify-center font-bold text-neutral-600 overflow-hidden">
+                                {user.profileImage ? (
+                                  <img src={user.profileImage} alt={user.fullName} className="w-full h-full object-cover" />
+                                ) : (
+                                  user.fullName.charAt(0)
+                                )}
                               </div>
                               <div className="truncate">
                                 <p className="font-bold text-black text-sm truncate">{user.fullName}</p>
@@ -2677,8 +3133,12 @@ import React, { useState, useEffect } from 'react';
                       <>
                         {/* Sohbet Üst Bilgi */}
                         <div className="p-4 border-b border-neutral-200 flex items-center gap-3 bg-white">
-                          <div className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold shrink-0">
-                            {personnelList.find(p => p.id === activeChatUserId)?.fullName.charAt(0)}
+                          <div className="w-8 h-8 rounded-full bg-red-100 text-red-600 flex items-center justify-center font-bold shrink-0 overflow-hidden">
+                            {personnelList.find(p => p.id === activeChatUserId)?.profileImage ? (
+                              <img src={personnelList.find(p => p.id === activeChatUserId)?.profileImage} alt="Profil" className="w-full h-full object-cover" />
+                            ) : (
+                              personnelList.find(p => p.id === activeChatUserId)?.fullName.charAt(0)
+                            )}
                           </div>
                           <div>
                             <h3 className="font-bold text-black text-sm">{personnelList.find(p => p.id === activeChatUserId)?.fullName}</h3>
@@ -2766,6 +3226,51 @@ import React, { useState, useEffect } from 'react';
                   </form>
                 </div>
               )}
+
+              {/* Şikayet Sekmesi */}
+              {activeProfileTab === 'complaint' && (
+                <div className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-neutral-50 border border-neutral-200 rounded-xl animate-in fade-in">
+                  <h3 className="text-lg font-bold text-black mb-2 flex items-center gap-2 border-b border-neutral-200 pb-3">
+                    <AlertTriangle className="w-5 h-5 text-red-600" /> Şikayet ve Öneri Bildirimi
+                  </h3>
+                  <p className="text-sm text-neutral-500 mb-6">
+                    Sistemle, operasyonlarla veya genel işleyişle ilgili şikayet, öneri veya taleplerinizi buradan yönetime iletebilirsiniz. Bildirimleriniz gizli tutularak sadece yetkililer tarafından incelenecektir.
+                  </p>
+                  
+                  {complaintSuccess && (
+                    <div className="bg-green-100 text-green-700 p-4 rounded-xl text-sm font-bold flex items-center gap-2 mb-6 border border-green-200">
+                      <CheckCircle className="w-5 h-5" /> Bildiriminiz başarıyla yönetime iletildi. Teşekkür ederiz.
+                    </div>
+                  )}
+
+                  <form onSubmit={handleSendComplaint} className="space-y-5 max-w-2xl bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-2">Konu *</label>
+                      <input 
+                        type="text" 
+                        required
+                        value={complaintData.subject} 
+                        onChange={e => setComplaintData({...complaintData, subject: e.target.value})} 
+                        className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-medium text-black" 
+                        placeholder="Kısaca bildiriminizin konusu..." 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-2">İçerik / Detaylar *</label>
+                      <textarea 
+                        required
+                        value={complaintData.content} 
+                        onChange={e => setComplaintData({...complaintData, content: e.target.value})} 
+                        className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-medium text-black h-32 resize-none" 
+                        placeholder="Detaylı olarak durumu açıklayınız..." 
+                      />
+                    </div>
+                    <button type="submit" className="w-full bg-black text-white font-bold py-4 rounded-xl hover:bg-neutral-800 transition shadow-lg flex justify-center items-center gap-2">
+                      <Send className="w-5 h-5" /> Bildirimi Gönder
+                    </button>
+                  </form>
+                </div>
+              )}
             </div>
           </div>
 
@@ -2774,152 +3279,7 @@ import React, { useState, useEffect } from 'react';
     );
   };
 
-  const FinanceDashboardView = ({ jobs }) => {
-    const [selectedType, setSelectedType] = useState('Tümü');
-    const [selectedPeriod, setSelectedPeriod] = useState('Aylık');
-    const [selectedStatus, setSelectedStatus] = useState('Tümü');
-
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonth = today.getMonth() + 1;
-    const todayStr = today.toISOString().split('T')[0];
-
-    // Filtreleme (Dönem + Tür) - Tüm kartlar ve liste için ortak temel
-    const baseFilteredJobs = jobs.filter(job => {
-      if (job.status === 'cancelled') return false;
-      if (!job.price) return false;
-      if (selectedType !== 'Tümü' && job.type !== selectedType) return false;
-
-      const jobDate = new Date(job.date);
-      const jYear = jobDate.getFullYear();
-      const jMonth = jobDate.getMonth() + 1;
-
-      if (selectedPeriod === 'Günlük' && job.date !== todayStr) return false;
-      if (selectedPeriod === 'Aylık' && (jYear !== currentYear || jMonth !== currentMonth)) return false;
-      if (selectedPeriod === 'Yıllık' && jYear !== currentYear) return false;
-
-      return true;
-    });
-
-    // Kart Hesaplamaları (Sadece Dönem ve Türe Göre Genel Özet)
-    const totalVolume = baseFilteredJobs.reduce((acc, job) => acc + (Number(job.price) || 0), 0);
-    const completedVolume = baseFilteredJobs.filter(j => j.status === 'completed').reduce((acc, job) => acc + (Number(job.price) || 0), 0);
-    const pendingVolume = baseFilteredJobs.filter(j => j.status !== 'completed').reduce((acc, job) => acc + (Number(job.price) || 0), 0);
-
-    // Alttaki Liste İçin Filtreleme (Durum filtresi de dahil)
-    const recentJobs = baseFilteredJobs.filter(job => {
-      if (selectedStatus === 'Tamamlanan' && job.status !== 'completed') return false;
-      if (selectedStatus === 'Bekleyen' && job.status === 'completed') return false;
-      return true;
-    }).sort((a, b) => new Date(b.date) - new Date(a.date));
-
-    const listTotal = recentJobs.reduce((acc, job) => acc + (Number(job.price) || 0), 0);
-
-    return (
-      <div className="space-y-6 animate-in fade-in">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-2 gap-4">
-          <h2 className="text-2xl font-bold text-black flex items-center gap-2">
-            <Wallet className="w-7 h-7 text-red-600" /> Kasa Özeti
-          </h2>
-          <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-2xl border border-neutral-200 shadow-sm w-full md:w-auto">
-            <select 
-              value={selectedPeriod} 
-              onChange={(e) => setSelectedPeriod(e.target.value)}
-              className="px-3 py-1.5 text-sm font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none focus:ring-2 focus:ring-red-600"
-            >
-              <option value="Tümü">Tüm Zamanlar</option>
-              <option value="Günlük">Bugün (Günlük)</option>
-              <option value="Aylık">Bu Ay (Aylık)</option>
-              <option value="Yıllık">Bu Yıl (Yıllık)</option>
-            </select>
-            <select 
-              value={selectedType} 
-              onChange={(e) => setSelectedType(e.target.value)}
-              className="px-3 py-1.5 text-sm font-bold bg-red-50 text-red-700 border border-red-200 rounded-xl outline-none focus:ring-2 focus:ring-red-600"
-            >
-              <option value="Tümü">Tüm Hizmetler</option>
-              <option value="Nakliye">Sadece Nakliye</option>
-              <option value="Depo">Sadece Depo</option>
-              <option value="Asansör">Sadece Asansör</option>
-            </select>
-            <select 
-              value={selectedStatus} 
-              onChange={(e) => setSelectedStatus(e.target.value)}
-              className="px-3 py-1.5 text-sm font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-600"
-            >
-              <option value="Tümü">Tüm Durumlar</option>
-              <option value="Tamamlanan">Tamamlanan İşler</option>
-              <option value="Bekleyen">Bekleyen/Süren İşler</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-neutral-200 flex items-center gap-4 hover:border-blue-600 transition group cursor-pointer">
-            <div className="p-3 bg-blue-50 text-blue-600 rounded-xl group-hover:scale-110 transition"><ClipboardList className="w-6 h-6" /></div>
-            <div>
-              <p className="text-neutral-500 text-sm font-bold mb-0.5">Toplam Açılan İş Hacmi</p>
-              <p className="text-xl font-black text-black">₺{totalVolume.toLocaleString('tr-TR')}</p>
-            </div>
-          </div>
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-neutral-200 flex items-center gap-4 hover:border-green-600 transition group cursor-pointer">
-            <div className="p-3 bg-green-50 text-green-600 rounded-xl group-hover:scale-110 transition"><CheckCircle className="w-6 h-6" /></div>
-            <div>
-              <p className="text-neutral-500 text-sm font-bold mb-0.5">Tamamlanan İş Geliri</p>
-              <p className="text-xl font-black text-green-600">₺{completedVolume.toLocaleString('tr-TR')}</p>
-            </div>
-          </div>
-          <div className="bg-white p-5 rounded-2xl shadow-sm border border-neutral-200 flex items-center gap-4 hover:border-red-600 transition group cursor-pointer">
-            <div className="p-3 bg-red-50 text-red-600 rounded-xl group-hover:scale-110 transition"><Clock className="w-6 h-6" /></div>
-            <div>
-              <p className="text-neutral-500 text-sm font-bold mb-0.5">Bekleyen İş Hacmi</p>
-              <p className="text-xl font-black text-red-600">₺{pendingVolume.toLocaleString('tr-TR')}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
-          <div className="p-4 border-b border-neutral-200 bg-neutral-50 flex justify-between items-center flex-wrap gap-2">
-            <h3 className="font-bold text-black flex items-center gap-2">
-              İşlem Hareketleri
-              <span className="text-xs font-bold text-neutral-500 bg-neutral-200 px-2 py-0.5 rounded-full">{recentJobs.length} İşlem</span>
-            </h3>
-            <div className="bg-black text-white px-3 py-1.5 rounded-lg text-sm font-bold shadow-md">
-              Görüntülenen Toplam: <span className="text-green-400">₺{listTotal.toLocaleString('tr-TR')}</span>
-            </div>
-          </div>
-          <div className="divide-y divide-neutral-100 max-h-[500px] overflow-y-auto custom-scrollbar">
-            {recentJobs.map(job => (
-              <div key={job.id} className="p-4 flex items-center justify-between hover:bg-neutral-50 transition">
-                <div className="flex items-center gap-4">
-                  <div className={`p-2 rounded-xl shadow-sm ${job.type === 'Depo' ? 'bg-blue-100 text-blue-600' : job.type === 'Asansör' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                    <ArrowDownRight className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <p className="font-bold text-black text-base">{job.customerName}</p>
-                    <p className="text-xs font-medium text-neutral-500 mt-0.5">{job.type} • {job.date}</p>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className={`text-lg font-black ${job.status === 'completed' ? 'text-green-600' : 'text-neutral-500'}`}>
-                    +₺{parseInt(job.price || 0).toLocaleString('tr-TR')}
-                  </p>
-                  <p className={`text-[10px] font-bold px-2 py-0.5 rounded-md inline-block mt-1 ${job.status === 'completed' ? 'bg-black text-white' : 'bg-neutral-200 text-neutral-700'}`}>
-                    {job.status === 'completed' ? 'TAMAMLANDI' : 'BEKLİYOR/DEVAM'}
-                  </p>
-                </div>
-              </div>
-            ))}
-            {recentJobs.length === 0 && (
-              <div className="p-8 text-center text-neutral-500 font-medium">Bu filtrelere uygun fiyatı girilmiş bir işlem bulunmuyor.</div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const ReportingView = ({ jobs }) => {
+  const ReportingView = ({ jobs, personnelList }) => {
     const [reportPeriod, setReportPeriod] = useState('month'); // 'month' or 'year'
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -3071,8 +3431,14 @@ import React, { useState, useEffect } from 'react';
               <tbody className="divide-y divide-neutral-100">
                 {summaryList.map((item, index) => (
                   <tr key={index} className="hover:bg-neutral-50 transition">
-                    <td className="p-4 font-bold text-black flex items-center gap-2 mt-3">
-                      <div className="w-6 h-6 rounded-full bg-neutral-200 flex items-center justify-center text-xs text-neutral-600">{item.name.charAt(0)}</div>
+                    <td className="p-4 font-bold text-black flex items-center gap-3 mt-3">
+                      <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0">
+                        {personnelList?.find(p => p.fullName === item.name)?.profileImage ? (
+                          <img src={personnelList.find(p => p.fullName === item.name).profileImage} alt={item.name} className="w-full h-full object-cover" />
+                        ) : (
+                          item.name.charAt(0)
+                        )}
+                      </div>
                       {item.name}
                     </td>
                     <td className="p-4 text-center">
@@ -3135,6 +3501,7 @@ import React, { useState, useEffect } from 'react';
           <div>
             <label className="block text-sm font-bold text-black mb-1">Görevli</label>
             <select value={newTask.assignee} onChange={(e) => setNewTask({...newTask, assignee: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none bg-white transition">
+              <option value="Tüm Personeller">Tüm Personeller</option>
               {personnelList.map(person => <option key={person.id} value={person.fullName}>{person.fullName}</option>)}
               <option value="Muhasebe">Muhasebe Departmanı</option>
               <option value="Yönetim">Yönetim Kurulu</option>
@@ -3280,14 +3647,47 @@ import React, { useState, useEffect } from 'react';
   };
 
   const AddPersonnelView = ({ onAdd, positions = [], ranks = [] }) => {
-    const [formData, setFormData] = useState({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '' });
+    const [formData, setFormData] = useState({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '' });
+    const [isUploading, setIsUploading] = useState(false);
     
     const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
     
+    const handleImageUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      setIsUploading(true);
+      setFormData(prev => ({ ...prev, profileImage: 'Yükleniyor...' }));
+
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', {
+          method: 'POST',
+          body: uploadData,
+        });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try {
+          const json = JSON.parse(text);
+          uploadedUrl = json.url || json.fileName || json.file || text;
+        } catch (err) {
+          uploadedUrl = text.trim();
+        }
+        setFormData(prev => ({ ...prev, profileImage: uploadedUrl }));
+      } catch (err) {
+        console.error("Yükleme hatası:", err);
+        alert("Görsel yüklenemedi.");
+        setFormData(prev => ({ ...prev, profileImage: '' }));
+      }
+      setIsUploading(false);
+    };
+
     const handleSubmit = (e) => {
       e.preventDefault();
       onAdd({ id: Date.now(), ...formData });
-      setFormData({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '' });
+      setFormData({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '' });
     };
 
     return (
@@ -3297,6 +3697,25 @@ import React, { useState, useEffect } from 'react';
         </h2>
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2 mb-2 flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 bg-neutral-50 rounded-xl border border-neutral-200">
+              <div className="w-20 h-20 rounded-full border-2 border-white shadow-sm overflow-hidden bg-neutral-200 flex items-center justify-center shrink-0">
+                {formData.profileImage === 'Yükleniyor...' ? (
+                  <span className="text-[10px] text-neutral-500 font-bold animate-pulse">Yükleniyor</span>
+                ) : formData.profileImage ? (
+                  <img src={formData.profileImage} alt="Profil" className="w-full h-full object-cover" />
+                ) : (
+                  <UserPlus className="w-8 h-8 text-neutral-400" />
+                )}
+              </div>
+              <div className="flex flex-col gap-2 w-full sm:w-auto">
+                <label className="block text-sm font-bold text-neutral-700">Profil Fotoğrafı</label>
+                <label className="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-fit shadow-sm">
+                  <Upload className="w-4 h-4 text-neutral-600" />
+                  <span className="text-sm font-bold text-neutral-700">Fotoğraf Yükle</span>
+                  <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={isUploading} />
+                </label>
+              </div>
+            </div>
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">Ad Soyad *</label>
               <input required type="text" name="fullName" value={formData.fullName} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
@@ -3390,10 +3809,17 @@ import React, { useState, useEffect } from 'react';
             <tbody className="divide-y divide-neutral-100">
               {personnelList.map(person => (
                 <tr key={person.id} className="hover:bg-neutral-50 transition">
-                  <td className="p-4 font-bold text-black">{person.fullName}</td>
-                  <td className="p-4 text-neutral-600">
-                    {person.personalPhone}
-                    {person.companyPhone && <><br/><span className="text-xs text-neutral-400">Şirket: {person.companyPhone}</span></>}
+                  <td className="p-4 font-bold text-black">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0">
+                        {person.profileImage ? (
+                          <img src={person.profileImage} alt={person.fullName} className="w-full h-full object-cover" />
+                        ) : (
+                          person.fullName.charAt(0)
+                        )}
+                      </div>
+                      {person.fullName}
+                    </div>
                   </td>
                   <td className="p-4 text-neutral-600">
                     <span className="font-bold">{person.position}</span><br/>
@@ -3488,8 +3914,19 @@ import React, { useState, useEffect } from 'react';
               {personnelList.map(p => (
                 <tr key={p.id} className="hover:bg-neutral-50 transition">
                   <td className="p-4 font-bold text-black">
-                    {p.fullName}
-                    <span className="block text-xs text-neutral-500 font-medium mt-0.5">{p.position} - {p.rank}</span>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0">
+                        {p.profileImage ? (
+                          <img src={p.profileImage} alt={p.fullName} className="w-full h-full object-cover" />
+                        ) : (
+                          p.fullName.charAt(0)
+                        )}
+                      </div>
+                      <div>
+                        {p.fullName}
+                        <span className="block text-xs text-neutral-500 font-medium mt-0.5">{p.position} - {p.rank}</span>
+                      </div>
+                    </div>
                   </td>
                   <td className="p-4 text-neutral-600 font-medium">{p.email || <span className="text-red-500 text-[10px] px-2 py-0.5 rounded border border-red-200 bg-red-50">E-Posta Yok</span>}</td>
                   <td className="p-4 text-neutral-600">
@@ -3626,12 +4063,17 @@ import React, { useState, useEffect } from 'react';
           <tbody className="divide-y divide-neutral-100">
             {personnelList.map(p => (
               <tr key={p.id} className="hover:bg-neutral-50 transition">
-                <td className="p-4 font-bold text-black">{p.fullName}</td>
-                <td className="p-4 text-center">
-                  <label className="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" className="sr-only peer" checked={p.permissions?.canView || false} onChange={(e) => handleUpdatePermissions(p.id, 'canView', e.target.checked)} />
-                    <div className="w-11 h-6 bg-neutral-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
-                  </label>
+                <td className="p-4 font-bold text-black">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0">
+                      {p.profileImage ? (
+                        <img src={p.profileImage} alt={p.fullName} className="w-full h-full object-cover" />
+                      ) : (
+                        p.fullName.charAt(0)
+                      )}
+                    </div>
+                    {p.fullName}
+                  </div>
                 </td>
                 <td className="p-4 text-center">
                   <label className="relative inline-flex items-center cursor-pointer">
@@ -4353,7 +4795,14 @@ import React, { useState, useEffect } from 'react';
       truckStatus: 'Herhangi bir sorun yok',
       truckIssueDetails: '',
       customerSatisfaction: 'Herhangi bir işlem yapmadı.',
-      enteredCode: ''
+      enteredCode: '',
+      elevatorSetup: 'Evet',
+      elevatorSetupReason: '',
+      elevatorImages: [],
+      elevatorIssue: 'Hayır',
+      elevatorIssueReason: '',
+      vehicleIssue: 'Hayır',
+      vehicleIssueReason: ''
     });
 
     const [aiModal, setAiModal] = useState({ isOpen: false, loading: false, content: '', title: '', type: '' });
@@ -4375,13 +4824,18 @@ import React, { useState, useEffect } from 'react';
     const [personnelList, setPersonnelList] = useState([]);
     const [positions, setPositions] = useState([]);
     const [ranks, setRanks] = useState([]);
+    const [complaints, setComplaints] = useState([]); // Yeni: Şikayetler State
     
     // Form State'leri
     const [newTransaction, setNewTransaction] = useState({ amount: '', category: 'Nakliye Tahsilatı', account: 'cash', date: new Date().toISOString().split('T')[0], description: '' });
     const [showTaskModal, setShowTaskModal] = useState(false);
     const [editingTask, setEditingTask] = useState(null);
     const [draggingTask, setDraggingTask] = useState(null);
-    const [newTask, setNewTask] = useState({ title: '', description: '', assignee: '', date: new Date().toISOString().split('T')[0] });
+    const [newTask, setNewTask] = useState({ title: '', description: '', assignee: 'Tüm Personeller', date: new Date().toISOString().split('T')[0] });
+
+    // Araç Düzenleme State'leri
+    const [editingVehicle, setEditingVehicle] = useState(null);
+    const [vehicleEditForm, setVehicleEditForm] = useState({});
 
     // Eski veri aktarımı kontrolü
     const [isDataMigrated, setIsDataMigrated] = useState(() => localStorage.getItem('sembol_data_migrated') === 'true');
@@ -4428,6 +4882,7 @@ import React, { useState, useEffect } from 'react';
       unsubs.push(onSnapshot(getCol('systemLogs'), snap => { setSystemLogs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('vehicles'), snap => { setVehicles(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, veh: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('materials'), snap => { setMaterials(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, mat: true})); }, console.error));
+      unsubs.push(onSnapshot(getCol('complaints'), snap => { setComplaints(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
 
       unsubs.push(onSnapshot(getCol('personnelList'), async snap => {
         const list = snap.docs.map(d => ({...d.data(), id: d.id})); 
@@ -4447,7 +4902,7 @@ import React, { useState, useEffect } from 'react';
           setPositions(data.positions || []);
           setRanks(data.ranks || []);
         } else {
-          const defaultPos = ['Şoför', 'Taşıma Elemanı', 'Muhasebe', 'Mobilya Ustası', 'Satış Personeli', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operasyon', 'Firma Sahibi'];
+          const defaultPos = ['Şoför', 'Taşıma Elemanı', 'Muhasebe', 'Mobilya Ustası', 'Satış Personeli', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operasyon', 'Operatör', 'Firma Sahibi'];
           const defaultRanks = ['Müdür', 'Ekip Şefi', 'Asistan', 'Standart', 'Kalfa'];
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { positions: defaultPos, ranks: defaultRanks });
           setPositions(defaultPos);
@@ -4574,6 +5029,14 @@ import React, { useState, useEffect } from 'react';
       setActiveTab('vehicleList');
     };
 
+    const handleUpdateVehicle = async (updatedVehicle) => {
+      if (!firebaseUser) return;
+      const { id, ...data } = updatedVehicle;
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'vehicles', id), data);
+      addSystemLog('Araç Güncellendi', `${data.plate} plakalı araç bilgileri güncellendi.`);
+      setEditingVehicle(null);
+    };
+
     const handleDeleteVehicle = async (id) => {
       if (!firebaseUser) return;
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'vehicles', id));
@@ -4596,7 +5059,7 @@ import React, { useState, useEffect } from 'react';
       if (!firebaseUser) return;
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'tasks'), { ...newTask, status: 'todo' });
       setShowTaskModal(false);
-      setNewTask({ title: '', description: '', assignee: personnelList.length > 0 ? personnelList[0].fullName : 'Yönetim', date: new Date().toISOString().split('T')[0] });
+      setNewTask({ title: '', description: '', assignee: 'Tüm Personeller', date: new Date().toISOString().split('T')[0] });
       setActiveTab('taskList');
     };
     
@@ -4605,6 +5068,27 @@ import React, { useState, useEffect } from 'react';
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', taskId), { status });
     };
     
+    // Şikayet İşlemleri
+    const handleUpdateComplaintStatus = async (id, status, isRead = false) => {
+      if (!firebaseUser) return;
+      const updateData = { status };
+      if (isRead) updateData.read = true;
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'complaints', id), updateData);
+    };
+
+    const handleDeleteComplaint = async (id) => {
+      if (!firebaseUser) return;
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'complaints', id));
+    };
+
+    const handleUpdateTask = async (e) => {
+      e.preventDefault();
+      if (!firebaseUser || !editingTask) return;
+      const { id, ...data } = editingTask;
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', id), data);
+      setEditingTask(null);
+    };
+
     const handleDeleteTask = async (taskId) => {
       if (!firebaseUser) return;
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', taskId));
@@ -4853,7 +5337,10 @@ import React, { useState, useEffect } from 'react';
     const handleOpenEndJobModal = (job) => {
       setJobToEnd(job);
       setEndJobError('');
-      setEndJobData({ paymentMethod: 'Nakit', damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '' });
+      setEndJobData({ 
+        paymentMethod: 'Nakit', damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '',
+        elevatorSetup: 'Evet', elevatorSetupReason: '', elevatorImages: [], elevatorIssue: 'Hayır', elevatorIssueReason: '', vehicleIssue: 'Hayır', vehicleIssueReason: ''
+      });
       setShowEndJobModal(true);
     };
 
@@ -4862,6 +5349,7 @@ import React, { useState, useEffect } from 'react';
       if (!file) return;
       
       if (type === 'truck') setEndJobData(prev => ({ ...prev, truckImages: [...(prev.truckImages || []), 'Yükleniyor...'] }));
+      else if (type === 'elevator') setEndJobData(prev => ({ ...prev, elevatorImages: [...(prev.elevatorImages || []), 'Yükleniyor...'] }));
       else setEndJobData(prev => ({ ...prev, damageImages: [...(prev.damageImages || []), 'Yükleniyor...'] }));
 
       const formData = new FormData();
@@ -4883,6 +5371,8 @@ import React, { useState, useEffect } from 'react';
         
         if (type === 'truck') {
           setEndJobData(prev => ({ ...prev, truckImages: prev.truckImages.map(img => img === 'Yükleniyor...' ? uploadedUrl : img) }));
+        } else if (type === 'elevator') {
+          setEndJobData(prev => ({ ...prev, elevatorImages: prev.elevatorImages.map(img => img === 'Yükleniyor...' ? uploadedUrl : img) }));
         } else {
           setEndJobData(prev => ({ ...prev, damageImages: prev.damageImages.map(img => img === 'Yükleniyor...' ? uploadedUrl : img) }));
         }
@@ -4890,6 +5380,8 @@ import React, { useState, useEffect } from 'react';
         console.error("Yükleme hatası:", err);
         if (type === 'truck') {
           setEndJobData(prev => ({ ...prev, truckImages: prev.truckImages.map(img => img === 'Yükleniyor...' ? file.name : img) }));
+        } else if (type === 'elevator') {
+          setEndJobData(prev => ({ ...prev, elevatorImages: prev.elevatorImages.map(img => img === 'Yükleniyor...' ? file.name : img) }));
         } else {
           setEndJobData(prev => ({ ...prev, damageImages: prev.damageImages.map(img => img === 'Yükleniyor...' ? file.name : img) }));
         }
@@ -4900,14 +5392,16 @@ import React, { useState, useEffect } from 'react';
       e.preventDefault();
       if (!firebaseUser) return;
       
-      // Güvenli eşleşme: Sadece alfanümerik karakterleri al ve büyük harfe çevir
-      const userCode = (endJobData.enteredCode || '').toString().trim().toUpperCase();
-      const realCode = (jobToEnd.deliveryCode || '').toString().trim().toUpperCase();
+      if (jobToEnd.type !== 'Asansör') {
+        // Güvenli eşleşme: Sadece alfanümerik karakterleri al ve büyük harfe çevir
+        const userCode = (endJobData.enteredCode || '').toString().trim().toUpperCase();
+        const realCode = (jobToEnd.deliveryCode || '').toString().trim().toUpperCase();
 
-      // Hata Kontrolü:
-      if (realCode && userCode !== realCode) {
-        setEndJobError(`Girdiğiniz kod hatalı. Müşteriden "${realCode}" kodunu istemelisiniz.`); 
-        return;
+        // Hata Kontrolü:
+        if (realCode && userCode !== realCode) {
+          setEndJobError(`Girdiğiniz kod hatalı. Müşteriden "${realCode}" kodunu istemelisiniz.`); 
+          return;
+        }
       }
 
       setEndJobError('');
@@ -5111,12 +5605,23 @@ import React, { useState, useEffect } from 'react';
           </div>
 
           <div className="px-6 py-4 bg-neutral-900/50 border-b border-neutral-800 flex flex-col">
-            <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-1">Aktif Kullanıcı</span>
-            <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-              <span className="text-sm font-bold text-white truncate">{currentUser?.fullName}</span>
+            <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">Aktif Kullanıcı</span>
+            <div className="flex items-center gap-3">
+              <div className="relative">
+                <div className="w-8 h-8 rounded-full bg-neutral-700 flex items-center justify-center text-white font-bold overflow-hidden shrink-0">
+                  {currentUser?.profileImage ? (
+                    <img src={currentUser.profileImage} alt={currentUser?.fullName} className="w-full h-full object-cover" />
+                  ) : (
+                    currentUser?.fullName?.charAt(0)
+                  )}
+                </div>
+                <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse absolute bottom-0 right-0 border-2 border-neutral-900"></div>
+              </div>
+              <div className="flex flex-col overflow-hidden">
+                <span className="text-sm font-bold text-white truncate">{currentUser?.fullName}</span>
+                <span className="text-[10px] text-neutral-400 truncate">{currentUser?.email}</span>
+              </div>
             </div>
-            <span className="text-[10px] text-neutral-400 mt-1 truncate">{currentUser?.email}</span>
           </div>
           
           <nav className="flex flex-col mt-4 px-4 gap-2 overflow-y-auto flex-1 pb-6 custom-scrollbar">
@@ -5152,10 +5657,10 @@ import React, { useState, useEffect } from 'react';
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsSubMenuOpen(!isSubMenuOpen); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor' || activeTab === 'addInfo') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <PlusCircle className={`w-5 h-5 shrink-0 ${(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Kayıt Aç</span>
+                    <PlusCircle className={`w-5 h-5 shrink-0 ${(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor' || activeTab === 'addInfo') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Kayıt Aç</span>
                   </div>
                   {isSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -5179,6 +5684,12 @@ import React, { useState, useEffect } from 'react';
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addAsansor' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addAsansor' ? 'bg-white' : 'bg-red-600'}`}></div> Asansör Kayıt
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('addInfo'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addInfo' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addInfo' ? 'bg-white' : 'bg-red-600'}`}></div> Bilgilendirme Ekle
                     </button>
                   </div>
                 )}
@@ -5306,10 +5817,10 @@ import React, { useState, useEffect } from 'react';
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'maviPersonnel' || activeTab === 'beyazPersonnel') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'maviPersonnel' || activeTab === 'beyazPersonnel' || activeTab === 'complaints') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <Briefcase className={`w-5 h-5 shrink-0 ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'maviPersonnel' || activeTab === 'beyazPersonnel') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Personel Listesi</span>
+                    <Briefcase className={`w-5 h-5 shrink-0 ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'maviPersonnel' || activeTab === 'beyazPersonnel' || activeTab === 'complaints') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Personel Listesi</span>
                   </div>
                   {isPersonnelSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -5339,6 +5850,16 @@ import React, { useState, useEffect } from 'react';
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'beyazPersonnel' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'beyazPersonnel' ? 'bg-white' : 'bg-red-600'}`}></div> Beyaz Personel
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('complaints'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'complaints' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'} relative`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'complaints' ? 'bg-white' : 'bg-red-600'}`}></div> 
+                      Şikayet Bildirimleri
+                      {complaints.filter(c => !c.read).length > 0 && (
+                        <span className="absolute right-4 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{complaints.filter(c => !c.read).length}</span>
+                      )}
                     </button>
                   </div>
                 )}
@@ -5528,7 +6049,8 @@ import React, { useState, useEffect } from 'react';
           <div className="max-w-6xl mx-auto">
             {activeTab === 'dashboard' && <DashboardView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} />}
             {activeTab === 'calendar' && <CalendarView jobs={visibleJobs} handleEditJob={handleEditJob} />}
-            {activeTab === 'profile' && <ProfileView currentUser={currentUser} jobs={visibleJobs} notifications={notifications} markNotificationsAsRead={markNotificationsAsRead} personnelList={personnelList} messages={messages} setMessages={setMessages} handleOpenEndJobModal={handleOpenEndJobModal} setViewingImage={setViewingImage} handleUpdatePersonnel={handleUpdatePersonnel} />}
+            {activeTab === 'profile' && <ProfileView currentUser={currentUser} jobs={visibleJobs} notifications={notifications} markNotificationsAsRead={markNotificationsAsRead} personnelList={personnelList} messages={messages} setMessages={setMessages} handleOpenEndJobModal={handleOpenEndJobModal} setViewingImage={setViewingImage} handleUpdatePersonnel={handleUpdatePersonnel} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
+            {activeTab === 'addInfo' && hasJobAccess && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
             
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && hasJobAccess &&
               <AddJobView 
@@ -5564,8 +6086,177 @@ import React, { useState, useEffect } from 'react';
             {activeTab === 'personnelList' && hasResourceAccess && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" />}
             {activeTab === 'maviPersonnel' && hasResourceAccess && <PersonnelListView personnelList={personnelList.filter(p => ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position))} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Mavi Yaka Personel" />}
             {activeTab === 'beyazPersonnel' && hasResourceAccess && <PersonnelListView personnelList={personnelList.filter(p => ['Muhasebe', 'Satış Personeli', 'Operasyon', 'Firma Sahibi', 'Müdür'].includes(p.position))} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Beyaz Yaka Personel" />}
+            {activeTab === 'complaints' && hasResourceAccess && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {activeTab === 'addVehicle' && hasResourceAccess && <AddVehicleView onAdd={handleAddVehicle} />}
-            {activeTab === 'vehicleList' && hasResourceAccess && <VehicleListView vehicles={vehicles} onDelete={handleDeleteVehicle} />}
+            {activeTab === 'vehicleList' && hasResourceAccess && (
+              <>
+                <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+                  <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
+                    <Car className="w-6 h-6 text-red-600" /> Mevcut Araç Listesi
+                  </h2>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-black text-white border-b border-neutral-200">
+                        <tr>
+                          <th className="p-4 font-bold rounded-tl-xl">Araç Plakası</th>
+                          <th className="p-4 font-bold">Araç Cinsi</th>
+                          <th className="p-4 font-bold">Taşıma Kapasitesi</th>
+                          <th className="p-4 font-bold">Araç Detayları</th>
+                          <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-neutral-100">
+                        {vehicles.map(vehicle => (
+                          <tr key={vehicle.id} className="hover:bg-neutral-50 transition">
+                            <td className="p-4 font-bold text-black text-lg whitespace-nowrap">
+                              <div className="border-2 border-black rounded px-3 py-1.5 inline-flex items-center gap-2 bg-white shadow-sm">
+                                <span className="bg-blue-600 text-white font-black text-[10px] px-1.5 py-0.5 rounded-sm">TR</span>
+                                <span className="tracking-widest">{vehicle.plate.toUpperCase()}</span>
+                              </div>
+                            </td>
+                            <td className="p-4 font-bold text-neutral-800 text-base">{vehicle.type}</td>
+                            <td className="p-4">
+                              <div className="flex flex-wrap gap-1.5">
+                                {vehicle.capacity.map(cap => (
+                                  <span key={cap} className="text-xs px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-bold border border-blue-100">
+                                    {cap} Ev
+                                  </span>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="p-4 text-neutral-600 text-xs">
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                                <span><b className="text-black">Hacim:</b> {vehicle.volume ? `${vehicle.volume} m³` : '-'}</span>
+                                <span><b className="text-black">KM:</b> {vehicle.km}</span>
+                                <span><b className="text-black">Model:</b> {vehicle.model}</span>
+                                <span><b className="text-black">Renk:</b> {vehicle.color}</span>
+                                <span className="col-span-2"><b className="text-black">Vites:</b> {vehicle.transmission}</span>
+                              </div>
+                            </td>
+                            <td className="p-4">
+                              <div className="flex items-center gap-2">
+                                <button 
+                                  onClick={() => {
+                                    setEditingVehicle(vehicle);
+                                    setVehicleEditForm(vehicle);
+                                  }} 
+                                  className="p-2.5 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition" 
+                                  title="Aracı Düzenle"
+                                >
+                                  <Edit className="w-5 h-5" />
+                                </button>
+                                <button onClick={() => handleDeleteVehicle(vehicle.id)} className="p-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition" title="Aracı Sil">
+                                  <Ban className="w-5 h-5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                        {vehicles.length === 0 && (
+                          <tr>
+                            <td colSpan="5" className="p-6 text-center text-neutral-500">Kayıtlı araç bulunamadı.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Araç Düzenleme Modalı */}
+                {editingVehicle && (
+                  <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+                    <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+                      <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-red-600">
+                        <h3 className="font-bold text-lg flex items-center gap-2"><Car className="w-5 h-5"/> Aracı Düzenle</h3>
+                        <button onClick={() => setEditingVehicle(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+                      </div>
+                      
+                      <form onSubmit={(e) => { e.preventDefault(); handleUpdateVehicle(vehicleEditForm); }} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-bold text-neutral-700 mb-1">Araç Plakası</label>
+                            <input required type="text" value={vehicleEditForm.plate} onChange={(e) => setVehicleEditForm({...vehicleEditForm, plate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition uppercase" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-bold text-neutral-700 mb-1">Araç Cinsi</label>
+                            <select required value={vehicleEditForm.type} onChange={(e) => setVehicleEditForm({...vehicleEditForm, type: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                              <option value="Kamyon">Kamyon</option>
+                              <option value="Kamyonet">Kamyonet</option>
+                              <option value="Panelvan">Panelvan</option>
+                              <option value="Minivan">Minivan</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+                          <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
+                            <Truck className="w-4 h-4 text-red-600" /> Araç Eşya Alma Kapasitesi
+                          </label>
+                          <div className="flex flex-wrap gap-2">
+                            {['1+0', '1+1', '2+1', '3+1', '4+1'].map(cap => (
+                              <label key={cap} className={`flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer border text-sm transition-all ${vehicleEditForm.capacity?.includes(cap) ? 'bg-red-600 border-red-600 text-white font-bold' : 'bg-white border-neutral-300 text-neutral-600 hover:bg-neutral-100'}`}>
+                                <input 
+                                  type="checkbox" 
+                                  className="hidden" 
+                                  checked={vehicleEditForm.capacity?.includes(cap)} 
+                                  onChange={() => {
+                                    const newCap = vehicleEditForm.capacity?.includes(cap) 
+                                      ? vehicleEditForm.capacity.filter(c => c !== cap) 
+                                      : [...(vehicleEditForm.capacity || []), cap];
+                                    setVehicleEditForm({...vehicleEditForm, capacity: newCap});
+                                  }} 
+                                />
+                                {cap}
+                              </label>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div>
+                            <label className="block text-sm font-bold text-neutral-700 mb-1">Hacim (m³)</label>
+                            <input required type="number" value={vehicleEditForm.volume} onChange={(e) => setVehicleEditForm({...vehicleEditForm, volume: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-bold text-neutral-700 mb-1">Araç KM</label>
+                            <input required type="number" value={vehicleEditForm.km} onChange={(e) => setVehicleEditForm({...vehicleEditForm, km: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-bold text-neutral-700 mb-1">Model (Yıl)</label>
+                            <input required type="number" value={vehicleEditForm.model} onChange={(e) => setVehicleEditForm({...vehicleEditForm, model: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-bold text-neutral-700 mb-1">Renk</label>
+                            <select required value={vehicleEditForm.color} onChange={(e) => setVehicleEditForm({...vehicleEditForm, color: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                              <option value="Beyaz">Beyaz</option>
+                              <option value="Gri">Gri</option>
+                              <option value="Siyah">Siyah</option>
+                              <option value="Yeşil">Yeşil</option>
+                              <option value="Kırmızı">Kırmızı</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-bold text-neutral-700 mb-1">Vites</label>
+                            <select required value={vehicleEditForm.transmission} onChange={(e) => setVehicleEditForm({...vehicleEditForm, transmission: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                              <option value="Manuel">Manuel</option>
+                              <option value="Otomatik">Otomatik</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-3 pt-4 border-t border-neutral-100">
+                          <button type="button" onClick={() => setEditingVehicle(null)} className="flex-1 py-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">İptal</button>
+                          <button type="submit" className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Değişiklikleri Kaydet</button>
+                        </div>
+                      </form>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
 
             {/* Malzeme Modülleri */}
             {activeTab === 'addMaterial' && hasResourceAccess && <AddMaterialView onAdd={handleAddMaterial} />}
@@ -5573,7 +6264,7 @@ import React, { useState, useEffect } from 'react';
             
             {/* Finans Yönetimi Modülleri */}
             {activeTab === 'financeDashboard' && hasFinanceAccess && <FinanceDashboardView jobs={jobs} />}
-            {activeTab === 'reporting' && hasFinanceAccess && <ReportingView jobs={jobs} />}
+            {activeTab === 'reporting' && hasFinanceAccess && <ReportingView jobs={jobs} personnelList={personnelList} />}
 
             {activeTab === 'addTask' && hasTaskAccess &&
               <AddTaskFormView 
@@ -5656,9 +6347,15 @@ import React, { useState, useEffect } from 'react';
                     <label className="block text-sm font-bold text-black mb-2">Asıl Görevli (Ekip Şefi / Sorumlu)</label>
                     <select required value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-medium">
                       <option value="">Lütfen personel seçiniz...</option>
-                      {personnelList.filter(p => p.rank === 'Ekip Şefi' || p.rank === 'Kalfa').map(person => (
-                        <option key={person.id} value={person.id}>{person.fullName} - {person.position} ({person.rank})</option>
-                      ))}
+                      {jobToAssign.type === 'Asansör' ? (
+                        personnelList.filter(p => p.position === 'Operatör').map(person => (
+                          <option key={person.id} value={person.id}>{person.fullName} - {person.position} ({person.rank})</option>
+                        ))
+                      ) : (
+                        personnelList.filter(p => p.rank === 'Ekip Şefi' || p.rank === 'Kalfa').map(person => (
+                          <option key={person.id} value={person.id}>{person.fullName} - {person.position} ({person.rank})</option>
+                        ))
+                      )}
                     </select>
                   </div>
 
@@ -5860,6 +6557,7 @@ import React, { useState, useEffect } from 'react';
                   <div>
                     <label className="block text-sm font-bold text-black mb-1">Görevli</label>
                     <select value={newTask.assignee} onChange={(e) => setNewTask({...newTask, assignee: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none bg-white transition">
+                      <option value="Tüm Personeller">Tüm Personeller</option>
                       {personnelList.map(person => <option key={person.id} value={person.fullName}>{person.fullName}</option>)}
                       <option value="Muhasebe">Muhasebe Departmanı</option>
                       <option value="Yönetim">Yönetim Kurulu</option>
@@ -5903,6 +6601,7 @@ import React, { useState, useEffect } from 'react';
                   <div>
                     <label className="block text-sm font-bold text-black mb-1">Görevli</label>
                     <select value={editingTask.assignee} onChange={(e) => setEditingTask({...editingTask, assignee: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none bg-white transition">
+                      <option value="Tüm Personeller">Tüm Personeller</option>
                       {personnelList.map(person => <option key={person.id} value={person.fullName}>{person.fullName}</option>)}
                       <option value="Muhasebe">Muhasebe Departmanı</option>
                       <option value="Yönetim">Yönetim Kurulu</option>
@@ -5938,136 +6637,213 @@ import React, { useState, useEffect } from 'react';
                   </div>
                 )}
                 <form onSubmit={submitEndJob} className="space-y-4">
-                  <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 mb-4 text-center">
-                    <Key className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
-                    <label className="block text-sm font-bold text-emerald-900 mb-2">Müşteri Teslim Kodunu Giriniz *</label>
-                    <input required type="text" value={endJobData.enteredCode || ''} onChange={e => setEndJobData({...endJobData, enteredCode: e.target.value.toUpperCase()})} className="w-full p-3 border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none transition font-mono tracking-widest uppercase text-center text-xl font-black text-emerald-800 placeholder-emerald-300" placeholder="6 HANELİ KOD" />
-                    <p className="text-[10px] text-emerald-700 mt-2 font-medium">İşi başarıyla sonlandırmak için müşteriden teslim kodunu isteyip yukarıdaki alana girin.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold text-black mb-1">Ödeme Yöntemi</label>
-                    <select value={endJobData.paymentMethod} onChange={e => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
-                        <option value="Nakit">Nakit</option>
-                        <option value="Havale/EFT">Havale/EFT</option>
-                        <option value="Kredi Kartı">Kredi Kartı</option>
-                        <option value="Ödeme Yapmadı">Ödeme Yapmadı</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold text-black mb-1">Müşteri Memnuniyeti</label>
-                    <select value={endJobData.customerSatisfaction} onChange={e => setEndJobData({...endJobData, customerSatisfaction: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
-                        <option value="Yorum yazdı.">Yorum yazdı.</option>
-                        <option value="Video alındı.">Video alındı.</option>
-                        <option value="Şirketle İletişime Geçti.">Şirketle İletişime Geçti.</option>
-                        <option value="Herhangi bir işlem yapmadı.">Herhangi bir işlem yapmadı.</option>
-                    </select>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-bold text-black mb-1">Hasar Durumu</label>
-                      <select value={endJobData.damageStatus} onChange={e => setEndJobData({...endJobData, damageStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
-                          <option value="Hasarsız teslim edildi">Hasarsız</option>
-                          <option value="Hasar var">Hasar var</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold text-black mb-1">Kamyon Durumu</label>
-                      <select value={endJobData.truckStatus} onChange={e => setEndJobData({...endJobData, truckStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
-                          <option value="Herhangi bir sorun yok">Sorun yok</option>
-                          <option value="Sorun var">Sorun var</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold text-black mb-1">Kamyon Kasası Fotoğrafı / Videosu (İş Sonu)</label>
-                    <div className="flex flex-col gap-2">
-                      {(endJobData.truckImages || []).map((img, idx) => (
-                        <div key={'timg'+idx} className="flex items-center gap-2 bg-neutral-50 p-2 rounded-xl border border-neutral-200">
-                          <Camera className="w-4 h-4 text-neutral-500 shrink-0" />
-                          <span className="text-sm font-medium text-neutral-600 flex-1 truncate">{img}</span>
-                          {img !== 'Yükleniyor...' && (
-                            <button type="button" onClick={() => setEndJobData(prev => ({...prev, truckImages: prev.truckImages.filter((_, i) => i !== idx)}))} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"><X className="w-4 h-4"/></button>
-                          )}
+                  {jobToEnd.type === 'Asansör' ? (
+                    <>
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-1">Ödeme Şekli</label>
+                        <select value={endJobData.paymentMethod} onChange={e => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                            <option value="Nakit">Nakit</option>
+                            <option value="Havale/EFT">Havale/EFT</option>
+                            <option value="Ödeme Alınmadı">Ödeme Alınmadı</option>
+                        </select>
+                      </div>
+                      
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-1">Asansör Kuruldu mu?</label>
+                        <select value={endJobData.elevatorSetup} onChange={e => setEndJobData({...endJobData, elevatorSetup: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                            <option value="Evet">Evet</option>
+                            <option value="Hayır">Hayır</option>
+                        </select>
+                      </div>
+                      {endJobData.elevatorSetup === 'Hayır' && (
+                        <div className="animate-in fade-in slide-in-from-top-2">
+                          <label className="block text-sm font-bold text-red-600 mb-1">Asansör Kurulmama Nedeni *</label>
+                          <textarea required value={endJobData.elevatorSetupReason} onChange={e => setEndJobData({...endJobData, elevatorSetupReason: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl outline-none resize-none h-16 text-sm mb-2" placeholder="Neden kurulamadı?"></textarea>
                         </div>
-                      ))}
-                      <label className="cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
-                        <PlusCircle className="w-5 h-5 text-neutral-500" />
-                        <span className="text-sm font-bold text-neutral-600">Yeni Görsel Ekle</span>
-                        <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => handleFileUpload(e, 'truck')} />
-                      </label>
-                    </div>
-                  </div>
+                      )}
 
-                  {endJobData.damageStatus === 'Hasar var' && (
-                    <div className="bg-red-50 p-4 rounded-xl border border-red-200">
-                        <label className="block text-sm font-bold text-red-900 mb-1">Hasar Detayı (Müşteriye de iletilecek)</label>
-                        <textarea required value={endJobData.damageDetails} onChange={e => setEndJobData({...endJobData, damageDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl outline-none resize-none h-16 text-sm mb-3" placeholder="Hasar hakkında detaylı bilgi..."></textarea>
-                        
-                        <label className="block text-sm font-bold text-red-900 mb-1 mt-2">Hasar Fotoğrafı</label>
-                        <div className="flex flex-col gap-2 mb-3">
-                          {(endJobData.damageImages || []).map((img, idx) => (
-                            <div key={'dimg'+idx} className="flex items-center gap-2 bg-white p-2 rounded-xl border border-red-200">
-                              <Camera className="w-4 h-4 text-red-500 shrink-0" />
-                              <span className="text-sm font-medium text-red-600 flex-1 truncate">{img}</span>
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-1">Asansör Kurulum Fotoğrafı</label>
+                        <div className="flex flex-col gap-2">
+                          {(endJobData.elevatorImages || []).map((img, idx) => (
+                            <div key={'eimg'+idx} className="flex items-center gap-2 bg-neutral-50 p-2 rounded-xl border border-neutral-200">
+                              <Camera className="w-4 h-4 text-neutral-500 shrink-0" />
+                              <span className="text-sm font-medium text-neutral-600 flex-1 truncate">{img}</span>
                               {img !== 'Yükleniyor...' && (
-                                <button type="button" onClick={() => setEndJobData(prev => ({...prev, damageImages: prev.damageImages.filter((_, i) => i !== idx)}))} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition"><X className="w-4 h-4"/></button>
+                                <button type="button" onClick={() => setEndJobData(prev => ({...prev, elevatorImages: prev.elevatorImages.filter((_, i) => i !== idx)}))} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"><X className="w-4 h-4"/></button>
                               )}
                             </div>
                           ))}
-                          <label className="cursor-pointer bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
-                            <PlusCircle className="w-5 h-5 text-red-500" />
-                            <span className="text-sm font-bold text-red-600">Yeni Hasar Fotoğrafı Ekle</span>
-                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'damage')} />
+                          <label className="cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
+                            <PlusCircle className="w-5 h-5 text-neutral-500" />
+                            <span className="text-sm font-bold text-neutral-600">Fotoğraf Ekle</span>
+                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'elevator')} />
                           </label>
                         </div>
-                        
-                        {endJobData.damageDetails.trim().length > 0 && (
-                          <div className="flex flex-col sm:flex-row gap-2 animate-in fade-in">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                let phone = jobToEnd.customerPhone.replace(/\D/g, '');
-                                if (phone.startsWith('0')) phone = '90' + phone.substring(1);
-                                else if (!phone.startsWith('90')) phone = '90' + phone;
-                                const msg = `Sayın *${jobToEnd.customerName}*,\n\nSembol Nakliyat olarak taşıma işleminizi tamamlamış bulunmaktayız. Ekibimiz tarafından teslimat sırasında aşağıdaki durum tutanak altına alınarak operasyon merkezimize raporlanmıştır:\n\n⚠️ *Hasar / Sorun Bildirimi:*\n_${endJobData.damageDetails}_\n\nMüşteri memnuniyeti bizim için en öncelikli konudur. Konuyla ilgili operasyon sorumlumuz en kısa sürede sizinle iletişime geçerek sürecin takibini sağlayacaktır.\n\nAnlayışınız için teşekkür ederiz.\n*Sembol Nakliyat Yönetimi*`;
-                                window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
-                              }}
-                              className="flex-1 px-3 py-2 bg-[#25D366] text-white text-xs font-bold rounded-lg hover:bg-[#128C7E] transition flex items-center justify-center gap-1.5 shadow-sm"
-                            >
-                              <MessageCircle className="w-4 h-4 shrink-0" /> Müşteriye Bildir (WA)
-                            </button>
+                      </div>
 
-                            <button
-                              type="button"
-                              onClick={() => {
-                                let phone = jobToEnd.customerPhone.replace(/\D/g, '');
-                                const msg = `Sayın ${jobToEnd.customerName},\nSembol Nakliyat olarak isinizi tamamladik. Ekibimiz tarafindan bir hasar durumu (${endJobData.damageDetails}) raporlanmistir. Operasyon sorumlumuz sizinle iletisime gececektir.`;
-                                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-                                const separator = isIOS ? '&' : '?';
-                                window.open(`sms:${phone}${separator}body=${encodeURIComponent(msg)}`, '_self');
-                              }}
-                              className="flex-1 px-3 py-2 bg-indigo-500 text-white text-xs font-bold rounded-lg hover:bg-indigo-600 transition flex items-center justify-center gap-1.5 shadow-sm"
-                            >
-                              <MessageSquareText className="w-4 h-4 shrink-0" /> Müşteriye Bildir (SMS)
-                            </button>
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-1">Asansörde Sorun Var mı?</label>
+                        <select value={endJobData.elevatorIssue} onChange={e => setEndJobData({...endJobData, elevatorIssue: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                            <option value="Hayır">Hayır</option>
+                            <option value="Evet">Evet</option>
+                        </select>
+                      </div>
+                      {endJobData.elevatorIssue === 'Evet' && (
+                        <div className="animate-in fade-in slide-in-from-top-2">
+                          <label className="block text-sm font-bold text-red-600 mb-1">Asansör Sorunu Nedeni *</label>
+                          <textarea required value={endJobData.elevatorIssueReason} onChange={e => setEndJobData({...endJobData, elevatorIssueReason: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl outline-none resize-none h-16 text-sm mb-2" placeholder="Sorun nedir?"></textarea>
+                        </div>
+                      )}
+
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-1">Araçta Sorun Var mı?</label>
+                        <select value={endJobData.vehicleIssue} onChange={e => setEndJobData({...endJobData, vehicleIssue: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                            <option value="Hayır">Hayır</option>
+                            <option value="Evet">Evet</option>
+                        </select>
+                      </div>
+                      {endJobData.vehicleIssue === 'Evet' && (
+                        <div className="animate-in fade-in slide-in-from-top-2">
+                          <label className="block text-sm font-bold text-red-600 mb-1">Araç Sorunu Nedeni *</label>
+                          <textarea required value={endJobData.vehicleIssueReason} onChange={e => setEndJobData({...endJobData, vehicleIssueReason: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl outline-none resize-none h-16 text-sm mb-2" placeholder="Araçtaki sorun nedir?"></textarea>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="bg-emerald-50 p-4 rounded-xl border border-emerald-200 mb-4 text-center">
+                        <Key className="w-8 h-8 text-emerald-600 mx-auto mb-2" />
+                        <label className="block text-sm font-bold text-emerald-900 mb-2">Müşteri Teslim Kodunu Giriniz *</label>
+                        <input required type="text" value={endJobData.enteredCode || ''} onChange={e => setEndJobData({...endJobData, enteredCode: e.target.value.toUpperCase()})} className="w-full p-3 border border-emerald-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none transition font-mono tracking-widest uppercase text-center text-xl font-black text-emerald-800 placeholder-emerald-300" placeholder="6 HANELİ KOD" />
+                        <p className="text-[10px] text-emerald-700 mt-2 font-medium">İşi başarıyla sonlandırmak için müşteriden teslim kodunu isteyip yukarıdaki alana girin.</p>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-1">Ödeme Yöntemi</label>
+                        <select value={endJobData.paymentMethod} onChange={e => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                          <option value="Nakit">Nakit</option>
+                          <option value="Havale/EFT">Havale/EFT</option>
+                          <option value="Kredi Kartı">Kredi Kartı</option>
+                          <option value="Ödeme Yapmadı">Ödeme Yapmadı</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-1">Müşteri Memnuniyeti</label>
+                        <select value={endJobData.customerSatisfaction} onChange={e => setEndJobData({...endJobData, customerSatisfaction: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                          <option value="Yorum yazdı.">Yorum yazdı.</option>
+                          <option value="Video alındı.">Video alındı.</option>
+                          <option value="Şirketle İletişime Geçti.">Şirketle İletişime Geçti.</option>
+                          <option value="Herhangi bir işlem yapmadı.">Herhangi bir işlem yapmadı.</option>
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-bold text-black mb-1">Hasar Durumu</label>
+                          <select value={endJobData.damageStatus} onChange={e => setEndJobData({...endJobData, damageStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                            <option value="Hasarsız teslim edildi">Hasarsız</option>
+                            <option value="Hasar var">Hasar var</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-sm font-bold text-black mb-1">Kamyon Durumu</label>
+                          <select value={endJobData.truckStatus} onChange={e => setEndJobData({...endJobData, truckStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                            <option value="Herhangi bir sorun yok">Sorun yok</option>
+                            <option value="Sorun var">Sorun var</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-1">Kamyon Kasası Fotoğrafı / Videosu (İş Sonu)</label>
+                        <div className="flex flex-col gap-2">
+                          {(endJobData.truckImages || []).map((img, idx) => (
+                            <div key={'timg'+idx} className="flex items-center gap-2 bg-neutral-50 p-2 rounded-xl border border-neutral-200">
+                              <Camera className="w-4 h-4 text-neutral-500 shrink-0" />
+                              <span className="text-sm font-medium text-neutral-600 flex-1 truncate">{img}</span>
+                              {img !== 'Yükleniyor...' && (
+                                <button type="button" onClick={() => setEndJobData(prev => ({...prev, truckImages: prev.truckImages.filter((_, i) => i !== idx)}))} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"><X className="w-4 h-4"/></button>
+                              )}
+                            </div>
+                          ))}
+                          <label className="cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
+                            <PlusCircle className="w-5 h-5 text-neutral-500" />
+                            <span className="text-sm font-bold text-neutral-600">Yeni Görsel Ekle</span>
+                            <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => handleFileUpload(e, 'truck')} />
+                          </label>
+                        </div>
+                      </div>
+
+                      {endJobData.damageStatus === 'Hasar var' && (
+                        <div className="bg-red-50 p-4 rounded-xl border border-red-200">
+                          <label className="block text-sm font-bold text-red-900 mb-1">Hasar Detayı (Müşteriye de iletilecek)</label>
+                          <textarea required value={endJobData.damageDetails} onChange={e => setEndJobData({...endJobData, damageDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl outline-none resize-none h-16 text-sm mb-3" placeholder="Hasar hakkında detaylı bilgi..."></textarea>
+                          
+                          <label className="block text-sm font-bold text-red-900 mb-1 mt-2">Hasar Fotoğrafı</label>
+                          <div className="flex flex-col gap-2 mb-3">
+                            {(endJobData.damageImages || []).map((img, idx) => (
+                              <div key={'dimg'+idx} className="flex items-center gap-2 bg-white p-2 rounded-xl border border-red-200">
+                                <Camera className="w-4 h-4 text-red-500 shrink-0" />
+                                <span className="text-sm font-medium text-red-600 flex-1 truncate">{img}</span>
+                                {img !== 'Yükleniyor...' && (
+                                  <button type="button" onClick={() => setEndJobData(prev => ({...prev, damageImages: prev.damageImages.filter((_, i) => i !== idx)}))} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition"><X className="w-4 h-4"/></button>
+                                )}
+                              </div>
+                            ))}
+                            <label className="cursor-pointer bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
+                              <PlusCircle className="w-5 h-5 text-red-500" />
+                              <span className="text-sm font-bold text-red-600">Yeni Hasar Fotoğrafı Ekle</span>
+                              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'damage')} />
+                            </label>
                           </div>
-                        )}
-                    </div>
-                  )}
-                  
-                  {endJobData.truckStatus === 'Sorun var' && (
-                    <div>
-                        <label className="block text-sm font-bold text-black mb-1">Kamyon Sorunu Detayı</label>
-                        <textarea required value={endJobData.truckIssueDetails} onChange={e => setEndJobData({...endJobData, truckIssueDetails: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none resize-none h-16 text-sm" placeholder="Araçtaki arıza/sorun..."></textarea>
-                    </div>
+                          
+                          {endJobData.damageDetails.trim().length > 0 && (
+                            <div className="flex flex-col sm:flex-row gap-2 animate-in fade-in">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  let phone = jobToEnd.customerPhone.replace(/\D/g, '');
+                                  if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+                                  else if (!phone.startsWith('90')) phone = '90' + phone;
+                                  const msg = `Sayın *${jobToEnd.customerName}*,\n\nSembol Nakliyat olarak taşıma işleminizi tamamlamış bulunmaktayız. Ekibimiz tarafından teslimat sırasında aşağıdaki durum tutanak altına alınarak operasyon merkezimize raporlanmıştır:\n\n⚠️ *Hasar / Sorun Bildirimi:*\n_${endJobData.damageDetails}_\n\nMüşteri memnuniyeti bizim için en öncelikli konudur. Konuyla ilgili operasyon sorumlumuz en kısa sürede sizinle iletişime geçerek sürecin takibini sağlayacaktır.\n\nAnlayışınız için teşekkür ederiz.\n*Sembol Nakliyat Yönetimi*`;
+                                  window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+                                }}
+                                className="flex-1 px-3 py-2 bg-[#25D366] text-white text-xs font-bold rounded-lg hover:bg-[#128C7E] transition flex items-center justify-center gap-1.5 shadow-sm"
+                              >
+                                <MessageCircle className="w-4 h-4 shrink-0" /> Müşteriye Bildir (WA)
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  let phone = jobToEnd.customerPhone.replace(/\D/g, '');
+                                  const msg = `Sayın ${jobToEnd.customerName},\nSembol Nakliyat olarak isinizi tamamladik. Ekibimiz tarafindan bir hasar durumu (${endJobData.damageDetails}) raporlanmistir. Operasyon sorumlumuz sizinle iletisime gececektir.`;
+                                  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+                                  const separator = isIOS ? '&' : '?';
+                                  window.open(`sms:${phone}${separator}body=${encodeURIComponent(msg)}`, '_self');
+                                }}
+                                className="flex-1 px-3 py-2 bg-indigo-500 text-white text-xs font-bold rounded-lg hover:bg-indigo-600 transition flex items-center justify-center gap-1.5 shadow-sm"
+                              >
+                                <MessageSquareText className="w-4 h-4 shrink-0" /> Müşteriye Bildir (SMS)
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                      
+                      {endJobData.truckStatus === 'Sorun var' && (
+                        <div>
+                          <label className="block text-sm font-bold text-black mb-1">Kamyon Sorunu Detayı</label>
+                          <textarea required value={endJobData.truckIssueDetails} onChange={e => setEndJobData({...endJobData, truckIssueDetails: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none resize-none h-16 text-sm" placeholder="Araçtaki arıza/sorun..."></textarea>
+                        </div>
+                      )}
+                    </>
                   )}
 
                   <button type="submit" className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
-                    <CheckCircle className="w-5 h-5" /> Kodu Doğrula ve İşi Bitir
+                    <CheckCircle className="w-5 h-5" /> {jobToEnd.type === 'Asansör' ? 'Asansör İşini Sonlandır' : 'Kodu Doğrula ve İşi Bitir'}
                   </button>
                 </form>
               </div>
