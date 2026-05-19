@@ -4859,7 +4859,7 @@ import React, { useState, useEffect } from 'react';
           </div>
         </div>
 
-        <div className="flex-1 w-full overflow-auto border border-neutral-300 custom-scrollbar rounded-xl bg-white shadow-inner relative">
+        <div className="flex-1 w-full overflow-auto overflow-x-auto border border-neutral-300 custom-scrollbar-table rounded-xl bg-white shadow-inner relative">
           <table className="w-full border-collapse text-xs md:text-sm min-w-max">
             <thead className="sticky top-0 z-30 shadow-md">
               <tr>
@@ -7553,6 +7553,23 @@ import React, { useState, useEffect } from 'react';
           .custom-scrollbar::-webkit-scrollbar-thumb {
             background-color: rgba(255, 255, 255, 0.1);
             border-radius: 10px;
+          }
+          .custom-scrollbar-table::-webkit-scrollbar {
+            height: 12px;
+            width: 12px;
+          }
+          .custom-scrollbar-table::-webkit-scrollbar-track {
+            background: #f8fafc;
+            border-bottom-left-radius: 12px;
+            border-bottom-right-radius: 12px;
+          }
+          .custom-scrollbar-table::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 10px;
+            border: 3px solid #f8fafc;
+          }
+          .custom-scrollbar-table::-webkit-scrollbar-thumb:hover {
+            background-color: #94a3b8;
           }
         `}} />
       </div>
