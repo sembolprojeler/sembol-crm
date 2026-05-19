@@ -14,7 +14,7 @@ import React, { useState, useEffect } from 'react';
   import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
   import { 
     getFirestore, collection, addDoc, onSnapshot, 
-    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy
+    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc
   } from "firebase/firestore";
 
   // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
@@ -3673,7 +3673,7 @@ import React, { useState, useEffect } from 'react';
   };
 
   const AddPersonnelView = ({ onAdd, positions = [], ranks = [] }) => {
-    const [formData, setFormData] = useState({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '' });
+    const [formData, setFormData] = useState({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '', collarType: 'Mavi Yaka' });
     const [isUploading, setIsUploading] = useState(false);
     
     const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -3713,7 +3713,7 @@ import React, { useState, useEffect } from 'react';
     const handleSubmit = (e) => {
       e.preventDefault();
       onAdd({ id: Date.now(), ...formData });
-      setFormData({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '' });
+      setFormData({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '', collarType: 'Mavi Yaka' });
     };
 
     return (
@@ -3757,6 +3757,13 @@ import React, { useState, useEffect } from 'react';
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">Şirket Telefonu</label>
               <input type="tel" name="companyPhone" value={formData.companyPhone} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Yaka Tipi *</label>
+              <select required name="collarType" value={formData.collarType} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-medium">
+                <option value="Mavi Yaka">Mavi Yaka</option>
+                <option value="Beyaz Yaka">Beyaz Yaka</option>
+              </select>
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -3861,6 +3868,7 @@ import React, { useState, useEffect } from 'react';
                 <th className="p-4 font-bold rounded-tl-xl">Ad Soyad</th>
                 <th className="p-4 font-bold">İletişim</th>
                 <th className="p-4 font-bold">Pozisyon / Rütbe</th>
+                <th className="p-4 font-bold">Yaka Tipi</th>
                 <th className="p-4 font-bold">İş Güvenliği</th>
                 <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
               </tr>
@@ -3891,6 +3899,11 @@ import React, { useState, useEffect } from 'react';
                   <td className="p-4 text-neutral-600">
                     <span className="font-bold">{person.position}</span><br/>
                     <span className="text-xs text-neutral-500">{person.rank}</span>
+                  </td>
+                  <td className="p-4 text-neutral-600">
+                    <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase whitespace-nowrap ${person.collarType === 'Beyaz Yaka' ? 'bg-neutral-100 text-neutral-700 border border-neutral-200' : 'bg-blue-50 text-blue-700 border border-blue-100'}`}>
+                      {person.collarType || 'Belirtilmedi'}
+                    </span>
                   </td>
                   <td className="p-4">
                     <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase whitespace-nowrap ${
@@ -3959,6 +3972,13 @@ import React, { useState, useEffect } from 'react';
                   <div>
                     <label className="block text-sm font-bold text-neutral-700 mb-1">Şirket Telefonu</label>
                     <input type="tel" value={editForm.companyPhone || ''} onChange={(e) => setEditForm({...editForm, companyPhone: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Yaka Tipi *</label>
+                    <select required value={editForm.collarType || 'Mavi Yaka'} onChange={(e) => setEditForm({...editForm, collarType: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-medium">
+                      <option value="Mavi Yaka">Mavi Yaka</option>
+                      <option value="Beyaz Yaka">Beyaz Yaka</option>
+                    </select>
                   </div>
                 </div>
                 
@@ -4614,6 +4634,297 @@ import React, { useState, useEffect } from 'react';
     </div>
   );
 
+  const PuantajView = ({ personnelList, db, appId, addSystemLog }) => {
+    const today = new Date();
+    const [currentMonth, setCurrentMonth] = useState(today.getMonth() + 1);
+    const [currentYear, setCurrentYear] = useState(today.getFullYear());
+    const [puantajData, setPuantajData] = useState({});
+    const [isSaving, setIsSaving] = useState(false);
+    const [isDataLoaded, setIsDataLoaded] = useState(false);
+    const currentDayRef = React.useRef(null);
+
+    const months = [
+      { val: 1, label: 'Ocak' }, { val: 2, label: 'Şubat' }, { val: 3, label: 'Mart' },
+      { val: 4, label: 'Nisan' }, { val: 5, label: 'Mayıs' }, { val: 6, label: 'Haziran' },
+      { val: 7, label: 'Temmuz' }, { val: 8, label: 'Ağustos' }, { val: 9, label: 'Eylül' },
+      { val: 10, label: 'Ekim' }, { val: 11, label: 'Kasım' }, { val: 12, label: 'Aralık' }
+    ];
+    const years = Array.from({ length: 10 }, (_, i) => 2024 + i);
+
+    const maviYakaList = personnelList.filter(p => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
+
+    const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+    const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+    useEffect(() => {
+      if (currentDayRef.current) {
+        setTimeout(() => {
+          currentDayRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+        }, 300);
+      }
+    }, [currentMonth, currentYear, maviYakaList.length]);
+
+    useEffect(() => {
+      const fetchPuantaj = async () => {
+        setIsDataLoaded(false);
+        try {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${currentYear}_${currentMonth}`);
+          const snap = await getDoc(docRef);
+          if (snap.exists()) {
+            setPuantajData(snap.data().records || {});
+          } else {
+            setPuantajData({});
+          }
+        } catch (e) {
+          console.error("Puantaj yüklenirken hata:", e);
+        } finally {
+          setIsDataLoaded(true);
+        }
+      };
+      fetchPuantaj();
+    }, [currentMonth, currentYear, db, appId]);
+
+    useEffect(() => {
+      if (!isDataLoaded) return;
+      const timeoutId = setTimeout(async () => {
+        setIsSaving(true);
+        try {
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${currentYear}_${currentMonth}`);
+          await setDoc(docRef, { records: puantajData, updatedAt: new Date().toISOString() }, { merge: true });
+        } catch (e) {
+          console.error("Otomatik kaydetme hatası:", e);
+        }
+        setTimeout(() => setIsSaving(false), 800);
+      }, 1000);
+      return () => clearTimeout(timeoutId);
+    }, [puantajData]);
+
+    const handleCellChange = (personId, day, value) => {
+      setPuantajData(prev => ({
+        ...prev,
+        [personId]: {
+          ...(prev[personId] || {}),
+          [day]: value
+        }
+      }));
+    };
+
+    const handleDownloadPDF = () => {
+      const printWindow = window.open('', '_blank');
+      
+      let tableRows = maviYakaList.map(person => {
+        const total = getPersonTotal(person.id);
+        const totalStr = total > 0 ? total.toString().replace('.', ',') : '';
+        let daysHtml = days.map(d => {
+          const val = (puantajData[person.id] && puantajData[person.id][d]) || '';
+          return `<td style="border: 1px solid #000; text-align: center; padding: 2px; height: 20px;">${val}</td>`;
+        }).join('');
+        
+        return `
+          <tr>
+            <td style="border: 1px solid #000; padding: 4px 8px; font-weight: bold; white-space: nowrap; font-size: 11px;">${person.fullName.toUpperCase()}</td>
+            <td style="border: 1px solid #000; padding: 2px; text-align: center; font-weight: bold; font-size: 12px; background-color: #fef08a;">${totalStr}</td>
+            ${daysHtml}
+          </tr>
+        `;
+      }).join('');
+
+      let commentsHtml = days.map(d => {
+        const val = (puantajData['daily_comments'] && puantajData['daily_comments'][d]) || '';
+        return `<td style="border: 1px solid #000; text-align: center; padding: 2px; background-color: #22c55e; color: white; font-weight: bold;">${val}</td>`;
+      }).join('');
+
+      let daysHeaderHtml = days.map(d => `<th style="border: 1px solid #000; padding: 2px; min-width: 20px; background-color: #8bb4e7; font-size: 9px;">${String(d).padStart(2, '0')}.${String(currentMonth).padStart(2, '0')}<br/>${currentYear}</th>`).join('');
+
+      const html = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Puantaj_${months.find(m => m.val === currentMonth)?.label}_${currentYear}</title>
+        <style>
+          @page { size: landscape; margin: 10mm; }
+          body { font-family: Arial, sans-serif; font-size: 10px; margin: 0; padding: 0; }
+          table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          th, td { border: 1px solid #000; padding: 2px; overflow: hidden; text-overflow: ellipsis; }
+          .header-title { background-color: #f97316; color: black; font-weight: bold; font-size: 16px; text-align: center; padding: 8px; border: 2px solid #000; }
+          .bg-yellow { background-color: #facc15; }
+          .bg-black { background-color: #000; color: #fff; }
+          .bg-gray { background-color: #e5e7eb; color: #dc2626; }
+        </style>
+      </head>
+      <body>
+        <table>
+          <thead>
+            <tr>
+              <th colspan="${daysInMonth + 2}" class="header-title">${months.find(m => m.val === currentMonth)?.label.toUpperCase()} ${currentYear} PUANTAJ LİSTESİ</th>
+            </tr>
+            <tr>
+              <th colspan="2" class="bg-yellow" style="text-align: center; font-size: 12px; padding: 4px;">PUANLARIM TOPLAMI : ${maviYakaList.reduce((acc, p) => acc + getPersonTotal(p.id), 0) > 0 ? maviYakaList.reduce((acc, p) => acc + getPersonTotal(p.id), 0).toString().replace('.', ',') : ''}</th>
+              <th colspan="${daysInMonth}" class="bg-black" style="text-align: center; letter-spacing: 2px; padding: 4px;">GÜN BİLGİSİ</th>
+            </tr>
+            <tr>
+              <th class="bg-gray" style="text-align: left; padding: 4px 8px; width: 150px;">AD SOYAD</th>
+              <th class="bg-yellow" style="width: 40px; font-size: 10px;">PUAN</th>
+              ${daysHeaderHtml}
+            </tr>
+            <tr>
+              <th class="bg-gray" style="text-align: center; font-size: 16px;">${getPersonTotal('daily_comments') > 0 ? getPersonTotal('daily_comments').toString().replace('.', ',') : ''}</th>
+              <th class="bg-yellow" style="font-size: 9px;">YORUM<br/>SAYISI</th>
+              ${commentsHtml}
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+        <script>
+          setTimeout(() => { window.print(); window.close(); }, 500);
+        </script>
+      </body>
+      </html>
+      `;
+
+      printWindow.document.open();
+      printWindow.document.write(html);
+      printWindow.document.close();
+    };
+
+    const getPersonTotal = (personId) => {
+      const record = puantajData[personId] || {};
+      return Object.values(record).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
+    };
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in flex flex-col h-[calc(100vh-120px)] relative">
+        <div className="flex justify-between items-center mb-6 shrink-0 gap-4 flex-wrap">
+          <h2 className="text-xl font-bold text-black flex items-center gap-2">
+            <CalendarDays className="w-6 h-6 text-red-600" /> Mavi Yaka Puantaj Tablosu
+          </h2>
+          <div className="flex items-center gap-3">
+            <select value={currentMonth} onChange={e => setCurrentMonth(parseInt(e.target.value))} className="p-2 border border-neutral-300 rounded-lg outline-none font-bold bg-neutral-50 focus:ring-2 focus:ring-red-600 cursor-pointer">
+              {months.map(m => <option key={m.val} value={m.val}>{m.label}</option>)}
+            </select>
+            <select value={currentYear} onChange={e => setCurrentYear(parseInt(e.target.value))} className="p-2 border border-neutral-300 rounded-lg outline-none font-bold bg-neutral-50 focus:ring-2 focus:ring-red-600 cursor-pointer">
+              {years.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            <div className="flex items-center mx-2 w-28 justify-end">
+              {isSaving ? (
+                <span className="text-xs font-bold text-neutral-400 flex items-center gap-1 animate-pulse"><Loader2 className="w-3 h-3 animate-spin"/> Kaydediliyor...</span>
+              ) : isDataLoaded ? (
+                <span className="text-xs font-bold text-green-600 flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Kaydedildi</span>
+              ) : null}
+            </div>
+            <button onClick={handleDownloadPDF} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-lg font-bold flex items-center gap-2 transition shadow-md">
+              <Download className="w-4 h-4" /> 
+              Tabloyu İndir (PDF)
+            </button>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto border-2 border-neutral-300 custom-scrollbar rounded-xl bg-white shadow-inner">
+          <table className="w-full border-collapse text-sm min-w-max">
+            <thead className="sticky top-0 z-30 shadow-md">
+              <tr>
+                <th colSpan={daysInMonth + 2} className="bg-orange-500 text-black font-black py-2.5 border-b-2 border-neutral-400 text-lg tracking-wider">
+                  {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} PUANTAJ LİSTESİ
+                </th>
+              </tr>
+              <tr>
+                <th colSpan="2" className="bg-yellow-400 border-b border-r border-neutral-400 text-center text-xl font-black text-black p-2">
+                  <div className="flex items-center justify-center gap-2">
+                    <span className="text-sm font-bold text-black/70 uppercase tracking-tight">PUANLARIM TOPLAMI :</span>
+                    <span>{maviYakaList.reduce((acc, p) => acc + getPersonTotal(p.id), 0) > 0 ? maviYakaList.reduce((acc, p) => acc + getPersonTotal(p.id), 0).toString().replace('.', ',') : ''}</span>
+                  </div>
+                </th>
+                <th colSpan={daysInMonth} className="bg-black text-white font-bold p-1 border-b border-neutral-400 text-xs tracking-widest">
+                  GÜN BİLGİSİ
+                </th>
+              </tr>
+              <tr>
+                <th className="bg-neutral-200 text-red-600 font-black p-2 border-b border-r border-neutral-400 sticky left-0 z-30 w-64 min-w-[220px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">AD SOYAD</th>
+                <th className="bg-yellow-400 text-black font-black p-2 border-b border-r border-neutral-400 w-16 min-w-[70px] leading-tight">PUAN</th>
+                {days.map(d => {
+                  const isToday = currentYear === today.getFullYear() && currentMonth === today.getMonth() + 1 && d === today.getDate();
+                  return (
+                    <th key={d} ref={isToday ? currentDayRef : null} className={`bg-[#8bb4e7] text-black font-bold p-2 border-b border-r border-neutral-400 min-w-[85px] ${isToday ? 'bg-red-500 text-white shadow-md z-10 relative ring-2 ring-red-500 ring-inset' : ''}`}>
+                      <div className="text-[11px] tracking-widest">{String(d).padStart(2, '0')}.{String(currentMonth).padStart(2, '0')}.{currentYear}</div>
+                      {isToday && <div className="text-[9px] uppercase mt-0.5 font-black text-white/90">BUGÜN</div>}
+                    </th>
+                  );
+                })}
+              </tr>
+              <tr>
+                <th className="bg-neutral-100 text-red-600 font-black p-2 border-b border-r border-neutral-400 sticky left-0 z-30 text-center text-2xl shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                  {getPersonTotal('daily_comments') > 0 ? getPersonTotal('daily_comments').toString().replace('.', ',') : ''}
+                </th>
+                <th className="bg-yellow-400 text-black font-black p-1 border-b border-r border-neutral-400 text-[11px] leading-tight text-center">
+                  YORUM<br/>SAYISI
+                </th>
+                {days.map(d => (
+                  <th key={`comment-${d}`} className="bg-green-500 p-0 border-b border-r border-green-600 relative min-w-[85px]">
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      value={(puantajData['daily_comments'] && puantajData['daily_comments'][d]) || ''}
+                      onChange={(e) => handleCellChange('daily_comments', d, e.target.value)}
+                      className="w-full h-10 text-center text-sm font-bold text-white bg-transparent outline-none focus:bg-green-600 focus:ring-inset focus:ring-2 focus:ring-white transition-colors appearance-none placeholder-green-300"
+                      style={{ MozAppearance: 'textfield' }}
+                    />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {maviYakaList.map((person, index) => (
+                <tr key={person.id} className="hover:bg-neutral-50 transition border-b border-neutral-300 group">
+                  <td className="sticky left-0 z-20 bg-white group-hover:bg-neutral-50 border-r border-neutral-400 p-2 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 border border-neutral-300">
+                        {person.profileImage ? (
+                          <img src={person.profileImage} alt={person.fullName} className="w-full h-full object-cover" />
+                        ) : (
+                          person.fullName.charAt(0)
+                        )}
+                      </div>
+                      <span className="font-bold text-neutral-800 text-xs truncate max-w-[160px]">{person.fullName.toUpperCase()}</span>
+                    </div>
+                  </td>
+                  <td className="bg-yellow-100/70 text-black font-black text-center border-r border-neutral-400 text-base">
+                    {getPersonTotal(person.id) > 0 ? getPersonTotal(person.id).toString().replace('.', ',') : ''}
+                  </td>
+                  {days.map(d => {
+                    const isToday = currentYear === today.getFullYear() && currentMonth === today.getMonth() + 1 && d === today.getDate();
+                    return (
+                      <td key={d} className={`border-r border-neutral-300 p-0 text-center relative ${isToday ? 'bg-red-50/40' : 'bg-white'}`}>
+                        <input
+                          type="number"
+                          step="0.5"
+                          min="0"
+                          value={(puantajData[person.id] && puantajData[person.id][d]) || ''}
+                          onChange={(e) => handleCellChange(person.id, d, e.target.value)}
+                          className={`w-full h-11 text-center text-sm font-bold text-black outline-none focus:ring-inset focus:ring-2 focus:ring-blue-600 transition-colors appearance-none ${isToday ? 'bg-transparent focus:bg-blue-100' : 'bg-transparent focus:bg-blue-100'}`}
+                          style={{ MozAppearance: 'textfield' }}
+                        />
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              {maviYakaList.length === 0 && (
+                <tr>
+                  <td colSpan={daysInMonth + 2} className="p-8 text-center text-neutral-500 font-medium">
+                    Sistemde mavi yaka personel kaydı bulunamadı.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, addSystemLog }) => {
     const [backups, setBackups] = useState(() => {
       const saved = localStorage.getItem('sembol_backups');
@@ -5244,6 +5555,51 @@ import React, { useState, useEffect } from 'react';
       if (!firebaseUser) return;
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'tasks', taskId), { status });
     };
+
+    const handleApprovePoints = async (job, addPoints, reviewImageUrl) => {
+      if (!firebaseUser) return;
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), {
+          pointsApproved: true,
+          reviewImage: reviewImageUrl || null
+        });
+
+        if (addPoints) {
+          const jobDate = new Date(job.date);
+          const year = jobDate.getFullYear();
+          const month = jobDate.getMonth() + 1;
+          const day = jobDate.getDate();
+
+          const puantajRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${year}_${month}`);
+          const snap = await getDoc(puantajRef);
+          let records = snap.exists() ? snap.data().records : {};
+
+          // İşin atandığı personellerin ID'leri
+          const teamIds = job.assignedPersonnelIds ? [...job.assignedPersonnelIds] : [];
+          if (job.assignedPersonnelId && !teamIds.includes(job.assignedPersonnelId)) {
+            teamIds.push(job.assignedPersonnelId);
+          }
+
+          // Seçilen güne personeller için +1 puan ekle
+          teamIds.forEach(pId => {
+            if (!records[pId]) records[pId] = {};
+            records[pId][day] = (parseFloat(records[pId][day]) || 0) + 1;
+          });
+
+          // Günlük yorum/puan sayısını +1 artır
+          if (!records['daily_comments']) records['daily_comments'] = {};
+          records['daily_comments'][day] = (parseFloat(records['daily_comments'][day]) || 0) + 1;
+
+          await setDoc(puantajRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
+        }
+
+        addSystemLog('Puan Onaylandı', `${job.customerName} operasyonu için müşteri puanı/yorumu onaylandı.`);
+        alert("İşlem başarıyla tamamlandı!");
+      } catch (e) {
+        console.error(e);
+        alert("Puan onaylanırken hata oluştu.");
+      }
+    };
     
     // Şikayet İşlemleri
     const handleUpdateComplaintStatus = async (id, status, isRead = false) => {
@@ -5701,6 +6057,8 @@ import React, { useState, useEffect } from 'react';
     const isManager = userPos.includes('Yönetici') || userPos.includes('Firma Sahibi') || currentUser?.rank === 'Müdür';
     const canEdit = currentUser?.permissions?.canEdit;
 
+    const canApprovePoints = userPos.includes('Operasyon') || isManager || canEdit;
+
     // İşlem yetkisi olanlar veya yöneticiler (Kayıt, İşler ve Müşteriler için tam yetki)
     const hasJobAccess = canEdit || isManager || isMuhasebe || isDepo;
     
@@ -5994,10 +6352,10 @@ import React, { useState, useEffect } from 'react';
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'maviPersonnel' || activeTab === 'beyazPersonnel' || activeTab === 'complaints') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'maviPersonnel' || activeTab === 'beyazPersonnel' || activeTab === 'complaints' || activeTab === 'maviPuantaj') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <Briefcase className={`w-5 h-5 shrink-0 ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'maviPersonnel' || activeTab === 'beyazPersonnel' || activeTab === 'complaints') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Personel Listesi</span>
+                    <Briefcase className={`w-5 h-5 shrink-0 ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'maviPersonnel' || activeTab === 'beyazPersonnel' || activeTab === 'complaints' || activeTab === 'maviPuantaj') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Personel Listesi</span>
                   </div>
                   {isPersonnelSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -6027,6 +6385,12 @@ import React, { useState, useEffect } from 'react';
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'beyazPersonnel' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'beyazPersonnel' ? 'bg-white' : 'bg-red-600'}`}></div> Beyaz Personel
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('maviPuantaj'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'maviPuantaj' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'maviPuantaj' ? 'bg-white' : 'bg-red-600'}`}></div> Mavi Puantaj
                     </button>
                     <button 
                       onClick={() => { setActiveTab('complaints'); setIsSidebarOpen(false); }}
@@ -6224,7 +6588,7 @@ import React, { useState, useEffect } from 'react';
         {/* Main Content Area */}
         <main className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
           <div className="max-w-6xl mx-auto">
-            {activeTab === 'dashboard' && <DashboardView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} />}
+            {activeTab === 'dashboard' && <DashboardView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} setViewingImage={setViewingImage} />}
             {activeTab === 'calendar' && <CalendarView jobs={visibleJobs} handleEditJob={handleEditJob} />}
             {activeTab === 'profile' && <ProfileView currentUser={currentUser} jobs={visibleJobs} notifications={notifications} markNotificationsAsRead={markNotificationsAsRead} personnelList={personnelList} messages={messages} setMessages={setMessages} handleOpenEndJobModal={handleOpenEndJobModal} setViewingImage={setViewingImage} handleUpdatePersonnel={handleUpdatePersonnel} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
             {activeTab === 'addInfo' && hasJobAccess && (currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi' || currentUser?.permissions?.canEdit) && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
@@ -6252,7 +6616,7 @@ import React, { useState, useEffect } from 'react';
 
             {/* İş Listesi Modülleri */}
             {activeTab === 'currentJobs' && hasJobAccess && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
-            {activeTab === 'completedJobs' && hasJobAccess && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
+            {activeTab === 'completedJobs' && hasJobAccess && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} canApprovePoints={canApprovePoints} handleApprovePoints={handleApprovePoints} />}
             {activeTab === 'allJobs' && hasJobAccess && <AllJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} />}
             {activeTab === 'cancelledJobs' && hasJobAccess && <CancelledJobsView jobs={jobs} handleEditJob={handleEditJob} handleRestoreJob={handleRestoreJob} setDeleteJobId={setDeleteJobId} />}
 
@@ -6261,8 +6625,9 @@ import React, { useState, useEffect } from 'react';
             {/* Personel ve Araç Modülleri */}
             {activeTab === 'addPersonnel' && hasResourceAccess && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
             {activeTab === 'personnelList' && hasResourceAccess && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" />}
-            {activeTab === 'maviPersonnel' && hasResourceAccess && <PersonnelListView personnelList={personnelList.filter(p => ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position))} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Mavi Yaka Personel" />}
-            {activeTab === 'beyazPersonnel' && hasResourceAccess && <PersonnelListView personnelList={personnelList.filter(p => ['Muhasebe', 'Satış Personeli', 'Operasyon', 'Firma Sahibi', 'Müdür'].includes(p.position))} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Beyaz Yaka Personel" />}
+            {activeTab === 'maviPersonnel' && hasResourceAccess && <PersonnelListView personnelList={personnelList.filter(p => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Mavi Yaka Personel" />}
+            {activeTab === 'beyazPersonnel' && hasResourceAccess && <PersonnelListView personnelList={personnelList.filter(p => p.collarType === 'Beyaz Yaka' || (!p.collarType && ['Muhasebe', 'Satış Personeli', 'Operasyon', 'Firma Sahibi', 'Müdür'].includes(p.position)))} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Beyaz Yaka Personel" />}
+            {activeTab === 'maviPuantaj' && hasResourceAccess && <PuantajView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'complaints' && hasResourceAccess && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {activeTab === 'addVehicle' && hasResourceAccess && <AddVehicleView onAdd={handleAddVehicle} />}
             {activeTab === 'vehicleList' && hasResourceAccess && (
