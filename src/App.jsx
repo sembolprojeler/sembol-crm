@@ -4833,80 +4833,80 @@ import React, { useState, useEffect } from 'react';
     };
 
     return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in flex flex-col h-[calc(100vh-120px)] relative">
-        <div className="flex justify-between items-center mb-6 shrink-0 gap-4 flex-wrap">
-          <h2 className="text-xl font-bold text-black flex items-center gap-2">
-            <CalendarDays className="w-6 h-6 text-red-600" /> Mavi Yaka Puantaj Tablosu
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 md:p-6 animate-in fade-in flex flex-col h-[calc(100vh-120px)] relative w-full overflow-hidden">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 shrink-0 gap-4 w-full">
+          <h2 className="text-lg md:text-xl font-bold text-black flex items-center gap-2">
+            <CalendarDays className="w-5 h-5 md:w-6 md:h-6 text-red-600" /> Mavi Yaka Puantaj Tablosu
           </h2>
-          <div className="flex items-center gap-3">
-            <select value={currentMonth} onChange={e => setCurrentMonth(parseInt(e.target.value))} className="p-2 border border-neutral-300 rounded-lg outline-none font-bold bg-neutral-50 focus:ring-2 focus:ring-red-600 cursor-pointer">
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            <select value={currentMonth} onChange={e => setCurrentMonth(parseInt(e.target.value))} className="p-2 border border-neutral-300 rounded-lg outline-none font-bold bg-neutral-50 focus:ring-2 focus:ring-red-600 cursor-pointer flex-1 md:flex-none text-sm">
               {months.map(m => <option key={m.val} value={m.val}>{m.label}</option>)}
             </select>
-            <select value={currentYear} onChange={e => setCurrentYear(parseInt(e.target.value))} className="p-2 border border-neutral-300 rounded-lg outline-none font-bold bg-neutral-50 focus:ring-2 focus:ring-red-600 cursor-pointer">
+            <select value={currentYear} onChange={e => setCurrentYear(parseInt(e.target.value))} className="p-2 border border-neutral-300 rounded-lg outline-none font-bold bg-neutral-50 focus:ring-2 focus:ring-red-600 cursor-pointer flex-1 md:flex-none text-sm">
               {years.map(y => <option key={y} value={y}>{y}</option>)}
             </select>
-            <div className="flex items-center mx-2 w-28 justify-end">
+            <button onClick={handleDownloadPDF} className="w-full md:w-auto bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 transition shadow-md text-sm mt-1 md:mt-0 order-last md:order-none">
+              <Download className="w-4 h-4" /> 
+              Tabloyu İndir
+            </button>
+            <div className="flex items-center w-full md:w-28 justify-center md:justify-end mt-1 md:mt-0">
               {isSaving ? (
                 <span className="text-xs font-bold text-neutral-400 flex items-center gap-1 animate-pulse"><Loader2 className="w-3 h-3 animate-spin"/> Kaydediliyor...</span>
               ) : isDataLoaded ? (
                 <span className="text-xs font-bold text-green-600 flex items-center gap-1"><CheckCircle className="w-3 h-3"/> Kaydedildi</span>
               ) : null}
             </div>
-            <button onClick={handleDownloadPDF} className="bg-red-600 hover:bg-red-700 text-white px-4 py-2.5 rounded-lg font-bold flex items-center gap-2 transition shadow-md">
-              <Download className="w-4 h-4" /> 
-              Tabloyu İndir (PDF)
-            </button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto border-2 border-neutral-300 custom-scrollbar rounded-xl bg-white shadow-inner">
-          <table className="w-full border-collapse text-sm min-w-max">
+        <div className="flex-1 w-full overflow-auto border border-neutral-300 custom-scrollbar rounded-xl bg-white shadow-inner relative">
+          <table className="w-full border-collapse text-xs md:text-sm min-w-max">
             <thead className="sticky top-0 z-30 shadow-md">
               <tr>
-                <th colSpan={daysInMonth + 2} className="bg-orange-500 text-black font-black py-2.5 border-b-2 border-neutral-400 text-lg tracking-wider">
+                <th colSpan={daysInMonth + 2} className="bg-orange-500 text-black font-black py-2 border-b-2 border-neutral-400 text-sm md:text-lg tracking-wider">
                   {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} PUANTAJ LİSTESİ
                 </th>
               </tr>
               <tr>
-                <th colSpan="2" className="bg-yellow-400 border-b border-r border-neutral-400 text-center text-xl font-black text-black p-2">
-                  <div className="flex items-center justify-center gap-2">
-                    <span className="text-sm font-bold text-black/70 uppercase tracking-tight">PUANLARIM TOPLAMI :</span>
+                <th colSpan="2" className="bg-yellow-400 border-b border-r border-neutral-400 text-center text-xs md:text-xl font-black text-black p-1 md:p-2">
+                  <div className="flex items-center justify-center gap-1 md:gap-2 flex-wrap">
+                    <span className="text-[9px] md:text-sm font-bold text-black/70 uppercase tracking-tight">TOPLAM :</span>
                     <span>{maviYakaList.reduce((acc, p) => acc + getPersonTotal(p.id), 0) > 0 ? maviYakaList.reduce((acc, p) => acc + getPersonTotal(p.id), 0).toString().replace('.', ',') : ''}</span>
                   </div>
                 </th>
-                <th colSpan={daysInMonth} className="bg-black text-white font-bold p-1 border-b border-neutral-400 text-xs tracking-widest">
+                <th colSpan={daysInMonth} className="bg-black text-white font-bold p-1 border-b border-neutral-400 text-[9px] md:text-xs tracking-widest">
                   GÜN BİLGİSİ
                 </th>
               </tr>
               <tr>
-                <th className="bg-neutral-200 text-red-600 font-black p-2 border-b border-r border-neutral-400 sticky left-0 z-30 w-64 min-w-[220px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">AD SOYAD</th>
-                <th className="bg-yellow-400 text-black font-black p-2 border-b border-r border-neutral-400 w-16 min-w-[70px] leading-tight">PUAN</th>
+                <th className="bg-neutral-200 text-red-600 font-black p-1 md:p-2 border-b border-r border-neutral-400 sticky left-0 z-30 w-24 min-w-[90px] md:w-64 md:min-w-[220px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] text-[9px] md:text-sm">AD SOYAD</th>
+                <th className="bg-yellow-400 text-black font-black p-1 md:p-2 border-b border-r border-neutral-400 w-10 min-w-[40px] md:w-16 md:min-w-[70px] leading-tight text-[8px] md:text-xs">PUAN</th>
                 {days.map(d => {
                   const isToday = currentYear === today.getFullYear() && currentMonth === today.getMonth() + 1 && d === today.getDate();
                   return (
-                    <th key={d} ref={isToday ? currentDayRef : null} className={`bg-[#8bb4e7] text-black font-bold p-2 border-b border-r border-neutral-400 min-w-[85px] ${isToday ? 'bg-red-500 text-white shadow-md z-10 relative ring-2 ring-red-500 ring-inset' : ''}`}>
-                      <div className="text-[11px] tracking-widest">{String(d).padStart(2, '0')}.{String(currentMonth).padStart(2, '0')}.{currentYear}</div>
-                      {isToday && <div className="text-[9px] uppercase mt-0.5 font-black text-white/90">BUGÜN</div>}
+                    <th key={d} ref={isToday ? currentDayRef : null} className={`bg-[#8bb4e7] text-black font-bold p-1 md:p-2 border-b border-r border-neutral-400 min-w-[45px] md:min-w-[85px] ${isToday ? 'bg-red-500 text-white shadow-md z-10 relative ring-2 ring-red-500 ring-inset' : ''}`}>
+                      <div className="text-[9px] md:text-[11px] tracking-widest">{String(d).padStart(2, '0')}.{String(currentMonth).padStart(2, '0')}</div>
+                      {isToday && <div className="text-[7px] md:text-[9px] uppercase mt-0.5 font-black text-white/90">BUGÜN</div>}
                     </th>
                   );
                 })}
               </tr>
               <tr>
-                <th className="bg-neutral-100 text-red-600 font-black p-2 border-b border-r border-neutral-400 sticky left-0 z-30 text-center text-2xl shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                <th className="bg-neutral-100 text-red-600 font-black p-1 md:p-2 border-b border-r border-neutral-400 sticky left-0 z-30 text-center text-sm md:text-2xl shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] w-24 min-w-[90px] md:w-64 md:min-w-[220px]">
                   {getPersonTotal('daily_comments') > 0 ? getPersonTotal('daily_comments').toString().replace('.', ',') : ''}
                 </th>
-                <th className="bg-yellow-400 text-black font-black p-1 border-b border-r border-neutral-400 text-[11px] leading-tight text-center">
+                <th className="bg-yellow-400 text-black font-black p-1 border-b border-r border-neutral-400 text-[7px] md:text-[11px] leading-tight text-center w-10 min-w-[40px] md:w-16 md:min-w-[70px]">
                   YORUM<br/>SAYISI
                 </th>
                 {days.map(d => (
-                  <th key={`comment-${d}`} className="bg-green-500 p-0 border-b border-r border-green-600 relative min-w-[85px]">
+                  <th key={`comment-${d}`} className="bg-green-500 p-0 border-b border-r border-green-600 relative min-w-[45px] md:min-w-[85px]">
                     <input
                       type="number"
                       step="0.5"
                       min="0"
                       value={(puantajData['daily_comments'] && puantajData['daily_comments'][d]) || ''}
                       onChange={(e) => handleCellChange('daily_comments', d, e.target.value)}
-                      className="w-full h-10 text-center text-sm font-bold text-white bg-transparent outline-none focus:bg-green-600 focus:ring-inset focus:ring-2 focus:ring-white transition-colors appearance-none placeholder-green-300"
+                      className="w-full h-7 md:h-10 text-center text-[10px] md:text-sm font-bold text-white bg-transparent outline-none focus:bg-green-600 focus:ring-inset focus:ring-2 focus:ring-white transition-colors appearance-none placeholder-green-300"
                       style={{ MozAppearance: 'textfield' }}
                     />
                   </th>
@@ -4916,19 +4916,19 @@ import React, { useState, useEffect } from 'react';
             <tbody>
               {maviYakaList.map((person, index) => (
                 <tr key={person.id} className="hover:bg-neutral-50 transition border-b border-neutral-300 group">
-                  <td className="sticky left-0 z-20 bg-white group-hover:bg-neutral-50 border-r border-neutral-400 p-2 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 border border-neutral-300">
+                  <td className="sticky left-0 z-20 bg-white group-hover:bg-neutral-50 border-r border-neutral-400 p-1 md:p-2 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] w-24 min-w-[90px] md:w-64 md:min-w-[220px]">
+                    <div className="flex items-center gap-1.5 md:gap-2.5">
+                      <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 border border-neutral-300 text-[8px] md:text-sm">
                         {person.profileImage ? (
                           <img src={person.profileImage} alt={person.fullName} className="w-full h-full object-cover" />
                         ) : (
                           person.fullName.charAt(0)
                         )}
                       </div>
-                      <span className="font-bold text-neutral-800 text-xs truncate max-w-[160px]">{person.fullName.toUpperCase()}</span>
+                      <span className="font-bold text-neutral-800 text-[9px] md:text-xs truncate max-w-[50px] md:max-w-[160px] leading-tight">{person.fullName.toUpperCase()}</span>
                     </div>
                   </td>
-                  <td className="bg-yellow-100/70 text-black font-black text-center border-r border-neutral-400 text-base">
+                  <td className="bg-yellow-100/70 text-black font-black text-center border-r border-neutral-400 text-xs md:text-base w-10 min-w-[40px] md:w-16 md:min-w-[70px]">
                     {getPersonTotal(person.id) > 0 ? getPersonTotal(person.id).toString().replace('.', ',') : ''}
                   </td>
                   {days.map(d => {
@@ -4941,7 +4941,7 @@ import React, { useState, useEffect } from 'react';
                           min="0"
                           value={(puantajData[person.id] && puantajData[person.id][d]) || ''}
                           onChange={(e) => handleCellChange(person.id, d, e.target.value)}
-                          className={`w-full h-11 text-center text-sm font-bold text-black outline-none focus:ring-inset focus:ring-2 focus:ring-blue-600 transition-colors appearance-none ${isToday ? 'bg-transparent focus:bg-blue-100' : 'bg-transparent focus:bg-blue-100'}`}
+                          className={`w-full h-7 md:h-11 text-center text-[10px] md:text-sm font-bold text-black outline-none focus:ring-inset focus:ring-2 focus:ring-blue-600 transition-colors appearance-none ${isToday ? 'bg-transparent focus:bg-blue-100' : 'bg-transparent focus:bg-blue-100'}`}
                           style={{ MozAppearance: 'textfield' }}
                         />
                       </td>
@@ -4951,7 +4951,7 @@ import React, { useState, useEffect } from 'react';
               ))}
               {maviYakaList.length === 0 && (
                 <tr>
-                  <td colSpan={daysInMonth + 2} className="p-8 text-center text-neutral-500 font-medium">
+                  <td colSpan={daysInMonth + 2} className="p-4 md:p-8 text-center text-neutral-500 font-medium text-xs md:text-sm">
                     Sistemde mavi yaka personel kaydı bulunamadı.
                   </td>
                 </tr>
