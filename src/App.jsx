@@ -571,6 +571,31 @@ import React, { useState, useEffect } from 'react';
           )}
       </div>
 
+      {/* --- MÜŞTERİ YORUMLARI --- */}
+      {jobs.filter(j => j.pointsApproved && j.reviewImage).length > 0 && (
+          <div className="bg-green-50 border border-green-200 p-4 rounded-2xl shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-1 h-full bg-green-600"></div>
+              <h3 className="text-green-800 font-black flex items-center gap-2 mb-3">
+                  <Star className="w-5 h-5 fill-green-600" /> Müşteri Yorumları
+              </h3>
+              <div className="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
+                  {jobs.filter(j => j.pointsApproved && j.reviewImage).sort((a,b) => new Date(b.date) - new Date(a.date)).map(rev => (
+                      <div key={rev.id} className="bg-white rounded-xl shadow-sm border border-green-100 overflow-hidden relative group min-w-[250px] max-w-[300px] shrink-0">
+                          <div className="w-full aspect-video bg-neutral-100 cursor-pointer" onClick={() => setViewingImage && setViewingImage({title: 'Müşteri Yorumu', name: rev.reviewImage})}>
+                              <img src={rev.reviewImage} alt="Müşteri Yorumu" className="w-full h-full object-cover hover:scale-105 transition duration-300" />
+                          </div>
+                          <div className="p-3">
+                              <h4 className="font-bold text-black text-sm mb-1">{rev.customerName}</h4>
+                              <p className="text-xs text-neutral-600 mb-1">
+                                  <Users className="w-3 h-3 inline mr-1 text-neutral-400" /> Ekip: {rev.team || 'Bilinmiyor'}
+                              </p>
+                              <span className="text-[10px] text-neutral-400 font-medium">{rev.date}</span>
+                          </div>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      )}
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
@@ -2063,7 +2088,7 @@ import React, { useState, useEffect } from 'react';
     );
   };
 
-  const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage, setDeleteJobId }) => {
+  const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage, setDeleteJobId, canApprovePoints, handleOpenApproveModal }) => {
     const [viewDate, setViewDate] = useState(new Date());
 
     const prevDay = () => {
@@ -2152,6 +2177,19 @@ import React, { useState, useEffect } from 'react';
                       <Edit className="w-4 h-4" /> Düzenle
                     </button>
                   </div>
+                  
+                  {/* PUAN ONAY BUTONU */}
+                  {canApprovePoints && !job.pointsApproved && (
+                    <button onClick={() => handleOpenApproveModal(job)} className="w-full px-4 py-2 bg-yellow-50 text-yellow-700 font-bold rounded-xl hover:bg-yellow-100 transition flex justify-center items-center gap-2 text-sm border border-yellow-200">
+                      <Star className="w-4 h-4" /> Puanı Onayla
+                    </button>
+                  )}
+                  {job.pointsApproved && (
+                    <div className="w-full px-4 py-2 bg-green-50 text-green-700 font-bold rounded-xl flex justify-center items-center gap-2 text-sm border border-green-200 opacity-70 cursor-not-allowed">
+                      <CheckCircle className="w-4 h-4" /> Puan Onaylandı
+                    </div>
+                  )}
+
                   {(job.endJobDetails?.truckImages || (job.endJobDetails?.truckImage ? [job.endJobDetails.truckImage] : [])).map((img, idx) => (
                     <button key={idx} onClick={() => setViewingImage({title: 'Kasa Fotoğrafı', name: img})} className="w-full px-4 py-2 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition flex justify-center items-center gap-2 text-sm border border-neutral-200">
                       <Camera className="w-4 h-4" /> Kasa Görseli {idx > 0 ? idx+1 : ''}
@@ -5293,6 +5331,11 @@ import React, { useState, useEffect } from 'react';
       vehicleIssueReason: ''
     });
 
+    // Puan Onay Modal State
+    const [showApproveModal, setShowApproveModal] = useState(false);
+    const [jobToApprove, setJobToApprove] = useState(null);
+    const [approveData, setApproveData] = useState({ addPoints: 'Evet', reviewImage: '' });
+
     const [aiModal, setAiModal] = useState({ isOpen: false, loading: false, content: '', title: '', type: '' });
     const [viewingImage, setViewingImage] = useState(null);
 
@@ -5599,6 +5642,53 @@ import React, { useState, useEffect } from 'react';
         console.error(e);
         alert("Puan onaylanırken hata oluştu.");
       }
+    };
+
+    const handleOpenApproveModal = (job) => {
+      setJobToApprove(job);
+      setApproveData({ addPoints: 'Evet', reviewImage: '' });
+      setShowApproveModal(true);
+    };
+
+    const handleReviewImageUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      setApproveData(prev => ({ ...prev, reviewImage: 'Yükleniyor...' }));
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', {
+          method: 'POST',
+          body: formData,
+        });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try {
+          const json = JSON.parse(text);
+          uploadedUrl = json.url || json.fileName || json.file || text;
+        } catch (err) {
+          uploadedUrl = text.trim();
+        }
+        setApproveData(prev => ({ ...prev, reviewImage: uploadedUrl }));
+      } catch (err) {
+        console.error("Yükleme hatası:", err);
+        alert("Görsel yüklenemedi.");
+        setApproveData(prev => ({ ...prev, reviewImage: '' }));
+      }
+    };
+
+    const submitApprovePoints = async (e) => {
+      e.preventDefault();
+      if (approveData.reviewImage === 'Yükleniyor...') {
+        alert('Lütfen görselin yüklenmesini bekleyin.');
+        return;
+      }
+      await handleApprovePoints(jobToApprove, approveData.addPoints === 'Evet', approveData.reviewImage);
+      setShowApproveModal(false);
+      setJobToApprove(null);
     };
     
     // Şikayet İşlemleri
@@ -6616,7 +6706,7 @@ import React, { useState, useEffect } from 'react';
 
             {/* İş Listesi Modülleri */}
             {activeTab === 'currentJobs' && hasJobAccess && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
-            {activeTab === 'completedJobs' && hasJobAccess && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} canApprovePoints={canApprovePoints} handleApprovePoints={handleApprovePoints} />}
+            {activeTab === 'completedJobs' && hasJobAccess && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} />}
             {activeTab === 'allJobs' && hasJobAccess && <AllJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} />}
             {activeTab === 'cancelledJobs' && hasJobAccess && <CancelledJobsView jobs={jobs} handleEditJob={handleEditJob} handleRestoreJob={handleRestoreJob} setDeleteJobId={setDeleteJobId} />}
 
@@ -7386,6 +7476,66 @@ import React, { useState, useEffect } from 'react';
 
                   <button type="submit" className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> {jobToEnd.type === 'Asansör' ? 'Asansör İşini Sonlandır' : 'Kodu Doğrula ve İşi Bitir'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* PUAN ONAYLAMA VE YORUM EKLEME MODALI */}
+        {showApproveModal && jobToApprove && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
+              <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-yellow-500 shrink-0">
+                <h3 className="font-bold text-lg flex items-center gap-2"><Star className="w-5 h-5 text-yellow-500 fill-yellow-500" /> Puanı Onayla</h3>
+                <button onClick={() => setShowApproveModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto custom-scrollbar">
+                <form onSubmit={submitApprovePoints} className="space-y-5">
+                  <div className="bg-neutral-50 p-3 rounded-xl border border-neutral-200">
+                    <p className="text-sm font-bold text-black mb-1">Müşteri: {jobToApprove.customerName}</p>
+                    <p className="text-xs text-neutral-500">Tarih: {jobToApprove.date}</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-2">Personele Puan Girilsin mi? (1 Puan)</label>
+                    <select value={approveData.addPoints} onChange={e => setApproveData({...approveData, addPoints: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium focus:ring-2 focus:ring-yellow-500 transition">
+                        <option value="Evet">Evet, 1 Puan Ekle</option>
+                        <option value="Hayır">Hayır, Puan Ekleme</option>
+                    </select>
+                    <p className="text-[10px] text-neutral-500 mt-1">Evet seçildiğinde görevdeki personellere ve günlük yorum sayısına puan eklenir.</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
+                      <Camera className="w-4 h-4 text-neutral-500" /> Müşteri Yorumu / Ekran Görüntüsü
+                    </label>
+                    {approveData.reviewImage && approveData.reviewImage !== 'Yükleniyor...' && (
+                      <div className="mb-3 w-full h-32 overflow-hidden rounded-xl border border-neutral-200 relative group">
+                        <img src={approveData.reviewImage} alt="Yorum" className="w-full h-full object-cover bg-neutral-100" />
+                        <button type="button" onClick={() => setApproveData(prev => ({...prev, reviewImage: ''}))} className="absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition shadow-md">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                    {approveData.reviewImage === 'Yükleniyor...' && (
+                      <div className="p-4 text-center font-bold text-neutral-500 animate-pulse bg-neutral-50 rounded-xl border border-neutral-200 mb-3">
+                        Görsel Yükleniyor...
+                      </div>
+                    )}
+                    {!approveData.reviewImage && (
+                      <label className="cursor-pointer bg-neutral-50 hover:bg-neutral-100 border border-neutral-300 border-dashed rounded-xl p-4 text-center transition flex flex-col justify-center items-center gap-2">
+                        <Upload className="w-6 h-6 text-neutral-400" />
+                        <span className="text-sm font-bold text-neutral-600">Yorum Görseli Ekle (İsteğe Bağlı)</span>
+                        <input type="file" accept="image/*" className="hidden" onChange={handleReviewImageUpload} />
+                      </label>
+                    )}
+                  </div>
+
+                  <button type="submit" className="w-full py-4 bg-yellow-500 text-black font-black rounded-xl hover:bg-yellow-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                    <CheckCircle className="w-5 h-5" /> Onayla ve Kaydet
                   </button>
                 </form>
               </div>
