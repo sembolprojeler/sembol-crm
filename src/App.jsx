@@ -4892,8 +4892,11 @@ import React, { useState, useEffect } from 'react';
                 })}
               </tr>
               <tr>
-                <th className="bg-neutral-100 text-red-600 font-black p-1 md:p-2 border-b border-r border-neutral-400 sticky left-0 z-30 text-center text-sm md:text-2xl shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] w-24 min-w-[90px] md:w-64 md:min-w-[220px]">
-                  {getPersonTotal('daily_comments') > 0 ? getPersonTotal('daily_comments').toString().replace('.', ',') : ''}
+                <th className="bg-neutral-100 text-red-600 font-black p-1 md:p-2 border-b border-r border-neutral-400 sticky left-0 z-30 text-center shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] w-24 min-w-[90px] md:w-64 md:min-w-[220px]">
+                  <div className="flex flex-col items-center justify-center gap-0.5">
+                    <span className="text-[8px] md:text-[11px] text-neutral-600 uppercase tracking-tighter font-bold">GENEL YORUM / PUAN</span>
+                    <span className="text-sm md:text-2xl">{getPersonTotal('daily_comments') > 0 ? getPersonTotal('daily_comments').toString().replace('.', ',') : '0'}</span>
+                  </div>
                 </th>
                 <th className="bg-yellow-400 text-black font-black p-1 border-b border-r border-neutral-400 text-[7px] md:text-[11px] leading-tight text-center w-10 min-w-[40px] md:w-16 md:min-w-[70px]">
                   YORUM<br/>SAYISI
@@ -7555,21 +7558,21 @@ import React, { useState, useEffect } from 'react';
             border-radius: 10px;
           }
           .custom-scrollbar-table::-webkit-scrollbar {
-            height: 12px;
-            width: 12px;
+            height: 16px;
+            width: 16px;
           }
           .custom-scrollbar-table::-webkit-scrollbar-track {
-            background: #f8fafc;
+            background: #f1f5f9;
             border-bottom-left-radius: 12px;
             border-bottom-right-radius: 12px;
           }
           .custom-scrollbar-table::-webkit-scrollbar-thumb {
-            background-color: #cbd5e1;
+            background-color: #ef4444;
             border-radius: 10px;
-            border: 3px solid #f8fafc;
+            border: 4px solid #f1f5f9;
           }
           .custom-scrollbar-table::-webkit-scrollbar-thumb:hover {
-            background-color: #94a3b8;
+            background-color: #dc2626;
           }
         `}} />
       </div>
