@@ -318,11 +318,12 @@ import React, { useState, useEffect } from 'react';
     printWindow.document.close();
   };
 
-  const DashboardView = ({ jobs, personnelList, vehicles, materials, systemLogs, currentUser, setViewingImage }) => {
+  const DashboardView = ({ jobs, allJobs, personnelList, vehicles, materials, systemLogs, currentUser, setViewingImage }) => {
     const isAdmin = ['Müdür', 'Firma Sahibi', 'Operasyon'].some(role => currentUser?.position?.includes(role) || currentUser?.rank === role) || currentUser?.permissions?.canEdit;
     
     const [myScore, setMyScore] = useState(0);
-    const [dailyStatuses, setDailyStatuses] = useState({ today: null, yesterday: null });
+    const [dailyData, setDailyData] = useState({ today: { mesai: null, puan: 0 }, yesterday: { mesai: null, puan: 0 } });
+    const [isRefreshing, setIsRefreshing] = useState(false);
     const [filterPeriod, setFilterPeriod] = useState('today');
 
     const today = new Date();
@@ -341,72 +342,93 @@ import React, { useState, useEffect } from 'react';
 
     const isMaviYaka = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
 
+    const fetchMyScoreAndStatus = async () => {
+      try {
+        const currentYear = today.getFullYear();
+        const currentMonth = today.getMonth() + 1;
+        const currentDay = today.getDate();
+
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yYear = yesterday.getFullYear();
+        const yMonth = yesterday.getMonth() + 1;
+        const yDay = yesterday.getDate();
+
+        // 1. Fetch current month Puantaj
+        const docRefPuantaj = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${currentYear}_${currentMonth}`);
+        const snapPuantaj = await getDoc(docRefPuantaj);
+        let currentMonthPuantajRecords = {};
+        if (snapPuantaj.exists()) {
+          currentMonthPuantajRecords = snapPuantaj.data().records || {};
+          const myRecord = currentMonthPuantajRecords[currentUser.id] || {};
+          const total = Object.values(myRecord).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
+          setMyScore(total);
+        }
+
+        let todayPuan = parseFloat(currentMonthPuantajRecords[currentUser.id]?.[currentDay]) || 0;
+        let yesterdayPuan = 0;
+
+        // 2. Fetch yesterday Puantaj (if previous month)
+        if (currentMonth === yMonth && currentYear === yYear) {
+            yesterdayPuan = parseFloat(currentMonthPuantajRecords[currentUser.id]?.[yDay]) || 0;
+        } else {
+            const docRefPuantajYest = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${yYear}_${yMonth}`);
+            const snapPuantajYest = await getDoc(docRefPuantajYest);
+            if (snapPuantajYest.exists()) {
+                const yRecords = snapPuantajYest.data().records || {};
+                yesterdayPuan = parseFloat(yRecords[currentUser.id]?.[yDay]) || 0;
+            }
+        }
+
+        // 3. Fetch current month Mesai
+        const docRefMesaiToday = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${currentYear}_${currentMonth}`);
+        const snapMesaiToday = await getDoc(docRefMesaiToday);
+        let todayStatus = null;
+        let currentMonthMesaiRecords = {};
+        if (snapMesaiToday.exists()) {
+           currentMonthMesaiRecords = snapMesaiToday.data().records || {};
+           const myRecord = currentMonthMesaiRecords[currentUser.id] || {};
+           const tData = myRecord[currentDay];
+           if (tData) todayStatus = typeof tData === 'object' ? tData.status : tData;
+        }
+
+        // 4. Fetch yesterday Mesai
+        let yesterdayStatus = null;
+        if (currentMonth === yMonth && currentYear === yYear) {
+           const myRecord = currentMonthMesaiRecords[currentUser.id] || {};
+           const yData = myRecord[yDay];
+           if (yData) yesterdayStatus = typeof yData === 'object' ? yData.status : yData;
+        } else {
+           const docRefMesaiYesterday = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${yYear}_${yMonth}`);
+           const snapMesaiYesterday = await getDoc(docRefMesaiYesterday);
+           if (snapMesaiYesterday.exists()) {
+             const records = snapMesaiYesterday.data().records || {};
+             const myRecord = records[currentUser.id] || {};
+             const yData = myRecord[yDay];
+             if (yData) yesterdayStatus = typeof yData === 'object' ? yData.status : yData;
+           }
+        }
+
+        setDailyData({
+            today: { mesai: todayStatus, puan: todayPuan },
+            yesterday: { mesai: yesterdayStatus, puan: yesterdayPuan }
+        });
+
+      } catch (error) {
+        console.error("Veriler yüklenemedi", error);
+      }
+    };
+
     useEffect(() => {
       if (!isMaviYaka || !currentUser) return;
-      const fetchMyScoreAndStatus = async () => {
-        try {
-          const currentYear = today.getFullYear();
-          const currentMonth = today.getMonth() + 1;
-          const currentDay = today.getDate();
-
-          const yesterday = new Date(today);
-          yesterday.setDate(yesterday.getDate() - 1);
-          const yYear = yesterday.getFullYear();
-          const yMonth = yesterday.getMonth() + 1;
-          const yDay = yesterday.getDate();
-
-          // Puan Çekme
-          const docRefPuantaj = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${currentYear}_${currentMonth}`);
-          const snapPuantaj = await getDoc(docRefPuantaj);
-          if (snapPuantaj.exists()) {
-            const records = snapPuantaj.data().records || {};
-            const myRecord = records[currentUser.id] || {};
-            const total = Object.values(myRecord).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
-            setMyScore(total);
-          }
-
-          // Günlük Mesai Durumu Çekme (Bugün)
-          const docRefMesaiToday = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${currentYear}_${currentMonth}`);
-          const snapMesaiToday = await getDoc(docRefMesaiToday);
-          let todayStatus = null;
-          if (snapMesaiToday.exists()) {
-             const records = snapMesaiToday.data().records || {};
-             const myRecord = records[currentUser.id] || {};
-             const tData = myRecord[currentDay];
-             
-             if (tData) {
-                todayStatus = typeof tData === 'object' ? tData.status : tData;
-             }
-          }
-
-          // Günlük Mesai Durumu Çekme (Dün)
-          let yesterdayStatus = null;
-          if (currentMonth === yMonth && currentYear === yYear) {
-             if (snapMesaiToday.exists()) {
-               const records = snapMesaiToday.data().records || {};
-               const myRecord = records[currentUser.id] || {};
-               const yData = myRecord[yDay];
-               if (yData) yesterdayStatus = typeof yData === 'object' ? yData.status : yData;
-             }
-          } else {
-             const docRefMesaiYesterday = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${yYear}_${yMonth}`);
-             const snapMesaiYesterday = await getDoc(docRefMesaiYesterday);
-             if (snapMesaiYesterday.exists()) {
-               const records = snapMesaiYesterday.data().records || {};
-               const myRecord = records[currentUser.id] || {};
-               const yData = myRecord[yDay];
-               if (yData) yesterdayStatus = typeof yData === 'object' ? yData.status : yData;
-             }
-          }
-
-          setDailyStatuses({ today: todayStatus, yesterday: yesterdayStatus });
-
-        } catch (error) {
-          console.error("Veriler yüklenemedi", error);
-        }
-      };
       fetchMyScoreAndStatus();
-    }, [currentUser, isMaviYaka, jobs]); // jobs eklendi ki onayda vs güncellensin
+    }, [currentUser, isMaviYaka, jobs]);
+
+    const handleRefresh = async () => {
+      setIsRefreshing(true);
+      await fetchMyScoreAndStatus();
+      setTimeout(() => setIsRefreshing(false), 800);
+    };
 
     let scoreColor = '';
     let scoreTextColor = '';
@@ -431,56 +453,101 @@ import React, { useState, useEffect } from 'react';
     }
 
     // --- MESAİ DURUM BİLDİRİMİ HAZIRLIĞI ---
-    const renderStatusBox = (status, dayLabel) => {
-       if (!status) return null;
-       let bg = '', textCol = '', border = '', icon = null, title = '', msg = '';
-       
-       switch (status) {
-          case 'G':
-             bg = 'bg-green-50'; border = 'border-green-200'; textCol = 'text-green-800'; title = `${dayLabel} Mesain Onaylandı`; msg = 'Mesain sisteme eksiksiz olarak işlendi. Harika!'; icon = <CheckCircle className="w-6 h-6 text-green-600" />; break;
-          case 'FM':
-             bg = 'bg-blue-50'; border = 'border-blue-200'; textCol = 'text-blue-800'; title = `${dayLabel} Fazla Mesai Yaptın`; msg = 'Harika efor! Emeklerinin karşılığını göreceksin, aynen devam! 💪'; icon = <Clock className="w-6 h-6 text-blue-600" />; break;
-          case 'D':
-             bg = 'bg-red-50'; border = 'border-red-200'; textCol = 'text-red-800'; title = `${dayLabel} İşe Gelmedin`; msg = 'Aramızda değildin. Umarım her şey yolundadır, seni dinlenmiş olarak bekliyoruz.'; icon = <AlertTriangle className="w-6 h-6 text-red-600" />; break;
-          case 'Hİ':
-             bg = 'bg-blue-50'; border = 'border-blue-200'; textCol = 'text-blue-800'; title = `${dayLabel} İzinlisin`; msg = 'Haftalık iznini iyi değerlendir, dinlenmek en doğal hakkın. İyi tatiller! 🌴'; icon = <Clock className="w-6 h-6 text-blue-600" />; break;
-          case 'Yİ':
-             bg = 'bg-purple-50'; border = 'border-purple-200'; textCol = 'text-purple-800'; title = `${dayLabel} Yıllık İzindesin`; msg = 'Uzun bir tatil zamanı! Kendine bolca vakit ayır ve iyice dinlen. 🏖️'; icon = <CalendarDays className="w-6 h-6 text-purple-600" />; break;
-          case 'EM':
-             bg = 'bg-yellow-50'; border = 'border-yellow-200'; textCol = 'text-yellow-800'; title = `${dayLabel} Eksik Mesai`; msg = 'Biraz eksik çalıştın gibi görünüyor. Bir dahaki sefere telafi edeceğinden eminiz!'; icon = <Clock className="w-6 h-6 text-yellow-600" />; break;
-          case 'Bİ':
-             bg = 'bg-pink-50'; border = 'border-pink-200'; textCol = 'text-pink-800'; title = `${dayLabel} Bayram İznindesin`; msg = 'İyi bayramlar! Sevdiklerinle birlikte güzel vakit geçir. 🍬'; icon = <Star className="w-6 h-6 text-pink-600" />; break;
-          case 'FG':
-             bg = 'bg-teal-50'; border = 'border-teal-200'; textCol = 'text-teal-800'; title = `${dayLabel} Fazladan Gün Çalıştın`; msg = 'Ekstra bir gün çalışarak gücünü gösterdin! Harikasın! 🚀'; icon = <Activity className="w-6 h-6 text-teal-600" />; break;
-          case 'Üİ':
-             bg = 'bg-neutral-100'; border = 'border-neutral-300'; textCol = 'text-neutral-700'; title = `${dayLabel} Ücretsiz İzindesin`; msg = 'İzindesin, dinlenmene bak. Tekrar aramızda görmek için sabırsızlanıyoruz.'; icon = <Ban className="w-6 h-6 text-neutral-500" />; break;
-          case 'R':
-             bg = 'bg-orange-50'; border = 'border-orange-200'; textCol = 'text-orange-800'; title = `${dayLabel} Raporlusun`; msg = 'Geçmiş olsun! Lütfen sağlığına dikkat et, seni sağlıklı olarak tekrar görmek istiyoruz. 🏥'; icon = <Activity className="w-6 h-6 text-orange-600" />; break;
-          default:
-             break;
+    const renderDailySummary = (data, dayLabel) => {
+       if (!data || (!data.mesai && data.puan === 0)) return null;
+
+       const boxes = [];
+
+       if (data.puan > 0) {
+            let pTitle = '';
+            let pMsg = '';
+            let pBg = 'bg-yellow-50';
+            let pBorder = 'border-yellow-200';
+            let pTextCol = 'text-yellow-800';
+            let pIcon = <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />;
+
+            if (data.puan === 0.5) {
+                pTitle = `${dayLabel} Destek Puanı!`;
+                pMsg = 'Takım arkadaşlarına yardımcı olduğun için 0.5 puan kazandın. Harika bir takım oyuncususun!';
+                pBg = 'bg-blue-50'; pBorder = 'border-blue-200'; pTextCol = 'text-blue-800';
+                pIcon = <Users className="w-6 h-6 text-blue-600" />;
+            } else if (data.puan === 1) {
+                pTitle = `${dayLabel} Müşteri Puanı!`;
+                pMsg = 'Müşteri memnuniyetini sağladığın için 1 tam puan kazandın. Tebrikler!';
+            } else if (data.puan > 1) {
+                pTitle = `${dayLabel} Harika Performans!`;
+                pMsg = `Hem müşteri memnuniyeti hem de takım desteği ile toplam ${data.puan} puan kazandın!`;
+                pBg = 'bg-emerald-50'; pBorder = 'border-emerald-200'; pTextCol = 'text-emerald-800';
+                pIcon = <Sparkles className="w-6 h-6 text-emerald-600" />;
+            }
+
+            boxes.push(
+              <div key="puan" className={`p-4 rounded-2xl border ${pBg} ${pBorder} shadow-sm flex items-start gap-4 mb-3 w-full`}>
+                 <div className="bg-white p-3 rounded-full shadow-sm shrink-0 border border-white/50">{pIcon}</div>
+                 <div>
+                    <h3 className={`font-black text-base md:text-lg ${pTextCol} mb-0.5`}>{pTitle}</h3>
+                    <p className={`text-xs md:text-sm font-medium ${pTextCol} opacity-90`}>{pMsg}</p>
+                 </div>
+              </div>
+           );
        }
 
-       if (!title) return null;
+       if (data.mesai) {
+          let bg = '', textCol = '', border = '', icon = null, title = '', msg = '';
+          switch (data.mesai) {
+             case 'G': bg = 'bg-green-50'; border = 'border-green-200'; textCol = 'text-green-800'; title = `${dayLabel} Mesain Onaylandı`; msg = 'Mesain sisteme eksiksiz olarak işlendi. Harika!'; icon = <CheckCircle className="w-6 h-6 text-green-600" />; break;
+             case 'FM': bg = 'bg-blue-50'; border = 'border-blue-200'; textCol = 'text-blue-800'; title = `${dayLabel} Fazla Mesai`; msg = 'Harika efor! Emeklerinin karşılığını göreceksin, aynen devam! 💪'; icon = <Clock className="w-6 h-6 text-blue-600" />; break;
+             case 'EM': bg = 'bg-yellow-50'; border = 'border-yellow-200'; textCol = 'text-yellow-800'; title = `${dayLabel} Eksik Mesai`; msg = 'Biraz eksik çalıştın gibi görünüyor. Bir dahaki sefere telafi edeceğinden eminiz!'; icon = <Clock className="w-6 h-6 text-yellow-600" />; break;
+             case 'D': bg = 'bg-red-50'; border = 'border-red-200'; textCol = 'text-red-800'; title = `${dayLabel} İşe Gelmedin`; msg = 'Aramızda değildin. Umarım her şey yolundadır, seni dinlenmiş olarak bekliyoruz.'; icon = <AlertTriangle className="w-6 h-6 text-red-600" />; break;
+             case 'Hİ': bg = 'bg-blue-50'; border = 'border-blue-200'; textCol = 'text-blue-800'; title = `${dayLabel} İzinlisin`; msg = 'Haftalık iznini iyi değerlendir, dinlenmek en doğal hakkın. İyi tatiller! 🌴'; icon = <Clock className="w-6 h-6 text-blue-600" />; break;
+             case 'Yİ': bg = 'bg-purple-50'; border = 'border-purple-200'; textCol = 'text-purple-800'; title = `${dayLabel} Yıllık İzindesin`; msg = 'Uzun bir tatil zamanı! Kendine bolca vakit ayır ve iyice dinlen. 🏖️'; icon = <CalendarDays className="w-6 h-6 text-purple-600" />; break;
+             case 'Bİ': bg = 'bg-pink-50'; border = 'border-pink-200'; textCol = 'text-pink-800'; title = `${dayLabel} Bayram İznindesin`; msg = 'İyi bayramlar! Sevdiklerinle birlikte güzel vakit geçir. 🍬'; icon = <Star className="w-6 h-6 text-pink-600" />; break;
+             case 'FG': bg = 'bg-teal-50'; border = 'border-teal-200'; textCol = 'text-teal-800'; title = `${dayLabel} Fazla Gün`; msg = 'Ekstra bir gün çalışarak gücünü gösterdin! Harikasın! 🚀'; icon = <Activity className="w-6 h-6 text-teal-600" />; break;
+             case 'Üİ': bg = 'bg-neutral-100'; border = 'border-neutral-300'; textCol = 'text-neutral-700'; title = `${dayLabel} Ücretsiz İzin`; msg = 'İzindesin, dinlenmene bak. Tekrar aramızda görmek için sabırsızlanıyoruz.'; icon = <Ban className="w-6 h-6 text-neutral-500" />; break;
+             case 'R': bg = 'bg-orange-50'; border = 'border-orange-200'; textCol = 'text-orange-800'; title = `${dayLabel} Raporlusun`; msg = 'Geçmiş olsun! Lütfen sağlığına dikkat et, seni sağlıklı olarak tekrar görmek istiyoruz. 🏥'; icon = <Activity className="w-6 h-6 text-orange-600" />; break;
+             default: break;
+          }
+          if (title) {
+              boxes.push(
+                  <div key="mesai" className={`p-4 rounded-2xl border ${bg} ${border} shadow-sm flex items-start gap-4 mb-3 w-full`}>
+                     <div className="bg-white p-3 rounded-full shadow-sm shrink-0 border border-white/50">{icon}</div>
+                     <div>
+                        <h3 className={`font-black text-base md:text-lg ${textCol} mb-0.5`}>{title}</h3>
+                        <p className={`text-xs md:text-sm font-medium ${textCol} opacity-90`}>{msg}</p>
+                     </div>
+                  </div>
+              );
+          }
+       }
 
        return (
-          <div key={dayLabel} className={`p-4 rounded-2xl border ${bg} ${border} shadow-sm animate-in fade-in slide-in-from-top-4 flex items-start gap-4`}>
-             <div className="bg-white p-3 rounded-full shadow-sm shrink-0 border border-white/50">
-                {icon}
-             </div>
-             <div>
-                <h3 className={`font-black text-lg ${textCol} mb-1`}>{title}</h3>
-                <p className={`text-sm font-medium ${textCol} opacity-90`}>{msg}</p>
-             </div>
-          </div>
+           <div className="flex-1 animate-in fade-in slide-in-from-top-4 flex flex-col">
+               <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider mb-3 pl-1 border-b border-neutral-200 pb-2">{dayLabel} Özeti</h3>
+               <div className="flex flex-col flex-1">
+                   {boxes}
+               </div>
+           </div>
        );
     };
 
     return (
       <div className="space-y-6 animate-in fade-in">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
-          <div>
-            <h2 className="text-2xl font-black text-black">Hoş Geldiniz, {currentUser?.fullName}</h2>
-            <p className="text-neutral-500 font-medium">Sistemdeki genel operasyon özetini aşağıdan takip edebilirsiniz.</p>
+          <div className="flex items-start lg:items-center gap-4 w-full lg:w-auto">
+            <div>
+              <h2 className="text-2xl font-black text-black">Hoş Geldiniz, {currentUser?.fullName}</h2>
+              <p className="text-neutral-500 font-medium">Sistemdeki genel operasyon özetini aşağıdan takip edebilirsiniz.</p>
+            </div>
+            {isMaviYaka && (
+              <button 
+                onClick={handleRefresh} 
+                disabled={isRefreshing}
+                className="ml-auto p-2.5 bg-neutral-100 text-neutral-600 rounded-full hover:bg-neutral-200 transition shrink-0 shadow-sm border border-neutral-200"
+                title="Günlük Özeti Yenile"
+              >
+                 <Loader2 className={`w-5 h-5 ${isRefreshing ? 'animate-spin text-red-600' : ''}`} />
+              </button>
+            )}
           </div>
           
           {isMaviYaka && (
@@ -500,22 +567,22 @@ import React, { useState, useEffect } from 'react';
         </div>
 
         {/* Günlük Mesai Durumu Bildirimi */}
-        {isMaviYaka && (dailyStatuses.today || dailyStatuses.yesterday) && (
+        {isMaviYaka && (dailyData.today || dailyData.yesterday) && (
           <div className="flex flex-col md:flex-row gap-4 mb-6">
-            {dailyStatuses.today && <div className="flex-1">{renderStatusBox(dailyStatuses.today, 'Bugün')}</div>}
-            {dailyStatuses.yesterday && <div className="flex-1">{renderStatusBox(dailyStatuses.yesterday, 'Dün')}</div>}
+            {dailyData.today && <div className="flex-1">{renderDailySummary(dailyData.today, 'Bugün')}</div>}
+            {dailyData.yesterday && <div className="flex-1">{renderDailySummary(dailyData.yesterday, 'Dün')}</div>}
           </div>
         )}
 
         {/* --- ALINAN YORUMLAR --- */}
-        {jobs.filter(j => j.pointsApproved && j.reviewImage).length > 0 && (
+        {(allJobs || jobs).filter(j => j.pointsApproved && j.reviewImage).length > 0 && (
           <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl shadow-sm relative overflow-hidden">
             <div className="absolute top-0 left-0 w-1 h-full bg-emerald-600"></div>
             <h3 className="text-emerald-800 font-black flex items-center gap-2 mb-3">
               <Star className="w-5 h-5 fill-emerald-600 text-emerald-600" /> Alınan Yorumlar
             </h3>
             <div className="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
-              {jobs.filter(j => j.pointsApproved && j.reviewImage).sort((a,b) => new Date(b.date) - new Date(a.date)).map(rev => {
+              {(allJobs || jobs).filter(j => j.pointsApproved && j.reviewImage).sort((a,b) => new Date(b.date) - new Date(a.date)).map(rev => {
                 // Sadece sistemdeki personelleri bul (dışarıdan manuel yazılanları yoksay)
                 const systemPersonnelNames = personnelList
                   .filter(p => rev.assignedPersonnelIds?.includes(p.id) || rev.assignedPersonnelId === p.id)
@@ -564,6 +631,49 @@ import React, { useState, useEffect } from 'react';
           </div>
         )}
 
+        {/* --- DESTEK YAPANLARA TEŞEKKÜRLER --- */}
+        {(allJobs || jobs).filter(j => j.pointsApproved && j.supportPersonnelIds && j.supportPersonnelIds.length > 0).length > 0 && (
+          <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl shadow-sm relative overflow-hidden mt-6">
+            <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
+            <h3 className="text-blue-800 font-black flex items-center gap-2 mb-3">
+              <Sparkles className="w-5 h-5 text-blue-600" /> Takım Çalışması & Destek Panosu
+            </h3>
+            <div className="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
+              {(allJobs || jobs).filter(j => j.pointsApproved && j.supportPersonnelIds && j.supportPersonnelIds.length > 0).sort((a,b) => new Date(b.date) - new Date(a.date)).map(job => {
+                const supportNames = personnelList
+                  .filter(p => job.supportPersonnelIds.includes(p.id))
+                  .map(p => p.fullName);
+
+                return (
+                  <div key={'sup-'+job.id} className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden relative min-w-[280px] max-w-[320px] shrink-0 flex flex-col p-4">
+                    <div className="flex items-center gap-3 mb-3 border-b border-neutral-100 pb-3">
+                      <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shrink-0">
+                        <Users className="w-5 h-5" />
+                      </div>
+                      <div className="overflow-hidden">
+                        <p className="text-xs text-neutral-500 font-bold">{job.date}</p>
+                        <p className="text-sm font-black text-black truncate">{job.customerName}</p>
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-xs text-neutral-600 font-medium mb-3 leading-relaxed">
+                        Zorlu anlarda takım arkadaşlarını yalnız bırakmayıp destek olan kahramanlarımız! Diğer takım arkadaşlarına yardımcı olduğunuz için teşekkür eder, tebrik ederiz. Harika bir iş çıkardınız! 🏆💪
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 mt-auto">
+                        {supportNames.map((name, i) => (
+                          <span key={i} className="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-1 rounded border border-blue-100 flex items-center gap-1">
+                            <CheckCircle className="w-3 h-3" /> {name}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-between items-end mt-2 mb-[-8px]">
           <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">İş İstatistikleri</h3>
           <select 
@@ -578,22 +688,42 @@ import React, { useState, useEffect } from 'react';
           </select>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
             <p className="text-neutral-500 text-sm font-medium mb-1">Toplam İş</p>
-            <p className="text-2xl font-black text-black">{dashboardJobs.length}</p>
+            <p className="text-2xl font-black text-black mb-2">{dashboardJobs.length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.type === 'Nakliye' || !j.type).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.type === 'Asansör').length} Asansör</span>
+            </div>
           </div>
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
             <p className="text-neutral-500 text-sm font-medium mb-1">Bekleyen</p>
-            <p className="text-2xl font-black text-neutral-600">{dashboardJobs.filter(j => j.status === 'pending').length}</p>
+            <p className="text-2xl font-black text-neutral-600 mb-2">{dashboardJobs.filter(j => j.status === 'pending').length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.status === 'pending' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.status === 'pending' && j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.status === 'pending' && j.type === 'Asansör').length} Asansör</span>
+            </div>
           </div>
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 border-l-4 border-l-red-600">
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 border-l-4 border-l-red-600 flex flex-col justify-between">
             <p className="text-neutral-500 text-sm font-medium mb-1">Sahada (Devam)</p>
-            <p className="text-2xl font-black text-red-600">{dashboardJobs.filter(j => j.status === 'in-progress').length}</p>
+            <p className="text-2xl font-black text-red-600 mb-2">{dashboardJobs.filter(j => j.status === 'in-progress').length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.status === 'in-progress' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.status === 'in-progress' && j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.status === 'in-progress' && j.type === 'Asansör').length} Asansör</span>
+            </div>
           </div>
-          <div className="bg-black p-4 rounded-2xl shadow-sm border border-black">
+          <div className="bg-black p-4 rounded-2xl shadow-sm border border-black flex flex-col justify-between">
             <p className="text-neutral-400 text-sm font-medium mb-1">Tamamlanan</p>
-            <p className="text-2xl font-black text-white">{dashboardJobs.filter(j => j.status === 'completed').length}</p>
+            <p className="text-2xl font-black text-white mb-2">{dashboardJobs.filter(j => j.status === 'completed').length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{dashboardJobs.filter(j => j.status === 'completed' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{dashboardJobs.filter(j => j.status === 'completed' && j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{dashboardJobs.filter(j => j.status === 'completed' && j.type === 'Asansör').length} Asansör</span>
+            </div>
           </div>
         </div>
         
@@ -1473,6 +1603,7 @@ import React, { useState, useEffect } from 'react';
 
   const CurrentJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerateMessage, handleEstimateMaterials, setCancelJobId, setViewingImage, setDeleteJobId }) => {
     const [viewDate, setViewDate] = useState(new Date());
+    const [searchQuery, setSearchQuery] = useState(''); // ARAMA STATE'İ EKLENDİ
 
     const sendAppointmentMessage = (job, method) => {
       let phone = job.customerPhone.replace(/\D/g, '');
@@ -1508,30 +1639,56 @@ import React, { useState, useEffect } from 'react';
     const dateStr = `${year}-${month}-${day}`;
     
     const formattedDate = viewDate.toLocaleDateString('tr-TR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-    // İptal edilen işleri mevcut işler listesinden gizliyoruz ve Nakliye > Depo > Asansör sırasına diziyoruz
+    
+    // ARAMA MANTIĞI EKLENDİ (Arama yapılıyorsa tarihi yoksay, global ara)
     const dailyJobs = jobs
-      .filter(j => j.date === dateStr && j.status !== 'cancelled')
+      .filter(j => {
+        if (j.status === 'cancelled') return false;
+        
+        if (searchQuery.trim()) {
+          return (j.customerName && j.customerName.toLowerCase().includes(searchQuery.toLowerCase())) || 
+                 (j.customerPhone && j.customerPhone.includes(searchQuery));
+        }
+        
+        return j.date === dateStr;
+      })
       .sort((a, b) => {
+        if (searchQuery.trim()) {
+           return new Date(b.date) - new Date(a.date); // Aramada en yeniler üstte görünsün
+        }
         const order = { 'Nakliye': 1, 'Depo': 2, 'Asansör': 3 };
         return (order[a.type || 'Nakliye'] || 4) - (order[b.type || 'Nakliye'] || 4);
       });
 
     return (
       <div className="space-y-6 animate-in fade-in">
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex justify-between items-center">
-          <button onClick={prevDay} className="p-4 bg-neutral-100 hover:bg-neutral-200 text-black rounded-xl transition"><ChevronLeft className="w-6 h-6" /></button>
-          <div className="text-center">
-            <h2 className="text-xl md:text-2xl font-bold text-black">{formattedDate}</h2>
-            <p className="text-sm font-medium text-neutral-500 mt-1">Günlük Operasyonlar Ajandası</p>
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center justify-between w-full md:w-auto gap-4">
+            <button onClick={prevDay} className="p-4 bg-neutral-100 hover:bg-neutral-200 text-black rounded-xl transition"><ChevronLeft className="w-6 h-6" /></button>
+            <div className="text-center min-w-[150px]">
+              <h2 className="text-xl md:text-2xl font-bold text-black">{formattedDate}</h2>
+              <p className="text-sm font-medium text-neutral-500 mt-1">Günlük Operasyonlar Ajandası</p>
+            </div>
+            <button onClick={nextDay} className="p-4 bg-neutral-100 hover:bg-neutral-200 text-black rounded-xl transition"><ChevronRight className="w-6 h-6" /></button>
           </div>
-          <button onClick={nextDay} className="p-4 bg-neutral-100 hover:bg-neutral-200 text-black rounded-xl transition"><ChevronRight className="w-6 h-6" /></button>
+          
+          <div className="relative w-full md:w-72 shrink-0">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+            <input
+              type="text"
+              placeholder="Tüm kayıtlarda ara..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-600 transition"
+            />
+          </div>
         </div>
 
         <div className="space-y-4">
           {dailyJobs.length === 0 ? (
             <div className="bg-white p-12 rounded-2xl shadow-sm border border-neutral-200 text-center text-neutral-500">
               <Calendar className="w-16 h-16 mx-auto mb-4 text-neutral-300" />
-              <p className="text-lg font-medium">Bu tarihe kayıtlı herhangi bir aktif operasyon bulunmuyor.</p>
+              <p className="text-lg font-medium">{searchQuery.trim() ? 'Aramanıza uygun kayıt bulunamadı.' : 'Bu tarihe kayıtlı herhangi bir aktif operasyon bulunmuyor.'}</p>
             </div>
           ) : (
             dailyJobs.map(job => (
@@ -2067,6 +2224,7 @@ import React, { useState, useEffect } from 'react';
 
   const CompletedJobsView = ({ jobs, handleEditJob, setViewingImage, setDeleteJobId, setMarkDamageJobId, canApprovePoints, handleOpenApproveModal, handleOpenMesaiModal }) => {
     const [viewDate, setViewDate] = useState(new Date());
+    const [searchQuery, setSearchQuery] = useState(''); // ARAMA STATE'İ EKLENDİ
 
     const prevDay = () => {
       const newDate = new Date(viewDate);
@@ -2087,29 +2245,55 @@ import React, { useState, useEffect } from 'react';
     
     const formattedDate = viewDate.toLocaleDateString('tr-TR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
+    // ARAMA MANTIĞI EKLENDİ (Arama yapılıyorsa tarihi yoksay, global ara)
     const completedJobs = jobs
-      .filter(j => j.status === 'completed' && j.date === dateStr)
+      .filter(j => {
+        if (j.status !== 'completed') return false;
+        
+        if (searchQuery.trim()) {
+          return (j.customerName && j.customerName.toLowerCase().includes(searchQuery.toLowerCase())) || 
+                 (j.customerPhone && j.customerPhone.includes(searchQuery));
+        }
+        
+        return j.date === dateStr;
+      })
       .sort((a, b) => {
+        if (searchQuery.trim()) {
+           return new Date(b.date) - new Date(a.date); // Aramada en yeniler üstte görünsün
+        }
         const order = { 'Nakliye': 1, 'Depo': 2, 'Asansör': 3 };
         return (order[a.type || 'Nakliye'] || 4) - (order[b.type || 'Nakliye'] || 4);
       });
 
     return (
       <div className="space-y-6 animate-in fade-in">
-        <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex justify-between items-center">
-          <button onClick={prevDay} className="p-4 bg-neutral-100 hover:bg-neutral-200 text-black rounded-xl transition"><ChevronLeft className="w-6 h-6" /></button>
-          <div className="text-center">
-            <h2 className="text-xl md:text-2xl font-bold text-green-600 flex justify-center items-center gap-2"><CheckCircle className="w-6 h-6"/> {formattedDate}</h2>
-            <p className="text-sm font-medium text-neutral-500 mt-1">Tamamlanan Operasyonlar</p>
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col md:flex-row justify-between items-center gap-4">
+          <div className="flex items-center justify-between w-full md:w-auto gap-4">
+            <button onClick={prevDay} className="p-4 bg-neutral-100 hover:bg-neutral-200 text-black rounded-xl transition"><ChevronLeft className="w-6 h-6" /></button>
+            <div className="text-center min-w-[150px]">
+              <h2 className="text-xl md:text-2xl font-bold text-green-600 flex justify-center items-center gap-2"><CheckCircle className="w-6 h-6"/> {formattedDate}</h2>
+              <p className="text-sm font-medium text-neutral-500 mt-1">Tamamlanan Operasyonlar</p>
+            </div>
+            <button onClick={nextDay} className="p-4 bg-neutral-100 hover:bg-neutral-200 text-black rounded-xl transition"><ChevronRight className="w-6 h-6" /></button>
           </div>
-          <button onClick={nextDay} className="p-4 bg-neutral-100 hover:bg-neutral-200 text-black rounded-xl transition"><ChevronRight className="w-6 h-6" /></button>
+          
+          <div className="relative w-full md:w-72 shrink-0">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+            <input
+              type="text"
+              placeholder="Tüm kayıtlarda ara..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-600 transition"
+            />
+          </div>
         </div>
 
         <div className="space-y-4">
           {completedJobs.length === 0 ? (
             <div className="bg-white p-12 rounded-2xl shadow-sm border border-neutral-200 text-center text-neutral-500">
               <CheckCircle className="w-16 h-16 mx-auto mb-4 text-neutral-300" />
-              <p className="text-lg font-medium">Bu tarihe kayıtlı tamamlanmış operasyon bulunmuyor.</p>
+              <p className="text-lg font-medium">{searchQuery.trim() ? 'Aramanıza uygun kayıt bulunamadı.' : 'Bu tarihe kayıtlı tamamlanmış operasyon bulunmuyor.'}</p>
             </div>
           ) : (
             completedJobs.map(job => (
@@ -2542,13 +2726,19 @@ import React, { useState, useEffect } from 'react';
     );
   };
 
-  const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead, personnelList, messages, setMessages, handleOpenEndJobModal, setViewingImage, handleUpdatePersonnel, tasks = [], handleUpdateTaskStatus, onSendMessage, onMarkMessageAsRead }) => {
-    const [activeProfileTab, setActiveProfileTab] = useState('jobs'); // 'jobs' | 'messages' | 'settings' | 'tasks' | 'complaint'
+  const ProfileView = ({ currentUser, jobs, notifications, markNotificationsAsRead, personnelList, messages, setMessages, handleOpenEndJobModal, setViewingImage, handleUpdatePersonnel, tasks = [], handleUpdateTaskStatus, onSendMessage, onMarkMessageAsRead, defaultTab = 'jobs' }) => {
+    const [activeProfileTab, setActiveProfileTab] = useState(defaultTab); // 'jobs' | 'messages' | 'settings' | 'tasks' | 'complaint'
+    
+    React.useEffect(() => {
+      setActiveProfileTab(defaultTab);
+    }, [defaultTab]);
+
     const [activeChatUserId, setActiveChatUserId] = useState(null);
     const [newMessage, setNewMessage] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [editProfileData, setEditProfileData] = useState({ fullName: currentUser.fullName, password: currentUser.password });
+    const [editProfileData, setEditProfileData] = useState({ fullName: currentUser?.fullName || '', password: currentUser?.password || '', profileImage: currentUser?.profileImage || '' });
     const [updateSuccess, setUpdateSuccess] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
     
     // Şikayet State'leri
     const [complaintData, setComplaintData] = useState({ subject: '', content: '' });
@@ -2590,7 +2780,7 @@ import React, { useState, useEffect } from 'react';
       }
       return true;
     });
-    const isLeader = ['Müdür', 'Ekip Şefi', 'Kalfa'].includes(currentUser.rank) || currentUser.permissions?.canEdit;
+    const isLeader = ['Müdür', 'Ekip Şefi', 'Kalfa'].includes(currentUser?.rank) || currentUser?.permissions?.canEdit;
 
     // Profil sekmesi açıldığında bildirimleri okundu olarak işaretle
     React.useEffect(() => {
@@ -2598,7 +2788,7 @@ import React, { useState, useEffect } from 'react';
     }, [currentUser.id]);
 
     React.useEffect(() => {
-      setEditProfileData({ fullName: currentUser.fullName, password: currentUser.password });
+      setEditProfileData({ fullName: currentUser?.fullName || '', password: currentUser?.password || '', profileImage: currentUser?.profileImage || '' });
     }, [currentUser]);
 
     // Yeni mesaj gönderme işlemi
@@ -2633,9 +2823,41 @@ import React, { useState, useEffect } from 'react';
 
     const handleProfileUpdate = (e) => {
       e.preventDefault();
-      handleUpdatePersonnel({ ...currentUser, fullName: editProfileData.fullName, password: editProfileData.password });
+      handleUpdatePersonnel({ ...currentUser, fullName: editProfileData.fullName, password: editProfileData.password, profileImage: editProfileData.profileImage });
       setUpdateSuccess(true);
       setTimeout(() => setUpdateSuccess(false), 3000);
+    };
+
+    const handleImageUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      setIsUploading(true);
+      setEditProfileData(prev => ({ ...prev, profileImage: 'Yükleniyor...' }));
+
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', {
+          method: 'POST',
+          body: uploadData,
+        });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try {
+          const json = JSON.parse(text);
+          uploadedUrl = json.url || json.fileName || json.file || text;
+        } catch (err) {
+          uploadedUrl = text.trim();
+        }
+        setEditProfileData(prev => ({ ...prev, profileImage: uploadedUrl }));
+      } catch (err) {
+        console.error("Yükleme hatası:", err);
+        alert("Görsel yüklenemedi.");
+        setEditProfileData(prev => ({ ...prev, profileImage: '' }));
+      }
+      setIsUploading(false);
     };
 
     const handleSendComplaint = async (e) => {
@@ -2673,14 +2895,14 @@ import React, { useState, useEffect } from 'react';
           <div className="md:col-span-1 space-y-6">
             <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
               <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center font-black text-3xl mb-4 mx-auto border-4 border-white shadow-lg overflow-hidden">
-                {currentUser.profileImage ? (
-                  <img src={currentUser.profileImage} alt={currentUser.fullName} className="w-full h-full object-cover" />
+                {currentUser?.profileImage ? (
+                  <img src={currentUser.profileImage} alt={currentUser?.fullName} className="w-full h-full object-cover" />
                 ) : (
-                  currentUser.fullName.charAt(0)
+                  (currentUser?.fullName || 'U').charAt(0).toUpperCase()
                 )}
               </div>
-              <h2 className="text-xl font-black text-center text-black mb-1">{currentUser.fullName}</h2>
-              <p className="text-center text-neutral-500 text-sm font-medium mb-6">{currentUser.position} - {currentUser.rank}</p>
+              <h2 className="text-xl font-black text-center text-black mb-1">{currentUser?.fullName}</h2>
+              <p className="text-center text-neutral-500 text-sm font-medium mb-6">{currentUser?.position || 'Belirtilmedi'} - {currentUser?.rank || 'Belirtilmedi'}</p>
               
               <div className="space-y-3 text-sm">
                 <div className="flex items-center gap-3 bg-neutral-50 p-3 rounded-xl border border-neutral-100">
@@ -2720,50 +2942,60 @@ import React, { useState, useEffect } from 'react';
             <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 h-full flex flex-col">
               
               {/* Profil Sağ Sekmeleri */}
-              <div className="flex flex-wrap gap-x-6 gap-y-2 border-b border-neutral-200 mb-6">
-                <button 
-                  onClick={() => setActiveProfileTab('jobs')} 
-                  className={`pb-3 font-bold transition flex items-center gap-2 ${activeProfileTab === 'jobs' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
-                >
-                  <ClipboardList className="w-5 h-5" /> Bana Atanan Görevler
-                </button>
-                <button 
-                  onClick={() => setActiveProfileTab('tasks')} 
-                  className={`pb-3 font-bold transition flex items-center gap-2 relative ${activeProfileTab === 'tasks' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
-                >
-                  <CheckSquare className="w-5 h-5" /> Özel Görevler
-                  {myTasks.filter(t => t.status === 'todo').length > 0 && (
-                    <span className="absolute -top-1 -right-3 flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600 text-[10px] items-center justify-center text-white font-black">{myTasks.filter(t => t.status === 'todo').length}</span>
-                    </span>
-                  )}
-                </button>
-                <button 
-                  onClick={() => setActiveProfileTab('messages')} 
-                  className={`pb-3 font-bold transition flex items-center gap-2 relative ${activeProfileTab === 'messages' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
-                >
-                  <MessageCircle className="w-5 h-5" /> Şirket İçi Mesajlaşma
-                  {messages.filter(m => m.receiverId === currentUser.id && !m.read).length > 0 && (
-                    <span className="absolute -top-1 -right-3 flex h-3 w-3">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
-                    </span>
-                  )}
-                </button>
-                <button 
-                  onClick={() => setActiveProfileTab('settings')} 
-                  className={`pb-3 font-bold transition flex items-center gap-2 ${activeProfileTab === 'settings' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
-                >
-                  <Lock className="w-5 h-5" /> Hesap Ayarları
-                </button>
-                <button 
-                  onClick={() => setActiveProfileTab('complaint')} 
-                  className={`pb-3 font-bold transition flex items-center gap-2 ${activeProfileTab === 'complaint' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
-                >
-                  <AlertTriangle className="w-5 h-5" /> Şikayet / Bildirim
-                </button>
-              </div>
+              {!isManagerRole && isLeader === false && (currentUser?.collarType === 'Mavi Yaka' || ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position)) ? (
+                activeProfileTab === 'settings' && (
+                  <div className="flex flex-wrap gap-x-6 gap-y-2 border-b border-neutral-200 mb-6">
+                    <button className="pb-3 font-bold transition flex items-center gap-2 border-b-2 border-red-600 text-red-600 cursor-default">
+                      <Lock className="w-5 h-5" /> Hesap Ayarları
+                    </button>
+                  </div>
+                )
+              ) : (
+                <div className="flex flex-wrap gap-x-6 gap-y-2 border-b border-neutral-200 mb-6">
+                  <button 
+                    onClick={() => setActiveProfileTab('jobs')} 
+                    className={`pb-3 font-bold transition flex items-center gap-2 ${activeProfileTab === 'jobs' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
+                  >
+                    <ClipboardList className="w-5 h-5" /> Bana Atanan Görevler
+                  </button>
+                  <button 
+                    onClick={() => setActiveProfileTab('tasks')} 
+                    className={`pb-3 font-bold transition flex items-center gap-2 relative ${activeProfileTab === 'tasks' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
+                  >
+                    <CheckSquare className="w-5 h-5" /> Özel Görevler
+                    {myTasks.filter(t => t.status === 'todo').length > 0 && (
+                      <span className="absolute -top-1 -right-3 flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600 text-[10px] items-center justify-center text-white font-black">{myTasks.filter(t => t.status === 'todo').length}</span>
+                      </span>
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => setActiveProfileTab('messages')} 
+                    className={`pb-3 font-bold transition flex items-center gap-2 relative ${activeProfileTab === 'messages' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
+                  >
+                    <MessageCircle className="w-5 h-5" /> Şirket İçi Mesajlaşma
+                    {messages.filter(m => m.receiverId === currentUser.id && !m.read).length > 0 && (
+                      <span className="absolute -top-1 -right-3 flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-red-600"></span>
+                      </span>
+                    )}
+                  </button>
+                  <button 
+                    onClick={() => setActiveProfileTab('settings')} 
+                    className={`pb-3 font-bold transition flex items-center gap-2 ${activeProfileTab === 'settings' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
+                  >
+                    <Lock className="w-5 h-5" /> Hesap Ayarları
+                  </button>
+                  <button 
+                    onClick={() => setActiveProfileTab('complaint')} 
+                    className={`pb-3 font-bold transition flex items-center gap-2 ${activeProfileTab === 'complaint' ? 'border-b-2 border-red-600 text-red-600' : 'text-neutral-500 hover:text-black'}`}
+                  >
+                    <AlertTriangle className="w-5 h-5" /> Şikayet / Bildirim
+                  </button>
+                </div>
+              )}
               
               {/* Görevlerim Sekmesi */}
               {activeProfileTab === 'jobs' && (
@@ -3192,7 +3424,7 @@ import React, { useState, useEffect } from 'react';
 
               {/* Mesajlaşma Sekmesi */}
               {activeProfileTab === 'messages' && (
-                <div className="flex flex-1 h-[600px] min-h-[500px] border border-neutral-200 rounded-xl overflow-hidden animate-in fade-in shadow-sm">
+                <div className="flex flex-1 h-[450px] min-h-[400px] border border-neutral-200 rounded-xl overflow-hidden animate-in fade-in shadow-sm">
                   {/* Personel Listesi (Sol Kenar Çubuğu) */}
                   <div className="w-1/3 max-w-[320px] bg-neutral-50 border-r border-neutral-200 flex flex-col">
                     {/* Arama Çubuğu */}
@@ -3231,12 +3463,12 @@ import React, { useState, useEffect } from 'react';
                                 {user.profileImage ? (
                                   <img src={user.profileImage} alt={user.fullName} className="w-full h-full object-cover" />
                                 ) : (
-                                  user.fullName.charAt(0)
+                                  (user.fullName || 'U').charAt(0).toUpperCase()
                                 )}
                               </div>
                               <div className="truncate">
-                                <p className="font-bold text-black text-[15px] truncate mb-0.5">{user.fullName}</p>
-                                <p className="text-xs text-neutral-500 font-medium truncate">{user.position} ({user.collarType || 'Mavi Yaka'})</p>
+                                <p className="font-black text-black text-base truncate mb-0.5">{user.fullName}</p>
+                                <p className="text-xs text-neutral-600 font-bold truncate">{user.position}</p>
                               </div>
                             </div>
                             {unreadCount > 0 && <span className="bg-red-600 text-white text-[11px] font-black px-2.5 py-1 rounded-full shrink-0 shadow-md">{unreadCount}</span>}
@@ -3264,14 +3496,14 @@ import React, { useState, useEffect } from 'react';
                             {personnelList.find(p => p.id === activeChatUserId)?.profileImage ? (
                               <img src={personnelList.find(p => p.id === activeChatUserId)?.profileImage} alt="Profil" className="w-full h-full object-cover" />
                             ) : (
-                              personnelList.find(p => p.id === activeChatUserId)?.fullName.charAt(0)
+                              (personnelList.find(p => p.id === activeChatUserId)?.fullName || 'U').charAt(0).toUpperCase()
                             )}
                           </div>
                           <div>
-                            <h3 className="font-black text-black text-[16px] mb-0.5">{personnelList.find(p => p.id === activeChatUserId)?.fullName}</h3>
-                            <p className="text-xs font-bold text-neutral-500 flex items-center gap-1.5">
+                            <h3 className="font-black text-black text-lg leading-none mb-1">{personnelList.find(p => p.id === activeChatUserId)?.fullName}</h3>
+                            <p className="text-xs font-bold text-neutral-600 flex items-center gap-1.5">
                               <span className="w-2 h-2 rounded-full bg-green-500"></span>
-                              {personnelList.find(p => p.id === activeChatUserId)?.position} ({personnelList.find(p => p.id === activeChatUserId)?.collarType || 'Mavi Yaka'})
+                              {personnelList.find(p => p.id === activeChatUserId)?.position}
                             </p>
                           </div>
                         </div>
@@ -3339,6 +3571,25 @@ import React, { useState, useEffect } from 'react';
                     </div>
                   )}
                   <form onSubmit={handleProfileUpdate} className="space-y-5 max-w-md bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
+                    <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 bg-neutral-50 rounded-xl border border-neutral-200 mb-2">
+                      <div className="w-20 h-20 rounded-full border-2 border-white shadow-sm overflow-hidden bg-neutral-200 flex items-center justify-center shrink-0">
+                        {editProfileData.profileImage === 'Yükleniyor...' ? (
+                          <span className="text-[10px] text-neutral-500 font-bold animate-pulse">Yükleniyor</span>
+                        ) : editProfileData.profileImage ? (
+                          <img src={editProfileData.profileImage} alt="Profil" className="w-full h-full object-cover" />
+                        ) : (
+                          <User className="w-8 h-8 text-neutral-400" />
+                        )}
+                      </div>
+                      <div className="flex flex-col gap-2 w-full sm:w-auto">
+                        <label className="block text-sm font-bold text-neutral-700">Profil Fotoğrafı</label>
+                        <label className="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-fit shadow-sm">
+                          <Upload className="w-4 h-4 text-neutral-600" />
+                          <span className="text-sm font-bold text-neutral-700">Fotoğraf Değiştir</span>
+                          <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={isUploading} />
+                        </label>
+                      </div>
+                    </div>
                     <div>
                       <label className="block text-sm font-bold text-neutral-700 mb-2">Kullanıcı Adı (Ad Soyad)</label>
                       <div className="relative">
@@ -3354,7 +3605,7 @@ import React, { useState, useEffect } from 'react';
                       </div>
                       <p className="text-xs text-neutral-500 mt-2 font-medium">Sisteme giriş yaparken kullandığınız şifredir. Şifrenizi kimseyle paylaşmayınız.</p>
                     </div>
-                    <button type="submit" className="w-full bg-red-600 text-white font-bold py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 flex justify-center items-center gap-2">
+                    <button type="submit" disabled={isUploading} className="w-full bg-red-600 text-white font-bold py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 flex justify-center items-center gap-2 disabled:opacity-50">
                       <Save className="w-5 h-5" /> Değişiklikleri Kaydet
                     </button>
                   </form>
@@ -3781,7 +4032,7 @@ import React, { useState, useEffect } from 'react';
   };
 
   const AddPersonnelView = ({ onAdd, positions = [], ranks = [] }) => {
-    const [formData, setFormData] = useState({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '', collarType: 'Mavi Yaka', startDate: '', setCardNo: '', maas: '', yol: '', yemek: '' });
+    const [formData, setFormData] = useState({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '', collarType: 'Mavi Yaka', startDate: '', setCardNo: '', maas: '', yol: '', yemek: '', bankaParasi: '', icrasiVar: 'Hayır' });
     const [isUploading, setIsUploading] = useState(false);
     
     const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -3821,7 +4072,7 @@ import React, { useState, useEffect } from 'react';
     const handleSubmit = (e) => {
       e.preventDefault();
       onAdd({ id: Date.now(), ...formData });
-      setFormData({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '', collarType: 'Mavi Yaka', startDate: '', setCardNo: '', maas: '', yol: '', yemek: '' });
+      setFormData({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '', collarType: 'Mavi Yaka', startDate: '', setCardNo: '', maas: '', yol: '', yemek: '', bankaParasi: '', icrasiVar: 'Hayır' });
     };
 
     return (
@@ -3895,6 +4146,20 @@ import React, { useState, useEffect } from 'react';
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">Yemek Parası (TL)</label>
               <input type="number" name="yemek" value={formData.yemek} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Banka Parası (Aylık TL)</label>
+              <input type="number" name="bankaParasi" value={formData.bankaParasi} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: 17000" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">İcrası Var mı?</label>
+              <select name="icrasiVar" value={formData.icrasiVar} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-medium">
+                <option value="Hayır">Hayır</option>
+                <option value="Evet">Evet</option>
+              </select>
             </div>
           </div>
 
@@ -4136,6 +4401,20 @@ import React, { useState, useEffect } from 'react';
                   <div>
                     <label className="block text-sm font-bold text-neutral-700 mb-1">Yemek Parası (TL)</label>
                     <input type="number" value={editForm.yemek || ''} onChange={(e) => setEditForm({...editForm, yemek: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Banka Parası (Aylık TL)</label>
+                    <input type="number" value={editForm.bankaParasi || ''} onChange={(e) => setEditForm({...editForm, bankaParasi: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">İcrası Var mı?</label>
+                    <select value={editForm.icrasiVar || 'Hayır'} onChange={(e) => setEditForm({...editForm, icrasiVar: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-medium">
+                      <option value="Hayır">Hayır</option>
+                      <option value="Evet">Evet</option>
+                    </select>
                   </div>
                 </div>
                 
@@ -5267,18 +5546,43 @@ import React, { useState, useEffect } from 'react';
   };
 
   const DamagedJobsView = ({ jobs, handleEditJob, setViewingImage, setDeleteJobId, handleOpenResolveDamageModal }) => {
-    const damagedJobs = jobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var').sort((a,b) => new Date(b.date) - new Date(a.date));
+    const [searchQuery, setSearchQuery] = useState(''); // ARAMA STATE'İ EKLENDİ
+    
+    const damagedJobs = jobs
+      .filter(j => {
+         if (j.endJobDetails?.damageStatus !== 'Hasar var') return false;
+         
+         if (searchQuery.trim()) {
+             return (j.customerName && j.customerName.toLowerCase().includes(searchQuery.toLowerCase())) || 
+                    (j.customerPhone && j.customerPhone.includes(searchQuery));
+         }
+         
+         return true;
+      })
+      .sort((a,b) => new Date(b.date) - new Date(a.date));
 
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-        <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
-          <AlertTriangle className="w-6 h-6 text-red-600" /> Hasar Bildirimi Olan İşler
-        </h2>
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4">
+          <h2 className="text-xl font-bold text-black flex items-center gap-2 shrink-0">
+            <AlertTriangle className="w-6 h-6 text-red-600" /> Hasar Bildirimi Olan İşler
+          </h2>
+          <div className="relative w-full md:w-64">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+            <input
+              type="text"
+              placeholder="Müşteri Adı veya Telefon..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-600 transition"
+            />
+          </div>
+        </div>
         <div className="space-y-4">
           {damagedJobs.length === 0 ? (
             <div className="text-center bg-neutral-50 p-8 rounded-2xl border border-neutral-200">
               <CheckCircle className="w-12 h-12 text-green-500 mx-auto mb-3" />
-              <p className="text-neutral-600 font-bold text-lg">Harika! Hasar kaydı bulunan operasyon yok.</p>
+              <p className="text-neutral-600 font-bold text-lg">{searchQuery.trim() ? 'Aramanıza uygun kayıt bulunamadı.' : 'Harika! Hasar kaydı bulunan operasyon yok.'}</p>
             </div>
           ) : (
             damagedJobs.map(job => (
@@ -5709,6 +6013,74 @@ import React, { useState, useEffect } from 'react';
       </div>
     </div>
   );
+
+  const UserActivitiesView = ({ personnelList }) => {
+    const sortedList = [...personnelList].sort((a, b) => {
+      const parseDate = (str) => {
+        if (!str) return 0;
+        const parts = str.split(' ');
+        if (parts.length < 2) return 0;
+        const [datePart, timePart] = parts;
+        const [d, m, y] = datePart.split('.');
+        const [hr, min] = timePart.split(':');
+        return new Date(`${y}-${m}-${d}T${hr}:${min}:00`).getTime() || 0;
+      };
+      return parseDate(b.lastLogin) - parseDate(a.lastLogin);
+    });
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+        <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
+          <Activity className="w-6 h-6 text-red-600" /> Kullanıcı Hareketleri (Son Girişler)
+        </h2>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600">
+              <tr>
+                <th className="p-4 font-bold rounded-tl-xl">Personel</th>
+                <th className="p-4 font-bold">Pozisyon / Rütbe</th>
+                <th className="p-4 font-bold rounded-tr-xl">Sisteme Son Giriş Zamanı</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {sortedList.map(p => (
+                <tr key={p.id} className="hover:bg-neutral-50 transition">
+                  <td className="p-4 font-bold text-black">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0">
+                        {p.profileImage ? <img src={p.profileImage} alt={p.fullName} className="w-full h-full object-cover" /> : p.fullName.charAt(0)}
+                      </div>
+                      {p.fullName}
+                    </div>
+                  </td>
+                  <td className="p-4 text-neutral-600 font-medium">
+                    <span className="block text-black font-bold">{p.position}</span>
+                    <span className="text-xs text-neutral-500">{p.rank}</span>
+                  </td>
+                  <td className="p-4">
+                    {p.lastLogin ? (
+                      <span className="bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border border-green-100 font-bold flex items-center gap-1.5 w-max">
+                        <Clock className="w-4 h-4 shrink-0" /> {p.lastLogin}
+                      </span>
+                    ) : (
+                      <span className="bg-neutral-100 text-neutral-500 px-3 py-1.5 rounded-lg border border-neutral-200 font-bold flex items-center gap-1.5 w-max">
+                        <Clock className="w-4 h-4 shrink-0" /> Henüz Giriş Yapmadı
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {sortedList.length === 0 && (
+                <tr>
+                  <td colSpan="3" className="p-6 text-center text-neutral-500">Kayıtlı personel bulunamadı.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
 
   const PuantajView = ({ personnelList, db, appId, addSystemLog }) => {
     const today = new Date();
@@ -6509,14 +6881,21 @@ import React, { useState, useEffect } from 'react';
       const rapor = row.rapor !== undefined && row.rapor !== '' ? parseFloat(row.rapor) : raporCount;
       const fazlaGunSayisi = row.fazlaGun !== undefined && row.fazlaGun !== '' ? parseFloat(row.fazlaGun) : fazlaGunCount;
 
-      const mesaiGunSayisi = Math.max(0, 30 - rapor); // Mesai gün sayısı sadece rapor sayısı kadar düşer
+      const mesaiGunSayisi = Math.max(0, 30 - rapor);
+      const odenecekGun = Math.max(0, 30 - rapor - devamsizlikSayisi);
       
       const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : person.maas) || 0;
+      const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
+      
+      const hesaplananBanka = (bankaParasiBase / 30) * odenecekGun;
+      const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
+      const bankaKalan = hesaplananBanka - icraKesintisi;
+
       const prim = parseFloat(row.prim) || 0;
       const yol = parseFloat(row.yol !== undefined && row.yol !== '' ? row.yol : person.yol) || 0;
       const yemek = parseFloat(row.yemek !== undefined && row.yemek !== '' ? row.yemek : person.yemek) || 0;
-      const banka = parseFloat(row.banka) || 0;
       const kesintili = parseFloat(row.kesintili) || 0;
+      const toplamKesintili = kesintili + icraKesintisi;
 
       // Toplam Saat Hesaplama:
       // Günlük Saat (Fazla/Eksik Mesailer neticesi) + Prim + (Fazla Gün * 10) - (Devamsızlık * 10)
@@ -6530,13 +6909,14 @@ import React, { useState, useEffect } from 'react';
       const netMaas = (maas / 30) * mesaiGunSayisi;
       const kalanNet = netMaas + mesaiUcreti + prim - toplamAvans;
       const maliyet = netMaas + mesaiUcreti + prim + yol + yemek;
-      const elden = kalanNet - banka;
-      const kesintiSonrasi = kalanNet - kesintili;
+      const elden = kalanNet - hesaplananBanka;
+      const kesintiSonrasi = kalanNet - toplamKesintili;
       const avansKalanNet = kesintiSonrasi;
 
       return { 
         nakitAvans, resmiAvans, gunlukSaat, toplamSaat, mesaiGunSayisi, 
-        maas, fazlaGunSayisi, devamsizlikSayisi, rapor, prim, yol, yemek, banka, kesintili,
+        maas, fazlaGunSayisi, devamsizlikSayisi, rapor, prim, yol, yemek,
+        hesaplananBanka, bankaKalan, icraKesintisi, kesintili, toplamKesintili,
         mesaiUcreti, toplamAvans, netMaas, kalanNet, maliyet, elden, 
         kesintiSonrasi, avansKalanNet 
       };
@@ -6547,8 +6927,8 @@ import React, { useState, useEffect } from 'react';
         "PERSONEL BİLGİSİ", "NAKİT AVANS", "RESMİ AVANS", "GÜNLÜK SAAT", "TOPLAM SAAT", 
         "İŞE BAŞLANGIÇ TARİHİ", "MESAİ GÜN SAYISI", "MAAŞ", "FAZLA GÜN SAYISI", "DEVAMSIZLIK", "RAPOR", 
         "PRİM", "MESAİ ÜCRETİ", "AVANS", "YOL PARASI", "YEMEK PARASI", "NET MAAŞ", 
-        "KALAN NET MAAŞ", "TOPLAM MALİYET", "BANKA PARASI", "ELDEN PARASI", 
-        "KESİNTİLİ PARASI", "KESİNTİ SONRASI PARASI", "AVANS KALAN NET MİKTAR"
+        "KALAN NET MAAŞ", "TOPLAM MALİYET", "BANKA PARASI", "BANKA KALAN PARASI", "ELDEN PARASI", 
+        "EK KESİNTİ", "TOPLAM KESİNTİ", "KESİNTİ SONRASI PARASI", "AVANS KALAN NET MİKTAR"
       ];
       let csvContent = headers.join(",") + "\n";
       
@@ -6574,9 +6954,11 @@ import React, { useState, useEffect } from 'react';
               c.netMaas.toFixed(2),
               c.kalanNet.toFixed(2),
               c.maliyet.toFixed(2),
-              c.banka,
+              c.hesaplananBanka.toFixed(2),
+              c.bankaKalan.toFixed(2),
               c.elden.toFixed(2),
               c.kesintili,
+              c.toplamKesintili.toFixed(2),
               c.kesintiSonrasi.toFixed(2),
               c.avansKalanNet.toFixed(2)
           ];
@@ -6624,7 +7006,7 @@ import React, { useState, useEffect } from 'react';
           <table className="w-full border-collapse text-xs md:text-sm min-w-max">
             <thead className="sticky top-0 z-30 shadow-md">
               <tr>
-                <th colSpan="24" className="bg-green-600 text-white font-black py-2 border-b-2 border-neutral-400 text-sm md:text-lg tracking-wider">
+                <th colSpan="25" className="bg-green-600 text-white font-black py-2 border-b-2 border-neutral-400 text-sm md:text-lg tracking-wider">
                   {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} MAAŞ HESAPLAMA TABLOSU
                 </th>
               </tr>
@@ -6649,6 +7031,7 @@ import React, { useState, useEffect } from 'react';
                 <th className="bg-green-200 text-green-900 font-black p-2 border-b border-r border-neutral-400 w-24">KALAN NET MAAŞ</th>
                 <th className="bg-red-100 text-red-900 font-black p-2 border-b border-r border-neutral-400 w-24">TOPLAM MALİYET</th>
                 <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24">BANKA PARASI</th>
+                <th className="bg-neutral-200 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24">BANKA KALAN PARASI</th>
                 <th className="bg-emerald-200 text-emerald-900 font-black p-2 border-b border-r border-neutral-400 w-24">ELDEN PARASI</th>
                 <th className="bg-red-100 text-red-900 font-bold p-2 border-b border-r border-neutral-400 w-24">KESİNTİLİ PARASI</th>
                 <th className="bg-emerald-300 text-emerald-900 font-black p-2 border-b border-r border-neutral-400 w-24">KESİNTİ SONRASI PARASI</th>
@@ -6720,14 +7103,20 @@ import React, { useState, useEffect } from 'react';
                     <td className="border-r border-neutral-300 p-1 bg-red-50 font-black text-red-700 text-center align-middle">
                       {c.maliyet.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                     </td>
-                    <td className="border-r border-neutral-300 p-1">
-                      <input type="number" value={row.banka || ''} onChange={e => handleCellChange(person.id, 'banka', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
+                    <td className="border-r border-neutral-300 p-1 bg-neutral-100 font-bold text-neutral-600 text-center align-middle">
+                      {c.hesaplananBanka.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                    </td>
+                    <td className="border-r border-neutral-300 p-1 bg-neutral-200 font-bold text-neutral-800 text-center align-middle">
+                      {c.bankaKalan.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                     </td>
                     <td className="border-r border-neutral-300 p-1 bg-emerald-100 font-black text-emerald-900 text-center align-middle">
                       {c.elden.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                     </td>
-                    <td className="border-r border-neutral-300 p-1">
-                      <input type="number" value={row.kesintili || ''} onChange={e => handleCellChange(person.id, 'kesintili', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-red-50 focus:ring-1 focus:ring-red-400 rounded text-red-600 font-bold" placeholder="0" />
+                    <td className="border-r border-neutral-300 p-1 flex flex-col gap-1 items-center justify-center">
+                      <input type="number" value={row.kesintili || ''} onChange={e => handleCellChange(person.id, 'kesintili', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-red-50 focus:ring-1 focus:ring-red-400 rounded text-red-600 font-bold" placeholder="0" title="Manuel Ek Kesinti" />
+                      {person.icrasiVar === 'Evet' && (
+                        <span className="text-[9px] text-red-600 font-bold text-center leading-none">+ {c.icraKesintisi?.toLocaleString('tr-TR', { maximumFractionDigits: 0 })} İcra</span>
+                      )}
                     </td>
                     <td className="border-r border-neutral-300 p-1 bg-emerald-200 font-black text-emerald-900 text-center align-middle">
                       {c.kesintiSonrasi.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
@@ -6740,7 +7129,7 @@ import React, { useState, useEffect } from 'react';
               })}
               {maviYakaList.length === 0 && (
                 <tr>
-                  <td colSpan="24" className="p-8 text-center text-neutral-500 font-medium">
+                  <td colSpan="25" className="p-8 text-center text-neutral-500 font-medium">
                     Sistemde mavi yaka personel kaydı bulunamadı.
                   </td>
                 </tr>
@@ -6889,6 +7278,8 @@ import React, { useState, useEffect } from 'react';
     const [additionalAssignees, setAdditionalAssignees] = useState([]);
     const [manualExtraAssignees, setManualExtraAssignees] = useState([]);
     const [assignedVehiclePlate, setAssignedVehiclePlate] = useState('');
+    const [showBusyPersonnel, setShowBusyPersonnel] = useState(false); // Yeni State
+    const [assignOperationNote, setAssignOperationNote] = useState(''); // Yeni: Operasyon Notu State'i
     
     // Görev Atama Sırasında Malzeme Yönetimi State'leri
     const [assignedMaterials, setAssignedMaterials] = useState({ strec: 0, bant: 0, poset: 0, kagit: 0, koli: 0 });
@@ -6961,6 +7352,8 @@ import React, { useState, useEffect } from 'react';
     // İletişim Hattı Modal
     const [showContactModal, setShowContactModal] = useState(false);
     const [contactForm, setContactForm] = useState({ name: '', phone: '', position: '' });
+    const [isContactsOpen, setIsContactsOpen] = useState(false);
+    const [editingContact, setEditingContact] = useState(null);
 
     // Araç Düzenleme State'leri
     const [editingVehicle, setEditingVehicle] = useState(null);
@@ -6977,6 +7370,203 @@ import React, { useState, useEffect } from 'react';
       extraUnloadingAddresses: [],
       date: new Date().toISOString().split('T')[0], time: '08:00', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
     });
+
+    // --- DEMO MODU STATE VE FONKSİYONLARI ---
+    const [isDemoGenerating, setIsDemoGenerating] = useState(false);
+    const [demoConfirm, setDemoConfirm] = useState({ isOpen: false, action: '' });
+    const isDemoModeActive = jobs.some(j => j.isDemo) || personnelList.some(p => p.isDemo) || vehicles.some(v => v.isDemo);
+
+    const executeDemoAction = async () => {
+        setDemoConfirm({ isOpen: false, action: '' });
+        setIsDemoGenerating(true);
+        if (demoConfirm.action === 'remove') {
+            try {
+               const collections = ['jobs', 'personnelList', 'vehicles', 'materials', 'tasks', 'todos'];
+               for (const col of collections) {
+                  const q = query(collection(db, 'artifacts', appId, 'public', 'data', col));
+                  const snap = await getDocs(q);
+                  const batchPromises = [];
+                  snap.forEach(docSnap => {
+                     if(docSnap.data().isDemo) {
+                         batchPromises.push(deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', col, docSnap.id)));
+                     }
+                  });
+                  await Promise.all(batchPromises);
+               }
+            } catch(e) { console.error("Demo verisi silinirken hata:", e); }
+        } else {
+            try {
+               const getRandomInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+               const getRandomItem = (arr) => arr[getRandomInt(0, arr.length - 1)];
+               const names = ["Ahmet", "Mehmet", "Ali", "Hasan", "Hüseyin", "Fatma", "Ayşe", "Emine", "Zeynep", "Hatice", "Can", "Burak", "Kaan", "Volkan", "Serkan", "Cem", "Oğuz", "Murat", "Gökhan", "Hakan", "Yusuf", "İbrahim", "Halil", "İsmail", "Süleyman", "Elif", "Derya", "Mert", "Efe", "Ozan"];
+               const surnames = ["Yılmaz", "Kaya", "Demir", "Çelik", "Şahin", "Yıldız", "Özdemir", "Arslan", "Doğan", "Kılıç", "Aslan", "Çetin", "Kara", "Koç", "Kurt", "Özkan", "Şimşek", "Polat", "Aydın", "Güneş"];
+               const randomName = () => getRandomItem(names) + " " + getRandomItem(surnames);
+               const randomPhone = () => "05" + getRandomInt(30000000, 59999999).toString();
+               const randomDateThisMonth = () => {
+                  const td = new Date();
+                  const day = getRandomInt(1, 28);
+                  return `${td.getFullYear()}-${String(td.getMonth() + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+               };
+
+               const promises = [];
+               const getRef = (colName) => collection(db, 'artifacts', appId, 'public', 'data', colName);
+
+               // 1. Personel Oluşturma (50)
+               const generatedPersonnel = [];
+               for(let i=0; i<50; i++) {
+                  const isBlue = Math.random() > 0.3; // %70 mavi yaka ihtimali
+                  const pId = doc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelList')).id;
+                  const pData = {
+                     fullName: randomName() + " (Demo)", email: `demo${i}@sembol.com`, password: '123',
+                     collarType: isBlue ? 'Mavi Yaka' : 'Beyaz Yaka',
+                     position: isBlue ? getRandomItem(['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu']) : getRandomItem(['Satış Personeli', 'Operasyon', 'Muhasebe']),
+                     rank: isBlue ? 'Standart' : 'Ekip Şefi',
+                     personalPhone: randomPhone(), isDemo: true, safetyTraining: 'Eğitim Aldı (Geçerli)'
+                  };
+                  generatedPersonnel.push({ id: pId, ...pData });
+                  promises.push(setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', pId), pData));
+               }
+
+               // 5. Araç Listesi (6) (Öne alındı ki işlere atanabilsin)
+               const generatedVehicles = [];
+               for(let i=1; i<=6; i++) {
+                  const vId = doc(collection(db, 'artifacts', appId, 'public', 'data', 'vehicles')).id;
+                  const vData = {
+                     plate: `34 DEMO 0${i}`, type: 'Kamyon', capacity: ['2+1', '3+1'], volume: '45', km: '120000', model: '2020', color: 'Beyaz', transmission: 'Manuel', isDemo: true
+                  };
+                  generatedVehicles.push({ id: vId, ...vData });
+                  promises.push(setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'vehicles', vId), vData));
+               }
+
+               // Rastgele ekip atama yardımcısı
+               const assignRandomTeam = (status) => {
+                   if (status === 'pending' && Math.random() > 0.3) {
+                       return { team: 'Atanmadı', teamNames: [], assignedPersonnelIds: [], assignedPersonnelId: null, assignedVehiclePlate: '' };
+                   }
+                   const p1 = getRandomItem(generatedPersonnel);
+                   const p2 = getRandomItem(generatedPersonnel);
+                   const p3 = getRandomItem(generatedPersonnel);
+                   const v = getRandomItem(generatedVehicles);
+                   const allNames = [p1.fullName, p2.fullName, p3.fullName];
+                   return {
+                       team: allNames.join(', '),
+                       teamNames: allNames,
+                       assignedPersonnelIds: [p1.id, p2.id, p3.id],
+                       assignedPersonnelId: p1.id,
+                       assignedVehiclePlate: v.plate
+                   };
+               };
+
+               // 2. Nakliye Kayıtları (50)
+               for(let i=0; i<50; i++) {
+                  const status = getRandomItem(['pending', 'in-progress', 'completed']);
+                  promises.push(addDoc(getRef('jobs'), {
+                     type: 'Nakliye', customerName: randomName(), customerPhone: randomPhone(), customerType: 'Bireysel',
+                     date: randomDateThisMonth(), time: '08:00',
+                     fromProvince: 'İstanbul (Anadolu)', fromDistrict: getRandomItem(TURKEY_LOCATIONS['İstanbul (Anadolu)']), fromRoomCount: getRandomItem(['1+1', '2+1', '3+1']), fromFloor: getRandomItem(['1. Kat', '2. Kat', '3. Kat']),
+                     toProvince: 'İstanbul (Anadolu)', toDistrict: getRandomItem(TURKEY_LOCATIONS['İstanbul (Anadolu)']), toRoomCount: getRandomItem(['1+1', '2+1', '3+1']), toFloor: getRandomItem(['1. Kat', '2. Kat', '3. Kat']),
+                     price: (getRandomInt(10, 50) * 1000).toString(), deposit: '1000',
+                     status: status,
+                     isDemo: true, createdBy: 'Sistem (Demo)',
+                     fromTransportMethod: 'Merdiven', toTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı', toPacking: 'Kendisi Topladı',
+                     ...assignRandomTeam(status)
+                  }));
+               }
+
+               // 3. Depo Kayıtları (50)
+               for(let i=0; i<50; i++) {
+                  const status = getRandomItem(['pending', 'in-progress', 'completed']);
+                  promises.push(addDoc(getRef('jobs'), {
+                     type: 'Depo', customerName: randomName(), customerPhone: randomPhone(), customerType: 'Bireysel',
+                     date: randomDateThisMonth(), time: '10:00',
+                     fromProvince: 'İstanbul (Anadolu)', fromDistrict: getRandomItem(TURKEY_LOCATIONS['İstanbul (Anadolu)']), fromRoomCount: getRandomItem(['1+1', '2+1']), fromFloor: getRandomItem(['1. Kat', '2. Kat']),
+                     toProvince: 'İstanbul (Anadolu)', toDistrict: 'Pendik', toRoomCount: 'Depoevim Tesisleri', toFloor: 'Giriş Kat',
+                     price: (getRandomInt(5, 20) * 1000).toString(), deposit: '500',
+                     status: status,
+                     isDemo: true, createdBy: 'Sistem (Demo)', depoDirection: 'toDepo', selectedDepo: 'Pendik Depoevim',
+                     fromTransportMethod: 'Merdiven', toTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı', toPacking: 'Kendisi Topladı',
+                     ...assignRandomTeam(status)
+                  }));
+               }
+
+               // 4. Asansör Kayıtları (30)
+               for(let i=0; i<30; i++) {
+                  const status = getRandomItem(['pending', 'completed']);
+                  promises.push(addDoc(getRef('jobs'), {
+                     type: 'Asansör', customerName: randomName(), customerPhone: randomPhone(), customerType: 'Kurumsal',
+                     date: randomDateThisMonth(), time: '13:00',
+                     fromProvince: 'İstanbul (Avrupa)', fromDistrict: getRandomItem(TURKEY_LOCATIONS['İstanbul (Avrupa)']), fromRoomCount: 'Yükleme Kurulum', fromFloor: getRandomItem(['5. Kat', '8. Kat', '12. Kat']),
+                     price: (getRandomInt(3, 8) * 1000).toString(), deposit: '0',
+                     status: status,
+                     isDemo: true, createdBy: 'Sistem (Demo)',
+                     fromPacking: 'Kendi İşimiz',
+                     ...assignRandomTeam(status)
+                  }));
+               }
+
+               // 6. Malzemeler (Otomatik)
+               const mats = [{n:'Koli (Demo)', c:'Ambalaj Malzemesi', s:'500', u:'Adet'}, {n:'Bant (Demo)', c:'Ambalaj Malzemesi', s:'200', u:'Adet'}, {n:'Streç (Demo)', c:'Ambalaj Malzemesi', s:'150', u:'Rulo'}];
+               for(const m of mats) {
+                   promises.push(addDoc(getRef('materials'), { name: m.n, category: m.c, stock: m.s, unit: m.u, isDemo: true }));
+               }
+
+               // 7. Görev Listesi (10)
+               for(let i=1; i<=10; i++) {
+                   promises.push(addDoc(getRef('tasks'), { title: `Demo Özel Görev ${i}`, description: 'Sistem tarafından oluşturulmuş otomatik demo görevi.', assignee: 'Tüm Personeller', date: randomDateThisMonth(), status: getRandomItem(['todo', 'in-progress', 'completed']), isDemo: true }));
+               }
+
+               // 8. Yapılacak Listesi (10)
+               for(let i=1; i<=10; i++) {
+                   promises.push(addDoc(getRef('todos'), { title: `Demo Yapılacak ${i}`, details: 'Demo içerik detayları...', priority: getRandomItem(['Normal', 'Yüksek', 'Acil']), reminderDate: randomDateThisMonth(), status: 'todo', isDemo: true }));
+               }
+
+               // 9. İptal Edilen İşler (15)
+               for(let i=0; i<15; i++) {
+                   promises.push(addDoc(getRef('jobs'), {
+                       type: getRandomItem(['Nakliye', 'Depo']), customerName: randomName(), customerPhone: randomPhone(), customerType: 'Bireysel',
+                       date: randomDateThisMonth(), time: '09:00',
+                       fromProvince: 'İstanbul (Anadolu)', fromDistrict: getRandomItem(TURKEY_LOCATIONS['İstanbul (Anadolu)']), fromRoomCount: '2+1', fromFloor: '2. Kat',
+                       toProvince: 'İstanbul (Anadolu)', toDistrict: getRandomItem(TURKEY_LOCATIONS['İstanbul (Anadolu)']), toRoomCount: '2+1', toFloor: '3. Kat',
+                       price: (getRandomInt(10, 30) * 1000).toString(), deposit: '0',
+                       status: 'cancelled',
+                       isDemo: true, createdBy: 'Sistem (Demo)',
+                       fromTransportMethod: 'Merdiven', toTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı', toPacking: 'Kendisi Topladı',
+                       ...assignRandomTeam('cancelled')
+                   }));
+               }
+
+               // 10. Hasarlı İşler (15)
+               for(let i=0; i<15; i++) {
+                   const assignment = assignRandomTeam('completed'); // Hasarlı işler tamamlanmış sayılır
+                   promises.push(addDoc(getRef('jobs'), {
+                       type: getRandomItem(['Nakliye', 'Depo']), customerName: randomName(), customerPhone: randomPhone(), customerType: 'Bireysel',
+                       date: randomDateThisMonth(), time: '14:00',
+                       fromProvince: 'İstanbul (Avrupa)', fromDistrict: getRandomItem(TURKEY_LOCATIONS['İstanbul (Avrupa)']), fromRoomCount: '3+1', fromFloor: '1. Kat',
+                       toProvince: 'İstanbul (Anadolu)', toDistrict: getRandomItem(TURKEY_LOCATIONS['İstanbul (Anadolu)']), toRoomCount: '3+1', toFloor: '4. Kat',
+                       price: (getRandomInt(15, 40) * 1000).toString(), deposit: '1000',
+                       status: 'completed',
+                       isDemo: true, createdBy: 'Sistem (Demo)',
+                       endJobDetails: {
+                           paymentMethod: 'Nakit',
+                           damageStatus: 'Hasar var',
+                           damageDetails: 'Taşıma esnasında eşyada ufak çaplı çizikler meydana gelmiştir (Demo Hasar Kaydı).',
+                           damageResolved: false,
+                           truckStatus: 'Herhangi bir sorun yok',
+                           customerSatisfaction: 'Şirketle İletişime Geçti.'
+                       },
+                       fromTransportMethod: 'Bina Asansörü', toTransportMethod: 'Merdiven', fromPacking: 'Toplama Yapılacak', toPacking: 'Kendisi Topladı',
+                       ...assignment
+                   }));
+               }
+
+               // Çoklu veriyi parçalara bölerek yolla (Tarayıcıyı yormamak için)
+               for(let i=0; i<promises.length; i+=50) {
+                   await Promise.all(promises.slice(i, i+50));
+               }
+            } catch(e) { console.error("Veri oluşturulurken hata:", e); }
+        }
+        setIsDemoGenerating(false);
+    };
 
     // --- FIREBASE BAĞLANTI EFEKTLERİ ---
     useEffect(() => {
@@ -7052,7 +7642,12 @@ import React, { useState, useEffect } from 'react';
       unsubs.push(onSnapshot(getCol('vehicles'), snap => { setVehicles(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, veh: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('materials'), snap => { setMaterials(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, mat: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('complaints'), snap => { setComplaints(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
-      unsubs.push(onSnapshot(getCol('companyContacts'), snap => { setCompanyContacts(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, contacts: true})); }, console.error));
+      unsubs.push(onSnapshot(getCol('companyContacts'), snap => { 
+        let contacts = snap.docs.map(d => ({...d.data(), id: d.id}));
+        contacts.sort((a, b) => (a.order || 0) - (b.order || 0));
+        setCompanyContacts(contacts); 
+        setDataLoadStatus(p => ({...p, contacts: true})); 
+      }, console.error));
       unsubs.push(onSnapshot(getCol('todos'), snap => { setTodos(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, todos: true})); }, console.error));
 
       unsubs.push(onSnapshot(getCol('personnelList'), async snap => {
@@ -7091,10 +7686,12 @@ import React, { useState, useEffect } from 'react';
           const savedUser = localStorage.getItem('sembol_crm_user');
           if (savedUser) {
             const parsed = JSON.parse(savedUser);
-            const user = personnelList.find(p => 
-              (p.email === parsed.email || p.fullName?.toLowerCase() === parsed.email?.toLowerCase()) && 
-              p.password === parsed.password
-            );
+            const parsedInput = (parsed.email || '').trim().toLocaleLowerCase('tr-TR');
+            const user = personnelList.find(p => {
+              const pEmail = (p.email || '').trim().toLocaleLowerCase('tr-TR');
+              const pName = (p.fullName || '').trim().toLocaleLowerCase('tr-TR');
+              return (pEmail === parsedInput || pName === parsedInput) && p.password === parsed.password;
+            });
             if (user) {
               setCurrentUser(user);
               setIsAuthenticated(true);
@@ -7109,15 +7706,38 @@ import React, { useState, useEffect } from 'react';
     const handleAddContact = async (e) => {
       e.preventDefault();
       if (!firebaseUser) return;
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'companyContacts'), contactForm);
+      if (editingContact) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companyContacts', editingContact.id), contactForm);
+        addSystemLog('İletişim Hattı', `Şirket iletişim hattındaki kişi güncellendi: ${contactForm.name}`);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'companyContacts'), { ...contactForm, order: companyContacts.length });
+        addSystemLog('İletişim Hattı', `Şirket iletişim hattına yeni kişi eklendi: ${contactForm.name}`);
+      }
       setContactForm({ name: '', phone: '', position: '' });
       setShowContactModal(false);
-      addSystemLog('İletişim Hattı', `Şirket iletişim hattına yeni kişi eklendi: ${contactForm.name}`);
+      setEditingContact(null);
     };
 
     const handleDeleteContact = async (id) => {
       if (!firebaseUser) return;
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companyContacts', id));
+    };
+
+    const handleReorderContact = async (index, direction) => {
+      if (!firebaseUser) return;
+      const newIndex = direction === 'up' ? index - 1 : index + 1;
+      if (newIndex < 0 || newIndex >= companyContacts.length) return;
+      
+      const current = companyContacts[index];
+      const target = companyContacts[newIndex];
+      
+      const currentOrder = current.order !== undefined ? current.order : index;
+      const targetOrder = target.order !== undefined ? target.order : newIndex;
+      
+      await Promise.all([
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companyContacts', current.id), { order: targetOrder }),
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companyContacts', target.id), { order: currentOrder })
+      ]);
     };
 
     const addSystemLog = async (action, details) => {
@@ -7277,15 +7897,18 @@ import React, { useState, useEffect } from 'react';
       addSystemLog('Yapılacak Silindi', `Yapılacak listesinden bir kayıt silindi.`);
     };
 
-    const handleApprovePoints = async (job, addPoints, reviewImageUrl) => {
+    const handleApprovePoints = async (job, individualPoints, reviewImageUrl, supportPersonnelIds = []) => {
       if (!firebaseUser) return;
       try {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), {
           pointsApproved: true,
-          reviewImage: reviewImageUrl || null
+          reviewImage: reviewImageUrl || null,
+          supportPersonnelIds: supportPersonnelIds
         });
 
-        if (addPoints) {
+        const hasAnyPoints = Object.values(individualPoints).some(v => parseFloat(v) > 0) || (supportPersonnelIds && supportPersonnelIds.length > 0);
+
+        if (hasAnyPoints) {
           const jobDate = new Date(job.date);
           const year = jobDate.getFullYear();
           const month = jobDate.getMonth() + 1;
@@ -7295,21 +7918,45 @@ import React, { useState, useEffect } from 'react';
           const snap = await getDoc(puantajRef);
           let records = snap.exists() ? snap.data().records : {};
 
-          // İşin atandığı personellerin ID'leri
-          const teamIds = job.assignedPersonnelIds ? [...job.assignedPersonnelIds] : [];
-          if (job.assignedPersonnelId && !teamIds.includes(job.assignedPersonnelId)) {
-            teamIds.push(job.assignedPersonnelId);
-          }
-
-          // Seçilen güne personeller için +1 puan ekle
-          teamIds.forEach(pId => {
-            if (!records[pId]) records[pId] = {};
-            records[pId][day] = (parseFloat(records[pId][day]) || 0) + 1;
+          let addedMainPoints = false;
+          
+          // Asıl ekibin özel puanlarını kaydet
+          Object.keys(individualPoints).forEach(pId => {
+            const pts = parseFloat(individualPoints[pId]) || 0;
+            if (pts > 0) {
+              if (!records[pId]) records[pId] = {};
+              records[pId][day] = (parseFloat(records[pId][day]) || 0) + pts;
+              addedMainPoints = true;
+            }
           });
 
-          // Günlük yorum/puan sayısını +1 artır
-          if (!records['daily_comments']) records['daily_comments'] = {};
-          records['daily_comments'][day] = (parseFloat(records['daily_comments'][day]) || 0) + 1;
+          // Günlük yorum/puan sayısını +1 artır (Eğer asıl ekibe bir puan girildiyse)
+          if (addedMainPoints) {
+            if (!records['daily_comments']) records['daily_comments'] = {};
+            records['daily_comments'][day] = (parseFloat(records['daily_comments'][day]) || 0) + 1;
+          }
+
+          if (supportPersonnelIds && supportPersonnelIds.length > 0) {
+            supportPersonnelIds.forEach(spId => {
+              if (!records[spId]) records[spId] = {};
+              records[spId][day] = (parseFloat(records[spId][day]) || 0) + 0.5;
+            });
+
+            const notifsCol = collection(db, 'artifacts', appId, 'public', 'data', 'notifications');
+            const assignDateStr = new Date().toISOString().split('T')[0];
+            for (const spId of supportPersonnelIds) {
+              await addDoc(notifsCol, {
+                userId: spId,
+                title: '🌟 Takım Desteği Puanı!',
+                message: `Diğer takım arkadaşlarınıza yardımcı olduğunuz için teşekkür ederiz! Harika iş çıkardınız. Destek puanınız (0.5) hanenize eklendi.`,
+                date: new Date().toLocaleString('tr-TR'),
+                read: false,
+                type: 'support_bonus',
+                assignedDate: assignDateStr,
+                jobDate: job.date
+              });
+            }
+          }
 
           await setDoc(puantajRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
         }
@@ -7324,7 +7971,15 @@ import React, { useState, useEffect } from 'react';
 
     const handleOpenApproveModal = (job) => {
       setJobToApprove(job);
-      setApproveData({ addPoints: 'Evet', reviewImage: '' });
+      const teamIds = job.assignedPersonnelIds ? [...job.assignedPersonnelIds] : [];
+      if (job.assignedPersonnelId && !teamIds.includes(job.assignedPersonnelId)) {
+        teamIds.push(job.assignedPersonnelId);
+      }
+      const initialPoints = {};
+      teamIds.forEach(id => {
+         initialPoints[id] = 1; // Varsayılan olarak herkese 1 puan ayarla
+      });
+      setApproveData({ individualPoints: initialPoints, reviewImage: '', supportPersonnelIds: [] });
       setShowApproveModal(true);
     };
 
@@ -7364,7 +8019,7 @@ import React, { useState, useEffect } from 'react';
         alert('Lütfen görselin yüklenmesini bekleyin.');
         return;
       }
-      await handleApprovePoints(jobToApprove, approveData.addPoints === 'Evet', approveData.reviewImage);
+      await handleApprovePoints(jobToApprove, approveData.individualPoints, approveData.reviewImage, approveData.supportPersonnelIds);
       setShowApproveModal(false);
       setJobToApprove(null);
     };
@@ -7698,6 +8353,7 @@ import React, { useState, useEffect } from 'react';
       setJobToAssign(job);
       setAssigneeId(job.assignedPersonnelId || '');
       setAssignedVehiclePlate(job.assignedVehiclePlate || '');
+      setAssignOperationNote(job.notes || ''); // Mevcut notu state'e aktar
       setAdditionalAssignees(job.assignedPersonnelIds ? job.assignedPersonnelIds.filter(id => id !== job.assignedPersonnelId) : []);
       
       let manual = [];
@@ -7718,6 +8374,7 @@ import React, { useState, useEffect } from 'react';
       });
       setCustomMaterials(job.customMaterials || []);
       setNewCustomMaterial({ name: '', amount: 1 });
+      setShowBusyPersonnel(false); // Her açılışta sıfırla
 
       setShowAssignModal(true);
     };
@@ -7742,7 +8399,8 @@ import React, { useState, useEffect } from 'react';
         status: 'in-progress', 
         assignedDate: jobToAssign.assignedDate || new Date().toISOString().split('T')[0],
         assignedMaterials: assignedMaterials,
-        customMaterials: customMaterials
+        customMaterials: customMaterials,
+        notes: assignOperationNote // Düzenlenmiş notu veritabanına kaydet
       });
       
       const notifsCol = collection(db, 'artifacts', appId, 'public', 'data', 'notifications');
@@ -7951,12 +8609,24 @@ import React, { useState, useEffect } from 'react';
       } catch (e) { setAiModal(prev => ({ ...prev, loading: false, content: 'Hata oluştu.' })); }
     };
 
-    const handleLogin = (email, password, rememberMe) => {
-      const user = personnelList.find(p => (p.email === email || p.fullName?.toLowerCase() === email.toLowerCase()) && p.password === password);
+    const handleLogin = async (email, password, rememberMe) => {
+      const loginInput = (email || '').trim().toLocaleLowerCase('tr-TR');
+      const user = personnelList.find(p => {
+        const pEmail = (p.email || '').trim().toLocaleLowerCase('tr-TR');
+        const pName = (p.fullName || '').trim().toLocaleLowerCase('tr-TR');
+        return (pEmail === loginInput || pName === loginInput) && p.password === password;
+      });
       if (user) {
         setCurrentUser(user); setIsAuthenticated(true); setLoginError('');
         if (rememberMe) try { localStorage.setItem('sembol_crm_user', JSON.stringify({ email, password })); } catch (e) { }
         else try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
+
+        try {
+          const nowStr = new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(user.id)), {
+            lastLogin: nowStr
+          });
+        } catch (err) { console.error("Son giriş tarihi güncellenemedi:", err); }
       } else setLoginError('Kullanıcı adı / E-posta veya şifre hatalı.');
     };
 
@@ -8026,6 +8696,10 @@ import React, { useState, useEffect } from 'react';
     const showAuth = checkAccess('auth', hasAdminAccess);
     const showSystemFiles = checkAccess('systemFiles', hasAdminAccess);
     
+    const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
+    const myTasksForBadge = tasks.filter(t => t.assignee === currentUser?.fullName || t.assignee === 'Tüm Personeller');
+    const unreadTasksCount = myTasksForBadge.filter(t => t.status === 'todo').length;
+
     const visibleJobs = hasJobAccess ? jobs : jobs.filter(j => {
       const isMyJob = j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id;
       if (!isMyJob) return false;
@@ -8055,7 +8729,7 @@ import React, { useState, useEffect } from 'react';
 
     const unreadNotifCount = visibleNotifications.filter(n => !n.read).length;
     const unreadMessageCount = messages.filter(m => m.receiverId === currentUser?.id && !m.read).length;
-    const totalUnreadCount = unreadNotifCount + unreadMessageCount;
+    const totalUnreadCount = isMaviYakaUser ? unreadNotifCount : (unreadNotifCount + unreadMessageCount);
 
     return (
       <div className="flex h-screen bg-neutral-50 font-sans text-neutral-900 overflow-hidden">
@@ -8138,16 +8812,62 @@ import React, { useState, useEffect } from 'react';
             )}
 
             <button 
-              onClick={() => { setActiveTab('profile'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-              className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'profile' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+              onClick={() => { setActiveTab(isMaviYakaUser ? 'profile_settings' : 'profile'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
+              className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'profile' || activeTab === 'profile_settings') ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
             >
               <div className="flex items-center gap-3">
                 <User className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Profilim</span>
               </div>
-              {totalUnreadCount > 0 && (
+              {!isMaviYakaUser && totalUnreadCount > 0 && (
                 <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{totalUnreadCount}</span>
               )}
             </button>
+
+            {isMaviYakaUser && (
+              <>
+                <button 
+                  onClick={() => { setActiveTab('profile_jobs'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'profile_jobs' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <ClipboardList className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Bana Atanan Görevler</span>
+                  </div>
+                  {unreadNotifCount > 0 && (
+                    <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{unreadNotifCount}</span>
+                  )}
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('profile_tasks'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'profile_tasks' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <CheckSquare className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Özel Görevler</span>
+                  </div>
+                  {unreadTasksCount > 0 && (
+                    <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{unreadTasksCount}</span>
+                  )}
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('profile_messages'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'profile_messages' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <MessageCircle className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Şirket İçi Mesaj</span>
+                  </div>
+                  {unreadMessageCount > 0 && (
+                    <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{unreadMessageCount}</span>
+                  )}
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('profile_complaint'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'profile_complaint' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <AlertTriangle className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Şikayet Bildirim</span>
+                  </div>
+                </button>
+              </>
+            )}
             
             {/* Kayıt Aç */}
             {showAddJob && (
@@ -8576,10 +9296,10 @@ import React, { useState, useEffect } from 'react';
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsSystemFilesSubMenuOpen(!isSystemFilesSubMenuOpen); setIsAuthSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'backupSystem' || activeTab === 'systemLogs') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'backupSystem' || activeTab === 'systemLogs' || activeTab === 'userActivities') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <FileText className={`w-5 h-5 shrink-0 ${(activeTab === 'backupSystem' || activeTab === 'systemLogs') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Sistem Dosyaları</span>
+                    <FileText className={`w-5 h-5 shrink-0 ${(activeTab === 'backupSystem' || activeTab === 'systemLogs' || activeTab === 'userActivities') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Sistem Dosyaları</span>
                   </div>
                   {isSystemFilesSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -8598,6 +9318,12 @@ import React, { useState, useEffect } from 'react';
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'systemLogs' ? 'bg-white' : 'bg-red-600'}`}></div> Hareket Geçmişi
                     </button>
+                    <button 
+                      onClick={() => { setActiveTab('userActivities'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'userActivities' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'userActivities' ? 'bg-white' : 'bg-red-600'}`}></div> Kullanıcı Hareketleri
+                    </button>
                   </div>
                 )}
               </div>
@@ -8608,34 +9334,42 @@ import React, { useState, useEffect } from 'react';
           {/* ŞİRKET İLETİŞİM HATTI */}
           <div className="px-4 pb-4">
             <div className="bg-emerald-900/30 border border-emerald-800/50 rounded-xl p-3 flex flex-col gap-2 shadow-inner">
-               <h4 className="text-emerald-400 text-[10px] font-black uppercase tracking-wider flex items-center justify-between border-b border-emerald-800/50 pb-2">
-                  <span className="flex items-center gap-1.5"><Phone className="w-3.5 h-3.5"/> Şirket İletişimi</span>
+               <div className="flex items-center justify-between border-b border-emerald-800/50 pb-2">
+                  <button onClick={() => setIsContactsOpen(!isContactsOpen)} className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-black uppercase tracking-wider hover:text-white transition flex-1 text-left">
+                    <Phone className="w-3.5 h-3.5"/> Şirket İletişimi {isContactsOpen ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
+                  </button>
                   {isManager && (
-                    <button onClick={() => setShowContactModal(true)} className="hover:text-white transition bg-emerald-800/50 hover:bg-emerald-700/50 p-1.5 rounded-lg flex items-center justify-center">
+                    <button onClick={() => { setContactForm({ name: '', phone: '', position: '' }); setEditingContact(null); setShowContactModal(true); }} className="hover:text-white transition bg-emerald-800/50 hover:bg-emerald-700/50 p-1.5 rounded-lg flex items-center justify-center text-emerald-400 shrink-0">
                       <PlusCircle className="w-3.5 h-3.5" />
                     </button>
                   )}
-               </h4>
-               <div className="space-y-1 mt-1 max-h-40 overflow-y-auto custom-scrollbar">
-                  {companyContacts.map(c => (
-                     <div key={c.id} className="flex justify-between items-center group">
-                        <a href={`tel:${c.phone}`} className="flex flex-col hover:bg-emerald-800/30 p-1.5 rounded transition w-full">
-                           <span className="text-white text-xs font-bold truncate">{c.name}</span>
-                           <span className="text-emerald-200/70 text-[9px] truncate mt-0.5">{c.position} - {c.phone}</span>
-                        </a>
-                        {isManager && (
-                           <button onClick={() => handleDeleteContact(c.id)} className="text-neutral-500 hover:text-red-400 p-1 opacity-0 group-hover:opacity-100 transition shrink-0">
-                              <X className="w-3.5 h-3.5"/>
-                           </button>
-                        )}
-                     </div>
-                  ))}
-                  {companyContacts.length === 0 && <p className="text-[10px] text-emerald-200/50 italic py-1 px-1.5">Kayıtlı numara yok.</p>}
                </div>
+               
+               {isContactsOpen && (
+                 <div className="space-y-1 mt-1 max-h-40 overflow-y-auto custom-scrollbar">
+                    {companyContacts.map((c, index) => (
+                       <div key={c.id} className="flex justify-between items-center group">
+                          <a href={`tel:${c.phone}`} className="flex flex-col hover:bg-emerald-800/30 p-1.5 rounded transition w-full">
+                             <span className="text-white text-xs font-bold truncate">{c.name}</span>
+                             <span className="text-emerald-200/70 text-[9px] truncate mt-0.5">{c.position} - {c.phone}</span>
+                          </a>
+                          {isManager && (
+                             <div className="flex items-center opacity-0 group-hover:opacity-100 transition shrink-0 gap-1 bg-emerald-900/50 p-1 rounded-lg">
+                                <button disabled={index === 0} onClick={() => handleReorderContact(index, 'up')} className="text-neutral-400 hover:text-white disabled:opacity-30 p-0.5"><ChevronUp className="w-3 h-3"/></button>
+                                <button disabled={index === companyContacts.length - 1} onClick={() => handleReorderContact(index, 'down')} className="text-neutral-400 hover:text-white disabled:opacity-30 p-0.5"><ChevronDown className="w-3 h-3"/></button>
+                                <button onClick={() => { setEditingContact(c); setContactForm({name: c.name, phone: c.phone, position: c.position}); setShowContactModal(true); }} className="text-blue-400 hover:text-blue-300 p-0.5"><Edit className="w-3 h-3"/></button>
+                                <button onClick={() => handleDeleteContact(c.id)} className="text-red-400 hover:text-red-300 p-0.5"><X className="w-3 h-3"/></button>
+                             </div>
+                          )}
+                       </div>
+                    ))}
+                    {companyContacts.length === 0 && <p className="text-[10px] text-emerald-200/50 italic py-1 px-1.5">Kayıtlı numara yok.</p>}
+                 </div>
+               )}
             </div>
           </div>
 
-          <div className="p-4 border-t border-neutral-800">
+          <div className="p-4 border-t border-neutral-800 space-y-2">
             <button 
               onClick={handleLogout}
               className="w-full py-3 px-4 text-sm font-bold text-red-500 hover:text-white hover:bg-red-600 transition flex justify-center items-center gap-2 rounded-xl border border-red-500/30 hover:border-red-600"
@@ -8648,9 +9382,9 @@ import React, { useState, useEffect } from 'react';
         {/* Main Content Area */}
         <main className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
           <div className="max-w-6xl mx-auto">
-            {activeTab === 'dashboard' && showDashboard && <DashboardView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} setViewingImage={setViewingImage} />}
+            {activeTab === 'dashboard' && showDashboard && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} setViewingImage={setViewingImage} />}
             {activeTab === 'calendar' && showCalendar && <CalendarView jobs={visibleJobs} handleEditJob={handleEditJob} />}
-            {activeTab === 'profile' && <ProfileView currentUser={currentUser} jobs={visibleJobs} notifications={notifications} markNotificationsAsRead={markNotificationsAsRead} personnelList={personnelList} messages={messages} setMessages={setMessages} handleOpenEndJobModal={handleOpenEndJobModal} setViewingImage={setViewingImage} handleUpdatePersonnel={handleUpdatePersonnel} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} onSendMessage={onSendMessage} onMarkMessageAsRead={onMarkMessageAsRead} />}
+            {activeTab.startsWith('profile') && <ProfileView currentUser={currentUser} jobs={visibleJobs} notifications={notifications} markNotificationsAsRead={markNotificationsAsRead} personnelList={personnelList} messages={messages} setMessages={setMessages} handleOpenEndJobModal={handleOpenEndJobModal} setViewingImage={setViewingImage} handleUpdatePersonnel={handleUpdatePersonnel} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} onSendMessage={onSendMessage} onMarkMessageAsRead={onMarkMessageAsRead} defaultTab={activeTab === 'profile' ? (['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position) || currentUser?.collarType === 'Mavi Yaka' ? 'settings' : 'jobs') : activeTab.replace('profile_', '')} />}
             {activeTab === 'addInfo' && showAddJob && (currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi' || currentUser?.permissions?.canEdit) && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
             
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
@@ -8989,6 +9723,7 @@ import React, { useState, useEffect } from 'react';
             {/* Sistem Dosyaları Modülü */}
             {activeTab === 'backupSystem' && showSystemFiles && <SystemFilesView jobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'systemLogs' && showSystemFiles && <SystemLogsView logs={systemLogs} />}
+            {activeTab === 'userActivities' && showSystemFiles && <UserActivitiesView personnelList={personnelList} />}
           </div>
         </main>
 
@@ -9017,6 +9752,27 @@ import React, { useState, useEffect } from 'react';
               <div className="flex gap-3">
                 <button onClick={() => setDeleteJobId(null)} className="flex-1 p-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">Vazgeç</button>
                 <button onClick={() => { handleCompletelyDeleteJob(deleteJobId); setDeleteJobId(null); }} className="flex-1 p-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30">Evet, Tamamen Sil</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DEMO ONAY MODALI */}
+        {demoConfirm.isOpen && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
+            <div className="bg-white p-6 rounded-2xl w-full max-w-md text-center animate-in zoom-in-95 shadow-2xl">
+              <Sparkles className="w-16 h-16 text-purple-600 mx-auto mb-4" />
+              <h3 className="font-black text-xl text-black mb-2">
+                {demoConfirm.action === 'create' ? 'Demo Verileri Oluştur' : 'Demo Verileri Temizle'}
+              </h3>
+              <p className="text-neutral-600 mb-6 text-sm font-medium">
+                {demoConfirm.action === 'create' 
+                  ? 'Sisteme otomatik olarak yaklaşık 200 adet demo kaydı (iş, personel, araç vb. şifreler "123") eklenecektir. Devam edilsin mi?' 
+                  : 'Sistemdeki tüm demo verileri kalıcı olarak temizlenecektir. Gerçek verileriniz etkilenmez. Onaylıyor musunuz?'}
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setDemoConfirm({ isOpen: false, action: '' })} className="flex-1 p-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">Vazgeç</button>
+                <button onClick={executeDemoAction} className="flex-1 p-3 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 transition shadow-lg shadow-purple-600/30">Evet, Onaylıyorum</button>
               </div>
             </div>
           </div>
@@ -9054,6 +9810,18 @@ import React, { useState, useEffect } from 'react';
                   </p>
 
                   <div>
+                    <label className="block text-sm font-bold text-black mb-1 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-600" /> Operasyon Notu
+                    </label>
+                    <textarea 
+                      value={assignOperationNote} 
+                      onChange={(e) => setAssignOperationNote(e.target.value)} 
+                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition resize-none h-20 text-sm font-medium bg-white" 
+                      placeholder="Ekibe iletilecek operasyon notu ekleyin veya düzenleyin..." 
+                    />
+                  </div>
+
+                  <div>
                     <label className="block text-sm font-bold text-black mb-2">Asıl Görevli (Ekip Şefi / Sorumlu)</label>
                     <select required value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-medium">
                       <option value="">Lütfen personel seçiniz...</option>
@@ -9077,29 +9845,44 @@ import React, { useState, useEffect } from 'react';
                     const availablePersonnel = personnelList.filter(p => 
                       p.id !== parseInt(assigneeId) && 
                       ['Şoför', 'Mobilya Ustası', 'Taşıma Elemanı'].includes(p.position) &&
-                      !busyPersonnelIdsThisDay.includes(p.id)
+                      (showBusyPersonnel || !busyPersonnelIdsThisDay.includes(p.id))
                     );
 
                     return (
                       <div className="animate-in fade-in slide-in-from-top-2">
-                        <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
-                          <Users className="w-4 h-4 text-red-600" /> Beraber Gidecek Diğer Personeller
-                        </label>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="block text-sm font-bold text-black flex items-center gap-2">
+                            <Users className="w-4 h-4 text-red-600" /> Beraber Gidecek Diğer Personeller
+                          </label>
+                          <button 
+                            type="button" 
+                            onClick={() => setShowBusyPersonnel(!showBusyPersonnel)}
+                            className={`text-[10px] px-2.5 py-1 rounded-lg font-bold border transition ${showBusyPersonnel ? 'bg-red-50 text-red-600 border-red-200' : 'bg-neutral-100 text-neutral-600 border-neutral-200'}`}
+                          >
+                            {showBusyPersonnel ? 'Meşgulleri Gizle' : '+ İkinci İşi Ata'}
+                          </button>
+                        </div>
                         <div className="max-h-40 overflow-y-auto border border-neutral-300 rounded-xl p-2 bg-white space-y-1 custom-scrollbar">
-                          {availablePersonnel.map(person => (
-                            <label key={person.id} className="flex items-center gap-3 p-2 hover:bg-neutral-50 rounded-lg cursor-pointer transition border border-transparent hover:border-neutral-200">
-                              <input 
-                                type="checkbox" 
-                                className="w-4 h-4 text-red-600 rounded border-neutral-300 focus:ring-red-600 cursor-pointer"
-                                checked={additionalAssignees.includes(person.id)}
-                                onChange={(e) => {
-                                  if (e.target.checked) setAdditionalAssignees([...additionalAssignees, person.id]);
-                                  else setAdditionalAssignees(additionalAssignees.filter(id => id !== person.id));
-                                }}
-                              />
-                              <span className="text-sm font-medium text-black flex-1">{person.fullName} <span className="text-xs text-neutral-500 ml-1">({person.position})</span></span>
-                            </label>
-                          ))}
+                          {availablePersonnel.map(person => {
+                            const isBusy = busyPersonnelIdsThisDay.includes(person.id);
+                            return (
+                              <label key={person.id} className="flex items-center gap-3 p-2 hover:bg-neutral-50 rounded-lg cursor-pointer transition border border-transparent hover:border-neutral-200">
+                                <input 
+                                  type="checkbox" 
+                                  className="w-4 h-4 text-red-600 rounded border-neutral-300 focus:ring-red-600 cursor-pointer"
+                                  checked={additionalAssignees.includes(person.id)}
+                                  onChange={(e) => {
+                                    if (e.target.checked) setAdditionalAssignees([...additionalAssignees, person.id]);
+                                    else setAdditionalAssignees(additionalAssignees.filter(id => id !== person.id));
+                                  }}
+                                />
+                                <span className="text-sm font-medium text-black flex-1 flex items-center gap-2">
+                                  {person.fullName} <span className="text-xs text-neutral-500">({person.position})</span>
+                                  {isBusy && <span className="text-[9px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded border border-orange-200 font-bold ml-auto">Başka İşi Var</span>}
+                                </span>
+                              </label>
+                            );
+                          })}
                           {availablePersonnel.length === 0 && (
                             <p className="text-xs text-neutral-500 p-2">Bu tarihte müsait durumda uygun pozisyonda (Şoför, Usta, Taşıma Elemanı) personel bulunmuyor.</p>
                           )}
@@ -9616,6 +10399,58 @@ import React, { useState, useEffect } from 'react';
                     </>
                   )}
 
+                  <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 mt-4 mb-2">
+                    <label className="block text-sm font-bold text-blue-900 mb-1 flex items-center gap-2">
+                      <Star className="w-4 h-4 text-blue-600 fill-blue-600" /> Müşteriden Değerlendirme (Google Yorum) İste
+                    </label>
+                    <p className="text-[10px] text-blue-700 mb-3 font-medium">İşi sonlandırmadan önce müşteriye otomatik Google değerlendirme linki gönderebilirsiniz.</p>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          let phone = jobToEnd.customerPhone.replace(/\D/g, '');
+                          if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+                          else if (!phone.startsWith('90')) phone = '90' + phone;
+                          
+                          let reviewLink = "https://g.page/r/CY7qIJg9osoKEBM/review";
+                          let msgBody = `Sayın *${jobToEnd.customerName}*,\n\nSembol Nakliyat olarak taşıma işleminizi tamamlamış bulunmaktayız. Bizi tercih ettiğiniz için teşekkür ederiz.\n\nHizmetimizden memnun kaldıysanız, aşağıdaki linke tıklayarak Google üzerinden bize kısa bir yorum bırakırsanız çok seviniriz. Değerli yorumlarınız, ekibimiz ve firmamız için çok önemlidir.\n\n⭐ *Değerlendirme Linki:*\n${reviewLink}\n\nYeni adresinizde sağlık ve mutluluk dolu günler dileriz.\n*Sembol Nakliyat Yönetimi*`;
+                          
+                          if (jobToEnd.type === 'Depo') {
+                              reviewLink = "https://g.page/r/Ce80w-lqdhRkEBM/review";
+                              msgBody = `Sayın *${jobToEnd.customerName}*,\n\nSembol Nakliyat Depoevim olarak depolama işleminizi tamamlamış bulunmaktayız. Bizi tercih ettiğiniz için teşekkür ederiz.\n\nHizmetimizden memnun kaldıysanız, aşağıdaki linke tıklayarak Google üzerinden bize kısa bir yorum bırakırsanız çok seviniriz. Değerli yorumlarınız, ekibimiz ve firmamız için çok önemlidir.\n\n⭐ *Değerlendirme Linki:*\n${reviewLink}\n\nEşyalarınız güvende, iyi günler dileriz.\n*Sembol Nakliyat Depoevim Yönetimi*`;
+                          }
+                          
+                          window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msgBody)}`, '_blank');
+                        }}
+                        className="flex-1 px-3 py-2 bg-[#25D366] text-white text-xs font-bold rounded-lg hover:bg-[#128C7E] transition flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <MessageCircle className="w-4 h-4 shrink-0" /> WhatsApp'tan İste
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          let phone = jobToEnd.customerPhone.replace(/\D/g, '');
+                          
+                          let reviewLink = "https://g.page/r/CY7qIJg9osoKEBM/review";
+                          let msgBody = `Sayın ${jobToEnd.customerName},\nSembol Nakliyat olarak tasima isleminizi tamamladik. Bizi tercih ettiginiz icin tesekkur ederiz.\n\nHizmetimizden memnun kaldiysaniz asagidaki linkten bize kisa bir yorum birakabilirsiniz. Yorumlariniz bizim icin cok degerlidir.\n\nLink: ${reviewLink}\n\nYeni adresinizde mutluluklar dileriz.`;
+                          
+                          if (jobToEnd.type === 'Depo') {
+                              reviewLink = "https://g.page/r/Ce80w-lqdhRkEBM/review";
+                              msgBody = `Sayın ${jobToEnd.customerName},\nSembol Nakliyat Depoevim olarak depolama isleminizi tamamladik. Bizi tercih ettiginiz icin tesekkur ederiz.\n\nHizmetimizden memnun kaldiysaniz asagidaki linkten bize kisa bir yorum birakabilirsiniz. Yorumlariniz bizim icin cok degerlidir.\n\nLink: ${reviewLink}\n\nEsyalariniz guvende, iyi gunler dileriz.`;
+                          }
+                          
+                          const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+                          const separator = isIOS ? '&' : '?';
+                          window.open(`sms:${phone}${separator}body=${encodeURIComponent(msgBody)}`, '_self');
+                        }}
+                        className="flex-1 px-3 py-2 bg-indigo-500 text-white text-xs font-bold rounded-lg hover:bg-indigo-600 transition flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <MessageSquareText className="w-4 h-4 shrink-0" /> SMS ile İste
+                      </button>
+                    </div>
+                  </div>
+
                   <button type="submit" className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> {jobToEnd.type === 'Asansör' ? 'Asansör İşini Sonlandır' : 'Kodu Doğrula ve İşi Bitir'}
                   </button>
@@ -9628,56 +10463,114 @@ import React, { useState, useEffect } from 'react';
         {/* PUAN ONAYLAMA VE YORUM EKLEME MODALI */}
         {showApproveModal && jobToApprove && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
-              <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-yellow-500 shrink-0">
-                <h3 className="font-bold text-lg flex items-center gap-2"><Star className="w-5 h-5 text-yellow-500 fill-yellow-500" /> Puanı Onayla</h3>
-                <button onClick={() => setShowApproveModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+            <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[95vh]">
+              <div className="bg-black text-white p-3 flex justify-between items-center border-b-4 border-yellow-500 shrink-0">
+                <h3 className="font-bold text-base flex items-center gap-2"><Star className="w-4 h-4 text-yellow-500 fill-yellow-500" /> Puan Onay Ekranı</h3>
+                <button onClick={() => setShowApproveModal(false)} className="text-neutral-400 hover:text-white transition p-1"><X className="w-5 h-5" /></button>
               </div>
               
-              <div className="p-6 overflow-y-auto custom-scrollbar">
-                <form onSubmit={submitApprovePoints} className="space-y-5">
-                  <div className="bg-neutral-50 p-3 rounded-xl border border-neutral-200">
-                    <p className="text-sm font-bold text-black mb-1">Müşteri: {jobToApprove.customerName}</p>
-                    <p className="text-xs text-neutral-500">Tarih: {jobToApprove.date}</p>
+              <div className="p-4 overflow-y-auto custom-scrollbar flex-1">
+                <form onSubmit={submitApprovePoints} className="space-y-4">
+                  <div className="bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 flex justify-between items-center">
+                    <div>
+                      <p className="text-xs font-black text-black leading-tight">{jobToApprove.customerName}</p>
+                      <p className="text-[10px] font-bold text-neutral-500 mt-0.5"><CalendarDays className="w-3 h-3 inline mr-0.5"/>{jobToApprove.date}</p>
+                    </div>
+                    <span className="text-[10px] bg-yellow-100 text-yellow-800 font-bold px-2 py-1 rounded border border-yellow-200">Onay Bekliyor</span>
                   </div>
 
-                  <div>
-                    <label className="block text-sm font-bold text-black mb-2">Personele Puan Girilsin mi? (1 Puan)</label>
-                    <select value={approveData.addPoints} onChange={e => setApproveData({...approveData, addPoints: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium focus:ring-2 focus:ring-yellow-500 transition">
-                        <option value="Evet">Evet, 1 Puan Ekle</option>
-                        <option value="Hayır">Hayır, Puan Ekleme</option>
-                    </select>
-                    <p className="text-[10px] text-neutral-500 mt-1">Evet seçildiğinde görevdeki personellere ve günlük yorum sayısına puan eklenir.</p>
-                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Sol Taraf: Puanlar */}
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-bold text-black mb-1.5">Ekip Puan Girişi</label>
+                          <div className="bg-white border border-neutral-200 rounded-lg p-1.5 space-y-1">
+                            {(() => {
+                              const teamIds = jobToApprove.assignedPersonnelIds ? [...jobToApprove.assignedPersonnelIds] : [];
+                              if (jobToApprove.assignedPersonnelId && !teamIds.includes(jobToApprove.assignedPersonnelId)) {
+                                teamIds.push(jobToApprove.assignedPersonnelId);
+                              }
+                              if (teamIds.length === 0) return <span className="text-[10px] text-neutral-500 italic px-2">Görevli personel bulunamadı.</span>;
+                              
+                              return teamIds.map(pId => {
+                                const person = personnelList.find(p => p.id === pId);
+                                return (
+                                  <div key={pId} className="flex justify-between items-center bg-neutral-50 p-1.5 rounded-md border border-neutral-100">
+                                    <span className="text-[11px] font-bold text-black flex items-center gap-1.5 truncate pr-2">
+                                       <User className="w-3 h-3 text-neutral-400 shrink-0" />
+                                       <span className="truncate">{person?.fullName || 'Bilinmeyen Personel'}</span>
+                                    </span>
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <input 
+                                         type="number" 
+                                         step="0.5" 
+                                         min="0" 
+                                         value={approveData.individualPoints[pId] !== undefined ? approveData.individualPoints[pId] : 1} 
+                                         onChange={e => setApproveData({...approveData, individualPoints: {...approveData.individualPoints, [pId]: parseFloat(e.target.value) || 0}})} 
+                                         className="w-12 h-6 border border-neutral-300 rounded text-center outline-none focus:ring-1 focus:ring-yellow-500 font-bold text-xs" 
+                                      />
+                                      <span className="text-[9px] font-bold text-neutral-500">Puan</span>
+                                    </div>
+                                  </div>
+                                )
+                              });
+                            })()}
+                          </div>
+                        </div>
 
-                  <div>
-                    <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
-                      <Camera className="w-4 h-4 text-neutral-500" /> Müşteri Yorumu / Ekran Görüntüsü
-                    </label>
-                    {approveData.reviewImage && approveData.reviewImage !== 'Yükleniyor...' && (
-                      <div className="mb-3 w-full h-32 overflow-hidden rounded-xl border border-neutral-200 relative group">
-                        <img src={approveData.reviewImage} alt="Yorum" className="w-full h-full object-cover bg-neutral-100" />
-                        <button type="button" onClick={() => setApproveData(prev => ({...prev, reviewImage: ''}))} className="absolute top-2 right-2 p-1.5 bg-red-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition shadow-md">
-                          <X className="w-4 h-4" />
-                        </button>
+                        <div className="bg-blue-50/50 p-2 rounded-lg border border-blue-100 flex flex-col max-h-36">
+                          <label className="block text-[11px] font-bold text-blue-900 mb-1.5 flex items-center gap-1">
+                            <Users className="w-3 h-3 text-blue-600" /> Ekstra Destek (0,5 Puan)
+                          </label>
+                          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-0.5 bg-white p-1 rounded border border-blue-100">
+                            {personnelList.filter(p => !jobToApprove.assignedPersonnelIds?.includes(p.id) && p.id !== jobToApprove.assignedPersonnelId && (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))).map(p => (
+                              <label key={p.id} className="flex items-center gap-1.5 p-1.5 hover:bg-neutral-50 rounded cursor-pointer transition">
+                                <input type="checkbox" className="w-3.5 h-3.5 text-blue-600 rounded" checked={approveData.supportPersonnelIds?.includes(p.id)} onChange={(e) => {
+                                    if(e.target.checked) setApproveData({...approveData, supportPersonnelIds: [...(approveData.supportPersonnelIds||[]), p.id]});
+                                    else setApproveData({...approveData, supportPersonnelIds: (approveData.supportPersonnelIds||[]).filter(id => id !== p.id)});
+                                }} />
+                                <span className="text-[10px] font-medium text-black truncate">{p.fullName}</span>
+                              </label>
+                            ))}
+                            {personnelList.filter(p => !jobToApprove.assignedPersonnelIds?.includes(p.id) && p.id !== jobToApprove.assignedPersonnelId && (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))).length === 0 && (
+                                <span className="text-[9px] text-neutral-500 italic px-1">Seçilebilecek ekstra personel yok.</span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    )}
-                    {approveData.reviewImage === 'Yükleniyor...' && (
-                      <div className="p-4 text-center font-bold text-neutral-500 animate-pulse bg-neutral-50 rounded-xl border border-neutral-200 mb-3">
-                        Görsel Yükleniyor...
+
+                      {/* Sağ Taraf: Resim */}
+                      <div className="flex flex-col h-full">
+                        <label className="block text-xs font-bold text-black mb-1.5 flex items-center gap-1.5">
+                          <Camera className="w-3.5 h-3.5 text-neutral-500" /> Müşteri Yorumu Görseli
+                        </label>
+                        <div className="flex-1 flex flex-col">
+                          {approveData.reviewImage && approveData.reviewImage !== 'Yükleniyor...' && (
+                            <div className="flex-1 w-full min-h-[120px] overflow-hidden rounded-lg border border-neutral-200 relative group">
+                              <img src={approveData.reviewImage} alt="Yorum" className="w-full h-full object-cover bg-neutral-100" />
+                              <button type="button" onClick={() => setApproveData(prev => ({...prev, reviewImage: ''}))} className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded opacity-0 group-hover:opacity-100 transition shadow-md">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                          {approveData.reviewImage === 'Yükleniyor...' && (
+                            <div className="flex-1 min-h-[120px] flex items-center justify-center font-bold text-[10px] text-neutral-500 animate-pulse bg-neutral-50 rounded-lg border border-neutral-200">
+                              Görsel Yükleniyor...
+                            </div>
+                          )}
+                          {!approveData.reviewImage && (
+                            <label className="cursor-pointer bg-neutral-50 hover:bg-neutral-100 border border-neutral-300 border-dashed rounded-lg flex-1 min-h-[120px] text-center transition flex flex-col justify-center items-center gap-1.5">
+                              <Upload className="w-5 h-5 text-neutral-400" />
+                              <span className="text-[10px] font-bold text-neutral-600">Yorum Görseli Ekle<br/><span className="font-medium opacity-70">(İsteğe Bağlı)</span></span>
+                              <input type="file" accept="image/*" className="hidden" onChange={handleReviewImageUpload} />
+                            </label>
+                          )}
+                        </div>
                       </div>
-                    )}
-                    {!approveData.reviewImage && (
-                      <label className="cursor-pointer bg-neutral-50 hover:bg-neutral-100 border border-neutral-300 border-dashed rounded-xl p-4 text-center transition flex flex-col justify-center items-center gap-2">
-                        <Upload className="w-6 h-6 text-neutral-400" />
-                        <span className="text-sm font-bold text-neutral-600">Yorum Görseli Ekle (İsteğe Bağlı)</span>
-                        <input type="file" accept="image/*" className="hidden" onChange={handleReviewImageUpload} />
-                      </label>
-                    )}
                   </div>
 
-                  <button type="submit" className="w-full py-4 bg-yellow-500 text-black font-black rounded-xl hover:bg-yellow-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
-                    <CheckCircle className="w-5 h-5" /> Onayla ve Kaydet
+                  <button type="submit" className="w-full py-3 bg-yellow-500 text-black font-black text-sm rounded-xl hover:bg-yellow-600 transition flex justify-center items-center gap-2 shadow-md">
+                    <CheckCircle className="w-4 h-4" /> Onayla ve Puanları İşle
                   </button>
                 </form>
               </div>
@@ -9778,31 +10671,35 @@ import React, { useState, useEffect } from 'react';
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
               <div className="bg-emerald-600 text-white p-4 flex justify-between items-center shrink-0">
-                <h3 className="font-bold text-lg flex items-center gap-2"><Phone className="w-5 h-5" /> İletişim Numarası Ekle</h3>
-                <button onClick={() => setShowContactModal(false)} className="text-emerald-200 hover:text-white transition"><X className="w-6 h-6" /></button>
+                <h3 className="font-bold text-lg flex items-center gap-2"><Phone className="w-5 h-5" /> {editingContact ? 'İletişim Numarası Düzenle' : 'İletişim Numarası Ekle'}</h3>
+                <button onClick={() => { setShowContactModal(false); setEditingContact(null); }} className="text-emerald-200 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
               <div className="p-6">
                 <form onSubmit={handleAddContact} className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-bold text-black mb-1">Personel Seçerek Doldur</label>
-                    <select 
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none bg-white font-medium"
-                      onChange={(e) => {
-                        const p = personnelList.find(x => String(x.id) === e.target.value);
-                        if (p) {
-                          setContactForm({ name: p.fullName, phone: p.personalPhone || p.companyPhone || '', position: p.position });
-                        }
-                      }}
-                    >
-                      <option value="">-- Personel Seçin --</option>
-                      {personnelList.map(p => (
-                        <option key={p.id} value={p.id}>{p.fullName} ({p.position})</option>
-                      ))}
-                    </select>
-                  </div>
-                  
-                  <div className="text-center text-xs font-bold text-neutral-400 py-1">VEYA MANUEL GİRİŞ YAPIN</div>
+                  {!editingContact && (
+                    <>
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-1">Personel Seçerek Doldur</label>
+                        <select 
+                          className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none bg-white font-medium"
+                          onChange={(e) => {
+                            const p = personnelList.find(x => String(x.id) === e.target.value);
+                            if (p) {
+                              setContactForm({ name: p.fullName, phone: p.personalPhone || p.companyPhone || '', position: p.position });
+                            }
+                          }}
+                        >
+                          <option value="">-- Personel Seçin --</option>
+                          {personnelList.map(p => (
+                            <option key={p.id} value={p.id}>{p.fullName} ({p.position})</option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      <div className="text-center text-xs font-bold text-neutral-400 py-1">VEYA MANUEL GİRİŞ YAPIN</div>
+                    </>
+                  )}
                   
                   <div>
                     <label className="block text-sm font-bold text-black mb-1">İsim Soyisim</label>
@@ -9817,7 +10714,7 @@ import React, { useState, useEffect } from 'react';
                     <input required type="text" value={contactForm.position} onChange={e => setContactForm({...contactForm, position: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none" placeholder="Örn: Operasyon Müdürü" />
                   </div>
                   <button type="submit" className="w-full py-4 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
-                    <CheckCircle className="w-5 h-5" /> Kaydet ve Ekle
+                    <CheckCircle className="w-5 h-5" /> {editingContact ? 'Değişiklikleri Kaydet' : 'Kaydet ve Ekle'}
                   </button>
                 </form>
               </div>
