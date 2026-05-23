@@ -524,17 +524,26 @@ import React, { useState, useEffect } from 'react';
 
       const unsubs = [];
       unsubs.push(onSnapshot(qAnn, snap => {
-        if (!snap.empty) setLatestInfo(prev => ({...prev, announcement: snap.docs[0].data()}));
+        if (!snap.empty) setLatestInfo(prev => ({...prev, announcement: { ...snap.docs[0].data(), id: snap.docs[0].id }}));
+        else setLatestInfo(prev => ({...prev, announcement: null}));
       }));
       unsubs.push(onSnapshot(qPost, snap => {
-        if (!snap.empty) setLatestInfo(prev => ({...prev, post: snap.docs[0].data()}));
+        if (!snap.empty) setLatestInfo(prev => ({...prev, post: { ...snap.docs[0].data(), id: snap.docs[0].id }}));
+        else setLatestInfo(prev => ({...prev, post: null}));
       }));
       unsubs.push(onSnapshot(qBest, snap => {
-        if (!snap.empty) setLatestInfo(prev => ({...prev, bestEmp: snap.docs[0].data()}));
+        if (!snap.empty) setLatestInfo(prev => ({...prev, bestEmp: { ...snap.docs[0].data(), id: snap.docs[0].id }}));
+        else setLatestInfo(prev => ({...prev, bestEmp: null}));
       }));
 
       return () => unsubs.forEach(u => u());
     }, []);
+
+    const handleDeleteInfo = async (colName, id) => {
+       try {
+           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colName, id));
+       } catch (err) { console.error("Silme hatası:", err); }
+    };
 
     const fetchMyScoreAndStatus = async () => {
       try {
@@ -764,9 +773,10 @@ import React, { useState, useEffect } from 'react';
         {(latestInfo.announcement || latestInfo.post || latestInfo.bestEmp) && (
           <div className="flex flex-col gap-4 mb-2">
             {latestInfo.announcement && (
-               <div className="bg-red-50 border border-red-200 p-4 md:p-5 rounded-2xl shadow-sm flex items-start gap-4 animate-in slide-in-from-top-4">
+               <div className="bg-red-50 border border-red-200 p-4 md:p-5 rounded-2xl shadow-sm flex items-start gap-4 animate-in slide-in-from-top-4 relative">
+                  {isAdmin && <button onClick={() => handleDeleteInfo('announcements', latestInfo.announcement.id)} className="absolute top-3 right-3 p-1.5 text-red-400 hover:text-red-700 bg-white rounded-lg shadow-sm border border-red-100 transition"><X className="w-4 h-4"/></button>}
                   <div className="bg-white p-3 rounded-full shrink-0 shadow-sm border border-red-100"><Bell className="w-6 h-6 text-red-600" /></div>
-                  <div className="flex-1">
+                  <div className="flex-1 pr-8">
                      <h3 className="text-red-800 font-black text-lg flex flex-wrap items-center gap-2">
                         {latestInfo.announcement.title} 
                         <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded-full shadow-sm">DUYURU</span>
@@ -777,9 +787,10 @@ import React, { useState, useEffect } from 'react';
                </div>
             )}
             {latestInfo.post && (
-               <div className="bg-blue-50 border border-blue-200 p-4 md:p-5 rounded-2xl shadow-sm flex flex-col md:flex-row items-center md:items-start gap-4 animate-in slide-in-from-top-4 delay-75">
+               <div className="bg-blue-50 border border-blue-200 p-4 md:p-5 rounded-2xl shadow-sm flex flex-col md:flex-row items-center md:items-start gap-4 animate-in slide-in-from-top-4 delay-75 relative">
+                  {isAdmin && <button onClick={() => handleDeleteInfo('posts', latestInfo.post.id)} className="absolute top-3 right-3 p-1.5 text-blue-400 hover:text-blue-700 bg-white rounded-lg shadow-sm border border-blue-100 transition"><X className="w-4 h-4"/></button>}
                   <div className="bg-white p-3 rounded-full shrink-0 shadow-sm border border-blue-100 hidden md:block"><Sparkles className="w-6 h-6 text-blue-600" /></div>
-                  <div className="flex-1 w-full">
+                  <div className="flex-1 w-full pr-8">
                      <h3 className="text-blue-800 font-black text-lg flex flex-wrap items-center gap-2 mb-2">
                         {latestInfo.post.title} 
                         <span className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-sm">SAHADAN KARELER</span>
@@ -793,10 +804,20 @@ import React, { useState, useEffect } from 'react';
                   </div>
                </div>
             )}
-            {latestInfo.bestEmp && (
-               <div className="bg-yellow-50 border border-yellow-200 p-4 md:p-5 rounded-2xl shadow-sm flex items-center gap-4 animate-in slide-in-from-top-4 delay-150">
-                  <div className="bg-white p-3 rounded-full shrink-0 shadow-sm border border-yellow-100"><Star className="w-6 h-6 text-yellow-500 fill-yellow-500" /></div>
-                  <div className="flex-1">
+            {latestInfo.bestEmp && (() => {
+               const bestEmpPerson = personnelList?.find(p => p.fullName === latestInfo.bestEmp.employeeName);
+               return (
+               <div className="bg-yellow-50 border border-yellow-200 p-4 md:p-5 rounded-2xl shadow-sm flex items-center gap-4 animate-in slide-in-from-top-4 delay-150 relative">
+                  {isAdmin && <button onClick={() => handleDeleteInfo('bestEmployees', latestInfo.bestEmp.id)} className="absolute top-3 right-3 p-1.5 text-yellow-500 hover:text-yellow-700 bg-white rounded-lg shadow-sm border border-yellow-200 transition"><X className="w-4 h-4"/></button>}
+                  <div className="w-14 h-14 bg-white rounded-full shrink-0 shadow-sm border border-yellow-300 flex items-center justify-center overflow-hidden relative">
+                    {bestEmpPerson?.profileImage ? (
+                        <img src={bestEmpPerson.profileImage} alt={bestEmpPerson.fullName} className="w-full h-full object-cover" />
+                    ) : (
+                        <Star className="w-8 h-8 text-yellow-500 fill-yellow-500" />
+                    )}
+                    <div className="absolute -bottom-1 -right-1 bg-yellow-400 rounded-full p-1 border-2 border-white"><Star className="w-3 h-3 text-white fill-white"/></div>
+                  </div>
+                  <div className="flex-1 pr-8">
                      <h3 className="text-yellow-800 font-black text-lg flex flex-wrap items-center gap-2">
                         {latestInfo.bestEmp.title} 
                         <span className="text-[10px] bg-yellow-500 text-white px-2 py-0.5 rounded-full shadow-sm">EN İYİLER</span>
@@ -807,7 +828,8 @@ import React, { useState, useEffect } from 'react';
                      <p className="text-yellow-600/80 text-[10px] mt-3 font-bold flex items-center gap-1"><Clock className="w-3 h-3" /> {latestInfo.bestEmp.dateStr} • {latestInfo.bestEmp.author}</p>
                   </div>
                </div>
-            )}
+               );
+            })()}
           </div>
         )}
 
@@ -5671,7 +5693,11 @@ import React, { useState, useEffect } from 'react';
       }
     }, [currentUser, markNotificationsAsRead]);
 
-    const myJobs = jobs.filter(j => j.assignedPersonnelIds?.includes(currentUser.id) || j.assignedPersonnelId === currentUser.id);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const myJobs = jobs.filter(j => 
+        (j.assignedPersonnelIds?.includes(currentUser.id) || j.assignedPersonnelId === currentUser.id) && 
+        j.date <= todayStr
+    );
 
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-4xl mx-auto">
@@ -8520,11 +8546,14 @@ import React, { useState, useEffect } from 'react';
     const myTasksForBadge = tasks.filter(t => t.assignee === currentUser?.fullName || t.assignee === 'Tüm Personeller');
     const unreadTasksCount = myTasksForBadge.filter(t => t.status === 'todo').length;
 
-    const unreadJobCount = jobs.filter(j => (j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id) && (j.status === 'pending' || j.status === 'in-progress')).length;
+    const todayStrApp = new Date().toISOString().split('T')[0];
+
+    const unreadJobCount = jobs.filter(j => (j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id) && (j.status === 'pending' || j.status === 'in-progress') && j.date <= todayStrApp).length;
 
     const visibleJobs = hasJobAccess ? jobs : jobs.filter(j => {
       const isMyJob = j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id;
       if (!isMyJob) return false;
+      if (j.date > todayStrApp) return false; // Gelecekteki işleri gizle
 
       // Personel için: İş tamamlanmışsa ve üzerinden 1 gün geçmişse gizle
       if (j.status === 'completed') {
@@ -8540,10 +8569,10 @@ import React, { useState, useEffect } from 'react';
       return true;
     });
     
-    const todayStrApp = new Date().toISOString().split('T')[0];
     const visibleNotifications = notifications.filter(n => {
       if (n.userId !== currentUser?.id) return false;
-      if (!isManager && n.type === 'assignment' && n.assignedDate === todayStrApp && n.jobDate > todayStrApp) {
+      // Görev atama bildirimiyse ve işin tarihi bugünden sonraysa (gelecekteyse), gizle! Sadece iş günü geldiğinde göster.
+      if (!isManager && n.type === 'assignment' && n.jobDate && n.jobDate > todayStrApp) {
         return false;
       }
       return true;
