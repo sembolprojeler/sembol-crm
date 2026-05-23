@@ -280,55 +280,62 @@ import React, { useState, useEffect } from 'react';
       <meta charset="UTF-8">
       <title>${job.customerName} - Sözleşme</title>
       <style>
-        @page { size: A4; margin: 10mm; }
+        @page { size: A4; margin: 0; }
         * { box-sizing: border-box; }
-        body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background: #525659; display: flex; flex-direction: column; align-items: center; font-size: 12px; }
+        body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background: #525659; display: flex; flex-direction: column; align-items: center; font-size: 11px; }
         
         .page { 
           width: 210mm; 
-          min-height: 297mm;
+          height: 297mm;
           background: white;
-          padding: 15mm 20mm;
+          padding: 12mm 15mm;
           margin: 10mm auto;
           box-shadow: 0 0 10px rgba(0,0,0,0.5);
           position: relative;
+          page-break-after: always;
+          overflow: hidden;
         }
         @media print {
           body { background: white; }
-          .page { margin: 0; box-shadow: none; border: none; min-height: auto; page-break-after: always; }
+          .page { margin: 0; padding: 12mm 15mm; box-shadow: none; border: none; height: 297mm; }
           .page:last-child { page-break-after: auto; }
         }
-        .header { text-align: center; border-bottom: 2px solid #d32f2f; padding-bottom: 15px; margin-bottom: 20px; display: flex; flex-direction: column; align-items: center; }
-        .logo-text { font-size: 28px; font-weight: 900; color: #d32f2f; letter-spacing: 2px; margin-bottom: 5px; }
-        .subtitle { font-size: 13px; color: #333; font-weight: bold; margin-bottom: 5px; letter-spacing: 1px; }
-        .contact-info { font-size: 11px; color: #555; line-height: 1.4; }
+        .header { text-align: center; border-bottom: 2px solid #d32f2f; padding-bottom: 10px; margin-bottom: 12px; display: flex; flex-direction: column; align-items: center; }
+        .logo-img { height: 45px; margin-bottom: 5px; object-fit: contain; }
+        .subtitle { font-size: 12px; color: #333; font-weight: bold; margin-bottom: 4px; letter-spacing: 1px; }
+        .contact-info { font-size: 10px; color: #555; line-height: 1.3; }
         
-        .main-title { font-size: 16px; font-weight: bold; text-align: center; margin: 15px 0; padding: 8px; background: #f0f0f0; border: 1px solid #ccc; text-transform: uppercase;}
+        .main-title { font-size: 15px; font-weight: bold; text-align: center; margin: 10px 0; padding: 6px; background: #f0f0f0; border: 1px solid #ccc; text-transform: uppercase;}
         
-        table { width: 100%; border-collapse: collapse; margin-bottom: 15px; font-size: 12px; }
-        th { background: #f0f0f0; padding: 6px; border: 1px solid #ccc; text-align: left; font-size: 13px; color: #d32f2f; }
-        td { padding: 6px; border: 1px solid #ccc; vertical-align: top; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 11px; }
+        th { background: #f0f0f0; padding: 5px; border: 1px solid #ccc; text-align: left; font-size: 12px; color: #d32f2f; }
+        td { padding: 5px; border: 1px solid #ccc; vertical-align: top; }
         .label { font-weight: bold; width: 35%; background: #fafafa; }
         
-        .section-title { font-weight: bold; font-size: 13px; color: #d32f2f; margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+        .section-title { font-weight: bold; font-size: 12px; color: #d32f2f; margin-top: 10px; margin-bottom: 5px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+        .desc-box { padding: 8px; border: 1px dashed #ccc; font-size: 11px; min-height: 35px; margin-bottom: 10px; background: #fafafa; }
         
-        .desc-box { padding: 10px; border: 1px dashed #ccc; font-size: 11px; min-height: 60px; margin-bottom: 15px; background: #fafafa; }
-        
-        .signatures { display: flex; justify-content: space-between; margin-top: 30px; }
+        .code-box { border: 2px dashed #d32f2f; background-color: #fff5f5; padding: 10px; margin-bottom: 10px; text-align: center; border-radius: 6px; }
+        .code-title { font-size: 11px; color: #d32f2f; font-weight: bold; margin-bottom: 3px; text-transform: uppercase; }
+        .code-val { font-size: 20px; font-weight: 900; color: #000; letter-spacing: 4px; }
+        .code-sub { font-size: 9px; color: #555; margin-top: 3px; }
+
+        .signatures { display: flex; justify-content: space-between; margin-top: 15px; }
         .sign-box { width: 45%; font-size: 11px; }
-        .sign-title { font-weight: bold; text-align: center; margin-bottom: 10px; text-decoration: underline; }
-        .sign-details { line-height: 1.6; }
+        .sign-title { font-weight: bold; text-align: center; margin-bottom: 5px; text-decoration: underline; }
+        .sign-details { line-height: 1.5; }
+        .kase-img { max-height: 60px; margin-top: 5px; display: block; margin-left: auto; margin-right: auto; }
         
         /* Page 2 Styles */
-        .terms-list { font-size: 10px; line-height: 1.5; text-align: justify; }
-        .terms-group-title { font-weight: bold; font-size: 11px; margin-top: 10px; margin-bottom: 5px; text-decoration: underline; }
+        .terms-list { font-size: 10px; line-height: 1.4; text-align: justify; }
+        .terms-group-title { font-weight: bold; font-size: 11px; margin-top: 8px; margin-bottom: 3px; text-decoration: underline; }
       </style>
     </head>
     <body>
       <!-- 1. SAYFA -->
       <div class="page">
         <div class="header">
-          <div class="logo-text">SEMBOL NAKLİYAT</div>
+          <img src="https://www.sembolevdeneve.com/crm/uploads/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
           <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
           <div class="contact-info">
             Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
@@ -357,16 +364,17 @@ import React, { useState, useEffect } from 'react';
           <tr><td class="label">Dış Cephe Asansörü:</td><td>${isCepheAsansorTo}</td></tr>
         </table>
 
-        <div class="section-title">AÇIKLAMA / EKSTRA NOT</div>
+        ${job.contractDetails ? `
+        <div class="section-title">EKSTRA SÖZLEŞME DETAYI</div>
         <div class="desc-box">
-          ${job.contractDetails || 'Özel bir sözleşme detayı girilmemiştir.'}<br/>
-          ${job.notes ? '<b>Operasyon Notu:</b> ' + job.notes : ''}
+          ${job.contractDetails}
         </div>
+        ` : ''}
 
-        <div style="border: 2px dashed #d32f2f; background-color: #fff5f5; padding: 12px; margin-bottom: 15px; text-align: center; border-radius: 8px;">
-          <div style="font-size: 12px; color: #d32f2f; font-weight: bold; margin-bottom: 5px; text-transform: uppercase;">Güvenlik / Teslim Kodu</div>
-          <div style="font-size: 24px; font-weight: 900; color: #000; letter-spacing: 4px;">${job.deliveryCode || 'BULUNMUYOR'}</div>
-          <div style="font-size: 10px; color: #555; margin-top: 5px;">(Lütfen eşya teslimatında ekiplerimize bu kodu iletiniz.)</div>
+        <div class="code-box">
+          <div class="code-title">Güvenlik / Teslim Kodu</div>
+          <div class="code-val">${job.deliveryCode || 'BULUNMUYOR'}</div>
+          <div class="code-sub">(Lütfen eşya teslimatında ekiplerimize bu kodu iletiniz.)</div>
         </div>
 
         <table>
@@ -381,8 +389,8 @@ import React, { useState, useEffect } from 'react';
           <div class="sign-box">
             <div class="sign-title">HİZMET VEREN (KAŞE / İMZA)</div>
             <div class="sign-details text-center">
-              <b>Sembol Nakliyat Depoculuk Tic. Ltd. Şti.</b><br/><br/><br/><br/>
-              (Kaşe / İmza alanı)
+              <b>Sembol Nakliyat Depoculuk Tic. Ltd. Şti.</b>
+              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" class="kase-img" alt="Kaşe" />
             </div>
           </div>
           <div class="sign-box">
@@ -400,7 +408,7 @@ import React, { useState, useEffect } from 'react';
       <!-- 2. SAYFA -->
       <div class="page">
         <div class="header">
-          <div class="logo-text">SEMBOL NAKLİYAT</div>
+          <img src="https://www.sembolevdeneve.com/crm/uploads/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
           <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
           <div class="contact-info">
             Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
@@ -408,7 +416,7 @@ import React, { useState, useEffect } from 'react';
           </div>
         </div>
 
-        <div class="main-title">HİZMET KAPSAMI VE OPERASYONEL ŞARTLAR<br/><span style="font-size: 12px; color: #555;">SÖZLEŞME ŞARTLARI VE MADDELERİ</span></div>
+        <div class="main-title">HİZMET KAPSAMI VE OPERASYONEL ŞARTLAR<br/><span style="font-size: 11px; color: #555;">SÖZLEŞME ŞARTLARI VE MADDELERİ</span></div>
 
         <div class="terms-list">
           1. Taşıma işlemi kapalı kasa nakliye aracı ile gerçekleştirilecek olup, aksi belirtmedikçe tek araç icin geçerlidir.<br/>
@@ -457,8 +465,8 @@ import React, { useState, useEffect } from 'react';
           <div class="sign-box">
             <div class="sign-title">HİZMET VEREN (KAŞE / İMZA)</div>
             <div class="sign-details text-center">
-              <b>Sembol Nakliyat Depoculuk Tic. Ltd. Şti.</b><br/><br/><br/><br/>
-              (Kaşe / İmza alanı)
+              <b>Sembol Nakliyat Depoculuk Tic. Ltd. Şti.</b>
+              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" class="kase-img" alt="Kaşe" />
             </div>
           </div>
           <div class="sign-box">
