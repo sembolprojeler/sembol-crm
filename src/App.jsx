@@ -8427,12 +8427,15 @@ import React, { useState, useEffect } from 'react';
     };
 
     const handleLogin = async (email, password, rememberMe) => {
-      const loginInput = (email || '').trim().toLocaleLowerCase('tr-TR');
+      const normalizeStr = (str) => (str || '').toString().trim().toLocaleLowerCase('tr-TR');
+      const loginInput = normalizeStr(email);
+      
       const user = personnelList.find(p => {
-        const pEmail = (p.email || '').trim().toLocaleLowerCase('tr-TR');
-        const pName = (p.fullName || '').trim().toLocaleLowerCase('tr-TR');
-        return (pEmail === loginInput || pName === loginInput) && p.password === password;
+        const pEmail = normalizeStr(p.email);
+        const pName = normalizeStr(p.fullName);
+        return (pEmail === loginInput || pName === loginInput) && String(p.password) === String(password);
       });
+
       if (user) {
         setCurrentUser(user); setIsAuthenticated(true); setLoginError('');
         if (rememberMe) try { localStorage.setItem('sembol_crm_user', JSON.stringify({ email, password })); } catch (e) { }
@@ -8516,6 +8519,8 @@ import React, { useState, useEffect } from 'react';
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
     const myTasksForBadge = tasks.filter(t => t.assignee === currentUser?.fullName || t.assignee === 'Tüm Personeller');
     const unreadTasksCount = myTasksForBadge.filter(t => t.status === 'todo').length;
+
+    const unreadJobCount = jobs.filter(j => (j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id) && (j.status === 'pending' || j.status === 'in-progress')).length;
 
     const visibleJobs = hasJobAccess ? jobs : jobs.filter(j => {
       const isMyJob = j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id;
