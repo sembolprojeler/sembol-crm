@@ -284,13 +284,13 @@ import React, { useState, useEffect } from 'react';
       <style>
         @page { size: A4; margin: 0; }
         * { box-sizing: border-box; }
-        body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background: #525659; display: flex; flex-direction: column; align-items: center; font-size: 11px; }
+        body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background: #525659; display: flex; flex-direction: column; align-items: center; font-size: 10px; }
         
         .page { 
           width: 210mm; 
           height: 297mm;
           background: white;
-          padding: 12mm 15mm;
+          padding: 8mm 12mm;
           margin: 10mm auto;
           box-shadow: 0 0 10px rgba(0,0,0,0.5);
           position: relative;
@@ -298,43 +298,116 @@ import React, { useState, useEffect } from 'react';
           overflow: hidden;
         }
         @media print {
-          body { background: white; }
-          .page { margin: 0; padding: 12mm 15mm; box-shadow: none; border: none; height: 297mm; }
+          @page { margin: 0 !important; }
+          body { background: white; margin: 0; -webkit-print-color-adjust: exact; }
+          .page { margin: 0; padding: 8mm 12mm; box-shadow: none; border: none; height: 297mm; page-break-after: always; }
           .page:last-child { page-break-after: auto; }
         }
-        .header { text-align: center; border-bottom: 2px solid #d32f2f; padding-bottom: 10px; margin-bottom: 12px; display: flex; flex-direction: column; align-items: center; }
-        .logo-img { height: 45px; margin-bottom: 5px; object-fit: contain; }
-        .subtitle { font-size: 12px; color: #333; font-weight: bold; margin-bottom: 4px; letter-spacing: 1px; }
-        .contact-info { font-size: 10px; color: #555; line-height: 1.3; }
+        .header { text-align: center; border-bottom: 2px solid #d32f2f; padding-bottom: 6px; margin-bottom: 8px; display: flex; flex-direction: column; align-items: center; }
+        .logo-img { height: 40px; margin-bottom: 4px; object-fit: contain; }
+        .subtitle { font-size: 11px; color: #333; font-weight: bold; margin-bottom: 3px; letter-spacing: 1px; }
+        .contact-info { font-size: 9px; color: #555; line-height: 1.2; }
         
-        .main-title { font-size: 15px; font-weight: bold; text-align: center; margin: 10px 0; padding: 6px; background: #f0f0f0; border: 1px solid #ccc; text-transform: uppercase;}
+        .main-title { font-size: 13px; font-weight: bold; text-align: center; margin: 8px 0; padding: 5px; background: #f0f0f0; border: 1px solid #ccc; text-transform: uppercase;}
         
-        table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 11px; }
-        th { background: #f0f0f0; padding: 5px; border: 1px solid #ccc; text-align: left; font-size: 12px; color: #d32f2f; }
-        td { padding: 5px; border: 1px solid #ccc; vertical-align: top; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10px; }
+        th { background: #f0f0f0; padding: 4px; border: 1px solid #ccc; text-align: left; font-size: 11px; color: #d32f2f; }
+        td { padding: 4px; border: 1px solid #ccc; vertical-align: top; }
         .label { font-weight: bold; width: 35%; background: #fafafa; }
         
-        .section-title { font-weight: bold; font-size: 12px; color: #d32f2f; margin-top: 10px; margin-bottom: 5px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
-        .desc-box { padding: 8px; border: 1px dashed #ccc; font-size: 11px; min-height: 35px; margin-bottom: 10px; background: #fafafa; }
+        .section-title { font-weight: bold; font-size: 11px; color: #d32f2f; margin-top: 8px; margin-bottom: 4px; border-bottom: 1px solid #ccc; padding-bottom: 2px; }
+        .desc-box { padding: 6px; border: 1px dashed #ccc; font-size: 10px; min-height: 25px; margin-bottom: 8px; background: #fafafa; }
         
-        .code-box { border: 2px dashed #d32f2f; background-color: #fff5f5; padding: 10px; margin-bottom: 10px; text-align: center; border-radius: 6px; }
-        .code-title { font-size: 11px; color: #d32f2f; font-weight: bold; margin-bottom: 3px; text-transform: uppercase; }
-        .code-val { font-size: 20px; font-weight: 900; color: #000; letter-spacing: 4px; }
-        .code-sub { font-size: 9px; color: #555; margin-top: 3px; }
+        .code-box { border: 2px dashed #d32f2f; background-color: #fff5f5; padding: 6px; margin-bottom: 8px; text-align: center; border-radius: 6px; }
+        .code-title { font-size: 10px; color: #d32f2f; font-weight: bold; margin-bottom: 2px; text-transform: uppercase; }
+        .code-val { font-size: 18px; font-weight: 900; color: #000; letter-spacing: 4px; }
+        .code-sub { font-size: 8px; color: #555; margin-top: 2px; }
 
-        .signatures { display: flex; justify-content: space-between; margin-top: 15px; }
-        .sign-box { width: 45%; font-size: 11px; }
-        .sign-title { font-weight: bold; text-align: center; margin-bottom: 5px; text-decoration: underline; }
-        .sign-details { line-height: 1.5; }
-        .kase-img { max-height: 60px; margin-top: 5px; display: block; margin-left: auto; margin-right: auto; }
+        .signatures { display: flex; justify-content: space-between; margin-top: 10px; }
+        .sign-box { width: 45%; font-size: 10px; }
+        .sign-title { font-weight: bold; text-align: center; margin-bottom: 4px; text-decoration: underline; }
+        .sign-details { line-height: 1.4; }
+        .kase-img { max-height: 50px; margin-top: 4px; display: block; margin-left: auto; margin-right: auto; }
         
         /* Page 2 Styles */
-        .terms-list { font-size: 10px; line-height: 1.4; text-align: justify; }
-        .terms-group-title { font-weight: bold; font-size: 11px; margin-top: 8px; margin-bottom: 3px; text-decoration: underline; }
+        .terms-list { font-size: 9px; line-height: 1.35; text-align: justify; }
+        .terms-group-title { font-weight: bold; font-size: 10px; margin-top: 6px; margin-bottom: 2px; text-decoration: underline; }
       </style>
     </head>
     <body>
-      <!-- 1. SAYFA -->
+      
+      <div class="page">
+        <div class="header">
+          <img src="https://www.sembolevdeneve.com/crm/uploads/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
+          <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
+          <div class="contact-info">
+            Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
+            Vergi No: 7600944287 | www.sembolnakliyat.com
+          </div>
+        </div>
+        
+        <div class="main-title">EVDEN EVE TAŞIMACILIK VE NAKLİYE SÖZLEŞMESİ</div>
+        
+        <table>
+          <tr><th colspan="2">YÜKLEME ADRESİ (NEREDEN)</th></tr>
+          <tr><td class="label">Adres:</td><td>${job.fromProvince || ''}/${job.fromDistrict || ''} - ${job.fromAddress || ''}</td></tr>
+          <tr><td class="label">Kat:</td><td>${job.fromFloor || ''}</td></tr>
+          <tr><td class="label">Oda Sayısı:</td><td>${job.fromRoomCount || ''}</td></tr>
+          <tr><td class="label">Bina Asansörü:</td><td>${isBinaAsansorFrom}</td></tr>
+          <tr><td class="label">Dış Cephe Asansörü:</td><td>${isCepheAsansorFrom}</td></tr>
+          <tr><td class="label">Toplama Hizmeti:</td><td>${isToplamaFrom}</td></tr>
+        </table>
+
+        <table>
+          <tr><th colspan="2">BOŞALTMA ADRESİ (NEREYE)</th></tr>
+          <tr><td class="label">Adres:</td><td>${job.toProvince ? job.toProvince + '/' + job.toDistrict + ' - ' + job.toAddress : 'Belirtilmedi'}</td></tr>
+          <tr><td class="label">Kat:</td><td>${job.toFloor || ''}</td></tr>
+          <tr><td class="label">Oda Sayısı:</td><td>${job.toRoomCount || ''}</td></tr>
+          <tr><td class="label">Bina Asansörü:</td><td>${isBinaAsansorTo}</td></tr>
+          <tr><td class="label">Dış Cephe Asansörü:</td><td>${isCepheAsansorTo}</td></tr>
+        </table>
+
+        ${job.contractDetails && job.contractDetails.trim() !== '' ? `
+        <div class="section-title">EKSTRA SÖZLEŞME DETAYI</div>
+        <div class="desc-box">
+          ${job.contractDetails}
+        </div>
+        ` : ''}
+
+        <div class="code-box">
+          <div class="code-title">Güvenlik / Teslim Kodu</div>
+          <div class="code-val">${job.deliveryCode || 'BULUNMUYOR'}</div>
+          <div class="code-sub">(Lütfen eşya teslimatında ekiplerimize bu kodu iletiniz.)</div>
+        </div>
+
+        <table>
+          <tr><th colspan="2">ANLAŞMA ÖDEME DETAYLARI</th></tr>
+          <tr><td class="label">Taşıma Tarihi / Saati:</td><td>${job.date || ''} - ${job.time || ''}</td></tr>
+          <tr><td class="label">Anlaşma Bedeli (TL):</td><td>${fiyat} TL</td></tr>
+          <tr><td class="label">Alınan Peşinat:</td><td>${kapora} TL</td></tr>
+          <tr><td class="label">Kalan Bakiye (TL):</td><td><b>${bakiye} TL</b></td></tr>
+        </table>
+
+        <div class="signatures">
+          <div class="sign-box">
+            <div class="sign-title">HİZMET VEREN (KAŞE / İMZA)</div>
+            <div class="sign-details text-center">
+              <b>Sembol Nakliyat Depoculuk Tic. Ltd. Şti.</b>
+              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" class="kase-img" alt="Kaşe" />
+            </div>
+          </div>
+          <div class="sign-box">
+            <div class="sign-title">HİZMET ALAN (MÜŞTERİ)</div>
+            <div class="sign-details">
+              <b>TC Kimlik No:</b> ${job.tcNo || '....................................'}<br/>
+              <b>İletişim No:</b> ${job.customerPhone || '....................................'}<br/>
+              <b>Adı Soyadı:</b> ${job.customerName || '....................................'}<br/><br/>
+              <b>İmza:</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="page">
         <div class="header">
           <img src="https://www.sembolevdeneve.com/crm/uploads/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
