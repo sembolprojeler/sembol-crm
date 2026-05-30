@@ -15,7 +15,7 @@ import React, { useState, useEffect } from 'react';
   import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
   import { 
     getFirestore, collection, addDoc, onSnapshot, 
-    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc
+    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where
   } from "firebase/firestore";
 
   // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
@@ -528,9 +528,9 @@ import React, { useState, useEffect } from 'react';
       const postRef = collection(db, 'artifacts', appId, 'public', 'data', 'posts');
       const bestRef = collection(db, 'artifacts', appId, 'public', 'data', 'bestEmployees');
 
-      const qAnn = query(annRef, orderBy('timestamp', 'desc'));
-      const qPost = query(postRef, orderBy('timestamp', 'desc'));
-      const qBest = query(bestRef, orderBy('timestamp', 'desc'));
+      const qAnn = query(annRef, orderBy('timestamp', 'desc'), limit(5));
+      const qPost = query(postRef, orderBy('timestamp', 'desc'), limit(5));
+      const qBest = query(bestRef, orderBy('timestamp', 'desc'), limit(5));
 
       const unsubs = [];
       unsubs.push(onSnapshot(qAnn, snap => {
@@ -7976,22 +7976,46 @@ import React, { useState, useEffect } from 'react';
       const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
       const unsubs = [];
 
-      unsubs.push(onSnapshot(getCol('jobs'), snap => { setJobs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('transactions'), snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('tasks'), snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('notifications'), snap => { setNotifications(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('messages'), snap => { setMessages(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, msg: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('systemLogs'), snap => { setSystemLogs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
+      // KOTA AŞIMINI ENGELLEMEK İÇİN SORGULARI LİMİTLİYORUZ
+      // İşleri sadece son 2 aya göre sınırla
+      const twoMonthsAgo = new Date();
+      twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
+      const dateLimitStr = twoMonthsAgo.toISOString().split('T')[0];
+
+      const jobsQuery = query(getCol('jobs'), where('date', '>=', dateLimitStr));
+      unsubs.push(onSnapshot(jobsQuery, snap => { setJobs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
+      
+      const transQuery = query(getCol('transactions'), limit(150));
+      unsubs.push(onSnapshot(transQuery, snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
+      
+      const tasksQuery = query(getCol('tasks'), limit(100));
+      unsubs.push(onSnapshot(tasksQuery, snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
+      
+      const notifQuery = query(getCol('notifications'), limit(100));
+      unsubs.push(onSnapshot(notifQuery, snap => { setNotifications(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
+      
+      const msgQuery = query(getCol('messages'), limit(50));
+      unsubs.push(onSnapshot(msgQuery, snap => { setMessages(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, msg: true})); }, console.error));
+      
+      const logsQuery = query(getCol('systemLogs'), limit(50));
+      unsubs.push(onSnapshot(logsQuery, snap => { setSystemLogs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
+      
       unsubs.push(onSnapshot(getCol('vehicles'), snap => { setVehicles(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, veh: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('materials'), snap => { setMaterials(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, mat: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('complaints'), snap => { setComplaints(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
+      
+      const complaintsQuery = query(getCol('complaints'), limit(50));
+      unsubs.push(onSnapshot(complaintsQuery, snap => { setComplaints(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
+      
       unsubs.push(onSnapshot(getCol('companyContacts'), snap => { 
         let contacts = snap.docs.map(d => ({...d.data(), id: d.id}));
         contacts.sort((a, b) => (a.order || 0) - (b.order || 0));
         setCompanyContacts(contacts); 
         setDataLoadStatus(p => ({...p, contacts: true})); 
       }, console.error));
-      unsubs.push(onSnapshot(getCol('todos'), snap => { setTodos(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, todos: true})); }, console.error));
+      
+      const todosQuery = query(getCol('todos'), limit(100));
+      unsubs.push(onSnapshot(todosQuery, snap => { setTodos(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, todos: true})); }, console.error));
+      
       unsubs.push(onSnapshot(getCol('companyPasswords'), snap => { setCompanyPasswords(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
 
       unsubs.push(onSnapshot(getCol('personnelList'), async snap => {
