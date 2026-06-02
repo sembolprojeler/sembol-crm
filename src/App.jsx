@@ -15,7 +15,7 @@ import React, { useState, useEffect } from 'react';
   import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
   import { 
     getFirestore, collection, addDoc, onSnapshot, 
-    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where
+    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc
   } from "firebase/firestore";
 
   // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
@@ -408,7 +408,80 @@ import React, { useState, useEffect } from 'react';
         </div>
       </div>
 
-<div class="page">
+      <div class="page">
+        <div class="header">
+          <img src="https://www.sembolevdeneve.com/crm/uploads/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
+          <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
+          <div class="contact-info">
+            Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
+            Vergi No: 7600944287 | www.sembolnakliyat.com
+          </div>
+        </div>
+        
+        <div class="main-title">EVDEN EVE TAŞIMACILIK VE NAKLİYE SÖZLEŞMESİ</div>
+        
+        <table>
+          <tr><th colspan="2">YÜKLEME ADRESİ (NEREDEN)</th></tr>
+          <tr><td class="label">Adres:</td><td>${job.fromProvince || ''}/${job.fromDistrict || ''} - ${job.fromAddress || ''}</td></tr>
+          <tr><td class="label">Kat:</td><td>${job.fromFloor || ''}</td></tr>
+          <tr><td class="label">Oda Sayısı:</td><td>${job.fromRoomCount || ''}</td></tr>
+          <tr><td class="label">Bina Asansörü:</td><td>${isBinaAsansorFrom}</td></tr>
+          <tr><td class="label">Dış Cephe Asansörü:</td><td>${isCepheAsansorFrom}</td></tr>
+          <tr><td class="label">Toplama Hizmeti:</td><td>${isToplamaFrom}</td></tr>
+        </table>
+
+        <table>
+          <tr><th colspan="2">BOŞALTMA ADRESİ (NEREYE)</th></tr>
+          <tr><td class="label">Adres:</td><td>${job.toProvince ? job.toProvince + '/' + job.toDistrict + ' - ' + job.toAddress : 'Belirtilmedi'}</td></tr>
+          <tr><td class="label">Kat:</td><td>${job.toFloor || ''}</td></tr>
+          <tr><td class="label">Oda Sayısı:</td><td>${job.toRoomCount || ''}</td></tr>
+          <tr><td class="label">Bina Asansörü:</td><td>${isBinaAsansorTo}</td></tr>
+          <tr><td class="label">Dış Cephe Asansörü:</td><td>${isCepheAsansorTo}</td></tr>
+        </table>
+
+        ${job.contractDetails ? `
+        <div class="section-title">EKSTRA SÖZLEŞME DETAYI</div>
+        <div class="desc-box">
+          ${job.contractDetails}
+        </div>
+        ` : ''}
+
+        <div class="code-box">
+          <div class="code-title">Güvenlik / Teslim Kodu</div>
+          <div class="code-val">${job.deliveryCode || 'BULUNMUYOR'}</div>
+          <div class="code-sub">(Lütfen eşya teslimatında ekiplerimize bu kodu iletiniz.)</div>
+        </div>
+
+        <table>
+          <tr><th colspan="2">ANLAŞMA ÖDEME DETAYLARI</th></tr>
+          <tr><td class="label">Taşıma Tarihi / Saati:</td><td>${job.date || ''} - ${job.time || ''}</td></tr>
+          <tr><td class="label">Anlaşma Bedeli (TL):</td><td>${fiyat} TL</td></tr>
+          <tr><td class="label">Alınan Peşinat:</td><td>${kapora} TL</td></tr>
+          <tr><td class="label">Kalan Bakiye (TL):</td><td><b>${bakiye} TL</b></td></tr>
+        </table>
+
+        <div class="signatures">
+          <div class="sign-box">
+            <div class="sign-title">HİZMET VEREN (KAŞE / İMZA)</div>
+            <div class="sign-details text-center">
+              <b>Sembol Nakliyat Depoculuk Tic. Ltd. Şti.</b>
+              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" class="kase-img" alt="Kaşe" />
+            </div>
+          </div>
+          <div class="sign-box">
+            <div class="sign-title">HİZMET ALAN (MÜŞTERİ)</div>
+            <div class="sign-details">
+              <b>TC Kimlik No:</b> ${job.tcNo || '....................................'}<br/>
+              <b>İletişim No:</b> ${job.customerPhone || '....................................'}<br/>
+              <b>Adı Soyadı:</b> ${job.customerName || '....................................'}<br/><br/>
+              <b>İmza:</b>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. SAYFA -->
+      <div class="page">
         <div class="header">
           <img src="https://www.sembolevdeneve.com/crm/uploads/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
           <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
@@ -528,9 +601,9 @@ import React, { useState, useEffect } from 'react';
       const postRef = collection(db, 'artifacts', appId, 'public', 'data', 'posts');
       const bestRef = collection(db, 'artifacts', appId, 'public', 'data', 'bestEmployees');
 
-      const qAnn = query(annRef, orderBy('timestamp', 'desc'), limit(5));
-      const qPost = query(postRef, orderBy('timestamp', 'desc'), limit(5));
-      const qBest = query(bestRef, orderBy('timestamp', 'desc'), limit(5));
+      const qAnn = query(annRef, orderBy('timestamp', 'desc'));
+      const qPost = query(postRef, orderBy('timestamp', 'desc'));
+      const qBest = query(bestRef, orderBy('timestamp', 'desc'));
 
       const unsubs = [];
       unsubs.push(onSnapshot(qAnn, snap => {
@@ -3063,7 +3136,7 @@ import React, { useState, useEffect } from 'react';
                             const kapora = parseInt(job.price || 0) * 0.10;
                             const kaporaText = kapora > 0 ? kapora.toLocaleString('tr-TR') : '...';
 
-                            const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %10'u olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Kuveyt Türk\nAlıcı: Mustafa Beşinci\nIBAN: TR22 0020 5000 0950 1990 8000 09\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
+                            const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %10'u olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Denizbank\nAlıcı: Şenol Beşinci\nIBAN: TR 94 0013 4000 0262 6671 7000 01\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
                             window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
                           }} 
                           className="px-3 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[10px] font-bold rounded-lg transition flex items-center gap-1 shadow-sm"
@@ -6335,7 +6408,7 @@ import React, { useState, useEffect } from 'react';
   };
 
   // --- PUANTAJ VIEW (Aylık Tablo) ---
-  const PuantajView = ({ personnelList, db, appId, addSystemLog }) => {
+  const PuantajView = ({ collarType, personnelList, db, appId, addSystemLog }) => {
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth() + 1);
     const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -6349,6 +6422,8 @@ import React, { useState, useEffect } from 'react';
     const [showMonthCloseModal, setShowMonthCloseModal] = useState(false);
     const [monthCloseModalData, setMonthCloseModalData] = useState(null);
 
+    const docPrefix = collarType === 'Mavi Yaka' ? '' : 'beyaz_';
+
     const months = [
       { val: 1, label: 'Ocak' }, { val: 2, label: 'Şubat' }, { val: 3, label: 'Mart' },
       { val: 4, label: 'Nisan' }, { val: 5, label: 'Mayıs' }, { val: 6, label: 'Haziran' },
@@ -6357,7 +6432,11 @@ import React, { useState, useEffect } from 'react';
     ];
     const years = Array.from({ length: 10 }, (_, i) => 2024 + i);
 
-    const maviYakaList = personnelList.filter(p => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
+    const targetPersonnelList = personnelList.filter(p => 
+      collarType === 'Mavi Yaka' 
+        ? (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
+        : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
+    );
 
     const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
@@ -6368,13 +6447,13 @@ import React, { useState, useEffect } from 'react';
           currentDayRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
         }, 300);
       }
-    }, [currentMonth, currentYear, maviYakaList.length]);
+    }, [currentMonth, currentYear, targetPersonnelList.length]);
 
     useEffect(() => {
       const fetchPuantaj = async () => {
         setIsDataLoaded(false);
         try {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${currentYear}_${currentMonth}`);
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${docPrefix}${currentYear}_${currentMonth}`);
           const snap = await getDoc(docRef);
           if (snap.exists()) {
             setPuantajData(snap.data().records || {});
@@ -6393,14 +6472,14 @@ import React, { useState, useEffect } from 'react';
         }
       };
       fetchPuantaj();
-    }, [currentMonth, currentYear, db, appId]);
+    }, [currentMonth, currentYear, db, appId, docPrefix]);
 
     useEffect(() => {
       if (!isDataLoaded) return;
       const timeoutId = setTimeout(async () => {
         setIsSaving(true);
         try {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${currentYear}_${currentMonth}`);
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${docPrefix}${currentYear}_${currentMonth}`);
           await setDoc(docRef, { records: puantajData, updatedAt: new Date().toISOString() }, { merge: true });
         } catch (e) {
           console.error("Otomatik kaydetme hatası:", e);
@@ -6423,7 +6502,7 @@ import React, { useState, useEffect } from 'react';
     const handleDownloadPDF = () => {
       const printWindow = window.open('', '_blank');
       
-      let tableRows = maviYakaList.map(person => {
+      let tableRows = targetPersonnelList.map(person => {
         const rawTotal = getPersonTotal(person.id);
         const bonusTotal = puantajMeta.bonusRecords[person.id] || 0;
         const netTotal = rawTotal + bonusTotal;
@@ -6453,13 +6532,13 @@ import React, { useState, useEffect } from 'react';
         return `<td style="border: 1px solid #000; text-align: center; padding: 2px; background-color: #22c55e; color: white; font-weight: bold;">${val}</td>`;
       }).join('');
 
-      let daysHeaderHtml = days.map(d => `<th style="border: 1px solid #000; padding: 2px; min-width: 20px; background-color: #8bb4e7; font-size: 9px;">${String(d).padStart(2, '0')}.${String(currentMonth).padStart(2, '0')}<br/>${currentYear}</th>`).join('');
+        let daysHeaderHtml = days.map(d => `<th style="border: 1px solid #000; padding: 2px; min-width: 20px; background-color: #8bb4e7; font-size: 9px;">${String(d).padStart(2, '0')}.${String(currentMonth).padStart(2, '0')}<br/>${currentYear}</th>`).join('');
 
       const html = `
       <!DOCTYPE html>
       <html>
       <head>
-        <title>Puantaj_${months.find(m => m.val === currentMonth)?.label}_${currentYear}</title>
+        <title>${collarType.replace(' ', '_')}_Puantaj_${months.find(m => m.val === currentMonth)?.label}_${currentYear}</title>
         <style>
           @page { size: landscape; margin: 10mm; }
           body { font-family: Arial, sans-serif; font-size: 10px; margin: 0; padding: 0; }
@@ -6475,10 +6554,10 @@ import React, { useState, useEffect } from 'react';
         <table>
           <thead>
             <tr>
-              <th colspan="${daysInMonth + 4}" class="header-title">${months.find(m => m.val === currentMonth)?.label.toUpperCase()} ${currentYear} PUANTAJ LİSTESİ</th>
+              <th colspan="${daysInMonth + 4}" class="header-title">${months.find(m => m.val === currentMonth)?.label.toUpperCase()} ${currentYear} ${collarType.toUpperCase()} PUANTAJ LİSTESİ</th>
             </tr>
             <tr>
-              <th colspan="4" class="bg-yellow" style="text-align: center; font-size: 12px; padding: 4px;">GENEL NET TOPLAM : ${maviYakaList.reduce((acc, p) => acc + getPersonTotal(p.id) + (puantajMeta.bonusRecords[p.id] || 0), 0) > 0 ? maviYakaList.reduce((acc, p) => acc + getPersonTotal(p.id) + (puantajMeta.bonusRecords[p.id] || 0), 0).toString().replace('.', ',') : ''}</th>
+              <th colspan="4" class="bg-yellow" style="text-align: center; font-size: 12px; padding: 4px;">GENEL NET TOPLAM : ${targetPersonnelList.reduce((acc, p) => acc + getPersonTotal(p.id) + (puantajMeta.bonusRecords[p.id] || 0), 0) > 0 ? targetPersonnelList.reduce((acc, p) => acc + getPersonTotal(p.id) + (puantajMeta.bonusRecords[p.id] || 0), 0).toString().replace('.', ',') : ''}</th>
               <th colspan="${daysInMonth}" class="bg-black" style="text-align: center; letter-spacing: 2px; padding: 4px;">GÜN BİLGİSİ</th>
             </tr>
             <tr>
@@ -6516,7 +6595,7 @@ import React, { useState, useEffect } from 'react';
     };
 
     const handleCloseMonth = () => {
-      const rawTotals = maviYakaList.map(p => ({
+      const rawTotals = targetPersonnelList.map(p => ({
           id: p.id,
           name: p.fullName,
           rawScore: getPersonTotal(p.id)
@@ -6577,7 +6656,7 @@ import React, { useState, useEffect } from 'react';
 
     const confirmCloseMonth = async () => {
        try {
-           const puantajRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${currentYear}_${currentMonth}`);
+           const puantajRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${docPrefix}${currentYear}_${currentMonth}`);
            await setDoc(puantajRef, {
                bonusRecords: monthCloseModalData.newBonusRecords,
                isClosed: true
@@ -6589,7 +6668,8 @@ import React, { useState, useEffect } from 'react';
                nextMonth = 1;
                nextYear++;
            }
-           const nextMaasRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${nextYear}_${nextMonth}`);
+           const nextDocId = `${docPrefix}${nextYear}_${nextMonth}`;
+           const nextMaasRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', nextDocId);
            const nextMaasSnap = await getDoc(nextMaasRef);
            let nextMaasRecords = nextMaasSnap.exists() ? nextMaasSnap.data().records : {};
 
@@ -6603,7 +6683,7 @@ import React, { useState, useEffect } from 'react';
 
            setPuantajMeta(prev => ({...prev, bonusRecords: monthCloseModalData.newBonusRecords, isClosed: true}));
            setShowMonthCloseModal(false);
-           addSystemLog('Ay Sonu Kapanışı', `${currentMonth}/${currentYear} dönemi puantajı kapatıldı, primler hesaplanıp ${nextMonth}/${nextYear} maaşlarına eklendi.`);
+           addSystemLog('Ay Sonu Kapanışı', `${currentMonth}/${currentYear} dönemi ${collarType} puantajı kapatıldı, primler hesaplanıp ${nextMonth}/${nextYear} maaşlarına eklendi.`);
            
        } catch (e) {
            console.error(e);
@@ -6615,7 +6695,7 @@ import React, { useState, useEffect } from 'react';
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 md:p-6 animate-in fade-in flex flex-col h-[calc(100vh-190px)] relative w-full overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 shrink-0 gap-4 w-full">
           <h2 className="text-lg md:text-xl font-bold text-black flex items-center gap-2">
-            <CalendarDays className="w-5 h-5 md:w-6 md:h-6 text-red-600" /> Mavi Yaka Puantaj Tablosu
+            <CalendarDays className="w-5 h-5 md:w-6 md:h-6 text-red-600" /> {collarType} Puantaj Tablosu
           </h2>
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
             <select value={currentMonth} onChange={e => setCurrentMonth(parseInt(e.target.value))} className="p-2 border border-neutral-300 rounded-lg outline-none font-bold bg-neutral-50 focus:ring-2 focus:ring-red-600 cursor-pointer flex-1 md:flex-none text-sm">
@@ -6652,14 +6732,14 @@ import React, { useState, useEffect } from 'react';
             <thead className="sticky top-0 z-30 shadow-md">
               <tr>
                 <th colSpan={daysInMonth + 4} className="bg-orange-500 text-black font-black py-2 border-b-2 border-neutral-400 text-sm md:text-lg tracking-wider">
-                  {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} PUANTAJ LİSTESİ
+                  {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} {collarType.toUpperCase()} PUANTAJ LİSTESİ
                 </th>
               </tr>
               <tr>
                 <th colSpan="4" className="bg-yellow-400 border-b border-r border-neutral-400 text-center text-xs md:text-xl font-black text-black p-1 md:p-2">
                   <div className="flex items-center justify-center gap-1 md:gap-2 flex-wrap">
                     <span className="text-[9px] md:text-sm font-bold text-black/70 uppercase tracking-tight">GENEL NET TOPLAM :</span>
-                    <span>{maviYakaList.reduce((acc, p) => acc + getPersonTotal(p.id) + (puantajMeta.bonusRecords[p.id] || 0), 0) > 0 ? maviYakaList.reduce((acc, p) => acc + getPersonTotal(p.id) + (puantajMeta.bonusRecords[p.id] || 0), 0).toString().replace('.', ',') : ''}</span>
+                    <span>{targetPersonnelList.reduce((acc, p) => acc + getPersonTotal(p.id) + (puantajMeta.bonusRecords[p.id] || 0), 0) > 0 ? targetPersonnelList.reduce((acc, p) => acc + getPersonTotal(p.id) + (puantajMeta.bonusRecords[p.id] || 0), 0).toString().replace('.', ',') : ''}</span>
                   </div>
                 </th>
                 <th colSpan={daysInMonth} className="bg-black text-white font-bold p-1 border-b border-neutral-400 text-[9px] md:text-xs tracking-widest">
@@ -6708,7 +6788,7 @@ import React, { useState, useEffect } from 'react';
               </tr>
             </thead>
             <tbody>
-              {maviYakaList.map((person, index) => {
+              {targetPersonnelList.map((person, index) => {
                 const rawTotal = getPersonTotal(person.id);
                 const bonusTotal = puantajMeta.bonusRecords[person.id] || 0;
                 const netTotal = rawTotal + bonusTotal;
@@ -6756,10 +6836,10 @@ import React, { useState, useEffect } from 'react';
                 </tr>
                 );
               })}
-              {maviYakaList.length === 0 && (
+              {targetPersonnelList.length === 0 && (
                 <tr>
                   <td colSpan={daysInMonth + 4} className="p-4 md:p-8 text-center text-neutral-500 font-medium text-xs md:text-sm">
-                    Sistemde mavi yaka personel kaydı bulunamadı.
+                    Sistemde {collarType.toLowerCase()} personel kaydı bulunamadı.
                   </td>
                 </tr>
               )}
@@ -6851,7 +6931,7 @@ import React, { useState, useEffect } from 'react';
 
                 <div className="bg-red-50 p-3 rounded-xl border border-red-200 text-xs font-medium text-red-800 flex gap-2">
                     <AlertTriangle className="w-5 h-5 shrink-0" />
-                    <p>Onayladıktan sonra bu ayın puanları kapatılacak ve listedeki prim tutarları gelecek ayın Mavi Maaş Tablosu'ndaki "PRİM" alanlarına otomatik olarak eklenecektir.</p>
+                    <p>Onayladıktan sonra bu ayın puanları kapatılacak ve listedeki prim tutarları gelecek ayın {collarType} Maaş Tablosu'ndaki "PRİM" alanlarına otomatik olarak eklenecektir.</p>
                 </div>
 
               </div>
@@ -6867,7 +6947,7 @@ import React, { useState, useEffect } from 'react';
     );
   };
 
-  const MaviMesaiView = ({ personnelList, db, appId, addSystemLog }) => {
+  const MesaiView = ({ collarType, personnelList, db, appId, addSystemLog }) => {
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth() + 1);
     const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -6875,6 +6955,8 @@ import React, { useState, useEffect } from 'react';
     const [isSaving, setIsSaving] = useState(false);
     const [isDataLoaded, setIsDataLoaded] = useState(false);
     const currentDayRef = React.useRef(null);
+
+    const docPrefix = collarType === 'Mavi Yaka' ? '' : 'beyaz_';
 
     const months = [
       { val: 1, label: 'Ocak' }, { val: 2, label: 'Şubat' }, { val: 3, label: 'Mart' },
@@ -6884,7 +6966,11 @@ import React, { useState, useEffect } from 'react';
     ];
     const years = Array.from({ length: 10 }, (_, i) => 2024 + i);
 
-    const maviYakaList = personnelList.filter(p => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
+    const targetPersonnelList = personnelList.filter(p => 
+      collarType === 'Mavi Yaka' 
+        ? (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
+        : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
+    );
 
     const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
@@ -6912,13 +6998,13 @@ import React, { useState, useEffect } from 'react';
           currentDayRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
         }, 300);
       }
-    }, [currentMonth, currentYear, maviYakaList.length]);
+    }, [currentMonth, currentYear, targetPersonnelList.length]);
 
     useEffect(() => {
       const fetchMesai = async () => {
         setIsDataLoaded(false);
         try {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${currentYear}_${currentMonth}`);
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${docPrefix}${currentYear}_${currentMonth}`);
           const snap = await getDoc(docRef);
           if (snap.exists()) {
             setMesaiData(snap.data().records || {});
@@ -6932,14 +7018,14 @@ import React, { useState, useEffect } from 'react';
         }
       };
       fetchMesai();
-    }, [currentMonth, currentYear, db, appId]);
+    }, [currentMonth, currentYear, db, appId, docPrefix]);
 
     useEffect(() => {
       if (!isDataLoaded) return;
       const timeoutId = setTimeout(async () => {
         setIsSaving(true);
         try {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${currentYear}_${currentMonth}`);
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${docPrefix}${currentYear}_${currentMonth}`);
           await setDoc(docRef, { records: mesaiData, updatedAt: new Date().toISOString() }, { merge: true });
         } catch (e) {
           console.error("Otomatik kaydetme hatası:", e);
@@ -6947,7 +7033,7 @@ import React, { useState, useEffect } from 'react';
         setTimeout(() => setIsSaving(false), 800);
       }, 1000);
       return () => clearTimeout(timeoutId);
-    }, [mesaiData]);
+    }, [mesaiData, docPrefix]);
 
     const handleCellChange = (personId, day, value) => {
       setMesaiData(prev => ({
@@ -7003,7 +7089,7 @@ import React, { useState, useEffect } from 'react';
     const handleDownloadPDF = () => {
         const printWindow = window.open('', '_blank');
         
-        let tableRows = maviYakaList.map(person => {
+        let tableRows = targetPersonnelList.map(person => {
           const counts = getStatusCounts(person.id);
           let daysHtml = days.map(d => {
             const valObj = mesaiData[person.id] && mesaiData[person.id][d];
@@ -7053,7 +7139,7 @@ import React, { useState, useEffect } from 'react';
         <!DOCTYPE html>
         <html>
         <head>
-          <title>Mesai_${months.find(m => m.val === currentMonth)?.label}_${currentYear}</title>
+          <title>${collarType.replace(' ', '_')}_Mesai_${months.find(m => m.val === currentMonth)?.label}_${currentYear}</title>
           <style>
             @page { size: landscape; margin: 10mm; }
             body { font-family: Arial, sans-serif; font-size: 10px; margin: 0; padding: 0; }
@@ -7083,7 +7169,7 @@ import React, { useState, useEffect } from 'react';
           <table>
             <thead>
               <tr>
-                <th colspan="${daysInMonth + 7}" class="header-title">${months.find(m => m.val === currentMonth)?.label.toUpperCase()} ${currentYear} MESAİ LİSTESİ</th>
+                <th colspan="${daysInMonth + 7}" class="header-title">${months.find(m => m.val === currentMonth)?.label.toUpperCase()} ${currentYear} ${collarType.toUpperCase()} MESAİ LİSTESİ</th>
               </tr>
               <tr>
                 <th rowspan="2" class="bg-gray" style="text-align: left; padding: 4px 8px; width: 150px; vertical-align: middle;">AD SOYAD</th>
@@ -7120,7 +7206,7 @@ import React, { useState, useEffect } from 'react';
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 md:p-6 animate-in fade-in flex flex-col h-[calc(100vh-190px)] relative w-full overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 shrink-0 gap-4 w-full">
           <h2 className="text-lg md:text-xl font-bold text-black flex items-center gap-2">
-            <CalendarDays className="w-5 h-5 md:w-6 md:h-6 text-blue-600" /> Mavi Yaka Mesai Takibi
+            <CalendarDays className="w-5 h-5 md:w-6 md:h-6 text-blue-600" /> {collarType} Mesai Takibi
           </h2>
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
             <select value={currentMonth} onChange={e => setCurrentMonth(parseInt(e.target.value))} className="p-2 border border-neutral-300 rounded-lg outline-none font-bold bg-neutral-50 focus:ring-2 focus:ring-blue-600 cursor-pointer flex-1 md:flex-none text-sm">
@@ -7157,7 +7243,7 @@ import React, { useState, useEffect } from 'react';
             <thead className="sticky top-0 z-30 shadow-md">
               <tr>
                 <th colSpan={daysInMonth + 7} className="bg-blue-600 text-white font-black py-2 border-b-2 border-neutral-400 text-sm md:text-lg tracking-wider">
-                  {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} MESAİ LİSTESİ
+                  {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} {collarType.toUpperCase()} MESAİ LİSTESİ
                 </th>
               </tr>
               <tr>
@@ -7194,7 +7280,7 @@ import React, { useState, useEffect } from 'react';
               </tr>
             </thead>
             <tbody>
-              {maviYakaList.map((person, index) => {
+              {targetPersonnelList.map((person, index) => {
                 const counts = getStatusCounts(person.id);
                 return (
                   <tr key={person.id} className="hover:bg-neutral-50 transition border-b border-neutral-300 group">
@@ -7256,10 +7342,10 @@ import React, { useState, useEffect } from 'react';
                   </tr>
                 );
               })}
-              {maviYakaList.length === 0 && (
+              {targetPersonnelList.length === 0 && (
                 <tr>
                   <td colSpan={daysInMonth + 7} className="p-4 md:p-8 text-center text-neutral-500 font-medium text-xs md:text-sm">
-                    Sistemde mavi yaka personel kaydı bulunamadı.
+                    Sistemde {collarType.toLowerCase()} personel kaydı bulunamadı.
                   </td>
                 </tr>
               )}
@@ -7270,14 +7356,17 @@ import React, { useState, useEffect } from 'react';
     );
   };
 
-  const MaviMaasView = ({ personnelList, db, appId, addSystemLog }) => {
+  const MaasView = ({ collarType, personnelList, db, appId, addSystemLog }) => {
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth() + 1);
     const [currentYear, setCurrentYear] = useState(today.getFullYear());
     const [maasData, setMaasData] = useState({});
     const [mesaiData, setMesaiData] = useState({});
+    const [yearlyData, setYearlyData] = useState({});
     const [isSaving, setIsSaving] = useState(false);
     const [isDataLoaded, setIsDataLoaded] = useState(false);
+
+    const docPrefix = collarType === 'Mavi Yaka' ? '' : 'beyaz_';
 
     const months = [
       { val: 1, label: 'Ocak' }, { val: 2, label: 'Şubat' }, { val: 3, label: 'Mart' },
@@ -7287,13 +7376,17 @@ import React, { useState, useEffect } from 'react';
     ];
     const years = Array.from({ length: 10 }, (_, i) => 2024 + i);
 
-    const maviYakaList = personnelList.filter(p => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
+    const targetPersonnelList = personnelList.filter(p => 
+      collarType === 'Mavi Yaka' 
+        ? (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
+        : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
+    );
 
     useEffect(() => {
       const fetchData = async () => {
         setIsDataLoaded(false);
         try {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${currentYear}_${currentMonth}`);
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${docPrefix}${currentYear}_${currentMonth}`);
           const snap = await getDoc(docRef);
           if (snap.exists()) {
             setMaasData(snap.data().records || {});
@@ -7301,12 +7394,20 @@ import React, { useState, useEffect } from 'react';
             setMaasData({});
           }
           
-          const mesaiRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${currentYear}_${currentMonth}`);
+          const mesaiRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${docPrefix}${currentYear}_${currentMonth}`);
           const mesaiSnap = await getDoc(mesaiRef);
           if (mesaiSnap.exists()) {
             setMesaiData(mesaiSnap.data().records || {});
           } else {
             setMesaiData({});
+          }
+
+          const yearlyRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas_yearly', currentYear.toString());
+          const yearlySnap = await getDoc(yearlyRef);
+          if (yearlySnap.exists()) {
+            setYearlyData(yearlySnap.data().records || {});
+          } else {
+            setYearlyData({});
           }
         } catch (e) {
           console.error("Veri yüklenirken hata:", e);
@@ -7315,22 +7416,25 @@ import React, { useState, useEffect } from 'react';
         }
       };
       fetchData();
-    }, [currentMonth, currentYear, db, appId]);
+    }, [currentMonth, currentYear, db, appId, docPrefix]);
 
     useEffect(() => {
       if (!isDataLoaded) return;
       const timeoutId = setTimeout(async () => {
         setIsSaving(true);
         try {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${currentYear}_${currentMonth}`);
+          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${docPrefix}${currentYear}_${currentMonth}`);
           await setDoc(docRef, { records: maasData, updatedAt: new Date().toISOString() }, { merge: true });
+
+          const yearlyRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas_yearly', currentYear.toString());
+          await setDoc(yearlyRef, { records: yearlyData, updatedAt: new Date().toISOString() }, { merge: true });
         } catch (e) {
           console.error("Otomatik kaydetme hatası:", e);
         }
         setTimeout(() => setIsSaving(false), 800);
       }, 1000);
       return () => clearTimeout(timeoutId);
-    }, [maasData]);
+    }, [maasData, yearlyData, docPrefix]);
 
     const handleCellChange = (personId, field, value) => {
       setMaasData(prev => ({
@@ -7342,8 +7446,18 @@ import React, { useState, useEffect } from 'react';
       }));
     };
 
+    const handleYearlyChange = (personId, field, value) => {
+      setYearlyData(prev => ({
+        ...prev,
+        [personId]: {
+          ...(prev[personId] || {}),
+          [field]: value
+        }
+      }));
+    };
+
     const calcRow = (personId) => {
-      const person = maviYakaList.find(p => p.id === personId) || {};
+      const person = targetPersonnelList.find(p => p.id === personId) || {};
       const row = maasData[personId] || {};
       
       const record = mesaiData[personId] || {};
@@ -7426,7 +7540,7 @@ import React, { useState, useEffect } from 'react';
     let totalYol = 0;
     let totalYemek = 0;
 
-    maviYakaList.forEach(person => {
+    targetPersonnelList.forEach(person => {
         const c = calcRow(person.id);
         totalKalanBanka += c.bankaKalan;
         totalKalanNakit += c.kalanNakit;
@@ -7436,31 +7550,34 @@ import React, { useState, useEffect } from 'react';
 
     const handleDownloadCSV = () => {
       const headers = [
-        "PERSONEL BİLGİSİ", "NAKİT AVANS", "RESMİ AVANS", "GÜNLÜK SAAT", "TOPLAM SAAT", 
-        "İŞE BAŞLANGIÇ TARİHİ", "MESAİ GÜN SAYISI", "MAAŞ", "FAZLA GÜN SAYISI", "DEVAMSIZLIK", "RAPOR", 
-        "PRİM", "MESAİ ÜCRETİ", "YOL PARASI", "YEMEK PARASI", "BANKA PARASI", "İCRA TUTARI", "KALAN BANKA", "KALAN NAKİT"
+        "PERSONEL BİLGİSİ", "İŞE BAŞLANGIÇ TARİHİ", "NAKİT AVANS", "RESMİ AVANS", "GÜNLÜK SAAT", "TOPLAM SAAT", 
+        "MESAİ GÜN SAYISI", "FAZLA GÜN SAYISI", "DEVAMSIZLIK", "RAPOR", "YILLIK İZİN", "BANKA PARASI", 
+        "PRİM", "MAAŞ", "MESAİ ÜCRETİ", "YEMEK PARASI", "YOL PARASI", "BORÇLANMA", "İCRA TUTARI", "KALAN BANKA", "KALAN NAKİT"
       ];
       let csvContent = "\uFEFF" + headers.join(";") + "\n";
       
-      maviYakaList.forEach(person => {
+      targetPersonnelList.forEach(person => {
           const c = calcRow(person.id);
+          const yRow = yearlyData[person.id] || {};
           const rowData = [
               `"${person.fullName.replace(/"/g, '""')}"`,
+              `"${person.startDate || '-'}"`,
               c.nakitAvans,
               c.resmiAvans,
               c.gunlukSaat,
               c.toplamSaat,
-              `"${person.startDate || '-'}"`,
               c.mesaiGunSayisi,
-              c.maas,
               c.fazlaGunSayisi,
               c.devamsizlikSayisi,
               c.rapor,
-              c.prim,
-              c.mesaiUcreti.toFixed(2),
-              c.yol,
-              c.yemek,
+              yRow.yillikIzin || 0,
               c.hesaplananBanka.toFixed(2),
+              c.prim,
+              c.maas,
+              c.mesaiUcreti.toFixed(2),
+              c.yemek,
+              c.yol,
+              yRow.borclanma || 0,
               c.icraKesintisi.toFixed(2),
               c.bankaKalan.toFixed(2),
               c.kalanNakit.toFixed(2)
@@ -7470,8 +7587,8 @@ import React, { useState, useEffect } from 'react';
 
       // CSV Dosyasına Genel Toplamların Eklenmesi
       const totalRow = [
-          `"GENEL TOPLAMLAR"`, "","","","","","","","","","","","", 
-          totalYol.toFixed(2), totalYemek.toFixed(2), "", "", 
+          `"GENEL TOPLAMLAR"`, "","","","","","","","","","", "","","", 
+          totalYemek.toFixed(2), totalYol.toFixed(2), "", "", 
           totalKalanBanka.toFixed(2), totalKalanNakit.toFixed(2)
       ];
       csvContent += totalRow.join(";") + "\n";
@@ -7480,7 +7597,7 @@ import React, { useState, useEffect } from 'react';
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
       link.setAttribute("href", url);
-      link.setAttribute("download", `Personel_Maas_Tablosu_${months.find(m => m.val === currentMonth)?.label}_${currentYear}.csv`);
+      link.setAttribute("download", `${collarType.replace(' ', '_')}_Maas_Tablosu_${months.find(m => m.val === currentMonth)?.label}_${currentYear}.csv`);
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -7490,7 +7607,7 @@ import React, { useState, useEffect } from 'react';
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 md:p-6 animate-in fade-in flex flex-col h-[calc(100vh-190px)] relative w-full overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 shrink-0 gap-4 w-full">
           <h2 className="text-lg md:text-xl font-bold text-black flex items-center gap-2">
-            <DollarSign className="w-5 h-5 md:w-6 md:h-6 text-green-600" /> Mavi Yaka Maaş Tablosu
+            <DollarSign className="w-5 h-5 md:w-6 md:h-6 text-green-600" /> {collarType} Maaş Tablosu
           </h2>
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
             <select value={currentMonth} onChange={e => setCurrentMonth(parseInt(e.target.value))} className="p-2 border border-neutral-300 rounded-lg outline-none font-bold bg-neutral-50 focus:ring-2 focus:ring-green-600 cursor-pointer flex-1 md:flex-none text-sm">
@@ -7517,34 +7634,36 @@ import React, { useState, useEffect } from 'react';
           <table className="w-full border-collapse text-xs md:text-sm min-w-max">
             <thead className="sticky top-0 z-30 shadow-md">
               <tr>
-                <th colSpan="19" className="bg-green-600 text-white font-black py-2 border-b-2 border-neutral-400 text-sm md:text-lg tracking-wider">
-                  {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} MAAŞ HESAPLAMA TABLOSU
+                <th colSpan="21" className="bg-green-600 text-white font-black py-2 border-b-2 border-neutral-400 text-sm md:text-lg tracking-wider">
+                  {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} {collarType.toUpperCase()} MAAŞ HESAPLAMA TABLOSU
                 </th>
               </tr>
               <tr>
                 <th className="bg-neutral-200 text-black font-black p-2 border-b border-r border-neutral-400 sticky left-0 z-30 w-48 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] text-xs align-bottom">PERSONEL BİLGİSİ</th>
+                <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24 text-center">İŞE BAŞLANGIÇ TARİHİ</th>
                 <th className="bg-yellow-100 text-yellow-900 font-bold p-2 border-b border-r border-neutral-400 w-24">NAKİT AVANS</th>
                 <th className="bg-yellow-100 text-yellow-900 font-bold p-2 border-b border-r border-neutral-400 w-24">RESMİ AVANS</th>
                 <th className="bg-blue-100 text-blue-900 font-bold p-2 border-b border-r border-neutral-400 w-20">GÜNLÜK SAAT</th>
                 <th className="bg-blue-100 text-blue-900 font-bold p-2 border-b border-r border-neutral-400 w-20">TOPLAM SAAT</th>
-                <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24 text-center">İŞE BAŞLANGIÇ TARİHİ</th>
                 <th className="bg-blue-100 text-blue-900 font-bold p-2 border-b border-r border-neutral-400 w-20">MESAİ GÜN SAYISI</th>
-                <th className="bg-blue-100 text-blue-900 font-bold p-2 border-b border-r border-neutral-400 w-24">MAAŞ</th>
                 <th className="bg-teal-100 text-teal-900 font-bold p-2 border-b border-r border-neutral-400 w-24">FAZLA GÜN SAYISI</th>
                 <th className="bg-red-100 text-red-900 font-bold p-2 border-b border-r border-neutral-400 w-20">DEVAMSIZLIK</th>
                 <th className="bg-orange-100 text-orange-900 font-bold p-2 border-b border-r border-neutral-400 w-20">RAPOR</th>
-                <th className="bg-green-100 text-green-900 font-bold p-2 border-b border-r border-neutral-400 w-20">PRİM</th>
-                <th className="bg-purple-100 text-purple-900 font-black p-2 border-b border-r border-neutral-400 w-24">MESAİ ÜCRETİ</th>
-                <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24">YOL PARASI</th>
-                <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24">YEMEK PARASI</th>
+                <th className="bg-purple-100 text-purple-900 font-bold p-2 border-b border-r border-neutral-400 w-24">YILLIK İZİN</th>
                 <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24">BANKA PARASI</th>
-                <th className="bg-red-100 text-red-900 font-bold p-2 border-b border-r border-neutral-400 w-24">İCRA TUTARI</th>
-                <th className="bg-emerald-300 text-emerald-900 font-black p-2 border-b border-r border-neutral-400 w-24">KALAN BANKA</th>
-                <th className="bg-emerald-400 text-emerald-900 font-black p-2 border-b border-neutral-400 w-24">KALAN NAKİT</th>
+                <th className="bg-green-100 text-green-900 font-bold p-2 border-b border-r border-neutral-400 w-20">PRİM</th>
+                <th className="bg-blue-100 text-blue-900 font-bold p-2 border-b border-r border-neutral-400 w-24">MAAŞ</th>
+                <th className="bg-purple-200 text-purple-900 font-black p-2 border-b border-r border-neutral-400 w-24">MESAİ ÜCRETİ</th>
+                <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24">YEMEK PARASI</th>
+                <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24">YOL PARASI</th>
+                <th className="bg-red-100 text-red-900 font-bold p-2 border-b border-r border-neutral-400 w-24">BORÇLANMA</th>
+                <th className="bg-red-200 text-red-900 font-bold p-2 border-b border-r border-neutral-400 w-24">İCRA TUTARI</th>
+                <th className="bg-yellow-200 text-yellow-900 font-black p-2 border-b border-r border-neutral-400 w-24">KALAN BANKA</th>
+                <th className="bg-orange-200 text-orange-900 font-black p-2 border-b border-neutral-400 w-24">KALAN NAKİT</th>
               </tr>
             </thead>
             <tbody>
-              {maviYakaList.map(person => {
+              {targetPersonnelList.map(person => {
                 const row = maasData[person.id] || {};
                 const c = calcRow(person.id);
                 return (
@@ -7553,6 +7672,9 @@ import React, { useState, useEffect } from 'react';
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-neutral-800 text-xs truncate max-w-[150px]">{person.fullName.toUpperCase()}</span>
                       </div>
+                    </td>
+                    <td className="border-r border-neutral-300 p-1 text-center text-xs font-medium text-neutral-600 align-middle">
+                      {person.startDate || '-'}
                     </td>
                     <td className="border-r border-neutral-300 p-1 bg-yellow-50/30">
                       <input type="number" value={row.nakitAvans || ''} onChange={e => handleCellChange(person.id, 'nakitAvans', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-yellow-100 focus:ring-1 focus:ring-yellow-400 rounded" placeholder="0" />
@@ -7566,14 +7688,8 @@ import React, { useState, useEffect } from 'react';
                     <td className="border-r border-neutral-300 p-1 bg-blue-50/50">
                       <input type="number" readOnly value={c.toplamSaat} className="w-full h-8 text-center bg-transparent outline-none rounded font-bold text-blue-600 cursor-not-allowed" placeholder="0" title="Otomatik hesaplanır" />
                     </td>
-                    <td className="border-r border-neutral-300 p-1 text-center text-xs font-medium text-neutral-600 align-middle">
-                      {person.startDate || '-'}
-                    </td>
                     <td className="border-r border-neutral-300 p-1 bg-blue-50/50">
                       <input type="number" readOnly value={c.mesaiGunSayisi} className="w-full h-8 text-center bg-transparent outline-none rounded font-bold cursor-not-allowed" title="Mesai tablosundan otomatik hesaplanır" />
-                    </td>
-                    <td className="border-r border-neutral-300 p-1">
-                      <input type="number" value={row.maas !== undefined ? row.maas : (person.maas || '')} onChange={e => handleCellChange(person.id, 'maas', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-blue-50 focus:ring-1 focus:ring-blue-400 rounded font-bold" placeholder="0" />
                     </td>
                     <td className="border-r border-neutral-300 p-1 bg-teal-50/50">
                       <input type="number" value={row.fazlaGun !== undefined ? row.fazlaGun : (c.fazlaGunSayisi || '')} onChange={e => handleCellChange(person.id, 'fazlaGun', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-teal-100 focus:ring-1 focus:ring-teal-400 rounded text-teal-700 font-bold" placeholder="0" title="Manuel düzenlenebilir" />
@@ -7584,51 +7700,80 @@ import React, { useState, useEffect } from 'react';
                     <td className="border-r border-neutral-300 p-1 bg-orange-50/50">
                       <input type="number" value={row.rapor !== undefined ? row.rapor : (c.rapor || '')} onChange={e => handleCellChange(person.id, 'rapor', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-orange-100 focus:ring-1 focus:ring-orange-400 rounded text-orange-600 font-bold" placeholder="0" title="Manuel düzenlenebilir" />
                     </td>
-                    <td className="border-r border-neutral-300 p-1">
-                      <input type="number" value={row.prim || ''} onChange={e => handleCellChange(person.id, 'prim', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-green-50 focus:ring-1 focus:ring-green-400 rounded text-green-600 font-bold" placeholder="0" />
-                    </td>
-                    <td className="border-r border-neutral-300 p-1 bg-purple-50 font-bold text-purple-900 text-center align-middle">
-                      {c.mesaiUcreti.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
-                    </td>
-                    <td className="border-r border-neutral-300 p-1">
-                      <input type="number" value={row.yol !== undefined ? row.yol : (person.yol || '')} onChange={e => handleCellChange(person.id, 'yol', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
-                    </td>
-                    <td className="border-r border-neutral-300 p-1">
-                      <input type="number" value={row.yemek !== undefined ? row.yemek : (person.yemek || '')} onChange={e => handleCellChange(person.id, 'yemek', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
+                    <td className="border-r border-neutral-300 p-1 bg-purple-50/50">
+                      <input type="number" value={(yearlyData[person.id] && yearlyData[person.id].yillikIzin) || ''} onChange={e => handleYearlyChange(person.id, 'yillikIzin', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-purple-100 focus:ring-1 focus:ring-purple-400 rounded text-purple-700 font-bold" placeholder="0" title="Tüm yıl boyunca geçerlidir. Yıl sonunda sıfırlanır." />
                     </td>
                     <td className="border-r border-neutral-300 p-1 bg-neutral-100 font-bold text-neutral-600 text-center align-middle">
                       {c.hesaplananBanka.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                     </td>
-                    <td className="border-r border-neutral-300 p-1 bg-red-50 font-black text-red-700 text-center align-middle">
+                    <td className="border-r border-neutral-300 p-1">
+                      <input type="number" value={row.prim || ''} onChange={e => handleCellChange(person.id, 'prim', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-green-50 focus:ring-1 focus:ring-green-400 rounded text-green-600 font-bold" placeholder="0" />
+                    </td>
+                    <td className="border-r border-neutral-300 p-1">
+                      <input type="number" value={row.maas !== undefined ? row.maas : (person.maas || '')} onChange={e => handleCellChange(person.id, 'maas', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-blue-50 focus:ring-1 focus:ring-blue-400 rounded font-bold" placeholder="0" />
+                    </td>
+                    <td className="border-r border-neutral-300 p-1 bg-purple-100 font-bold text-purple-900 text-center align-middle">
+                      {c.mesaiUcreti.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                    </td>
+                    <td className={`border-r border-neutral-300 p-1 ${row.yemekOdendi ? 'bg-green-50' : ''}`}>
+                      <div className="flex items-center gap-1">
+                        <input type="number" value={row.yemek !== undefined ? row.yemek : (person.yemek || '')} onChange={e => handleCellChange(person.id, 'yemek', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
+                        <button type="button" onClick={() => handleCellChange(person.id, 'yemekOdendi', !row.yemekOdendi)} className={`p-1 shrink-0 rounded transition ${row.yemekOdendi ? 'text-green-600' : 'text-neutral-300 hover:text-neutral-500'}`} title={row.yemekOdendi ? 'Ödendi' : 'Ödenmedi'}>
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                    <td className={`border-r border-neutral-300 p-1 ${row.yolOdendi ? 'bg-green-50' : ''}`}>
+                      <div className="flex items-center gap-1">
+                        <input type="number" value={row.yol !== undefined ? row.yol : (person.yol || '')} onChange={e => handleCellChange(person.id, 'yol', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
+                        <button type="button" onClick={() => handleCellChange(person.id, 'yolOdendi', !row.yolOdendi)} className={`p-1 shrink-0 rounded transition ${row.yolOdendi ? 'text-green-600' : 'text-neutral-300 hover:text-neutral-500'}`} title={row.yolOdendi ? 'Ödendi' : 'Ödenmedi'}>
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                    <td className="border-r border-neutral-300 p-1 bg-red-50/50">
+                      <input type="number" value={(yearlyData[person.id] && yearlyData[person.id].borclanma) || ''} onChange={e => handleYearlyChange(person.id, 'borclanma', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-red-100 focus:ring-1 focus:ring-red-400 rounded text-red-700 font-bold" placeholder="0" title="Tüm yıl boyunca geçerlidir. Yıl sonunda sıfırlanır." />
+                    </td>
+                    <td className="border-r border-neutral-300 p-1 bg-red-100 font-black text-red-800 text-center align-middle">
                       {c.icraKesintisi.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                     </td>
-                    <td className="border-r border-neutral-300 p-1 bg-emerald-200 font-black text-emerald-900 text-center align-middle">
-                      {c.bankaKalan.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                    <td className={`border-r border-neutral-300 p-1 align-middle ${row.bankaOdendi ? 'bg-green-200' : 'bg-yellow-100'}`}>
+                      <div className="flex items-center justify-center gap-1">
+                        <span className={`font-black ${row.bankaOdendi ? 'text-green-800 line-through opacity-70' : 'text-yellow-900'}`}>{c.bankaKalan.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
+                        <button type="button" onClick={() => handleCellChange(person.id, 'bankaOdendi', !row.bankaOdendi)} className={`p-0.5 shrink-0 rounded transition ${row.bankaOdendi ? 'text-green-700' : 'text-yellow-600/50 hover:text-yellow-800'}`} title={row.bankaOdendi ? 'Ödendi' : 'Ödenmedi'}>
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
-                    <td className="p-1 bg-emerald-300 font-black text-emerald-900 text-center align-middle">
-                      {c.kalanNakit.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                    <td className={`p-1 align-middle ${row.nakitOdendi ? 'bg-green-300' : 'bg-orange-100'}`}>
+                      <div className="flex items-center justify-center gap-1">
+                        <span className={`font-black ${row.nakitOdendi ? 'text-green-900 line-through opacity-70' : 'text-orange-900'}`}>{c.kalanNakit.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
+                        <button type="button" onClick={() => handleCellChange(person.id, 'nakitOdendi', !row.nakitOdendi)} className={`p-0.5 shrink-0 rounded transition ${row.nakitOdendi ? 'text-green-800' : 'text-orange-600/50 hover:text-orange-800'}`} title={row.nakitOdendi ? 'Ödendi' : 'Ödenmedi'}>
+                          <CheckCircle className="w-4 h-4" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
               })}
-              {maviYakaList.length === 0 && (
+              {targetPersonnelList.length === 0 && (
                 <tr>
-                  <td colSpan="19" className="p-8 text-center text-neutral-500 font-medium">
-                    Sistemde mavi yaka personel kaydı bulunamadı.
+                  <td colSpan="21" className="p-8 text-center text-neutral-500 font-medium">
+                    Sistemde {collarType.toLowerCase()} personel kaydı bulunamadı.
                   </td>
                 </tr>
               )}
             </tbody>
-            {maviYakaList.length > 0 && (
+            {targetPersonnelList.length > 0 && (
               <tfoot className="sticky bottom-0 z-40 shadow-[0_-4px_6px_-2px_rgba(0,0,0,0.1)]">
                 <tr className="bg-black text-white font-black text-xs md:text-sm">
-                  <td colSpan="13" className="p-2 md:p-3 text-right border-r border-neutral-600">GENEL TOPLAMLAR :</td>
-                  <td className="p-2 md:p-3 text-center border-r border-neutral-600 text-white">₺{totalYol.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
+                  <td colSpan="15" className="p-2 md:p-3 text-right border-r border-neutral-600">GENEL TOPLAMLAR :</td>
                   <td className="p-2 md:p-3 text-center border-r border-neutral-600 text-white">₺{totalYemek.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
+                  <td className="p-2 md:p-3 text-center border-r border-neutral-600 text-white">₺{totalYol.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
                   <td className="p-2 md:p-3 text-center border-r border-neutral-600"></td>
                   <td className="p-2 md:p-3 text-center border-r border-neutral-600"></td>
-                  <td className="p-2 md:p-3 text-center border-r border-neutral-600 text-emerald-300">₺{totalKalanBanka.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
-                  <td className="p-2 md:p-3 text-center text-emerald-400">₺{totalKalanNakit.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
+                  <td className="p-2 md:p-3 text-center border-r border-neutral-600 text-yellow-400">₺{totalKalanBanka.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
+                  <td className="p-2 md:p-3 text-center text-orange-400">₺{totalKalanNakit.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
                 </tr>
               </tfoot>
             )}
@@ -7638,36 +7783,54 @@ import React, { useState, useEffect } from 'react';
     );
   };
 
-  const MaviMuhasebeView = ({ personnelList, db, appId, addSystemLog }) => {
+  const PersonelMuhasebeView = ({ personnelList, db, appId, addSystemLog }) => {
+    const [collarType, setCollarType] = useState('Mavi Yaka');
     const [activeSubTab, setActiveSubTab] = useState('puantaj');
 
     return (
       <div className="flex flex-col gap-4 h-full animate-in fade-in">
+         {/* Üst Kısım: Yaka Seçimi */}
+         <div className="bg-white p-2 rounded-2xl shadow-sm border border-neutral-200 flex gap-2 overflow-x-auto custom-scrollbar shrink-0">
+           <button
+              onClick={() => setCollarType('Mavi Yaka')}
+              className={`flex-1 py-3 px-4 rounded-xl font-black text-sm transition flex items-center justify-center gap-2 ${collarType === 'Mavi Yaka' ? 'bg-black text-white shadow-md' : 'bg-neutral-50 text-neutral-600 hover:bg-neutral-100'}`}
+           >
+              <Users className="w-5 h-5 shrink-0" /> Mavi Yaka Muhasebe
+           </button>
+           <button
+              onClick={() => setCollarType('Beyaz Yaka')}
+              className={`flex-1 py-3 px-4 rounded-xl font-black text-sm transition flex items-center justify-center gap-2 ${collarType === 'Beyaz Yaka' ? 'bg-black text-white shadow-md' : 'bg-neutral-50 text-neutral-600 hover:bg-neutral-100'}`}
+           >
+              <Briefcase className="w-5 h-5 shrink-0" /> Beyaz Yaka Muhasebe
+           </button>
+         </div>
+
+         {/* Alt Kısım: Sekme Seçimi */}
          <div className="bg-white p-2 rounded-2xl shadow-sm border border-neutral-200 flex gap-2 overflow-x-auto custom-scrollbar shrink-0">
            <button
               onClick={() => setActiveSubTab('puantaj')}
               className={`flex-1 min-w-[150px] py-3 px-4 rounded-xl font-black text-sm transition flex items-center justify-center gap-2 ${activeSubTab === 'puantaj' ? 'bg-red-600 text-white shadow-md' : 'bg-neutral-50 text-neutral-600 hover:bg-neutral-100 hover:text-black'}`}
            >
-              <CalendarDays className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Mavi Puantaj</span>
+              <CalendarDays className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">{collarType} Puantaj</span>
            </button>
            <button
               onClick={() => setActiveSubTab('mesai')}
               className={`flex-1 min-w-[150px] py-3 px-4 rounded-xl font-black text-sm transition flex items-center justify-center gap-2 ${activeSubTab === 'mesai' ? 'bg-blue-600 text-white shadow-md' : 'bg-neutral-50 text-neutral-600 hover:bg-neutral-100 hover:text-black'}`}
            >
-              <Clock className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Mavi Mesai</span>
+              <Clock className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">{collarType} Mesai</span>
            </button>
            <button
               onClick={() => setActiveSubTab('maas')}
               className={`flex-1 min-w-[150px] py-3 px-4 rounded-xl font-black text-sm transition flex items-center justify-center gap-2 ${activeSubTab === 'maas' ? 'bg-green-600 text-white shadow-md' : 'bg-neutral-50 text-neutral-600 hover:bg-neutral-100 hover:text-black'}`}
            >
-              <DollarSign className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Mavi Maaş</span>
+              <DollarSign className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">{collarType} Maaş</span>
            </button>
          </div>
 
          <div className="flex-1 w-full relative">
-           {activeSubTab === 'puantaj' && <PuantajView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
-           {activeSubTab === 'mesai' && <MaviMesaiView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
-           {activeSubTab === 'maas' && <MaviMaasView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
+           {activeSubTab === 'puantaj' && <PuantajView collarType={collarType} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
+           {activeSubTab === 'mesai' && <MesaiView collarType={collarType} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
+           {activeSubTab === 'maas' && <MaasView collarType={collarType} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
          </div>
       </div>
     );
@@ -7976,46 +8139,22 @@ import React, { useState, useEffect } from 'react';
       const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
       const unsubs = [];
 
-      // KOTA AŞIMINI ENGELLEMEK İÇİN SORGULARI LİMİTLİYORUZ
-      // İşleri sadece son 2 aya göre sınırla
-      const twoMonthsAgo = new Date();
-      twoMonthsAgo.setMonth(twoMonthsAgo.getMonth() - 2);
-      const dateLimitStr = twoMonthsAgo.toISOString().split('T')[0];
-
-      const jobsQuery = query(getCol('jobs'), where('date', '>=', dateLimitStr));
-      unsubs.push(onSnapshot(jobsQuery, snap => { setJobs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
-      
-      const transQuery = query(getCol('transactions'), limit(150));
-      unsubs.push(onSnapshot(transQuery, snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
-      
-      const tasksQuery = query(getCol('tasks'), limit(100));
-      unsubs.push(onSnapshot(tasksQuery, snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
-      
-      const notifQuery = query(getCol('notifications'), limit(100));
-      unsubs.push(onSnapshot(notifQuery, snap => { setNotifications(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
-      
-      const msgQuery = query(getCol('messages'), limit(50));
-      unsubs.push(onSnapshot(msgQuery, snap => { setMessages(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, msg: true})); }, console.error));
-      
-      const logsQuery = query(getCol('systemLogs'), limit(50));
-      unsubs.push(onSnapshot(logsQuery, snap => { setSystemLogs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
-      
+      unsubs.push(onSnapshot(getCol('jobs'), snap => { setJobs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
+      unsubs.push(onSnapshot(getCol('transactions'), snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
+      unsubs.push(onSnapshot(getCol('tasks'), snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
+      unsubs.push(onSnapshot(getCol('notifications'), snap => { setNotifications(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
+      unsubs.push(onSnapshot(getCol('messages'), snap => { setMessages(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, msg: true})); }, console.error));
+      unsubs.push(onSnapshot(getCol('systemLogs'), snap => { setSystemLogs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('vehicles'), snap => { setVehicles(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, veh: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('materials'), snap => { setMaterials(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, mat: true})); }, console.error));
-      
-      const complaintsQuery = query(getCol('complaints'), limit(50));
-      unsubs.push(onSnapshot(complaintsQuery, snap => { setComplaints(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
-      
+      unsubs.push(onSnapshot(getCol('complaints'), snap => { setComplaints(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
       unsubs.push(onSnapshot(getCol('companyContacts'), snap => { 
         let contacts = snap.docs.map(d => ({...d.data(), id: d.id}));
         contacts.sort((a, b) => (a.order || 0) - (b.order || 0));
         setCompanyContacts(contacts); 
         setDataLoadStatus(p => ({...p, contacts: true})); 
       }, console.error));
-      
-      const todosQuery = query(getCol('todos'), limit(100));
-      unsubs.push(onSnapshot(todosQuery, snap => { setTodos(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, todos: true})); }, console.error));
-      
+      unsubs.push(onSnapshot(getCol('todos'), snap => { setTodos(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, todos: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('companyPasswords'), snap => { setCompanyPasswords(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
 
       unsubs.push(onSnapshot(getCol('personnelList'), async snap => {
@@ -9416,10 +9555,10 @@ import React, { useState, useEffect } from 'react';
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'complaints' || activeTab === 'maviMuhasebe') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'complaints') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <Briefcase className={`w-5 h-5 shrink-0 ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'complaints' || activeTab === 'maviMuhasebe') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Personel Listesi</span>
+                    <Briefcase className={`w-5 h-5 shrink-0 ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'complaints') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Personel Listesi</span>
                   </div>
                   {isPersonnelSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -9437,12 +9576,6 @@ import React, { useState, useEffect } from 'react';
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personnelList' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personnelList' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm Personel
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('maviMuhasebe'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'maviMuhasebe' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'maviMuhasebe' ? 'bg-white' : 'bg-red-600'}`}></div> Mavi Muhasebe
                     </button>
                     <button 
                       onClick={() => { setActiveTab('complaints'); setIsSidebarOpen(false); }}
@@ -9566,10 +9699,10 @@ import React, { useState, useEffect } from 'react';
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsFinanceSubMenuOpen(!isFinanceSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'financeDashboard' || activeTab === 'reporting') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'financeDashboard' || activeTab === 'reporting' || activeTab === 'personelMuhasebe') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <Wallet className={`w-5 h-5 shrink-0 ${(activeTab === 'financeDashboard' || activeTab === 'reporting') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Finans Yönetimi</span>
+                    <Wallet className={`w-5 h-5 shrink-0 ${(activeTab === 'financeDashboard' || activeTab === 'reporting' || activeTab === 'personelMuhasebe') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Finans Yönetimi</span>
                   </div>
                   {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -9587,6 +9720,12 @@ import React, { useState, useEffect } from 'react';
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'reporting' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'reporting' ? 'bg-white' : 'bg-red-600'}`}></div> Raporlama
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('personelMuhasebe'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelMuhasebe' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelMuhasebe' ? 'bg-white' : 'bg-red-600'}`}></div> Personel Muhasebe
                     </button>
                   </div>
                 )}
@@ -9875,7 +10014,6 @@ import React, { useState, useEffect } from 'react';
             {/* Personel ve Araç Modülleri */}
             {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
             {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" />}
-            {activeTab === 'maviMuhasebe' && showPersonnel && <MaviMuhasebeView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {activeTab === 'addVehicle' && showVehicles && <AddVehicleView onAdd={handleAddVehicle} />}
             {activeTab === 'vehicleList' && showVehicles && (
@@ -10060,6 +10198,7 @@ import React, { useState, useEffect } from 'react';
             {/* Finans Yönetimi Modülleri */}
             {activeTab === 'financeDashboard' && showFinance && <FinanceDashboardView jobs={jobs} transactions={transactions} transactionType={transactionType} setTransactionType={setTransactionType} newTransaction={newTransaction} setNewTransaction={setNewTransaction} handleAddTransaction={handleAddTransaction} />}
             {activeTab === 'reporting' && showFinance && <ReportingView jobs={jobs} personnelList={personnelList} />}
+            {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
 
             {activeTab === 'addTask' && showTasks &&
               <AddTaskFormView 
