@@ -288,7 +288,7 @@ import React, { useState, useEffect } from 'react';
         
         .page { 
           width: 210mm; 
-          height: 297mm;
+          height: 296mm; /* Tam A4 boyutu 297mm dir ancak taşmayı önlemek için 1mm azalttık */
           background: white;
           padding: 8mm 12mm;
           margin: 10mm auto;
@@ -300,7 +300,7 @@ import React, { useState, useEffect } from 'react';
         @media print {
           @page { margin: 0 !important; }
           body { background: white; margin: 0; -webkit-print-color-adjust: exact; }
-          .page { margin: 0; padding: 8mm 12mm; box-shadow: none; border: none; height: 297mm; page-break-after: always; }
+          .page { margin: 0; padding: 8mm 12mm; box-shadow: none; border: none; height: 296mm; page-break-after: always; }
           .page:last-child { page-break-after: auto; }
         }
         .header { text-align: center; border-bottom: 2px solid #d32f2f; padding-bottom: 6px; margin-bottom: 8px; display: flex; flex-direction: column; align-items: center; }
@@ -342,7 +342,7 @@ import React, { useState, useEffect } from 'react';
           <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
           <div class="contact-info">
             Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
-            Vergi No: 7600944287 | www.sembolnakliyat.com
+            Vergi No: 7600944287
           </div>
         </div>
         
@@ -408,78 +408,6 @@ import React, { useState, useEffect } from 'react';
         </div>
       </div>
 
-      <div class="page">
-        <div class="header">
-          <img src="https://www.sembolevdeneve.com/crm/uploads/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
-          <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
-          <div class="contact-info">
-            Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
-            Vergi No: 7600944287 | www.sembolnakliyat.com
-          </div>
-        </div>
-        
-        <div class="main-title">EVDEN EVE TAŞIMACILIK VE NAKLİYE SÖZLEŞMESİ</div>
-        
-        <table>
-          <tr><th colspan="2">YÜKLEME ADRESİ (NEREDEN)</th></tr>
-          <tr><td class="label">Adres:</td><td>${job.fromProvince || ''}/${job.fromDistrict || ''} - ${job.fromAddress || ''}</td></tr>
-          <tr><td class="label">Kat:</td><td>${job.fromFloor || ''}</td></tr>
-          <tr><td class="label">Oda Sayısı:</td><td>${job.fromRoomCount || ''}</td></tr>
-          <tr><td class="label">Bina Asansörü:</td><td>${isBinaAsansorFrom}</td></tr>
-          <tr><td class="label">Dış Cephe Asansörü:</td><td>${isCepheAsansorFrom}</td></tr>
-          <tr><td class="label">Toplama Hizmeti:</td><td>${isToplamaFrom}</td></tr>
-        </table>
-
-        <table>
-          <tr><th colspan="2">BOŞALTMA ADRESİ (NEREYE)</th></tr>
-          <tr><td class="label">Adres:</td><td>${job.toProvince ? job.toProvince + '/' + job.toDistrict + ' - ' + job.toAddress : 'Belirtilmedi'}</td></tr>
-          <tr><td class="label">Kat:</td><td>${job.toFloor || ''}</td></tr>
-          <tr><td class="label">Oda Sayısı:</td><td>${job.toRoomCount || ''}</td></tr>
-          <tr><td class="label">Bina Asansörü:</td><td>${isBinaAsansorTo}</td></tr>
-          <tr><td class="label">Dış Cephe Asansörü:</td><td>${isCepheAsansorTo}</td></tr>
-        </table>
-
-        ${job.contractDetails ? `
-        <div class="section-title">EKSTRA SÖZLEŞME DETAYI</div>
-        <div class="desc-box">
-          ${job.contractDetails}
-        </div>
-        ` : ''}
-
-        <div class="code-box">
-          <div class="code-title">Güvenlik / Teslim Kodu</div>
-          <div class="code-val">${job.deliveryCode || 'BULUNMUYOR'}</div>
-          <div class="code-sub">(Lütfen eşya teslimatında ekiplerimize bu kodu iletiniz.)</div>
-        </div>
-
-        <table>
-          <tr><th colspan="2">ANLAŞMA ÖDEME DETAYLARI</th></tr>
-          <tr><td class="label">Taşıma Tarihi / Saati:</td><td>${job.date || ''} - ${job.time || ''}</td></tr>
-          <tr><td class="label">Anlaşma Bedeli (TL):</td><td>${fiyat} TL</td></tr>
-          <tr><td class="label">Alınan Peşinat:</td><td>${kapora} TL</td></tr>
-          <tr><td class="label">Kalan Bakiye (TL):</td><td><b>${bakiye} TL</b></td></tr>
-        </table>
-
-        <div class="signatures">
-          <div class="sign-box">
-            <div class="sign-title">HİZMET VEREN (KAŞE / İMZA)</div>
-            <div class="sign-details text-center">
-              <b>Sembol Nakliyat Depoculuk Tic. Ltd. Şti.</b>
-              <img src="https://www.sembolevdeneve.com/crm/uploads/ka%C5%9Fe.jpg" class="kase-img" alt="Kaşe" />
-            </div>
-          </div>
-          <div class="sign-box">
-            <div class="sign-title">HİZMET ALAN (MÜŞTERİ)</div>
-            <div class="sign-details">
-              <b>TC Kimlik No:</b> ${job.tcNo || '....................................'}<br/>
-              <b>İletişim No:</b> ${job.customerPhone || '....................................'}<br/>
-              <b>Adı Soyadı:</b> ${job.customerName || '....................................'}<br/><br/>
-              <b>İmza:</b>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- 2. SAYFA -->
       <div class="page">
         <div class="header">
@@ -487,7 +415,7 @@ import React, { useState, useEffect } from 'react';
           <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
           <div class="contact-info">
             Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
-            Vergi No: 7600944287 | www.sembolnakliyat.com
+            Vergi No: 7600944287
           </div>
         </div>
 
