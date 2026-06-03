@@ -288,7 +288,7 @@ import React, { useState, useEffect } from 'react';
         
         .page { 
           width: 210mm; 
-          height: 296mm; /* Tam A4 boyutu 297mm dir ancak taşmayı önlemek için 1mm azalttık */
+          height: 297mm;
           background: white;
           padding: 8mm 12mm;
           margin: 10mm auto;
@@ -300,7 +300,7 @@ import React, { useState, useEffect } from 'react';
         @media print {
           @page { margin: 0 !important; }
           body { background: white; margin: 0; -webkit-print-color-adjust: exact; }
-          .page { margin: 0; padding: 8mm 12mm; box-shadow: none; border: none; height: 296mm; page-break-after: always; }
+          .page { margin: 0; padding: 8mm 12mm; box-shadow: none; border: none; height: 297mm; page-break-after: always; }
           .page:last-child { page-break-after: auto; }
         }
         .header { text-align: center; border-bottom: 2px solid #d32f2f; padding-bottom: 6px; margin-bottom: 8px; display: flex; flex-direction: column; align-items: center; }
@@ -342,7 +342,7 @@ import React, { useState, useEffect } from 'react';
           <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
           <div class="contact-info">
             Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
-            Vergi No: 7600944287
+            Vergi No: 7600944287 | www.sembolnakliyat.com
           </div>
         </div>
         
@@ -415,7 +415,7 @@ import React, { useState, useEffect } from 'react';
           <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
           <div class="contact-info">
             Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
-            Vergi No: 7600944287
+            Vergi No: 7600944287 | www.sembolnakliyat.com
           </div>
         </div>
 
@@ -484,6 +484,10 @@ import React, { useState, useEffect } from 'react';
         </div>
       </div>
       <script>
+        // Tarayıcıdaki başlık ve linkin basılmasını engellemek için gerekli olabilecek bir ek stil (bazı tarayıcılar destekler).
+        const style = document.createElement('style');
+        style.textContent = '@page { margin: 0; } @media print { body { -webkit-print-color-adjust: exact; } }';
+        document.head.appendChild(style);
         setTimeout(() => {
           window.print();
         }, 500);
@@ -1992,27 +1996,30 @@ import React, { useState, useEffect } from 'react';
             dailyJobs.map(job => (
               <div key={job.id} className={`bg-white p-5 rounded-2xl shadow-sm border ${job.status === 'cancelled' ? 'border-red-400 bg-red-50/40' : job.isSpecial ? 'border-yellow-400 ring-2 ring-yellow-100 bg-yellow-50/30' : 'border-neutral-200'} flex flex-col md:flex-row gap-6 justify-between hover:border-red-600 transition group cursor-pointer`}>
                 <div className="flex-1">
-                  <div className="flex items-center gap-3 mb-3">
-                    <span className="font-black text-xl text-black flex items-center gap-1.5">
-                      {job.isSpecial && <Star className="w-5 h-5 text-yellow-500 fill-yellow-500 drop-shadow-sm" />}
-                      {job.customerName}
-                    </span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase tracking-wider ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
-                      {job.type || 'Nakliye'}
-                    </span>
-                    <span className={`text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider ${
-                      job.status === 'completed' ? 'bg-black text-white' :
-                      job.status === 'in-progress' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' :
-                      job.status === 'cancelled' ? 'bg-red-100 text-red-800 border border-red-200' :
-                      'bg-neutral-100 text-neutral-700'
-                    }`}>
-                      {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : job.status === 'cancelled' ? 'İptal Edildi' : 'Bekliyor'}
-                    </span>
-                    
-                    {job.price && (
-                      <div className="ml-auto text-right">
-                        <span className="block text-lg font-black text-green-600">₺{parseInt(job.price).toLocaleString('tr-TR')}</span>
-                        {job.deposit && <span className="text-[10px] font-bold text-neutral-500">Kapora: ₺{parseInt(job.deposit).toLocaleString('tr-TR')}</span>}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-3">
+                      <span className="font-black text-xl text-black flex items-center gap-1.5">
+                        {job.isSpecial && <Star className="w-5 h-5 text-yellow-500 fill-yellow-500 drop-shadow-sm" />}
+                        {job.customerName}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase tracking-wider ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                        {job.type || 'Nakliye'}
+                      </span>
+                      <span className={`text-xs px-3 py-1 rounded-full font-bold uppercase tracking-wider ${
+                        job.status === 'completed' ? 'bg-black text-white' :
+                        job.status === 'in-progress' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' :
+                        job.status === 'cancelled' ? 'bg-red-100 text-red-800 border border-red-200' :
+                        'bg-neutral-100 text-neutral-700'
+                      }`}>
+                        {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : job.status === 'cancelled' ? 'İptal Edildi' : 'Bekliyor'}
+                      </span>
+                    </div>
+                    {job.createdBy && (
+                      <div className="flex items-center gap-1.5 bg-neutral-50 px-2 py-1 rounded-lg border border-neutral-200" title={`Kayıt Eden: ${job.createdBy}`}>
+                        <div className="w-5 h-5 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 text-[8px]">
+                           {job.createdBy.charAt(0)}
+                        </div>
+                        <span className="text-[10px] font-bold text-neutral-600">{job.createdBy}</span>
                       </div>
                     )}
                   </div>
@@ -2597,12 +2604,22 @@ import React, { useState, useEffect } from 'react';
             completedJobs.map(job => (
               <div key={job.id} className="p-4 border border-green-200 bg-white shadow-sm rounded-xl flex flex-col md:flex-row gap-4 justify-between md:items-center hover:border-green-400 transition">
                 <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-2">
-                    <h3 className="font-bold text-black text-lg">{job.customerName}</h3>
-                    <span className="text-[10px] bg-black text-white px-2 py-0.5 rounded-full font-bold shadow-sm">TAMAMLANDI</span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase shadow-sm ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
-                      {job.type || 'Nakliye'}
-                    </span>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-bold text-black text-lg">{job.customerName}</h3>
+                      <span className="text-[10px] bg-black text-white px-2 py-0.5 rounded-full font-bold shadow-sm">TAMAMLANDI</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase shadow-sm ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                        {job.type || 'Nakliye'}
+                      </span>
+                    </div>
+                    {job.createdBy && (
+                      <div className="flex items-center gap-1.5 bg-neutral-50 px-2 py-1 rounded-lg border border-neutral-200" title={`Kayıt Eden: ${job.createdBy}`}>
+                        <div className="w-5 h-5 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 text-[8px]">
+                           {job.createdBy.charAt(0)}
+                        </div>
+                        <span className="text-[10px] font-bold text-neutral-600">{job.createdBy}</span>
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-wrap items-center gap-3 text-sm text-neutral-600 mb-2">
                     <span className="flex items-center gap-1.5"><Clock className="w-4 h-4 text-neutral-400" /> {job.date} - {job.time}</span>
@@ -3064,7 +3081,7 @@ import React, { useState, useEffect } from 'react';
                             const kapora = parseInt(job.price || 0) * 0.10;
                             const kaporaText = kapora > 0 ? kapora.toLocaleString('tr-TR') : '...';
 
-                            const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %10'u olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Denizbank\nAlıcı: Şenol Beşinci\nIBAN: TR 94 0013 4000 0262 6671 7000 01\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
+                            const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %10'u olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Denizbank\nAlıcı: Şenol Beşinci\nIBAN: TR 94 0013 4000 0262 9671 7000 01\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
                             window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
                           }} 
                           className="px-3 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[10px] font-bold rounded-lg transition flex items-center gap-1 shadow-sm"
@@ -6037,13 +6054,23 @@ import React, { useState, useEffect } from 'react';
                         </a>
                       )}
                     </div>
-                    <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider ${
-                      job.status === 'completed' ? 'bg-black text-white' :
-                      job.status === 'in-progress' ? 'bg-red-600 text-white' :
-                      'bg-neutral-100 text-neutral-700'
-                    }`}>
-                      {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
-                    </span>
+                    <div className="flex flex-col items-end gap-2">
+                      <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider ${
+                        job.status === 'completed' ? 'bg-black text-white' :
+                        job.status === 'in-progress' ? 'bg-red-600 text-white' :
+                        'bg-neutral-100 text-neutral-700'
+                      }`}>
+                        {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
+                      </span>
+                      {job.createdBy && (
+                        <div className="flex items-center gap-1.5 bg-neutral-50 px-2 py-1 rounded-lg border border-neutral-200" title={`Kayıt Eden: ${job.createdBy}`}>
+                          <div className="w-5 h-5 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 text-[8px]">
+                             {job.createdBy.charAt(0)}
+                          </div>
+                          <span className="text-[10px] font-bold text-neutral-600">{job.createdBy}</span>
+                        </div>
+                      )}
+                    </div>
                  </div>
 
                  {/* EKİP & ARAÇ BİLGİSİ */}
@@ -6360,11 +6387,12 @@ import React, { useState, useEffect } from 'react';
     ];
     const years = Array.from({ length: 10 }, (_, i) => 2024 + i);
 
-    const targetPersonnelList = personnelList.filter(p => 
-      collarType === 'Mavi Yaka' 
+    const targetPersonnelList = personnelList.filter(p => {
+      if (p.position === 'Firma Sahibi') return false;
+      return collarType === 'Mavi Yaka' 
         ? (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
-        : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
-    );
+        : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
+    });
 
     const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
@@ -6894,11 +6922,12 @@ import React, { useState, useEffect } from 'react';
     ];
     const years = Array.from({ length: 10 }, (_, i) => 2024 + i);
 
-    const targetPersonnelList = personnelList.filter(p => 
-      collarType === 'Mavi Yaka' 
+    const targetPersonnelList = personnelList.filter(p => {
+      if (p.position === 'Firma Sahibi') return false;
+      return collarType === 'Mavi Yaka' 
         ? (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
-        : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
-    );
+        : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
+    });
 
     const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
@@ -7304,11 +7333,12 @@ import React, { useState, useEffect } from 'react';
     ];
     const years = Array.from({ length: 10 }, (_, i) => 2024 + i);
 
-    const targetPersonnelList = personnelList.filter(p => 
-      collarType === 'Mavi Yaka' 
+    const targetPersonnelList = personnelList.filter(p => {
+      if (p.position === 'Firma Sahibi') return false;
+      return collarType === 'Mavi Yaka' 
         ? (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
-        : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
-    );
+        : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
+    });
 
     useEffect(() => {
       const fetchData = async () => {
@@ -7598,6 +7628,13 @@ import React, { useState, useEffect } from 'react';
                   <tr key={person.id} className="hover:bg-neutral-50 transition border-b border-neutral-300">
                     <td className="sticky left-0 z-20 bg-white border-r border-neutral-400 p-2 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                       <div className="flex items-center gap-2">
+                        <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 border border-neutral-300 text-[8px] md:text-sm">
+                          {person.profileImage ? (
+                            <img src={person.profileImage} alt={person.fullName} className="w-full h-full object-cover" />
+                          ) : (
+                            person.fullName.charAt(0)
+                          )}
+                        </div>
                         <span className="font-bold text-neutral-800 text-xs truncate max-w-[150px]">{person.fullName.toUpperCase()}</span>
                       </div>
                     </td>
