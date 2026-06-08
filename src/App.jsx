@@ -15,7 +15,7 @@ import React, { useState, useEffect } from 'react';
   import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
   import { 
     getFirestore, collection, addDoc, onSnapshot, 
-    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc
+    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit
   } from "firebase/firestore";
 
   // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
@@ -5857,7 +5857,7 @@ import React, { useState, useEffect } from 'react';
       if (currentUser?.id) {
         markNotificationsAsRead(currentUser.id);
       }
-    }, [currentUser, markNotificationsAsRead]);
+    }, [currentUser?.id]); // Sonsuz döngüyü kırmak için obje bağımlılığı kaldırıldı, sadece ID dinleniyor
 
     const myNotifications = notifications
       .filter(n => n.userId === currentUser?.id)
@@ -6013,7 +6013,7 @@ import React, { useState, useEffect } from 'react';
       if (currentUser?.id) {
         markNotificationsAsRead(currentUser.id);
       }
-    }, [currentUser, markNotificationsAsRead]);
+    }, [currentUser?.id]); // Sonsuz döngüyü kırmak için obje bağımlılığı kaldırıldı, sadece ID dinleniyor
 
     const todayStr = new Date().toISOString().split('T')[0];
     const myJobs = jobs.filter(j => 
@@ -8107,12 +8107,20 @@ import React, { useState, useEffect } from 'react';
       unsubs.push(onSnapshot(getCol('jobs'), snap => { setJobs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('transactions'), snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('tasks'), snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('notifications'), snap => { setNotifications(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('messages'), snap => { setMessages(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, msg: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('systemLogs'), snap => { setSystemLogs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
+      
+      // KARA DELİKLER - Sürekli şişen ve geçmişe dönük gereksiz okuma yapan verilere limit eklendi
+      const qNotifs = query(getCol('notifications'), limit(100));
+      const qMsgs = query(getCol('messages'), limit(50));
+      const qLogs = query(getCol('systemLogs'), limit(100));
+      const qComplaints = query(getCol('complaints'), limit(50));
+
+      unsubs.push(onSnapshot(qNotifs, snap => { setNotifications(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
+      unsubs.push(onSnapshot(qMsgs, snap => { setMessages(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, msg: true})); }, console.error));
+      unsubs.push(onSnapshot(qLogs, snap => { setSystemLogs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
+      unsubs.push(onSnapshot(qComplaints, snap => { setComplaints(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
+      
       unsubs.push(onSnapshot(getCol('vehicles'), snap => { setVehicles(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, veh: true})); }, console.error));
       unsubs.push(onSnapshot(getCol('materials'), snap => { setMaterials(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, mat: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('complaints'), snap => { setComplaints(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
       unsubs.push(onSnapshot(getCol('companyContacts'), snap => { 
         let contacts = snap.docs.map(d => ({...d.data(), id: d.id}));
         contacts.sort((a, b) => (a.order || 0) - (b.order || 0));
@@ -8603,8 +8611,22 @@ import React, { useState, useEffect } from 'react';
     const handleAddTransaction = async (e) => {
       e.preventDefault();
       if (!firebaseUser) return;
+
+      const amount = parseFloat(newTransaction.amount);
+
+      // Negatif kasa kontrolü için net kasanın hesaplanması
+      let allIncome = jobs.filter(j => j.status === 'completed').reduce((sum, j) => sum + (parseFloat(j.price) || 0), 0) + transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+      let allExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
+      let netBalance = allIncome - allExpense;
+
+      // Negatif kasa kontrolü
+      if (transactionType === 'expense' && netBalance - amount < 0) {
+        alert(`Kasadaki net durumunuz: ₺${netBalance.toLocaleString('tr-TR')}. Lütfen işlem yapmadan önce kasanıza gelir/para ekleyin veya mevcut giderlerinizi düzenleyin.`);
+        return;
+      }
+
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), { 
-        type: transactionType, amount: parseFloat(newTransaction.amount), category: newTransaction.category, account: newTransaction.account, date: newTransaction.date, description: newTransaction.description 
+        type: transactionType, amount: amount, category: newTransaction.category, account: newTransaction.account, date: newTransaction.date, description: newTransaction.description 
       });
       setNewTransaction({ amount: '', category: transactionType === 'income' ? 'Nakliye Tahsilatı' : 'Maaş Ödemesi', account: 'cash', date: new Date().toISOString().split('T')[0], description: '' });
       setActiveTab('financeDashboard');
