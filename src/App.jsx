@@ -533,9 +533,9 @@ import React, { useState, useEffect } from 'react';
       const postRef = collection(db, 'artifacts', appId, 'public', 'data', 'posts');
       const bestRef = collection(db, 'artifacts', appId, 'public', 'data', 'bestEmployees');
 
-      const qAnn = query(annRef, orderBy('timestamp', 'desc'));
-      const qPost = query(postRef, orderBy('timestamp', 'desc'));
-      const qBest = query(bestRef, orderBy('timestamp', 'desc'));
+const qAnn = query(annRef, orderBy('timestamp', 'desc'), limit(15));
+      const qPost = query(postRef, orderBy('timestamp', 'desc'), limit(15));
+      const qBest = query(bestRef, orderBy('timestamp', 'desc'), limit(15));
 
       const unsubs = [];
       unsubs.push(onSnapshot(qAnn, snap => {
@@ -634,10 +634,10 @@ import React, { useState, useEffect } from 'react';
       }
     };
 
-    useEffect(() => {
+useEffect(() => {
       if (!isMaviYaka || !currentUser) return;
       fetchMyScoreAndStatus();
-    }, [currentUser, isMaviYaka, jobs]);
+    }, [currentUser, isMaviYaka]);
 
     const handleRefresh = async () => {
       setIsRefreshing(true);
@@ -5288,7 +5288,8 @@ import React, { useState, useEffect } from 'react';
     );
   };
 
-  const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, addSystemLog }) => {
+const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, addSystemLog }) => {
+    const [isRestoring, setIsRestoring] = useState(false);
     
     const handleBackupData = () => {
       const dataToExport = {
@@ -5311,26 +5312,111 @@ import React, { useState, useEffect } from 'react';
       addSystemLog('Sistem Yedekleme', 'Sistem verileri JSON formatında dışa aktarıldı.');
     };
 
+    const handleRestoreData = (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      if (!window.confirm("DİKKAT: Bu işlem mevcut tüm operasyon, personel ve araç kayıtlarınızın üzerine yazacaktır! Sadece acil durumlarda kullanılması önerilir. Onaylıyor musunuz?")) {
+        e.target.value = null;
+        return;
+      }
+
+      setIsRestoring(true);
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const data = JSON.parse(event.target.result);
+          
+          if (!data.jobs || !data.personnelList) {
+            alert("Hata: Yüklediğiniz dosya geçerli bir Sembol CRM yedeği değil.");
+            setIsRestoring(false);
+            return;
+          }
+
+          // İşleri Yükle
+          for (const item of data.jobs) {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', item.id), item);
+          }
+          // Personelleri Yükle
+          for (const item of data.personnelList) {
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', item.id), item);
+          }
+          // Araçları Yükle
+          if (data.vehicles) {
+            for (const item of data.vehicles) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'vehicles', item.id), item);
+            }
+          }
+          // Malzemeleri Yükle
+          if (data.materials) {
+            for (const item of data.materials) {
+              await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', item.id), item);
+            }
+          }
+
+          addSystemLog('Sistem Geri Yükleme', 'Veritabanı yedeği dosyadan başarıyla geri yüklendi.');
+          alert("Sistem başarıyla geri yüklendi! Değişikliklerin aktif olması için sayfa yenilenecektir.");
+          window.location.reload();
+          
+        } catch (err) {
+          console.error("Yükleme Hatası:", err);
+          alert("Dosya okunurken veya veritabanına yazılırken bir hata oluştu.");
+          setIsRestoring(false);
+        }
+      };
+      
+      reader.readAsText(file);
+    };
+
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <FileText className="w-6 h-6 text-red-600" /> Sistem Dosyaları & Yedekleme
         </h2>
         
-        <div className="p-6 bg-blue-50 border border-blue-200 rounded-2xl mb-6">
-          <div className="flex items-start gap-4">
-            <div className="p-3 bg-blue-600 rounded-xl shrink-0">
-              <Database className="w-6 h-6 text-white" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+          {/* DIŞA AKTAR BÖLÜMÜ */}
+          <div className="p-6 bg-blue-50 border border-blue-200 rounded-2xl flex flex-col">
+            <div className="flex items-start gap-4 mb-auto">
+              <div className="p-3 bg-blue-600 rounded-xl shrink-0">
+                <Database className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="font-bold text-blue-900 text-lg mb-2">Veritabanı Yedeği Al</h3>
+                <p className="text-blue-700 text-sm font-medium mb-4 leading-relaxed">
+                  Sistemdeki tüm operasyon kayıtlarını (işleri), personelleri, araçları ve stok malzeme kayıtlarını tek bir JSON dosyası olarak bilgisayarınıza indirebilirsiniz. Bu işlem veri güvenliğiniz için düzenli aralıklarla önerilir.
+                </p>
+              </div>
             </div>
-            <div>
-              <h3 className="font-bold text-blue-900 text-lg mb-2">Veritabanı Yedeği Al</h3>
-              <p className="text-blue-700 text-sm font-medium mb-4 leading-relaxed">
-                Sistemdeki tüm operasyon kayıtlarını (işleri), personelleri, araçları ve stok malzeme kayıtlarını tek bir JSON dosyası olarak bilgisayarınıza indirebilirsiniz. Bu işlem olası veri kayıplarına karşı düzenli periyotlarda önerilir.
-              </p>
-              <button onClick={handleBackupData} className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition flex items-center gap-2 shadow-lg shadow-blue-600/30">
-                <Download className="w-5 h-5" /> Sistemi Dışa Aktar (Yedekle)
-              </button>
+            <button onClick={handleBackupData} className="w-full py-4 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30 mt-4">
+              <Download className="w-5 h-5" /> Sistemi Dışa Aktar (Yedekle)
+            </button>
+          </div>
+
+          {/* İÇE AKTAR (RESTORE) BÖLÜMÜ */}
+          <div className="p-6 bg-orange-50 border border-orange-200 rounded-2xl flex flex-col">
+            <div className="flex items-start gap-4 mb-auto">
+              <div className="p-3 bg-orange-600 rounded-xl shrink-0">
+                <History className="w-6 h-6 text-white" />
+              </div>
+              <div>
+                <h3 className="font-bold text-orange-900 text-lg mb-2">Yedeği Geri Yükle</h3>
+                <p className="text-orange-700 text-sm font-medium mb-4 leading-relaxed">
+                  Daha önce indirdiğiniz bir <b>.json</b> yedekleme dosyasını sisteme yükleyebilirsiniz. <br/> <b className="text-red-600">DİKKAT:</b> Bu işlem mevcut verilerinizi siler ve yerine yüklediğiniz dosyadaki verileri koyar.
+                </p>
+              </div>
             </div>
+            
+            {isRestoring ? (
+              <div className="w-full py-4 bg-orange-300 text-white font-bold rounded-xl flex items-center justify-center gap-2 shadow-sm mt-4 cursor-wait">
+                <Loader2 className="w-5 h-5 animate-spin" /> Yükleniyor... Lütfen bekleyin.
+              </div>
+            ) : (
+              <label className="w-full py-4 bg-orange-600 hover:bg-orange-700 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 shadow-lg shadow-orange-600/30 mt-4 cursor-pointer">
+                <Upload className="w-5 h-5" /> Yedek Dosyasını Yükle (Restore)
+                <input type="file" accept=".json" className="hidden" onChange={handleRestoreData} />
+              </label>
+            )}
           </div>
         </div>
       </div>
@@ -8104,10 +8190,19 @@ import React, { useState, useEffect } from 'react';
       const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
       const unsubs = [];
 
-      unsubs.push(onSnapshot(getCol('jobs'), snap => { setJobs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('transactions'), snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
-      unsubs.push(onSnapshot(getCol('tasks'), snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
-      
+// Son 60 günün operasyonlarını çekmek için tarih hesaplaması
+      const sixtyDaysAgo = new Date();
+      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      const startDateStr = sixtyDaysAgo.toISOString().split('T')[0];
+
+      const qJobs = query(getCol('jobs'), where('date', '>=', startDateStr));
+      const qTrans = query(getCol('transactions'), limit(300));
+      const qTasks = query(getCol('tasks'), limit(100));
+
+      unsubs.push(onSnapshot(qJobs, snap => { setJobs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
+      unsubs.push(onSnapshot(qTrans, snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
+      unsubs.push(onSnapshot(qTasks, snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
+            
       // KARA DELİKLER - Sürekli şişen ve geçmişe dönük gereksiz okuma yapan verilere limit eklendi
       const qNotifs = query(getCol('notifications'), limit(100));
       const qMsgs = query(getCol('messages'), limit(50));
