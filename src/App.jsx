@@ -13,10 +13,10 @@ import React, { useState, useEffect } from 'react';
   // --- FIREBASE BAĞLANTISI ---
   import { initializeApp } from "firebase/app";
   import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
-  import { 
-    getFirestore, collection, addDoc, onSnapshot, 
-    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit
-  } from "firebase/firestore";
+import { 
+  getFirestore, collection, addDoc, onSnapshot, 
+  doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where
+} from "firebase/firestore";
 
   // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
   const defaultFirebaseConfig = {
