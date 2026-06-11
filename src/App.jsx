@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
     ArrowUpRight, ArrowDownRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, ArrowUpDown,
     UserPlus, Camera, Upload, Edit, Ban, LogOut, Lock, Mail, Bell, User, Sparkles, Loader2, Copy, MessageSquareText,
     MessageCircle, Send, Package, Database, Download, History, Save, Search, Key, BarChart, TrendingUp, ListTodo,
-    Eye, EyeOff
+    Eye, EyeOff, FolderOpen
   } from 'lucide-react';
 
   // --- FIREBASE BAĞLANTISI ---
@@ -500,7 +500,149 @@ import {
     printWindow.document.close();
   };
 
-  const DashboardView = ({ jobs, allJobs, personnelList, vehicles, materials, systemLogs, currentUser, setViewingImage }) => {
+  const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
+    const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+    const [mesaiData, setMesaiData] = useState({});
+    const [puantajData, setPuantajData] = useState({});
+    
+    useEffect(() => {
+      const fetchDailyData = async () => {
+        if(!db || !appId) return;
+        const dateObj = new Date(selectedDate);
+        const year = dateObj.getFullYear();
+        const month = dateObj.getMonth() + 1;
+        
+        try {
+          const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${year}_${month}`);
+          const mSnap = await getDoc(mRef);
+          if(mSnap.exists()) setMesaiData(mSnap.data().records || {});
+          else setMesaiData({});
+
+          const pRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${year}_${month}`);
+          const pSnap = await getDoc(pRef);
+          if(pSnap.exists()) setPuantajData(pSnap.data().records || {});
+          else setPuantajData({});
+        } catch(e) {
+          console.error("Günlük veri çekilemedi:", e);
+        }
+      };
+      fetchDailyData();
+    }, [selectedDate]);
+
+    const selectedDay = parseInt(selectedDate.split('-')[2], 10);
+
+    const dailyCompletedJobs = jobs.filter(j => j.date === selectedDate && j.status === 'completed');
+    const yorumAlanlar = dailyCompletedJobs.filter(j => j.pointsApproved);
+    const yorumAlamayanlar = dailyCompletedJobs.filter(j => !j.pointsApproved);
+
+    const maviYakaList = personnelList.filter(p => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
+
+    const mesaiHareketleri = [];
+    maviYakaList.forEach(p => {
+       const d = mesaiData[p.id]?.[selectedDay];
+       const st = typeof d === 'object' && d !== null ? d.status : d;
+       const hr = typeof d === 'object' && d !== null ? d.hours : '';
+       if (st && st !== 'G') {
+         mesaiHareketleri.push({ name: p.fullName, status: st, hours: hr });
+       }
+    });
+
+    const finansHareketleri = transactions?.filter(t => t.date === selectedDate && t.type === 'expense') || [];
+
+    return (
+      <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl shadow-lg border border-slate-700 p-5 mb-6 relative overflow-hidden animate-in fade-in slide-in-from-top-4">
+         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-5 pb-4 border-b border-slate-700 gap-4">
+            <div>
+               <h3 className="text-xl font-black text-white flex items-center gap-2">
+                 <Activity className="w-6 h-6 text-blue-400" /> Mavi Yaka & Operasyon Günlük Takip
+               </h3>
+               <p className="text-slate-400 text-sm font-medium mt-1">Personel mesai, puan/yorum ve günlük muhasebe (avans vb.) hareketleri</p>
+            </div>
+            <div className="flex items-center gap-2 bg-slate-800 p-2.5 rounded-xl border border-slate-600 shadow-sm shrink-0">
+              <CalendarDays className="w-5 h-5 text-slate-400" />
+              <input 
+                type="date" 
+                value={selectedDate} 
+                onChange={e => setSelectedDate(e.target.value)}
+                className="bg-transparent text-white font-bold outline-none cursor-pointer"
+              />
+            </div>
+         </div>
+
+         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Yorum Alanlar */}
+            <div className="bg-slate-800/50 p-4 rounded-xl border border-emerald-500/30 flex flex-col h-56">
+               <h4 className="text-emerald-400 font-bold text-sm mb-3 flex items-center gap-1.5 border-b border-slate-700/50 pb-2 shrink-0">
+                 <Star className="w-4 h-4 fill-emerald-400"/> Yorum Alan Ekipler
+               </h4>
+               <div className="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1">
+                  {yorumAlanlar.length > 0 ? yorumAlanlar.map(j => (
+                     <div key={j.id} className="bg-slate-800 p-2.5 rounded-lg border border-slate-700 hover:border-emerald-500/50 transition">
+                        <p className="text-xs text-white font-bold truncate" title={j.customerName}>{j.customerName}</p>
+                        <p className="text-[10px] text-emerald-300 mt-1 truncate" title={j.team}><User className="w-3 h-3 inline mr-0.5" /> {j.team}</p>
+                     </div>
+                  )) : <p className="text-xs text-slate-500 italic mt-2">Bugün yorum alan ekip kaydı yok.</p>}
+               </div>
+            </div>
+
+            {/* Yorum Alamayanlar */}
+            <div className="bg-slate-800/50 p-4 rounded-xl border border-red-500/30 flex flex-col h-56">
+               <h4 className="text-red-400 font-bold text-sm mb-3 flex items-center gap-1.5 border-b border-slate-700/50 pb-2 shrink-0">
+                 <AlertTriangle className="w-4 h-4"/> Yorum Alamayan Ekipler
+               </h4>
+               <div className="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1">
+                  {yorumAlamayanlar.length > 0 ? yorumAlamayanlar.map(j => (
+                     <div key={j.id} className="bg-slate-800 p-2.5 rounded-lg border border-slate-700 hover:border-red-500/50 transition">
+                        <p className="text-xs text-white font-bold truncate" title={j.customerName}>{j.customerName}</p>
+                        <p className="text-[10px] text-red-300 mt-1 truncate" title={j.team}><User className="w-3 h-3 inline mr-0.5" /> {j.team}</p>
+                     </div>
+                  )) : <p className="text-xs text-slate-500 italic mt-2">Tüm ekipler yorum aldı veya iş yok.</p>}
+               </div>
+            </div>
+
+            {/* Mesai / İzin */}
+            <div className="bg-slate-800/50 p-4 rounded-xl border border-blue-500/30 flex flex-col h-56">
+               <h4 className="text-blue-400 font-bold text-sm mb-3 flex items-center gap-1.5 border-b border-slate-700/50 pb-2 shrink-0">
+                 <Clock className="w-4 h-4"/> Mesai & İzin Durumları
+               </h4>
+               <div className="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1">
+                  {mesaiHareketleri.length > 0 ? mesaiHareketleri.map((m, i) => {
+                     const opt = MESAI_STATUS_OPTIONS.find(o => o.code === m.status);
+                     return (
+                        <div key={i} className="flex justify-between items-center bg-slate-800 p-2.5 rounded-lg border border-slate-700 hover:border-blue-500/50 transition">
+                           <span className="text-[11px] text-white font-bold truncate pr-2" title={m.name}>{m.name}</span>
+                           <span className="text-[10px] font-black bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded border border-blue-500/30 whitespace-nowrap">
+                             {opt ? opt.label : m.status} {m.hours ? `(${m.hours}s)` : ''}
+                           </span>
+                        </div>
+                     )
+                  }) : <p className="text-xs text-slate-500 italic mt-2">Özel mesai/izin kaydı bulunmuyor.</p>}
+               </div>
+            </div>
+
+            {/* Muhasebe / Avans */}
+            <div className="bg-slate-800/50 p-4 rounded-xl border border-orange-500/30 flex flex-col h-56">
+               <h4 className="text-orange-400 font-bold text-sm mb-3 flex items-center gap-1.5 border-b border-slate-700/50 pb-2 shrink-0">
+                 <Wallet className="w-4 h-4"/> Günlük Gider & Avans
+               </h4>
+               <div className="space-y-2 overflow-y-auto custom-scrollbar pr-1 flex-1">
+                  {finansHareketleri.length > 0 ? finansHareketleri.map(t => (
+                     <div key={t.id} className="bg-slate-800 p-2.5 rounded-lg border border-slate-700 hover:border-orange-500/50 transition flex flex-col justify-center">
+                        <div className="flex justify-between items-start mb-1">
+                           <p className="text-[11px] text-white font-bold truncate flex-1 pr-2" title={t.customerOrDesc || t.description}>{t.customerOrDesc || t.description}</p>
+                           <span className="text-[11px] font-black text-orange-400 shrink-0">-₺{Number(t.amount).toLocaleString('tr-TR')}</span>
+                        </div>
+                        <p className="text-[9px] text-slate-400 truncate">{t.category}</p>
+                     </div>
+                  )) : <p className="text-xs text-slate-500 italic mt-2">Bugün kaydedilen bir gider/avans yok.</p>}
+               </div>
+            </div>
+         </div>
+      </div>
+    )
+  };
+
+  const DashboardView = ({ jobs, allJobs, personnelList, vehicles, materials, systemLogs, currentUser, setViewingImage, transactions }) => {
     const isAdmin = ['Müdür', 'Firma Sahibi', 'Operasyon'].some(role => currentUser?.position?.includes(role) || currentUser?.rank === role) || currentUser?.permissions?.canEdit;
     
     const [myScore, setMyScore] = useState(0);
@@ -1026,6 +1168,10 @@ useEffect(() => {
                 </div>
               </div>
             </div>
+            
+            {isAdmin && (
+               <AdminMaviYakaTakip jobs={allJobs} personnelList={personnelList} transactions={transactions} />
+            )}
             
             <div className="grid grid-cols-1 gap-6 mt-6">
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-80 flex flex-col">
@@ -2014,14 +2160,22 @@ useEffect(() => {
                         {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : job.status === 'cancelled' ? 'İptal Edildi' : 'Bekliyor'}
                       </span>
                     </div>
-                    {job.createdBy && (
-                      <div className="flex items-center gap-1.5 bg-neutral-50 px-2 py-1 rounded-lg border border-neutral-200" title={`Kayıt Eden: ${job.createdBy}`}>
-                        <div className="w-5 h-5 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 text-[8px]">
-                           {job.createdBy.charAt(0)}
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      {job.price && (
+                        <div className="text-right leading-none bg-green-50 px-3 py-1.5 rounded-lg border border-green-200 shadow-sm">
+                          <span className="block text-lg font-black text-green-700">₺{parseInt(job.price).toLocaleString('tr-TR')}</span>
+                          {job.deposit && <span className="block text-[10px] font-bold text-green-600 mt-1">Kapora: ₺{parseInt(job.deposit).toLocaleString('tr-TR')}</span>}
                         </div>
-                        <span className="text-[10px] font-bold text-neutral-600">{job.createdBy}</span>
-                      </div>
-                    )}
+                      )}
+                      {job.createdBy && (
+                        <div className="flex items-center gap-1.5 bg-neutral-50 px-2 py-1 rounded-lg border border-neutral-200" title={`Kayıt Eden: ${job.createdBy}`}>
+                          <div className="w-5 h-5 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 text-[8px]">
+                             {job.createdBy.charAt(0)}
+                          </div>
+                          <span className="text-[10px] font-bold text-neutral-600">{job.createdBy}</span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   
                   <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -2750,8 +2904,8 @@ useEffect(() => {
       </div>
     );
   };
-
-  const CalendarView = ({ jobs, handleEditJob, currentUser }) => {
+  const CalendarView = ({ jobs, handleEditJob, currentUser, handleOpenAssignModal }) => {
+    const canAssign = currentUser?.position?.includes('Operasyon') || currentUser?.position?.includes('Firma Sahibi') || currentUser?.permissions?.canEdit;
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
     const [currentYear, setCurrentYear] = useState(today.getFullYear());
@@ -3088,6 +3242,11 @@ useEffect(() => {
                         >
                           <MessageCircle className="w-3 h-3"/> Bilgilendir (WA)
                         </button>
+                        {canAssign && (
+                          <button onClick={() => handleOpenAssignModal(job)} className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-blue-200">
+                            <CheckSquare className="w-3 h-3"/> {job.team !== 'Atanmadı' ? 'Görevi Düzenle' : 'Görev Ata'}
+                          </button>
+                        )}
                         <button onClick={() => generateContractPDF(job)} className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-green-200">
                           <FileText className="w-3 h-3"/> PDF
                         </button>
@@ -3495,7 +3654,7 @@ useEffect(() => {
   };
 
   const AddPersonnelView = ({ onAdd, positions = [], ranks = [] }) => {
-    const [formData, setFormData] = useState({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '', collarType: 'Mavi Yaka', startDate: '', setCardNo: '', maas: '', yol: '', yemek: '', bankaParasi: '', icrasiVar: 'Hayır' });
+    const [formData, setFormData] = useState({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', employmentStatus: 'Aktif', email: '', password: '', profileImage: '', collarType: 'Mavi Yaka', startDate: '', setCardNo: '', maas: '', yol: '', yemek: '', bankaParasi: '', icrasiVar: 'Hayır' });
     const [isUploading, setIsUploading] = useState(false);
     
     const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -3535,7 +3694,7 @@ useEffect(() => {
     const handleSubmit = (e) => {
       e.preventDefault();
       onAdd({ id: Date.now(), ...formData });
-      setFormData({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', safetyTraining: 'Eğitim Aldı (Geçerli)', email: '', password: '', profileImage: '', collarType: 'Mavi Yaka', startDate: '', setCardNo: '', maas: '', yol: '', yemek: '', bankaParasi: '', icrasiVar: 'Hayır' });
+      setFormData({ fullName: '', tcNo: '', birthDate: '', companyPhone: '', personalPhone: '', position: '', rank: '', employmentStatus: 'Aktif', email: '', password: '', profileImage: '', collarType: 'Mavi Yaka', startDate: '', setCardNo: '', maas: '', yol: '', yemek: '', bankaParasi: '', icrasiVar: 'Hayır' });
     };
 
     return (
@@ -3642,11 +3801,10 @@ useEffect(() => {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-bold text-neutral-700 mb-1">İş Güvenliği Durumu</label>
-              <select required name="safetyTraining" value={formData.safetyTraining} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
-                <option value="Eğitim Aldı (Geçerli)">Eğitim Aldı (Geçerli)</option>
-                <option value="Eğitim Süresi Doldu">Eğitim Süresi Doldu</option>
-                <option value="Eğitim Almadı (Riskli)">Eğitim Almadı (Riskli)</option>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Personel Durumu *</label>
+              <select required name="employmentStatus" value={formData.employmentStatus} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                <option value="Aktif">Aktif (Çalışıyor)</option>
+                <option value="Pasif">Pasif (İşten Ayrıldı / Erişim Yok)</option>
               </select>
             </div>
           </div>
@@ -3758,7 +3916,7 @@ useEffect(() => {
                 <th className="p-4 font-bold">İletişim</th>
                 <th className="p-4 font-bold">Pozisyon / Rütbe</th>
                 <th className="p-4 font-bold">Yaka Tipi</th>
-                <th className="p-4 font-bold">İş Güvenliği</th>
+                <th className="p-4 font-bold">Çalışma Durumu</th>
                 <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
               </tr>
             </thead>
@@ -3798,11 +3956,10 @@ useEffect(() => {
                   </td>
                   <td className="p-4">
                     <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase whitespace-nowrap ${
-                      person.safetyTraining?.includes('Geçerli') ? 'bg-green-100 text-green-700' :
-                      person.safetyTraining?.includes('Doldu') ? 'bg-yellow-100 text-yellow-700' :
+                      (person.employmentStatus === 'Aktif' || !person.employmentStatus) ? 'bg-green-100 text-green-700' :
                       'bg-red-100 text-red-700'
                     }`}>
-                      {person.safetyTraining}
+                      {person.employmentStatus || 'Aktif'}
                     </span>
                   </td>
                   <td className="p-4">
@@ -3926,11 +4083,10 @@ useEffect(() => {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">İş Güvenliği Durumu</label>
-                    <select required value={editForm.safetyTraining || 'Eğitim Aldı (Geçerli)'} onChange={(e) => setEditForm({...editForm, safetyTraining: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
-                      <option value="Eğitim Aldı (Geçerli)">Eğitim Aldı (Geçerli)</option>
-                      <option value="Eğitim Süresi Doldu">Eğitim Süresi Doldu</option>
-                      <option value="Eğitim Almadı (Riskli)">Eğitim Almadı (Riskli)</option>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Personel Durumu *</label>
+                    <select required value={editForm.employmentStatus || 'Aktif'} onChange={(e) => setEditForm({...editForm, employmentStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                      <option value="Aktif">Aktif (Çalışıyor)</option>
+                      <option value="Pasif">Pasif (İşten Ayrıldı / Erişim Yok)</option>
                     </select>
                   </div>
                 </div>
@@ -4006,6 +4162,252 @@ useEffect(() => {
                 <p className="text-sm text-neutral-700 whitespace-pre-wrap leading-relaxed">{complaint.content}</p>
               </div>
             ))
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const OzlukDosyalariView = ({ personnelList, db, appId, addSystemLog, setViewingImage }) => {
+    const [filterCollar, setFilterCollar] = useState('Mavi Yaka');
+    const [selectedPerson, setSelectedPerson] = useState(null);
+    const [uploadingCategory, setUploadingCategory] = useState(null);
+    const [searchQuery, setSearchQuery] = useState('');
+
+    const documentCategories = [
+      "Personel Kimlik",
+      "Personel Ehliyet Ve diğer vb belgeler",
+      "Personel İş Güvenliği",
+      "Personel Sağlık Raporu",
+      "Personel Sigorta Giriş",
+      "Personel Tutanakları",
+      "Personel Dilekçe Şikayet",
+      "Personel Ücretsiz izinleri",
+      "Personel Ücretli İzinleri",
+      "Personel Devamsızlık tutanakları",
+      "Personel Diğer Belgeleri"
+    ];
+
+    const filteredPersonnel = personnelList.filter(p => {
+      if (p.position === 'Firma Sahibi') return false;
+      if (p.collarType !== filterCollar && !(filterCollar === 'Mavi Yaka' && !p.collarType)) return false;
+      if (searchQuery.trim() && !p.fullName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
+      return true;
+    });
+
+    const handleFileUpload = async (e, category) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      setUploadingCategory(category);
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { 
+          const json = JSON.parse(text); 
+          uploadedUrl = json.url || json.fileName || json.file || text; 
+        } catch (err) { 
+          uploadedUrl = text.trim(); 
+        }
+
+        const currentFiles = selectedPerson.ozlukDosyasi?.[category] || [];
+        const newFile = { 
+          name: file.name, 
+          url: uploadedUrl, 
+          date: new Date().toLocaleDateString('tr-TR') 
+        };
+        const updatedOzluk = { ...(selectedPerson.ozlukDosyasi || {}), [category]: [...currentFiles, newFile] };
+        
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), {
+          ozlukDosyasi: updatedOzluk
+        });
+
+        setSelectedPerson({ ...selectedPerson, ozlukDosyasi: updatedOzluk });
+        addSystemLog('Özlük Dosyası Eklendi', `${selectedPerson.fullName} personeline ait "${category}" bölümüne yeni belge eklendi.`);
+        
+      } catch (err) {
+        alert('Yükleme sırasında hata oluştu.');
+      }
+      setUploadingCategory(null);
+    };
+
+    const handleDeleteFile = async (category, fileIndex) => {
+      if (!window.confirm('Bu belgeyi kalıcı olarak silmek istediğinize emin misiniz?')) return;
+      
+      const currentFiles = selectedPerson.ozlukDosyasi?.[category] || [];
+      const newFiles = currentFiles.filter((_, i) => i !== fileIndex);
+      const updatedOzluk = { ...(selectedPerson.ozlukDosyasi || {}), [category]: newFiles };
+      
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), {
+        ozlukDosyasi: updatedOzluk
+      });
+
+      setSelectedPerson({ ...selectedPerson, ozlukDosyasi: updatedOzluk });
+      addSystemLog('Özlük Dosyası Silindi', `${selectedPerson.fullName} personeline ait "${category}" bölümünden bir belge silindi.`);
+    };
+
+    if (selectedPerson) {
+      return (
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in slide-in-from-right-4">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-neutral-200 pb-4 mb-6">
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => setSelectedPerson(null)} 
+                className="p-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-xl transition"
+              >
+                <ChevronLeft className="w-5 h-5" />
+              </button>
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden border-2 border-white shadow-sm shrink-0">
+                  {selectedPerson.profileImage ? (
+                    <img src={selectedPerson.profileImage} alt={selectedPerson.fullName} className="w-full h-full object-cover" />
+                  ) : (
+                    selectedPerson.fullName.charAt(0)
+                  )}
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-black">{selectedPerson.fullName} <span className="text-sm font-medium text-neutral-500">/ Özlük Dosyası</span></h2>
+                  <p className="text-xs font-bold text-neutral-500 mt-0.5">{selectedPerson.position} • {selectedPerson.rank} • {selectedPerson.collarType || 'Mavi Yaka'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {documentCategories.map((cat, idx) => {
+              const files = selectedPerson.ozlukDosyasi?.[cat] || [];
+              return (
+                <div key={idx} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+                  <div className="flex justify-between items-center mb-3 border-b border-neutral-200 pb-2">
+                    <h3 className="font-bold text-black text-sm flex items-center gap-2">
+                      <FolderOpen className="w-4 h-4 text-red-600" /> {cat}
+                    </h3>
+                    <span className="text-xs font-bold bg-white text-neutral-600 px-2 py-1 rounded shadow-sm border border-neutral-200">{files.length} Belge</span>
+                  </div>
+                  
+                  <div className="space-y-2 mb-3 max-h-40 overflow-y-auto custom-scrollbar">
+                    {files.map((file, fIdx) => (
+                      <div key={fIdx} className="flex justify-between items-center bg-white p-2.5 rounded-lg border border-neutral-200 shadow-sm group">
+                        <div className="flex items-center gap-2 overflow-hidden pr-2">
+                          <FileText className="w-4 h-4 text-neutral-400 shrink-0" />
+                          <div className="flex flex-col overflow-hidden">
+                            <span className="text-xs font-bold text-neutral-800 truncate" title={file.name}>{file.name}</span>
+                            <span className="text-[9px] text-neutral-500 font-medium">{file.date}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition">
+                          <button onClick={() => setViewingImage({ title: `${cat} Belgesi`, name: file.url })} className="p-1.5 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition" title="Görüntüle">
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => handleDeleteFile(cat, fIdx)} className="p-1.5 bg-red-50 text-red-600 rounded hover:bg-red-100 transition" title="Sil">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {files.length === 0 && (
+                      <p className="text-xs text-neutral-400 italic py-2">Henüz bu kategoriye belge eklenmemiş.</p>
+                    )}
+                  </div>
+                  
+                  <label className={`cursor-pointer w-full py-2.5 bg-white border border-neutral-300 border-dashed rounded-lg flex items-center justify-center gap-2 hover:bg-neutral-100 transition shadow-sm ${uploadingCategory === cat ? 'opacity-50 pointer-events-none' : ''}`}>
+                    {uploadingCategory === cat ? (
+                      <Loader2 className="w-4 h-4 text-neutral-500 animate-spin" />
+                    ) : (
+                      <Upload className="w-4 h-4 text-neutral-500" />
+                    )}
+                    <span className="text-xs font-bold text-neutral-600">{uploadingCategory === cat ? 'Yükleniyor...' : 'Yeni Belge Yükle'}</span>
+                    <input type="file" className="hidden" onChange={(e) => handleFileUpload(e, cat)} disabled={uploadingCategory !== null} />
+                  </label>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4">
+          <h2 className="text-xl font-bold text-black flex items-center gap-2 shrink-0">
+            <FolderOpen className="w-6 h-6 text-red-600" /> Personel Özlük Dosyaları
+          </h2>
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            <div className="relative flex-1 md:w-64">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+              <input
+                type="text"
+                placeholder="Personel Ara..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-600 transition"
+              />
+            </div>
+            <div className="flex bg-neutral-100 p-1 rounded-xl shrink-0">
+              <button 
+                onClick={() => setFilterCollar('Mavi Yaka')}
+                className={`px-4 py-1.5 text-sm font-bold rounded-lg transition ${filterCollar === 'Mavi Yaka' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+              >
+                Mavi Yaka
+              </button>
+              <button 
+                onClick={() => setFilterCollar('Beyaz Yaka')}
+                className={`px-4 py-1.5 text-sm font-bold rounded-lg transition ${filterCollar === 'Beyaz Yaka' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+              >
+                Beyaz Yaka
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {filteredPersonnel.map(person => {
+            let totalDocs = 0;
+            if (person.ozlukDosyasi) {
+               Object.values(person.ozlukDosyasi).forEach(arr => totalDocs += arr.length);
+            }
+            
+            return (
+              <div 
+                key={person.id} 
+                onClick={() => setSelectedPerson(person)}
+                className="bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 rounded-xl p-4 cursor-pointer transition group relative overflow-hidden"
+              >
+                <div className="absolute top-0 right-0 w-16 h-16 bg-red-600/5 rounded-bl-full -z-0 group-hover:scale-110 transition-transform"></div>
+                <div className="flex items-center gap-3 mb-3 relative z-10">
+                  <div className="w-12 h-12 rounded-full bg-white border border-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 shadow-sm">
+                    {person.profileImage ? (
+                      <img src={person.profileImage} alt={person.fullName} className="w-full h-full object-cover" />
+                    ) : (
+                      person.fullName.charAt(0)
+                    )}
+                  </div>
+                  <div className="overflow-hidden">
+                    <h3 className="font-bold text-black text-sm truncate">{person.fullName}</h3>
+                    <p className="text-[10px] font-medium text-neutral-500 truncate">{person.position}</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center justify-between mt-auto pt-3 border-t border-neutral-200 relative z-10">
+                  <span className="text-xs font-bold text-neutral-600 flex items-center gap-1.5 bg-white px-2 py-1 rounded shadow-sm border border-neutral-200">
+                    <FolderOpen className="w-3.5 h-3.5 text-red-600" /> {totalDocs} Evrak
+                  </span>
+                  <span className="text-[10px] bg-red-50 text-red-600 font-bold px-2 py-1 rounded border border-red-100 group-hover:bg-red-600 group-hover:text-white transition">
+                    Dosyayı Aç
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+          {filteredPersonnel.length === 0 && (
+            <div className="col-span-full py-12 text-center text-neutral-500 font-medium border-2 border-dashed border-neutral-200 rounded-2xl">
+              Bu kategoriye uygun personel bulunamadı.
+            </div>
           )}
         </div>
       </div>
@@ -6102,14 +6504,17 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
     }, [currentUser?.id]); // Sonsuz döngüyü kırmak için obje bağımlılığı kaldırıldı, sadece ID dinleniyor
 
     const todayStr = new Date().toISOString().split('T')[0];
-    const myJobs = jobs.filter(j => 
-        (j.assignedPersonnelIds?.includes(currentUser.id) || j.assignedPersonnelId === currentUser.id) && 
-        j.date <= todayStr
-    );
     
     // YENİ EKLENEN: Mavi yaka ve Ekip Şefi OLMAYAN durumu kontrol et
     const isStandardBlueCollar = (currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position))) && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
 
+    const myJobs = jobs.filter(j => {
+        const isAssigned = j.assignedPersonnelIds?.includes(currentUser.id) || j.assignedPersonnelId === currentUser.id;
+        if (!isAssigned) return false;
+        // Ekip Şefi değilse (Standart mavi yaka) işleri sadece atandığı gün sabah görür
+        if (isStandardBlueCollar && j.date > todayStr) return false;
+        return true;
+    });
 
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-4xl mx-auto">
@@ -6240,8 +6645,8 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
                       </div>
                     ))}
 
-                    {/* VR (BOŞALTMA) - YALNIZCA ASIL GÖREVLİ GÖREBİLİR */}
-                    {isMainAssignee && job.toDistrict && (
+                    {/* VR (BOŞALTMA) - TÜM GÖREVLİLER GÖREBİLİR */}
+                    {job.toDistrict && (
                       <>
                         <div className="w-full h-px bg-neutral-200 my-1"></div>
                         <div>
@@ -8037,6 +8442,8 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
     const [isTargetVehicleExternal, setIsTargetVehicleExternal] = useState(false);
     const [assignedJobTime, setAssignedJobTime] = useState('');
 
+    const [teamSuggestion, setTeamSuggestion] = useState(null); // YENİ: Yapay zeka tahmini ekip state'i
+
     const [showEndJobModal, setShowEndJobModal] = useState(false);
     const [jobToEnd, setJobToEnd] = useState(null);
     const [endJobError, setEndJobError] = useState('');
@@ -8230,7 +8637,7 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
         setPersonnelList(list);
         if (snap.empty) {
           await addDoc(getCol('personnelList'), {
-            fullName: 'Sistem Yöneticisi', email: 'admin', password: 'admin', position: 'Firma Sahibi', rank: 'Müdür', safetyTraining: 'Eğitim Aldı (Geçerli)', permissions: { canView: true, canEdit: true }
+            fullName: 'Sistem Yöneticisi', email: 'admin', password: 'admin', position: 'Firma Sahibi', rank: 'Müdür', employmentStatus: 'Aktif', permissions: { canView: true, canEdit: true }
           });
         }
 
@@ -8268,7 +8675,7 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
               const pName = (p.fullName || '').trim().toLocaleLowerCase('tr-TR');
               return (pEmail === parsedInput || pName === parsedInput) && p.password === parsed.password;
             });
-            if (user) {
+            if (user && user.employmentStatus !== 'Pasif') {
               setCurrentUser(user);
               setIsAuthenticated(true);
             }
@@ -8276,6 +8683,21 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
         } catch (e) {}
       }
     }, [personnelList, isAuthenticated]); 
+
+    useEffect(() => {
+      if (isAuthenticated && currentUser && personnelList.length > 0) {
+        const updatedUser = personnelList.find(p => p.id === currentUser.id);
+        if (updatedUser) {
+          if (updatedUser.employmentStatus === 'Pasif') {
+             setCurrentUser(updatedUser);
+          } else if (JSON.stringify(updatedUser.permissions) !== JSON.stringify(currentUser.permissions) || updatedUser.employmentStatus !== currentUser.employmentStatus) {
+             setCurrentUser(updatedUser);
+          }
+        } else {
+          handleLogout();
+        }
+      }
+    }, [personnelList]);
 
     // --- FIREBASE CRUD İŞLEMLERİ ---
 
@@ -8437,6 +8859,47 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
     const handleDeleteMaterial = async (id) => {
       if (!firebaseUser) return;
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', id));
+    };
+
+    const handleUpdateMaterialStock = async (materialId, amountChange, description, cost) => {
+      if (!firebaseUser) return;
+      const material = materials.find(m => m.id === materialId);
+      if (!material) return;
+
+      const changeNum = parseFloat(amountChange) || 0;
+      const newStock = Math.max(0, parseFloat(material.stock) + changeNum);
+
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', materialId), {
+        stock: String(newStock)
+      });
+
+      let actionText = changeNum > 0 ? 'Stok Girişi' : 'Stok Çıkışı';
+      let detailsText = `${material.name} malzemesi için ${Math.abs(changeNum)} ${material.unit} ${actionText} yapıldı.`;
+      if (description) detailsText += ` Açıklama: ${description}.`;
+      if (cost && parseFloat(cost) > 0) detailsText += ` Tutar: ₺${cost}.`;
+
+      addSystemLog(actionText, detailsText);
+
+      // Finans Eklemesi
+      if (cost && parseFloat(cost) > 0 && changeNum > 0) {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
+          type: 'expense',
+          amount: parseFloat(cost),
+          category: 'Malzeme Alımı',
+          account: 'cash',
+          date: new Date().toISOString().split('T')[0],
+          description: `${material.name} Alımı: ${description || ''}`.trim()
+        });
+      } else if (cost && parseFloat(cost) > 0 && changeNum < 0) {
+         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
+          type: 'income',
+          amount: parseFloat(cost),
+          category: 'Malzeme Satışı / Çıkışı',
+          account: 'cash',
+          date: new Date().toISOString().split('T')[0],
+          description: `${material.name} Çıkışı: ${description || ''}`.trim()
+        });
+      }
     };
 
     const handleAddTask = async (e) => {
@@ -8939,6 +9402,135 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
       } catch (err) { console.error(err); }
     };
 
+    const generateTeamSuggestion = (job) => {
+      let base = 4; // default
+      const room = job.fromRoomCount || '';
+      const isDepo = job.type === 'Depo';
+
+      if (room.includes('1+0') || room.includes('Parça')) base = isDepo ? 2 : 3;
+      else if (room.includes('1+1')) base = isDepo ? 3 : 4;
+      else if (room.includes('2+1')) base = isDepo ? 4 : 5;
+      else if (room.includes('3+1')) base = isDepo ? 5 : 6;
+      else if (room.includes('4+1') || room.includes('Villa') || room.includes('Ofis')) base = isDepo ? 6 : 7;
+      else base = isDepo ? 4 : 5;
+
+      let targetCount = base;
+      let notes = [];
+      notes.push(`${room} ${job.type || 'Nakliye'} operasyonu taban ekip: ${base} kişi.`);
+
+      if (job.fromPacking === 'Toplama Yapılacak') {
+        targetCount += 1;
+        notes.push("Firma toplaması olduğu için +1 kişi eklendi.");
+      }
+
+      const getFloorNum = (floorStr) => {
+        if (!floorStr) return 0;
+        const match = floorStr.match(/(\d+)/);
+        return match ? parseInt(match[1]) : 0;
+      };
+
+      const fromFloor = getFloorNum(job.fromFloor);
+      const toFloor = getFloorNum(job.toFloor);
+
+      if (job.fromTransportMethod === 'Merdiven' && fromFloor > 3) {
+        targetCount += 1;
+        notes.push(`Yükleme ${fromFloor}. Kat Merdiven olduğu için +1 kişi eklendi.`);
+      }
+      if (job.toTransportMethod === 'Merdiven' && toFloor > 3) {
+        targetCount += 1;
+        notes.push(`Boşaltma ${toFloor}. Kat Merdiven olduğu için +1 kişi eklendi.`);
+      }
+
+      const isHighValue = parseInt(job.price || 0) > 25000;
+      if (isHighValue) {
+        notes.push("Yüksek bütçeli iş: Daha çok yorum alan tecrübeli ekiplere öncelik verildi.");
+      }
+
+      // O gün başka işte olanları bul (Müsaitlik kontrolü)
+      const busyIds = jobs.filter(j => j.date === job.date && j.id !== job.id && j.status !== 'cancelled')
+                          .flatMap(j => j.assignedPersonnelIds || []);
+
+      // Müşteri Memnuniyeti / Yorum Skoru Hesaplama
+      const personnelScores = {};
+      personnelList.forEach(p => personnelScores[p.id] = 0);
+      
+      jobs.filter(j => j.status === 'completed' && j.pointsApproved).forEach(j => {
+          (j.assignedPersonnelIds || []).forEach(id => {
+              if(personnelScores[id] !== undefined) personnelScores[id] += 1;
+          });
+      });
+      
+      let available = personnelList.filter(p => !busyIds.includes(p.id) && ['Şoför', 'Mobilya Ustası', 'Taşıma Elemanı'].includes(p.position));
+
+      // Puan/Rank sıralaması (Önceliklendirme)
+      available.sort((a, b) => {
+         const rankWeight = { 'Müdür': 5, 'Ekip Şefi': 4, 'Kalfa': 3, 'Asistan': 2, 'Standart': 1 };
+         let scoreA = rankWeight[a.rank] || 0;
+         let scoreB = rankWeight[b.rank] || 0;
+         
+         // Yüksek fiyatlı işlerde yorum ve müşteri memnuniyeti puanını (x2 çarpanla) baz al
+         if (isHighValue) {
+             scoreA += (personnelScores[a.id] || 0) * 2;
+             scoreB += (personnelScores[b.id] || 0) * 2;
+         }
+
+         return scoreB - scoreA;
+      });
+
+      const suggested = [];
+      
+      // 1. En az 1 Şoför ata
+      const soforIdx = available.findIndex(p => p.position === 'Şoför');
+      if (soforIdx > -1) suggested.push(available.splice(soforIdx, 1)[0]);
+
+      // 2. En az 1 Mobilyacı ata
+      const ustaIdx = available.findIndex(p => p.position === 'Mobilya Ustası');
+      if (ustaIdx > -1) suggested.push(available.splice(ustaIdx, 1)[0]);
+
+      // Daha önceki tamamlanmış işlerdeki "Birlikte Çalışma (Sinerji)" durumunu hesapla
+      if (suggested.length > 0) {
+          const anchorId = suggested[0].id;
+          const synergyScores = {};
+          jobs.filter(j => j.status === 'completed' && j.assignedPersonnelIds?.includes(anchorId)).forEach(j => {
+              j.assignedPersonnelIds.forEach(id => {
+                  if (id !== anchorId) {
+                      synergyScores[id] = (synergyScores[id] || 0) + 1;
+                  }
+              });
+          });
+
+          // Kalan personeli Sinerji (birlikte çalışmış olma sıklığına) göre tekrar ağırlıklandır
+          available.sort((a, b) => {
+              const synA = synergyScores[a.id] || 0;
+              const synB = synergyScores[b.id] || 0;
+              return synB - synA; 
+          });
+      }
+
+      // 3. Kalanı tamamlama (Sırasıyla: Şoför > Mobilyacı > Taşımacı)
+      while (suggested.length < targetCount && available.length > 0) {
+         let nextIdx = available.findIndex(p => p.position === 'Şoför');
+         if (nextIdx === -1) nextIdx = available.findIndex(p => p.position === 'Mobilya Ustası');
+         if (nextIdx === -1) nextIdx = available.findIndex(p => p.position === 'Taşıma Elemanı');
+         if (nextIdx === -1) nextIdx = 0; // Güvenlik ağı
+
+         suggested.push(available.splice(nextIdx, 1)[0]);
+      }
+
+      // 4. Sistemdeki uygun kadro yetmezse dışarıdan "Yevmiyeci" ekle
+      let yevmiyeciCount = 1;
+      while (suggested.length < targetCount) {
+         suggested.push({ fullName: `Yevmiyeci ${yevmiyeciCount}`, position: 'Taşıma Elemanı', isExternal: true });
+         yevmiyeciCount++;
+      }
+
+      return {
+        targetCount,
+        notes,
+        suggested
+      };
+    };
+
     const handleOpenAssignModal = (job) => {
       setJobToAssign(job);
       setAssigneeId(job.assignedPersonnelId || '');
@@ -8970,6 +9562,7 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
       setCustomMaterials(job.customMaterials || []);
       setNewCustomMaterial({ name: '', amount: 1 });
       setShowBusyPersonnel(false); // Her açılışta sıfırla
+      setTeamSuggestion(null); // Modalı açarken öneriyi sıfırla
 
       setShowAssignModal(true);
     };
@@ -9042,7 +9635,7 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
         console.error("Otomatik mesai güncelleme hatası:", err);
       }
       
-      setShowAssignModal(false); setJobToAssign(null); setAssigneeId(''); setAdditionalAssignees([]); setManualExtraAssignees([]); setAssignedVehiclePlate('');
+      setShowAssignModal(false); setJobToAssign(null); setAssigneeId(''); setAdditionalAssignees([]); setManualExtraAssignees([]); setAssignedVehiclePlate(''); setTeamSuggestion(null);
     };
 
     const handleAddManualAssignee = () => setManualExtraAssignees([...manualExtraAssignees, '']);
@@ -9067,7 +9660,7 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
         isTargetVehicleExternal: null,
         assignedJobTime: null
       });
-      setShowAssignModal(false); setJobToAssign(null); setAssigneeId(''); setAdditionalAssignees([]); setManualExtraAssignees([]); setAssignedVehiclePlate('');
+      setShowAssignModal(false); setJobToAssign(null); setAssigneeId(''); setAdditionalAssignees([]); setManualExtraAssignees([]); setAssignedVehiclePlate(''); setTeamSuggestion(null);
     };
 
     const handleOpenEndJobModal = (job) => {
@@ -9221,6 +9814,11 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
       });
 
       if (user) {
+        if (user.employmentStatus === 'Pasif') {
+           setLoginError('Hesabınız pasife alınmıştır. Sisteme erişim yetkiniz bulunmuyor.');
+           return;
+        }
+
         setCurrentUser(user); setIsAuthenticated(true); setLoginError('');
         if (rememberMe) try { localStorage.setItem('sembol_crm_user', JSON.stringify({ email, password })); } catch (e) { }
         else try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
@@ -9257,6 +9855,17 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
 
     if (!isAuthenticated) {
       return <LoginScreen onLogin={handleLogin} error={loginError} />;
+    }
+
+    if (currentUser?.employmentStatus === 'Pasif') {
+      return (
+        <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4 animate-in fade-in text-white">
+          <AlertTriangle className="w-16 h-16 text-red-600 mb-4" />
+          <h1 className="text-2xl font-black mb-2 text-center text-white">Hesabınız Pasife Alınmıştır</h1>
+          <p className="text-neutral-400 text-center mb-6">Sisteme erişim yetkiniz sonlandırılmıştır. Lütfen yöneticinizle iletişime geçin.</p>
+          <button onClick={handleLogout} className="px-6 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition shadow-lg shadow-red-600/30">Çıkış Yap</button>
+        </div>
+      );
     }
 
     if (!allDataLoaded) {
@@ -9301,17 +9910,27 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
     const showSystemFiles = checkAccess('systemFiles', hasAdminAccess);
     
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
+    const isStandardBlueCollarApp = isMaviYakaUser && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
+    
     const myTasksForBadge = tasks.filter(t => t.assignee === currentUser?.fullName || t.assignee === 'Tüm Personeller');
     const unreadTasksCount = myTasksForBadge.filter(t => t.status === 'todo').length;
 
     const todayStrApp = new Date().toISOString().split('T')[0];
 
-    const unreadJobCount = jobs.filter(j => (j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id) && (j.status === 'pending' || j.status === 'in-progress') && j.date <= todayStrApp).length;
+    const unreadJobCount = jobs.filter(j => {
+      const isMyJob = j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id;
+      if (!isMyJob) return false;
+      if (j.status !== 'pending' && j.status !== 'in-progress') return false;
+      if (isStandardBlueCollarApp && j.date > todayStrApp) return false;
+      return true;
+    }).length;
 
     const visibleJobs = hasJobAccess ? jobs : jobs.filter(j => {
       const isMyJob = j.assignedPersonnelIds?.includes(currentUser?.id) || j.assignedPersonnelId === currentUser?.id;
       if (!isMyJob) return false;
-      if (j.date > todayStrApp) return false; // Gelecekteki işleri gizle
+      
+      // Standart mavi yakalı personeller gelecekteki işleri göremez, Ekip Şefi ve Üzeri görür
+      if (isStandardBlueCollarApp && j.date > todayStrApp) return false;
 
       // Personel için: İş tamamlanmışsa ve üzerinden 1 gün geçmişse gizle
       if (j.status === 'completed') {
@@ -9329,8 +9948,8 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
     
     const visibleNotifications = notifications.filter(n => {
       if (n.userId !== currentUser?.id) return false;
-      // Görev atama bildirimiyse ve işin tarihi bugünden sonraysa (gelecekteyse), gizle! Sadece iş günü geldiğinde göster.
-      if (!isManager && n.type === 'assignment' && n.jobDate && n.jobDate > todayStrApp) {
+      // Görev atama bildirimiyse ve işin tarihi bugünden sonraysa (gelecekteyse), gizle! Sadece iş günü geldiğinde göster. (Ekip Şefi hariç)
+      if (isStandardBlueCollarApp && n.type === 'assignment' && n.jobDate && n.jobDate > todayStrApp) {
         return false;
       }
       return true;
@@ -9637,10 +10256,10 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'complaints') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'ozlukDosyalari' || activeTab === 'complaints') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <Briefcase className={`w-5 h-5 shrink-0 ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'complaints') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Personel Listesi</span>
+                    <Briefcase className={`w-5 h-5 shrink-0 ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'ozlukDosyalari' || activeTab === 'complaints') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Personel Listesi</span>
                   </div>
                   {isPersonnelSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -9658,6 +10277,12 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personnelList' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personnelList' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm Personel
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('ozlukDosyalari'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'ozlukDosyalari' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'ozlukDosyalari' ? 'bg-white' : 'bg-red-600'}`}></div> Özlük Dosyaları
                     </button>
                     <button 
                       onClick={() => { setActiveTab('complaints'); setIsSidebarOpen(false); }}
@@ -9970,9 +10595,9 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
         {/* Main Content Area */}
         <main className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
           <div className="max-w-6xl mx-auto">
-            {activeTab === 'dashboard' && showDashboard && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} setViewingImage={setViewingImage} />}
+            {activeTab === 'dashboard' && showDashboard && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions} />}
             {activeTab === 'notifications' && <NotificationsView notifications={visibleNotifications} markNotificationsAsRead={markNotificationsAsRead} currentUser={currentUser} />}
-            {activeTab === 'calendar' && showCalendar && <CalendarView jobs={visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} />}
+            {activeTab === 'calendar' && showCalendar && <CalendarView jobs={visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} handleOpenAssignModal={handleOpenAssignModal} />}
             {activeTab === 'profileSettings' && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} />}
             {activeTab === 'myAssignedJobs' && <MyAssignedJobsView currentUser={currentUser} jobs={visibleJobs} handleOpenEndJobModal={handleOpenEndJobModal} markNotificationsAsRead={markNotificationsAsRead} />}
             {activeTab === 'mySpecialTasks' && <MyTasksView currentUser={currentUser} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
@@ -10096,6 +10721,7 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
             {/* Personel ve Araç Modülleri */}
             {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
             {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" />}
+            {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {activeTab === 'addVehicle' && showVehicles && <AddVehicleView onAdd={handleAddVehicle} />}
             {activeTab === 'vehicleList' && showVehicles && (
@@ -10275,7 +10901,7 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
 
             {/* Malzeme Modülleri */}
             {activeTab === 'addMaterial' && showMaterials && <AddMaterialView onAdd={handleAddMaterial} />}
-            {activeTab === 'materialList' && showMaterials && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} />}
+            {activeTab === 'materialList' && showMaterials && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} onUpdateStock={handleUpdateMaterialStock} />}
             
             {/* Finans Yönetimi Modülleri */}
             {activeTab === 'financeDashboard' && showFinance && <FinanceDashboardView jobs={jobs} transactions={transactions} transactionType={transactionType} setTransactionType={setTransactionType} newTransaction={newTransaction} setNewTransaction={setNewTransaction} handleAddTransaction={handleAddTransaction} />}
@@ -10366,11 +10992,39 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[95vh] flex flex-col">
               <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-red-600 shrink-0">
-                <h3 className="font-bold text-lg">Personele Görev Ata</h3>
-                <button onClick={() => setShowAssignModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  Personele Görev Ata
+                  <button 
+                    type="button" 
+                    onClick={() => setTeamSuggestion(teamSuggestion ? null : generateTeamSuggestion(jobToAssign))}
+                    className="ml-2 w-6 h-6 bg-red-600 rounded-full flex items-center justify-center text-white text-sm hover:bg-red-500 transition shadow-sm font-black"
+                    title="Sistem Tahmini Ekip Önerisi"
+                  >
+                    ?
+                  </button>
+                </h3>
+                <button onClick={() => {setShowAssignModal(false); setTeamSuggestion(null);}} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
               <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+                {teamSuggestion && (
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 mb-4 animate-in fade-in slide-in-from-top-2">
+                    <h4 className="font-black text-indigo-900 flex items-center gap-2 mb-2 text-sm">
+                      <Sparkles className="w-4 h-4 text-indigo-600" /> Tahmini Ekip Önerisi ({teamSuggestion.targetCount} Kişi)
+                    </h4>
+                    <ul className="text-[10px] text-indigo-800 font-medium list-disc pl-4 mb-3 space-y-0.5 leading-relaxed">
+                      {teamSuggestion.notes.map((note, idx) => <li key={idx}>{note}</li>)}
+                    </ul>
+                    <div className="flex flex-wrap gap-2">
+                      {teamSuggestion.suggested.map((p, idx) => (
+                         <div key={idx} className={`px-2 py-1 rounded-lg border text-xs font-bold flex items-center gap-1.5 shadow-sm ${p.isExternal ? 'bg-orange-100 text-orange-800 border-orange-200' : 'bg-white text-indigo-900 border-indigo-200'}`}>
+                           <User className="w-3 h-3 opacity-70" />
+                           {p.fullName} <span className="opacity-70 font-medium text-[9px]">({p.position})</span>
+                         </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <form onSubmit={submitAssignJob} className="space-y-5">
                   <p className="text-sm text-neutral-600 pb-2 border-b border-neutral-100">
                     <b className="text-black">Müşteri:</b> {jobToAssign.customerName} <br/>
