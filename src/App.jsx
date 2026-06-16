@@ -8016,17 +8016,17 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
             onDragOver={(e) => handleDragOver(e, 'unassigned')}
             onDragLeave={handleDragLeave}
             onDrop={handleDropToUnassigned}
-            className={`w-full lg:w-[260px] xl:w-[280px] h-full flex flex-col gap-4 shrink-0 transition-colors ${dragOverTarget === 'unassigned' ? 'bg-orange-50/50 rounded-2xl ring-2 ring-orange-400 ring-inset p-2' : ''}`}
+            className={`w-full lg:w-[260px] xl:w-[280px] h-full overflow-y-auto custom-scrollbar pb-32 flex flex-col gap-4 shrink-0 transition-colors ${dragOverTarget === 'unassigned' ? 'bg-orange-50/50 rounded-2xl ring-2 ring-orange-400 ring-inset p-2' : ''}`}
           >
             {/* Araç Havuzu */}
-            <div className="h-1/3 flex flex-col bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
+            <div className="flex flex-col h-fit shrink-0 bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
               <div className="p-2.5 border-b border-neutral-200 bg-neutral-50 flex items-center justify-between shrink-0">
                 <h3 className="font-black text-xs text-black flex items-center gap-1.5">
                   <Truck className="w-3.5 h-3.5 text-purple-600" /> Boştaki Araçlar
                 </h3>
                 <span className="bg-black text-white px-1.5 py-0.5 rounded text-[10px] font-bold">{availableVehicles.length}</span>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1.5 bg-neutral-50/30">
+              <div className="p-2 space-y-1.5 bg-neutral-50/30">
                 {availableVehicles.length === 0 ? (
                   <div className="text-center text-neutral-400 py-4 text-[10px] font-medium">Boşta araç bulunmuyor.</div>
                 ) : (
@@ -8050,13 +8050,13 @@ const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, 
             </div>
 
             {/* Personel Havuzu */}
-            <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
+            <div className="flex flex-col h-fit shrink-0 bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
               <div className="p-2.5 border-b border-neutral-200 bg-neutral-50 flex items-center justify-between shrink-0">
                 <h3 className="font-black text-xs text-black flex items-center gap-1.5">
                   <UserPlus className="w-3.5 h-3.5 text-orange-500" /> Ekipler
                 </h3>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1.5 bg-neutral-50/30">
+              <div className="p-2 space-y-1.5 bg-neutral-50/30">
                 {displayPersonnel.length === 0 ? (
                   <div className="text-center text-neutral-400 py-6 text-[10px] font-medium">Boşta personel bulunmuyor.</div>
                 ) : (
