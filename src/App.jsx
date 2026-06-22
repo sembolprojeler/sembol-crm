@@ -5966,7 +5966,7 @@ useEffect(() => {
     </div>
   );
 
-  const ModuleAccessView = ({ positions, positionModules, handleUpdatePositionModuleAccess }) => {
+  const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdatePositionModuleAccess }) => {
     const modules = [
       { id: 'dashboard', label: 'Anasayfa' },
       { id: 'calendar', label: 'Takvim' },
@@ -5984,10 +5984,12 @@ useEffect(() => {
       { id: 'systemFiles', label: 'Sistem Dosyaları' }
     ];
 
-    const handleToggle = (pos, moduleId, currentModules) => {
+    const allGroups = [...new Set([...(positions || []), ...(ranks || [])])];
+
+    const handleToggle = (group, moduleId, currentModules) => {
       const updated = currentModules ? { ...currentModules } : {};
       updated[moduleId] = !updated[moduleId];
-      handleUpdatePositionModuleAccess(pos, updated);
+      handleUpdatePositionModuleAccess(group, updated);
     };
 
     return (
@@ -6000,25 +6002,25 @@ useEffect(() => {
         </div>
         
         <div className="space-y-6">
-          {positions.map(pos => (
-            <div key={pos} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 shadow-sm">
+          {allGroups.map(group => (
+            <div key={group} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 shadow-sm">
               <div className="flex items-center gap-3 mb-4 border-b border-neutral-200 pb-3">
                 <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
                   <Briefcase className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="font-black text-black">{pos}</h4>
-                  <p className="text-[10px] text-neutral-500 font-bold uppercase">Tüm "{pos}" personelleri için geçerlidir</p>
+                  <h4 className="font-black text-black">{group}</h4>
+                  <p className="text-[10px] text-neutral-500 font-bold uppercase">Tüm "{group}" personelleri için geçerlidir</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                 {modules.map(mod => {
-                  const hasAccess = positionModules?.[pos]?.[mod.id] ?? false;
+                  const hasAccess = positionModules?.[group]?.[mod.id] ?? false;
                   return (
                     <label key={mod.id} className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${hasAccess ? 'bg-blue-50 border-blue-200' : 'bg-white border-neutral-200 hover:bg-neutral-100'}`}>
                       <span className={`text-xs font-bold ${hasAccess ? 'text-blue-800' : 'text-neutral-600'}`}>{mod.label}</span>
                       <div className="relative inline-flex items-center">
-                        <input type="checkbox" className="sr-only peer" checked={hasAccess} onChange={() => handleToggle(pos, mod.id, positionModules?.[pos])} />
+                        <input type="checkbox" className="sr-only peer" checked={hasAccess} onChange={() => handleToggle(group, mod.id, positionModules?.[group])} />
                         <div className="w-7 h-4 bg-neutral-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
                       </div>
                     </label>
@@ -6027,8 +6029,8 @@ useEffect(() => {
               </div>
             </div>
           ))}
-          {positions.length === 0 && (
-            <p className="text-center text-neutral-500 italic py-4">Sistemde tanımlı pozisyon bulunmuyor.</p>
+          {allGroups.length === 0 && (
+            <p className="text-center text-neutral-500 italic py-4">Sistemde tanımlı pozisyon/rütbe bulunmuyor.</p>
           )}
         </div>
       </div>
@@ -11510,7 +11512,14 @@ useEffect(() => {
     const hasTaskAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); // Görev Listesi
     const hasOperasyonAccess = isManager || currentUser?.position?.includes('Operasyon');
     
-    const checkAccess = (key, fallback) => currentUser?.permissions?.modules?.[key] ?? fallback;
+    const checkAccess = (key, fallback) => {
+      if (currentUser?.permissions?.canEdit) return true;
+      const posAccess = positionModules?.[currentUser?.position];
+      if (posAccess && posAccess[key] !== undefined) return posAccess[key];
+      const rankAccess = positionModules?.[currentUser?.rank];
+      if (rankAccess && rankAccess[key] !== undefined) return rankAccess[key];
+      return fallback;
+    };
 
     const showDashboard = checkAccess('dashboard', true);
     const showCalendar = checkAccess('calendar', true);
@@ -12572,7 +12581,7 @@ useEffect(() => {
             {activeTab === 'positions' && showAuth && <PositionsView positions={positions} onAddPosition={handleAddPosition} onDeletePosition={handleDeletePosition} />}
             {activeTab === 'ranks' && showAuth && <RanksView ranks={ranks} onAddRank={handleAddRank} onDeleteRank={handleDeleteRank} />}
             {activeTab === 'permissions' && showAuth && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} />}
-            {activeTab === 'moduleAccess' && showAuth && <ModuleAccessView positions={positions} positionModules={positionModules} handleUpdatePositionModuleAccess={handleUpdatePositionModuleAccess} />}
+            {activeTab === 'moduleAccess' && showAuth && <ModuleAccessView positions={positions} ranks={ranks} positionModules={positionModules} handleUpdatePositionModuleAccess={handleUpdatePositionModuleAccess} />}
             
             {/* Sistem Dosyaları Modülü */}
             {activeTab === 'backupSystem' && showSystemFiles && <SystemFilesView jobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} />}
