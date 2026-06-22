@@ -11724,11 +11724,10 @@ const checkAccess = (key) => {
     const showMaterials = checkAccess('materials');
     const showOperasyon = checkAccess('operasyon');
 
-    // Kısıtlama: Rütbesi Müdür veya Firma Sahibi olmayan göremesin
-    const isMudur = currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi';
-    const showFinance = isMudur;
-    const showAuth = isMudur;
-    const showSystemFiles = isMudur;
+// Finans, Yetkilendirme ve Sistem Dosyaları için dinamik yetki (aç-kapat) kontrolü
+    const showFinance = checkAccess('finance');
+    const showAuth = checkAccess('auth');
+    const showSystemFiles = checkAccess('systemFiles');
     
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
     const isStandardBlueCollarApp = isMaviYakaUser && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
@@ -11926,7 +11925,7 @@ const checkAccess = (key) => {
               )}
             </button>
 
-            {isMaviYakaUser && (
+{isMaviYakaUser && (
                 <button 
                   onClick={() => { setActiveTab('myAssignedJobs'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
                   className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'myAssignedJobs' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -11940,18 +11939,8 @@ const checkAccess = (key) => {
                 </button>
             )}
 
-            {(currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi' || currentUser?.position?.includes('Operasyon') || currentUser?.permissions?.canEdit) && (
-              <button 
-                onClick={() => { setActiveTab('addInfo'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'addInfo' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-              >
-                <div className="flex items-center gap-3">
-                  <Bell className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Bilgilendirme Ekle</span>
-                </div>
-              </button>
-            )}
-
             {/* İş Listesi & Kayıt Aç */}
+
             {showAddJob && (
               <div className="flex flex-col gap-1">
                 <button 
