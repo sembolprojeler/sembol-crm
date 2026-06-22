@@ -2316,6 +2316,7 @@ useEffect(() => {
               )}
 
               {/* Tahmini Malzeme Bölümü */}
+              {job.type !== 'Asansör' && (
               <div className="mt-4 text-xs font-medium bg-amber-50 text-amber-800 p-3 rounded-xl border border-amber-200 flex flex-col md:flex-row gap-x-3 gap-y-2 md:items-center">
                 <div className="flex items-center gap-1.5 shrink-0"><Package className="w-4 h-4 text-amber-600" /> <b className="text-amber-900">Sistem Malzeme Tahmini:</b></div>
                 <div className="flex gap-3 flex-wrap flex-1">
@@ -2334,6 +2335,7 @@ useEffect(() => {
                 </div>
                 {job.materialsDeducted && <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded font-bold text-[10px] ml-auto uppercase tracking-wider shrink-0 border border-green-200">Stoktan Düşüldü</span>}
               </div>
+              )}
 
               {job.endJobDetails && (
                 <div className="mt-4 text-xs font-medium bg-green-50 text-green-800 p-4 rounded-xl border border-green-200 flex flex-col gap-3">
@@ -2402,9 +2404,11 @@ useEffect(() => {
                   <MessageSquareText className="w-4 h-4"/> Randevu Onayı (SMS)
                 </button>
 
+                {job.type !== 'Asansör' && (
                 <button onClick={() => handleEstimateMaterials(job)} className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
                   <Package className="w-4 h-4"/> ✨ Malzeme Tahmini
                 </button>
+                )}
                 {job.status !== 'cancelled' && (
                   <button onClick={() => setCancelJobId(job.id)} className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
                     <Ban className="w-4 h-4"/> İşi İptal Et
@@ -2680,9 +2684,11 @@ useEffect(() => {
                   <button onClick={() => handleGenerateMessage(job)} className="p-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-lg transition" title="Mesaj">
                     <MessageSquareText className="w-4 h-4" />
                   </button>
+                  {job.type !== 'Asansör' && (
                   <button onClick={() => handleEstimateMaterials(job)} className="p-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg transition" title="Malzeme">
                     <Package className="w-4 h-4" />
                   </button>
+                  )}
                   {job.status !== 'cancelled' && (
                     <button onClick={() => setCancelJobId(job.id)} className="p-1.5 bg-red-50 hover:bg-red-100 text-red-700 rounded-lg transition" title="İptal Et">
                       <Ban className="w-4 h-4" />
@@ -2933,7 +2939,8 @@ useEffect(() => {
     const [selectedDate, setSelectedDate] = useState(today.toISOString().split('T')[0]); 
     const [myPuantaj, setMyPuantaj] = useState({});
 
-    const isMaviYaka = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
+    const isOperator = currentUser?.position === 'Operatör';
+    const isMaviYaka = (currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position))) && !isOperator;
 
     useEffect(() => {
       if (!isMaviYaka || !currentUser) return;
@@ -2960,6 +2967,14 @@ useEffect(() => {
 
     // İptal edilenleri takvimden gizliyoruz ve önceliğe göre sıralıyoruz (Nakliye > Depo > Asansör)
     const activeJobs = jobs
+      .filter(j => {
+        if (isOperator) {
+          const jobDate = new Date(j.date);
+          const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+          return j.type === 'Asansör' && jobDate >= currentMonthStart && j.status !== 'cancelled';
+        }
+        return j.status !== 'cancelled';
+      })
       .sort((a, b) => {
         const order = { 'Nakliye': 1, 'Depo': 2, 'Asansör': 3 };
         return (order[a.type || 'Nakliye'] || 4) - (order[b.type || 'Nakliye'] || 4);
@@ -3246,40 +3261,44 @@ useEffect(() => {
                         {job.assignedVehiclePlate && <span className="flex items-center gap-1 text-[10px] font-bold bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100"><Truck className="w-3 h-3" /> {job.assignedVehiclePlate}</span>}
                       </div>
                       <div className="flex flex-wrap items-center justify-end gap-1.5 w-full sm:w-auto mt-2 sm:mt-0">
-                        <button 
-                          onClick={() => {
-                            let phone = job.customerPhone.replace(/\D/g, '');
-                            if (phone.startsWith('0')) phone = '90' + phone.substring(1);
-                            else if (!phone.startsWith('90')) phone = '90' + phone;
+                        {!isOperator && (
+                          <>
+                            <button 
+                              onClick={() => {
+                                let phone = job.customerPhone.replace(/\D/g, '');
+                                if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+                                else if (!phone.startsWith('90')) phone = '90' + phone;
 
-                            const kapora = parseInt(job.price || 0) * 0.10;
-                            const kaporaText = kapora > 0 ? kapora.toLocaleString('tr-TR') : '...';
+                                const kapora = parseInt(job.price || 0) * 0.10;
+                                const kaporaText = kapora > 0 ? kapora.toLocaleString('tr-TR') : '...';
 
-                            const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %10'u olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Denizbank\nAlıcı: Şenol Beşinci\nIBAN: TR 94 0013 4000 0262 9671 7000 01\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
-                          window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
-                        }} 
-                        className="px-3 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[10px] font-bold rounded-lg transition flex items-center gap-1 shadow-sm"
-                      >
-                        <MessageCircle className="w-3 h-3"/> Bilgilendir (WA)
-                      </button>
-                      <button onClick={() => generateContractPDF(job)} className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-green-200">
-                        <FileText className="w-3 h-3"/> PDF
-                      </button>
-                      <button onClick={() => handleEditJob(job)} className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-neutral-200">
-                        <Edit className="w-3 h-3"/> Düzenle
-                      </button>
-                      <button onClick={() => { setJobToChangeDate(job); setNewJobDate(job.date); setShowChangeDateModal(true); }} className="px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-orange-200">
-                        <CalendarDays className="w-3 h-3"/> Tarih Değiştir
-                      </button>
-                      {job.status !== 'cancelled' && (
-                        <button onClick={() => setCancelJobId(job.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-red-200">
-                          <Ban className="w-3 h-3"/> İptal Et
-                        </button>
-                      )}
+                                const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %10'u olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Denizbank\nAlıcı: Şenol Beşinci\nIBAN: TR 94 0013 4000 0262 9671 7000 01\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
+                              window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+                            }} 
+                            className="px-3 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[10px] font-bold rounded-lg transition flex items-center gap-1 shadow-sm"
+                          >
+                            <MessageCircle className="w-3 h-3"/> Bilgilendir (WA)
+                          </button>
+                          <button onClick={() => generateContractPDF(job)} className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-green-200">
+                            <FileText className="w-3 h-3"/> PDF
+                          </button>
+                          <button onClick={() => handleEditJob(job)} className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-neutral-200">
+                            <Edit className="w-3 h-3"/> Düzenle
+                          </button>
+                          <button onClick={() => { setJobToChangeDate(job); setNewJobDate(job.date); setShowChangeDateModal(true); }} className="px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-orange-200">
+                            <CalendarDays className="w-3 h-3"/> Tarih Değiştir
+                          </button>
+                          {job.status !== 'cancelled' && (
+                            <button onClick={() => setCancelJobId(job.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-red-200">
+                              <Ban className="w-3 h-3"/> İptal Et
+                            </button>
+                          )}
+                        </>
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                ))
               )}
             </div>
           </div>
@@ -3903,23 +3922,23 @@ useEffect(() => {
         </div>
 
         <div className="flex-1 w-full overflow-auto custom-scrollbar-table border border-neutral-300 rounded-2xl bg-white shadow-sm relative">
-            <table className="w-full border-collapse text-sm text-left min-w-max">
+            <table className="w-full border-collapse text-sm text-left table-fixed">
               <thead className="bg-neutral-100 sticky top-0 z-30 shadow-sm">
                 <tr>
-                  <th className="p-3 border-b border-r border-neutral-300 font-black text-neutral-800 sticky left-0 bg-neutral-100 z-40 min-w-[200px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                  <th className="p-2 md:p-3 border-b border-r border-neutral-300 font-black text-neutral-800 sticky left-0 bg-neutral-100 z-40 w-[26%] md:w-[20%] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                     Personel
                   </th>
                   {weekDays.map((wd) => {
                     const isToday = wd.dateStr === new Date().toISOString().split('T')[0];
                     return (
-                      <th key={wd.dateStr} className={`p-2 border-b border-r border-neutral-300 text-center min-w-[110px] w-[12%] ${isToday ? 'bg-yellow-200' : ''}`}>
-                        <div className={`text-xs font-bold ${isToday ? 'text-yellow-800' : 'text-neutral-500'}`}>{wd.dayName}</div>
-                        <div className={`text-xl font-black ${isToday ? 'text-yellow-700' : 'text-black'}`}>{wd.dayNum}</div>
+                      <th key={wd.dateStr} className={`p-1 md:p-2 border-b border-r border-neutral-300 text-center w-[9%] md:w-[10%] overflow-hidden ${isToday ? 'bg-yellow-200' : ''}`}>
+                        <div className={`text-[10px] md:text-xs font-bold truncate ${isToday ? 'text-yellow-800' : 'text-neutral-500'}`}>{wd.dayName}</div>
+                        <div className={`text-sm md:text-xl font-black ${isToday ? 'text-yellow-700' : 'text-black'}`}>{wd.dayNum}</div>
                       </th>
                     );
                   })}
-                  <th className="p-3 border-b border-neutral-300 font-black text-center bg-yellow-400 text-black w-28">
-                    Haftalık Toplam
+                  <th className="p-1 md:p-2 border-b border-neutral-300 font-black text-center bg-yellow-400 text-black w-[11%] md:w-[10%] text-[9px] md:text-sm">
+                    Toplam
                   </th>
                 </tr>
               </thead>
@@ -3928,14 +3947,14 @@ useEffect(() => {
                   let weeklyTotal = 0;
                   return (
                     <tr key={person.id} className={`hover:bg-neutral-50 transition ${person.employmentStatus === 'Pasif' ? 'opacity-60 grayscale' : ''}`}>
-                      <td className="p-2 border-r border-neutral-200 sticky left-0 bg-white z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] group-hover:bg-neutral-50">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
+                      <td className="p-1 md:p-2 border-r border-neutral-200 sticky left-0 bg-white z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] group-hover:bg-neutral-50 overflow-hidden">
+                        <div className="flex items-center gap-1.5 md:gap-3">
+                          <div className="hidden md:flex w-9 h-9 rounded-full bg-neutral-200 items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
                             {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover" /> : <User className="w-4 h-4 text-neutral-400" />}
                           </div>
-                          <div className="flex flex-col">
-                            <span className={`font-bold text-sm truncate max-w-[150px] ${person.employmentStatus === 'Pasif' ? 'line-through text-neutral-500' : 'text-black'}`} title={person.fullName}>{person.fullName}</span>
-                            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">{person.position}</span>
+                          <div className="flex flex-col min-w-0">
+                            <span className={`font-bold text-[11px] md:text-sm truncate w-full ${person.employmentStatus === 'Pasif' ? 'line-through text-neutral-500' : 'text-black'}`} title={person.fullName}>{person.fullName}</span>
+                            <span className="text-[9px] md:text-[10px] font-bold text-neutral-500 uppercase tracking-wider truncate w-full">{person.position}</span>
                           </div>
                         </div>
                       </td>
@@ -3945,11 +3964,11 @@ useEffect(() => {
                         const isToday = wd.dateStr === new Date().toISOString().split('T')[0];
                         
                         return (
-                          <td key={wd.dateStr} className={`p-2 border-r border-neutral-200 text-center align-middle ${isToday ? 'bg-yellow-50/50' : ''}`}>
+                          <td key={wd.dateStr} className={`p-1 border-r border-neutral-200 text-center align-middle overflow-hidden ${isToday ? 'bg-yellow-50/50' : ''}`}>
                             {pts > 0 ? (
-                              <div className="flex flex-col items-center justify-center gap-1 animate-in zoom-in">
-                                <Star className="w-6 h-6 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
-                                <span className="text-[11px] font-black text-yellow-800 bg-yellow-100 px-2 py-0.5 rounded border border-yellow-300">+{pts} Puan</span>
+                              <div className="flex flex-col items-center justify-center gap-0.5 md:gap-1 animate-in zoom-in">
+                                <Star className="w-4 h-4 md:w-6 md:h-6 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
+                                <span className="text-[9px] md:text-[11px] font-black text-yellow-800 bg-yellow-100 px-1 py-0.5 rounded border border-yellow-300 truncate w-full max-w-[40px] md:max-w-[60px]">+{pts}</span>
                               </div>
                             ) : (
                               <span className="text-neutral-300">-</span>
@@ -3957,9 +3976,9 @@ useEffect(() => {
                           </td>
                         );
                       })}
-                      <td className="p-2 text-center bg-yellow-50 align-middle border-l border-neutral-300">
+                      <td className="p-1 md:p-2 text-center bg-yellow-50 align-middle border-l border-neutral-300">
                         {weeklyTotal > 0 ? (
-                          <span className="text-lg font-black text-yellow-700">{weeklyTotal}</span>
+                          <span className="text-sm md:text-lg font-black text-yellow-700">{weeklyTotal}</span>
                         ) : (
                           <span className="text-neutral-400 font-bold">0</span>
                         )}
@@ -4101,18 +4120,18 @@ useEffect(() => {
 
         {/* Ana Takvim Görünümü */}
         <div className="flex-1 w-full overflow-auto custom-scrollbar-table border border-neutral-300 rounded-2xl bg-white shadow-sm relative">
-            <table className="w-full border-collapse text-sm text-left min-w-max">
+            <table className="w-full border-collapse text-sm text-left table-fixed">
               <thead className="bg-neutral-100 sticky top-0 z-30 shadow-sm">
                 <tr>
-                  <th className="p-3 border-b border-r border-neutral-300 font-black text-neutral-800 sticky left-0 bg-neutral-100 z-40 min-w-[200px] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                  <th className="p-2 md:p-3 border-b border-r border-neutral-300 font-black text-neutral-800 sticky left-0 bg-neutral-100 z-40 w-[30%] md:w-[23%] shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                     Personel
                   </th>
                   {weekDays.map((wd) => {
                     const isToday = wd.dateStr === new Date().toISOString().split('T')[0];
                     return (
-                      <th key={wd.dateStr} className={`p-2 border-b border-r border-neutral-300 text-center min-w-[110px] w-[12%] ${isToday ? 'bg-blue-100' : ''}`}>
-                        <div className={`text-xs font-bold ${isToday ? 'text-blue-800' : 'text-neutral-500'}`}>{wd.dayName}</div>
-                        <div className={`text-xl font-black ${isToday ? 'text-blue-700' : 'text-black'}`}>{wd.dayNum}</div>
+                      <th key={wd.dateStr} className={`p-1 md:p-2 border-b border-r border-neutral-300 text-center w-[10%] md:w-[11%] overflow-hidden ${isToday ? 'bg-blue-100' : ''}`}>
+                        <div className={`text-[10px] md:text-xs font-bold truncate ${isToday ? 'text-blue-800' : 'text-neutral-500'}`}>{wd.dayName}</div>
+                        <div className={`text-sm md:text-xl font-black ${isToday ? 'text-blue-700' : 'text-black'}`}>{wd.dayNum}</div>
                       </th>
                     );
                   })}
@@ -4122,14 +4141,14 @@ useEffect(() => {
                 {maviYakaList.map(person => {
                   return (
                     <tr key={person.id} className={`hover:bg-neutral-50 transition ${person.employmentStatus === 'Pasif' ? 'opacity-60 grayscale' : ''}`}>
-                      <td className="p-2 border-r border-neutral-200 sticky left-0 bg-white z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] group-hover:bg-neutral-50">
-                        <div className="flex items-center gap-3">
-                          <div className="w-9 h-9 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
+                      <td className="p-1 md:p-2 border-r border-neutral-200 sticky left-0 bg-white z-20 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] group-hover:bg-neutral-50 overflow-hidden">
+                        <div className="flex items-center gap-1.5 md:gap-3">
+                          <div className="hidden md:flex w-9 h-9 rounded-full bg-neutral-200 items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
                             {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover" /> : <User className="w-4 h-4 text-neutral-400" />}
                           </div>
-                          <div className="flex flex-col">
-                            <span className={`font-bold text-sm truncate max-w-[150px] ${person.employmentStatus === 'Pasif' ? 'line-through text-neutral-500' : 'text-black'}`} title={person.fullName}>{person.fullName}</span>
-                            <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider">{person.position}</span>
+                          <div className="flex flex-col min-w-0">
+                            <span className={`font-bold text-[11px] md:text-sm truncate w-full ${person.employmentStatus === 'Pasif' ? 'line-through text-neutral-500' : 'text-black'}`} title={person.fullName}>{person.fullName}</span>
+                            <span className="text-[9px] md:text-[10px] font-bold text-neutral-500 uppercase tracking-wider truncate w-full">{person.position}</span>
                           </div>
                         </div>
                       </td>
@@ -4141,13 +4160,13 @@ useEffect(() => {
                         const option = MESAI_STATUS_OPTIONS.find(o => o.code === st);
                         
                         return (
-                          <td key={wd.dateStr} className={`p-2 border-r border-neutral-200 text-center align-middle ${isToday ? 'bg-blue-50/30' : ''}`}>
+                          <td key={wd.dateStr} className={`p-1 border-r border-neutral-200 text-center align-middle overflow-hidden ${isToday ? 'bg-blue-50/30' : ''}`}>
                             {st ? (
-                              <div className="flex flex-col items-center justify-center gap-1 animate-in zoom-in">
-                                <span className={`text-[10px] font-black px-2 py-1 rounded-md shadow-sm border border-black/5 ${option?.color || 'bg-neutral-200 text-neutral-700'}`}>
+                              <div className="flex flex-col items-center justify-center gap-0.5 md:gap-1 animate-in zoom-in">
+                                <span className={`text-[9px] md:text-[11px] font-black px-1 py-0.5 rounded-md shadow-sm border border-black/5 truncate w-full max-w-[40px] md:max-w-[70px] ${option?.color || 'bg-neutral-200 text-neutral-700'}`} title={option?.label || st}>
                                   {option?.label || st}
                                 </span>
-                                {hr && <span className="text-[10px] font-bold text-neutral-600 bg-white px-1.5 py-0.5 rounded border border-neutral-200 shadow-sm">{hr} Saat</span>}
+                                {hr && <span className="text-[8px] md:text-[10px] font-bold text-neutral-600 bg-white px-1 py-0.5 rounded border border-neutral-200 shadow-sm truncate">{hr} S</span>}
                               </div>
                             ) : (
                               <span className="text-neutral-300 text-xs">-</span>
@@ -4369,6 +4388,174 @@ useEffect(() => {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+    );
+  };
+
+  const AdvancedReportingView = ({ jobs }) => {
+    const [reportPeriod, setReportPeriod] = useState('month'); // 'month', 'year', 'all'
+    const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+    const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
+    const [selectedTab, setSelectedTab] = useState('Nakliye'); // 'Nakliye', 'Depo'
+
+    const years = Array.from(new Set(jobs.map(j => new Date(j.date).getFullYear()))).sort((a,b) => b-a);
+    if(years.length === 0) years.push(new Date().getFullYear());
+
+    const months = [
+      { value: 1, label: 'Ocak' }, { value: 2, label: 'Şubat' }, { value: 3, label: 'Mart' },
+      { value: 4, label: 'Nisan' }, { value: 5, label: 'Mayıs' }, { value: 6, label: 'Haziran' },
+      { value: 7, label: 'Temmuz' }, { value: 8, label: 'Ağustos' }, { value: 9, label: 'Eylül' },
+      { value: 10, label: 'Ekim' }, { value: 11, label: 'Kasım' }, { value: 12, label: 'Aralık' }
+    ];
+
+    const filteredJobs = jobs.filter(job => {
+      if (job.status === 'cancelled') return false;
+      const jobType = job.type || 'Nakliye';
+      if (jobType !== selectedTab) return false;
+      
+      if (reportPeriod === 'all') return true;
+
+      const d = new Date(job.date);
+      if (reportPeriod === 'year') {
+        return d.getFullYear() === selectedYear;
+      } else {
+        return d.getFullYear() === selectedYear && (d.getMonth() + 1) === selectedMonth;
+      }
+    });
+
+    const aggregateData = (data, keyGetter) => {
+      const result = {};
+      data.forEach(job => {
+        const key = keyGetter(job);
+        if (!key) return;
+        if (!result[key]) result[key] = { count: 0, totalPrice: 0 };
+        result[key].count += 1;
+        result[key].totalPrice += (parseFloat(job.price) || 0);
+      });
+      return Object.entries(result).map(([name, val]) => ({
+        name,
+        count: val.count,
+        avgPrice: val.count > 0 ? Math.round(val.totalPrice / val.count) : 0
+      })).sort((a, b) => b.count - a.count);
+    };
+
+    const cityData = aggregateData(filteredJobs, j => (j.fromProvince && j.toProvince) ? `${j.fromProvince} ➔ ${j.toProvince}` : null);
+    const districtData = aggregateData(filteredJobs, j => (j.fromDistrict && j.toDistrict) ? `${j.fromDistrict} ➔ ${j.toDistrict}` : null);
+    const roomData = aggregateData(filteredJobs, j => j.fromRoomCount);
+    const packingData = aggregateData(filteredJobs, j => j.fromPacking);
+
+    const renderTable = (title, icon, data, nameLabel) => (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden flex flex-col h-[350px]">
+        <div className="p-4 border-b border-neutral-200 bg-neutral-50 flex items-center gap-2 shrink-0">
+          {icon}
+          <h3 className="font-bold text-black text-sm">{title}</h3>
+        </div>
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-0">
+          <table className="w-full text-left text-xs md:text-sm">
+            <thead className="bg-white sticky top-0 border-b border-neutral-100 text-neutral-500 shadow-sm z-10">
+              <tr>
+                <th className="p-3 font-bold">{nameLabel}</th>
+                <th className="p-3 font-bold text-center">Adet</th>
+                <th className="p-3 font-bold text-right">Ortalama Fiyat</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {data.map((item, idx) => (
+                <tr key={idx} className="hover:bg-neutral-50 transition">
+                  <td className="p-3 font-bold text-black">{item.name}</td>
+                  <td className="p-3 text-center">
+                    <span className="bg-neutral-100 text-black px-2.5 py-1 rounded-lg font-black text-xs border border-neutral-200">
+                      {item.count} İş
+                    </span>
+                  </td>
+                  <td className="p-3 text-right font-black text-green-600">
+                    ₺{item.avgPrice.toLocaleString('tr-TR')}
+                  </td>
+                </tr>
+              ))}
+              {data.length === 0 && (
+                <tr>
+                  <td colSpan="3" className="p-6 text-center text-neutral-500 font-medium">Bu döneme ait veri bulunamadı.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+
+    return (
+      <div className="space-y-6 animate-in fade-in">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <h2 className="text-2xl font-bold text-black flex items-center gap-2">
+            <Activity className="w-7 h-7 text-red-600" /> Operasyon Analiz & İstatistik
+          </h2>
+          
+          <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-2xl border border-neutral-200 shadow-sm w-full md:w-auto">
+            <div className="flex bg-neutral-100 p-1 rounded-xl">
+              <button 
+                onClick={() => setReportPeriod('month')}
+                className={`px-4 py-1.5 text-sm font-bold rounded-lg transition ${reportPeriod === 'month' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+              >
+                Aylık
+              </button>
+              <button 
+                onClick={() => setReportPeriod('year')}
+                className={`px-4 py-1.5 text-sm font-bold rounded-lg transition ${reportPeriod === 'year' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+              >
+                Yıllık
+              </button>
+              <button 
+                onClick={() => setReportPeriod('all')}
+                className={`px-4 py-1.5 text-sm font-bold rounded-lg transition ${reportPeriod === 'all' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+              >
+                Tüm Zamanlar
+              </button>
+            </div>
+            
+            {reportPeriod !== 'all' && (
+              <select 
+                value={selectedYear} 
+                onChange={(e) => setSelectedYear(parseInt(e.target.value))}
+                className="px-3 py-1.5 text-sm font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none"
+              >
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+            )}
+            
+            {reportPeriod === 'month' && (
+              <select 
+                value={selectedMonth} 
+                onChange={(e) => setSelectedMonth(parseInt(e.target.value))}
+                className="px-3 py-1.5 text-sm font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none"
+              >
+                {months.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            )}
+          </div>
+        </div>
+
+        <div className="bg-white p-2 rounded-2xl shadow-sm border border-neutral-200 flex gap-2 overflow-x-auto custom-scrollbar">
+           <button
+              onClick={() => setSelectedTab('Nakliye')}
+              className={`flex-1 py-3 px-4 rounded-xl font-black text-sm transition flex items-center justify-center gap-2 ${selectedTab === 'Nakliye' ? 'bg-red-600 text-white shadow-md' : 'bg-neutral-50 text-neutral-600 hover:bg-neutral-100 hover:text-black'}`}
+           >
+              <Truck className="w-5 h-5 shrink-0" /> Nakliye Operasyonları Analizi
+           </button>
+           <button
+              onClick={() => setSelectedTab('Depo')}
+              className={`flex-1 py-3 px-4 rounded-xl font-black text-sm transition flex items-center justify-center gap-2 ${selectedTab === 'Depo' ? 'bg-blue-600 text-white shadow-md' : 'bg-neutral-50 text-neutral-600 hover:bg-neutral-100 hover:text-black'}`}
+           >
+              <Database className="w-5 h-5 shrink-0" /> Depolama Operasyonları Analizi
+           </button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+           {renderTable('Şehirler Arası Hareket (İlden İle)', <MapPin className="w-4 h-4 text-red-600" />, cityData, 'Güzergah (İl)')}
+           {renderTable('Bölgesel Hareket (İlçeden İlçeye)', <MapPin className="w-4 h-4 text-blue-600" />, districtData, 'Güzergah (İlçe)')}
+           {renderTable('Daire / Oda Sayısı Dağılımı', <Briefcase className="w-4 h-4 text-green-600" />, roomData, 'Daire Tipi')}
+           {renderTable('Toplama / Ambalaj Hizmeti Dağılımı', <Package className="w-4 h-4 text-orange-600" />, packingData, 'Toplama Tipi')}
         </div>
       </div>
     );
@@ -5152,7 +5339,200 @@ useEffect(() => {
   };
 
   const AddVehicleView = () => <PlaceholderView title="Araç Ekle" icon={PlusCircle} />;
-  const VehicleMaintenanceView = () => <PlaceholderView title="Araç Rapor & Bakım" icon={Car} />;
+  
+  const VehicleMaintenanceView = ({ vehicles, onUpdateVehicle, addSystemLog }) => {
+    const [selectedVehicle, setSelectedVehicle] = useState(null);
+    const [recordForm, setRecordForm] = useState({
+      type: 'Periyodik Bakım',
+      date: new Date().toISOString().split('T')[0],
+      km: '',
+      cost: '',
+      nextDate: '',
+      nextKm: '',
+      notes: ''
+    });
+
+    const handleSubmit = (e) => {
+      e.preventDefault();
+      if (!selectedVehicle) return;
+
+      const newRecord = {
+        id: Date.now().toString(),
+        ...recordForm,
+        createdAt: new Date().toISOString()
+      };
+
+      const updatedRecords = [...(selectedVehicle.maintenanceRecords || []), newRecord];
+      
+      let newKm = selectedVehicle.km;
+      if (recordForm.km && parseInt(recordForm.km) > parseInt(selectedVehicle.km || '0')) {
+        newKm = recordForm.km;
+      }
+
+      onUpdateVehicle({
+        ...selectedVehicle,
+        km: newKm,
+        maintenanceRecords: updatedRecords
+      });
+
+      addSystemLog('Araç Bakım Eklendi', `${selectedVehicle.plate} aracına ${recordForm.type} kaydı girildi.`);
+      
+      setRecordForm({
+        type: 'Periyodik Bakım',
+        date: new Date().toISOString().split('T')[0],
+        km: '',
+        cost: '',
+        nextDate: '',
+        nextKm: '',
+        notes: ''
+      });
+      
+      setSelectedVehicle({
+        ...selectedVehicle,
+        km: newKm,
+        maintenanceRecords: updatedRecords
+      });
+    };
+
+    const handleDelete = (recordId) => {
+      if (!window.confirm('Bu kaydı silmek istediğinize emin misiniz?')) return;
+      const updatedRecords = (selectedVehicle.maintenanceRecords || []).filter(r => r.id !== recordId);
+      onUpdateVehicle({
+        ...selectedVehicle,
+        maintenanceRecords: updatedRecords
+      });
+      setSelectedVehicle({
+        ...selectedVehicle,
+        maintenanceRecords: updatedRecords
+      });
+    };
+
+    return (
+      <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in h-[calc(100vh-140px)]">
+        {/* Sol: Araç Listesi */}
+        <div className="w-full lg:w-1/3 flex flex-col gap-4 h-full">
+          <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-5 flex-1 flex flex-col overflow-hidden">
+            <h2 className="text-xl font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-3 shrink-0">
+              <Car className="w-6 h-6 text-red-600" /> Araç Filosu
+            </h2>
+            <div className="flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-2 flex-1">
+              {vehicles.map(v => (
+                <button 
+                  key={v.id}
+                  onClick={() => setSelectedVehicle(v)}
+                  className={`p-3 rounded-xl border text-left transition flex items-center justify-between ${selectedVehicle?.id === v.id ? 'bg-red-50 border-red-300' : 'bg-white border-neutral-200 hover:border-red-300'}`}
+                >
+                  <div>
+                    <div className="font-black text-black tracking-widest">{v.plate}</div>
+                    <div className="text-xs text-neutral-500 font-medium">{v.type} • {v.km} KM</div>
+                  </div>
+                  <ChevronRight className={`w-5 h-5 ${selectedVehicle?.id === v.id ? 'text-red-500' : 'text-neutral-400'}`} />
+                </button>
+              ))}
+              {vehicles.length === 0 && <p className="text-sm text-neutral-500 italic text-center py-4">Araç bulunamadı.</p>}
+            </div>
+          </div>
+        </div>
+
+        {/* Sağ: Detay ve Form */}
+        <div className="w-full lg:w-2/3 flex flex-col gap-6 h-full overflow-hidden">
+          {!selectedVehicle ? (
+            <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-10 flex flex-col items-center justify-center text-neutral-400 h-full">
+              <Car className="w-16 h-16 mb-4 opacity-50" />
+              <p className="font-bold text-lg text-neutral-500">Rapor ve bakım eklemek için sol taraftan bir araç seçin.</p>
+            </div>
+          ) : (
+            <>
+              <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 shrink-0">
+                <h3 className="text-lg font-black text-black mb-4 flex items-center justify-between border-b border-neutral-100 pb-3">
+                  <span className="flex items-center gap-2"><PlusCircle className="w-5 h-5 text-red-600" /> Yeni Rapor / Bakım Ekle</span>
+                  <span className="text-sm bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200">{selectedVehicle.plate}</span>
+                </h3>
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">İşlem Türü</label>
+                      <select required value={recordForm.type} onChange={e => setRecordForm({...recordForm, type: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium">
+                        <option value="Periyodik Bakım">Periyodik Bakım (Yağ/Filtre)</option>
+                        <option value="Araç Muayenesi">Araç Muayenesi</option>
+                        <option value="Sigorta / Kasko">Sigorta / Kasko</option>
+                        <option value="Lastik Değişimi">Lastik Değişimi</option>
+                        <option value="Arıza / Tamir">Arıza / Tamir</option>
+                        <option value="Ceza / Trafik">Ceza / Trafik</option>
+                        <option value="Diğer">Diğer</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Tarih</label>
+                      <input required type="date" value={recordForm.date} onChange={e => setRecordForm({...recordForm, date: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">İşlem Yapılan KM</label>
+                      <input required type="number" value={recordForm.km} onChange={e => setRecordForm({...recordForm, km: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" placeholder={selectedVehicle.km} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Maliyet (TL)</label>
+                      <input type="number" value={recordForm.cost} onChange={e => setRecordForm({...recordForm, cost: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" placeholder="0" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Gelecek İşlem Tarihi</label>
+                      <input type="date" value={recordForm.nextDate} onChange={e => setRecordForm({...recordForm, nextDate: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" title="Muayene veya Sigorta bitiş tarihi" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Gelecek İşlem KM</label>
+                      <input type="number" value={recordForm.nextKm} onChange={e => setRecordForm({...recordForm, nextKm: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" placeholder="Sonraki bakım KM'si" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Detaylar / Notlar</label>
+                    <textarea value={recordForm.notes} onChange={e => setRecordForm({...recordForm, notes: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-16 resize-none" placeholder="Değişen parçalar, muayene istasyonu vb..."></textarea>
+                  </div>
+                  <button type="submit" className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-sm">
+                    <Save className="w-5 h-5" /> Kaydı Ekle
+                  </button>
+                </form>
+              </div>
+
+              <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 flex-1 flex flex-col overflow-hidden">
+                <h3 className="text-lg font-black text-black mb-4 flex items-center gap-2 border-b border-neutral-100 pb-3 shrink-0">
+                  <History className="w-5 h-5 text-neutral-600" /> Geçmiş Kayıtlar
+                </h3>
+                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+                  {!(selectedVehicle.maintenanceRecords && selectedVehicle.maintenanceRecords.length > 0) ? (
+                    <p className="text-center text-sm text-neutral-500 italic py-6">Bu araca ait kayıt bulunmuyor.</p>
+                  ) : (
+                    [...(selectedVehicle.maintenanceRecords)].sort((a,b)=> new Date(b.date) - new Date(a.date)).map(record => (
+                      <div key={record.id} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 flex flex-col sm:flex-row gap-4 justify-between relative group">
+                        <button onClick={() => handleDelete(record.id)} className="absolute top-2 right-2 p-1.5 bg-red-50 text-red-600 rounded-lg opacity-0 group-hover:opacity-100 transition"><X className="w-4 h-4"/></button>
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-bold text-black text-base">{record.type}</span>
+                            <span className="text-[10px] bg-white border border-neutral-200 px-2 py-0.5 rounded font-bold text-neutral-600"><CalendarDays className="w-3 h-3 inline mr-1"/>{record.date}</span>
+                          </div>
+                          <p className="text-xs text-neutral-600 font-medium mb-2">{record.notes}</p>
+                          <div className="flex flex-wrap gap-2">
+                            {record.km && <span className="text-[10px] font-bold bg-neutral-200 text-neutral-700 px-2 py-1 rounded">İşlem: {record.km} KM</span>}
+                            {record.nextKm && <span className="text-[10px] font-bold bg-orange-100 text-orange-800 px-2 py-1 rounded border border-orange-200">Sonraki: {record.nextKm} KM</span>}
+                            {record.nextDate && <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-2 py-1 rounded border border-blue-200">Sonraki: {record.nextDate}</span>}
+                          </div>
+                        </div>
+                        {record.cost && (
+                          <div className="sm:text-right shrink-0 mt-2 sm:mt-0">
+                            <span className="block text-xs font-bold text-neutral-500 uppercase">Maliyet</span>
+                            <span className="text-lg font-black text-red-600">₺{parseInt(record.cost).toLocaleString('tr-TR')}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
   
   const AddPersonnelView = ({ onAdd, positions, ranks }) => {
     const [formData, setFormData] = useState({
@@ -5439,9 +5819,22 @@ useEffect(() => {
     );
   };
 
-  const OzlukDosyalariView = ({ personnelList }) => {
+  const OzlukDosyalariView = ({ personnelList, db, appId, addSystemLog, setViewingImage }) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [collarFilter, setCollarFilter] = useState('Mavi Yaka');
+    const [selectedPerson, setSelectedPerson] = useState(null);
+    const [uploadingCategory, setUploadingCategory] = useState(null);
+
+    const DOCUMENT_CATEGORIES = [
+      "Personel Kimlik",
+      "Personel Ehliyet Ve diğer vb belgeler",
+      "Personel İş Güvenliği",
+      "Personel Sağlık Raporu",
+      "Personel Sigorta Giriş",
+      "Personel Tutanakları",
+      "Personel Dilekçe Şikayet",
+      "Personel Ücretsiz İzinleri"
+    ];
 
     const filteredList = personnelList.filter(p => {
       if (collarFilter && p.collarType !== collarFilter) return false;
@@ -5449,83 +5842,316 @@ useEffect(() => {
       return true;
     });
 
-    return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4">
-          <h2 className="text-xl font-bold text-red-600 flex items-center gap-2">
-            <FolderOpen className="w-6 h-6" /> Personel Özlük Dosyaları
-          </h2>
-          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-            <div className="relative flex-1 md:flex-none">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-              <input 
-                type="text" 
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                placeholder="Personel Ara..." 
-                className="pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm outline-none focus:ring-1 focus:ring-red-500 w-full md:w-56 transition" 
-              />
-            </div>
-            <div className="flex bg-neutral-100 rounded-xl p-1 shrink-0 border border-neutral-200 w-full md:w-auto">
-              <button 
-                onClick={() => setCollarFilter('Mavi Yaka')}
-                className={`flex-1 md:flex-none px-4 py-1.5 text-sm font-bold rounded-lg transition ${collarFilter === 'Mavi Yaka' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
-              >
-                Mavi Yaka
-              </button>
-              <button 
-                onClick={() => setCollarFilter('Beyaz Yaka')}
-                className={`flex-1 md:flex-none px-4 py-1.5 text-sm font-bold rounded-lg transition ${collarFilter === 'Beyaz Yaka' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
-              >
-                Beyaz Yaka
-              </button>
-            </div>
-          </div>
-        </div>
+    const handleFileUpload = async (e, category) => {
+      const file = e.target.files[0];
+      if (!file || !selectedPerson) return;
+      
+      setUploadingCategory(category);
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+        
+        const newDoc = {
+          id: Date.now().toString(),
+          name: file.name,
+          url: uploadedUrl,
+          date: new Date().toLocaleDateString('tr-TR'),
+          category: category // Hangi kategoriye yüklendiğini kaydediyoruz
+        };
+        
+        const updatedDocs = [...(selectedPerson.documents || []), newDoc];
+        
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(selectedPerson.id)), {
+          documents: updatedDocs
+        });
+        
+        addSystemLog('Özlük Dosyası Eklendi', `${selectedPerson.fullName} personeline '${category}' kategorisinde yeni bir evrak eklendi.`);
+        setSelectedPerson(prev => ({ ...prev, documents: updatedDocs }));
+        
+      } catch (err) {
+        console.error("Yükleme hatası:", err);
+        alert("Dosya yüklenemedi.");
+      }
+      setUploadingCategory(null);
+    };
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-           {filteredList.map(person => (
-              <div key={person.id} className="bg-white border border-neutral-200 rounded-2xl overflow-hidden relative shadow-sm hover:shadow-md hover:border-red-200 transition group cursor-pointer">
-                 <div className="absolute top-0 right-0 w-32 h-full bg-red-50/60 rounded-l-full -mr-8 transition-transform duration-500 group-hover:scale-[1.15]"></div>
-                 <div className="p-5 relative z-10 flex flex-col h-full">
-                    <div className="flex items-center gap-3 mb-5">
-                       <div className="w-12 h-12 rounded-full bg-neutral-100 overflow-hidden border border-neutral-300 shadow-sm shrink-0 flex items-center justify-center">
-                         {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover"/> : <User className="w-6 h-6 text-neutral-400"/>}
-                       </div>
-                       <div className="overflow-hidden">
-                         <h3 className="font-bold text-black text-sm truncate">{person.fullName}</h3>
-                         <p className="text-[11px] text-neutral-500 font-medium mt-0.5 truncate">{person.position || 'Belirtilmedi'}</p>
-                       </div>
-                    </div>
-                    <div className="flex justify-between items-center pt-3 border-t border-neutral-100 mt-auto">
-                       <span className="flex items-center gap-1.5 text-xs font-bold text-red-600">
-                         <FolderOpen className="w-4 h-4" /> 0 Evrak
-                       </span>
-                       <span className="text-[10px] font-bold text-red-600 group-hover:text-red-700 transition uppercase tracking-wider">
-                         Dosyayı Aç
-                       </span>
-                    </div>
-                 </div>
+    const handleDeleteFile = async (docId) => {
+      if (!window.confirm("Bu evrakı silmek istediğinize emin misiniz?")) return;
+      
+      const updatedDocs = (selectedPerson.documents || []).filter(d => d.id !== docId);
+      
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(selectedPerson.id)), {
+          documents: updatedDocs
+        });
+        addSystemLog('Özlük Dosyası Silindi', `${selectedPerson.fullName} personelinden bir evrak silindi.`);
+        setSelectedPerson(prev => ({ ...prev, documents: updatedDocs }));
+      } catch (err) {
+        console.error("Silme hatası:", err);
+      }
+    };
+
+    const handleRemoveLeaveEvent = async (eventId) => {
+      if (!window.confirm("Bu ayrılış (pasif) bildirimini silmek istediğinize emin misiniz?")) return;
+      const updatedHistory = (selectedPerson.leaveHistory || []).filter(h => h.id !== eventId);
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(selectedPerson.id)), {
+          leaveHistory: updatedHistory
+        });
+        addSystemLog('Ayrılış Bildirimi Silindi', `${selectedPerson.fullName} personelinin pasife alınma uyarısı kaldırıldı.`);
+        setSelectedPerson(prev => ({ ...prev, leaveHistory: updatedHistory }));
+      } catch (err) {
+        console.error("Silme hatası:", err);
+      }
+    };
+
+    useEffect(() => {
+      if (selectedPerson) {
+        const updated = personnelList.find(p => p.id === selectedPerson.id);
+        if (updated && JSON.stringify(updated.documents) !== JSON.stringify(selectedPerson.documents)) {
+          setSelectedPerson(updated);
+        }
+      }
+    }, [personnelList, selectedPerson]);
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in min-h-[calc(100vh-140px)]">
+        
+        {!selectedPerson ? (
+          // LİSTE GÖRÜNÜMÜ (Ekran Resmi 1)
+          <>
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+              <h2 className="text-xl font-bold text-red-600 flex items-center gap-2">
+                <FolderOpen className="w-6 h-6" /> Personel Özlük Dosyaları
+              </h2>
+              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+                <div className="relative flex-1 md:w-64">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                  <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    placeholder="Personel Ara..." 
+                    className="pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-full text-sm outline-none focus:ring-1 focus:ring-red-500 w-full transition" 
+                  />
+                </div>
+                <div className="flex bg-neutral-100 rounded-full p-1 shrink-0 border border-neutral-200 w-full md:w-auto">
+                  <button 
+                    onClick={() => setCollarFilter('Mavi Yaka')}
+                    className={`flex-1 md:flex-none px-5 py-1.5 text-sm font-bold rounded-full transition ${collarFilter === 'Mavi Yaka' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+                  >
+                    Mavi Yaka
+                  </button>
+                  <button 
+                    onClick={() => setCollarFilter('Beyaz Yaka')}
+                    className={`flex-1 md:flex-none px-5 py-1.5 text-sm font-bold rounded-full transition ${collarFilter === 'Beyaz Yaka' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+                  >
+                    Beyaz Yaka
+                  </button>
+                </div>
               </div>
-           ))}
-           {filteredList.length === 0 && (
-              <div className="col-span-full py-12 text-center text-neutral-500 text-sm font-medium border-2 border-dashed border-neutral-200 rounded-2xl bg-neutral-50/50">
-                 Bu kritere uygun personel bulunamadı.
-              </div>
-           )}
-        </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+               {filteredList.map(person => (
+                  <div key={person.id} className="bg-white border border-neutral-200 rounded-2xl overflow-hidden relative shadow-sm hover:shadow-md hover:border-red-200 transition group flex flex-col h-full">
+                     {/* Arka plan kırmızı şekil */}
+                     <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 rounded-bl-[100px] z-0"></div>
+                     
+                     <div className="p-5 relative z-10 flex flex-col h-full">
+                        <div className="flex items-center gap-3 mb-6">
+                           <div className="w-12 h-12 rounded-full bg-neutral-100 overflow-hidden border border-neutral-300 shadow-sm shrink-0 flex items-center justify-center bg-white">
+                             {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover"/> : <span className="font-bold text-neutral-500">{person.fullName.charAt(0)}</span>}
+                           </div>
+                           <div className="overflow-hidden">
+                             <h3 className="font-bold text-black text-sm truncate">{person.fullName}</h3>
+                             <p className="text-[11px] text-neutral-500 font-medium mt-0.5 truncate">{person.position || 'Belirtilmedi'}</p>
+                           </div>
+                        </div>
+                        <div className="flex justify-between items-center pt-3 border-t border-neutral-100 mt-auto">
+                           <span className="flex items-center gap-1.5 text-xs font-bold text-neutral-600">
+                             <FolderOpen className="w-4 h-4 text-red-600" /> {(person.documents || []).length} Evrak
+                           </span>
+                           <button onClick={() => setSelectedPerson(person)} className="text-[10px] font-bold text-white bg-red-600 hover:bg-red-700 px-4 py-1.5 rounded transition shadow-sm">
+                             Dosyayı Aç
+                           </button>
+                        </div>
+                     </div>
+                  </div>
+               ))}
+               {filteredList.length === 0 && (
+                  <div className="col-span-full py-12 text-center text-neutral-500 text-sm font-medium border-2 border-dashed border-neutral-200 rounded-2xl bg-neutral-50/50">
+                     Bu kritere uygun personel bulunamadı.
+                  </div>
+               )}
+            </div>
+          </>
+        ) : (
+          // DETAY GÖRÜNÜMÜ (Ekran Resmi 2)
+          <div className="flex flex-col h-full animate-in slide-in-from-right-4">
+             {/* Detay Üst Başlık */}
+             <div className="flex items-center gap-4 mb-8">
+                <button 
+                  onClick={() => setSelectedPerson(null)} 
+                  className="w-10 h-10 bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 rounded-xl flex items-center justify-center text-neutral-600 transition shadow-sm"
+                >
+                   <ChevronLeft className="w-5 h-5" />
+                </button>
+                <div className="flex items-center gap-3">
+                   <div className="w-12 h-12 rounded-full overflow-hidden border border-neutral-300 shadow-sm shrink-0 flex items-center justify-center bg-white">
+                      {selectedPerson.profileImage ? <img src={selectedPerson.profileImage} className="w-full h-full object-cover"/> : <span className="font-bold text-neutral-500">{selectedPerson.fullName.charAt(0)}</span>}
+                   </div>
+                   <div>
+                      <h2 className="text-xl font-bold text-black flex items-center gap-2">
+                        {selectedPerson.fullName} <span className="text-neutral-400 font-medium">/ Özlük Dosyası</span>
+                      </h2>
+                      <p className="text-[11px] font-bold text-neutral-500 mt-1">
+                        {selectedPerson.position || 'Belirtilmedi'} • {selectedPerson.rank || 'Belirtilmedi'} • {selectedPerson.collarType || 'Belirtilmedi'}
+                      </p>
+                   </div>
+                </div>
+             </div>
+
+             {/* İşi Bırakma / Pasif Geçmişi Uyarıları */}
+             {selectedPerson.leaveHistory && selectedPerson.leaveHistory.length > 0 && (
+                <div className="mb-6 space-y-2 animate-in fade-in">
+                   {selectedPerson.leaveHistory.map(evt => (
+                      <div key={evt.id} className="bg-red-50 border border-red-200 p-3 rounded-xl flex items-center justify-between shadow-sm">
+                         <div className="flex items-center gap-2 text-red-800">
+                            <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
+                            <span className="text-sm font-bold">
+                               Personel Pasife Alındı (İşi Bırakma Tarihi): <span className="font-black ml-1">{evt.date}</span>
+                            </span>
+                         </div>
+                         <button onClick={() => handleRemoveLeaveEvent(evt.id)} className="text-red-500 hover:text-red-700 bg-white p-1.5 rounded-lg border border-red-200 transition shadow-sm shrink-0" title="Bu bildirimi kaldır">
+                            <X className="w-4 h-4" />
+                         </button>
+                      </div>
+                   ))}
+                </div>
+             )}
+
+             {/* Kategoriler Grid */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {DOCUMENT_CATEGORIES.map((category) => {
+                   // Bu kategoriye ait evrakları filtrele. Eskiden yüklenmiş kategorisizleri ilk kategoriye atayalım.
+                   const catDocs = (selectedPerson.documents || []).filter(d => 
+                      d.category === category || (!d.category && category === "Personel Kimlik")
+                   );
+
+                   return (
+                     <div key={category} className="border border-neutral-200 rounded-2xl p-4 bg-white shadow-sm flex flex-col">
+                        <div className="flex justify-between items-center border-b border-neutral-100 pb-3 mb-3">
+                           <h3 className="font-bold text-sm text-red-700 flex items-center gap-2">
+                              <FolderOpen className="w-4 h-4" /> {category}
+                           </h3>
+                           <span className="bg-neutral-100 text-neutral-600 text-[10px] font-bold px-2 py-0.5 rounded border border-neutral-200">
+                              {catDocs.length} Belge
+                           </span>
+                        </div>
+
+                        <div className="flex-1 flex flex-col gap-2 min-h-[60px] max-h-[160px] overflow-y-auto custom-scrollbar mb-4">
+                           {catDocs.length === 0 ? (
+                              <p className="text-xs text-neutral-400 italic text-center py-4 my-auto">Henüz bu kategoriye belge eklenmemiş.</p>
+                           ) : (
+                              catDocs.sort((a,b) => b.id - a.id).map(doc => (
+                                <div key={doc.id} className="flex items-center justify-between p-2 rounded-xl border border-neutral-100 bg-neutral-50 group hover:border-red-200 transition">
+                                   <div className="flex items-center gap-2 overflow-hidden">
+                                      <FileText className="w-4 h-4 text-neutral-400 shrink-0" />
+                                      <div className="overflow-hidden">
+                                        <p className="text-xs font-bold text-black truncate" title={doc.name}>{doc.name}</p>
+                                        <p className="text-[9px] text-neutral-500 font-medium">{doc.date}</p>
+                                      </div>
+                                   </div>
+                                   <div className="flex items-center gap-1 shrink-0">
+                                      <button onClick={(e) => { e.stopPropagation(); setViewingImage && setViewingImage({title: doc.name, name: doc.url}); }} className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:text-blue-600 transition" title="Görüntüle">
+                                         <Eye className="w-3.5 h-3.5" />
+                                      </button>
+                                      <a href={doc.url} target="_blank" rel="noreferrer" className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:text-green-600 transition" title="İndir">
+                                         <Download className="w-3.5 h-3.5" />
+                                      </a>
+                                      <button onClick={() => handleDeleteFile(doc.id)} className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:text-red-600 transition" title="Sil">
+                                         <X className="w-3.5 h-3.5" />
+                                      </button>
+                                   </div>
+                                </div>
+                              ))
+                           )}
+                        </div>
+
+                        <label className={`cursor-pointer w-full py-2.5 rounded-xl text-xs font-bold text-neutral-600 border border-neutral-200 flex justify-center items-center gap-2 transition mt-auto ${uploadingCategory === category ? 'bg-neutral-100' : 'bg-white hover:bg-neutral-50'}`}>
+                           {uploadingCategory === category ? (
+                              <><Loader2 className="w-4 h-4 animate-spin text-red-600" /> Yükleniyor...</>
+                           ) : (
+                              <><Upload className="w-4 h-4 text-neutral-400" /> Yeni Belge Yükle</>
+                           )}
+                           <input type="file" className="hidden" onChange={(e) => handleFileUpload(e, category)} disabled={uploadingCategory !== null} />
+                        </label>
+                     </div>
+                   );
+                })}
+             </div>
+          </div>
+        )}
       </div>
     );
   };
 
-  const ComplaintsView = () => {
+  const ComplaintsView = ({ complaints, updateComplaintStatus, deleteComplaint }) => {
+    const sortedComplaints = [...(complaints || [])].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in h-[calc(100vh-140px)] flex flex-col">
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4 shrink-0">
           <AlertTriangle className="w-6 h-6 text-red-600" /> Şikayet ve Bildirimler
         </h2>
-        <div className="flex-1 flex justify-center items-center border border-neutral-200 rounded-2xl bg-neutral-50/50">
-          <p className="text-neutral-500 font-medium text-sm">Sistemde kayıtlı şikayet veya bildirim bulunmuyor.</p>
+        
+        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-4">
+          {sortedComplaints.length === 0 ? (
+            <div className="h-full flex justify-center items-center border border-neutral-200 rounded-2xl bg-neutral-50/50">
+              <p className="text-neutral-500 font-medium text-sm">Sistemde kayıtlı şikayet veya bildirim bulunmuyor.</p>
+            </div>
+          ) : (
+            sortedComplaints.map(comp => (
+              <div key={comp.id} className={`p-5 rounded-2xl border transition shadow-sm flex flex-col gap-3 ${comp.read ? 'bg-white border-neutral-200' : 'bg-red-50/40 border-red-200'}`}>
+                <div className="flex justify-between items-start">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-full bg-neutral-200 flex items-center justify-center font-bold text-neutral-600 shrink-0">
+                      <User className="w-5 h-5 text-neutral-500" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-black text-base">{comp.senderName} <span className="text-xs font-medium text-neutral-500 ml-1">({comp.senderPosition})</span></h3>
+                      <p className="text-xs text-neutral-500 font-bold mt-0.5">{comp.dateStr}</p>
+                    </div>
+                  </div>
+                  {!comp.read && (
+                    <span className="bg-red-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider animate-pulse">Yeni Bildirim</span>
+                  )}
+                </div>
+                
+                <div className="bg-white p-4 rounded-xl border border-neutral-100 shadow-sm mt-1">
+                  <h4 className="font-black text-red-800 text-sm mb-2 pb-2 border-b border-neutral-100">Konu: {comp.subject}</h4>
+                  <p className="text-sm text-neutral-700 leading-relaxed whitespace-pre-wrap">{comp.content}</p>
+                </div>
+
+                <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-neutral-100">
+                  {!comp.read && (
+                    <button onClick={() => updateComplaintStatus(comp.id, 'İncelendi', true)} className="px-4 py-2 bg-green-50 text-green-700 hover:bg-green-100 font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-green-200">
+                      <CheckCircle className="w-4 h-4" /> Okundu Olarak İşaretle
+                    </button>
+                  )}
+                  <button onClick={() => { if(window.confirm('Bu bildirimi silmek istediğinize emin misiniz?')) deleteComplaint(comp.id); }} className="px-4 py-2 bg-neutral-100 text-red-600 hover:bg-red-100 font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-neutral-200">
+                    <X className="w-4 h-4" /> Sil
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     );
@@ -5570,7 +6196,102 @@ useEffect(() => {
     </div>
   );
 
-  const TaskManagerView = () => <PlaceholderView title="Görev Tahtası" icon={CheckSquare} />;
+  const TaskManagerView = ({ tasks, setShowTaskModal, draggingTask, setDraggingTask, openEditTask, handleUpdateTaskStatus, handleDeleteTask }) => {
+    const columns = [
+      { id: 'todo', title: 'YAPILACAKLAR', color: 'bg-neutral-800' },
+      { id: 'in-progress', title: 'İŞLEME ALINANLAR', color: 'bg-blue-600' },
+      { id: 'completed', title: 'TAMAMLANANLAR', color: 'bg-green-600' }
+    ];
+
+    const handleDragStart = (e, task) => {
+      setDraggingTask(task);
+      e.dataTransfer.effectAllowed = 'move';
+    };
+
+    const handleDragOver = (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    };
+
+    const handleDrop = (e, targetStatus) => {
+      e.preventDefault();
+      if (draggingTask && draggingTask.status !== targetStatus) {
+        handleUpdateTaskStatus(draggingTask.id, targetStatus);
+      }
+      setDraggingTask(null);
+    };
+
+    return (
+      <div className="h-[calc(100vh-120px)] flex flex-col animate-in fade-in">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-black flex items-center gap-2">
+            <CheckSquare className="w-7 h-7 text-red-600" /> Görev Tahtası
+          </h2>
+          <button 
+            onClick={() => setShowTaskModal(true)}
+            className="bg-black text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-neutral-800 transition shadow-lg"
+          >
+            <PlusCircle className="w-5 h-5" /> Yeni Görev Ekle
+          </button>
+        </div>
+
+        <div className="flex-1 flex gap-6 overflow-x-auto pb-4 custom-scrollbar items-start">
+          {columns.map(column => (
+            <div 
+              key={column.id} 
+              onDragOver={handleDragOver}
+              onDrop={(e) => handleDrop(e, column.id)}
+              className="bg-neutral-100 rounded-2xl w-80 md:w-96 flex-shrink-0 flex flex-col max-h-full border border-neutral-200"
+            >
+              <div className="p-4 border-b border-neutral-200 flex justify-between items-center bg-white rounded-t-2xl shadow-sm">
+                <h3 className="font-bold text-black text-sm flex items-center gap-2">
+                  <div className={`w-3 h-3 rounded-full ${column.color}`}></div>
+                  {column.title}
+                </h3>
+                <span className="bg-neutral-100 text-neutral-600 text-xs font-bold px-2.5 py-1 rounded-lg border border-neutral-200">
+                  {tasks.filter(t => t.status === column.id).length} Görev
+                </span>
+              </div>
+
+              <div className="p-3 flex-1 overflow-y-auto space-y-3 custom-scrollbar min-h-[150px]">
+                {tasks.filter(t => t.status === column.id).sort((a,b) => new Date(a.date) - new Date(b.date)).map(task => (
+                  <div 
+                    key={task.id} 
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, task)}
+                    className="bg-white p-4 rounded-xl shadow-sm border border-neutral-200 hover:border-red-400 transition cursor-grab active:cursor-grabbing group flex flex-col"
+                  >
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="text-[10px] font-bold bg-neutral-100 text-neutral-600 px-2 py-0.5 rounded border border-neutral-200 flex items-center gap-1">
+                        <CalendarDays className="w-3 h-3 text-neutral-400" /> Son: {task.date}
+                      </span>
+                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                        <button onClick={() => openEditTask(task)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Düzenle"><Edit className="w-3.5 h-3.5" /></button>
+                        <button onClick={() => handleDeleteTask(task.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Sil"><X className="w-3.5 h-3.5" /></button>
+                      </div>
+                    </div>
+                    <h4 className="font-black text-black text-base mb-1">{task.title}</h4>
+                    <p className="text-xs text-neutral-600 mb-4 whitespace-pre-wrap font-medium">{task.description}</p>
+                    
+                    <div className="flex items-center gap-1.5 mt-auto pt-3 border-t border-neutral-100">
+                      <div className="w-6 h-6 rounded-full bg-neutral-100 flex items-center justify-center text-neutral-400 overflow-hidden shrink-0 border border-neutral-200">
+                         <User className="w-3.5 h-3.5" />
+                      </div>
+                      <span className="text-xs font-bold text-neutral-700 truncate">{task.assignee}</span>
+                    </div>
+                  </div>
+                ))}
+                {tasks.filter(t => t.status === column.id).length === 0 && (
+                  <p className="text-center text-xs font-medium text-neutral-400 py-4">Bu alanda görev bulunmuyor.</p>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const SystemFilesView = () => <PlaceholderView title="Sistem Yedekleme" icon={Database} />;
 
   const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks }) => {
@@ -5779,7 +6500,7 @@ useEffect(() => {
     </div>
   );
 
-  const ModuleAccessView = ({ personnelList, handleUpdateModuleAccess, currentUser }) => {
+  const ModuleAccessView = ({ positions, positionModules, handleUpdatePositionModuleAccess }) => {
     const modules = [
       { id: 'dashboard', label: 'Anasayfa' },
       { id: 'calendar', label: 'Takvim' },
@@ -5797,41 +6518,41 @@ useEffect(() => {
       { id: 'systemFiles', label: 'Sistem Dosyaları' }
     ];
 
-    const handleToggle = (userId, moduleId, currentModules) => {
+    const handleToggle = (pos, moduleId, currentModules) => {
       const updated = currentModules ? { ...currentModules } : {};
       updated[moduleId] = !updated[moduleId];
-      handleUpdateModuleAccess(userId, updated);
+      handleUpdatePositionModuleAccess(pos, updated);
     };
 
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
-          <Eye className="w-6 h-6 text-red-600" /> Modül Görüntüleme Yetkileri
+          <Eye className="w-6 h-6 text-red-600" /> Pozisyona Göre Modül Görüntüleme Yetkileri
         </h2>
         <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium mb-6 border border-blue-200">
-          Bu sayfadan <b>Tam Yetki (Admin) olmayan</b> personellerin sol menüde hangi sayfaları görebileceğini ayarlayabilirsiniz. Admin yetkisi olanlar her koşulda tüm modülleri görür.
+          Bu sayfadan yetkilendirmeleri <b>pozisyonlara göre</b> yönetebilirsiniz. Burada yapacağınız ayarlamalar o pozisyonda çalışan tüm personeller için geçerli olacaktır. Tam Yetki (Admin) olan personeller her koşulda tüm modülleri görür.
         </div>
         
         <div className="space-y-6">
-          {personnelList.filter(p => !p.permissions?.canEdit).map(user => (
-            <div key={user.id} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 shadow-sm">
+          {positions.map(pos => (
+            <div key={pos} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 shadow-sm">
               <div className="flex items-center gap-3 mb-4 border-b border-neutral-200 pb-3">
-                <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold">
-                  {user.profileImage ? <img src={user.profileImage} alt="" className="w-full h-full object-cover rounded-full" /> : user.fullName.charAt(0)}
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
+                  <Briefcase className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="font-black text-black">{user.fullName}</h4>
-                  <p className="text-[10px] text-neutral-500 font-bold uppercase">{user.position} - {user.rank}</p>
+                  <h4 className="font-black text-black">{pos}</h4>
+                  <p className="text-[10px] text-neutral-500 font-bold uppercase">Tüm "{pos}" personelleri için geçerlidir</p>
                 </div>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                 {modules.map(mod => {
-                  const hasAccess = user.permissions?.modules?.[mod.id] ?? false;
+                  const hasAccess = positionModules?.[pos]?.[mod.id] ?? false;
                   return (
                     <label key={mod.id} className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${hasAccess ? 'bg-blue-50 border-blue-200' : 'bg-white border-neutral-200 hover:bg-neutral-100'}`}>
                       <span className={`text-xs font-bold ${hasAccess ? 'text-blue-800' : 'text-neutral-600'}`}>{mod.label}</span>
                       <div className="relative inline-flex items-center">
-                        <input type="checkbox" className="sr-only peer" checked={hasAccess} onChange={() => handleToggle(user.id, mod.id, user.permissions?.modules)} />
+                        <input type="checkbox" className="sr-only peer" checked={hasAccess} onChange={() => handleToggle(pos, mod.id, positionModules?.[pos])} />
                         <div className="w-7 h-4 bg-neutral-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
                       </div>
                     </label>
@@ -5840,8 +6561,8 @@ useEffect(() => {
               </div>
             </div>
           ))}
-          {personnelList.filter(p => !p.permissions?.canEdit).length === 0 && (
-            <p className="text-center text-neutral-500 italic py-4">Admin yetkisine sahip olmayan personel bulunmuyor.</p>
+          {positions.length === 0 && (
+            <p className="text-center text-neutral-500 italic py-4">Sistemde tanımlı pozisyon bulunmuyor.</p>
           )}
         </div>
       </div>
@@ -5849,10 +6570,59 @@ useEffect(() => {
   };
 
   const CompanyPasswordsView = ({ passwords, db, appId, addSystemLog }) => {
-    const [formData, setFormData] = useState({ platform: '', link: '', username: '', password: '', notes: '' });
+    const [formData, setFormData] = useState({ platform: '', link: '', username: '', password: '', notes: '', category: 'Genel' });
     const [editingId, setEditingId] = useState(null);
     const [visiblePasswords, setVisiblePasswords] = useState({});
     const [copiedField, setCopiedField] = useState(null);
+
+    // Kategori State'leri
+    const [categories, setCategories] = useState(['Genel']);
+    const [newCategory, setNewCategory] = useState('');
+    const [showCategoryManager, setShowCategoryManager] = useState(false);
+
+    useEffect(() => {
+      if (!db || !appId) return;
+      const catRef = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'passwordCategories');
+      const unsub = onSnapshot(catRef, (snap) => {
+        if (snap.exists()) {
+          setCategories(snap.data().list || ['Genel']);
+        } else {
+          // İlk açılışta varsayılan kategori oluştur
+          setDoc(catRef, { list: ['Genel'] });
+          setCategories(['Genel']);
+        }
+      });
+      return () => unsub();
+    }, [db, appId]);
+
+    const handleAddCategory = async (e) => {
+      e.preventDefault();
+      const catName = newCategory.trim();
+      if (!catName || categories.includes(catName)) return;
+      
+      const updated = [...categories, catName];
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'passwordCategories'), { list: updated });
+      addSystemLog('Şifre Kategorisi Eklendi', `Yeni şifre kategorisi oluşturuldu: ${catName}`);
+      setNewCategory('');
+    };
+
+    const handleDeleteCategory = async (catToDelete) => {
+      if (catToDelete === 'Genel') {
+        alert("Genel kategorisi silinemez.");
+        return;
+      }
+      if (window.confirm(`'${catToDelete}' kategorisini silmek istediğinize emin misiniz? (Bu kategorideki şifreler 'Genel' kategorisine taşınacaktır)`)) {
+        const updated = categories.filter(c => c !== catToDelete);
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'passwordCategories'), { list: updated });
+        
+        // Bu kategorideki şifreleri Genel'e taşı
+        const affectedPwds = passwords.filter(p => p.category === catToDelete);
+        for (const pwd of affectedPwds) {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companyPasswords', pwd.id), { category: 'Genel' });
+        }
+        addSystemLog('Şifre Kategorisi Silindi', `${catToDelete} kategorisi silindi ve içerikleri Genel kategorisine aktarıldı.`);
+      }
+    };
 
     const handleAdd = async (e) => {
       e.preventDefault();
@@ -5868,13 +6638,13 @@ useEffect(() => {
            });
            addSystemLog('Kurumsal Şifre Eklendi', `${formData.platform} platformuna ait yeni şifre eklendi.`);
         }
-        setFormData({ platform: '', link: '', username: '', password: '', notes: '' });
+        setFormData({ platform: '', link: '', username: '', password: '', notes: '', category: categories[0] || 'Genel' });
       } catch(err) { console.error(err); }
     };
 
     const handleEdit = (pwd) => {
       setEditingId(pwd.id);
-      setFormData({ platform: pwd.platform || '', link: pwd.link || '', username: pwd.username || '', password: pwd.password || '', notes: pwd.notes || '' });
+      setFormData({ platform: pwd.platform || '', link: pwd.link || '', username: pwd.username || '', password: pwd.password || '', notes: pwd.notes || '', category: pwd.category || 'Genel' });
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
 
@@ -5908,8 +6678,39 @@ useEffect(() => {
         
         <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-sm text-blue-800 font-medium mb-6 flex items-start gap-3">
           <Shield className="w-5 h-5 shrink-0 mt-0.5 text-blue-600" />
-          <p>Şirkete ait (Instagram, Hosting, E-Posta, vb.) tüm kurumsal hesapların giriş bilgilerini buradan güvenle yönetebilirsiniz. Bu bölüme sadece yetkili yöneticiler erişebilir.</p>
+          <div className="flex-1 flex flex-col md:flex-row md:items-center justify-between gap-2">
+            <p>Şirkete ait (Instagram, Hosting, E-Posta, vb.) tüm kurumsal hesapların giriş bilgilerini buradan güvenle yönetebilirsiniz. Bu bölüme sadece yetkili yöneticiler erişebilir.</p>
+            <button 
+              onClick={() => setShowCategoryManager(!showCategoryManager)}
+              className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-blue-700 transition shrink-0 shadow-sm flex items-center gap-1.5"
+            >
+              <FolderOpen className="w-3.5 h-3.5" /> Kategori Yönetimi {showCategoryManager ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+            </button>
+          </div>
         </div>
+
+        {/* Kategori Yöneticisi */}
+        {showCategoryManager && (
+          <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 mb-6 animate-in slide-in-from-top-2">
+            <h3 className="font-bold text-black mb-3 text-sm flex items-center gap-2">
+              <FolderOpen className="w-4 h-4 text-blue-600" /> Şifre Kategorileri
+            </h3>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {categories.map(cat => (
+                <div key={cat} className="flex items-center gap-1 bg-white border border-neutral-300 pl-3 pr-1 py-1 rounded-lg shadow-sm text-sm font-bold text-neutral-700">
+                  {cat}
+                  {cat !== 'Genel' && (
+                    <button onClick={() => handleDeleteCategory(cat)} className="text-red-500 hover:bg-red-50 p-1 rounded transition"><X className="w-3 h-3"/></button>
+                  )}
+                </div>
+              ))}
+            </div>
+            <form onSubmit={handleAddCategory} className="flex gap-2">
+              <input type="text" value={newCategory} onChange={e => setNewCategory(e.target.value)} placeholder="Yeni Kategori Adı" className="p-2 border border-neutral-300 rounded-lg focus:ring-2 focus:ring-blue-600 outline-none text-sm w-64" />
+              <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition">Ekle</button>
+            </form>
+          </div>
+        )}
 
         <form onSubmit={handleAdd} className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 mb-8 space-y-4">
           <h3 className="font-bold text-black border-b border-neutral-200 pb-2 mb-4 flex items-center gap-2">
@@ -5920,6 +6721,12 @@ useEffect(() => {
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">Platform / Sistem Adı *</label>
               <input required type="text" value={formData.platform} onChange={e => setFormData({...formData, platform: e.target.value})} placeholder="Örn: Instagram (Sembol Nakliyat)" className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Kategori *</label>
+              <select required value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium transition">
+                {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
+              </select>
             </div>
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">Giriş Linki (URL)</label>
@@ -5941,7 +6748,7 @@ useEffect(() => {
 
           <div className="flex gap-3">
             {editingId && (
-              <button type="button" onClick={() => { setEditingId(null); setFormData({ platform: '', link: '', username: '', password: '', notes: '' }); }} className="flex-1 py-3 bg-neutral-200 text-neutral-700 font-bold rounded-xl hover:bg-neutral-300 transition">İptal</button>
+              <button type="button" onClick={() => { setEditingId(null); setFormData({ platform: '', link: '', username: '', password: '', notes: '', category: categories[0] || 'Genel' }); }} className="flex-1 py-3 bg-neutral-200 text-neutral-700 font-bold rounded-xl hover:bg-neutral-300 transition">İptal</button>
             )}
             <button type="submit" className="flex-[2] py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-md">
               <Save className="w-5 h-5" /> {editingId ? 'Değişiklikleri Kaydet' : 'Sisteme Kaydet'}
@@ -5949,65 +6756,81 @@ useEffect(() => {
           </div>
         </form>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {passwords.map(pwd => (
-            <div key={pwd.id} className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-sm flex flex-col gap-4 hover:border-neutral-300 transition group">
-               <div className="flex justify-between items-start border-b border-neutral-100 pb-3">
-                  <div>
-                    <h4 className="font-black text-lg text-black">{pwd.platform}</h4>
-                    {pwd.link && (
-                      <a href={pwd.link.startsWith('http') ? pwd.link : `https://${pwd.link}`} target="_blank" rel="noreferrer" className="text-xs text-blue-600 font-medium hover:underline flex items-center gap-1 mt-0.5">
-                        <ArrowUpRight className="w-3 h-3" /> {pwd.link}
-                      </a>
-                    )}
-                  </div>
-                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                     <button onClick={() => handleEdit(pwd)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle"><Edit className="w-4 h-4"/></button>
-                     <button onClick={() => handleDelete(pwd.id, pwd.platform)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition" title="Sil"><X className="w-4 h-4"/></button>
-                  </div>
-               </div>
+        {passwords.length === 0 ? (
+          <div className="text-center text-neutral-500 py-10 bg-neutral-50 rounded-2xl border border-neutral-200">
+            <Key className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
+            <p className="font-medium text-sm">Sistemde kayıtlı kurumsal şifre bulunmuyor.</p>
+          </div>
+        ) : (
+          <div className="space-y-8">
+            {categories.map(cat => {
+              const catPwds = passwords.filter(p => (p.category || 'Genel') === cat);
+              if (catPwds.length === 0) return null;
 
-               <div className="space-y-3 flex-1">
-                  <div>
-                    <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1">Kullanıcı Adı / E-Posta</span>
-                    <div className="flex items-center gap-2">
-                       <code className="bg-neutral-100 px-3 py-1.5 rounded-lg text-sm font-bold text-black flex-1 truncate select-all">{pwd.username}</code>
-                       <button onClick={() => handleCopy(pwd.username, `user_${pwd.id}`)} className="p-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-lg transition shrink-0" title="Kopyala">
-                         {copiedField === `user_${pwd.id}` ? <CheckCircle className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-                       </button>
-                    </div>
-                  </div>
+              return (
+                <div key={cat} className="animate-in fade-in">
+                  <h3 className="text-lg font-black text-neutral-800 mb-4 flex items-center gap-2 border-b border-neutral-200 pb-2 pl-2">
+                    <FolderOpen className="w-5 h-5 text-red-600" /> {cat} <span className="text-xs bg-neutral-100 px-2 py-0.5 rounded-full border border-neutral-200">{catPwds.length}</span>
+                  </h3>
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {catPwds.map(pwd => (
+                      <div key={pwd.id} className="bg-white p-5 rounded-2xl border border-neutral-200 shadow-sm flex flex-col gap-4 hover:border-red-300 transition group relative overflow-hidden">
+                        <div className="absolute top-0 left-0 w-1 h-full bg-red-600 opacity-0 group-hover:opacity-100 transition"></div>
+                        <div className="flex justify-between items-start border-b border-neutral-100 pb-3 pl-1">
+                            <div>
+                              <h4 className="font-black text-lg text-black">{pwd.platform}</h4>
+                              {pwd.link && (
+                                <a href={pwd.link.startsWith('http') ? pwd.link : `https://${pwd.link}`} target="_blank" rel="noreferrer" className="text-xs text-blue-600 font-medium hover:underline flex items-center gap-1 mt-0.5">
+                                  <ArrowUpRight className="w-3 h-3" /> {pwd.link}
+                                </a>
+                              )}
+                            </div>
+                            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                              <button onClick={() => handleEdit(pwd)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition border border-transparent hover:border-blue-200" title="Düzenle"><Edit className="w-4 h-4"/></button>
+                              <button onClick={() => handleDelete(pwd.id, pwd.platform)} className="p-1.5 text-red-600 hover:bg-red-50 rounded-lg transition border border-transparent hover:border-red-200" title="Sil"><X className="w-4 h-4"/></button>
+                            </div>
+                        </div>
 
-                  <div>
-                    <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1">Şifre</span>
-                    <div className="flex items-center gap-2">
-                       <code className="bg-neutral-100 px-3 py-1.5 rounded-lg text-sm font-bold text-black flex-1 truncate select-all">
-                         {visiblePasswords[pwd.id] ? pwd.password : '••••••••••••'}
-                       </code>
-                       <button onClick={() => toggleVisible(pwd.id)} className="p-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-lg transition shrink-0" title={visiblePasswords[pwd.id] ? "Gizle" : "Göster"}>
-                         {visiblePasswords[pwd.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                       </button>
-                       <button onClick={() => handleCopy(pwd.password, `pwd_${pwd.id}`)} className="p-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-lg transition shrink-0" title="Kopyala">
-                         {copiedField === `pwd_${pwd.id}` ? <CheckCircle className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
-                       </button>
-                    </div>
+                        <div className="space-y-3 flex-1 pl-1">
+                            <div>
+                              <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1">Kullanıcı Adı / E-Posta</span>
+                              <div className="flex items-center gap-2">
+                                <code className="bg-neutral-100 px-3 py-1.5 rounded-lg text-sm font-bold text-black flex-1 truncate select-all">{pwd.username}</code>
+                                <button onClick={() => handleCopy(pwd.username, `user_${pwd.id}`)} className="p-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-lg transition shrink-0" title="Kopyala">
+                                  {copiedField === `user_${pwd.id}` ? <CheckCircle className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            </div>
+
+                            <div>
+                              <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1">Şifre</span>
+                              <div className="flex items-center gap-2">
+                                <code className="bg-neutral-100 px-3 py-1.5 rounded-lg text-sm font-bold text-black flex-1 truncate select-all">
+                                  {visiblePasswords[pwd.id] ? pwd.password : '••••••••••••'}
+                                </code>
+                                <button onClick={() => toggleVisible(pwd.id)} className="p-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-lg transition shrink-0 border border-transparent hover:border-neutral-300" title={visiblePasswords[pwd.id] ? "Gizle" : "Göster"}>
+                                  {visiblePasswords[pwd.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                                </button>
+                                <button onClick={() => handleCopy(pwd.password, `pwd_${pwd.id}`)} className="p-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-lg transition shrink-0 border border-transparent hover:border-neutral-300" title="Kopyala">
+                                  {copiedField === `pwd_${pwd.id}` ? <CheckCircle className="w-4 h-4 text-green-600" /> : <Copy className="w-4 h-4" />}
+                                </button>
+                              </div>
+                            </div>
+                            
+                            {pwd.notes && (
+                              <div className="mt-2 text-xs text-neutral-600 bg-yellow-50 p-2.5 rounded-lg border border-yellow-200 shadow-sm leading-relaxed">
+                                <b className="text-yellow-800">Not:</b> {pwd.notes}
+                              </div>
+                            )}
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  
-                  {pwd.notes && (
-                    <div className="mt-2 text-xs text-neutral-600 bg-yellow-50 p-2.5 rounded-lg border border-yellow-100">
-                      <b className="text-yellow-800">Not:</b> {pwd.notes}
-                    </div>
-                  )}
-               </div>
-            </div>
-          ))}
-          {passwords.length === 0 && (
-            <div className="lg:col-span-2 text-center text-neutral-500 py-10 bg-neutral-50 rounded-2xl border border-neutral-200">
-              <Key className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
-              <p className="font-medium text-sm">Sistemde kayıtlı kurumsal şifre bulunmuyor.</p>
-            </div>
-          )}
-        </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
@@ -6418,8 +7241,9 @@ useEffect(() => {
                   </div>
 
                   {/* Actions */}
+                  {canApprovePoints && (
                   <div className="p-2 border-t border-neutral-200 bg-neutral-50 flex flex-col gap-1.5 shrink-0">
-                    {canApprovePoints && !job.pointsApproved ? (
+                    {!job.pointsApproved ? (
                       <button onClick={() => handleOpenApproveModal(job)} className="w-full py-2 bg-yellow-50 text-yellow-700 font-bold text-xs rounded-lg hover:bg-yellow-100 transition flex justify-center items-center gap-1.5 border border-yellow-200">
                         <Star className="w-4 h-4" /> Puan Onayla
                       </button>
@@ -6429,7 +7253,7 @@ useEffect(() => {
                       </div>
                     )}
 
-                    {canApprovePoints && !job.mesaiApproved ? (
+                    {!job.mesaiApproved ? (
                       <button onClick={() => handleOpenMesaiModal(job)} className="w-full py-2 bg-blue-50 text-blue-700 font-bold text-xs rounded-lg hover:bg-blue-100 transition flex justify-center items-center gap-1.5 border border-blue-200">
                         <Clock className="w-4 h-4" /> Mesai Onayla
                       </button>
@@ -6449,6 +7273,7 @@ useEffect(() => {
                       <Edit className="w-3.5 h-3.5" /> İncele / Düzenle
                     </button>
                   </div>
+                  )}
 
                 </div>
               ))}
@@ -6493,7 +7318,8 @@ useEffect(() => {
     const systemNames = (job.assignedPersonnelIds || []).map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
     const manualNames = (job.teamNames || []).filter(name => !systemNames.includes(name));
     const currentCount = systemNames.length + manualNames.length;
-    const isNakliye = job.type !== 'Depo';
+    const isNakliye = job.type === 'Nakliye' || !job.type;
+    const isAsansor = job.type === 'Asansör';
     const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking);
 
     const handleNoteBlur = async () => {
@@ -6617,24 +7443,33 @@ useEffect(() => {
         onDragOver={(e) => handleDragOver(e, job.id)}
         onDragLeave={handleDragLeave}
         onDrop={(e) => handleDropToJob(e, job.id)}
-        className={`w-[260px] md:w-[280px] shrink-0 bg-white rounded-xl flex flex-col h-fit overflow-hidden border-2 transition-colors duration-200 shadow-md pb-1 ${dragOverTarget === job.id ? (isNakliye ? 'border-red-400 bg-red-50/50' : 'border-blue-400 bg-blue-50/50') : 'border-neutral-200 hover:border-neutral-300'}`}
+        className={`w-[260px] md:w-[280px] shrink-0 bg-white rounded-xl flex flex-col h-fit overflow-hidden border-2 transition-colors duration-200 shadow-md pb-1 ${dragOverTarget === job.id ? (isNakliye ? 'border-red-400 bg-red-50/50' : isAsansor ? 'border-green-400 bg-green-50/50' : 'border-blue-400 bg-blue-50/50') : 'border-neutral-200 hover:border-neutral-300'}`}
       >
         {/* İŞ KARTI BAŞLIĞI */}
-        <div className={`p-3 border-b-4 ${isNakliye ? 'border-red-500 bg-red-50' : 'border-blue-500 bg-blue-50'} shrink-0`}>
+        <div className={`p-3 border-b-4 ${isNakliye ? 'border-red-500 bg-red-50' : isAsansor ? 'border-green-500 bg-green-50' : 'border-blue-500 bg-blue-50'} shrink-0`}>
           <div className="flex justify-between items-start mb-1.5">
-            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest text-white ${isNakliye ? 'bg-red-600' : 'bg-blue-600'}`}>{job.type || 'Nakliye'}</span>
+            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest text-white ${isNakliye ? 'bg-red-600' : isAsansor ? 'bg-green-600' : 'bg-blue-600'}`}>{job.type || 'Nakliye'}</span>
             <span className="text-[11px] font-bold text-neutral-600"><Clock className="w-3 h-3 inline mr-1" />{job.time}</span>
           </div>
           <h3 className="font-black text-[15px] text-black truncate mb-1" title={job.customerName}>{job.customerName}</h3>
+          
+          {isAsansor && job.fromRoomCount && (
+             <div className="mb-2">
+                 <span className={`text-[10px] font-black px-2 py-1 rounded-md text-white uppercase shadow-sm ${job.fromRoomCount.includes('Yükleme') ? 'bg-orange-500' : 'bg-indigo-500'}`}>
+                     <ArrowUpRight className="w-3 h-3 inline mr-1" /> {job.fromRoomCount}
+                 </span>
+             </div>
+          )}
+
           <div className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-700 mb-2">
-            <span className="bg-white px-1 py-0.5 rounded border border-neutral-300 shadow-sm">{job.fromRoomCount}</span>
-            <span>•</span>
-            <span className="truncate flex-1">{job.fromDistrict} ➔ {job.toDistrict || '?'}</span>
+            {!isAsansor && <span className="bg-white px-1 py-0.5 rounded border border-neutral-300 shadow-sm">{job.fromRoomCount}</span>}
+            {!isAsansor && <span>•</span>}
+            <span className="truncate flex-1">{job.fromDistrict} {job.toDistrict ? `➔ ${job.toDistrict}` : ''}</span>
           </div>
 
           <div className="text-[9px] flex flex-col gap-1 mb-2 bg-white p-1.5 rounded border border-neutral-200 shadow-sm">
             <div className="flex justify-between items-center">
-               <span className="truncate text-neutral-600"><b>Kat:</b> {job.fromFloor} ➔ {job.toFloor || '?'}</span>
+               <span className="truncate text-neutral-600"><b>Kat:</b> {job.fromFloor} {job.toFloor ? `➔ ${job.toFloor}` : ''}</span>
                {job.price && <span className="font-black text-green-700 text-[10px] shrink-0">₺{parseInt(job.price).toLocaleString('tr-TR')}</span>}
             </div>
             <div className="flex justify-between text-neutral-600">
@@ -6748,6 +7583,7 @@ useEffect(() => {
         </div>
 
         {/* Malzemeler */}
+        {job.type !== 'Asansör' && (
         <div className="p-2 border-t border-neutral-200 bg-amber-50/30 shrink-0">
           <span className="text-[9px] font-bold text-amber-800 uppercase tracking-wider mb-1 block flex items-center gap-1"><Package className="w-3 h-3"/> Malzemeler</span>
           <div className="grid grid-cols-2 gap-1 mb-1">
@@ -6783,6 +7619,7 @@ useEffect(() => {
             )}
           </div>
         </div>
+        )}
 
         {/* Operasyon Notu */}
         <div className="p-2 border-t border-neutral-200 bg-neutral-50 shrink-0">
@@ -6833,9 +7670,17 @@ useEffect(() => {
 
     const dailyJobs = jobs.filter(j => 
       j.date === selectedDate && 
-      (j.type === 'Nakliye' || j.type === 'Depo' || !j.type) && 
       j.status !== 'cancelled'
-    ).sort((a, b) => new Date(a.date + 'T' + a.time) - new Date(b.date + 'T' + b.time));
+    ).sort((a, b) => {
+      const order = { 'Nakliye': 1, 'Depo': 2, 'Asansör': 3 };
+      const typeA = a.type || 'Nakliye';
+      const typeB = b.type || 'Nakliye';
+      
+      if (order[typeA] !== order[typeB]) {
+          return order[typeA] - order[typeB];
+      }
+      return new Date(a.date + 'T' + (a.time || '00:00')) - new Date(b.date + 'T' + (b.time || '00:00'));
+    });
 
     const maviYakaList = personnelList.filter(p => {
       if (p.position === 'Firma Sahibi') return false;
@@ -6859,7 +7704,7 @@ useEffect(() => {
        return true;
     });
 
-    const posOrder = { 'Şoför': 1, 'Mobilya Ustası': 2, 'Taşıma Elemanı': 3 };
+    const posOrder = { 'Şoför': 1, 'Mobilya Ustası': 2, 'Taşıma Elemanı': 3, 'Operatör': 4 };
     displayPersonnel.sort((a, b) => {
         const orderA = posOrder[a.position] || 99;
         const orderB = posOrder[b.position] || 99;
@@ -6906,10 +7751,13 @@ useEffect(() => {
           let newIds = [...(targetJob.assignedPersonnelIds || [])];
           const person = personnelList.find(p => String(p.id) === String(itemId));
 
-          if (newIds.length === 0) {
-              const isValidFirst = targetJob.type === 'Asansör'
-                ? person.position === 'Operatör'
-                : (person.rank === 'Ekip Şefi' || person.rank === 'Kalfa' || person.rank === 'Müdür' || person.position === 'Firma Sahibi');
+          if (targetJob.type === 'Asansör' && person.position !== 'Operatör') {
+              alert("Asansör işlerine sadece 'Operatör' pozisyonundaki personeller atanabilir!");
+              return;
+          }
+
+          if (newIds.length === 0 && targetJob.type !== 'Asansör') {
+              const isValidFirst = (person.rank === 'Ekip Şefi' || person.rank === 'Kalfa' || person.rank === 'Müdür' || person.position === 'Firma Sahibi');
 
               if (!isValidFirst) {
                   alert("İşin en başına eklenecek ilk kişi Ekip Şefi veya yetkili biri olmalıdır!");
@@ -7427,6 +8275,7 @@ useEffect(() => {
                  )}
 
                  {/* MALZEME BİLGİSİ */}
+                 {job.type !== 'Asansör' && (
                  <div className="mt-2 text-xs font-medium bg-amber-50 text-amber-800 p-3 rounded-xl border border-amber-200 flex flex-col md:flex-row gap-x-3 gap-y-2 md:items-center">
                     <div className="flex items-center gap-1.5 shrink-0"><Package className="w-4 h-4 text-amber-600" /> <b className="text-amber-900">Operasyon Malzemeleri:</b></div>
                     <div className="flex gap-3 flex-wrap flex-1">
@@ -7451,6 +8300,7 @@ useEffect(() => {
                       </div>
                     )}
                  </div>
+                 )}
 
                  {/* FİYAT BİLGİSİ (SADECE ASIL GÖREVLİ) */}
                  {isMainAssignee && job.price && (
@@ -8137,6 +8987,7 @@ useEffect(() => {
     const [currentMonth, setCurrentMonth] = useState(today.getMonth() + 1);
     const [currentYear, setCurrentYear] = useState(today.getFullYear());
     const [mesaiData, setMesaiData] = useState({});
+    const [prevMonthData, setPrevMonthData] = useState({}); // YENİ EKLENDİ
     const [isSaving, setIsSaving] = useState(false);
     const [isDataLoaded, setIsDataLoaded] = useState(false);
     const currentDayRef = React.useRef(null);
@@ -8195,6 +9046,18 @@ useEffect(() => {
           const snap = await getDoc(docRef);
           let fetchedRecords = snap.exists() ? snap.data().records || {} : {};
 
+          // Önceki Ayın Verisini Çek (Pazar hesaplaması için)
+          let pMonth = currentMonth - 1;
+          let pYear = currentYear;
+          if (pMonth === 0) { pMonth = 12; pYear -= 1; }
+          const prevDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${docPrefix}${pYear}_${pMonth}`);
+          const prevSnap = await getDoc(prevDocRef);
+          if (prevSnap.exists()) {
+             setPrevMonthData(prevSnap.data().records || {});
+          } else {
+             setPrevMonthData({});
+          }
+
           // BEYAZ YAKA İÇİN OTOMATİK MESAİ DOLDURMA
           if (collarType === 'Beyaz Yaka') {
             const beyazYakaList = personnelList.filter(p => {
@@ -8242,6 +9105,74 @@ useEffect(() => {
       }, 1000);
       return () => clearTimeout(timeoutId);
     }, [mesaiData, docPrefix]);
+
+    // OTOMATİK PAZAR GÜNÜ MESAİ KONTROLÜ (7 GÜN KURALI)
+    useEffect(() => {
+      if (!isDataLoaded) return; // Mavi Yaka kısıtlaması kaldırılarak tüm personellere (Beyaz Yaka dahil) uygulandı
+
+      let hasChanges = false;
+      const newData = JSON.parse(JSON.stringify(mesaiData));
+      const daysInPrevMonth = new Date(currentYear, currentMonth - 1, 0).getDate();
+
+      targetPersonnelList.forEach(person => {
+          const pId = person.id;
+          if (!newData[pId]) return;
+
+          for (let d = 1; d <= daysInMonth; d++) {
+             const dateObj = new Date(currentYear, currentMonth - 1, d);
+             if (dateObj.getDay() === 0) { // Sadece Pazar günlerini kontrol et
+                const sundayValObj = newData[pId][d];
+                const sundayStatus = typeof sundayValObj === 'object' && sundayValObj !== null ? sundayValObj.status : sundayValObj;
+                
+                // Eğer pazar günü çalışılmışsa kontrol yap
+                if (sundayStatus && ['G', 'FM', 'EM', 'FGM', 'FG'].includes(sundayStatus)) {
+                   let workedDays = 0;
+                   let hasLeave = false;
+                   
+                   // Pazartesiden Pazara (d-6'dan d'ye) 7 günlük periyodu tara
+                   for (let i = d - 6; i <= d; i++) {
+                      let cellStatus = '';
+                      if (i > 0) {
+                         const cell = newData[pId][i];
+                         cellStatus = typeof cell === 'object' && cell !== null ? cell.status : cell;
+                      } else {
+                         // Ayın ilk günlerine denk geliyorsa önceki aydan veri al
+                         const prevDay = daysInPrevMonth + i;
+                         const cell = prevMonthData[pId]?.[prevDay];
+                         cellStatus = typeof cell === 'object' && cell !== null ? cell.status : cell;
+                      }
+                      
+                      if (['Hİ', 'D', 'R', 'Üİ', 'Yİ', 'Bİ'].includes(cellStatus)) {
+                         hasLeave = true;
+                      }
+                      if (['G', 'FM', 'EM', 'FGM', 'FG'].includes(cellStatus)) {
+                         workedDays++;
+                      }
+                   }
+
+                   // Eğer hiç izin kullanmamış ve 7 gün tam gelmişse -> FGM
+                   if (workedDays === 7 && !hasLeave) {
+                       if (sundayStatus !== 'FGM' && sundayStatus !== 'FG') { 
+                           newData[pId][d] = { ...(typeof sundayValObj === 'object' ? sundayValObj : {}), status: 'FGM' };
+                           hasChanges = true;
+                       }
+                   } 
+                   // Eğer hafta içi izin kullanmışsa, Pazar günü normal mesai(G) sayılır
+                   else if (hasLeave) {
+                       if (sundayStatus === 'FGM' || sundayStatus === 'FG') { 
+                           newData[pId][d] = { ...(typeof sundayValObj === 'object' ? sundayValObj : {}), status: 'G' };
+                           hasChanges = true;
+                       }
+                   }
+                }
+             }
+          }
+      });
+
+      if (hasChanges) {
+          setMesaiData(newData);
+      }
+    }, [mesaiData, isDataLoaded, collarType, currentMonth, currentYear, daysInMonth, prevMonthData, targetPersonnelList]);
 
     const handleCellChange = (personId, day, value) => {
       setMesaiData(prev => ({
@@ -9179,10 +10110,26 @@ useEffect(() => {
             if (person) {
                 const amount = getAmountForTab(id);
                 toplamTutar += amount;
-                const amountStr = Number.isInteger(amount) ? amount.toString() : amount.toFixed(2);
+                
+                // Tutar formatı: Noktasız, küsurat için virgül (Örn: 15000,50 veya 15000)
+                let amountStr = amount.toFixed(2).replace('.', ',');
+                if (amountStr.endsWith(',00')) {
+                    amountStr = amount.toString();
+                }
+
+                // IBAN formatı: Boşluksuz (Örn: TR123456789012345678901234)
                 const iban = person.iban ? person.iban.replace(/\s+/g, '') : '';
-                // Excel şablonuna birebir uyumlu olarak boş sütunlar virgüllerle atlanıyor
-                rowsData.push(`${person.fullName},,,,,${iban},${amountStr},,,,,`);
+                
+                // TC Kimlik formatı (Varsa)
+                const tckn = person.tcNo ? person.tcNo.replace(/\s+/g, '') : '';
+                
+                // Banka Kodu ve Şube Kodu IBAN'dan veya sistemden (Şimdilik boş bırakılıyor, IBAN yeterli genelde)
+                const bankaKodu = ''; 
+                const subeKodu = '';
+                const hesapNo = '';
+
+                // Satır Formatı: İsim,TCKN (Opsiyonel),Banka Kodu,Şube Kodu,Hesap,IBAN (Boşluksuz 26 Karakter),Tutar,Borç İzahat,Alacak izahat,,,
+                rowsData.push(`${person.fullName},${tckn},${bankaKodu},${subeKodu},${hesapNo},${iban},${amountStr},${bankInfo.borcIzahat},,,,,`);
             }
         });
 
@@ -9193,32 +10140,42 @@ useEffect(() => {
             odemeTarihiFormatted = `${parts[2]}${parts[1]}${parts[0]}`;
         }
 
-        // Ödeme tipi harfini ayıklama (Sadece baş harf - M, N, Z)
+        // Ödeme tipi harfini ayıklama (Sadece baş harf - M, N, Z vb.)
         let odemeTipiFormatted = bankInfo.odemeTipi;
         if (odemeTipiFormatted === 'MAAŞ (M)') odemeTipiFormatted = 'M';
         else if (odemeTipiFormatted === 'AVANS') odemeTipiFormatted = 'N';
         else if (odemeTipiFormatted === 'DİĞER') odemeTipiFormatted = 'Z';
 
-        const toplamTutarStr = Number.isInteger(toplamTutar) ? toplamTutar.toString() : toplamTutar.toFixed(2);
+        // Toplam Tutar formatı: Noktasız, küsurat için virgül
+        let toplamTutarStr = toplamTutar.toFixed(2).replace('.', ',');
+        if (toplamTutarStr.endsWith(',00')) {
+            toplamTutarStr = toplamTutar.toString();
+        }
 
-        let csvContent = "\uFEFF";
+        let csvContent = "\uFEFF"; // UTF-8 BOM for Excel
+        
+        // --- BAŞLIK VE BİLGİLENDİRME ALANLARI ---
         csvContent += `Kurum Kodu,${bankInfo.kurumKodu},Garanti Bankası tarafından verilen kurum kodunuz.,,,,,,Ödeme Tipleri,,,\n`;
         csvContent += `Şube Kodu,${bankInfo.subeKodu},Şubenizden öğreniniz,,,,,,O,SOSYAL YARDIM,G,PROMOSYON\n`;
         csvContent += `Hesap,${bankInfo.hesapNo},Maaş ödemesinde kullanacağınız hesap. 1299998-2 şeklinde kontrol digiti girmeyiniz.,,,,,,D,DÖNER SERMAYE    ,R,PRİM ÖDEMESİ     \n`;
         csvContent += `Toplam Adet,${toplamAdet},Toplam maaş adedi. (Giriş yapıldıkça otomatik olarak hesaplanır.),,,,,,C,KOMİSYON,S,EK DERS ÜCRETİ\n`;
         csvContent += `Toplam Tutar,${toplamTutarStr},Toplam ödeme tutarı. (Giriş yapıldıkça otomatik olarak hesaplanır.),,,,,,F,FAZLA MESAİ      ,H,HUZUR HAKKI\n`;
-        csvContent += `Döviz Kodu,TL ,Döviz kodunu listeden seçiniz.,,,,,,I,İKRAMİYE         ,V,ASGARİ GEÇİM İNDİRİMİ\n`;
+        csvContent += `Döviz Kodu,TL,Döviz kodunu listeden seçiniz.,,,,,,I,İKRAMİYE         ,V,ASGARİ GEÇİM İNDİRİMİ\n`;
         csvContent += `Ödeme Tarihi,${odemeTarihiFormatted},GGAAYYYY formatında. (Örnek: 04032001 giriniz.),,,,,,K,KIDEM TAZMİNATI  ,Y,YOLLUK           \n`;
         csvContent += `Ödeme Tipi,${odemeTipiFormatted},Ödeme tiplerini yandaki tabloda görebilirsiniz.,,,,,,M,MAAŞ             ,Z,DİĞER            \n`;
         csvContent += `Borç İzahat,${bankInfo.borcIzahat},,,,,,,N,AVANS            ,X,KESİNTİ\n`;
         csvContent += `"BİLGİLENDİRME : Dosyanızdaki bilgiler banka sistemine otomatik olarak yüklenecektir. Banka kodu boş veya  62 ise havale, 62'den farklı ise EFT'dir. Kayıtlar içinde EFT varsa ödeme tarihi işgünü olmalıdır. Başka bir excel dosyasından kopyalama yapmak istiyorsanız Edit/Paste Spacial seçeneğini Values seçerek kullanınız.",,,,,,,,,,,\n`;
         csvContent += `"Herhangi bir hataya yol açmamak için dosyanın formatını değiştirmeyiniz, açıklamalara uyunuz. ",,,,,,,,,,,\n`;
+        
+        // --- SÜTUN BAŞLIKLARI ---
         csvContent += `İsim,TCKN (Opsiyonel),Banka Kodu,Şube Kodu,Hesap,IBAN (Boşluksuz 26 Karakter),Tutar,Borç İzahat,Alacak izahat,,,\n`;
 
+        // --- VERİ SATIRLARI ---
         rowsData.forEach(row => {
             csvContent += row + "\n";
         });
 
+        // CSV Dosyasını Oluştur ve İndir
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement("a");
         const url = URL.createObjectURL(blob);
@@ -9575,6 +10532,7 @@ useEffect(() => {
     const [personnelList, setPersonnelList] = useState([]);
     const [positions, setPositions] = useState([]);
     const [ranks, setRanks] = useState([]);
+    const [positionModules, setPositionModules] = useState({}); // YENİ EKLENDİ
     const [complaints, setComplaints] = useState([]); // Yeni: Şikayetler State
     const [companyContacts, setCompanyContacts] = useState([]); // Yeni: Şirket İletişim Hattı
     const [todos, setTodos] = useState([]); // Yapılacak Listesi
@@ -9740,7 +10698,7 @@ useEffect(() => {
         setPersonnelList(list);
         if (snap.empty) {
           await addDoc(getCol('personnelList'), {
-            fullName: 'Sistem Yöneticisi', email: 'admin', password: 'Kajmeran461-', position: 'Firma Sahibi', rank: 'Müdür', employmentStatus: 'Aktif', permissions: { canView: true, canEdit: true }
+            fullName: 'Sistem Yöneticisi', email: 'admin', password: 'admin', position: 'Firma Sahibi', rank: 'Müdür', employmentStatus: 'Aktif', permissions: { canView: true, canEdit: true }
           });
         }
 
@@ -9753,12 +10711,14 @@ useEffect(() => {
           const data = docSnap.data();
           setPositions(data.positions || []);
           setRanks(data.ranks || []);
+          setPositionModules(data.positionModules || {}); // YENİ EKLENDİ
         } else {
           const defaultPos = ['Şoför', 'Taşıma Elemanı', 'Muhasebe', 'Mobilya Ustası', 'Satış Personeli', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operasyon', 'Operatör', 'Firma Sahibi'];
           const defaultRanks = ['Müdür', 'Ekip Şefi', 'Asistan', 'Standart', 'Kalfa'];
-          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { positions: defaultPos, ranks: defaultRanks });
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { positions: defaultPos, ranks: defaultRanks, positionModules: {} });
           setPositions(defaultPos);
           setRanks(defaultRanks);
+          setPositionModules({}); // YENİ EKLENDİ
         }
         setDataLoadStatus(p => ({...p, settings: true}));
       }, console.error));
@@ -9885,6 +10845,8 @@ useEffect(() => {
       const oldUser = personnelList.find(p => p.id === id);
       if (oldUser && oldUser.employmentStatus !== 'Pasif' && data.employmentStatus === 'Pasif') {
           data.passiveDate = new Date().toISOString();
+          const leaveEvent = { id: Date.now().toString(), date: new Date().toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }), type: 'Pasif' };
+          data.leaveHistory = [...(oldUser.leaveHistory || []), leaveEvent];
       } else if (oldUser && oldUser.employmentStatus === 'Pasif' && data.employmentStatus !== 'Pasif') {
           data.passiveDate = null;
       }
@@ -9918,6 +10880,17 @@ useEffect(() => {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', id), {
         permissions: { ...user.permissions, [permissionType]: value }
       });
+    };
+
+    const handleUpdatePositionModuleAccess = async (position, modulesData) => {
+      if (!firebaseUser) return;
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), {
+        positionModules: {
+          ...positionModules,
+          [position]: modulesData
+        }
+      }, { merge: true });
+      addSystemLog('Görüntüleme Yetkileri', `${position} pozisyonunun modül erişim izinleri güncellendi.`);
     };
 
     const handleAddPosition = async (newPos) => {
@@ -10522,7 +11495,7 @@ useEffect(() => {
             if (recordType !== 'Asansör' && i === 0) {
               const createAsansor = async (sourceAddr, installType) => {
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), {
-                  type: 'Asansör', customerType: formData.customerType, tcNo: formData.tcNo, taxNo: formData.taxNo, customerName: formData.customerName, customerPhone: formData.customerPhone, altPhone: formData.altPhone, date: dateStr, time: formData.time, price: '0', deposit: '0', deliveryCode: newDeliveryCode, contractDetails: 'Otomatik Oluşturulan Asansör Kurulum Kaydı', notes: '', team: 'Atanmadı', assignedPersonnelId: null, assignedPersonnelIds: [], teamNames: [], status: 'pending', endJobDetails: null, createdBy: currentUser?.fullName || 'Sistem', fromFloor: sourceAddr.floor, fromDistance: sourceAddr.distance, fromDistanceUnit: sourceAddr.distanceUnit, fromPacking: 'Kendi İşimiz', fromProvince: sourceAddr.province || '', fromDistrict: sourceAddr.district || '', fromAddress: sourceAddr.address || '', toProvince: '', toDistrict: '', toAddress: '', toFloor: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', extraLoadingAddresses: [], extraUnloadingAddresses: []
+                  type: 'Asansör', customerType: formData.customerType, tcNo: formData.tcNo, taxNo: formData.taxNo, customerName: formData.customerName, customerPhone: formData.customerPhone, altPhone: formData.altPhone, date: dateStr, time: formData.time, price: '0', deposit: '0', deliveryCode: newDeliveryCode, contractDetails: 'Otomatik Oluşturulan Asansör Kurulum Kaydı', notes: '', team: 'Atanmadı', assignedPersonnelId: null, assignedPersonnelIds: [], teamNames: [], status: 'pending', endJobDetails: null, createdBy: currentUser?.fullName || 'Sistem', fromFloor: sourceAddr.floor, fromDistance: sourceAddr.distance, fromDistanceUnit: sourceAddr.distanceUnit, fromPacking: 'Kendi İşimiz', fromRoomCount: installType, fromProvince: sourceAddr.province || '', fromDistrict: sourceAddr.district || '', fromAddress: sourceAddr.address || '', toProvince: '', toDistrict: '', toAddress: '', toFloor: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', extraLoadingAddresses: [], extraUnloadingAddresses: []
                 });
               };
 
@@ -10882,7 +11855,7 @@ useEffect(() => {
 
       setEndJobError('');
 
-      if (!jobToEnd.materialsDeducted) {
+      if (!jobToEnd.materialsDeducted && jobToEnd.type !== 'Asansör') {
         const estData = jobToEnd.assignedMaterials || calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking);
         const customMats = jobToEnd.customMaterials || [];
         let deductedList = []; // YENİ EKLENDİ: Log için düşülen malzemeleri tutacak
@@ -11062,7 +12035,8 @@ useEffect(() => {
     const isManager = userPos.includes('Yönetici') || userPos.includes('Firma Sahibi') || currentUser?.rank === 'Müdür';
     const canEdit = currentUser?.permissions?.canEdit;
 
-    const canApprovePoints = userPos.includes('Operasyon') || isManager || canEdit;
+    // Sadece "Operasyon" veya "Firma Sahibi" pozisyonuna sahip olanlar bu işlemi yapabilir
+    const canApprovePoints = userPos.includes('Operasyon') || userPos === 'Firma Sahibi';
 
     // Geriye dönük uyumluluk (Legacy Fallback)
     const hasJobAccess = canEdit || isManager || isMuhasebe || isDepo;
@@ -11142,6 +12116,24 @@ useEffect(() => {
 
     const unreadNotifCount = visibleNotifications.filter(n => !n.read).length;
     const totalUnreadCount = unreadNotifCount;
+
+    let dueMaintenanceCount = 0;
+    vehicles.forEach(v => {
+        if (v.maintenanceRecords && Array.isArray(v.maintenanceRecords)) {
+            v.maintenanceRecords.forEach(r => {
+                let isDue = false;
+                if (r.nextDate && r.nextDate <= todayStrApp) {
+                    isDue = true;
+                }
+                if (r.nextKm && v.km && parseInt(v.km) >= parseInt(r.nextKm)) {
+                    isDue = true;
+                }
+                if (isDue) {
+                    dueMaintenanceCount++;
+                }
+            });
+        }
+    });
 
     return (
       <div className="flex h-screen bg-neutral-50 font-sans text-neutral-900 overflow-hidden">
@@ -11339,17 +12331,24 @@ useEffect(() => {
                   <div className="flex items-center gap-3">
                     <Activity className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Operasyon Bölümü</span>
                   </div>
-                  {isOperasyonSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  <div className="flex items-center gap-2">
+                    {dueMaintenanceCount > 0 && !isOperasyonSubMenuOpen && (
+                      <span className="bg-white text-red-600 text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-sm animate-pulse">{dueMaintenanceCount}</span>
+                    )}
+                    {isOperasyonSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </div>
                 </button>
                 
                 {isOperasyonSubMenuOpen && (
                   <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    {canApprovePoints && (
                     <button 
                       onClick={() => { setActiveTab('isOnaylamaTahtasi'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'isOnaylamaTahtasi' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'isOnaylamaTahtasi' ? 'bg-white' : 'bg-orange-500'}`}></div> İş Onaylama Tahtası
                     </button>
+                    )}
                     <button 
                       onClick={() => { setActiveTab('ekipKurmaTahtasi'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'ekipKurmaTahtasi' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -11399,9 +12398,14 @@ useEffect(() => {
                     </button>
                     <button 
                       onClick={() => { setActiveTab('vehicleMaintenance'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'vehicleMaintenance' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'vehicleMaintenance' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'vehicleMaintenance' ? 'bg-white' : 'bg-orange-500'}`}></div> Araç Rapor & Bakım
+                      <div className="flex items-center gap-3">
+                        <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'vehicleMaintenance' ? 'bg-white' : 'bg-orange-500'}`}></div> <span className="whitespace-nowrap">Araç Rapor & Bakım</span>
+                      </div>
+                      {dueMaintenanceCount > 0 && (
+                        <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{dueMaintenanceCount}</span>
+                      )}
                     </button>
                     {showMaterials && (
                       <button 
@@ -11598,10 +12602,10 @@ useEffect(() => {
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsFinanceSubMenuOpen(!isFinanceSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'financeDashboard' || activeTab === 'reporting' || activeTab === 'personelMuhasebe') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'financeDashboard' || activeTab === 'reporting' || activeTab === 'personelMuhasebe' || activeTab === 'personelOdeme' || activeTab === 'advancedReporting') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <Wallet className={`w-5 h-5 shrink-0 ${(activeTab === 'financeDashboard' || activeTab === 'reporting' || activeTab === 'personelMuhasebe') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Finans Yönetimi</span>
+                    <Wallet className={`w-5 h-5 shrink-0 ${(activeTab === 'financeDashboard' || activeTab === 'reporting' || activeTab === 'personelMuhasebe' || activeTab === 'personelOdeme' || activeTab === 'advancedReporting') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Finans Yönetimi</span>
                   </div>
                   {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -11618,7 +12622,13 @@ useEffect(() => {
                       onClick={() => { setActiveTab('reporting'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'reporting' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'reporting' ? 'bg-white' : 'bg-red-600'}`}></div> Raporlama
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'reporting' ? 'bg-white' : 'bg-red-600'}`}></div> Genel Ciro Raporu
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('advancedReporting'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'advancedReporting' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'advancedReporting' ? 'bg-white' : 'bg-red-600'}`}></div> Analiz & İstatistik
                     </button>
                     <button 
                       onClick={() => { setActiveTab('personelMuhasebe'); setIsSidebarOpen(false); }}
@@ -11795,7 +12805,7 @@ useEffect(() => {
           <div className="max-w-6xl mx-auto">
             {activeTab === 'dashboard' && showDashboard && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions} />}
             {activeTab === 'notifications' && <NotificationsView notifications={visibleNotifications} markNotificationsAsRead={markNotificationsAsRead} currentUser={currentUser} />}
-            {activeTab === 'calendar' && showCalendar && <CalendarView jobs={visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} setJobToChangeDate={setJobToChangeDate} setNewJobDate={setNewJobDate} setShowChangeDateModal={setShowChangeDateModal} setCancelJobId={setCancelJobId} />}
+            {activeTab === 'calendar' && showCalendar && <CalendarView jobs={currentUser?.position === 'Operatör' ? jobs : visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} setJobToChangeDate={setJobToChangeDate} setNewJobDate={setNewJobDate} setShowChangeDateModal={setShowChangeDateModal} setCancelJobId={setCancelJobId} />}
             {activeTab === 'profileSettings' && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} />}
             {activeTab === 'myAssignedJobs' && <MyAssignedJobsView currentUser={currentUser} jobs={visibleJobs} handleOpenEndJobModal={handleOpenEndJobModal} markNotificationsAsRead={markNotificationsAsRead} />}
             {activeTab === 'mySpecialTasks' && <MyTasksView currentUser={currentUser} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
@@ -12066,6 +13076,7 @@ useEffect(() => {
             {/* Finans Yönetimi Modülleri */}
             {activeTab === 'financeDashboard' && showFinance && <FinanceDashboardView jobs={jobs} transactions={transactions} transactionType={transactionType} setTransactionType={setTransactionType} newTransaction={newTransaction} setNewTransaction={setNewTransaction} handleAddTransaction={handleAddTransaction} />}
             {activeTab === 'reporting' && showFinance && <ReportingView jobs={jobs} personnelList={personnelList} />}
+            {activeTab === 'advancedReporting' && showFinance && <AdvancedReportingView jobs={jobs} />}
             {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'personelOdeme' && showFinance && <PersonelOdemeView personnelList={personnelList} transactions={transactions} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
 
@@ -12080,11 +13091,12 @@ useEffect(() => {
             {activeTab === 'taskList' && (showTasks || showOperasyon) &&
               <TaskManagerView 
                 tasks={tasks}
-                setTasks={setTasks}
                 setShowTaskModal={setShowTaskModal}
                 draggingTask={draggingTask}
                 setDraggingTask={setDraggingTask}
                 openEditTask={openEditTask}
+                handleUpdateTaskStatus={handleUpdateTaskStatus}
+                handleDeleteTask={handleDeleteTask}
               />
             }
             
@@ -12093,7 +13105,7 @@ useEffect(() => {
             {activeTab === 'positions' && showAuth && <PositionsView positions={positions} onAddPosition={handleAddPosition} onDeletePosition={handleDeletePosition} />}
             {activeTab === 'ranks' && showAuth && <RanksView ranks={ranks} onAddRank={handleAddRank} onDeleteRank={handleDeleteRank} />}
             {activeTab === 'permissions' && showAuth && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} />}
-            {activeTab === 'moduleAccess' && showAuth && <ModuleAccessView personnelList={personnelList} handleUpdateModuleAccess={handleUpdateModuleAccess} currentUser={currentUser} />}
+            {activeTab === 'moduleAccess' && showAuth && <ModuleAccessView positions={positions} positionModules={positionModules} handleUpdatePositionModuleAccess={handleUpdatePositionModuleAccess} />}
             
             {/* Sistem Dosyaları Modülü */}
             {activeTab === 'backupSystem' && showSystemFiles && <SystemFilesView jobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} />}
