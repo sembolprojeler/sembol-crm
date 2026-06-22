@@ -5877,6 +5877,170 @@ useEffect(() => {
     );
   };
 
+  // --- EKSİK OLAN USERLISTVIEW BİLEŞENİ BAŞLANGICI ---
+  const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks }) => {
+    const [editingUser, setEditingUser] = useState(null);
+
+    const modules = [
+      { id: 'dashboard', label: 'Anasayfa' },
+      { id: 'calendar', label: 'Takvim' },
+      { id: 'addJob', label: 'Satış (Kayıt Açma)' },
+      { id: 'jobList', label: 'İş Listesi' },
+      { id: 'operasyon', label: 'Operasyon Bölümü' },
+      { id: 'customers', label: 'Müşteri Listesi' },
+      { id: 'personnel', label: 'Personel Listesi' },
+      { id: 'vehicles', label: 'Araçlar' },
+      { id: 'materials', label: 'Malzemeler' },
+      { id: 'todos', label: 'Yapılacak Listesi' },
+      { id: 'finance', label: 'Finans Yönetimi' },
+      { id: 'tasks', label: 'Görev Tahtası' },
+      { id: 'auth', label: 'Yetkilendirme' },
+      { id: 'systemFiles', label: 'Sistem Dosyaları' }
+    ];
+
+    const handleToggleModule = (moduleId) => {
+        const currentModules = editingUser.permissions?.modules || {};
+        const updatedPermissions = {
+            ...editingUser.permissions,
+            modules: {
+                ...currentModules,
+                [moduleId]: !currentModules[moduleId]
+            }
+        };
+        setEditingUser({...editingUser, permissions: updatedPermissions});
+    };
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-5xl mx-auto">
+        <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
+          <Users className="w-6 h-6 text-red-600" /> Mevcut Kullanıcılar ve Yetkileri
+        </h2>
+        
+        <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium mb-6 border border-blue-200">
+          Kullanıcıları düzenleyebilir, silebilir veya onlara <b>kişiye özel</b> modül erişim yetkileri atayabilirsiniz. Kişiye özel atanan yetkiler, pozisyon yetkilerini ezer. (Not: Sistemde "Tam Yetki/Admin" olanlar her yeri görebilir.)
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-black text-white">
+              <tr>
+                <th className="p-4 font-bold rounded-tl-xl">Ad Soyad</th>
+                <th className="p-4 font-bold">Kullanıcı Adı / E-Posta</th>
+                <th className="p-4 font-bold">Pozisyon / Rütbe</th>
+                <th className="p-4 font-bold text-center">Durum</th>
+                <th className="p-4 font-bold rounded-tr-xl text-center">İşlemler</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {personnelList.map(person => (
+                <tr key={person.id} className="hover:bg-neutral-50 transition">
+                  <td className="p-4 font-bold text-black flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
+                      {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover" alt="Profil"/> : <User className="w-4 h-4 text-neutral-400"/>}
+                    </div>
+                    {person.fullName}
+                  </td>
+                  <td className="p-4 text-neutral-600 font-medium">{person.email}</td>
+                  <td className="p-4 text-neutral-600">{person.position} <span className="text-xs text-neutral-400">({person.rank})</span></td>
+                  <td className="p-4 text-center">
+                    <span className={`px-2 py-1 rounded-lg text-xs font-bold ${person.employmentStatus === 'Aktif' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                      {person.employmentStatus || 'Aktif'}
+                    </span>
+                  </td>
+                  <td className="p-4 flex items-center justify-center gap-2">
+                    <button onClick={() => setEditingUser(person)} className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition" title="Düzenle ve Özel Yetki Ver">
+                      Düzenle & Yetkilendir
+                    </button>
+                    <button onClick={() => { if(window.confirm('Bu kullanıcıyı sistemden silmek istediğinize emin misiniz?')) onDelete(person.id); }} className="p-2 text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition" title="Sil"><X className="w-4 h-4"/></button>
+                  </td>
+                </tr>
+              ))}
+              {personnelList.length === 0 && (
+                <tr>
+                  <td colSpan="5" className="p-6 text-center text-neutral-500">Kayıtlı kullanıcı bulunamadı.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {editingUser && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+              <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-red-600 shrink-0">
+                <h3 className="font-bold text-lg">Kullanıcı Düzenle ve Yetkilendir</h3>
+                <button onClick={() => setEditingUser(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <div className="p-6 overflow-y-auto custom-scrollbar">
+                <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="space-y-6">
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold mb-1">Ad Soyad</label>
+                      <input required type="text" value={editingUser.fullName || ''} onChange={e => setEditingUser({...editingUser, fullName: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1">E-Posta / Kullanıcı Adı</label>
+                      <input required type="text" value={editingUser.email || ''} onChange={e => setEditingUser({...editingUser, email: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1">Şifre</label>
+                      <input required type="text" value={editingUser.password || ''} onChange={e => setEditingUser({...editingUser, password: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1">Durum</label>
+                      <select value={editingUser.employmentStatus || 'Aktif'} onChange={e => setEditingUser({...editingUser, employmentStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-red-600">
+                        <option value="Aktif">Aktif</option>
+                        <option value="Pasif">Pasif</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1">Pozisyon</label>
+                      <select value={editingUser.position || ''} onChange={e => setEditingUser({...editingUser, position: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-red-600">
+                        {positions.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1">Rütbe</label>
+                      <select value={editingUser.rank || ''} onChange={e => setEditingUser({...editingUser, rank: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-red-600">
+                        {ranks.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="mt-6">
+                      <h4 className="font-bold text-black mb-3 border-b border-neutral-200 pb-2 flex items-center gap-2">
+                          <Eye className="w-5 h-5 text-red-600" /> Kişiye Özel Modül Yetkileri
+                      </h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                          {modules.map(mod => {
+                          const hasAccess = editingUser.permissions?.modules?.[mod.id] ?? false;
+                          return (
+                              <label key={mod.id} className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${hasAccess ? 'bg-blue-50 border-blue-200' : 'bg-white border-neutral-200 hover:bg-neutral-100'}`}>
+                              <span className={`text-xs font-bold ${hasAccess ? 'text-blue-800' : 'text-neutral-600'}`}>{mod.label}</span>
+                              <div className="relative inline-flex items-center">
+                                  <input type="checkbox" className="sr-only peer" checked={hasAccess} onChange={() => handleToggleModule(mod.id)} />
+                                  <div className="w-7 h-4 bg-neutral-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
+                              </div>
+                              </label>
+                          );
+                          })}
+                      </div>
+                  </div>
+                  
+                  <button type="submit" className="w-full bg-red-600 text-white p-4 rounded-xl font-bold hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg mt-4">
+                    <CheckCircle className="w-5 h-5" /> Değişiklikleri Kaydet
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+  // --- USERLISTVIEW BİLEŞENİ BİTİŞİ ---
+
   const PositionsView = ({ positions, onAddPosition, onDeletePosition }) => {
     const [newPos, setNewPos] = useState('');
     return (
@@ -11512,12 +11676,22 @@ useEffect(() => {
     const hasTaskAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); // Görev Listesi
     const hasOperasyonAccess = isManager || currentUser?.position?.includes('Operasyon');
     
-    const checkAccess = (key, fallback) => {
+const checkAccess = (key, fallback) => {
       if (currentUser?.permissions?.canEdit) return true;
+      
+      // 1. Önce kişiye özel atanmış bir modül yetkisi var mı kontrol et
+      if (currentUser?.permissions?.modules && currentUser.permissions.modules[key] !== undefined) {
+        return currentUser.permissions.modules[key];
+      }
+
+      // 2. Yoksa pozisyona göre kontrol et
       const posAccess = positionModules?.[currentUser?.position];
       if (posAccess && posAccess[key] !== undefined) return posAccess[key];
+      
+      // 3. Yoksa rütbeye göre kontrol et
       const rankAccess = positionModules?.[currentUser?.rank];
       if (rankAccess && rankAccess[key] !== undefined) return rankAccess[key];
+      
       return fallback;
     };
 
