@@ -5718,11 +5718,11 @@ useEffect(() => {
       </div>
     );
   };
-
-  const PersonnelListView = ({ personnelList, positions = [], ranks = [] }) => {
+  const PersonnelListView = ({ personnelList, onUpdate, positions = [], ranks = [] }) => {
     const [filterYaka, setFilterYaka] = useState('');
     const [filterPozisyon, setFilterPozisyon] = useState('');
     const [filterRutbe, setFilterRutbe] = useState('');
+    const [editingUser, setEditingUser] = useState(null);
 
     const filteredList = personnelList.filter(p => {
       if (filterYaka && p.collarType !== filterYaka) return false;
@@ -5791,17 +5791,7 @@ useEffect(() => {
                     <span className="text-xs text-neutral-500">{person.rank || '-'}</span>
                   </td>
                   <td className="p-4 text-center">
-                    <span className={`text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider ${person.collarType === 'Mavi Yaka' ? 'text-blue-700 bg-blue-50 border border-blue-200' : 'text-neutral-600 bg-neutral-100 border border-neutral-200'}`}>
-                      {person.collarType || 'BELİRTİLMEDİ'}
-                    </span>
-                  </td>
-                  <td className="p-4 text-center">
-                    <span className={`text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-wider ${person.employmentStatus === 'Aktif' ? 'text-green-700 bg-green-50 border border-green-200' : 'text-red-700 bg-red-50 border border-red-200'}`}>
-                      {person.employmentStatus || 'AKTİF'}
-                    </span>
-                  </td>
-                  <td className="p-4 text-center">
-                    <button className="p-2 text-blue-500 border border-blue-200 bg-white rounded-lg hover:bg-blue-50 hover:border-blue-300 transition shadow-sm opacity-0 group-hover:opacity-100" title="Düzenle">
+                    <button onClick={() => setEditingUser(person)} className="p-2 text-blue-500 border border-blue-200 bg-white rounded-lg hover:bg-blue-50 hover:border-blue-300 transition shadow-sm opacity-0 group-hover:opacity-100" title="Düzenle">
                       <Edit className="w-4 h-4"/>
                     </button>
                   </td>
@@ -5815,576 +5805,52 @@ useEffect(() => {
             </tbody>
           </table>
         </div>
-      </div>
-    );
-  };
-
-  const OzlukDosyalariView = ({ personnelList, db, appId, addSystemLog, setViewingImage }) => {
-    const [searchQuery, setSearchQuery] = useState('');
-    const [collarFilter, setCollarFilter] = useState('Mavi Yaka');
-    const [selectedPerson, setSelectedPerson] = useState(null);
-    const [uploadingCategory, setUploadingCategory] = useState(null);
-
-    const DOCUMENT_CATEGORIES = [
-      "Personel Kimlik",
-      "Personel Ehliyet Ve diğer vb belgeler",
-      "Personel İş Güvenliği",
-      "Personel Sağlık Raporu",
-      "Personel Sigorta Giriş",
-      "Personel Tutanakları",
-      "Personel Dilekçe Şikayet",
-      "Personel Ücretsiz İzinleri"
-    ];
-
-    const filteredList = personnelList.filter(p => {
-      if (collarFilter && p.collarType !== collarFilter) return false;
-      if (searchQuery && !p.fullName.toLowerCase().includes(searchQuery.toLowerCase())) return false;
-      return true;
-    });
-
-    const handleFileUpload = async (e, category) => {
-      const file = e.target.files[0];
-      if (!file || !selectedPerson) return;
-      
-      setUploadingCategory(category);
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      try {
-        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
-        const text = await res.text();
-        let uploadedUrl = file.name;
-        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
-        
-        const newDoc = {
-          id: Date.now().toString(),
-          name: file.name,
-          url: uploadedUrl,
-          date: new Date().toLocaleDateString('tr-TR'),
-          category: category // Hangi kategoriye yüklendiğini kaydediyoruz
-        };
-        
-        const updatedDocs = [...(selectedPerson.documents || []), newDoc];
-        
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(selectedPerson.id)), {
-          documents: updatedDocs
-        });
-        
-        addSystemLog('Özlük Dosyası Eklendi', `${selectedPerson.fullName} personeline '${category}' kategorisinde yeni bir evrak eklendi.`);
-        setSelectedPerson(prev => ({ ...prev, documents: updatedDocs }));
-        
-      } catch (err) {
-        console.error("Yükleme hatası:", err);
-        alert("Dosya yüklenemedi.");
-      }
-      setUploadingCategory(null);
-    };
-
-    const handleDeleteFile = async (docId) => {
-      if (!window.confirm("Bu evrakı silmek istediğinize emin misiniz?")) return;
-      
-      const updatedDocs = (selectedPerson.documents || []).filter(d => d.id !== docId);
-      
-      try {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(selectedPerson.id)), {
-          documents: updatedDocs
-        });
-        addSystemLog('Özlük Dosyası Silindi', `${selectedPerson.fullName} personelinden bir evrak silindi.`);
-        setSelectedPerson(prev => ({ ...prev, documents: updatedDocs }));
-      } catch (err) {
-        console.error("Silme hatası:", err);
-      }
-    };
-
-    const handleRemoveLeaveEvent = async (eventId) => {
-      if (!window.confirm("Bu ayrılış (pasif) bildirimini silmek istediğinize emin misiniz?")) return;
-      const updatedHistory = (selectedPerson.leaveHistory || []).filter(h => h.id !== eventId);
-      try {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(selectedPerson.id)), {
-          leaveHistory: updatedHistory
-        });
-        addSystemLog('Ayrılış Bildirimi Silindi', `${selectedPerson.fullName} personelinin pasife alınma uyarısı kaldırıldı.`);
-        setSelectedPerson(prev => ({ ...prev, leaveHistory: updatedHistory }));
-      } catch (err) {
-        console.error("Silme hatası:", err);
-      }
-    };
-
-    useEffect(() => {
-      if (selectedPerson) {
-        const updated = personnelList.find(p => p.id === selectedPerson.id);
-        if (updated && JSON.stringify(updated.documents) !== JSON.stringify(selectedPerson.documents)) {
-          setSelectedPerson(updated);
-        }
-      }
-    }, [personnelList, selectedPerson]);
-
-    return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in min-h-[calc(100vh-140px)]">
-        
-        {!selectedPerson ? (
-          // LİSTE GÖRÜNÜMÜ (Ekran Resmi 1)
-          <>
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
-              <h2 className="text-xl font-bold text-red-600 flex items-center gap-2">
-                <FolderOpen className="w-6 h-6" /> Personel Özlük Dosyaları
-              </h2>
-              <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-                <div className="relative flex-1 md:w-64">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                  <input 
-                    type="text" 
-                    value={searchQuery}
-                    onChange={e => setSearchQuery(e.target.value)}
-                    placeholder="Personel Ara..." 
-                    className="pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-full text-sm outline-none focus:ring-1 focus:ring-red-500 w-full transition" 
-                  />
-                </div>
-                <div className="flex bg-neutral-100 rounded-full p-1 shrink-0 border border-neutral-200 w-full md:w-auto">
-                  <button 
-                    onClick={() => setCollarFilter('Mavi Yaka')}
-                    className={`flex-1 md:flex-none px-5 py-1.5 text-sm font-bold rounded-full transition ${collarFilter === 'Mavi Yaka' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
-                  >
-                    Mavi Yaka
-                  </button>
-                  <button 
-                    onClick={() => setCollarFilter('Beyaz Yaka')}
-                    className={`flex-1 md:flex-none px-5 py-1.5 text-sm font-bold rounded-full transition ${collarFilter === 'Beyaz Yaka' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
-                  >
-                    Beyaz Yaka
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-               {filteredList.map(person => (
-                  <div key={person.id} className="bg-white border border-neutral-200 rounded-2xl overflow-hidden relative shadow-sm hover:shadow-md hover:border-red-200 transition group flex flex-col h-full">
-                     {/* Arka plan kırmızı şekil */}
-                     <div className="absolute top-0 right-0 w-32 h-32 bg-red-50 rounded-bl-[100px] z-0"></div>
-                     
-                     <div className="p-5 relative z-10 flex flex-col h-full">
-                        <div className="flex items-center gap-3 mb-6">
-                           <div className="w-12 h-12 rounded-full bg-neutral-100 overflow-hidden border border-neutral-300 shadow-sm shrink-0 flex items-center justify-center bg-white">
-                             {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover"/> : <span className="font-bold text-neutral-500">{person.fullName.charAt(0)}</span>}
-                           </div>
-                           <div className="overflow-hidden">
-                             <h3 className="font-bold text-black text-sm truncate">{person.fullName}</h3>
-                             <p className="text-[11px] text-neutral-500 font-medium mt-0.5 truncate">{person.position || 'Belirtilmedi'}</p>
-                           </div>
-                        </div>
-                        <div className="flex justify-between items-center pt-3 border-t border-neutral-100 mt-auto">
-                           <span className="flex items-center gap-1.5 text-xs font-bold text-neutral-600">
-                             <FolderOpen className="w-4 h-4 text-red-600" /> {(person.documents || []).length} Evrak
-                           </span>
-                           <button onClick={() => setSelectedPerson(person)} className="text-[10px] font-bold text-white bg-red-600 hover:bg-red-700 px-4 py-1.5 rounded transition shadow-sm">
-                             Dosyayı Aç
-                           </button>
-                        </div>
-                     </div>
-                  </div>
-               ))}
-               {filteredList.length === 0 && (
-                  <div className="col-span-full py-12 text-center text-neutral-500 text-sm font-medium border-2 border-dashed border-neutral-200 rounded-2xl bg-neutral-50/50">
-                     Bu kritere uygun personel bulunamadı.
-                  </div>
-               )}
-            </div>
-          </>
-        ) : (
-          // DETAY GÖRÜNÜMÜ (Ekran Resmi 2)
-          <div className="flex flex-col h-full animate-in slide-in-from-right-4">
-             {/* Detay Üst Başlık */}
-             <div className="flex items-center gap-4 mb-8">
-                <button 
-                  onClick={() => setSelectedPerson(null)} 
-                  className="w-10 h-10 bg-neutral-50 hover:bg-neutral-100 border border-neutral-200 rounded-xl flex items-center justify-center text-neutral-600 transition shadow-sm"
-                >
-                   <ChevronLeft className="w-5 h-5" />
-                </button>
-                <div className="flex items-center gap-3">
-                   <div className="w-12 h-12 rounded-full overflow-hidden border border-neutral-300 shadow-sm shrink-0 flex items-center justify-center bg-white">
-                      {selectedPerson.profileImage ? <img src={selectedPerson.profileImage} className="w-full h-full object-cover"/> : <span className="font-bold text-neutral-500">{selectedPerson.fullName.charAt(0)}</span>}
-                   </div>
-                   <div>
-                      <h2 className="text-xl font-bold text-black flex items-center gap-2">
-                        {selectedPerson.fullName} <span className="text-neutral-400 font-medium">/ Özlük Dosyası</span>
-                      </h2>
-                      <p className="text-[11px] font-bold text-neutral-500 mt-1">
-                        {selectedPerson.position || 'Belirtilmedi'} • {selectedPerson.rank || 'Belirtilmedi'} • {selectedPerson.collarType || 'Belirtilmedi'}
-                      </p>
-                   </div>
-                </div>
-             </div>
-
-             {/* İşi Bırakma / Pasif Geçmişi Uyarıları */}
-             {selectedPerson.leaveHistory && selectedPerson.leaveHistory.length > 0 && (
-                <div className="mb-6 space-y-2 animate-in fade-in">
-                   {selectedPerson.leaveHistory.map(evt => (
-                      <div key={evt.id} className="bg-red-50 border border-red-200 p-3 rounded-xl flex items-center justify-between shadow-sm">
-                         <div className="flex items-center gap-2 text-red-800">
-                            <AlertTriangle className="w-5 h-5 text-red-600 shrink-0" />
-                            <span className="text-sm font-bold">
-                               Personel Pasife Alındı (İşi Bırakma Tarihi): <span className="font-black ml-1">{evt.date}</span>
-                            </span>
-                         </div>
-                         <button onClick={() => handleRemoveLeaveEvent(evt.id)} className="text-red-500 hover:text-red-700 bg-white p-1.5 rounded-lg border border-red-200 transition shadow-sm shrink-0" title="Bu bildirimi kaldır">
-                            <X className="w-4 h-4" />
-                         </button>
-                      </div>
-                   ))}
-                </div>
-             )}
-
-             {/* Kategoriler Grid */}
-             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {DOCUMENT_CATEGORIES.map((category) => {
-                   // Bu kategoriye ait evrakları filtrele. Eskiden yüklenmiş kategorisizleri ilk kategoriye atayalım.
-                   const catDocs = (selectedPerson.documents || []).filter(d => 
-                      d.category === category || (!d.category && category === "Personel Kimlik")
-                   );
-
-                   return (
-                     <div key={category} className="border border-neutral-200 rounded-2xl p-4 bg-white shadow-sm flex flex-col">
-                        <div className="flex justify-between items-center border-b border-neutral-100 pb-3 mb-3">
-                           <h3 className="font-bold text-sm text-red-700 flex items-center gap-2">
-                              <FolderOpen className="w-4 h-4" /> {category}
-                           </h3>
-                           <span className="bg-neutral-100 text-neutral-600 text-[10px] font-bold px-2 py-0.5 rounded border border-neutral-200">
-                              {catDocs.length} Belge
-                           </span>
-                        </div>
-
-                        <div className="flex-1 flex flex-col gap-2 min-h-[60px] max-h-[160px] overflow-y-auto custom-scrollbar mb-4">
-                           {catDocs.length === 0 ? (
-                              <p className="text-xs text-neutral-400 italic text-center py-4 my-auto">Henüz bu kategoriye belge eklenmemiş.</p>
-                           ) : (
-                              catDocs.sort((a,b) => b.id - a.id).map(doc => (
-                                <div key={doc.id} className="flex items-center justify-between p-2 rounded-xl border border-neutral-100 bg-neutral-50 group hover:border-red-200 transition">
-                                   <div className="flex items-center gap-2 overflow-hidden">
-                                      <FileText className="w-4 h-4 text-neutral-400 shrink-0" />
-                                      <div className="overflow-hidden">
-                                        <p className="text-xs font-bold text-black truncate" title={doc.name}>{doc.name}</p>
-                                        <p className="text-[9px] text-neutral-500 font-medium">{doc.date}</p>
-                                      </div>
-                                   </div>
-                                   <div className="flex items-center gap-1 shrink-0">
-                                      <button onClick={(e) => { e.stopPropagation(); setViewingImage && setViewingImage({title: doc.name, name: doc.url}); }} className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:text-blue-600 transition" title="Görüntüle">
-                                         <Eye className="w-3.5 h-3.5" />
-                                      </button>
-                                      <a href={doc.url} target="_blank" rel="noreferrer" className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:text-green-600 transition" title="İndir">
-                                         <Download className="w-3.5 h-3.5" />
-                                      </a>
-                                      <button onClick={() => handleDeleteFile(doc.id)} className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:text-red-600 transition" title="Sil">
-                                         <X className="w-3.5 h-3.5" />
-                                      </button>
-                                   </div>
-                                </div>
-                              ))
-                           )}
-                        </div>
-
-                        <label className={`cursor-pointer w-full py-2.5 rounded-xl text-xs font-bold text-neutral-600 border border-neutral-200 flex justify-center items-center gap-2 transition mt-auto ${uploadingCategory === category ? 'bg-neutral-100' : 'bg-white hover:bg-neutral-50'}`}>
-                           {uploadingCategory === category ? (
-                              <><Loader2 className="w-4 h-4 animate-spin text-red-600" /> Yükleniyor...</>
-                           ) : (
-                              <><Upload className="w-4 h-4 text-neutral-400" /> Yeni Belge Yükle</>
-                           )}
-                           <input type="file" className="hidden" onChange={(e) => handleFileUpload(e, category)} disabled={uploadingCategory !== null} />
-                        </label>
-                     </div>
-                   );
-                })}
-             </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const ComplaintsView = ({ complaints, updateComplaintStatus, deleteComplaint }) => {
-    const sortedComplaints = [...(complaints || [])].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-    return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in h-[calc(100vh-140px)] flex flex-col">
-        <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4 shrink-0">
-          <AlertTriangle className="w-6 h-6 text-red-600" /> Şikayet ve Bildirimler
-        </h2>
-        
-        <div className="flex-1 overflow-y-auto custom-scrollbar pr-2 space-y-4">
-          {sortedComplaints.length === 0 ? (
-            <div className="h-full flex justify-center items-center border border-neutral-200 rounded-2xl bg-neutral-50/50">
-              <p className="text-neutral-500 font-medium text-sm">Sistemde kayıtlı şikayet veya bildirim bulunmuyor.</p>
-            </div>
-          ) : (
-            sortedComplaints.map(comp => (
-              <div key={comp.id} className={`p-5 rounded-2xl border transition shadow-sm flex flex-col gap-3 ${comp.read ? 'bg-white border-neutral-200' : 'bg-red-50/40 border-red-200'}`}>
-                <div className="flex justify-between items-start">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-neutral-200 flex items-center justify-center font-bold text-neutral-600 shrink-0">
-                      <User className="w-5 h-5 text-neutral-500" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-black text-base">{comp.senderName} <span className="text-xs font-medium text-neutral-500 ml-1">({comp.senderPosition})</span></h3>
-                      <p className="text-xs text-neutral-500 font-bold mt-0.5">{comp.dateStr}</p>
-                    </div>
-                  </div>
-                  {!comp.read && (
-                    <span className="bg-red-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider animate-pulse">Yeni Bildirim</span>
-                  )}
-                </div>
-                
-                <div className="bg-white p-4 rounded-xl border border-neutral-100 shadow-sm mt-1">
-                  <h4 className="font-black text-red-800 text-sm mb-2 pb-2 border-b border-neutral-100">Konu: {comp.subject}</h4>
-                  <p className="text-sm text-neutral-700 leading-relaxed whitespace-pre-wrap">{comp.content}</p>
-                </div>
-
-                <div className="flex justify-end gap-2 mt-2 pt-2 border-t border-neutral-100">
-                  {!comp.read && (
-                    <button onClick={() => updateComplaintStatus(comp.id, 'İncelendi', true)} className="px-4 py-2 bg-green-50 text-green-700 hover:bg-green-100 font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-green-200">
-                      <CheckCircle className="w-4 h-4" /> Okundu Olarak İşaretle
-                    </button>
-                  )}
-                  <button onClick={() => { if(window.confirm('Bu bildirimi silmek istediğinize emin misiniz?')) deleteComplaint(comp.id); }} className="px-4 py-2 bg-neutral-100 text-red-600 hover:bg-red-100 font-bold text-xs rounded-xl transition flex items-center gap-1.5 border border-neutral-200">
-                    <X className="w-4 h-4" /> Sil
-                  </button>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
-    );
-  };
-  
-  const AddTodoView = ({ newTodo, setNewTodo, handleAddTodo }) => (
-    <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-      <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
-        <PlusCircle className="w-6 h-6 text-red-600" /> Yeni Yapılacak / Takip Ekle
-      </h2>
-      <form onSubmit={handleAddTodo} className="space-y-4">
-        <div>
-          <label className="block text-sm font-bold text-black mb-1">Başlık</label>
-          <input required type="text" value={newTodo.title} onChange={(e) => setNewTodo({...newTodo, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Müşteri Ahmet Bey aranacak" />
-        </div>
-        
-        <div>
-          <label className="block text-sm font-bold text-black mb-1">Detaylar</label>
-          <textarea required value={newTodo.details} onChange={(e) => setNewTodo({...newTodo, details: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-24 resize-none transition" placeholder="Yapılacak işin detayları..." />
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-bold text-black mb-1">Öncelik Durumu</label>
-            <select value={newTodo.priority} onChange={(e) => setNewTodo({...newTodo, priority: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
-              <option value="Normal">Normal</option>
-              <option value="Düşük">Düşük</option>
-              <option value="Yüksek">Yüksek</option>
-              <option value="Acil">Acil</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-bold text-black mb-1">Hatırlatma / Son Tarih</label>
-            <input required type="date" value={newTodo.reminderDate} onChange={(e) => setNewTodo({...newTodo, reminderDate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-          </div>
-        </div>
-
-        <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
-          <CheckCircle className="w-5 h-5" /> Listeye Ekle
-        </button>
-      </form>
-    </div>
-  );
-
-  const TaskManagerView = ({ tasks, setShowTaskModal, draggingTask, setDraggingTask, openEditTask, handleUpdateTaskStatus, handleDeleteTask }) => {
-    const columns = [
-      { id: 'todo', title: 'YAPILACAKLAR', color: 'bg-neutral-800' },
-      { id: 'in-progress', title: 'İŞLEME ALINANLAR', color: 'bg-blue-600' },
-      { id: 'completed', title: 'TAMAMLANANLAR', color: 'bg-green-600' }
-    ];
-
-    const handleDragStart = (e, task) => {
-      setDraggingTask(task);
-      e.dataTransfer.effectAllowed = 'move';
-    };
-
-    const handleDragOver = (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-    };
-
-    const handleDrop = (e, targetStatus) => {
-      e.preventDefault();
-      if (draggingTask && draggingTask.status !== targetStatus) {
-        handleUpdateTaskStatus(draggingTask.id, targetStatus);
-      }
-      setDraggingTask(null);
-    };
-
-    return (
-      <div className="h-[calc(100vh-120px)] flex flex-col animate-in fade-in">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-2xl font-bold text-black flex items-center gap-2">
-            <CheckSquare className="w-7 h-7 text-red-600" /> Görev Tahtası
-          </h2>
-          <button 
-            onClick={() => setShowTaskModal(true)}
-            className="bg-black text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-neutral-800 transition shadow-lg"
-          >
-            <PlusCircle className="w-5 h-5" /> Yeni Görev Ekle
-          </button>
-        </div>
-
-        <div className="flex-1 flex gap-6 overflow-x-auto pb-4 custom-scrollbar items-start">
-          {columns.map(column => (
-            <div 
-              key={column.id} 
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDrop(e, column.id)}
-              className="bg-neutral-100 rounded-2xl w-80 md:w-96 flex-shrink-0 flex flex-col max-h-full border border-neutral-200"
-            >
-              <div className="p-4 border-b border-neutral-200 flex justify-between items-center bg-white rounded-t-2xl shadow-sm">
-                <h3 className="font-bold text-black text-sm flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full ${column.color}`}></div>
-                  {column.title}
-                </h3>
-                <span className="bg-neutral-100 text-neutral-600 text-xs font-bold px-2.5 py-1 rounded-lg border border-neutral-200">
-                  {tasks.filter(t => t.status === column.id).length} Görev
-                </span>
-              </div>
-
-              <div className="p-3 flex-1 overflow-y-auto space-y-3 custom-scrollbar min-h-[150px]">
-                {tasks.filter(t => t.status === column.id).sort((a,b) => new Date(a.date) - new Date(b.date)).map(task => (
-                  <div 
-                    key={task.id} 
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, task)}
-                    className="bg-white p-4 rounded-xl shadow-sm border border-neutral-200 hover:border-red-400 transition cursor-grab active:cursor-grabbing group flex flex-col"
-                  >
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-[10px] font-bold bg-neutral-100 text-neutral-600 px-2 py-0.5 rounded border border-neutral-200 flex items-center gap-1">
-                        <CalendarDays className="w-3 h-3 text-neutral-400" /> Son: {task.date}
-                      </span>
-                      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
-                        <button onClick={() => openEditTask(task)} className="p-1 text-blue-600 hover:bg-blue-50 rounded" title="Düzenle"><Edit className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => handleDeleteTask(task.id)} className="p-1 text-red-600 hover:bg-red-50 rounded" title="Sil"><X className="w-3.5 h-3.5" /></button>
-                      </div>
-                    </div>
-                    <h4 className="font-black text-black text-base mb-1">{task.title}</h4>
-                    <p className="text-xs text-neutral-600 mb-4 whitespace-pre-wrap font-medium">{task.description}</p>
-                    
-                    <div className="flex items-center gap-1.5 mt-auto pt-3 border-t border-neutral-100">
-                      <div className="w-6 h-6 rounded-full bg-neutral-100 flex items-center justify-center text-neutral-400 overflow-hidden shrink-0 border border-neutral-200">
-                         <User className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="text-xs font-bold text-neutral-700 truncate">{task.assignee}</span>
-                    </div>
-                  </div>
-                ))}
-                {tasks.filter(t => t.status === column.id).length === 0 && (
-                  <p className="text-center text-xs font-medium text-neutral-400 py-4">Bu alanda görev bulunmuyor.</p>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  };
-
-  const SystemFilesView = () => <PlaceholderView title="Sistem Yedekleme" icon={Database} />;
-
-  const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks }) => {
-    const [editingUser, setEditingUser] = useState(null);
-
-    return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-        <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
-          <Users className="w-6 h-6 text-red-600" /> Mevcut Kullanıcılar
-        </h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-black text-white border-b border-neutral-200">
-              <tr>
-                <th className="p-4 font-bold rounded-tl-xl">Kullanıcı</th>
-                <th className="p-4 font-bold">Pozisyon & Rütbe</th>
-                <th className="p-4 font-bold">Yaka Tipi</th>
-                <th className="p-4 font-bold text-center">Durum</th>
-                <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-neutral-100">
-              {personnelList.map(user => (
-                <tr key={user.id} className="hover:bg-neutral-50 transition">
-                  <td className="p-4 font-bold text-black">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0">
-                        {user.profileImage ? <img src={user.profileImage} alt="" className="w-full h-full object-cover" /> : user.fullName.charAt(0)}
-                      </div>
-                      <div className="flex flex-col">
-                        <span>{user.fullName}</span>
-                        <span className="text-[10px] text-neutral-500 font-medium">{user.email}</span>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="p-4 text-neutral-600 font-medium">
-                    <span className="block text-black font-bold">{user.position || '-'}</span>
-                    <span className="text-xs text-neutral-500">{user.rank || '-'}</span>
-                  </td>
-                  <td className="p-4 text-neutral-600 font-medium">{user.collarType || 'Belirtilmedi'}</td>
-                  <td className="p-4 text-center">
-                    <span className={`text-[10px] px-2 py-1 rounded font-bold uppercase tracking-wider ${user.employmentStatus === 'Aktif' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                      {user.employmentStatus || 'Aktif'}
-                    </span>
-                  </td>
-                  <td className="p-4">
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => setEditingUser(user)} className="p-2.5 bg-blue-50 text-blue-600 rounded-xl hover:bg-blue-100 transition" title="Düzenle"><Edit className="w-4 h-4" /></button>
-                      <button onClick={() => { if(window.confirm('Emin misiniz?')) onDelete(user.id); }} className="p-2.5 bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition" title="Sil"><X className="w-4 h-4" /></button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {personnelList.length === 0 && <tr><td colSpan="5" className="p-6 text-center text-neutral-500">Kullanıcı bulunamadı.</td></tr>}
-            </tbody>
-          </table>
-        </div>
 
         {editingUser && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
               <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-red-600">
-                <h3 className="font-bold text-lg">Kullanıcı Düzenle</h3>
+                <h3 className="font-bold text-lg">Personel Düzenle</h3>
                 <button onClick={() => setEditingUser(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
-                <div>
-                  <label className="block text-sm font-bold text-black mb-1">Ad Soyad</label>
-                  <input required type="text" value={editingUser.fullName} onChange={e => setEditingUser({...editingUser, fullName: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-black mb-1">E-Posta / Kullanıcı Adı</label>
-                  <input required type="text" value={editingUser.email} onChange={e => setEditingUser({...editingUser, email: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-black mb-1">Şifre</label>
-                  <input required type="text" value={editingUser.password} onChange={e => setEditingUser({...editingUser, password: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-1">Ad Soyad</label>
+                    <input required type="text" value={editingUser.fullName || ''} onChange={e => setEditingUser({...editingUser, fullName: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-1">TC Kimlik No</label>
+                    <input type="text" value={editingUser.tcNo || ''} onChange={e => setEditingUser({...editingUser, tcNo: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-1">Kişisel Telefon</label>
+                    <input type="tel" value={editingUser.personalPhone || ''} onChange={e => setEditingUser({...editingUser, personalPhone: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-1">Şirket Telefonu</label>
+                    <input type="tel" value={editingUser.companyPhone || ''} onChange={e => setEditingUser({...editingUser, companyPhone: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-1">E-Posta / Kullanıcı Adı</label>
+                    <input required type="text" value={editingUser.email || ''} onChange={e => setEditingUser({...editingUser, email: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-1">Şifre</label>
+                    <input required type="text" value={editingUser.password || ''} onChange={e => setEditingUser({...editingUser, password: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
                   <div>
                     <label className="block text-sm font-bold text-black mb-1">Pozisyon</label>
-                    <select value={editingUser.position} onChange={e => setEditingUser({...editingUser, position: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                    <select value={editingUser.position || ''} onChange={e => setEditingUser({...editingUser, position: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
                       {positions.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-black mb-1">Rütbe</label>
-                    <select value={editingUser.rank} onChange={e => setEditingUser({...editingUser, rank: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                    <select value={editingUser.rank || ''} onChange={e => setEditingUser({...editingUser, rank: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
                       {ranks.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-bold text-black mb-1">Yaka Tipi</label>
                     <select value={editingUser.collarType || 'Mavi Yaka'} onChange={e => setEditingUser({...editingUser, collarType: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
@@ -12041,9 +11507,7 @@ useEffect(() => {
     // Geriye dönük uyumluluk (Legacy Fallback)
     const hasJobAccess = canEdit || isManager || isMuhasebe || isDepo;
     const hasResourceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); // Personel, Araç, Malzeme
-    const hasFinanceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); // Finans
     const hasTaskAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); // Görev Listesi
-    const hasAdminAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); // Yetkilendirme, Sistem
     const hasOperasyonAccess = isManager || currentUser?.position?.includes('Operasyon');
     
     const checkAccess = (key, fallback) => currentUser?.permissions?.modules?.[key] ?? fallback;
@@ -12058,10 +11522,13 @@ useEffect(() => {
     const showVehicles = checkAccess('vehicles', hasResourceAccess);
     const showTodos = checkAccess('todos', hasTaskAccess);
     const showMaterials = checkAccess('materials', hasResourceAccess);
-    const showFinance = checkAccess('finance', hasFinanceAccess);
-    const showAuth = checkAccess('auth', hasAdminAccess);
-    const showSystemFiles = checkAccess('systemFiles', hasAdminAccess);
     const showOperasyon = checkAccess('operasyon', hasOperasyonAccess);
+
+    // Kısıtlama: Rütbesi Müdür veya Firma Sahibi olmayan göremesin
+    const isMudur = currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi';
+    const showFinance = isMudur;
+    const showAuth = isMudur;
+    const showSystemFiles = isMudur;
     
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
     const isStandardBlueCollarApp = isMaviYakaUser && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
