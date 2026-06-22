@@ -5878,7 +5878,7 @@ useEffect(() => {
   };
 
   // --- EKSİK OLAN USERLISTVIEW BİLEŞENİ BAŞLANGICI ---
-  const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks }) => {
+const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, positionModules }) => {
     const [editingUser, setEditingUser] = useState(null);
 
     const modules = [
@@ -5898,13 +5898,13 @@ useEffect(() => {
       { id: 'systemFiles', label: 'Sistem Dosyaları' }
     ];
 
-    const handleToggleModule = (moduleId) => {
+    const handleToggleModule = (moduleId, currentMergedState) => {
         const currentModules = editingUser.permissions?.modules || {};
         const updatedPermissions = {
             ...editingUser.permissions,
             modules: {
                 ...currentModules,
-                [moduleId]: !currentModules[moduleId]
+                [moduleId]: !currentMergedState // Mevcut birleşik yetkinin tam tersini "istisna" olarak kaydet
             }
         };
         setEditingUser({...editingUser, permissions: updatedPermissions});
@@ -6008,18 +6008,30 @@ useEffect(() => {
                     </div>
                   </div>
 
-                  <div className="mt-6">
+<div className="mt-6">
                       <h4 className="font-bold text-black mb-3 border-b border-neutral-200 pb-2 flex items-center gap-2">
                           <Eye className="w-5 h-5 text-red-600" /> Kişiye Özel Modül Yetkileri
                       </h4>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                           {modules.map(mod => {
-                          const hasAccess = editingUser.permissions?.modules?.[mod.id] ?? false;
+                          // Rol bazlı varsayılan yetki kontrolü
+                          const isRoleAccess = positionModules?.[editingUser.position]?.[mod.id] || positionModules?.[editingUser.rank]?.[mod.id] || false;
+                          
+                          // Kişiye özel override var mı?
+                          const personalAccess = editingUser.permissions?.modules?.[mod.id];
+                          
+                          // Admin mi?
+                          const isAdmin = editingUser.permissions?.canEdit;
+                          
+                          // Eğer kişisel ayar varsa onu ezici olarak al, yoksa rol bazlı olanı göster, adminse hep açık göster
+                          const currentMergedState = typeof personalAccess === 'boolean' ? personalAccess : isRoleAccess;
+                          const displayAccess = isAdmin ? true : currentMergedState;
+
                           return (
-                              <label key={mod.id} className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${hasAccess ? 'bg-blue-50 border-blue-200' : 'bg-white border-neutral-200 hover:bg-neutral-100'}`}>
-                              <span className={`text-xs font-bold ${hasAccess ? 'text-blue-800' : 'text-neutral-600'}`}>{mod.label}</span>
+                              <label key={mod.id} className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${displayAccess ? 'bg-blue-50 border-blue-200' : 'bg-white border-neutral-200 hover:bg-neutral-100'} ${isAdmin ? 'opacity-60 cursor-not-allowed' : ''}`}>
+                              <span className={`text-xs font-bold ${displayAccess ? 'text-blue-800' : 'text-neutral-600'}`}>{mod.label}</span>
                               <div className="relative inline-flex items-center">
-                                  <input type="checkbox" className="sr-only peer" checked={hasAccess} onChange={() => handleToggleModule(mod.id)} />
+                                  <input type="checkbox" className="sr-only peer" checked={displayAccess} disabled={isAdmin} onChange={() => handleToggleModule(mod.id, currentMergedState)} />
                                   <div className="w-7 h-4 bg-neutral-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
                               </div>
                               </label>
@@ -11676,36 +11688,41 @@ useEffect(() => {
     const hasTaskAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); // Görev Listesi
     const hasOperasyonAccess = isManager || currentUser?.position?.includes('Operasyon');
     
-const checkAccess = (key, fallback) => {
+const checkAccess = (key) => {
+      // 1. Kullanıcı aktif değilse yetkisi kapalı
+      if (currentUser?.employmentStatus === 'Pasif') return false;
+
+      // 2. Adminse tam yetki (her şey açık)
       if (currentUser?.permissions?.canEdit) return true;
       
-      // 1. Önce kişiye özel atanmış bir modül yetkisi var mı kontrol et
-      if (currentUser?.permissions?.modules && currentUser.permissions.modules[key] !== undefined) {
+      // 3. Kişiye özel atanmış modül yetkisi varsa rolü ezer
+      if (currentUser?.permissions?.modules && typeof currentUser.permissions.modules[key] === 'boolean') {
         return currentUser.permissions.modules[key];
       }
 
-      // 2. Yoksa pozisyona göre kontrol et
+      // 4. Pozisyona göre rol kontrolü
       const posAccess = positionModules?.[currentUser?.position];
-      if (posAccess && posAccess[key] !== undefined) return posAccess[key];
+      if (posAccess && typeof posAccess[key] === 'boolean') return posAccess[key];
       
-      // 3. Yoksa rütbeye göre kontrol et
+      // 5. Rütbeye göre rol kontrolü
       const rankAccess = positionModules?.[currentUser?.rank];
-      if (rankAccess && rankAccess[key] !== undefined) return rankAccess[key];
+      if (rankAccess && typeof rankAccess[key] === 'boolean') return rankAccess[key];
       
-      return fallback;
+      // 6. Hiçbir yerde belirtilmemişse varsayılan olarak kapalı (Default-Deny)
+      return false;
     };
 
-    const showDashboard = checkAccess('dashboard', true);
-    const showCalendar = checkAccess('calendar', true);
-    const showAddJob = checkAccess('addJob', hasJobAccess);
-    const showJobList = checkAccess('jobList', hasJobAccess);
-    const showTasks = checkAccess('tasks', hasTaskAccess);
-    const showCustomers = checkAccess('customers', hasJobAccess);
-    const showPersonnel = checkAccess('personnel', hasResourceAccess);
-    const showVehicles = checkAccess('vehicles', hasResourceAccess);
-    const showTodos = checkAccess('todos', hasTaskAccess);
-    const showMaterials = checkAccess('materials', hasResourceAccess);
-    const showOperasyon = checkAccess('operasyon', hasOperasyonAccess);
+    const showDashboard = checkAccess('dashboard');
+    const showCalendar = checkAccess('calendar');
+    const showAddJob = checkAccess('addJob');
+    const showJobList = checkAccess('jobList');
+    const showTasks = checkAccess('tasks');
+    const showCustomers = checkAccess('customers');
+    const showPersonnel = checkAccess('personnel');
+    const showVehicles = checkAccess('vehicles');
+    const showTodos = checkAccess('todos');
+    const showMaterials = checkAccess('materials');
+    const showOperasyon = checkAccess('operasyon');
 
     // Kısıtlama: Rütbesi Müdür veya Firma Sahibi olmayan göremesin
     const isMudur = currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi';
@@ -12750,9 +12767,8 @@ const checkAccess = (key, fallback) => {
               />
             }
             
-            {/* Yetkilendirme Modülleri */}
-            {activeTab === 'userList' && showAuth && <UserListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} onDelete={handleDeletePersonnel} positions={positions} ranks={ranks} />}
-            {activeTab === 'positions' && showAuth && <PositionsView positions={positions} onAddPosition={handleAddPosition} onDeletePosition={handleDeletePosition} />}
+{/* Yetkilendirme Modülleri */}
+            {activeTab === 'userList' && showAuth && <UserListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} onDelete={handleDeletePersonnel} positions={positions} ranks={ranks} positionModules={positionModules} />}            {activeTab === 'positions' && showAuth && <PositionsView positions={positions} onAddPosition={handleAddPosition} onDeletePosition={handleDeletePosition} />}
             {activeTab === 'ranks' && showAuth && <RanksView ranks={ranks} onAddRank={handleAddRank} onDeleteRank={handleDeleteRank} />}
             {activeTab === 'permissions' && showAuth && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} />}
             {activeTab === 'moduleAccess' && showAuth && <ModuleAccessView positions={positions} ranks={ranks} positionModules={positionModules} handleUpdatePositionModuleAccess={handleUpdatePositionModuleAccess} />}
