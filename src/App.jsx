@@ -12656,6 +12656,56 @@ useEffect(() => {
               </div>
             )}
 
+            {/* İş Listesi */}
+            {showJobList && (
+              <div className="flex flex-col gap-1">
+                <button 
+                  onClick={() => { setIsJobSubMenuOpen(!isJobSubMenuOpen); setIsAddJobSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'currentJobs' || activeTab === 'completedJobs' || activeTab === 'allJobs' || activeTab === 'damagedJobs' || activeTab === 'cancelledJobs') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <ClipboardList className={`w-5 h-5 shrink-0 ${(activeTab === 'currentJobs' || activeTab === 'completedJobs' || activeTab === 'allJobs' || activeTab === 'damagedJobs' || activeTab === 'cancelledJobs') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">İş Listesi</span>
+                  </div>
+                  {isJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+                
+                {isJobSubMenuOpen && (
+                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    <button 
+                      onClick={() => { setActiveTab('currentJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'currentJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'currentJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Mevcut İşler
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('completedJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'completedJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'completedJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Tamamlanan İşler
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('allJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm İşler
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('damagedJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'damagedJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'damagedJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Hasarlı İşler
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('cancelledJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'cancelledJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'cancelledJobs' ? 'bg-white' : 'bg-red-600'}`}></div> İptal Edilen İşler
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Müşteri Listesi */}
             {showCustomers && (
               <div className="flex flex-col gap-1">
