@@ -4337,7 +4337,7 @@ useEffect(() => {
                   <th className="p-4 font-bold">Kayıt Açan Personel</th>
                   <th className="p-4 font-bold text-center">Açılan İş Sayısı Detayı</th>
                   <th className="p-4 font-bold text-right">Getirdiği Toplam Ciro</th>
-                  <th className="p-4 font-bold text-right">İş Başı Ortalama</th>
+                  <th className="p-4 font-bold text-right" title="Ortalama hesaplamasına asansör işleri dahil edilmemiştir.">İş Başı Ortalama <br/><span className="text-[10px] font-normal text-neutral-400">(Asansör Hariç)</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
@@ -4376,7 +4376,7 @@ useEffect(() => {
                       )}
                     </td>
                     <td className="p-4 text-right font-bold text-neutral-600">
-                      ₺{item.count > 0 ? Math.round(item.revenue / item.count).toLocaleString('tr-TR') : 0}
+                      ₺{(item.count - item.asansorCount) > 0 ? Math.round((item.revenue - item.asansorRevenue) / (item.count - item.asansorCount)).toLocaleString('tr-TR') : 0}
                     </td>
                   </tr>
                 ))}
@@ -4595,6 +4595,142 @@ useEffect(() => {
 
         <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
           <PlusCircle className="w-5 h-5" /> Listeye Kaydet
+        </button>
+      </form>
+    </div>
+  );
+
+  const TaskManagerView = ({ tasks, setShowTaskModal, draggingTask, setDraggingTask, openEditTask, handleUpdateTaskStatus, handleDeleteTask }) => {
+    const columns = [
+      { id: 'todo', title: 'YAPILACAKLAR', color: 'bg-neutral-800' },
+      { id: 'in-progress', title: 'DEVAM EDENLER', color: 'bg-red-600' },
+      { id: 'completed', title: 'TAMAMLANANLAR', color: 'bg-neutral-800' }
+    ];
+
+    const handleDragStart = (e, taskId) => {
+      setDraggingTask(taskId);
+      e.dataTransfer.effectAllowed = 'move';
+    };
+
+    const handleDragOver = (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+    };
+
+    const handleDrop = (e, targetStatus) => {
+      e.preventDefault();
+      if (draggingTask) {
+        handleUpdateTaskStatus(draggingTask, targetStatus);
+        setDraggingTask(null);
+      }
+    };
+
+    return (
+      <div className="h-[calc(100vh-120px)] flex flex-col animate-in fade-in">
+        <div className="flex justify-between items-center mb-6">
+          <h2 className="text-2xl font-bold text-black flex items-center gap-2">
+            <CheckSquare className="w-7 h-7 text-red-600" /> Görev Yöneticisi
+          </h2>
+          <button 
+            onClick={() => setShowTaskModal(true)}
+            className="bg-black text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-neutral-800 transition shadow-lg"
+          >
+            <PlusCircle className="w-5 h-5" /> Yeni Görev Ekle
+          </button>
+        </div>
+
+        <div className="flex-1 flex gap-6 overflow-x-auto pb-4 custom-scrollbar items-start">
+          {columns.map(column => {
+            const columnTasks = tasks.filter(t => t.status === column.id);
+            return (
+              <div 
+                key={column.id} 
+                className="bg-neutral-50 rounded-2xl w-80 md:w-96 flex-shrink-0 flex flex-col max-h-full border border-neutral-200"
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, column.id)}
+              >
+                <div className="p-4 border-b border-neutral-200 flex justify-between items-center bg-white rounded-t-2xl shadow-sm">
+                  <h3 className="font-bold text-black text-sm flex items-center gap-2">
+                    <div className={`w-3 h-3 rounded-full ${column.color}`}></div>
+                    {column.title}
+                  </h3>
+                  <span className="bg-neutral-100 text-neutral-600 text-xs font-bold px-2.5 py-1 rounded-lg border border-neutral-200">
+                    {columnTasks.length}
+                  </span>
+                </div>
+
+                <div className="p-3 flex-1 overflow-y-auto space-y-3 custom-scrollbar min-h-[150px]">
+                  {columnTasks.sort((a, b) => new Date(b.date) - new Date(a.date)).map(task => (
+                    <div 
+                      key={task.id} 
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, task.id)}
+                      className="bg-white p-4 rounded-xl shadow-sm border border-neutral-200 hover:border-red-400 transition group flex flex-col gap-2 cursor-grab active:cursor-grabbing"
+                    >
+                      <div className="flex justify-between items-start">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded border bg-neutral-50 text-neutral-600 border-neutral-200 flex items-center gap-1">
+                          <User className="w-3 h-3" /> {task.assignee}
+                        </span>
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                          <button onClick={() => openEditTask(task)} className="text-blue-500 hover:text-blue-700 p-1"><Edit className="w-4 h-4" /></button>
+                          <button onClick={() => handleDeleteTask(task.id)} className="text-red-500 hover:text-red-700 p-1"><X className="w-4 h-4" /></button>
+                        </div>
+                      </div>
+                      
+                      <h4 className="font-black text-black text-base leading-tight">{task.title}</h4>
+                      <p className="text-xs text-neutral-600 whitespace-pre-wrap font-medium">{task.description}</p>
+                      
+                      <div className="flex items-center gap-1.5 text-[11px] font-bold text-neutral-700 bg-neutral-50 px-2 py-1.5 rounded-lg border border-neutral-200 mt-1 w-max">
+                        <CalendarDays className="w-3.5 h-3.5 text-red-600" /> Tarih: {task.date}
+                      </div>
+                    </div>
+                  ))}
+                  {columnTasks.length === 0 && (
+                    <p className="text-center text-xs font-medium text-neutral-400 py-4">Bu alanda görev bulunmuyor.</p>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const AddTodoView = ({ newTodo, setNewTodo, handleAddTodo }) => (
+    <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+      <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
+        <ListTodo className="w-6 h-6 text-red-600" /> Yeni Yapılacak İş Ekle
+      </h2>
+      <form onSubmit={handleAddTodo} className="space-y-4">
+        <div>
+          <label className="block text-sm font-bold text-black mb-1">Başlık</label>
+          <input required type="text" value={newTodo.title} onChange={(e) => setNewTodo({...newTodo, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Araç muayenesi randevusu alınacak" />
+        </div>
+        
+        <div>
+          <label className="block text-sm font-bold text-black mb-1">Detaylar / Notlar</label>
+          <textarea required value={newTodo.details} onChange={(e) => setNewTodo({...newTodo, details: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-24 resize-none transition" placeholder="Yapılacak işin detayları..." />
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-bold text-black mb-1">Hatırlatma Tarihi</label>
+            <input required type="date" value={newTodo.reminderDate} onChange={(e) => setNewTodo({...newTodo, reminderDate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+          </div>
+          <div>
+            <label className="block text-sm font-bold text-black mb-1">Önem Derecesi</label>
+            <select value={newTodo.priority} onChange={(e) => setNewTodo({...newTodo, priority: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-medium">
+              <option value="Düşük">Düşük</option>
+              <option value="Normal">Normal</option>
+              <option value="Yüksek">Yüksek</option>
+              <option value="Acil">Acil</option>
+            </select>
+          </div>
+        </div>
+
+        <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+          <PlusCircle className="w-5 h-5" /> Kaydet ve Ekle
         </button>
       </form>
     </div>
@@ -5341,7 +5477,9 @@ useEffect(() => {
   const AddVehicleView = () => <PlaceholderView title="Araç Ekle" icon={PlusCircle} />;
   
   const VehicleMaintenanceView = ({ vehicles, onUpdateVehicle, addSystemLog }) => {
-    const [selectedVehicle, setSelectedVehicle] = useState(null);
+    const [selectedVehicleId, setSelectedVehicleId] = useState('');
+    const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId) || null;
+    
     const [recordForm, setRecordForm] = useState({
       type: 'Periyodik Bakım',
       date: new Date().toISOString().split('T')[0],
@@ -5386,12 +5524,6 @@ useEffect(() => {
         nextKm: '',
         notes: ''
       });
-      
-      setSelectedVehicle({
-        ...selectedVehicle,
-        km: newKm,
-        maintenanceRecords: updatedRecords
-      });
     };
 
     const handleDelete = (recordId) => {
@@ -5401,52 +5533,112 @@ useEffect(() => {
         ...selectedVehicle,
         maintenanceRecords: updatedRecords
       });
-      setSelectedVehicle({
-        ...selectedVehicle,
-        maintenanceRecords: updatedRecords
-      });
     };
 
-    return (
-      <div className="flex flex-col lg:flex-row gap-6 animate-in fade-in h-[calc(100vh-140px)]">
-        {/* Sol: Araç Listesi */}
-        <div className="w-full lg:w-1/3 flex flex-col gap-4 h-full">
-          <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-5 flex-1 flex flex-col overflow-hidden">
-            <h2 className="text-xl font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-3 shrink-0">
-              <Car className="w-6 h-6 text-red-600" /> Araç Filosu
-            </h2>
-            <div className="flex flex-col gap-2 overflow-y-auto custom-scrollbar pr-2 flex-1">
-              {vehicles.map(v => (
-                <button 
-                  key={v.id}
-                  onClick={() => setSelectedVehicle(v)}
-                  className={`p-3 rounded-xl border text-left transition flex items-center justify-between ${selectedVehicle?.id === v.id ? 'bg-red-50 border-red-300' : 'bg-white border-neutral-200 hover:border-red-300'}`}
-                >
-                  <div>
-                    <div className="font-black text-black tracking-widest">{v.plate}</div>
-                    <div className="text-xs text-neutral-500 font-medium">{v.type} • {v.km} KM</div>
-                  </div>
-                  <ChevronRight className={`w-5 h-5 ${selectedVehicle?.id === v.id ? 'text-red-500' : 'text-neutral-400'}`} />
-                </button>
-              ))}
-              {vehicles.length === 0 && <p className="text-sm text-neutral-500 italic text-center py-4">Araç bulunamadı.</p>}
-            </div>
-          </div>
-        </div>
+    // --- Kritik Durum Hesaplama ---
+    const todayStr = new Date().toISOString().split('T')[0];
+    const criticalAlerts = [];
+    vehicles.forEach(v => {
+      if (v.maintenanceRecords) {
+        v.maintenanceRecords.forEach(r => {
+           let isCritical = false;
+           let reason = '';
+           if (r.nextDate && r.nextDate <= todayStr) { isCritical = true; reason = 'Tarihi Geçti/Yaklaştı'; }
+           if (r.nextKm && v.km && parseInt(v.km) >= parseInt(r.nextKm)) { isCritical = true; reason = 'KM Sınırı Aşıldı'; }
+           if (isCritical) criticalAlerts.push({ vehicle: v.plate, type: r.type, reason, nextDate: r.nextDate, nextKm: r.nextKm });
+        });
+      }
+    });
 
-        {/* Sağ: Detay ve Form */}
-        <div className="w-full lg:w-2/3 flex flex-col gap-6 h-full overflow-hidden">
-          {!selectedVehicle ? (
-            <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-10 flex flex-col items-center justify-center text-neutral-400 h-full">
-              <Car className="w-16 h-16 mb-4 opacity-50" />
-              <p className="font-bold text-lg text-neutral-500">Rapor ve bakım eklemek için sol taraftan bir araç seçin.</p>
+    // --- Son İşlemler Hesaplama ---
+    let allRecords = [];
+    vehicles.forEach(v => {
+       if (v.maintenanceRecords) {
+           v.maintenanceRecords.forEach(r => {
+               allRecords.push({ ...r, plate: v.plate });
+           });
+       }
+    });
+    allRecords.sort((a,b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date));
+    const recentRecords = allRecords.slice(0, 5);
+
+    return (
+      <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in pb-8">
+        <h2 className="text-2xl font-black text-black flex items-center gap-2 border-b border-neutral-200 pb-4">
+          <Activity className="w-7 h-7 text-red-600" /> Araç Rapor & Bakım Yönetimi
+        </h2>
+
+        {/* Filo Kritik Durum */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2">
+            <AlertTriangle className="w-6 h-6 text-orange-500" /> Filo Kritik Durum & Hatırlatmalar
+          </h3>
+          {criticalAlerts.length === 0 ? (
+            <div className="bg-green-50 border border-green-200 text-green-700 p-5 rounded-xl flex items-center gap-3 font-bold">
+              <CheckCircle className="w-6 h-6" /> Sistemde yaklaşan veya gecikmiş hiçbir bakım/muayene bulunmuyor. Harika!
             </div>
           ) : (
-            <>
-              <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 shrink-0">
-                <h3 className="text-lg font-black text-black mb-4 flex items-center justify-between border-b border-neutral-100 pb-3">
-                  <span className="flex items-center gap-2"><PlusCircle className="w-5 h-5 text-red-600" /> Yeni Rapor / Bakım Ekle</span>
-                  <span className="text-sm bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200">{selectedVehicle.plate}</span>
+            <div className="space-y-3">
+              {criticalAlerts.map((alert, i) => (
+                <div key={i} className="bg-red-50 border border-red-200 p-4 rounded-xl flex justify-between items-center text-sm shadow-sm">
+                  <div className="flex flex-col gap-1">
+                    <span className="font-black text-red-900 text-base">{alert.vehicle} - {alert.type}</span>
+                    <span className="text-red-700 font-medium">{alert.reason} {alert.nextDate ? `(${alert.nextDate})` : ''} {alert.nextKm ? `(${alert.nextKm} KM)` : ''}</span>
+                  </div>
+                  <AlertTriangle className="w-6 h-6 text-red-500" />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Son Eklenen İşlemler */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2">
+            <History className="w-6 h-6 text-blue-500" /> Son Eklenen İşlemler
+          </h3>
+          {recentRecords.length === 0 ? (
+            <p className="text-sm text-neutral-500 font-medium">Henüz herhangi bir araca bakım kaydı eklenmemiş.</p>
+          ) : (
+            <div className="space-y-3">
+              {recentRecords.map(r => (
+                <div key={r.id} className="bg-neutral-50 border border-neutral-200 p-4 rounded-xl flex justify-between items-center text-sm shadow-sm transition hover:border-blue-200">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Car className="w-4 h-4"/></div>
+                    <div>
+                      <span className="font-black text-black text-base block mb-0.5">{r.plate}</span>
+                      <span className="text-neutral-600 font-medium">{r.type} <span className="text-[10px] text-neutral-400 ml-1">({r.date})</span></span>
+                    </div>
+                  </div>
+                  <span className="font-black text-green-600 text-base">{r.cost ? `₺${parseInt(r.cost).toLocaleString('tr-TR')}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* İşlem Yapılacak Aracı Seçin */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-black mb-3">İşlem Yapılacak Aracı Seçin</h3>
+          <select 
+            value={selectedVehicleId} 
+            onChange={(e) => setSelectedVehicleId(e.target.value)} 
+            className="w-full md:w-[400px] p-4 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-base cursor-pointer shadow-sm transition hover:border-red-400"
+          >
+            <option value="">-- Araç Seçiniz --</option>
+            {vehicles.map(v => (
+              <option key={v.id} value={v.id}>{v.plate} ({v.type})</option>
+            ))}
+          </select>
+
+          {selectedVehicle && (
+            <div className="mt-8 pt-8 border-t border-neutral-200 grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in slide-in-from-top-4">
+              
+              {/* Form Bölümü */}
+              <div>
+                <h3 className="text-lg font-black text-black mb-4 flex items-center justify-between">
+                  <span className="flex items-center gap-2"><PlusCircle className="w-5 h-5 text-red-600" /> Rapor / Bakım Ekle</span>
+                  <span className="text-xs bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200">{selectedVehicle.plate}</span>
                 </h3>
                 <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -5485,24 +5677,25 @@ useEffect(() => {
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-neutral-700 mb-1">Detaylar / Notlar</label>
-                    <textarea value={recordForm.notes} onChange={e => setRecordForm({...recordForm, notes: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-16 resize-none" placeholder="Değişen parçalar, muayene istasyonu vb..."></textarea>
+                    <textarea value={recordForm.notes} onChange={e => setRecordForm({...recordForm, notes: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none" placeholder="Değişen parçalar, muayene istasyonu vb..."></textarea>
                   </div>
-                  <button type="submit" className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-sm">
+                  <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg shadow-red-600/30">
                     <Save className="w-5 h-5" /> Kaydı Ekle
                   </button>
                 </form>
               </div>
 
-              <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 flex-1 flex flex-col overflow-hidden">
+              {/* Geçmiş Kayıtlar Bölümü */}
+              <div className="flex flex-col overflow-hidden">
                 <h3 className="text-lg font-black text-black mb-4 flex items-center gap-2 border-b border-neutral-100 pb-3 shrink-0">
-                  <History className="w-5 h-5 text-neutral-600" /> Geçmiş Kayıtlar
+                  <History className="w-5 h-5 text-neutral-600" /> {selectedVehicle.plate} Geçmiş Kayıtları
                 </h3>
-                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+                <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2 max-h-[500px]">
                   {!(selectedVehicle.maintenanceRecords && selectedVehicle.maintenanceRecords.length > 0) ? (
-                    <p className="text-center text-sm text-neutral-500 italic py-6">Bu araca ait kayıt bulunmuyor.</p>
+                    <p className="text-center text-sm text-neutral-500 italic py-10 bg-neutral-50 rounded-xl border border-neutral-200">Bu araca ait kayıt bulunmuyor.</p>
                   ) : (
                     [...(selectedVehicle.maintenanceRecords)].sort((a,b)=> new Date(b.date) - new Date(a.date)).map(record => (
-                      <div key={record.id} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 flex flex-col sm:flex-row gap-4 justify-between relative group">
+                      <div key={record.id} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 flex flex-col sm:flex-row gap-4 justify-between relative group shadow-sm transition hover:border-red-200">
                         <button onClick={() => handleDelete(record.id)} className="absolute top-2 right-2 p-1.5 bg-red-50 text-red-600 rounded-lg opacity-0 group-hover:opacity-100 transition"><X className="w-4 h-4"/></button>
                         <div>
                           <div className="flex items-center gap-2 mb-1">
@@ -5517,7 +5710,7 @@ useEffect(() => {
                           </div>
                         </div>
                         {record.cost && (
-                          <div className="sm:text-right shrink-0 mt-2 sm:mt-0">
+                          <div className="sm:text-right shrink-0 mt-2 sm:mt-0 flex sm:flex-col items-center sm:items-end justify-between sm:justify-start">
                             <span className="block text-xs font-bold text-neutral-500 uppercase">Maliyet</span>
                             <span className="text-lg font-black text-red-600">₺{parseInt(record.cost).toLocaleString('tr-TR')}</span>
                           </div>
@@ -5527,7 +5720,8 @@ useEffect(() => {
                   )}
                 </div>
               </div>
-            </>
+
+            </div>
           )}
         </div>
       </div>
@@ -5723,6 +5917,7 @@ useEffect(() => {
     const [filterPozisyon, setFilterPozisyon] = useState('');
     const [filterRutbe, setFilterRutbe] = useState('');
     const [editingUser, setEditingUser] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
 
     const filteredList = personnelList.filter(p => {
       if (filterYaka && p.collarType !== filterYaka) return false;
@@ -5730,6 +5925,26 @@ useEffect(() => {
       if (filterRutbe && p.rank !== filterRutbe) return false;
       return true;
     });
+
+    const handleImageUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      setIsUploading(true);
+      setEditingUser(prev => ({ ...prev, profileImage: 'Yükleniyor...' }));
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: uploadData });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+        setEditingUser(prev => ({ ...prev, profileImage: uploadedUrl }));
+      } catch (err) {
+        console.error("Yükleme hatası:", err);
+        setEditingUser(prev => ({ ...prev, profileImage: '' }));
+      }
+      setIsUploading(false);
+    };
 
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
@@ -5760,9 +5975,7 @@ useEffect(() => {
                 <th className="p-4 font-bold rounded-tl-xl">Ad Soyad</th>
                 <th className="p-4 font-bold">İletişim</th>
                 <th className="p-4 font-bold">Pozisyon / Rütbe</th>
-                <th className="p-4 font-bold text-center">Yaka Tipi</th>
-                <th className="p-4 font-bold text-center">Çalışma Durumu</th>
-                <th className="p-4 font-bold rounded-tr-xl text-center">İşlemler</th>
+                <th className="p-4 font-bold text-center rounded-tr-xl">Düzenleme</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
@@ -5791,7 +6004,7 @@ useEffect(() => {
                     <span className="text-xs text-neutral-500">{person.rank || '-'}</span>
                   </td>
                   <td className="p-4 text-center">
-                    <button onClick={() => setEditingUser(person)} className="p-2 text-blue-500 border border-blue-200 bg-white rounded-lg hover:bg-blue-50 hover:border-blue-300 transition shadow-sm opacity-0 group-hover:opacity-100" title="Düzenle">
+                    <button onClick={() => setEditingUser(person)} className="p-2 text-blue-500 border border-blue-200 bg-white rounded-lg hover:bg-blue-50 hover:border-blue-300 transition shadow-sm" title="Düzenle">
                       <Edit className="w-4 h-4"/>
                     </button>
                   </td>
@@ -5799,7 +6012,7 @@ useEffect(() => {
               ))}
               {filteredList.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="p-8 text-center text-neutral-500 font-medium border-2 border-dashed border-neutral-200 bg-neutral-50/50 m-4 rounded-xl">Bu kritere uygun personel bulunamadı.</td>
+                  <td colSpan="4" className="p-8 text-center text-neutral-500 font-medium border-2 border-dashed border-neutral-200 bg-neutral-50/50 m-4 rounded-xl">Bu kritere uygun personel bulunamadı.</td>
                 </tr>
               )}
             </tbody>
@@ -5808,66 +6021,144 @@ useEffect(() => {
 
         {editingUser && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+            <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
               <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-red-600">
                 <h3 className="font-bold text-lg">Personel Düzenle</h3>
                 <button onClick={() => setEditingUser(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                
+                <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-5 bg-neutral-50 rounded-xl border border-neutral-200">
+                  <div className="w-20 h-20 rounded-full border border-neutral-300 bg-neutral-100 flex items-center justify-center overflow-hidden shrink-0">
+                    {editingUser.profileImage === 'Yükleniyor...' ? (
+                      <span className="text-[10px] font-bold text-neutral-500 animate-pulse">...</span>
+                    ) : editingUser.profileImage ? (
+                      <img src={editingUser.profileImage} alt="Profil" className="w-full h-full object-cover" />
+                    ) : (
+                      <UserPlus className="w-8 h-8 text-neutral-400" />
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2 w-full sm:w-auto items-center sm:items-start text-center sm:text-left">
+                    <span className="text-sm font-bold text-neutral-700">Profil Fotoğrafı</span>
+                    <label className="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-lg flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-max shadow-sm text-xs font-bold text-neutral-700">
+                      <Upload className="w-4 h-4" /> Fotoğraf Yükle
+                      <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={isUploading} />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                   <div>
-                    <label className="block text-sm font-bold text-black mb-1">Ad Soyad</label>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Ad Soyad *</label>
                     <input required type="text" value={editingUser.fullName || ''} onChange={e => setEditingUser({...editingUser, fullName: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-black mb-1">TC Kimlik No</label>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">TC Kimlik No</label>
                     <input type="text" value={editingUser.tcNo || ''} onChange={e => setEditingUser({...editingUser, tcNo: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
                   </div>
+                  
                   <div>
-                    <label className="block text-sm font-bold text-black mb-1">Kişisel Telefon</label>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Kişisel Telefon</label>
                     <input type="tel" value={editingUser.personalPhone || ''} onChange={e => setEditingUser({...editingUser, personalPhone: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-black mb-1">Şirket Telefonu</label>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Şirket Telefonu</label>
                     <input type="tel" value={editingUser.companyPhone || ''} onChange={e => setEditingUser({...editingUser, companyPhone: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
                   </div>
+
                   <div>
-                    <label className="block text-sm font-bold text-black mb-1">E-Posta / Kullanıcı Adı</label>
-                    <input required type="text" value={editingUser.email || ''} onChange={e => setEditingUser({...editingUser, email: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">İşe Başlama Tarihi</label>
+                    <input type="date" value={editingUser.startDate || ''} onChange={e => setEditingUser({...editingUser, startDate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-medium text-neutral-700" />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-black mb-1">Şifre</label>
-                    <input required type="text" value={editingUser.password || ''} onChange={e => setEditingUser({...editingUser, password: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">SetCard Numarası</label>
+                    <input type="text" value={editingUser.setcard || ''} onChange={e => setEditingUser({...editingUser, setcard: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="SetCard Numarası" />
                   </div>
-                  <div>
-                    <label className="block text-sm font-bold text-black mb-1">Pozisyon</label>
-                    <select value={editingUser.position || ''} onChange={e => setEditingUser({...editingUser, position: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
-                      {positions.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-black mb-1">Rütbe</label>
-                    <select value={editingUser.rank || ''} onChange={e => setEditingUser({...editingUser, rank: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
-                      {ranks.map(r => <option key={r} value={r}>{r}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-black mb-1">Yaka Tipi</label>
-                    <select value={editingUser.collarType || 'Mavi Yaka'} onChange={e => setEditingUser({...editingUser, collarType: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+
+                  <div className="md:col-span-1">
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Yaka Tipi *</label>
+                    <select value={editingUser.collarType || 'Mavi Yaka'} onChange={e => setEditingUser({...editingUser, collarType: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
                       <option value="Mavi Yaka">Mavi Yaka</option>
                       <option value="Beyaz Yaka">Beyaz Yaka</option>
                     </select>
                   </div>
+                  <div className="hidden md:block"></div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-neutral-700 mb-1">Banka IBAN Numarası</label>
+                  <input type="text" value={editingUser.iban || ''} onChange={e => setEditingUser({...editingUser, iban: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none font-mono text-sm uppercase transition" placeholder="TR..." />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-neutral-700 mb-1">Açık Adres</label>
+                  <textarea value={editingUser.address || ''} onChange={e => setEditingUser({...editingUser, address: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition h-20 resize-none" placeholder="Personel adresi..."></textarea>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-4">
+                   <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Maaş Ücreti (TL)</label>
+                      <input type="number" value={editingUser.maas || ''} onChange={e => setEditingUser({...editingUser, maas: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                   </div>
+                   <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Yol Parası (TL)</label>
+                      <input type="number" value={editingUser.yol || ''} onChange={e => setEditingUser({...editingUser, yol: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                   </div>
+                   <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Yemek Parası (TL)</label>
+                      <input type="number" value={editingUser.yemek || ''} onChange={e => setEditingUser({...editingUser, yemek: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                   </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                   <div>
-                    <label className="block text-sm font-bold text-black mb-1">Durum</label>
-                    <select value={editingUser.employmentStatus || 'Aktif'} onChange={e => setEditingUser({...editingUser, employmentStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
-                      <option value="Aktif">Aktif</option>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Banka Parası (Aylık TL)</label>
+                    <input type="number" value={editingUser.bankaParasi || ''} onChange={e => setEditingUser({...editingUser, bankaParasi: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: 17000" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">İcrası Var mı?</label>
+                    <select value={editingUser.icrasiVar || 'Hayır'} onChange={e => setEditingUser({...editingUser, icrasiVar: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
+                      <option value="Hayır">Hayır</option>
+                      <option value="Evet">Evet</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Pozisyon *</label>
+                    <select value={editingUser.position || ''} onChange={e => setEditingUser({...editingUser, position: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
+                      {positions.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Rütbe *</label>
+                    <select value={editingUser.rank || ''} onChange={e => setEditingUser({...editingUser, rank: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
+                      {ranks.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Personel Durumu *</label>
+                    <select value={editingUser.employmentStatus || 'Aktif'} onChange={e => setEditingUser({...editingUser, employmentStatus: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
+                      <option value="Aktif">Aktif (Çalışıyor)</option>
                       <option value="Pasif">Pasif</option>
                     </select>
                   </div>
                 </div>
-                <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
-                  <Save className="w-5 h-5" /> Kaydet
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">E-Posta (Sisteme Giriş İçin) *</label>
+                    <input required type="text" value={editingUser.email || ''} onChange={e => setEditingUser({...editingUser, email: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Şifre (Sisteme Giriş İçin) *</label>
+                    <input required type="text" value={editingUser.password || ''} onChange={e => setEditingUser({...editingUser, password: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                </div>
+
+                <button type="submit" disabled={isUploading} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2 disabled:opacity-50">
+                  <Save className="w-5 h-5" /> Değişiklikleri Kaydet
                 </button>
               </form>
             </div>
@@ -5877,25 +6168,259 @@ useEffect(() => {
     );
   };
 
-  // --- EKSİK OLAN USERLISTVIEW BİLEŞENİ BAŞLANGICI ---
-const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, positionModules }) => {
+  const OzlukDosyalariView = ({ personnelList, db, appId, addSystemLog, setViewingImage }) => {
+    const [selectedPerson, setSelectedPerson] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [collarFilter, setCollarFilter] = useState('Tümü'); // 'Tümü', 'Mavi Yaka', 'Beyaz Yaka'
+
+    const filteredList = personnelList.filter(p => {
+      const matchesSearch = p.fullName.toLowerCase().includes(searchQuery.toLowerCase()) || (p.position && p.position.toLowerCase().includes(searchQuery.toLowerCase()));
+      const matchesCollar = collarFilter === 'Tümü' ? true : p.collarType === collarFilter;
+      return matchesSearch && matchesCollar;
+    });
+
+    const handleFileUpload = async (e, docType) => {
+      const file = e.target.files[0];
+      if (!file || !selectedPerson) return;
+      setIsUploading(true);
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+
+        const updatedOzluk = { ...(selectedPerson.ozlukDosyalari || {}), [docType]: uploadedUrl };
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukDosyalari: updatedOzluk });
+        addSystemLog('Özlük Dosyası Eklendi', `${selectedPerson.fullName} personeline ait ${docType} dosyası eklendi.`);
+        setSelectedPerson({ ...selectedPerson, ozlukDosyalari: updatedOzluk });
+      } catch (err) {
+        console.error("Yükleme hatası:", err);
+        alert("Dosya yüklenemedi.");
+      }
+      setIsUploading(false);
+    };
+
+    const handleDeleteFile = async (docType) => {
+      if (!window.confirm('Bu dosyayı silmek istediğinize emin misiniz?')) return;
+      const updatedOzluk = { ...(selectedPerson.ozlukDosyalari || {}) };
+      delete updatedOzluk[docType];
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukDosyalari: updatedOzluk });
+      addSystemLog('Özlük Dosyası Silindi', `${selectedPerson.fullName} personeline ait ${docType} dosyası silindi.`);
+      setSelectedPerson({ ...selectedPerson, ozlukDosyalari: updatedOzluk });
+    };
+
+    const documentTypes = [
+      { id: 'kimlik', label: 'Kimlik Fotokopisi' },
+      { id: 'ehliyet', label: 'Sürücü Belgesi (Ehliyet)' },
+      { id: 'ikametgah', label: 'İkametgah Belgesi' },
+      { id: 'sabikaKaydi', label: 'Adli Sicil Kaydı' },
+      { id: 'saglikRaporu', label: 'Sağlık Raporu' },
+      { id: 'sozlesme', label: 'İş Sözleşmesi' },
+      { id: 'diploma', label: 'Diploma / Mezuniyet Belgesi' },
+      { id: 'sgk', label: 'SGK İşe Giriş Bildirgesi' },
+      { id: 'tutanaklar', label: 'Tutanaklar' },
+      { id: 'icraDosyasi', label: 'İcra Dosyası' },
+      { id: 'isGuvenligi', label: 'İş Güvenliği' },
+      { id: 'digerBelgeler', label: 'Diğer Belgeler' }
+    ];
+
+    if (!selectedPerson) {
+      return (
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-7xl mx-auto h-full flex flex-col">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4 shrink-0">
+            <h2 className="text-xl font-bold text-red-600 flex items-center gap-2">
+              <FolderOpen className="w-6 h-6" /> Personel Özlük Dosyaları
+            </h2>
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                <input type="text" placeholder="Personel Ara..." value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-600 transition" />
+              </div>
+              <div className="flex bg-neutral-100 p-1 rounded-xl shrink-0">
+                <button onClick={() => setCollarFilter('Tümü')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${collarFilter === 'Tümü' ? 'bg-white text-black shadow-sm' : 'text-neutral-500'}`}>Tümü</button>
+                <button onClick={() => setCollarFilter('Mavi Yaka')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${collarFilter === 'Mavi Yaka' ? 'bg-white text-black shadow-sm' : 'text-neutral-500'}`}>Mavi Yaka</button>
+                <button onClick={() => setCollarFilter('Beyaz Yaka')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${collarFilter === 'Beyaz Yaka' ? 'bg-white text-black shadow-sm' : 'text-neutral-500'}`}>Beyaz Yaka</button>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 overflow-y-auto custom-scrollbar pr-2 pb-4">
+            {filteredList.map(p => {
+              const evrakCount = Object.keys(p.ozlukDosyalari || {}).length;
+              return (
+                <div key={p.id} className="bg-white rounded-2xl border border-red-100 shadow-sm hover:border-red-300 hover:shadow-md transition-all flex flex-col p-5 group">
+                  <div className="flex items-center gap-4 mb-5">
+                    <div className="w-14 h-14 rounded-full bg-neutral-100 overflow-hidden shrink-0 border border-neutral-200 shadow-sm">
+                      {p.profileImage ? <img src={p.profileImage} className="w-full h-full object-cover"/> : <User className="w-6 h-6 m-4 text-neutral-400"/>}
+                    </div>
+                    <div className="overflow-hidden flex-1">
+                      <h3 className="font-bold text-black text-sm truncate" title={p.fullName}>{p.fullName}</h3>
+                      <p className="text-[11px] text-neutral-500 truncate font-medium mt-0.5" title={p.position}>{p.position}</p>
+                    </div>
+                  </div>
+                  <div className="mt-auto flex items-center justify-between pt-3 border-t border-red-50">
+                    <span className="flex items-center gap-1.5 text-red-600 text-xs font-bold bg-red-50 px-2 py-1 rounded-lg">
+                      <FolderOpen className="w-4 h-4" /> {evrakCount} Evrak
+                    </span>
+                    <button onClick={() => setSelectedPerson(p)} className="text-[10px] font-black text-red-500 group-hover:text-red-700 uppercase tracking-widest transition">
+                      DOSYAYI AÇ
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+            {filteredList.length === 0 && (
+              <div className="col-span-full py-12 text-center text-neutral-500 font-medium">
+                Aradığınız kriterlere uygun personel bulunamadı.
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // Detay Görünümü
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden flex flex-col relative animate-in slide-in-from-right-4 max-w-5xl mx-auto h-[calc(100vh-120px)] md:h-[calc(100vh-140px)]">
+        {isUploading && (
+          <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center">
+            <Loader2 className="w-8 h-8 text-red-600 animate-spin mb-2" />
+            <p className="font-bold text-neutral-600">Dosya Yükleniyor...</p>
+          </div>
+        )}
+        
+        <div className="p-4 border-b border-neutral-200 bg-neutral-50 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-4">
+             <div className="w-12 h-12 rounded-full bg-white border border-neutral-300 overflow-hidden shadow-sm shrink-0">
+               {selectedPerson.profileImage ? <img src={selectedPerson.profileImage} className="w-full h-full object-cover"/> : <User className="w-6 h-6 m-3 text-neutral-400"/>}
+             </div>
+             <div>
+               <h2 className="text-lg font-black text-black leading-tight">{selectedPerson.fullName}</h2>
+               <p className="text-xs font-medium text-neutral-600">{selectedPerson.position} • {selectedPerson.tcNo || 'TC No Yok'}</p>
+             </div>
+          </div>
+          <button onClick={() => setSelectedPerson(null)} className="flex items-center gap-1.5 px-4 py-2 bg-white border border-neutral-300 rounded-lg text-sm font-bold text-neutral-700 hover:bg-neutral-100 transition shadow-sm">
+             <ChevronLeft className="w-4 h-4" /> Geri Dön
+          </button>
+        </div>
+
+        <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {documentTypes.map(docType => {
+                const fileUrl = selectedPerson.ozlukDosyalari?.[docType.id];
+                return (
+                  <div key={docType.id} className="border border-neutral-200 rounded-xl p-4 flex flex-col gap-3 relative group bg-white shadow-sm hover:shadow-md transition hover:border-red-200">
+                    <div className="flex items-center gap-2 mb-2">
+                      <FileText className={`w-5 h-5 ${fileUrl ? 'text-green-500' : 'text-neutral-400'}`} />
+                      <h3 className="font-bold text-sm text-neutral-800 leading-tight">{docType.label}</h3>
+                    </div>
+                    
+                    {fileUrl ? (
+                      <div className="flex flex-col gap-2 mt-auto">
+                        <button onClick={() => setViewingImage({title: docType.label, name: fileUrl})} className="w-full py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-bold text-xs rounded-lg transition flex items-center justify-center gap-2 border border-neutral-200">
+                          <Eye className="w-4 h-4" /> Görüntüle
+                        </button>
+                        <button onClick={() => handleDeleteFile(docType.id)} className="absolute top-2 right-2 p-1.5 bg-red-50 text-red-600 rounded-lg opacity-0 group-hover:opacity-100 transition hover:bg-red-100">
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="mt-auto">
+                        <label className="cursor-pointer w-full py-2 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs rounded-lg transition flex items-center justify-center gap-2 border border-red-100 border-dashed">
+                          <Upload className="w-4 h-4" /> Yükle
+                          <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => handleFileUpload(e, docType.id)} />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const ComplaintsView = ({ complaints, updateComplaintStatus, deleteComplaint }) => {
+    const [filter, setFilter] = useState('all');
+
+    const filtered = complaints.filter(c => filter === 'all' ? true : c.status === filter).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-5xl mx-auto">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4">
+          <h2 className="text-xl font-bold text-black flex items-center gap-2">
+            <AlertTriangle className="w-6 h-6 text-red-600" /> Şikayet ve Bildirimler
+          </h2>
+          <div className="flex bg-neutral-100 p-1 rounded-xl">
+            <button onClick={() => setFilter('all')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${filter === 'all' ? 'bg-white text-black shadow-sm' : 'text-neutral-500'}`}>Tümü</button>
+            <button onClick={() => setFilter('Yeni')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${filter === 'Yeni' ? 'bg-red-500 text-white shadow-sm' : 'text-neutral-500'}`}>Yeni</button>
+            <button onClick={() => setFilter('İnceleniyor')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${filter === 'İnceleniyor' ? 'bg-blue-500 text-white shadow-sm' : 'text-neutral-500'}`}>İnceleniyor</button>
+            <button onClick={() => setFilter('Çözüldü')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${filter === 'Çözüldü' ? 'bg-green-500 text-white shadow-sm' : 'text-neutral-500'}`}>Çözüldü</button>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          {filtered.map(c => (
+            <div key={c.id} className={`p-4 rounded-xl border flex flex-col gap-3 transition ${!c.read ? 'bg-red-50/30 border-red-200' : 'bg-white border-neutral-200'}`}>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="font-bold text-lg text-black flex items-center gap-2">
+                    {!c.read && <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>}
+                    {c.subject}
+                  </h3>
+                  <p className="text-xs text-neutral-500 mt-1 font-medium"><User className="w-3 h-3 inline mr-1" /> {c.senderName} ({c.senderPosition}) • <Clock className="w-3 h-3 inline ml-2 mr-1" /> {c.dateStr}</p>
+                </div>
+                <select 
+                  value={c.status} 
+                  onChange={e => updateComplaintStatus(c.id, e.target.value, true)}
+                  className={`text-xs font-bold px-3 py-1.5 rounded-lg border outline-none cursor-pointer ${c.status === 'Yeni' ? 'bg-red-100 text-red-800 border-red-200' : c.status === 'İnceleniyor' ? 'bg-blue-100 text-blue-800 border-blue-200' : 'bg-green-100 text-green-800 border-green-200'}`}
+                >
+                  <option value="Yeni">Yeni</option>
+                  <option value="İnceleniyor">İnceleniyor</option>
+                  <option value="Çözüldü">Çözüldü</option>
+                </select>
+              </div>
+              <div className="bg-neutral-50 p-3 rounded-lg border border-neutral-100 text-sm text-neutral-700 leading-relaxed whitespace-pre-wrap">
+                {c.content}
+              </div>
+              <div className="flex justify-end pt-2">
+                <button onClick={() => { if(window.confirm('Bildirimi silmek istediğinize emin misiniz?')) deleteComplaint(c.id); }} className="text-red-500 hover:text-red-700 text-xs font-bold flex items-center gap-1 bg-white px-2 py-1 rounded border border-red-100 hover:bg-red-50 transition"><Ban className="w-3.5 h-3.5" /> Sil</button>
+              </div>
+            </div>
+          ))}
+          {filtered.length === 0 && (
+            <p className="text-center text-neutral-500 py-8 bg-neutral-50 rounded-xl border border-neutral-200">Gösterilecek şikayet/bildirim bulunamadı.</p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, positionModules }) => {
     const [editingUser, setEditingUser] = useState(null);
 
     const modules = [
       { id: 'dashboard', label: 'Anasayfa' },
       { id: 'calendar', label: 'Takvim' },
-      { id: 'addJob', label: 'Satış (Kayıt Açma)' },
-      { id: 'jobList', label: 'İş Listesi' },
+      { id: 'profileSettings', label: 'Profilim' },
+      { id: 'addInfo', label: 'Bilgilendirme Ekle' },
+      { id: 'mySpecialTasks', label: 'Özel Görevlerim' },
+      { id: 'addJob', label: 'Satış Bölümü' },
       { id: 'operasyon', label: 'Operasyon Bölümü' },
+      { id: 'jobList', label: 'İş Listesi' },
       { id: 'customers', label: 'Müşteri Listesi' },
       { id: 'personnel', label: 'Personel Listesi' },
-      { id: 'vehicles', label: 'Araçlar' },
-      { id: 'materials', label: 'Malzemeler' },
       { id: 'todos', label: 'Yapılacak Listesi' },
       { id: 'finance', label: 'Finans Yönetimi' },
-      { id: 'tasks', label: 'Görev Tahtası' },
       { id: 'auth', label: 'Yetkilendirme' },
-      { id: 'systemFiles', label: 'Sistem Dosyaları' }
+      { id: 'systemFiles', label: 'Sistem Dosyaları' },
+      { id: 'myComplaint', label: 'Şikayet Bildirim' }
     ];
 
     const handleToggleModule = (moduleId, currentMergedState) => {
@@ -5917,7 +6442,7 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
         </h2>
         
         <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium mb-6 border border-blue-200">
-          Kullanıcıları düzenleyebilir, silebilir veya onlara <b>kişiye özel</b> modül erişim yetkileri atayabilirsiniz. Kişiye özel atanan yetkiler, pozisyon yetkilerini ezer. (Not: Sistemde "Tam Yetki/Admin" olanlar her yeri görebilir.)
+          Kullanıcıları düzenleyebilir, silebilir veya onlara <b>kişiye özel</b> modül erişim yetkileri atayabilirsiniz. Kişiye özel atanan yetkiler, pozisyon yetkilerini ezer.
         </div>
 
         <div className="overflow-x-auto">
@@ -6008,7 +6533,7 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
                     </div>
                   </div>
 
-<div className="mt-6">
+                  <div className="mt-6">
                       <h4 className="font-bold text-black mb-3 border-b border-neutral-200 pb-2 flex items-center gap-2">
                           <Eye className="w-5 h-5 text-red-600" /> Kişiye Özel Modül Yetkileri
                       </h4>
@@ -6020,18 +6545,15 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
                           // Kişiye özel override var mı?
                           const personalAccess = editingUser.permissions?.modules?.[mod.id];
                           
-                          // Admin mi?
-                          const isAdmin = editingUser.permissions?.canEdit;
-                          
-                          // Eğer kişisel ayar varsa onu ezici olarak al, yoksa rol bazlı olanı göster, adminse hep açık göster
+                          // Eğer kişisel ayar varsa onu ezici olarak al, yoksa rol bazlı olanı göster
                           const currentMergedState = typeof personalAccess === 'boolean' ? personalAccess : isRoleAccess;
-                          const displayAccess = isAdmin ? true : currentMergedState;
+                          const displayAccess = currentMergedState;
 
                           return (
-                              <label key={mod.id} className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${displayAccess ? 'bg-blue-50 border-blue-200' : 'bg-white border-neutral-200 hover:bg-neutral-100'} ${isAdmin ? 'opacity-60 cursor-not-allowed' : ''}`}>
+                              <label key={mod.id} className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${displayAccess ? 'bg-blue-50 border-blue-200' : 'bg-white border-neutral-200 hover:bg-neutral-100'}`}>
                               <span className={`text-xs font-bold ${displayAccess ? 'text-blue-800' : 'text-neutral-600'}`}>{mod.label}</span>
                               <div className="relative inline-flex items-center">
-                                  <input type="checkbox" className="sr-only peer" checked={displayAccess} disabled={isAdmin} onChange={() => handleToggleModule(mod.id, currentMergedState)} />
+                                  <input type="checkbox" className="sr-only peer" checked={displayAccess} onChange={() => handleToggleModule(mod.id, currentMergedState)} />
                                   <div className="w-7 h-4 bg-neutral-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
                               </div>
                               </label>
@@ -6051,7 +6573,6 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
       </div>
     );
   };
-  // --- USERLISTVIEW BİLEŞENİ BİTİŞİ ---
 
   const PositionsView = ({ positions, onAddPosition, onDeletePosition }) => {
     const [newPos, setNewPos] = useState('');
@@ -6105,7 +6626,7 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
         <Shield className="w-6 h-6 text-red-600" /> İzinler Yönetimi
       </h2>
       <div className="bg-red-50 text-red-800 p-4 rounded-xl text-sm font-medium mb-6 border border-red-200">
-        Personellerin sisteme müdahale (veri ekleme, silme, düzenleme) yetkilerini buradan yönetebilirsiniz. <b>Tam Yetki (Admin)</b> verilen personeller sistemdeki her şeyi görebilir ve düzenleyebilir.
+        Personellerin sisteme müdahale (veri ekleme, silme, düzenleme) ve sisteme giriş yetkilerini buradan yönetebilirsiniz. <b>Düzenleme Yetkisi</b> verilen personeller görüntüleyebildikleri modüllerde değişiklik yapabilirler. Sayfa görünürlükleri "Modül Görüntüleme" alanından belirlenir.
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
@@ -6114,7 +6635,7 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
               <th className="p-4 font-bold rounded-tl-xl">Kullanıcı</th>
               <th className="p-4 font-bold">Pozisyon / Rütbe</th>
               <th className="p-4 font-bold text-center">Sisteme Giriş</th>
-              <th className="p-4 font-bold text-center rounded-tr-xl">Tam Yetki (Admin)</th>
+              <th className="p-4 font-bold text-center rounded-tr-xl">Düzenleme Yetkisi</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100">
@@ -6146,18 +6667,19 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
     const modules = [
       { id: 'dashboard', label: 'Anasayfa' },
       { id: 'calendar', label: 'Takvim' },
-      { id: 'addJob', label: 'Satış (Kayıt Açma)' },
-      { id: 'jobList', label: 'İş Listesi' },
+      { id: 'profileSettings', label: 'Profilim' },
+      { id: 'addInfo', label: 'Bilgilendirme Ekle' },
+      { id: 'mySpecialTasks', label: 'Özel Görevlerim' },
+      { id: 'addJob', label: 'Satış Bölümü' },
       { id: 'operasyon', label: 'Operasyon Bölümü' },
+      { id: 'jobList', label: 'İş Listesi' },
       { id: 'customers', label: 'Müşteri Listesi' },
       { id: 'personnel', label: 'Personel Listesi' },
-      { id: 'vehicles', label: 'Araçlar' },
-      { id: 'materials', label: 'Malzemeler' },
       { id: 'todos', label: 'Yapılacak Listesi' },
       { id: 'finance', label: 'Finans Yönetimi' },
-      { id: 'tasks', label: 'Görev Tahtası' },
       { id: 'auth', label: 'Yetkilendirme' },
-      { id: 'systemFiles', label: 'Sistem Dosyaları' }
+      { id: 'systemFiles', label: 'Sistem Dosyaları' },
+      { id: 'myComplaint', label: 'Şikayet Bildirim' }
     ];
 
     const allGroups = [...new Set([...(positions || []), ...(ranks || [])])];
@@ -6174,7 +6696,7 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
           <Eye className="w-6 h-6 text-red-600" /> Pozisyona Göre Modül Görüntüleme Yetkileri
         </h2>
         <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium mb-6 border border-blue-200">
-          Bu sayfadan yetkilendirmeleri <b>pozisyonlara göre</b> yönetebilirsiniz. Burada yapacağınız ayarlamalar o pozisyonda çalışan tüm personeller için geçerli olacaktır. Tam Yetki (Admin) olan personeller her koşulda tüm modülleri görür.
+          Bu sayfadan yetkilendirmeleri <b>pozisyonlara göre</b> yönetebilirsiniz. Burada yapacağınız ayarlamalar o pozisyonda çalışan tüm personeller için geçerli olacaktır. Görüntüleme yetkisi olmayan kullanıcılar o modüle erişemezler.
         </div>
         
         <div className="space-y-6">
@@ -6475,6 +6997,51 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
             })}
           </div>
         )}
+      </div>
+    );
+  };
+
+  const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, addSystemLog }) => {
+    const handleBackup = () => {
+      const backupData = {
+        timestamp: new Date().toISOString(),
+        jobs,
+        personnelList,
+        vehicles,
+        materials
+      };
+      
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+      const downloadAnchorNode = document.createElement('a');
+      downloadAnchorNode.setAttribute("href", dataStr);
+      downloadAnchorNode.setAttribute("download", `sembol_yedek_${new Date().toISOString().split('T')[0]}.json`);
+      document.body.appendChild(downloadAnchorNode);
+      downloadAnchorNode.click();
+      downloadAnchorNode.remove();
+      
+      if(addSystemLog) {
+        addSystemLog('Sistem Yedeği Alındı', 'Kullanıcı tüm veritabanının yedeğini indirdi.');
+      }
+    };
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-4xl mx-auto">
+        <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
+          <Database className="w-6 h-6 text-red-600" /> Sistem Yedekleme
+        </h2>
+        <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium mb-6 border border-blue-200">
+          Sistemdeki tüm operasyonları, personelleri, araçları ve stok kayıtlarını tek bir JSON dosyası olarak bilgisayarınıza indirebilirsiniz. Veri güvenliği için düzenli yedek almanız önerilir.
+        </div>
+        <div className="flex flex-col md:flex-row gap-4">
+          <div className="flex-1 bg-neutral-50 p-6 rounded-xl border border-neutral-200 flex flex-col items-center justify-center text-center gap-3">
+            <Database className="w-12 h-12 text-neutral-400" />
+            <h3 className="font-bold text-black text-lg">Tüm Veritabanını İndir</h3>
+            <p className="text-xs text-neutral-500 font-medium px-4">İşler, Personeller, Araçlar, Stoklar vb. sistem verilerini içerir.</p>
+            <button onClick={handleBackup} className="mt-2 w-full max-w-xs py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg">
+              <Download className="w-5 h-5" /> Yedeği İndir (.json)
+            </button>
+          </div>
+        </div>
       </div>
     );
   };
@@ -6987,18 +7554,16 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
     const handleAddCustomMaterial = async () => {
        const matName = newCustomMaterial.name.trim();
        if(matName) {
-           const updated = [...customMaterials, { id: Date.now(), name: matName, amount: newCustomMaterial.amount }];
+           const existingIdx = customMaterials.findIndex(c => c.name === matName);
+           let updated;
+           if (existingIdx > -1) {
+               updated = [...customMaterials];
+               updated[existingIdx].amount += newCustomMaterial.amount;
+           } else {
+               updated = [...customMaterials, { id: Date.now(), name: matName, amount: newCustomMaterial.amount }];
+           }
            setCustomMaterials(updated);
            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), { customMaterials: updated });
-           
-           // Listede yoksa malzemeyi 0 stokla ekle
-           const exists = materials.some(m => m.name.toLowerCase() === matName.toLowerCase());
-           if (!exists) {
-               await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'materials'), {
-                   name: matName, category: 'Diğer Sarf Malzeme', stock: '0', unit: 'Adet'
-               });
-           }
-
            setNewCustomMaterial({ name: '', amount: 1 });
        }
     };
@@ -7245,9 +7810,14 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
 
           {/* SİSTEM HARİCİ MALZEME EKLEME - DOĞRUDAN KARTA GÖMÜLDÜ */}
           <div className="pt-1.5 mt-1.5 border-t border-amber-200/50">
-            <label className="block text-[9px] font-bold text-amber-800/80 mb-1">Sistem Harici Malzeme Ekle</label>
+            <label className="block text-[9px] font-bold text-amber-800/80 mb-1">Ekstra Malzeme Ekle</label>
             <div className="flex gap-1">
-              <input type="text" value={newCustomMaterial.name} onChange={e => setNewCustomMaterial({...newCustomMaterial, name: e.target.value})} placeholder="Örn: Askılı Koli" className="flex-1 p-1 text-[9px] border border-amber-200 rounded outline-none focus:ring-1 focus:ring-amber-500 font-bold bg-white" />
+              <select value={newCustomMaterial.name} onChange={e => setNewCustomMaterial({...newCustomMaterial, name: e.target.value})} className="flex-1 p-1 text-[9px] border border-amber-200 rounded outline-none focus:ring-1 focus:ring-amber-500 font-bold bg-white cursor-pointer">
+                <option value="">Seçiniz...</option>
+                {materials.filter(m => !['streç', 'bant', 'poşet', 'kağıt', 'koli'].includes(m.name.toLowerCase())).map(m => (
+                  <option key={m.id} value={m.name}>{m.name}</option>
+                ))}
+              </select>
               <input type="number" value={newCustomMaterial.amount} onChange={e => setNewCustomMaterial({...newCustomMaterial, amount: parseFloat(e.target.value) || 0})} className="w-10 p-1 border border-amber-200 rounded outline-none focus:ring-1 focus:ring-amber-500 text-[9px] text-center font-bold bg-white" min="0.5" step="0.5" />
               <button type="button" onClick={handleAddCustomMaterial} className="bg-amber-600 text-white px-2 rounded text-[9px] font-bold hover:bg-amber-700 transition shadow-sm">Ekle</button>
             </div>
@@ -11614,6 +12184,11 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
            return;
         }
 
+        if (user.permissions && user.permissions.canView === false) {
+           setLoginError('Sisteme giriş yetkiniz kapatılmıştır. Lütfen yöneticinizle iletişime geçin.');
+           return;
+        }
+
         setCurrentUser(user); setIsAuthenticated(true); setLoginError('');
         if (rememberMe) try { localStorage.setItem('sembol_crm_user', JSON.stringify({ email, password })); } catch (e) { }
         else try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
@@ -11673,61 +12248,64 @@ const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, pos
     }
 
     const userPos = currentUser?.position || '';
+    const isSuperAdmin = currentUser?.fullName === 'Sistem Yöneticisi' || userPos === 'Firma Sahibi';
+    const canEdit = isSuperAdmin || currentUser?.permissions?.canEdit === true;
+    
     const isSales = userPos.includes('Satış');
     const isMuhasebe = userPos.includes('Muhasebe');
     const isDepo = userPos.includes('Depo Sorumlusu') || userPos.includes('Depo');
-    const isManager = userPos.includes('Yönetici') || userPos.includes('Firma Sahibi') || currentUser?.rank === 'Müdür';
-    const canEdit = currentUser?.permissions?.canEdit;
+    
+    // Düzenleme yetkisi (canEdit) olan personel girdiği modüllerde yönetici gibi davranabilmeli:
+    const isManager = userPos.includes('Yönetici') || userPos.includes('Firma Sahibi') || currentUser?.rank === 'Müdür' || canEdit;
 
-    // Sadece "Operasyon" veya "Firma Sahibi" pozisyonuna sahip olanlar bu işlemi yapabilir
-    const canApprovePoints = userPos.includes('Operasyon') || userPos === 'Firma Sahibi';
+    // Sadece "Operasyon", "Firma Sahibi" veya "Düzenleme Yetkisi" olanlar bu işlemi yapabilir
+    const canApprovePoints = userPos.includes('Operasyon') || userPos === 'Firma Sahibi' || canEdit;
 
     // Geriye dönük uyumluluk (Legacy Fallback)
     const hasJobAccess = canEdit || isManager || isMuhasebe || isDepo;
-    const hasResourceAccess = isManager || isMuhasebe || (canEdit && !isSales && !isDepo); // Personel, Araç, Malzeme
-    const hasTaskAccess = isManager || (canEdit && !isSales && !isDepo && !isMuhasebe); // Görev Listesi
-    const hasOperasyonAccess = isManager || currentUser?.position?.includes('Operasyon');
+    const hasResourceAccess = isManager || isMuhasebe || canEdit; // Personel, Araç, Malzeme
+    const hasTaskAccess = isManager || canEdit; // Görev Listesi
+    const hasOperasyonAccess = isManager || currentUser?.position?.includes('Operasyon') || canEdit;
     
-const checkAccess = (key) => {
+    const checkAccess = (key) => {
       // 1. Kullanıcı aktif değilse yetkisi kapalı
       if (currentUser?.employmentStatus === 'Pasif') return false;
 
-      // 2. Adminse tam yetki (her şey açık)
-      if (currentUser?.permissions?.canEdit) return true;
-      
-      // 3. Kişiye özel atanmış modül yetkisi varsa rolü ezer
+      // SÜPER ADMİN KONTROLÜ: Firma Sahibi veya Sistem Yöneticisi her şeyi görür
+      if (isSuperAdmin) return true;
+
+      // 2. Kişiye özel atanmış modül yetkisi varsa rolü ezer
       if (currentUser?.permissions?.modules && typeof currentUser.permissions.modules[key] === 'boolean') {
         return currentUser.permissions.modules[key];
       }
 
-      // 4. Pozisyona göre rol kontrolü
+      // 3. Pozisyona göre rol kontrolü
       const posAccess = positionModules?.[currentUser?.position];
       if (posAccess && typeof posAccess[key] === 'boolean') return posAccess[key];
       
-      // 5. Rütbeye göre rol kontrolü
+      // 4. Rütbeye göre rol kontrolü
       const rankAccess = positionModules?.[currentUser?.rank];
       if (rankAccess && typeof rankAccess[key] === 'boolean') return rankAccess[key];
       
-      // 6. Hiçbir yerde belirtilmemişse varsayılan olarak kapalı (Default-Deny)
+      // 5. Hiçbir yerde belirtilmemişse varsayılan olarak kapalı (Default-Deny)
       return false;
     };
 
     const showDashboard = checkAccess('dashboard');
     const showCalendar = checkAccess('calendar');
+    const showProfileSettings = checkAccess('profileSettings');
+    const showAddInfo = checkAccess('addInfo');
+    const showMySpecialTasks = checkAccess('mySpecialTasks');
     const showAddJob = checkAccess('addJob');
     const showJobList = checkAccess('jobList');
-    const showTasks = checkAccess('tasks');
     const showCustomers = checkAccess('customers');
     const showPersonnel = checkAccess('personnel');
-    const showVehicles = checkAccess('vehicles');
     const showTodos = checkAccess('todos');
-    const showMaterials = checkAccess('materials');
     const showOperasyon = checkAccess('operasyon');
-
-// Finans, Yetkilendirme ve Sistem Dosyaları için dinamik yetki (aç-kapat) kontrolü
     const showFinance = checkAccess('finance');
     const showAuth = checkAccess('auth');
     const showSystemFiles = checkAccess('systemFiles');
+    const showMyComplaint = checkAccess('myComplaint');
     
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
     const isStandardBlueCollarApp = isMaviYakaUser && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
@@ -11893,16 +12471,18 @@ const checkAccess = (key) => {
               </button>
             )}
 
-            <button 
-              onClick={() => { setActiveTab('profileSettings'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-              className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'profileSettings' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-            >
-              <div className="flex items-center gap-3">
-                <User className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Profilim</span>
-              </div>
-            </button>
+            {showProfileSettings && (
+              <button 
+                onClick={() => { setActiveTab('profileSettings'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
+                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'profileSettings' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+              >
+                <div className="flex items-center gap-3">
+                  <User className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Profilim</span>
+                </div>
+              </button>
+            )}
 
-            {(currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi' || currentUser?.position?.includes('Operasyon') || currentUser?.permissions?.canEdit) && (
+            {showAddInfo && (
               <button 
                 onClick={() => { setActiveTab('addInfo'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl mt-2 ${activeTab === 'addInfo' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -11913,17 +12493,19 @@ const checkAccess = (key) => {
               </button>
             )}
 
-            <button 
-              onClick={() => { setActiveTab('mySpecialTasks'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-              className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl mt-2 ${activeTab === 'mySpecialTasks' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-            >
-              <div className="flex items-center gap-3">
-                <CheckSquare className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Özel Görevlerim</span>
-              </div>
-              {unreadTasksCount > 0 && (
-                <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{unreadTasksCount}</span>
-              )}
-            </button>
+            {showMySpecialTasks && (
+              <button 
+                onClick={() => { setActiveTab('mySpecialTasks'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
+                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl mt-2 ${activeTab === 'mySpecialTasks' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+              >
+                <div className="flex items-center gap-3">
+                  <CheckSquare className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Özel Görevlerim</span>
+                </div>
+                {unreadTasksCount > 0 && (
+                  <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{unreadTasksCount}</span>
+                )}
+              </button>
+            )}
 
 {isMaviYakaUser && (
                 <button 
@@ -12063,63 +12645,11 @@ const checkAccess = (key) => {
                         <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{dueMaintenanceCount}</span>
                       )}
                     </button>
-                    {showMaterials && (
-                      <button 
-                        onClick={() => { setActiveTab('materialList'); setIsSidebarOpen(false); }}
-                        className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'materialList' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                      >
-                        <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'materialList' ? 'bg-white' : 'bg-orange-500'}`}></div> Malzeme Listesi
-                      </button>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* İş Listesi */}
-            {showJobList && (
-              <div className="flex flex-col gap-1 mt-2">
-                <button 
-                  onClick={() => { setIsJobSubMenuOpen(!isJobSubMenuOpen); setIsAddJobSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'currentJobs' || activeTab === 'completedJobs' || activeTab === 'allJobs' || activeTab === 'damagedJobs' || activeTab === 'cancelledJobs') ? 'bg-neutral-900 text-white border border-blue-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <ClipboardList className={`w-5 h-5 shrink-0 ${(activeTab === 'currentJobs' || activeTab === 'completedJobs' || activeTab === 'allJobs' || activeTab === 'damagedJobs' || activeTab === 'cancelledJobs') ? 'text-blue-500' : ''}`} /> <span className="whitespace-nowrap">İş Listesi</span>
-                  </div>
-                  {isJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-                
-                {isJobSubMenuOpen && (
-                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
                     <button 
-                      onClick={() => { setActiveTab('currentJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'currentJobs' ? 'text-red-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      onClick={() => { setActiveTab('materialList'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'materialList' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'currentJobs' ? 'bg-red-500' : 'bg-red-600'}`}></div> Mevcut İşler
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('completedJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'completedJobs' ? 'text-red-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'completedJobs' ? 'bg-red-500' : 'bg-red-600'}`}></div> Tamamlanan İşler
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('allJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allJobs' ? 'text-red-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allJobs' ? 'bg-red-500' : 'bg-red-600'}`}></div> Tüm İşler
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('damagedJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'damagedJobs' ? 'text-red-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'damagedJobs' ? 'bg-red-500' : 'bg-red-600'}`}></div> Hasarlı İşler
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('cancelledJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'cancelledJobs' ? 'text-red-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'cancelledJobs' ? 'bg-red-500' : 'bg-red-600'}`}></div> İptal Edilen İşler
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'materialList' ? 'bg-white' : 'bg-orange-500'}`}></div> Malzeme Listesi
                     </button>
                   </div>
                 )}
@@ -12397,14 +12927,16 @@ const checkAccess = (key) => {
               </div>
             )}
 
-            <button 
-              onClick={() => { setActiveTab('myComplaint'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-              className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl mt-2 ${activeTab === 'myComplaint' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-            >
-              <div className="flex items-center gap-3">
-                <AlertTriangle className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Şikayet Bildirim</span>
-              </div>
-            </button>
+            {showMyComplaint && (
+              <button 
+                onClick={() => { setActiveTab('myComplaint'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
+                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl mt-2 ${activeTab === 'myComplaint' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+              >
+                <div className="flex items-center gap-3">
+                  <AlertTriangle className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Şikayet Bildirim</span>
+                </div>
+              </button>
+            )}
 
           </nav>
 
@@ -12462,9 +12994,9 @@ const checkAccess = (key) => {
             {activeTab === 'dashboard' && showDashboard && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions} />}
             {activeTab === 'notifications' && <NotificationsView notifications={visibleNotifications} markNotificationsAsRead={markNotificationsAsRead} currentUser={currentUser} />}
             {activeTab === 'calendar' && showCalendar && <CalendarView jobs={currentUser?.position === 'Operatör' ? jobs : visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} setJobToChangeDate={setJobToChangeDate} setNewJobDate={setNewJobDate} setShowChangeDateModal={setShowChangeDateModal} setCancelJobId={setCancelJobId} />}
-            {activeTab === 'profileSettings' && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} />}
+            {activeTab === 'profileSettings' && showProfileSettings && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} />}
             {activeTab === 'myAssignedJobs' && <MyAssignedJobsView currentUser={currentUser} jobs={visibleJobs} handleOpenEndJobModal={handleOpenEndJobModal} markNotificationsAsRead={markNotificationsAsRead} />}
-            {activeTab === 'mySpecialTasks' && <MyTasksView currentUser={currentUser} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
+            {activeTab === 'mySpecialTasks' && showMySpecialTasks && <MyTasksView currentUser={currentUser} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
             
             {activeTab === 'isOnaylamaTahtasi' && showOperasyon && <IsOnaylamaTahtasiView jobs={visibleJobs} handleEditJob={handleEditJob} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} />}
             {activeTab === 'ekipKurmaTahtasi' && showOperasyon && <EkipKurmaTahtasiView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} />}
@@ -12473,8 +13005,8 @@ const checkAccess = (key) => {
             {activeTab === 'puantajTahtasi' && showOperasyon && <PuantajTahtasiView personnelList={personnelList} db={db} appId={appId} />}
             {activeTab === 'maviMesaiTahtasi' && showOperasyon && <MaviMesaiTahtasiView personnelList={personnelList} db={db} appId={appId} />}
             
-            {activeTab === 'myComplaint' && <MyComplaintSubmitView currentUser={currentUser} db={db} appId={appId} addSystemLog={addSystemLog} />}
-            {activeTab === 'addInfo' && (currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi' || currentUser?.position?.includes('Operasyon') || currentUser?.permissions?.canEdit) && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
+            {activeTab === 'myComplaint' && showMyComplaint && <MyComplaintSubmitView currentUser={currentUser} db={db} appId={appId} addSystemLog={addSystemLog} />}
+            {activeTab === 'addInfo' && showAddInfo && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
             
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
               <div className="space-y-4">
@@ -12542,8 +13074,8 @@ const checkAccess = (key) => {
             {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
-            {activeTab === 'addVehicle' && (showVehicles || showOperasyon) && <AddVehicleView onAdd={handleAddVehicle} onCancel={() => setActiveTab('vehicleList')} />}
-            {activeTab === 'vehicleList' && (showVehicles || showOperasyon) && (
+            {activeTab === 'addVehicle' && showOperasyon && <AddVehicleView onAdd={handleAddVehicle} onCancel={() => setActiveTab('vehicleList')} />}
+            {activeTab === 'vehicleList' && showOperasyon && (
               <>
                 <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
                   <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
@@ -12720,14 +13252,14 @@ const checkAccess = (key) => {
                 )}
               </>
             )}
-            {activeTab === 'vehicleMaintenance' && (showVehicles || showOperasyon) && <VehicleMaintenanceView vehicles={vehicles} onUpdateVehicle={handleUpdateVehicle} addSystemLog={addSystemLog} />}
+            {activeTab === 'vehicleMaintenance' && showOperasyon && <VehicleMaintenanceView vehicles={vehicles} onUpdateVehicle={handleUpdateVehicle} addSystemLog={addSystemLog} />}
 
             {/* Yapılacak Listesi Modülleri */}
             {activeTab === 'addTodo' && showTodos && <AddTodoView newTodo={newTodo} setNewTodo={setNewTodo} handleAddTodo={handleAddTodo} />}
             {activeTab === 'todoList' && showTodos && <TodoListView todos={todos} handleUpdateTodoStatus={handleUpdateTodoStatus} handleDeleteTodo={handleDeleteTodo} />}
 
             {/* Malzeme Modülleri */}
-            {activeTab === 'materialList' && showMaterials && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} onUpdateStock={handleUpdateMaterialStock} onAdd={handleAddMaterial} systemLogs={systemLogs} />}
+            {activeTab === 'materialList' && showOperasyon && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} onUpdateStock={handleUpdateMaterialStock} onAdd={handleAddMaterial} systemLogs={systemLogs} />}
             
             {/* Finans Yönetimi Modülleri */}
             {activeTab === 'financeDashboard' && showFinance && <FinanceDashboardView jobs={jobs} transactions={transactions} transactionType={transactionType} setTransactionType={setTransactionType} newTransaction={newTransaction} setNewTransaction={setNewTransaction} handleAddTransaction={handleAddTransaction} />}
@@ -12736,7 +13268,7 @@ const checkAccess = (key) => {
             {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'personelOdeme' && showFinance && <PersonelOdemeView personnelList={personnelList} transactions={transactions} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
 
-            {activeTab === 'addTask' && showTasks &&
+            {activeTab === 'addTask' && showOperasyon &&
               <AddTaskFormView 
                 newTask={newTask}
                 setNewTask={setNewTask}
@@ -12744,7 +13276,7 @@ const checkAccess = (key) => {
                 personnelList={personnelList}
               />
             }
-            {activeTab === 'taskList' && (showTasks || showOperasyon) &&
+            {activeTab === 'taskList' && showOperasyon &&
               <TaskManagerView 
                 tasks={tasks}
                 setShowTaskModal={setShowTaskModal}
@@ -13053,22 +13585,26 @@ const checkAccess = (key) => {
                         </div>
                         
                         <div className="pt-2 border-t border-neutral-200">
-                          <label className="block text-[11px] font-bold text-neutral-600 mb-1.5">Sistem Harici Malzeme Ekle</label>
+                          <label className="block text-[11px] font-bold text-neutral-600 mb-1.5">Ekstra Malzeme Ekle</label>
                           <div className="flex gap-2">
-                            <input type="text" value={newCustomMaterial.name} onChange={e => setNewCustomMaterial({...newCustomMaterial, name: e.target.value})} placeholder="Örn: Askılı Koli" className="flex-1 p-2 border border-neutral-300 rounded-lg outline-none focus:ring-2 focus:ring-red-600 text-xs font-medium bg-white" />
+                            <select value={newCustomMaterial.name} onChange={e => setNewCustomMaterial({...newCustomMaterial, name: e.target.value})} className="flex-1 p-2 border border-neutral-300 rounded-lg outline-none focus:ring-2 focus:ring-red-600 text-xs font-bold bg-white cursor-pointer">
+                              <option value="">Listeden Malzeme Seçin...</option>
+                              {materials.filter(m => !['streç', 'bant', 'poşet', 'kağıt', 'koli'].includes(m.name.toLowerCase())).map(m => (
+                                <option key={m.id} value={m.name}>{m.name}</option>
+                              ))}
+                            </select>
                             <input type="number" value={newCustomMaterial.amount} onChange={e => setNewCustomMaterial({...newCustomMaterial, amount: parseFloat(e.target.value) || 0})} className="w-16 p-2 border border-neutral-300 rounded-lg outline-none focus:ring-2 focus:ring-red-600 text-xs text-center font-bold bg-white" min="0.5" step="0.5" />
                             <button type="button" onClick={() => {
                               const matName = newCustomMaterial.name.trim();
                               if(matName) {
-                                setCustomMaterials([...customMaterials, { id: Date.now(), name: matName, amount: newCustomMaterial.amount }]);
-                                
-                                const exists = materials.some(m => m.name.toLowerCase() === matName.toLowerCase());
-                                if (!exists) {
-                                    addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'materials'), {
-                                        name: matName, category: 'Diğer Sarf Malzeme', stock: '0', unit: 'Adet'
-                                    });
+                                const existingIdx = customMaterials.findIndex(c => c.name === matName);
+                                if (existingIdx > -1) {
+                                    const updated = [...customMaterials];
+                                    updated[existingIdx].amount += newCustomMaterial.amount;
+                                    setCustomMaterials(updated);
+                                } else {
+                                    setCustomMaterials([...customMaterials, { id: Date.now(), name: matName, amount: newCustomMaterial.amount }]);
                                 }
-
                                 setNewCustomMaterial({ name: '', amount: 1 });
                               }
                             }} className="bg-neutral-800 text-white px-3 rounded-lg text-xs font-bold hover:bg-black transition shadow-sm">Ekle</button>
