@@ -6663,7 +6663,7 @@ useEffect(() => {
     </div>
   );
 
-  const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdatePositionModuleAccess }) => {
+const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdatePositionModuleAccess }) => {
     const modules = [
       { id: 'dashboard', label: 'Anasayfa' },
       { id: 'calendar', label: 'Takvim' },
@@ -6684,10 +6684,8 @@ useEffect(() => {
 
     const allGroups = [...new Set([...(positions || []), ...(ranks || [])])];
 
-    const handleToggle = (group, moduleId, currentModules) => {
-      const updated = currentModules ? { ...currentModules } : {};
-      updated[moduleId] = !updated[moduleId];
-      handleUpdatePositionModuleAccess(group, updated);
+    const handleToggle = (group, moduleId, currentStatus) => {
+      handleUpdatePositionModuleAccess(group, moduleId, !currentStatus);
     };
 
     return (
@@ -6718,7 +6716,7 @@ useEffect(() => {
                     <label key={mod.id} className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${hasAccess ? 'bg-blue-50 border-blue-200' : 'bg-white border-neutral-200 hover:bg-neutral-100'}`}>
                       <span className={`text-xs font-bold ${hasAccess ? 'text-blue-800' : 'text-neutral-600'}`}>{mod.label}</span>
                       <div className="relative inline-flex items-center">
-                        <input type="checkbox" className="sr-only peer" checked={hasAccess} onChange={() => handleToggle(group, mod.id, positionModules?.[group])} />
+                        <input type="checkbox" className="sr-only peer" checked={hasAccess} onChange={() => handleToggle(group, mod.id, hasAccess)} />
                         <div className="w-7 h-4 bg-neutral-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
                       </div>
                     </label>
@@ -11096,16 +11094,21 @@ useEffect(() => {
       });
     };
 
-    const handleUpdatePositionModuleAccess = async (position, modulesData) => {
-      if (!firebaseUser) return;
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), {
-        positionModules: {
-          ...positionModules,
-          [position]: modulesData
+const handleUpdatePositionModuleAccess = async (position, moduleId, newValue) => {
+    if (!firebaseUser) return;
+    
+    // Eski veriyi kopyalamak yerine (...positionModules),
+    // Sadece değişen tekil modülün değerini gönderip Firebase'in onu derinlemesine birleştirmesini (merge) sağlıyoruz.
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), {
+      positionModules: {
+        [position]: {
+          [moduleId]: newValue
         }
-      }, { merge: true });
-      addSystemLog('Görüntüleme Yetkileri', `${position} pozisyonunun modül erişim izinleri güncellendi.`);
-    };
+      }
+    }, { merge: true });
+    
+    addSystemLog('Görüntüleme Yetkileri', `${position} pozisyonunun modül erişim izinleri güncellendi.`);
+  };
 
     const handleAddPosition = async (newPos) => {
       if (!firebaseUser) return;
