@@ -11094,21 +11094,29 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       });
     };
 
-const handleUpdatePositionModuleAccess = async (position, moduleId, newValue) => {
-    if (!firebaseUser) return;
-    
-    // Eski veriyi kopyalamak yerine (...positionModules),
-    // Sadece değişen tekil modülün değerini gönderip Firebase'in onu derinlemesine birleştirmesini (merge) sağlıyoruz.
-    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), {
-      positionModules: {
-        [position]: {
-          [moduleId]: newValue
-        }
+    const handleUpdatePositionModuleAccess = async (position, moduleId, newValue) => {
+      if (!firebaseUser) return;
+      
+      try {
+        // KÖKTEN ÇÖZÜM: Dot notation (Nokta Notasyonu) kullanarak Race Condition (Hızlı tıklama çakışmaları) önlenir.
+        // Bu sayede Firebase objeyi merge etmeye çalışmaz, sadece hedefteki tekil boolean değeri anında değiştirir.
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), {
+          [`positionModules.${position}.${moduleId}`]: newValue
+        });
+      } catch (error) {
+        // Güvenlik Ağı: Eğer çok eski bir veritabanıysa ve 'positionModules' ana objesi henüz hiç oluşmamışsa,
+        // updateDoc hata fırlatır. Bu durumda objeyi baştan güvenli bir şekilde setDoc ile ilk kez kurarız.
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), {
+          positionModules: {
+            [position]: {
+              [moduleId]: newValue
+            }
+          }
+        }, { merge: true });
       }
-    }, { merge: true });
-    
-    addSystemLog('Görüntüleme Yetkileri', `${position} pozisyonunun modül erişim izinleri güncellendi.`);
-  };
+      
+      addSystemLog('Görüntüleme Yetkileri', `${position} pozisyonunun modül erişim izinleri güncellendi.`);
+    };
 
     const handleAddPosition = async (newPos) => {
       if (!firebaseUser) return;
