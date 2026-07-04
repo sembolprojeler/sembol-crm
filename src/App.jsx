@@ -10,212 +10,29 @@ import React, { useState, useEffect } from 'react';
     Eye, EyeOff, FolderOpen
   } from 'lucide-react';
 
-  // --- FIREBASE BAĞLANTISI (ÖNİZLEME MODU) ---
-  // NOT: Bu artifact/önizleme ortamında gerçek "firebase" paketi
-  // yüklenemediği (harici ağ erişimi kısıtlı) için, aşağıda GERÇEK
-  // Firestore ve Auth API'siyle BİREBİR AYNI fonksiyon isim/imzalarını
-  // taklit eden, tarayıcı belleğinde (in-memory) çalışan bir MOCK katman
-  // tanımlanıyor. Böylece uygulamanın geri kalanındaki (collection/doc/
-  // onSnapshot vb.) 300'den fazla Firestore çağrısına TEK SATIR
-  // DOKUNULMADAN önizleme çalıştırılabiliyor. Gerçek Vercel/production
-  // ortamında bu blok, orijinal "firebase/app", "firebase/auth",
-  // "firebase/firestore" importlarıyla değiştirilmelidir.
+  // --- FIREBASE BAĞLANTISI ---
+  import { initializeApp } from "firebase/app";
+  import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
+import { 
+  getFirestore, collection, addDoc, onSnapshot, 
+  doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where
+} from "firebase/firestore";
 
-  // Bellekte veri deposu: { "koleksiyon/yolu": { dokümanId: {...veri} } }
-  const __store = {};
-  // Aktif onSnapshot dinleyicileri: { "koleksiyon/yolu": Set<fonksiyon> }
-  const __listeners = {};
-
-  // Bir yol değiştiğinde o yolu dinleyen tüm onSnapshot callback'lerini tetikler
-  function __notify(path) {
-    if (__listeners[path]) __listeners[path].forEach(fn => fn());
-  }
-  // collection()/doc() argümanlarından (db hariç) yol string'i üretir
-  function __pathOf(segments) {
-    return segments.filter(s => typeof s === 'string' || typeof s === 'number').join('/');
-  }
-  function __randomId() {
-    return 'id_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-  }
-
-  // --- Mock Firebase App / Auth ---
-  function initializeApp() { return {}; }
-  function getAuth() { return { currentUser: { uid: 'demo-kullanici' } }; }
-  function signInAnonymously(authRef) {
-    const user = { uid: 'demo-kullanici' };
-    authRef.currentUser = user;
-    return Promise.resolve({ user });
-  }
-  function signInWithCustomToken(authRef) { return signInAnonymously(authRef); }
-  function onAuthStateChanged(authRef, callback) {
-    callback(authRef.currentUser || { uid: 'demo-kullanici' });
-    return () => {};
-  }
-
-  // --- Mock Firestore ---
-  function getFirestore() { return {}; }
-
-  function collection(db, ...segments) {
-    const path = __pathOf(segments);
-    if (!__store[path]) __store[path] = {};
-    return { __type: 'collection', path };
-  }
-
-  function doc(dbOrCollectionRef, ...segments) {
-    if (dbOrCollectionRef && dbOrCollectionRef.__type === 'collection') {
-      const path = dbOrCollectionRef.path;
-      const id = segments[0] || __randomId();
-      return { __type: 'doc', path, id };
-    }
-    const id = segments[segments.length - 1];
-    const path = __pathOf(segments.slice(0, -1));
-    return { __type: 'doc', path, id };
-  }
-
-  function addDoc(collectionRef, data) {
-    const { path } = collectionRef;
-    if (!__store[path]) __store[path] = {};
-    const id = __randomId();
-    __store[path][id] = { ...data };
-    __notify(path);
-    return Promise.resolve({ id });
-  }
-
-  function setDoc(docRef, data, opts) {
-    const { path, id } = docRef;
-    if (!__store[path]) __store[path] = {};
-    const prev = __store[path][id];
-    __store[path][id] = (opts && opts.merge && prev) ? { ...prev, ...data } : { ...data };
-    __notify(path);
-    return Promise.resolve();
-  }
-
-  function updateDoc(docRef, data) {
-    const { path, id } = docRef;
-    if (!__store[path]) __store[path] = {};
-    __store[path][id] = { ...(__store[path][id] || {}), ...data };
-    __notify(path);
-    return Promise.resolve();
-  }
-
-  function deleteDoc(docRef) {
-    const { path, id } = docRef;
-    if (__store[path]) delete __store[path][id];
-    __notify(path);
-    return Promise.resolve();
-  }
-
-  function getDoc(docRef) {
-    const { path, id } = docRef;
-    const data = __store[path] && __store[path][id];
-    return Promise.resolve({ exists: () => !!data, data: () => data ? { ...data } : undefined, id });
-  }
-
-  function where(field, op, value) { return { __type: 'where', field, op, value }; }
-  function orderBy(field, direction = 'asc') { return { __type: 'orderBy', field, direction }; }
-  function limit(n) { return { __type: 'limit', n }; }
-
-  function query(collectionRef, ...constraints) {
-    return { __type: 'query', path: collectionRef.path, constraints };
-  }
-
-  function __applyConstraints(docsArr, constraints) {
-    let result = docsArr;
-    constraints.forEach(c => {
-      if (c.__type === 'where') {
-        result = result.filter(d => {
-          const v = d[c.field];
-          switch (c.op) {
-            case '==': return v === c.value;
-            case '!=': return v !== c.value;
-            case '>': return v > c.value;
-            case '>=': return v >= c.value;
-            case '<': return v < c.value;
-            case '<=': return v <= c.value;
-            case 'array-contains': return Array.isArray(v) && v.includes(c.value);
-            default: return true;
-          }
-        });
-      } else if (c.__type === 'orderBy') {
-        result = [...result].sort((a, b) => {
-          if (a[c.field] === b[c.field]) return 0;
-          const dir = c.direction === 'desc' ? -1 : 1;
-          return a[c.field] > b[c.field] ? dir : -dir;
-        });
-      } else if (c.__type === 'limit') {
-        result = result.slice(0, c.n);
-      }
-    });
-    return result;
-  }
-
-  function __snapshotDocs(refOrQuery) {
-    const raw = __store[refOrQuery.path] || {};
-    let docsArr = Object.keys(raw).map(id => ({ id, ...raw[id] }));
-    if (refOrQuery.__type === 'query') docsArr = __applyConstraints(docsArr, refOrQuery.constraints);
-    return docsArr;
-  }
-  function __wrapDocs(docsArr) {
-    const mapped = docsArr.map(d => {
-      const { id, ...rest } = d;
-      return { id, data: () => ({ ...rest }) };
-    });
-    return { docs: mapped, empty: mapped.length === 0, size: mapped.length, forEach: (fn) => mapped.forEach(fn) };
-  }
-
-  function getDocs(refOrQuery) { return Promise.resolve(__wrapDocs(__snapshotDocs(refOrQuery))); }
-
-  function onSnapshot(refOrQuery, onNext) {
-    const path = refOrQuery.path;
-    if (!__listeners[path]) __listeners[path] = new Set();
-    let fire;
-    if (refOrQuery.__type === 'doc') {
-      fire = () => {
-        const data = __store[path] && __store[path][refOrQuery.id];
-        onNext({ exists: () => !!data, data: () => data ? { ...data } : undefined, id: refOrQuery.id });
-      };
-    } else {
-      fire = () => onNext(__wrapDocs(__snapshotDocs(refOrQuery)));
-    }
-    __listeners[path].add(fire);
-    fire();
-    return () => __listeners[path].delete(fire);
-  }
-
-  const app = initializeApp();
-  const auth = getAuth();
-  const db = getFirestore();
-  const appId = 'sembol-crm-onizleme';
-
-  // --- localStorage POLYFILL (ÖNİZLEME MODU) ---
-  // Artifact/önizleme ortamı gerçek tarayıcı localStorage API'sini desteklemez.
-  // "Beni Hatırla" / oturum hatırlama gibi özelliklerin hata vermeden
-  // çalışabilmesi için bellek üzerinde çalışan basit bir polyfill kullanılıyor.
-  // Not: Sayfa yenilendiğinde bu veriler (gerçek localStorage'ın aksine) kaybolur.
-  const __memoryStorage = {};
-  const localStorage = {
-    getItem: (k) => (k in __memoryStorage ? __memoryStorage[k] : null),
-    setItem: (k, v) => { __memoryStorage[k] = String(v); },
-    removeItem: (k) => { delete __memoryStorage[k]; },
-    clear: () => { Object.keys(__memoryStorage).forEach(k => delete __memoryStorage[k]); }
+  // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
+  const defaultFirebaseConfig = {
+    apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
+    authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
+    projectId: "sembol-operasyon-merkezi",
+    storageBucket: "sembol-operasyon-merkezi.firebasestorage.app",
+    messagingSenderId: "1054049299174",
+    appId: "1:1054049299174:web:2193f916a3501543d92927"
   };
+  const firebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_config ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
 
-  // --- ÖNİZLEME İÇİN VARSAYILAN SİSTEM YÖNETİCİSİ ---
-  // Giriş ekranını test edebilmeniz için mock veritabanına, tam yetkili
-  // (canView + canEdit) "Sistem Yöneticisi" kaydı önceden yükleniyor.
-  // Giriş bilgileri: Kullanıcı adı/E-posta -> admin   |   Şifre -> admin
-  __store[`artifacts/${appId}/public/data/personnelList`] = {
-    'admin-seed': {
-      fullName: 'Sistem Yöneticisi',
-      email: 'admin',
-      password: 'admin',
-      position: 'Firma Sahibi',
-      rank: 'Müdür',
-      employmentStatus: 'Aktif',
-      permissions: { canView: true, canEdit: true }
-    }
-  };
-
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+  const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
 
   // TÜRKİYE İL VE İLÇE VERİTABANI
   const TURKEY_LOCATIONS = {
@@ -1556,7 +1373,7 @@ useEffect(() => {
                 </div>
             )}
 
-            <div  className="space-y-4">
+            <form onSubmit={handleSubmit} className="space-y-4">
                 {infoType === 'Duyuru' && (
                     <>
                         <div>
@@ -1611,10 +1428,10 @@ useEffect(() => {
                     </>
                 )}
 
-                <button type="button" onClick={handleSubmit} disabled={isSubmitting || post.imageUrl === 'Yükleniyor...'} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg disabled:opacity-50 mt-6">
+                <button type="submit" disabled={isSubmitting || post.imageUrl === 'Yükleniyor...'} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg disabled:opacity-50 mt-6">
                     <Send className="w-5 h-5" /> Yayına Al
                 </button>
-            </div>
+            </form>
         </div>
     );
   };
@@ -1641,7 +1458,7 @@ useEffect(() => {
           </button>
         </div>
 
-        <div  className="space-y-6">
+        <form onSubmit={handleAddJob} className="space-y-6">
           {/* MÜŞTERİ VE GENEL BİLGİLER */}
           <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200">
             <h3 className="font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-2">
@@ -2244,11 +2061,11 @@ useEffect(() => {
             </div>
           </div>
 
-          <button type="button" onClick={handleAddJob} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl hover:bg-red-700 transition flex justify-center items-center gap-2 text-xl shadow-xl shadow-red-600/30">
+          <button type="submit" className="w-full bg-red-600 text-white font-black py-5 rounded-2xl hover:bg-red-700 transition flex justify-center items-center gap-2 text-xl shadow-xl shadow-red-600/30">
             <PlusCircle className="w-6 h-6" /> 
             {editingJobId ? 'Kaydı Güncelle' : 'Kaydı Oluştur'}
           </button>
-        </div>
+        </form>
       </div>
     );
   };
@@ -3944,7 +3761,7 @@ useEffect(() => {
                 <h3 className="font-bold text-lg flex items-center gap-2"><CalendarDays className="w-5 h-5 text-orange-500" /> Özel Durum Ekle</h3>
                 <button onClick={() => setShowSpecialLeaveModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
-              <div  className="p-6 space-y-4">
+              <form onSubmit={handleAddSpecialLeave} className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-neutral-700 mb-1">Personel Seçin *</label>
                   <select required value={specialLeaveForm.personnelId} onChange={e => setSpecialLeaveForm({...specialLeaveForm, personnelId: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 font-medium bg-white">
@@ -3971,11 +3788,11 @@ useEffect(() => {
                     <input required type="date" min={specialLeaveForm.startDate} value={specialLeaveForm.endDate} onChange={e => setSpecialLeaveForm({...specialLeaveForm, endDate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
                   </div>
                 </div>
-                <button type="button" onClick={handleAddSpecialLeave} disabled={isSaving} className="w-full py-4 bg-orange-500 text-white font-black rounded-xl hover:bg-orange-600 transition shadow-lg shadow-orange-500/30 flex justify-center items-center gap-2 mt-2 disabled:opacity-50">
+                <button type="submit" disabled={isSaving} className="w-full py-4 bg-orange-500 text-white font-black rounded-xl hover:bg-orange-600 transition shadow-lg shadow-orange-500/30 flex justify-center items-center gap-2 mt-2 disabled:opacity-50">
                   {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
                   {isSaving ? 'Kaydediliyor...' : 'Durumu Kaydet'}
                 </button>
-              </div>
+              </form>
             </div>
           </div>
         )}
@@ -4783,7 +4600,7 @@ useEffect(() => {
       <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
         <CheckSquare className="w-6 h-6 text-red-600" /> Yeni Görev Ekle
       </h2>
-      <div  className="space-y-4">
+      <form onSubmit={handleAddTask} className="space-y-4">
         <div>
           <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
           <input required type="text" value={newTask.title} onChange={(e) => setNewTask({...newTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" placeholder="Örn: Müşteri aramaları yapılacak" />
@@ -4810,10 +4627,10 @@ useEffect(() => {
           </div>
         </div>
 
-        <button type="button" onClick={handleAddTask} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+        <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
           <PlusCircle className="w-5 h-5" /> Listeye Kaydet
         </button>
-      </div>
+      </form>
     </div>
   );
 
@@ -4919,7 +4736,7 @@ useEffect(() => {
       <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
         <ListTodo className="w-6 h-6 text-red-600" /> Yeni Yapılacak İş Ekle
       </h2>
-      <div  className="space-y-4">
+      <form onSubmit={handleAddTodo} className="space-y-4">
         <div>
           <label className="block text-sm font-bold text-black mb-1">Başlık</label>
           <input required type="text" value={newTodo.title} onChange={(e) => setNewTodo({...newTodo, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Araç muayenesi randevusu alınacak" />
@@ -4946,10 +4763,10 @@ useEffect(() => {
           </div>
         </div>
 
-        <button type="button" onClick={handleAddTodo} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+        <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
           <PlusCircle className="w-5 h-5" /> Kaydet ve Ekle
         </button>
-      </div>
+      </form>
     </div>
   );
 
@@ -5044,7 +4861,7 @@ useEffect(() => {
             </button>
           )}
         </div>
-        <div  className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="block text-sm font-bold text-black mb-1">Malzeme Adı</label>
             <input required type="text" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-medium" placeholder="Örn: Koli Bantı, 50x50 Koli" />
@@ -5075,10 +4892,10 @@ useEffect(() => {
               </select>
             </div>
           </div>
-          <button type="button" onClick={handleSubmit} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+          <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
             <PlusCircle className="w-5 h-5" /> Malzemeyi Kaydet
           </button>
-        </div>
+        </form>
       </div>
     );
   };
@@ -5110,7 +4927,7 @@ useEffect(() => {
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div  className="space-y-5">
+        <form onSubmit={handleSubmit} className="space-y-5">
           <div>
             <label className="block text-sm font-bold text-black mb-1">Malzeme Seçin</label>
             <select required value={formData.materialId} onChange={(e) => setFormData({...formData, materialId: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-blue-600 outline-none bg-white transition font-medium">
@@ -5146,10 +4963,10 @@ useEffect(() => {
             </div>
           </div>
 
-          <button type="button" onClick={handleSubmit} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg shadow-blue-600/20 mt-4">
+          <button type="submit" className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg shadow-blue-600/20 mt-4">
             <CheckCircle className="w-5 h-5" /> Stokları Güncelle
           </button>
-        </div>
+        </form>
       </div>
     );
   };
@@ -5476,7 +5293,7 @@ useEffect(() => {
            <h3 className="text-lg font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-100 pb-3">
              <PlusCircle className="w-5 h-5 text-red-600" /> Manuel Finansal İşlem Ekle
            </h3>
-           <div  className="flex flex-col lg:flex-row gap-4">
+           <form onSubmit={handleAddTransaction} className="flex flex-col lg:flex-row gap-4">
               <div className="flex bg-neutral-100 p-1 rounded-xl shrink-0">
                 <button type="button" onClick={() => setTransactionType('income')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${transactionType === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-neutral-500'}`}>Gelir</button>
                 <button type="button" onClick={() => setTransactionType('expense')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${transactionType === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-neutral-500'}`}>Gider</button>
@@ -5488,8 +5305,8 @@ useEffect(() => {
                 <option value="bank">Banka / Havale</option>
               </select>
               <input required type="date" value={newTransaction.date} onChange={e => setNewTransaction({...newTransaction, date: e.target.value})} className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" />
-              <button type="button" onClick={handleAddTransaction} className="px-6 py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Kaydet</button>
-           </div>
+              <button type="submit" className="px-6 py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Kaydet</button>
+           </form>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
@@ -5784,7 +5601,7 @@ useEffect(() => {
           <button onClick={onCancel} className="text-neutral-400 hover:text-black transition"><X className="w-6 h-6" /></button>
         </div>
 
-        <div className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">Araç Plakası</label>
@@ -5879,9 +5696,9 @@ useEffect(() => {
 
           <div className="flex gap-3 pt-4 border-t border-neutral-100">
             <button type="button" onClick={onCancel} className="flex-1 py-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">İptal</button>
-            <button type="button" onClick={handleSubmit} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Aracı Kaydet</button>
+            <button type="submit" className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Aracı Kaydet</button>
           </div>
-        </div>
+        </form>
       </div>
     );
   };
@@ -6036,6 +5853,7 @@ useEffect(() => {
     // YENİ: Artık sadece son 5 değil, bugüne kadar eklenen TÜM kayıtlar (aşağıda kaydırmalı alanda) gösteriliyor
     const recentRecords = allRecords;
 
+
     return (
       <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in pb-8">
         <h2 className="text-2xl font-black text-black flex items-center gap-2 border-b border-neutral-200 pb-4">
@@ -6068,7 +5886,7 @@ useEffect(() => {
                   </span>
                   <span className="text-xs bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200">{selectedVehicle.plate}</span>
                 </h3>
-                <div  className="space-y-4">
+                <form onSubmit={handleSubmit} className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-bold text-neutral-700 mb-1">İşlem Türü</label>
@@ -6108,7 +5926,7 @@ useEffect(() => {
                     <textarea value={recordForm.notes} onChange={e => setRecordForm({...recordForm, notes: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none" placeholder="Değişen parçalar, muayene istasyonu vb..."></textarea>
                   </div>
                   <div className="flex gap-2">
-                    <button type="button" onClick={handleSubmit} className="flex-1 py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg shadow-red-600/30">
+                    <button type="submit" className="flex-1 py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg shadow-red-600/30">
                       <Save className="w-5 h-5" /> {editingRecordInfo ? 'Kaydı Güncelle' : 'Kaydı Ekle'}
                     </button>
                     {editingRecordInfo && (
@@ -6117,7 +5935,7 @@ useEffect(() => {
                       </button>
                     )}
                   </div>
-                </div>
+                </form>
               </div>
 
               {/* Geçmiş Kayıtlar Bölümü */}
@@ -6209,7 +6027,6 @@ useEffect(() => {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="font-black text-green-600 text-base">{r.cost ? `₺${parseInt(r.cost).toLocaleString('tr-TR')}` : ''}</span>
-                    {/* YENİ: Duruma göre düzenleme butonu */}
                     <button
                       type="button"
                       onClick={() => handleStartEdit(r.vehicleId, r)}
@@ -6224,7 +6041,6 @@ useEffect(() => {
             </div>
           )}
         </div>
-
       </div>
     );
   };
@@ -6275,7 +6091,7 @@ useEffect(() => {
         <h2 className="text-xl sm:text-2xl font-black text-black mb-8 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <UserPlus className="w-6 h-6 sm:w-7 sm:h-7 text-red-600" /> Personel Ekle
         </h2>
-        <div  className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-6">
           
           <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-5 bg-neutral-50 rounded-xl border border-neutral-200">
             <div className="w-20 h-20 rounded-full border border-neutral-300 bg-neutral-100 flex items-center justify-center overflow-hidden shrink-0">
@@ -6406,10 +6222,10 @@ useEffect(() => {
             </div>
           </div>
 
-          <button type="button" onClick={handleSubmit} disabled={isUploading} className="w-full py-4 mt-2 bg-[#e62020] text-white font-bold text-lg rounded-xl hover:bg-red-700 transition shadow-md disabled:opacity-50">
+          <button type="submit" disabled={isUploading} className="w-full py-4 mt-2 bg-[#e62020] text-white font-bold text-lg rounded-xl hover:bg-red-700 transition shadow-md disabled:opacity-50">
             Personeli Kaydet
           </button>
-        </div>
+        </form>
       </div>
     );
   };
@@ -6527,7 +6343,7 @@ useEffect(() => {
                 <h3 className="font-bold text-lg">Personel Düzenle</h3>
                 <button onClick={() => setEditingUser(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
-              <div  className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
+              <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
                 
                 <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-5 bg-neutral-50 rounded-xl border border-neutral-200">
                   <div className="w-20 h-20 rounded-full border border-neutral-300 bg-neutral-100 flex items-center justify-center overflow-hidden shrink-0">
@@ -6658,10 +6474,10 @@ useEffect(() => {
                   </div>
                 </div>
 
-                <button type="button" onClick={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} disabled={isUploading} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2 disabled:opacity-50">
+                <button type="submit" disabled={isUploading} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2 disabled:opacity-50">
                   <Save className="w-5 h-5" /> Değişiklikleri Kaydet
                 </button>
-              </div>
+              </form>
             </div>
           </div>
         )}
@@ -6998,7 +6814,7 @@ useEffect(() => {
                 <button onClick={() => setEditingUser(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               <div className="p-6 overflow-y-auto custom-scrollbar">
-                <div  className="space-y-6">
+                <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="space-y-6">
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -7063,10 +6879,10 @@ useEffect(() => {
                       </div>
                   </div>
                   
-                  <button type="button" onClick={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="w-full bg-red-600 text-white p-4 rounded-xl font-bold hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg mt-4">
+                  <button type="submit" className="w-full bg-red-600 text-white p-4 rounded-xl font-bold hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg mt-4">
                     <CheckCircle className="w-5 h-5" /> Değişiklikleri Kaydet
                   </button>
-                </div>
+                </form>
               </div>
             </div>
           </div>
@@ -7082,10 +6898,10 @@ useEffect(() => {
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <Briefcase className="w-6 h-6 text-red-600" /> Pozisyon Yönetimi
         </h2>
-        <div  className="flex gap-2 mb-6">
+        <form onSubmit={e => { e.preventDefault(); if(newPos) { onAddPosition(newPos); setNewPos(''); } }} className="flex gap-2 mb-6">
           <input type="text" value={newPos} onChange={e => setNewPos(e.target.value)} placeholder="Yeni Pozisyon Adı" className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-          <button type="button" onClick={e => { e.preventDefault(); if(newPos) { onAddPosition(newPos); setNewPos(''); } }} className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
-        </div>
+          <button type="submit" className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
+        </form>
         <div className="space-y-2">
           {positions.map((pos, idx) => (
             <div key={idx} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-200">
@@ -7105,10 +6921,10 @@ useEffect(() => {
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <Star className="w-6 h-6 text-red-600" /> Rütbe Yönetimi
         </h2>
-        <div  className="flex gap-2 mb-6">
+        <form onSubmit={e => { e.preventDefault(); if(newRank) { onAddRank(newRank); setNewRank(''); } }} className="flex gap-2 mb-6">
           <input type="text" value={newRank} onChange={e => setNewRank(e.target.value)} placeholder="Yeni Rütbe Adı" className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-          <button type="button" onClick={e => { e.preventDefault(); if(newRank) { onAddRank(newRank); setNewRank(''); } }} className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
-        </div>
+          <button type="submit" className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
+        </form>
         <div className="space-y-2">
           {ranks.map((rank, idx) => (
             <div key={idx} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-200">
@@ -7370,14 +7186,14 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 </div>
               ))}
             </div>
-            <div  className="flex gap-2">
+            <form onSubmit={handleAddCategory} className="flex gap-2">
               <input type="text" value={newCategory} onChange={e => setNewCategory(e.target.value)} placeholder="Yeni Kategori Adı" className="p-2 border border-neutral-300 rounded-lg focus:ring-2 focus:ring-blue-600 outline-none text-sm w-64" />
-              <button type="button" onClick={handleAddCategory} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition">Ekle</button>
-            </div>
+              <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition">Ekle</button>
+            </form>
           </div>
         )}
 
-        <div  className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 mb-8 space-y-4">
+        <form onSubmit={handleAdd} className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 mb-8 space-y-4">
           <h3 className="font-bold text-black border-b border-neutral-200 pb-2 mb-4 flex items-center gap-2">
             <PlusCircle className="w-5 h-5 text-red-600" /> {editingId ? 'Şifre Bilgilerini Güncelle' : 'Yeni Hesap / Şifre Ekle'}
           </h3>
@@ -7415,11 +7231,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {editingId && (
               <button type="button" onClick={() => { setEditingId(null); setFormData({ platform: '', link: '', username: '', password: '', notes: '', category: categories[0] || 'Genel' }); }} className="flex-1 py-3 bg-neutral-200 text-neutral-700 font-bold rounded-xl hover:bg-neutral-300 transition">İptal</button>
             )}
-            <button type="button" onClick={handleAdd} className="flex-[2] py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-md">
+            <button type="submit" className="flex-[2] py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-md">
               <Save className="w-5 h-5" /> {editingId ? 'Değişiklikleri Kaydet' : 'Sisteme Kaydet'}
             </button>
           </div>
-        </div>
+        </form>
 
         {passwords.length === 0 ? (
           <div className="text-center text-neutral-500 py-10 bg-neutral-50 rounded-2xl border border-neutral-200">
@@ -8402,7 +8218,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [mesaiData, setMesaiData] = useState({});
 
     // --- YENİ: "FAZLA İŞ ATA" ÖZELLİĞİ İÇİN EKLENEN STATE'LER ---
-    // Not: Mevcut kodların hiçbiri değiştirilmedi, sadece ek özellik için yeni state'ler eklendi.
     const [showFazlaIsAtaModal, setShowFazlaIsAtaModal] = useState(false); // Modal açık/kapalı
     const [fazlaIsAtaPersonId, setFazlaIsAtaPersonId] = useState('');      // Seçilen (meşgul) personel
     const [fazlaIsAtaJobId, setFazlaIsAtaJobId] = useState('');            // Eklenecek hedef iş
@@ -8921,7 +8736,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
          <h2 className="text-2xl font-black text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
            <User className="w-7 h-7 text-red-600" /> Profil Bilgilerim
          </h2>
-         <div  className="space-y-6">
+         <form onSubmit={handleSaveProfile} className="space-y-6">
            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 bg-neutral-50 rounded-xl border border-neutral-200">
              <div className="w-24 h-24 rounded-full border-4 border-white shadow-md overflow-hidden bg-neutral-200 flex items-center justify-center shrink-0">
                {editForm.profileImage === 'Yükleniyor...' ? (
@@ -8961,10 +8776,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
              </div>
            </div>
 
-           <button type="button" onClick={handleSaveProfile} disabled={isUploading} className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 disabled:opacity-50">
+           <button type="submit" disabled={isUploading} className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 disabled:opacity-50">
              Bilgilerimi Güncelle
            </button>
-         </div>
+         </form>
       </div>
     );
   };
@@ -9309,7 +9124,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
          <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
            <AlertTriangle className="w-6 h-6 text-red-600" /> Şikayet / Sorun Bildirimi
          </h2>
-         <div  className="space-y-4">
+         <form onSubmit={submitComplaint} className="space-y-4">
             <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-sm text-blue-800 font-medium mb-4">
                Sistemdeki sorunları, personel şikayetlerini veya araç/ekipman eksikliklerini doğrudan yönetim kuruluna iletebilirsiniz.
             </div>
@@ -9321,10 +9136,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               <label className="block text-sm font-bold text-black mb-1">Detaylı Açıklama</label>
               <textarea required value={complaintContent} onChange={e => setComplaintContent(e.target.value)} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-32 resize-none transition" placeholder="Sorunu tüm detaylarıyla açıklayın..."></textarea>
             </div>
-            <button type="button" onClick={submitComplaint} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+            <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
                <Send className="w-5 h-5" /> Bildirimi Yöneticilere Gönder
             </button>
-         </div>
+         </form>
       </div>
     );
   };
@@ -11248,7 +11063,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             <p className="text-red-600 text-xs font-bold mt-1 tracking-[0.2em] bg-red-50 px-3 py-1 rounded-full border border-red-100">OPERASYON MERKEZİ</p>
           </div>
           
-          <div  className="p-8 space-y-6">
+          <form onSubmit={handleSubmit} className="p-8 space-y-6">
             {error && (
               <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100">
                 <AlertTriangle className="w-5 h-5 shrink-0" /> {error}
@@ -11298,10 +11113,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </label>
             </div>
             
-            <button type="button" onClick={handleSubmit} className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg mt-4">
+            <button type="submit" className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg mt-4">
               Sisteme Giriş Yap
             </button>
-          </div>
+          </form>
         </div>
       </div>
     );
@@ -13937,7 +13752,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         <button onClick={() => setEditingVehicle(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
                       </div>
                       
-                      <div  className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                      <form onSubmit={(e) => { e.preventDefault(); handleUpdateVehicle(vehicleEditForm); }} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-bold text-neutral-700 mb-1">Araç Plakası</label>
@@ -14048,9 +13863,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
                         <div className="flex gap-3 pt-4 border-t border-neutral-100">
                           <button type="button" onClick={() => setEditingVehicle(null)} className="flex-1 py-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">İptal</button>
-                          <button type="button" onClick={(e) => { e.preventDefault(); handleUpdateVehicle(vehicleEditForm); }} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Değişiklikleri Kaydet</button>
+                          <button type="submit" className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Değişiklikleri Kaydet</button>
                         </div>
-                      </div>
+                      </form>
                     </div>
                   </div>
                 )}
@@ -14230,7 +14045,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     </div>
                   </div>
                 )}
-                <div  className="space-y-5">
+                <form onSubmit={submitAssignJob} className="space-y-5">
                   <p className="text-sm text-neutral-600 pb-2 border-b border-neutral-100">
                     <b className="text-black">Müşteri:</b> {jobToAssign.customerName} <br/>
                     <b className="text-black">Tarih:</b> {jobToAssign.date}
@@ -14492,7 +14307,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    <button type="button" onClick={submitAssignJob} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20">
+                    <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20">
                       <CheckSquare className="w-5 h-5" /> Görevi Onayla ve Atamayı Yap
                     </button>
 
@@ -14502,7 +14317,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       </button>
                     )}
                   </div>
-                </div>
+                </form>
               </div>
             </div>
           </div>
@@ -14586,7 +14401,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <button onClick={() => setShowTaskModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
-              <div  className="p-6 space-y-4">
+              <form onSubmit={handleAddTask} className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
                   <input required type="text" value={newTask.title} onChange={(e) => setNewTask({...newTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" placeholder="Örn: Müşteri aramaları yapılacak" />
@@ -14613,10 +14428,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
                 </div>
 
-                <button type="button" onClick={handleAddTask} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+                <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
                   <PlusCircle className="w-5 h-5" /> Görevi Ekle
                 </button>
-              </div>
+              </form>
             </div>
           </div>
         )}
@@ -14630,7 +14445,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <button onClick={() => setEditingTask(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
-              <div  className="p-6 space-y-4">
+              <form onSubmit={handleUpdateTask} className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
                   <input required type="text" value={editingTask.title} onChange={(e) => setEditingTask({...editingTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" />
@@ -14657,10 +14472,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
                 </div>
 
-                <button type="button" onClick={handleUpdateTask} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+                <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
                   <CheckCircle className="w-5 h-5" /> Değişiklikleri Kaydet
                 </button>
-              </div>
+              </form>
             </div>
           </div>
         )}
@@ -14680,7 +14495,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <AlertTriangle className="w-5 h-5 shrink-0" /> {endJobError}
                   </div>
                 )}
-                <div  className="space-y-4">
+                <form onSubmit={submitEndJob} className="space-y-4">
                   {jobToEnd.type === 'Asansör' ? (
                     <>
                       <div>
@@ -14938,10 +14753,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     </div>
                   </div>
 
-                  <button type="button" onClick={submitEndJob} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <button type="submit" className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> {jobToEnd.type === 'Asansör' ? 'Asansör İşini Sonlandır' : 'Kodu Doğrula ve İşi Bitir'}
                   </button>
-                </div>
+                </form>
               </div>
             </div>
           </div>
@@ -14957,7 +14772,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
               
               <div className="p-4 overflow-y-auto custom-scrollbar flex-1">
-                <div  className="space-y-4">
+                <form onSubmit={submitApprovePoints} className="space-y-4">
                   <div className="bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 flex justify-between items-center">
                     <div>
                       <p className="text-xs font-black text-black leading-tight">{jobToApprove.customerName}</p>
@@ -15056,10 +14871,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       </div>
                   </div>
 
-                  <button type="button" onClick={submitApprovePoints} className="w-full py-3 bg-yellow-500 text-black font-black text-sm rounded-xl hover:bg-yellow-600 transition flex justify-center items-center gap-2 shadow-md">
+                  <button type="submit" className="w-full py-3 bg-yellow-500 text-black font-black text-sm rounded-xl hover:bg-yellow-600 transition flex justify-center items-center gap-2 shadow-md">
                     <CheckCircle className="w-4 h-4" /> Onayla ve Puanları İşle
                   </button>
-                </div>
+                </form>
               </div>
             </div>
           </div>
@@ -15074,7 +14889,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <button onClick={() => setShowMesaiModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               <div className="p-6 overflow-y-auto custom-scrollbar max-h-[80vh]">
-                <div  className="space-y-4">
+                <form onSubmit={submitMesaiApprove} className="space-y-4">
                    <div className="bg-neutral-50 p-3 rounded-xl border border-neutral-200 mb-4">
                       <p className="text-sm font-bold text-black mb-1">Müşteri: {jobForMesai.customerName}</p>
                       <p className="text-xs text-neutral-500">Tarih: {jobForMesai.date}</p>
@@ -15120,10 +14935,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       </div>
                    )}
 
-                   <button type="button" onClick={submitMesaiApprove} disabled={Object.keys(mesaiModalData).length === 0} className="w-full py-4 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg mt-4 disabled:opacity-50">
+                   <button type="submit" disabled={Object.keys(mesaiModalData).length === 0} className="w-full py-4 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg mt-4 disabled:opacity-50">
                      <CheckCircle className="w-5 h-5" /> Mesaileri Kaydet
                    </button>
-                </div>
+                </form>
               </div>
             </div>
           </div>
@@ -15139,15 +14954,15 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
               
               <div className="p-6 overflow-y-auto custom-scrollbar">
-                <div  className="space-y-4">
+                <form onSubmit={handleResolveDamageSubmit} className="space-y-4">
                   <div>
                     <label className="block text-sm font-bold text-black mb-2">Çözüm Notu / Açıklama</label>
                     <textarea required value={resolveDamageModal.note} onChange={e => setResolveDamageModal({...resolveDamageModal, note: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none transition text-sm" placeholder="Sorun nasıl çözüldü? Müşteri ile nasıl anlaşıldı? (Örn: Tamir masrafı karşılandı.)"></textarea>
                   </div>
-                  <button type="button" onClick={handleResolveDamageSubmit} className="w-full py-4 bg-green-500 text-white font-black rounded-xl hover:bg-green-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <button type="submit" className="w-full py-4 bg-green-500 text-white font-black rounded-xl hover:bg-green-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> Çözüldü Olarak Kaydet
                   </button>
-                </div>
+                </form>
               </div>
             </div>
           </div>
@@ -15163,7 +14978,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
               
               <div className="p-6">
-                <div  className="space-y-4">
+                <form onSubmit={handleAddContact} className="space-y-4">
                   {!editingContact && (
                     <>
                       <div>
@@ -15200,10 +15015,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <label className="block text-sm font-bold text-black mb-1">Pozisyon / Unvan</label>
                     <input required type="text" value={contactForm.position} onChange={e => setContactForm({...contactForm, position: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none" placeholder="Örn: Operasyon Müdürü" />
                   </div>
-                  <button type="button" onClick={handleAddContact} className="w-full py-4 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <button type="submit" className="w-full py-4 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> {editingContact ? 'Değişiklikleri Kaydet' : 'Kaydet ve Ekle'}
                   </button>
-                </div>
+                </form>
               </div>
             </div>
           </div>
