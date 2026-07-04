@@ -10,29 +10,212 @@ import React, { useState, useEffect } from 'react';
     Eye, EyeOff, FolderOpen
   } from 'lucide-react';
 
-  // --- FIREBASE BAĞLANTISI ---
-  import { initializeApp } from "firebase/app";
-  import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
-import { 
-  getFirestore, collection, addDoc, onSnapshot, 
-  doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where
-} from "firebase/firestore";
+  // --- FIREBASE BAĞLANTISI (ÖNİZLEME MODU) ---
+  // NOT: Bu artifact/önizleme ortamında gerçek "firebase" paketi
+  // yüklenemediği (harici ağ erişimi kısıtlı) için, aşağıda GERÇEK
+  // Firestore ve Auth API'siyle BİREBİR AYNI fonksiyon isim/imzalarını
+  // taklit eden, tarayıcı belleğinde (in-memory) çalışan bir MOCK katman
+  // tanımlanıyor. Böylece uygulamanın geri kalanındaki (collection/doc/
+  // onSnapshot vb.) 300'den fazla Firestore çağrısına TEK SATIR
+  // DOKUNULMADAN önizleme çalıştırılabiliyor. Gerçek Vercel/production
+  // ortamında bu blok, orijinal "firebase/app", "firebase/auth",
+  // "firebase/firestore" importlarıyla değiştirilmelidir.
 
-  // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
-  const defaultFirebaseConfig = {
-    apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
-    authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
-    projectId: "sembol-operasyon-merkezi",
-    storageBucket: "sembol-operasyon-merkezi.firebasestorage.app",
-    messagingSenderId: "1054049299174",
-    appId: "1:1054049299174:web:2193f916a3501543d92927"
+  // Bellekte veri deposu: { "koleksiyon/yolu": { dokümanId: {...veri} } }
+  const __store = {};
+  // Aktif onSnapshot dinleyicileri: { "koleksiyon/yolu": Set<fonksiyon> }
+  const __listeners = {};
+
+  // Bir yol değiştiğinde o yolu dinleyen tüm onSnapshot callback'lerini tetikler
+  function __notify(path) {
+    if (__listeners[path]) __listeners[path].forEach(fn => fn());
+  }
+  // collection()/doc() argümanlarından (db hariç) yol string'i üretir
+  function __pathOf(segments) {
+    return segments.filter(s => typeof s === 'string' || typeof s === 'number').join('/');
+  }
+  function __randomId() {
+    return 'id_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  }
+
+  // --- Mock Firebase App / Auth ---
+  function initializeApp() { return {}; }
+  function getAuth() { return { currentUser: { uid: 'demo-kullanici' } }; }
+  function signInAnonymously(authRef) {
+    const user = { uid: 'demo-kullanici' };
+    authRef.currentUser = user;
+    return Promise.resolve({ user });
+  }
+  function signInWithCustomToken(authRef) { return signInAnonymously(authRef); }
+  function onAuthStateChanged(authRef, callback) {
+    callback(authRef.currentUser || { uid: 'demo-kullanici' });
+    return () => {};
+  }
+
+  // --- Mock Firestore ---
+  function getFirestore() { return {}; }
+
+  function collection(db, ...segments) {
+    const path = __pathOf(segments);
+    if (!__store[path]) __store[path] = {};
+    return { __type: 'collection', path };
+  }
+
+  function doc(dbOrCollectionRef, ...segments) {
+    if (dbOrCollectionRef && dbOrCollectionRef.__type === 'collection') {
+      const path = dbOrCollectionRef.path;
+      const id = segments[0] || __randomId();
+      return { __type: 'doc', path, id };
+    }
+    const id = segments[segments.length - 1];
+    const path = __pathOf(segments.slice(0, -1));
+    return { __type: 'doc', path, id };
+  }
+
+  function addDoc(collectionRef, data) {
+    const { path } = collectionRef;
+    if (!__store[path]) __store[path] = {};
+    const id = __randomId();
+    __store[path][id] = { ...data };
+    __notify(path);
+    return Promise.resolve({ id });
+  }
+
+  function setDoc(docRef, data, opts) {
+    const { path, id } = docRef;
+    if (!__store[path]) __store[path] = {};
+    const prev = __store[path][id];
+    __store[path][id] = (opts && opts.merge && prev) ? { ...prev, ...data } : { ...data };
+    __notify(path);
+    return Promise.resolve();
+  }
+
+  function updateDoc(docRef, data) {
+    const { path, id } = docRef;
+    if (!__store[path]) __store[path] = {};
+    __store[path][id] = { ...(__store[path][id] || {}), ...data };
+    __notify(path);
+    return Promise.resolve();
+  }
+
+  function deleteDoc(docRef) {
+    const { path, id } = docRef;
+    if (__store[path]) delete __store[path][id];
+    __notify(path);
+    return Promise.resolve();
+  }
+
+  function getDoc(docRef) {
+    const { path, id } = docRef;
+    const data = __store[path] && __store[path][id];
+    return Promise.resolve({ exists: () => !!data, data: () => data ? { ...data } : undefined, id });
+  }
+
+  function where(field, op, value) { return { __type: 'where', field, op, value }; }
+  function orderBy(field, direction = 'asc') { return { __type: 'orderBy', field, direction }; }
+  function limit(n) { return { __type: 'limit', n }; }
+
+  function query(collectionRef, ...constraints) {
+    return { __type: 'query', path: collectionRef.path, constraints };
+  }
+
+  function __applyConstraints(docsArr, constraints) {
+    let result = docsArr;
+    constraints.forEach(c => {
+      if (c.__type === 'where') {
+        result = result.filter(d => {
+          const v = d[c.field];
+          switch (c.op) {
+            case '==': return v === c.value;
+            case '!=': return v !== c.value;
+            case '>': return v > c.value;
+            case '>=': return v >= c.value;
+            case '<': return v < c.value;
+            case '<=': return v <= c.value;
+            case 'array-contains': return Array.isArray(v) && v.includes(c.value);
+            default: return true;
+          }
+        });
+      } else if (c.__type === 'orderBy') {
+        result = [...result].sort((a, b) => {
+          if (a[c.field] === b[c.field]) return 0;
+          const dir = c.direction === 'desc' ? -1 : 1;
+          return a[c.field] > b[c.field] ? dir : -dir;
+        });
+      } else if (c.__type === 'limit') {
+        result = result.slice(0, c.n);
+      }
+    });
+    return result;
+  }
+
+  function __snapshotDocs(refOrQuery) {
+    const raw = __store[refOrQuery.path] || {};
+    let docsArr = Object.keys(raw).map(id => ({ id, ...raw[id] }));
+    if (refOrQuery.__type === 'query') docsArr = __applyConstraints(docsArr, refOrQuery.constraints);
+    return docsArr;
+  }
+  function __wrapDocs(docsArr) {
+    const mapped = docsArr.map(d => {
+      const { id, ...rest } = d;
+      return { id, data: () => ({ ...rest }) };
+    });
+    return { docs: mapped, empty: mapped.length === 0, size: mapped.length, forEach: (fn) => mapped.forEach(fn) };
+  }
+
+  function getDocs(refOrQuery) { return Promise.resolve(__wrapDocs(__snapshotDocs(refOrQuery))); }
+
+  function onSnapshot(refOrQuery, onNext) {
+    const path = refOrQuery.path;
+    if (!__listeners[path]) __listeners[path] = new Set();
+    let fire;
+    if (refOrQuery.__type === 'doc') {
+      fire = () => {
+        const data = __store[path] && __store[path][refOrQuery.id];
+        onNext({ exists: () => !!data, data: () => data ? { ...data } : undefined, id: refOrQuery.id });
+      };
+    } else {
+      fire = () => onNext(__wrapDocs(__snapshotDocs(refOrQuery)));
+    }
+    __listeners[path].add(fire);
+    fire();
+    return () => __listeners[path].delete(fire);
+  }
+
+  const app = initializeApp();
+  const auth = getAuth();
+  const db = getFirestore();
+  const appId = 'sembol-crm-onizleme';
+
+  // --- localStorage POLYFILL (ÖNİZLEME MODU) ---
+  // Artifact/önizleme ortamı gerçek tarayıcı localStorage API'sini desteklemez.
+  // "Beni Hatırla" / oturum hatırlama gibi özelliklerin hata vermeden
+  // çalışabilmesi için bellek üzerinde çalışan basit bir polyfill kullanılıyor.
+  // Not: Sayfa yenilendiğinde bu veriler (gerçek localStorage'ın aksine) kaybolur.
+  const __memoryStorage = {};
+  const localStorage = {
+    getItem: (k) => (k in __memoryStorage ? __memoryStorage[k] : null),
+    setItem: (k, v) => { __memoryStorage[k] = String(v); },
+    removeItem: (k) => { delete __memoryStorage[k]; },
+    clear: () => { Object.keys(__memoryStorage).forEach(k => delete __memoryStorage[k]); }
   };
-  const firebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_config ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
 
-  const app = initializeApp(firebaseConfig);
-  const auth = getAuth(app);
-  const db = getFirestore(app);
-  const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
+  // --- ÖNİZLEME İÇİN VARSAYILAN SİSTEM YÖNETİCİSİ ---
+  // Giriş ekranını test edebilmeniz için mock veritabanına, tam yetkili
+  // (canView + canEdit) "Sistem Yöneticisi" kaydı önceden yükleniyor.
+  // Giriş bilgileri: Kullanıcı adı/E-posta -> admin   |   Şifre -> admin
+  __store[`artifacts/${appId}/public/data/personnelList`] = {
+    'admin-seed': {
+      fullName: 'Sistem Yöneticisi',
+      email: 'admin',
+      password: 'admin',
+      position: 'Firma Sahibi',
+      rank: 'Müdür',
+      employmentStatus: 'Aktif',
+      permissions: { canView: true, canEdit: true }
+    }
+  };
+
 
   // TÜRKİYE İL VE İLÇE VERİTABANI
   const TURKEY_LOCATIONS = {
@@ -1373,7 +1556,7 @@ useEffect(() => {
                 </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <div  className="space-y-4">
                 {infoType === 'Duyuru' && (
                     <>
                         <div>
@@ -1428,10 +1611,10 @@ useEffect(() => {
                     </>
                 )}
 
-                <button type="submit" disabled={isSubmitting || post.imageUrl === 'Yükleniyor...'} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg disabled:opacity-50 mt-6">
+                <button type="button" onClick={handleSubmit} disabled={isSubmitting || post.imageUrl === 'Yükleniyor...'} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg disabled:opacity-50 mt-6">
                     <Send className="w-5 h-5" /> Yayına Al
                 </button>
-            </form>
+            </div>
         </div>
     );
   };
@@ -1458,7 +1641,7 @@ useEffect(() => {
           </button>
         </div>
 
-        <form onSubmit={handleAddJob} className="space-y-6">
+        <div  className="space-y-6">
           {/* MÜŞTERİ VE GENEL BİLGİLER */}
           <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200">
             <h3 className="font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-2">
@@ -2061,11 +2244,11 @@ useEffect(() => {
             </div>
           </div>
 
-          <button type="submit" className="w-full bg-red-600 text-white font-black py-5 rounded-2xl hover:bg-red-700 transition flex justify-center items-center gap-2 text-xl shadow-xl shadow-red-600/30">
+          <button type="button" onClick={handleAddJob} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl hover:bg-red-700 transition flex justify-center items-center gap-2 text-xl shadow-xl shadow-red-600/30">
             <PlusCircle className="w-6 h-6" /> 
             {editingJobId ? 'Kaydı Güncelle' : 'Kaydı Oluştur'}
           </button>
-        </form>
+        </div>
       </div>
     );
   };
@@ -2079,7 +2262,7 @@ useEffect(() => {
       if (phone.startsWith('0')) phone = '90' + phone.substring(1);
       else if (!phone.startsWith('90')) phone = '90' + phone;
 
-      const msg = `Merhaba ${job.customerName},\n\nBen Sembol Nakliyat operasyon sorumlunuz. ${job.date} saat ${job.time} sularında planlanan işleminiz için ekibimiz ve aracımız hazırlıklarını tamamlamıştır.\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\nEkibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.\n\nHerhangi bir sorun durumunda veya talebinizde doğrudan benimle bu numara üzerinden iletişime geçebilirsiniz.\n\nŞimdiden yeni yerinizin hayırlı olmasını dileriz. Süreci sizin için en iyi şekilde tamamlamaya çalışacağız. Görüşmek üzere!`;
+      const msg = `Merhaba ${job.customerName},\n\nBen Sembol Nakliyat operasyon sorumlunuz. ${job.date} saat ${job.time} sularında planlanan işleminiz için ekibimiz ve aracımız hazırlıklarını tamamlamıştır. İşi daha iyi organize edebilmemiz açısından taşıma aracımız için uygun bir park yeri ayarlamanızı rica ederiz.\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\nEkibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.\n\nHerhangi bir sorun durumunda veya talebinizde doğrudan benimle bu numara üzerinden iletişime geçebilirsiniz.\n\nŞimdiden yeni yerinizin hayırlı olmasını dileriz. Süreci sizin için en iyi şekilde tamamlamaya çalışacağız. Görüşmek üzere!`;
 
       if (method === 'wa') {
         window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
@@ -3761,7 +3944,7 @@ useEffect(() => {
                 <h3 className="font-bold text-lg flex items-center gap-2"><CalendarDays className="w-5 h-5 text-orange-500" /> Özel Durum Ekle</h3>
                 <button onClick={() => setShowSpecialLeaveModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
-              <form onSubmit={handleAddSpecialLeave} className="p-6 space-y-4">
+              <div  className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-neutral-700 mb-1">Personel Seçin *</label>
                   <select required value={specialLeaveForm.personnelId} onChange={e => setSpecialLeaveForm({...specialLeaveForm, personnelId: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 font-medium bg-white">
@@ -3788,11 +3971,11 @@ useEffect(() => {
                     <input required type="date" min={specialLeaveForm.startDate} value={specialLeaveForm.endDate} onChange={e => setSpecialLeaveForm({...specialLeaveForm, endDate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
                   </div>
                 </div>
-                <button type="submit" disabled={isSaving} className="w-full py-4 bg-orange-500 text-white font-black rounded-xl hover:bg-orange-600 transition shadow-lg shadow-orange-500/30 flex justify-center items-center gap-2 mt-2 disabled:opacity-50">
+                <button type="button" onClick={handleAddSpecialLeave} disabled={isSaving} className="w-full py-4 bg-orange-500 text-white font-black rounded-xl hover:bg-orange-600 transition shadow-lg shadow-orange-500/30 flex justify-center items-center gap-2 mt-2 disabled:opacity-50">
                   {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
                   {isSaving ? 'Kaydediliyor...' : 'Durumu Kaydet'}
                 </button>
-              </form>
+              </div>
             </div>
           </div>
         )}
@@ -4246,6 +4429,22 @@ useEffect(() => {
     const totalAsansor = filteredJobs.filter(j => j.type === 'Asansör').length;
     const totalRevenue = summaryList.reduce((acc, curr) => acc + curr.revenue, 0);
 
+    // --- YENİ: İptal Edilen İşler (aynı dönem/tip filtresine göre, sadece ayrı gösterim için) ---
+    const cancelledJobsInPeriod = jobs.filter(job => {
+      if (job.status !== 'cancelled') return false;
+      if (selectedType !== 'Tümü' && job.type !== selectedType) return false;
+      const d = new Date(job.date);
+      if (reportPeriod === 'year') {
+        return d.getFullYear() === selectedYear;
+      } else {
+        return d.getFullYear() === selectedYear && (d.getMonth() + 1) === selectedMonth;
+      }
+    });
+    const totalCancelled = cancelledJobsInPeriod.length;
+    const cancelledNakliye = cancelledJobsInPeriod.filter(j => j.type === 'Nakliye').length;
+    const cancelledDepo = cancelledJobsInPeriod.filter(j => j.type === 'Depo').length;
+    const cancelledAsansor = cancelledJobsInPeriod.filter(j => j.type === 'Asansör').length;
+
     return (
       <div className="space-y-6 animate-in fade-in">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -4323,6 +4522,24 @@ useEffect(() => {
             </div>
           </div>
         </div>
+
+        {/* YENİ: İptal Edilen İşler (rapor/ciro hesaplarına dahil edilmez, sadece bilgi amaçlı ayrı gösterilir) */}
+        {totalCancelled > 0 && (
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-red-200">
+            <div className="flex items-start gap-4">
+              <div className="p-4 bg-red-50 text-red-600 rounded-2xl shrink-0"><Ban className="w-8 h-8" /></div>
+              <div className="flex-1">
+                <p className="text-neutral-500 text-sm font-bold mb-1">Dönem İçinde İptal Edilen İşler <span className="text-[10px] font-medium text-neutral-400">(ciro ve toplam iş sayısına dahil değildir)</span></p>
+                <p className="text-3xl font-black text-red-600 mb-2">{totalCancelled} <span className="text-sm font-medium text-neutral-400">Adet</span></p>
+                <div className="flex flex-wrap gap-2">
+                  <span className="text-xs font-bold bg-red-50 text-red-600 px-2.5 py-1 rounded-lg border border-red-100">{cancelledNakliye} Nakliye</span>
+                  <span className="text-xs font-bold bg-blue-50 text-blue-600 px-2.5 py-1 rounded-lg border border-blue-100">{cancelledDepo} Depo</span>
+                  <span className="text-xs font-bold bg-green-50 text-green-600 px-2.5 py-1 rounded-lg border border-green-100">{cancelledAsansor} Asansör</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Personel Performans Tablosu */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
@@ -4566,7 +4783,7 @@ useEffect(() => {
       <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
         <CheckSquare className="w-6 h-6 text-red-600" /> Yeni Görev Ekle
       </h2>
-      <form onSubmit={handleAddTask} className="space-y-4">
+      <div  className="space-y-4">
         <div>
           <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
           <input required type="text" value={newTask.title} onChange={(e) => setNewTask({...newTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" placeholder="Örn: Müşteri aramaları yapılacak" />
@@ -4593,10 +4810,10 @@ useEffect(() => {
           </div>
         </div>
 
-        <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+        <button type="button" onClick={handleAddTask} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
           <PlusCircle className="w-5 h-5" /> Listeye Kaydet
         </button>
-      </form>
+      </div>
     </div>
   );
 
@@ -4702,7 +4919,7 @@ useEffect(() => {
       <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
         <ListTodo className="w-6 h-6 text-red-600" /> Yeni Yapılacak İş Ekle
       </h2>
-      <form onSubmit={handleAddTodo} className="space-y-4">
+      <div  className="space-y-4">
         <div>
           <label className="block text-sm font-bold text-black mb-1">Başlık</label>
           <input required type="text" value={newTodo.title} onChange={(e) => setNewTodo({...newTodo, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Araç muayenesi randevusu alınacak" />
@@ -4729,10 +4946,10 @@ useEffect(() => {
           </div>
         </div>
 
-        <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+        <button type="button" onClick={handleAddTodo} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
           <PlusCircle className="w-5 h-5" /> Kaydet ve Ekle
         </button>
-      </form>
+      </div>
     </div>
   );
 
@@ -4827,7 +5044,7 @@ useEffect(() => {
             </button>
           )}
         </div>
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <div  className="space-y-5">
           <div>
             <label className="block text-sm font-bold text-black mb-1">Malzeme Adı</label>
             <input required type="text" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-medium" placeholder="Örn: Koli Bantı, 50x50 Koli" />
@@ -4858,10 +5075,10 @@ useEffect(() => {
               </select>
             </div>
           </div>
-          <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+          <button type="button" onClick={handleSubmit} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
             <PlusCircle className="w-5 h-5" /> Malzemeyi Kaydet
           </button>
-        </form>
+        </div>
       </div>
     );
   };
@@ -4893,7 +5110,7 @@ useEffect(() => {
             <X className="w-5 h-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <div  className="space-y-5">
           <div>
             <label className="block text-sm font-bold text-black mb-1">Malzeme Seçin</label>
             <select required value={formData.materialId} onChange={(e) => setFormData({...formData, materialId: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-blue-600 outline-none bg-white transition font-medium">
@@ -4929,10 +5146,10 @@ useEffect(() => {
             </div>
           </div>
 
-          <button type="submit" className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg shadow-blue-600/20 mt-4">
+          <button type="button" onClick={handleSubmit} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg shadow-blue-600/20 mt-4">
             <CheckCircle className="w-5 h-5" /> Stokları Güncelle
           </button>
-        </form>
+        </div>
       </div>
     );
   };
@@ -4940,27 +5157,32 @@ useEffect(() => {
   const MaterialListView = ({ materials, onDelete, onUpdateStock, onAdd, systemLogs = [] }) => {
     const [showAddModal, setShowAddModal] = useState(false);
     const [showUpdateModal, setShowUpdateModal] = useState(false);
+    // YENİ: "Tüm Hareketleri Gör" modalı için state
+    const [showAllLogsModal, setShowAllLogsModal] = useState(false);
 
     const handleAdd = (data) => {
       if(onAdd) onAdd(data);
       setShowAddModal(false);
     };
 
+    const parseLogDate = (str) => {
+       if (!str) return 0;
+       const parts = str.split(' ');
+       if (parts.length < 2) return 0;
+       const [datePart, timePart] = parts;
+       const [d, m, y] = datePart.split('.');
+       const [hr, min] = timePart.split(':');
+       return new Date(`${y}-${m}-${d}T${hr}:${min}:00`).getTime() || 0;
+    };
+
     // Sistem loglarından sadece malzeme ve stok hareketlerini filtrele
-    const materialLogs = systemLogs.filter(log => 
+    const allMaterialLogsSorted = systemLogs.filter(log => 
       log.action?.includes('Malzeme') || log.action?.includes('Stok')
-    ).sort((a, b) => {
-       const parseDate = (str) => {
-          if (!str) return 0;
-          const parts = str.split(' ');
-          if (parts.length < 2) return 0;
-          const [datePart, timePart] = parts;
-          const [d, m, y] = datePart.split('.');
-          const [hr, min] = timePart.split(':');
-          return new Date(`${y}-${m}-${d}T${hr}:${min}:00`).getTime() || 0;
-       };
-       return parseDate(b.timestamp) - parseDate(a.timestamp);
-    }).slice(0, 20); // Son 20 hareketi göster
+    ).sort((a, b) => parseLogDate(b.timestamp) - parseLogDate(a.timestamp));
+
+    // YENİ: "Tüm Hareketleri Gör" butonu için TAM liste (kesilmemiş)
+    const allMaterialLogs = allMaterialLogsSorted;
+    const materialLogs = allMaterialLogsSorted.slice(0, 20); // Son 20 hareketi göster
 
     return (
       <div className="flex flex-col gap-6 animate-in fade-in">
@@ -5026,9 +5248,18 @@ useEffect(() => {
 
         {/* YENİ EKLENEN: MALZEME HAREKETLERİ */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 relative">
-          <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
-            <History className="w-6 h-6 text-red-600" /> Malzeme Hareketleri (Son 20 İşlem)
-          </h2>
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 border-b border-neutral-200 pb-4 gap-3">
+            <h2 className="text-xl font-bold text-black flex items-center gap-2">
+              <History className="w-6 h-6 text-red-600" /> Malzeme Hareketleri (Son 20 İşlem)
+            </h2>
+            {/* YENİ: Tüm Hareketleri Gör Butonu */}
+            <button
+              onClick={() => setShowAllLogsModal(true)}
+              className="bg-neutral-100 text-neutral-700 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-neutral-200 transition w-full sm:w-auto justify-center"
+            >
+              <History className="w-4 h-4" /> Tüm Hareketleri Gör ({allMaterialLogs.length})
+            </button>
+          </div>
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600">
@@ -5074,6 +5305,49 @@ useEffect(() => {
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex justify-center items-center p-4">
             <div className="w-full max-w-2xl relative animate-in zoom-in-95">
               <UpdateMaterialStockView materials={materials} onUpdate={onUpdateStock} onCancel={() => setShowUpdateModal(false)} />
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: Tüm Malzeme Hareketlerini Gösteren Modal */}
+        {showAllLogsModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[85vh]">
+              <div className="bg-black text-white p-4 flex justify-between items-center shrink-0">
+                <h3 className="font-bold text-lg flex items-center gap-2"><History className="w-5 h-5" /> Tüm Malzeme Hareketleri ({allMaterialLogs.length})</h3>
+                <button onClick={() => setShowAllLogsModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <div className="overflow-y-auto custom-scrollbar flex-1">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600 sticky top-0">
+                    <tr>
+                      <th className="p-4 font-bold">Tarih / Saat</th>
+                      <th className="p-4 font-bold">İşlem Türü</th>
+                      <th className="p-4 font-bold">Detaylar</th>
+                      <th className="p-4 font-bold">İşlemi Yapan</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100">
+                    {allMaterialLogs.map(log => (
+                      <tr key={log.id} className="hover:bg-neutral-50 transition">
+                        <td className="p-4 font-medium text-black whitespace-nowrap">{log.timestamp}</td>
+                        <td className="p-4">
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${log.action.includes('Çıkışı') ? 'bg-red-50 text-red-700 border-red-100' : 'bg-green-50 text-green-700 border-green-100'}`}>
+                            {log.action}
+                          </span>
+                        </td>
+                        <td className="p-4 text-neutral-600 font-medium">{log.details}</td>
+                        <td className="p-4 font-bold text-neutral-800">{log.user}</td>
+                      </tr>
+                    ))}
+                    {allMaterialLogs.length === 0 && (
+                      <tr>
+                        <td colSpan="4" className="p-6 text-center text-neutral-500">Henüz malzeme hareketi bulunmuyor.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -5202,7 +5476,7 @@ useEffect(() => {
            <h3 className="text-lg font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-100 pb-3">
              <PlusCircle className="w-5 h-5 text-red-600" /> Manuel Finansal İşlem Ekle
            </h3>
-           <form onSubmit={handleAddTransaction} className="flex flex-col lg:flex-row gap-4">
+           <div  className="flex flex-col lg:flex-row gap-4">
               <div className="flex bg-neutral-100 p-1 rounded-xl shrink-0">
                 <button type="button" onClick={() => setTransactionType('income')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${transactionType === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-neutral-500'}`}>Gelir</button>
                 <button type="button" onClick={() => setTransactionType('expense')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${transactionType === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-neutral-500'}`}>Gider</button>
@@ -5214,8 +5488,8 @@ useEffect(() => {
                 <option value="bank">Banka / Havale</option>
               </select>
               <input required type="date" value={newTransaction.date} onChange={e => setNewTransaction({...newTransaction, date: e.target.value})} className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" />
-              <button type="submit" className="px-6 py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Kaydet</button>
-           </form>
+              <button type="button" onClick={handleAddTransaction} className="px-6 py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Kaydet</button>
+           </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
@@ -5474,7 +5748,143 @@ useEffect(() => {
     );
   };
 
-  const AddVehicleView = () => <PlaceholderView title="Araç Ekle" icon={PlusCircle} />;
+  const AddVehicleView = ({ onAdd, onCancel }) => {
+    const [formData, setFormData] = useState({
+      plate: '', type: 'Kamyon', capacity: [], volume: '', km: '', model: '', color: 'Beyaz', transmission: 'Manuel', ruhsatFoto: ''
+    });
+
+    const handleRuhsatUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      setFormData(prev => ({ ...prev, ruhsatFoto: 'Yükleniyor...' }));
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: uploadData });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+        setFormData(prev => ({ ...prev, ruhsatFoto: uploadedUrl }));
+      } catch (err) {
+        console.error('Ruhsat yükleme hatası:', err);
+        setFormData(prev => ({ ...prev, ruhsatFoto: '' }));
+      }
+    };
+
+    const handleSubmit = (e) => {
+      e.preventDefault();
+      if (!formData.plate || !formData.volume || !formData.km || !formData.model) return;
+      onAdd(formData);
+    };
+
+    return (
+      <div className="max-w-3xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+        <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
+          <h2 className="text-xl font-bold text-black flex items-center gap-2"><PlusCircle className="w-6 h-6 text-red-600" /> Araç Ekle</h2>
+          <button onClick={onCancel} className="text-neutral-400 hover:text-black transition"><X className="w-6 h-6" /></button>
+        </div>
+
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Araç Plakası</label>
+              <input required type="text" value={formData.plate} onChange={(e) => setFormData({...formData, plate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition uppercase" placeholder="Örn: 34 ABC 123" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Araç Cinsi</label>
+              <select required value={formData.type} onChange={(e) => setFormData({...formData, type: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                <option value="Kamyon">Kamyon</option>
+                <option value="Kamyonet">Kamyonet</option>
+                <option value="Panelvan">Panelvan</option>
+                <option value="Minivan">Minivan</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+            <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
+              <Truck className="w-4 h-4 text-red-600" /> Araç Eşya Alma Kapasitesi
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {['1+0', '1+1', '2+1', '3+1', '4+1'].map(cap => (
+                <label key={cap} className={`flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer border text-sm transition-all ${formData.capacity?.includes(cap) ? 'bg-red-600 border-red-600 text-white font-bold' : 'bg-white border-neutral-300 text-neutral-600 hover:bg-neutral-100'}`}>
+                  <input
+                    type="checkbox"
+                    className="hidden"
+                    checked={formData.capacity?.includes(cap)}
+                    onChange={() => {
+                      const newCap = formData.capacity?.includes(cap)
+                        ? formData.capacity.filter(c => c !== cap)
+                        : [...(formData.capacity || []), cap];
+                      setFormData({...formData, capacity: newCap});
+                    }}
+                  />
+                  {cap}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Hacim (m³)</label>
+              <input required type="number" value={formData.volume} onChange={(e) => setFormData({...formData, volume: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Araç KM</label>
+              <input required type="number" value={formData.km} onChange={(e) => setFormData({...formData, km: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Model (Yıl)</label>
+              <input required type="number" value={formData.model} onChange={(e) => setFormData({...formData, model: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Renk</label>
+              <select required value={formData.color} onChange={(e) => setFormData({...formData, color: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                <option value="Beyaz">Beyaz</option>
+                <option value="Gri">Gri</option>
+                <option value="Siyah">Siyah</option>
+                <option value="Yeşil">Yeşil</option>
+                <option value="Kırmızı">Kırmızı</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Vites</label>
+              <select required value={formData.transmission} onChange={(e) => setFormData({...formData, transmission: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                <option value="Manuel">Manuel</option>
+                <option value="Otomatik">Otomatik</option>
+              </select>
+            </div>
+          </div>
+
+          {/* YENİ: Araç Ruhsat Fotoğrafı Ekleme */}
+          <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+            <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
+              <FileText className="w-4 h-4 text-red-600" /> Araç Ruhsat Fotoğrafı
+            </label>
+            {formData.ruhsatFoto && formData.ruhsatFoto !== 'Yükleniyor...' && (
+              <img src={formData.ruhsatFoto} alt="Ruhsat" className="h-28 rounded-lg border border-neutral-200 mb-2 object-cover" />
+            )}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleRuhsatUpload}
+              className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-black file:text-white file:font-bold file:cursor-pointer"
+            />
+            {formData.ruhsatFoto === 'Yükleniyor...' && <p className="text-xs text-neutral-400 mt-1">Yükleniyor...</p>}
+          </div>
+
+          <div className="flex gap-3 pt-4 border-t border-neutral-100">
+            <button type="button" onClick={onCancel} className="flex-1 py-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">İptal</button>
+            <button type="button" onClick={handleSubmit} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Aracı Kaydet</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
   
   const VehicleMaintenanceView = ({ vehicles, onUpdateVehicle, addSystemLog }) => {
     const [selectedVehicleId, setSelectedVehicleId] = useState('');
@@ -5490,9 +5900,43 @@ useEffect(() => {
       notes: ''
     });
 
+    // --- YENİ: Kayıt düzenleme modu için state ---
+    const [editingRecordInfo, setEditingRecordInfo] = useState(null); // { vehicleId, recordId } | null
+
     const handleSubmit = (e) => {
       e.preventDefault();
       if (!selectedVehicle) return;
+
+      // --- YENİ: Düzenleme modu ise var olan kaydı güncelle ---
+      if (editingRecordInfo && editingRecordInfo.recordId) {
+        const updatedRecords = (selectedVehicle.maintenanceRecords || []).map(r =>
+          r.id === editingRecordInfo.recordId ? { ...r, ...recordForm } : r
+        );
+
+        let newKmEdit = selectedVehicle.km;
+        if (recordForm.km && parseInt(recordForm.km) > parseInt(selectedVehicle.km || '0')) {
+          newKmEdit = recordForm.km;
+        }
+
+        onUpdateVehicle({
+          ...selectedVehicle,
+          km: newKmEdit,
+          maintenanceRecords: updatedRecords
+        });
+
+        addSystemLog('Araç Bakım Düzenlendi', `${selectedVehicle.plate} aracının ${recordForm.type} kaydı güncellendi.`);
+        setEditingRecordInfo(null);
+        setRecordForm({
+          type: 'Periyodik Bakım',
+          date: new Date().toISOString().split('T')[0],
+          km: '',
+          cost: '',
+          nextDate: '',
+          nextKm: '',
+          notes: ''
+        });
+        return;
+      }
 
       const newRecord = {
         id: Date.now().toString(),
@@ -5515,6 +5959,35 @@ useEffect(() => {
 
       addSystemLog('Araç Bakım Eklendi', `${selectedVehicle.plate} aracına ${recordForm.type} kaydı girildi.`);
       
+      setRecordForm({
+        type: 'Periyodik Bakım',
+        date: new Date().toISOString().split('T')[0],
+        km: '',
+        cost: '',
+        nextDate: '',
+        nextKm: '',
+        notes: ''
+      });
+    };
+
+    // --- YENİ: Bir kaydı düzenlemek için formu doldurup düzenleme moduna geçer ---
+    const handleStartEdit = (vehicleId, record) => {
+      setSelectedVehicleId(vehicleId);
+      setEditingRecordInfo({ vehicleId, recordId: record.id });
+      setRecordForm({
+        type: record.type || 'Periyodik Bakım',
+        date: record.date || new Date().toISOString().split('T')[0],
+        km: record.km || '',
+        cost: record.cost || '',
+        nextDate: record.nextDate || '',
+        nextKm: record.nextKm || '',
+        notes: record.notes || ''
+      });
+    };
+
+    // --- YENİ: Düzenleme modunu iptal eder ---
+    const handleCancelEdit = () => {
+      setEditingRecordInfo(null);
       setRecordForm({
         type: 'Periyodik Bakım',
         date: new Date().toISOString().split('T')[0],
@@ -5555,67 +6028,19 @@ useEffect(() => {
     vehicles.forEach(v => {
        if (v.maintenanceRecords) {
            v.maintenanceRecords.forEach(r => {
-               allRecords.push({ ...r, plate: v.plate });
+               allRecords.push({ ...r, plate: v.plate, vehicleId: v.id });
            });
        }
     });
     allRecords.sort((a,b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date));
-    const recentRecords = allRecords.slice(0, 5);
+    // YENİ: Artık sadece son 5 değil, bugüne kadar eklenen TÜM kayıtlar (aşağıda kaydırmalı alanda) gösteriliyor
+    const recentRecords = allRecords;
 
     return (
       <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in pb-8">
         <h2 className="text-2xl font-black text-black flex items-center gap-2 border-b border-neutral-200 pb-4">
           <Activity className="w-7 h-7 text-red-600" /> Araç Rapor & Bakım Yönetimi
         </h2>
-
-        {/* Filo Kritik Durum */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2">
-            <AlertTriangle className="w-6 h-6 text-orange-500" /> Filo Kritik Durum & Hatırlatmalar
-          </h3>
-          {criticalAlerts.length === 0 ? (
-            <div className="bg-green-50 border border-green-200 text-green-700 p-5 rounded-xl flex items-center gap-3 font-bold">
-              <CheckCircle className="w-6 h-6" /> Sistemde yaklaşan veya gecikmiş hiçbir bakım/muayene bulunmuyor. Harika!
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {criticalAlerts.map((alert, i) => (
-                <div key={i} className="bg-red-50 border border-red-200 p-4 rounded-xl flex justify-between items-center text-sm shadow-sm">
-                  <div className="flex flex-col gap-1">
-                    <span className="font-black text-red-900 text-base">{alert.vehicle} - {alert.type}</span>
-                    <span className="text-red-700 font-medium">{alert.reason} {alert.nextDate ? `(${alert.nextDate})` : ''} {alert.nextKm ? `(${alert.nextKm} KM)` : ''}</span>
-                  </div>
-                  <AlertTriangle className="w-6 h-6 text-red-500" />
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Son Eklenen İşlemler */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2">
-            <History className="w-6 h-6 text-blue-500" /> Son Eklenen İşlemler
-          </h3>
-          {recentRecords.length === 0 ? (
-            <p className="text-sm text-neutral-500 font-medium">Henüz herhangi bir araca bakım kaydı eklenmemiş.</p>
-          ) : (
-            <div className="space-y-3">
-              {recentRecords.map(r => (
-                <div key={r.id} className="bg-neutral-50 border border-neutral-200 p-4 rounded-xl flex justify-between items-center text-sm shadow-sm transition hover:border-blue-200">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Car className="w-4 h-4"/></div>
-                    <div>
-                      <span className="font-black text-black text-base block mb-0.5">{r.plate}</span>
-                      <span className="text-neutral-600 font-medium">{r.type} <span className="text-[10px] text-neutral-400 ml-1">({r.date})</span></span>
-                    </div>
-                  </div>
-                  <span className="font-black text-green-600 text-base">{r.cost ? `₺${parseInt(r.cost).toLocaleString('tr-TR')}` : ''}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
 
         {/* İşlem Yapılacak Aracı Seçin */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
@@ -5637,10 +6062,13 @@ useEffect(() => {
               {/* Form Bölümü */}
               <div>
                 <h3 className="text-lg font-black text-black mb-4 flex items-center justify-between">
-                  <span className="flex items-center gap-2"><PlusCircle className="w-5 h-5 text-red-600" /> Rapor / Bakım Ekle</span>
+                  <span className="flex items-center gap-2">
+                    <PlusCircle className="w-5 h-5 text-red-600" />
+                    {editingRecordInfo ? 'Kaydı Düzenle' : 'Rapor / Bakım Ekle'}
+                  </span>
                   <span className="text-xs bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200">{selectedVehicle.plate}</span>
                 </h3>
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <div  className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-bold text-neutral-700 mb-1">İşlem Türü</label>
@@ -5679,10 +6107,17 @@ useEffect(() => {
                     <label className="block text-sm font-bold text-neutral-700 mb-1">Detaylar / Notlar</label>
                     <textarea value={recordForm.notes} onChange={e => setRecordForm({...recordForm, notes: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none" placeholder="Değişen parçalar, muayene istasyonu vb..."></textarea>
                   </div>
-                  <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg shadow-red-600/30">
-                    <Save className="w-5 h-5" /> Kaydı Ekle
-                  </button>
-                </form>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={handleSubmit} className="flex-1 py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg shadow-red-600/30">
+                      <Save className="w-5 h-5" /> {editingRecordInfo ? 'Kaydı Güncelle' : 'Kaydı Ekle'}
+                    </button>
+                    {editingRecordInfo && (
+                      <button type="button" onClick={handleCancelEdit} className="px-5 py-4 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition">
+                        Vazgeç
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
 
               {/* Geçmiş Kayıtlar Bölümü */}
@@ -5696,7 +6131,10 @@ useEffect(() => {
                   ) : (
                     [...(selectedVehicle.maintenanceRecords)].sort((a,b)=> new Date(b.date) - new Date(a.date)).map(record => (
                       <div key={record.id} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 flex flex-col sm:flex-row gap-4 justify-between relative group shadow-sm transition hover:border-red-200">
-                        <button onClick={() => handleDelete(record.id)} className="absolute top-2 right-2 p-1.5 bg-red-50 text-red-600 rounded-lg opacity-0 group-hover:opacity-100 transition"><X className="w-4 h-4"/></button>
+                        <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                          <button onClick={() => handleStartEdit(selectedVehicle.id, record)} className="p-1.5 bg-blue-50 text-blue-600 rounded-lg" title="Düzenle"><Edit className="w-4 h-4"/></button>
+                          <button onClick={() => handleDelete(record.id)} className="p-1.5 bg-red-50 text-red-600 rounded-lg" title="Sil"><X className="w-4 h-4"/></button>
+                        </div>
                         <div>
                           <div className="flex items-center gap-2 mb-1">
                             <span className="font-bold text-black text-base">{record.type}</span>
@@ -5724,6 +6162,69 @@ useEffect(() => {
             </div>
           )}
         </div>
+
+        {/* Filo Kritik Durum */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2">
+            <AlertTriangle className="w-6 h-6 text-orange-500" /> Filo Kritik Durum & Hatırlatmalar
+          </h3>
+          {criticalAlerts.length === 0 ? (
+            <div className="bg-green-50 border border-green-200 text-green-700 p-5 rounded-xl flex items-center gap-3 font-bold">
+              <CheckCircle className="w-6 h-6" /> Sistemde yaklaşan veya gecikmiş hiçbir bakım/muayene bulunmuyor. Harika!
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {criticalAlerts.map((alert, i) => (
+                <div key={i} className="bg-red-50 border border-red-200 p-4 rounded-xl flex justify-between items-center text-sm shadow-sm">
+                  <div className="flex flex-col gap-1">
+                    <span className="font-black text-red-900 text-base">{alert.vehicle} - {alert.type}</span>
+                    <span className="text-red-700 font-medium">{alert.reason} {alert.nextDate ? `(${alert.nextDate})` : ''} {alert.nextKm ? `(${alert.nextKm} KM)` : ''}</span>
+                  </div>
+                  <AlertTriangle className="w-6 h-6 text-red-500" />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Son Eklenen İşlemler */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2 justify-between">
+            <span className="flex items-center gap-2"><History className="w-6 h-6 text-blue-500" /> Son Eklenen İşlemler</span>
+            <span className="text-xs bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200 font-bold text-neutral-500">{recentRecords.length} kayıt</span>
+          </h3>
+          {recentRecords.length === 0 ? (
+            <p className="text-sm text-neutral-500 font-medium">Henüz herhangi bir araca bakım kaydı eklenmemiş.</p>
+          ) : (
+            /* YENİ: Bugüne kadarki tüm kayıtlar artık kaydırmalı (scroll) bir alanda listeleniyor */
+            <div className="space-y-3 max-h-[420px] overflow-y-auto custom-scrollbar pr-2">
+              {recentRecords.map(r => (
+                <div key={r.id} className="bg-neutral-50 border border-neutral-200 p-4 rounded-xl flex justify-between items-center text-sm shadow-sm transition hover:border-blue-200">
+                  <div className="flex items-center gap-3">
+                    <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Car className="w-4 h-4"/></div>
+                    <div>
+                      <span className="font-black text-black text-base block mb-0.5">{r.plate}</span>
+                      <span className="text-neutral-600 font-medium">{r.type} <span className="text-[10px] text-neutral-400 ml-1">({r.date})</span></span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-black text-green-600 text-base">{r.cost ? `₺${parseInt(r.cost).toLocaleString('tr-TR')}` : ''}</span>
+                    {/* YENİ: Duruma göre düzenleme butonu */}
+                    <button
+                      type="button"
+                      onClick={() => handleStartEdit(r.vehicleId, r)}
+                      className="p-2 bg-white border border-neutral-200 text-neutral-500 rounded-lg hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200 transition shrink-0"
+                      title="Bu kaydı düzenle"
+                    >
+                      <Edit className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
       </div>
     );
   };
@@ -5774,7 +6275,7 @@ useEffect(() => {
         <h2 className="text-xl sm:text-2xl font-black text-black mb-8 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <UserPlus className="w-6 h-6 sm:w-7 sm:h-7 text-red-600" /> Personel Ekle
         </h2>
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <div  className="space-y-6">
           
           <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-5 bg-neutral-50 rounded-xl border border-neutral-200">
             <div className="w-20 h-20 rounded-full border border-neutral-300 bg-neutral-100 flex items-center justify-center overflow-hidden shrink-0">
@@ -5905,10 +6406,10 @@ useEffect(() => {
             </div>
           </div>
 
-          <button type="submit" disabled={isUploading} className="w-full py-4 mt-2 bg-[#e62020] text-white font-bold text-lg rounded-xl hover:bg-red-700 transition shadow-md disabled:opacity-50">
+          <button type="button" onClick={handleSubmit} disabled={isUploading} className="w-full py-4 mt-2 bg-[#e62020] text-white font-bold text-lg rounded-xl hover:bg-red-700 transition shadow-md disabled:opacity-50">
             Personeli Kaydet
           </button>
-        </form>
+        </div>
       </div>
     );
   };
@@ -6026,7 +6527,7 @@ useEffect(() => {
                 <h3 className="font-bold text-lg">Personel Düzenle</h3>
                 <button onClick={() => setEditingUser(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
+              <div  className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
                 
                 <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-5 bg-neutral-50 rounded-xl border border-neutral-200">
                   <div className="w-20 h-20 rounded-full border border-neutral-300 bg-neutral-100 flex items-center justify-center overflow-hidden shrink-0">
@@ -6157,10 +6658,10 @@ useEffect(() => {
                   </div>
                 </div>
 
-                <button type="submit" disabled={isUploading} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2 disabled:opacity-50">
+                <button type="button" onClick={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} disabled={isUploading} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2 disabled:opacity-50">
                   <Save className="w-5 h-5" /> Değişiklikleri Kaydet
                 </button>
-              </form>
+              </div>
             </div>
           </div>
         )}
@@ -6497,7 +6998,7 @@ useEffect(() => {
                 <button onClick={() => setEditingUser(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               <div className="p-6 overflow-y-auto custom-scrollbar">
-                <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="space-y-6">
+                <div  className="space-y-6">
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -6562,10 +7063,10 @@ useEffect(() => {
                       </div>
                   </div>
                   
-                  <button type="submit" className="w-full bg-red-600 text-white p-4 rounded-xl font-bold hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg mt-4">
+                  <button type="button" onClick={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="w-full bg-red-600 text-white p-4 rounded-xl font-bold hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg mt-4">
                     <CheckCircle className="w-5 h-5" /> Değişiklikleri Kaydet
                   </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -6581,10 +7082,10 @@ useEffect(() => {
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <Briefcase className="w-6 h-6 text-red-600" /> Pozisyon Yönetimi
         </h2>
-        <form onSubmit={e => { e.preventDefault(); if(newPos) { onAddPosition(newPos); setNewPos(''); } }} className="flex gap-2 mb-6">
+        <div  className="flex gap-2 mb-6">
           <input type="text" value={newPos} onChange={e => setNewPos(e.target.value)} placeholder="Yeni Pozisyon Adı" className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-          <button type="submit" className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
-        </form>
+          <button type="button" onClick={e => { e.preventDefault(); if(newPos) { onAddPosition(newPos); setNewPos(''); } }} className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
+        </div>
         <div className="space-y-2">
           {positions.map((pos, idx) => (
             <div key={idx} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-200">
@@ -6604,10 +7105,10 @@ useEffect(() => {
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <Star className="w-6 h-6 text-red-600" /> Rütbe Yönetimi
         </h2>
-        <form onSubmit={e => { e.preventDefault(); if(newRank) { onAddRank(newRank); setNewRank(''); } }} className="flex gap-2 mb-6">
+        <div  className="flex gap-2 mb-6">
           <input type="text" value={newRank} onChange={e => setNewRank(e.target.value)} placeholder="Yeni Rütbe Adı" className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-          <button type="submit" className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
-        </form>
+          <button type="button" onClick={e => { e.preventDefault(); if(newRank) { onAddRank(newRank); setNewRank(''); } }} className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
+        </div>
         <div className="space-y-2">
           {ranks.map((rank, idx) => (
             <div key={idx} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-200">
@@ -6869,14 +7370,14 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 </div>
               ))}
             </div>
-            <form onSubmit={handleAddCategory} className="flex gap-2">
+            <div  className="flex gap-2">
               <input type="text" value={newCategory} onChange={e => setNewCategory(e.target.value)} placeholder="Yeni Kategori Adı" className="p-2 border border-neutral-300 rounded-lg focus:ring-2 focus:ring-blue-600 outline-none text-sm w-64" />
-              <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition">Ekle</button>
-            </form>
+              <button type="button" onClick={handleAddCategory} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition">Ekle</button>
+            </div>
           </div>
         )}
 
-        <form onSubmit={handleAdd} className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 mb-8 space-y-4">
+        <div  className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 mb-8 space-y-4">
           <h3 className="font-bold text-black border-b border-neutral-200 pb-2 mb-4 flex items-center gap-2">
             <PlusCircle className="w-5 h-5 text-red-600" /> {editingId ? 'Şifre Bilgilerini Güncelle' : 'Yeni Hesap / Şifre Ekle'}
           </h3>
@@ -6914,11 +7415,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {editingId && (
               <button type="button" onClick={() => { setEditingId(null); setFormData({ platform: '', link: '', username: '', password: '', notes: '', category: categories[0] || 'Genel' }); }} className="flex-1 py-3 bg-neutral-200 text-neutral-700 font-bold rounded-xl hover:bg-neutral-300 transition">İptal</button>
             )}
-            <button type="submit" className="flex-[2] py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-md">
+            <button type="button" onClick={handleAdd} className="flex-[2] py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-md">
               <Save className="w-5 h-5" /> {editingId ? 'Değişiklikleri Kaydet' : 'Sisteme Kaydet'}
             </button>
           </div>
-        </form>
+        </div>
 
         {passwords.length === 0 ? (
           <div className="text-center text-neutral-500 py-10 bg-neutral-50 rounded-2xl border border-neutral-200">
@@ -7548,6 +8049,24 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         });
     };
 
+    // YENİ: Ekip Kurma Tahtası'ndan da Randevu Onayı (WA/SMS) mesajı gönderebilmek için eklendi
+    const sendAppointmentMessage = (method) => {
+        let phone = (job.customerPhone || '').replace(/\D/g, '');
+        if (!phone) { alert('Bu iş için kayıtlı bir müşteri telefonu bulunamadı.'); return; }
+        if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+        else if (!phone.startsWith('90')) phone = '90' + phone;
+
+        const msg = `Merhaba ${job.customerName},\n\nBen Sembol Nakliyat operasyon sorumlunuz. ${job.date} saat ${job.time} sularında planlanan işleminiz için ekibimiz ve aracımız hazırlıklarını tamamlamıştır. İşi daha iyi organize edebilmemiz açısından taşıma aracımız için uygun bir park yeri ayarlamanızı rica ederiz.\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\nEkibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.\n\nHerhangi bir sorun durumunda veya talebinizde doğrudan benimle bu numara üzerinden iletişime geçebilirsiniz.\n\nŞimdiden yeni yerinizin hayırlı olmasını dileriz. Süreci sizin için en iyi şekilde tamamlamaya çalışacağız. Görüşmek üzere!`;
+
+        if (method === 'wa') {
+            window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+        } else if (method === 'sms') {
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+            const separator = isIOS ? '&' : '?';
+            window.open(`sms:${phone}${separator}body=${encodeURIComponent(msg)}`, '_self');
+        }
+    };
+
     // EKLENEN YENİ METOTLAR: Doğrudan kart üzerinden malzeme ekleme ve çıkarma
     const handleAddCustomMaterial = async () => {
        const matName = newCustomMaterial.name.trim();
@@ -7854,6 +8373,24 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             <CheckSquare className="w-3.5 h-3.5" /> {job.isTeamApproved ? 'Ekip Onaylandı / Düzenle' : 'Tüm Ekibi Onayla'}
           </button>
         </div>
+
+        {/* YENİ: Müşteriye Randevu Onayı (WhatsApp / SMS) Butonları */}
+        <div className="p-2 border-t border-neutral-200 shrink-0 bg-white flex gap-1.5">
+          <button
+            type="button"
+            onClick={() => sendAppointmentMessage('wa')}
+            className="flex-1 py-2 text-[10px] font-bold rounded-lg transition flex items-center justify-center gap-1 bg-[#25D366]/10 hover:bg-[#25D366]/20 text-[#128C7E]"
+          >
+            <MessageCircle className="w-3.5 h-3.5" /> Randevu Onayı (WA)
+          </button>
+          <button
+            type="button"
+            onClick={() => sendAppointmentMessage('sms')}
+            className="flex-1 py-2 text-[10px] font-bold rounded-lg transition flex items-center justify-center gap-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700"
+          >
+            <MessageSquareText className="w-3.5 h-3.5" /> Randevu Onayı (SMS)
+          </button>
+        </div>
       </div>
     );
   };
@@ -7863,6 +8400,13 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [selectedDate, setSelectedDate] = useState(today);
     const [dragOverTarget, setDragOverTarget] = useState(null);
     const [mesaiData, setMesaiData] = useState({});
+
+    // --- YENİ: "FAZLA İŞ ATA" ÖZELLİĞİ İÇİN EKLENEN STATE'LER ---
+    // Not: Mevcut kodların hiçbiri değiştirilmedi, sadece ek özellik için yeni state'ler eklendi.
+    const [showFazlaIsAtaModal, setShowFazlaIsAtaModal] = useState(false); // Modal açık/kapalı
+    const [fazlaIsAtaPersonId, setFazlaIsAtaPersonId] = useState('');      // Seçilen (meşgul) personel
+    const [fazlaIsAtaJobId, setFazlaIsAtaJobId] = useState('');            // Eklenecek hedef iş
+    const [fazlaIsAtaError, setFazlaIsAtaError] = useState('');           // Uyarı mesajı
 
     useEffect(() => {
       const fetchMesai = async () => {
@@ -8057,6 +8601,59 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       }
     };
 
+    // --- YENİ: "FAZLA İŞ ATA" FONKSİYONU ---
+    // Bu fonksiyon TAMAMEN YENİ ve EKLENTİ niteliğindedir; mevcut atama
+    // fonksiyonlarına (handleDropToJob, handleDropToUnassigned) hiç dokunulmadı.
+    // Amaç: O gün başka bir işe zaten yazılmış (meşgul) bir personeli, ASIL
+    // işinden ÇIKARMADAN, seçilen farklı bir işe de EK olarak eklemek.
+    const handleFazlaIsAta = async () => {
+      setFazlaIsAtaError('');
+      if (!fazlaIsAtaPersonId || !fazlaIsAtaJobId) {
+        setFazlaIsAtaError('Lütfen personel ve iş seçin.');
+        return;
+      }
+
+      const targetJob = jobs.find(j => j.id === fazlaIsAtaJobId);
+      const person = personnelList.find(p => String(p.id) === String(fazlaIsAtaPersonId));
+      if (!targetJob || !person) {
+        setFazlaIsAtaError('Personel veya iş bulunamadı.');
+        return;
+      }
+
+      // Asansör işlerine sadece Operatör atanabilir kuralı korunuyor
+      if (targetJob.type === 'Asansör' && person.position !== 'Operatör') {
+        setFazlaIsAtaError("Asansör işlerine sadece 'Operatör' pozisyonundaki personeller atanabilir!");
+        return;
+      }
+
+      let newIds = [...(targetJob.assignedPersonnelIds || [])];
+      if (newIds.includes(fazlaIsAtaPersonId)) {
+        setFazlaIsAtaError('Bu personel zaten bu işe atanmış.');
+        return;
+      }
+      newIds.push(fazlaIsAtaPersonId);
+
+      const manualNames = (targetJob.teamNames || []).filter(name => !targetJob.assignedPersonnelIds?.includes(personnelList.find(p => p.fullName === name)?.id));
+      const systemNames = newIds.map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
+      const allNames = [...systemNames, ...manualNames];
+
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', fazlaIsAtaJobId), {
+          assignedPersonnelIds: newIds,
+          assignedPersonnelId: newIds[0] || null,
+          teamNames: allNames,
+          team: allNames.length > 0 ? allNames.join(', ') : 'Atanmadı'
+        });
+        if (addSystemLog) addSystemLog('Fazla İş Ata', `${person.fullName}, ${targetJob.customerName || 'iş'} operasyonuna ek personel olarak atandı.`);
+        setFazlaIsAtaPersonId('');
+        setFazlaIsAtaJobId('');
+        setShowFazlaIsAtaModal(false);
+      } catch (err) {
+        console.error('Fazla iş atama sırasında hata:', err);
+        setFazlaIsAtaError('Atama sırasında bir hata oluştu.');
+      }
+    };
+
     return (
       <div className="flex flex-col h-[calc(100vh-120px)] md:h-[calc(100vh-140px)] animate-in fade-in pb-4">
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col md:flex-row justify-between items-center gap-4 mb-4 shrink-0">
@@ -8153,6 +8750,14 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <h3 className="font-black text-xs text-black flex items-center gap-1.5">
                   <UserPlus className="w-3.5 h-3.5 text-orange-500" /> Ekipler
                 </h3>
+                {/* YENİ: Fazla İş Ata Butonu - mevcut başlık/yapı değiştirilmeden eklendi */}
+                <button
+                  type="button"
+                  onClick={() => { setFazlaIsAtaError(''); setFazlaIsAtaPersonId(''); setFazlaIsAtaJobId(''); setShowFazlaIsAtaModal(true); }}
+                  className="bg-orange-500 hover:bg-orange-600 text-white text-[9px] font-black px-2 py-1 rounded-lg shadow-sm transition flex items-center gap-1"
+                >
+                  <UserPlus className="w-3 h-3" /> Fazla İş Ata
+                </button>
               </div>
               <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1.5 bg-neutral-50/30">
                 {displayPersonnel.length === 0 ? (
@@ -8188,6 +8793,78 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
 
         </div>
+
+        {/* --- YENİ: FAZLA İŞ ATA MODALI --- */}
+        {/* Mevcut hiçbir bileşen/JSX değiştirilmedi; bu modal tamamen ek olarak eklendi. */}
+        {showFazlaIsAtaModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
+              <div className="bg-orange-500 text-white p-4 flex justify-between items-center shrink-0">
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <UserPlus className="w-5 h-5" /> Fazla İş Ata
+                </h3>
+                <button onClick={() => setShowFazlaIsAtaModal(false)} className="text-orange-100 hover:text-white transition">
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <p className="text-xs font-medium text-neutral-500">
+                  O gün başka bir işe zaten atanmış (meşgul) personelleri, mevcut işlerinden çıkarmadan
+                  seçtiğiniz farklı bir işe de EK personel olarak atayabilirsiniz.
+                </p>
+
+                {fazlaIsAtaError && (
+                  <div className="bg-red-50 text-red-600 p-3 rounded-xl text-xs font-bold flex items-center gap-2 border border-red-100">
+                    <AlertTriangle className="w-4 h-4 shrink-0" /> {fazlaIsAtaError}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Meşgul / Ekip Personeli Seçin</label>
+                  <select
+                    value={fazlaIsAtaPersonId}
+                    onChange={(e) => setFazlaIsAtaPersonId(e.target.value)}
+                    className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none bg-white font-medium"
+                  >
+                    <option value="">-- Personel Seçin --</option>
+                    {busyPersonnelIdsThisDay
+                      .filter((id, idx, arr) => arr.indexOf(id) === idx)
+                      .map(id => personnelList.find(p => String(p.id) === String(id)))
+                      .filter(Boolean)
+                      .map(p => (
+                        <option key={p.id} value={p.id}>{p.fullName} ({p.position})</option>
+                      ))}
+                  </select>
+                  <p className="text-[10px] text-neutral-400 mt-1">Bu liste, o gün en az bir işe atanmış tüm ekip üyelerini gösterir.</p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Ek Olarak Atanacak İş</label>
+                  <select
+                    value={fazlaIsAtaJobId}
+                    onChange={(e) => setFazlaIsAtaJobId(e.target.value)}
+                    className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none bg-white font-medium"
+                  >
+                    <option value="">-- İş Seçin --</option>
+                    {dailyJobs.map(j => (
+                      <option key={j.id} value={j.id}>{j.customerName} — {j.type || 'Nakliye'} ({j.time || '--:--'})</option>
+                    ))}
+                  </select>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleFazlaIsAta}
+                  className="w-full py-4 bg-orange-500 text-white font-black rounded-xl hover:bg-orange-600 transition flex justify-center items-center gap-2 shadow-lg mt-2"
+                >
+                  <CheckCircle className="w-5 h-5" /> Ek Personel Olarak Ata
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     );
   };
@@ -8244,7 +8921,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
          <h2 className="text-2xl font-black text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
            <User className="w-7 h-7 text-red-600" /> Profil Bilgilerim
          </h2>
-         <form onSubmit={handleSaveProfile} className="space-y-6">
+         <div  className="space-y-6">
            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 bg-neutral-50 rounded-xl border border-neutral-200">
              <div className="w-24 h-24 rounded-full border-4 border-white shadow-md overflow-hidden bg-neutral-200 flex items-center justify-center shrink-0">
                {editForm.profileImage === 'Yükleniyor...' ? (
@@ -8284,10 +8961,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
              </div>
            </div>
 
-           <button type="submit" disabled={isUploading} className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 disabled:opacity-50">
+           <button type="button" onClick={handleSaveProfile} disabled={isUploading} className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 disabled:opacity-50">
              Bilgilerimi Güncelle
            </button>
-         </form>
+         </div>
       </div>
     );
   };
@@ -8632,7 +9309,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
          <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
            <AlertTriangle className="w-6 h-6 text-red-600" /> Şikayet / Sorun Bildirimi
          </h2>
-         <form onSubmit={submitComplaint} className="space-y-4">
+         <div  className="space-y-4">
             <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-sm text-blue-800 font-medium mb-4">
                Sistemdeki sorunları, personel şikayetlerini veya araç/ekipman eksikliklerini doğrudan yönetim kuruluna iletebilirsiniz.
             </div>
@@ -8644,10 +9321,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               <label className="block text-sm font-bold text-black mb-1">Detaylı Açıklama</label>
               <textarea required value={complaintContent} onChange={e => setComplaintContent(e.target.value)} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-32 resize-none transition" placeholder="Sorunu tüm detaylarıyla açıklayın..."></textarea>
             </div>
-            <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+            <button type="button" onClick={submitComplaint} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
                <Send className="w-5 h-5" /> Bildirimi Yöneticilere Gönder
             </button>
-         </form>
+         </div>
       </div>
     );
   };
@@ -10571,7 +11248,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             <p className="text-red-600 text-xs font-bold mt-1 tracking-[0.2em] bg-red-50 px-3 py-1 rounded-full border border-red-100">OPERASYON MERKEZİ</p>
           </div>
           
-          <form onSubmit={handleSubmit} className="p-8 space-y-6">
+          <div  className="p-8 space-y-6">
             {error && (
               <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100">
                 <AlertTriangle className="w-5 h-5 shrink-0" /> {error}
@@ -10621,10 +11298,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </label>
             </div>
             
-            <button type="submit" className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg mt-4">
+            <button type="button" onClick={handleSubmit} className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg mt-4">
               Sisteme Giriş Yap
             </button>
-          </form>
+          </div>
         </div>
       </div>
     );
@@ -10766,6 +11443,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     // Araç Düzenleme State'leri
     const [editingVehicle, setEditingVehicle] = useState(null);
     const [vehicleEditForm, setVehicleEditForm] = useState({});
+    // YENİ: Araç ruhsatı fotoğrafını büyük önizlemede göstermek için state
+    const [viewingRuhsatUrl, setViewingRuhsatUrl] = useState(null);
 
     // Eski veri aktarımı kontrolü
     const [isDataMigrated, setIsDataMigrated] = useState(() => localStorage.getItem('sembol_data_migrated') === 'true');
@@ -11577,7 +12256,23 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     const handleCancelJob = async (id) => {
       if (!firebaseUser) return;
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id), { status: 'cancelled' });
+      const jobToCancel = jobs.find(j => j.id === id);
+      const updateData = { status: 'cancelled' };
+
+      // YENİ: İptal edilen işe ekip/personel atanmışsa, o personellerin bu işteki
+      // görevini de otomatik olarak iptal et (atamayı kaldır). Mevcut iptal mantığına dokunulmadı.
+      if (jobToCancel && (
+        (jobToCancel.assignedPersonnelIds && jobToCancel.assignedPersonnelIds.length > 0) ||
+        jobToCancel.assignedPersonnelId ||
+        (jobToCancel.team && jobToCancel.team !== 'Atanmadı')
+      )) {
+        updateData.assignedPersonnelIds = [];
+        updateData.assignedPersonnelId = null;
+        updateData.teamNames = [];
+        updateData.team = 'Atanmadı';
+      }
+
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id), updateData);
       addSystemLog('İş İptal Edildi', `Sistem üzerinden bir operasyon iptal edildi.`);
     };
 
@@ -13158,6 +13853,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                           <th className="p-4 font-bold">Araç Cinsi</th>
                           <th className="p-4 font-bold">Taşıma Kapasitesi</th>
                           <th className="p-4 font-bold">Araç Detayları</th>
+                          <th className="p-4 font-bold">Ruhsat</th>
                           <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
                         </tr>
                       </thead>
@@ -13189,6 +13885,20 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                                 <span className="col-span-2"><b className="text-black">Vites:</b> {vehicle.transmission}</span>
                               </div>
                             </td>
+                            {/* YENİ: Ruhsat sütunu */}
+                            <td className="p-4">
+                              {vehicle.ruhsatFoto && vehicle.ruhsatFoto !== 'Yükleniyor...' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setViewingRuhsatUrl(vehicle.ruhsatFoto)}
+                                  className="px-3 py-2 bg-neutral-100 text-neutral-700 text-xs font-bold rounded-lg hover:bg-neutral-200 transition flex items-center gap-1.5 whitespace-nowrap"
+                                >
+                                  <FileText className="w-3.5 h-3.5" /> Ruhsatı Gör
+                                </button>
+                              ) : (
+                                <span className="text-xs text-neutral-400 font-medium">Yüklenmedi</span>
+                              )}
+                            </td>
                             <td className="p-4">
                               <div className="flex items-center gap-2">
                                 <button 
@@ -13210,7 +13920,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         ))}
                         {vehicles.length === 0 && (
                           <tr>
-                            <td colSpan="5" className="p-6 text-center text-neutral-500">Kayıtlı araç bulunamadı.</td>
+                            <td colSpan="6" className="p-6 text-center text-neutral-500">Kayıtlı araç bulunamadı.</td>
                           </tr>
                         )}
                       </tbody>
@@ -13227,7 +13937,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         <button onClick={() => setEditingVehicle(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
                       </div>
                       
-                      <form onSubmit={(e) => { e.preventDefault(); handleUpdateVehicle(vehicleEditForm); }} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                      <div  className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-bold text-neutral-700 mb-1">Araç Plakası</label>
@@ -13303,15 +14013,63 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                           </div>
                         </div>
 
+                        {/* YENİ: Araç Ruhsat Fotoğrafı Ekleme */}
+                        <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+                          <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
+                            <FileText className="w-4 h-4 text-red-600" /> Araç Ruhsat Fotoğrafı
+                          </label>
+                          {vehicleEditForm.ruhsatFoto && vehicleEditForm.ruhsatFoto !== 'Yükleniyor...' && (
+                            <img src={vehicleEditForm.ruhsatFoto} alt="Ruhsat" className="h-28 rounded-lg border border-neutral-200 mb-2 object-cover" />
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={async (e) => {
+                              const file = e.target.files[0];
+                              if (!file) return;
+                              setVehicleEditForm(prev => ({ ...prev, ruhsatFoto: 'Yükleniyor...' }));
+                              const uploadData = new FormData();
+                              uploadData.append('file', file);
+                              try {
+                                const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: uploadData });
+                                const text = await res.text();
+                                let uploadedUrl = file.name;
+                                try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+                                setVehicleEditForm(prev => ({ ...prev, ruhsatFoto: uploadedUrl }));
+                              } catch (err) {
+                                console.error('Ruhsat yükleme hatası:', err);
+                                setVehicleEditForm(prev => ({ ...prev, ruhsatFoto: '' }));
+                              }
+                            }}
+                            className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-black file:text-white file:font-bold file:cursor-pointer"
+                          />
+                          {vehicleEditForm.ruhsatFoto === 'Yükleniyor...' && <p className="text-xs text-neutral-400 mt-1">Yükleniyor...</p>}
+                        </div>
+
                         <div className="flex gap-3 pt-4 border-t border-neutral-100">
                           <button type="button" onClick={() => setEditingVehicle(null)} className="flex-1 py-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">İptal</button>
-                          <button type="submit" className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Değişiklikleri Kaydet</button>
+                          <button type="button" onClick={(e) => { e.preventDefault(); handleUpdateVehicle(vehicleEditForm); }} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Değişiklikleri Kaydet</button>
                         </div>
-                      </form>
+                      </div>
                     </div>
                   </div>
                 )}
               </>
+            )}
+
+            {/* YENİ: Araç Ruhsatı Büyük Önizleme Modalı */}
+            {viewingRuhsatUrl && (
+              <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4" onClick={() => setViewingRuhsatUrl(null)}>
+                <div className="bg-white rounded-2xl shadow-2xl overflow-hidden max-w-2xl w-full animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
+                  <div className="bg-black text-white p-4 flex justify-between items-center">
+                    <h3 className="font-bold text-lg flex items-center gap-2"><FileText className="w-5 h-5" /> Araç Ruhsatı</h3>
+                    <button onClick={() => setViewingRuhsatUrl(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+                  </div>
+                  <div className="p-4 bg-neutral-100 flex justify-center">
+                    <img src={viewingRuhsatUrl} alt="Araç Ruhsatı" className="max-h-[70vh] rounded-lg object-contain" />
+                  </div>
+                </div>
+              </div>
             )}
             {activeTab === 'vehicleMaintenance' && showOperasyon && <VehicleMaintenanceView vehicles={vehicles} onUpdateVehicle={handleUpdateVehicle} addSystemLog={addSystemLog} />}
 
@@ -13472,7 +14230,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     </div>
                   </div>
                 )}
-                <form onSubmit={submitAssignJob} className="space-y-5">
+                <div  className="space-y-5">
                   <p className="text-sm text-neutral-600 pb-2 border-b border-neutral-100">
                     <b className="text-black">Müşteri:</b> {jobToAssign.customerName} <br/>
                     <b className="text-black">Tarih:</b> {jobToAssign.date}
@@ -13734,7 +14492,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20">
+                    <button type="button" onClick={submitAssignJob} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20">
                       <CheckSquare className="w-5 h-5" /> Görevi Onayla ve Atamayı Yap
                     </button>
 
@@ -13744,7 +14502,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       </button>
                     )}
                   </div>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -13828,7 +14586,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <button onClick={() => setShowTaskModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
-              <form onSubmit={handleAddTask} className="p-6 space-y-4">
+              <div  className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
                   <input required type="text" value={newTask.title} onChange={(e) => setNewTask({...newTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" placeholder="Örn: Müşteri aramaları yapılacak" />
@@ -13855,10 +14613,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
                 </div>
 
-                <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+                <button type="button" onClick={handleAddTask} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
                   <PlusCircle className="w-5 h-5" /> Görevi Ekle
                 </button>
-              </form>
+              </div>
             </div>
           </div>
         )}
@@ -13872,7 +14630,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <button onClick={() => setEditingTask(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
-              <form onSubmit={handleUpdateTask} className="p-6 space-y-4">
+              <div  className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
                   <input required type="text" value={editingTask.title} onChange={(e) => setEditingTask({...editingTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" />
@@ -13899,10 +14657,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
                 </div>
 
-                <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+                <button type="button" onClick={handleUpdateTask} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
                   <CheckCircle className="w-5 h-5" /> Değişiklikleri Kaydet
                 </button>
-              </form>
+              </div>
             </div>
           </div>
         )}
@@ -13922,7 +14680,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <AlertTriangle className="w-5 h-5 shrink-0" /> {endJobError}
                   </div>
                 )}
-                <form onSubmit={submitEndJob} className="space-y-4">
+                <div  className="space-y-4">
                   {jobToEnd.type === 'Asansör' ? (
                     <>
                       <div>
@@ -14180,10 +14938,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     </div>
                   </div>
 
-                  <button type="submit" className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <button type="button" onClick={submitEndJob} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> {jobToEnd.type === 'Asansör' ? 'Asansör İşini Sonlandır' : 'Kodu Doğrula ve İşi Bitir'}
                   </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -14199,7 +14957,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
               
               <div className="p-4 overflow-y-auto custom-scrollbar flex-1">
-                <form onSubmit={submitApprovePoints} className="space-y-4">
+                <div  className="space-y-4">
                   <div className="bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 flex justify-between items-center">
                     <div>
                       <p className="text-xs font-black text-black leading-tight">{jobToApprove.customerName}</p>
@@ -14298,10 +15056,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       </div>
                   </div>
 
-                  <button type="submit" className="w-full py-3 bg-yellow-500 text-black font-black text-sm rounded-xl hover:bg-yellow-600 transition flex justify-center items-center gap-2 shadow-md">
+                  <button type="button" onClick={submitApprovePoints} className="w-full py-3 bg-yellow-500 text-black font-black text-sm rounded-xl hover:bg-yellow-600 transition flex justify-center items-center gap-2 shadow-md">
                     <CheckCircle className="w-4 h-4" /> Onayla ve Puanları İşle
                   </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -14316,7 +15074,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <button onClick={() => setShowMesaiModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               <div className="p-6 overflow-y-auto custom-scrollbar max-h-[80vh]">
-                <form onSubmit={submitMesaiApprove} className="space-y-4">
+                <div  className="space-y-4">
                    <div className="bg-neutral-50 p-3 rounded-xl border border-neutral-200 mb-4">
                       <p className="text-sm font-bold text-black mb-1">Müşteri: {jobForMesai.customerName}</p>
                       <p className="text-xs text-neutral-500">Tarih: {jobForMesai.date}</p>
@@ -14362,10 +15120,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       </div>
                    )}
 
-                   <button type="submit" disabled={Object.keys(mesaiModalData).length === 0} className="w-full py-4 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg mt-4 disabled:opacity-50">
+                   <button type="button" onClick={submitMesaiApprove} disabled={Object.keys(mesaiModalData).length === 0} className="w-full py-4 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg mt-4 disabled:opacity-50">
                      <CheckCircle className="w-5 h-5" /> Mesaileri Kaydet
                    </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -14381,15 +15139,15 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
               
               <div className="p-6 overflow-y-auto custom-scrollbar">
-                <form onSubmit={handleResolveDamageSubmit} className="space-y-4">
+                <div  className="space-y-4">
                   <div>
                     <label className="block text-sm font-bold text-black mb-2">Çözüm Notu / Açıklama</label>
                     <textarea required value={resolveDamageModal.note} onChange={e => setResolveDamageModal({...resolveDamageModal, note: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none transition text-sm" placeholder="Sorun nasıl çözüldü? Müşteri ile nasıl anlaşıldı? (Örn: Tamir masrafı karşılandı.)"></textarea>
                   </div>
-                  <button type="submit" className="w-full py-4 bg-green-500 text-white font-black rounded-xl hover:bg-green-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <button type="button" onClick={handleResolveDamageSubmit} className="w-full py-4 bg-green-500 text-white font-black rounded-xl hover:bg-green-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> Çözüldü Olarak Kaydet
                   </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -14405,7 +15163,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
               
               <div className="p-6">
-                <form onSubmit={handleAddContact} className="space-y-4">
+                <div  className="space-y-4">
                   {!editingContact && (
                     <>
                       <div>
@@ -14442,10 +15200,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <label className="block text-sm font-bold text-black mb-1">Pozisyon / Unvan</label>
                     <input required type="text" value={contactForm.position} onChange={e => setContactForm({...contactForm, position: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none" placeholder="Örn: Operasyon Müdürü" />
                   </div>
-                  <button type="submit" className="w-full py-4 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <button type="button" onClick={handleAddContact} className="w-full py-4 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> {editingContact ? 'Değişiklikleri Kaydet' : 'Kaydet ve Ekle'}
                   </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
