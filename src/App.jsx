@@ -7,16 +7,16 @@ import React, { useState, useEffect } from 'react';
     ArrowUpRight, ArrowDownRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, ArrowUpDown,
     UserPlus, Camera, Upload, Edit, Ban, LogOut, Lock, Mail, Bell, User, Sparkles, Loader2, Copy, MessageSquareText,
     MessageCircle, Send, Package, Database, Download, History, Save, Search, Key, BarChart, TrendingUp, ListTodo,
-    Eye, EyeOff, FolderOpen
+    Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award
   } from 'lucide-react';
 
-  // --- FIREBASE BAĞLANTISI ---
+  // --- FIREBASE BAĞLANTISI (GERÇEK / CANLI) ---
   import { initializeApp } from "firebase/app";
   import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
-import { 
-  getFirestore, collection, addDoc, onSnapshot, 
-  doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where
-} from "firebase/firestore";
+  import {
+    getFirestore, collection, addDoc, onSnapshot,
+    doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where
+  } from "firebase/firestore";
 
   // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
   const defaultFirebaseConfig = {
@@ -34,219 +34,7 @@ import {
   const db = getFirestore(app);
   const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
 
-  // TÜRKİYE İL VE İLÇE VERİTABANI
-  const TURKEY_LOCATIONS = {
-    "İstanbul (Avrupa)": ["Arnavutköy", "Avcılar", "Bağcılar", "Bahçelievler", "Bakırköy", "Başakşehir", "Bayrampaşa", "Beşiktaş", "Beylikdüzü", "Beyoğlu", "Büyükçekmece", "Çatalca", "Esenler", "Esenyurt", "Eyüpsultan", "Fatih", "Gaziosmanpaşa", "Güngören", "Kâğıthane", "Küçükçekmece", "Sarıyer", "Silivri", "Sultangazi", "Şişli", "Zeytinburnu"],
-    "İstanbul (Anadolu)": ["Adalar", "Ataşehir", "Beykoz", "Çekmeköy", "Kadıköy", "Kartal", "Maltepe", "Pendik", "Sancaktepe", "Sultanbeyli", "Şile", "Tuzla", "Ümraniye", "Üsküdar"],
-    "Ankara": ["Akyurt", "Altındağ", "Ayaş", "Bala", "Beypazarı", "Çamlıdere", "Çankaya", "Çubuk", "Elmadağ", "Etimesgut", "Evren", "Gölbaşı", "Güdül", "Haymana", "Kahramankazan", "Kalecik", "Keçiören", "Kızılcahamam", "Mamak", "Nallıhan", "Polatlı", "Pursaklar", "Sincan", "Şereflikoçhisar", "Yenimahalle"],
-    "İzmir": ["Aliağa", "Balçova", "Bayındır", "Bayraklı", "Bergama", "Beydağ", "Bornova", "Buca", "Çeşme", "Çiğli", "Dikili", "Foça", "Gaziemir", "Güzelbahçe", "Karabağlar", "Karaburun", "Karşıyaka", "Kemalpaşa", "Kınık", "Kiraz", "Konak", "Menderes", "Menemen", "Narlıdere", "Ödemiş", "Seferihisar", "Selçuk", "Tire", "Torbalı", "Urla"],
-    "Adana": ["Aladağ", "Ceyhan", "Çukurova", "Feke", "İmamoğlu", "Karaisalı", "Karataş", "Kozan", "Pozantı", "Saimbeyli", "Sarıçam", "Seyhan", "Tufanbeyli", "Yumurtalık", "Yüreğir"],
-    "Adıyaman": ["Besni", "Çelikhan", "Gerger", "Gölbaşı", "Kâhta", "Merkez", "Samsat", "Sincik", "Tut"],
-    "Afyonkarahisar": ["Başmakçı", "Bayat", "Bolvadin", "Çay", "Çobanlar", "Dazkırı", "Dinar", "Emirdağ", "Evciler", "Hocalar", "İhsaniye", "İscehisar", "Kızılören", "Merkez", "Sandıklı", "Sinanpaşa", "Sultandağı", "Şuhut"],
-    "Ağrı": ["Diyadin", "Doğubayazıt", "Eleşkirt", "Hamur", "Merkez", "Patnos", "Taşlıçay", "Tutak"],
-    "Aksaray": ["Ağaçören", "Eskil", "Gülağaç", "Güzelyurt", "Merkez", "Ortaköy", "Sarıyahşi", "Sultanhanı"],
-    "Amasya": ["Göynücek", "Gümüşhacıköy", "Hamamözü", "Merkez", "Merzifon", "Suluova", "Taşova"],
-    "Antalya": ["Akseki", "Aksu", "Alanya", "Demre", "Döşemealtı", "Elmalı", "Finike", "Gazipaşa", "Gündoğmuş", "İbradı", "Kaş", "Kemer", "Kepez", "Konyaaltı", "Korkuteli", "Kumluca", "Manavgat", "Muratpaşa", "Serik"],
-    "Ardahan": ["Çıldır", "Damal", "Göle", "Hanak", "Merkez", "Posof"],
-    "Artvin": ["Ardanuç", "Arhavi", "Borçka", "Hopa", "Kemalpaşa", "Merkez", "Murgul", "Şavşat", "Yusufeli"],
-    "Aydın": ["Bozdoğan", "Buharkent", "Çine", "Didim", "Efeler", "İncirliova", "Karacasu", "Karpuzlu", "Koçarlı", "Köşk", "Kuşadası", "Kuyucak", "Nazilli", "Söke", "Sultanhisar", "Yenipazar"],
-    "Balıkesir": ["Altıeylül", "Ayvalık", "Balya", "Bandırma", "Bigadiç", "Burhaniye", "Dursunbey", "Edremit", "Erdek", "Gömeç", "Gönen", "Havran", "İvrindi", "Karesi", "Kepsut", "Manyas", "Marmara", "Savaştepe", "Sındırgı", "Susurluk"],
-    "Bartın": ["Amasra", "Kurucaşile", "Merkez", "Ulus"],
-    "Batman": ["Beşiri", "Gercüş", "Hasankeyf", "Kozluk", "Merkez", "Sason"],
-    "Bayburt": ["Aydıntepe", "Demirözü", "Merkez"],
-    "Bilecik": ["Bozüyük", "Gölpazarı", "İnhisar", "Merkez", "Osmaneli", "Pazaryeri", "Söğüt", "Yenipazar"],
-    "Bingöl": ["Adaklı", "Genç", "Karlıova", "Kiğı", "Merkez", "Solhan", "Yayladere", "Yedisu"],
-    "Bitlis": ["Adilcevaz", "Ahlat", "Güroymak", "Hizan", "Merkez", "Mutki", "Tatvan"],
-    "Bolu": ["Dörtdivan", "Gerede", "Göynük", "Kıbrıscık", "Mengen", "Merkez", "Mudurnu", "Seben", "Yeniçağa"],
-    "Burdur": ["Ağlasun", "Altınyayla", "Bucak", "Çavdır", "Çeltikçi", "Gölhisar", "Karamanlı", "Kemer", "Merkez", "Tefenni", "Yeşilova"],
-    "Bursa": ["Büyükorhan", "Gemlik", "Gürsu", "Harmancık", "İnegöl", "İznik", "Karacabey", "Keles", "Kestel", "Mudanya", "Mustafakemalpaşa", "Nilüfer", "Orhaneli", "Orhangazi", "Osmangazi", "Yenişehir", "Yıldırım"],
-    "Çanakkale": ["Ayvacık", "Bayramiç", "Biga", "Bozcaada", "Çan", "Eceabat", "Ezine", "Gelibolu", "Gökçeada", "Lapseki", "Merkez", "Yenice"],
-    "Çankırı": ["Atkaracalar", "Bayramören", "Çerkeş", "Eldivan", "Ilgaz", "Kızılırmak", "Korgun", "Kurşunlu", "Merkez", "Orta", "Şabanözü", "Yapraklı"],
-    "Çorum": ["Alaca", "Bayat", "Boğazkale", "Dodurga", "İskilip", "Kargı", "Laçin", "Mecitözü", "Merkez", "Oğuzlar", "Ortaköy", "Osmancık", "Sungurlu", "Uğurludağ"],
-    "Denizli": ["Acıpayam", "Babadağ", "Baklan", "Bekilli", "Beyağaç", "Bozkurt", "Buldan", "Çal", "Çameli", "Çardak", "Çivril", "Güney", "Honaz", "Kale", "Merkezefendi", "Pamukkale", "Sarayköy", "Serinhisar", "Tavas"],
-    "Diyarbakır": ["Bağlar", "Bismil", "Çermik", "Çınar", "Çüngüş", "Dicle", "Eğil", "Ergani", "Hani", "Hazro", "Kayapınar", "Kocaköy", "Kulp", "Lice", "Silvan", "Sur", "Yenişehir"],
-    "Düzce": ["Akçakoca", "Cumayeri", "Çilimli", "Gölyaka", "Gümüşova", "Kaynaşlı", "Merkez", "Yığılca"],
-    "Edirne": ["Enez", "Havsa", "İpsala", "Keşan", "Lalapaşa", "Meriç", "Merkez", "Süloğlu", "Uzunköprü"],
-    "Elazığ": ["Ağın", "Alacakaya", "Arıcak", "Baskil", "Karakoçan", "Keban", "Kovancılar", "Maden", "Merkez", "Palu", "Sivrice"],
-    "Erzincan": ["Çayırlı", "İliç", "Kemah", "Kemaliye", "Merkez", "Otlukbeli", "Refahiye", "Tercan", "Üzümlü"],
-    "Erzurum": ["Aşkale", "Aziziye", "Çat", "Hınıs", "Horasan", "İspir", "Karaçoban", "Karayazı", "Köprüköy", "Narman", "Oltu", "Olur", "Palandöken", "Pasinler", "Pazaryolu", "Şenkaya", "Tekman", "Tortum", "Uzundere", "Yakutiye"],
-    "Eskişehir": ["Alpu", "Beylikova", "Çifteler", "Günyüzü", "Han", "İnönü", "Mahmudiye", "Mihalgazi", "Mihalıççık", "Odunpazarı", "Sarıcakaya", "Seyitgazi", "Sivrihisar", "Tepebaşı"],
-    "Gaziantep": ["Araban", "İslahiye", "Karkamış", "Nizip", "Nurdağı", "Oğuzeli", "Şahinbey", "Şehitkamil", "Yavuzeli"],
-    "Giresun": ["Alucra", "Bulancak", "Çamoluk", "Çanakçı", "Dereli", "Doğankent", "Espiye", "Eynesil", "Görele", "Güce", "Keşap", "Merkez", "Piraziz", "Şebinkarahisar", "Tirebolu", "Yağlıdere"],
-    "Gümüşhane": ["Kelkit", "Köse", "Kürtün", "Merkez", "Şiran", "Torul"],
-    "Hakkari": ["Çukurca", "Derecik", "Merkez", "Şemdinli", "Yüksekova"],
-    "Hatay": ["Altınözü", "Antakya", "Arsuz", "Belen", "Defne", "Dörtyol", "Erzin", "Hassa", "İskenderun", "Kırıkhan", "Kumlu", "Payas", "Reyhanlı", "Samandağ", "Yayladağı"],
-    "Iğdır": ["Aralık", "Karakoyunlu", "Merkez", "Tuzluca"],
-    "Isparta": ["Aksu", "Atabey", "Eğirdir", "Gelendost", "Gönen", "Keçiborlu", "Merkez", "Senirkent", "Sütçüler", "Şarkikaraağaç", "Uluborlu", "Yalvaç", "Yenişarbademli"],
-    "Kahramanmaraş": ["Afşin", "Andırın", "Çağlayancerit", "Dulkadiroğlu", "Ekinözü", "Elbistan", "Göksun", "Nurhak", "Onikişubat", "Pazarcık", "Türkoğlu"],
-    "Karabük": ["Eflani", "Eskipazar", "Merkez", "Ovacık", "Safranbolu", "Yenice"],
-    "Karaman": ["Ayrancı", "Başyayla", "Ermenek", "Kazımkarabekir", "Merkez", "Sarıveliler"],
-    "Kars": ["Akyaka", "Arpaçay", "Digor", "Kağızman", "Merkez", "Sarıkamış", "Selim", "Susuz"],
-    "Kastamonu": ["Abana", "Ağlı", "Araç", "Azdavay", "Bozkurt", "Cide", "Çatalzeytin", "Daday", "Devrekani", "Doğanyurt", "Hanönü", "İhsangazi", "İnebolu", "Küre", "Merkez", "Pınarbaşı", "Seydiler", "Şenpazar", "Taşköprü", "Tosya"],
-    "Kayseri": ["Akkışla", "Bünyan", "Develi", "Felahiye", "Hacılar", "İncesu", "Kocasinan", "Melikgazi", "Özvatan", "Pınarbaşı", "Sarıoğlan", "Sarız", "Talas", "Tomarza", "Yahyalı", "Yeşilhisar"],
-    "Kırıkkale": ["Bahşılı", "Balışeyh", "Çelebi", "Delice", "Karakeçili", "Keskin", "Merkez", "Sulakyurt", "Yahşihan"],
-    "Kırklareli": ["Babaeski", "Demirköy", "Kofçaz", "Lüleburgaz", "Merkez", "Pehlivanköy", "Pınarhisar", "Vize"],
-    "Kırşehir": ["Akçakent", "Akpınar", "Boztepe", "Çiçekdağı", "Kaman", "Merkez", "Mucur"],
-    "Kilis": ["Elbeyli", "Musabeyli", "Polateli", "Merkez"],
-    "Kocaeli": ["Başiskele", "Çayırova", "Darıca", "Derince", "Dilovası", "Gebze", "Gölcük", "İzmit", "Kandıra", "Karamürsel", "Kartepe", "Körfez"],
-    "Konya": ["Ahırlı", "Akören", "Akşehir", "Altınekin", "Beyşehir", "Bozkır", "Cihanbeyli", "Çeltik", "Çumra", "Derbent", "Derebucak", "Doğanhisar", "Emirgazi", "Ereğli", "Güneysınır", "Hadim", "Halkapınar", "Hüyük", "Ilgın", "Kadınhanı", "Karapınar", "Karatay", "Kulu", "Meram", "Sarayönü", "Selçuklu", "Seydişehir", "Taşkent", "Tuzlukçu", "Yalıhüyük", "Yunak"],
-    "Kütahya": ["Altıntaş", "Aslanapa", "Çavdarhisar", "Domaniç", "Dumlupınar", "Emet", "Gediz", "Hisarcık", "Merkez", "Pazarlar", "Şaphane", "Simav", "Tavşanlı"],
-    "Malatya": ["Akçadağ", "Arapgir", "Arguvan", "Battalgazi", "Darende", "Doğanşehir", "Doğanyol", "Hekimhan", "Kale", "Kuluncak", "Pütürge", "Yazıhan", "Yeşilyurt"],
-    "Manisa": ["Ahmetli", "Akhisar", "Alaşehir", "Demirci", "Gölmarmara", "Gördes", "Kırkağaç", "Köprübaşı", "Kula", "Salihli", "Sarıgöl", "Saruhanlı", "Selendi", "Soma", "Şehzadeler", "Turgutlu", "Yunusemre"],
-    "Mardin": ["Artuklu", "Dargeçit", "Derik", "Kızıltepe", "Mazıdağı", "Midyat", "Nusaybin", "Ömerli", "Savur", "Yeşilli"],
-    "Mersin": ["Akdeniz", "Anamur", "Aydıncık", "Bozyazı", "Çamlıyayla", "Erdemli", "Gülnar", "Mezitli", "Mut", "Silifke", "Tarsus", "Toroslar", "Yenişehir"],
-    "Muğla": ["Bodrum", "Dalaman", "Datça", "Fethiye", "Kavaklıdere", "Köyceğiz", "Marmaris", "Menteşe", "Milas", "Ortaca", "Seydikemer", "Ula", "Yatağan"],
-    "Muş": ["Bulanık", "Hasköy", "Korkut", "Malazgirt", "Merkez", "Varto"],
-    "Nevşehir": ["Acıgöl", "Avanos", "Derinkuyu", "Gülşehir", "Hacıbektaş", "Kozaklı", "Merkez", "Ürgüp"],
-    "Niğde": ["Altunhisar", "Bor", "Çamardı", "Çiftlik", "Merkez", "Ulukışla"],
-    "Ordu": ["Akkuş", "Altınordu", "Aybastı", "Çamaş", "Çatalpınar", "Çaybaşı", "Fatsa", "Gölköy", "Gülyalı", "Gürgentepe", "İkizce", "Kabadüz", "Kabataş", "Korgan", "Kumru", "Mesudiye", "Perşembe", "Ulubey", "Ünye"],
-    "Osmaniye": ["Bahçe", "Düziçi", "Hasanbeyli", "Kadirli", "Merkez", "Sumbas", "Toprakkale"],
-    "Rize": ["Ardeşen", "Çamlıhemşin", "Çayeli", "Derepazarı", "Fındıklı", "Güneysu", "Hemşin", "İkizdere", "İyidere", "Kalkandere", "Merkez", "Pazar"],
-    "Sakarya": ["Adapazarı", "Akyazı", "Arifiye", "Erenler", "Ferizli", "Geyve", "Hendek", "Karapürçek", "Karasu", "Kaynarca", "Kocaali", "Pamukova", "Sapanca", "Serdivan", "Söğütlü", "Taraklı"],
-    "Samsun": ["19 Mayıs", "Alaçam", "Asarcık", "Atakum", "Ayvacık", "Bafra", "Canik", "Çarşamba", "Havza", "İlkadım", "Kavak", "Ladik", "Salıpazarı", "Tekkeköy", "Terme", "Vezirköprü", "Yakakent"],
-    "Siirt": ["Baykan", "Eruh", "Kurtalan", "Merkez", "Pervari", "Şirvan", "Tillo"],
-    "Sinop": ["Ayancık", "Boyabat", "Dikmen", "Durağan", "Erfelek", "Gerze", "Merkez", "Saraydüzü", "Türkeli"],
-    "Sivas": ["Akıncılar", "Altınyayla", "Divriği", "Doğanşar", "Gemerek", "Gölova", "Gürün", "Hafik", "İmranlı", "Kangal", "Koyulhisar", "Merkez", "Suşehri", "Şarkışla", "Ulaş", "Yıldızeli", "Zara"],
-    "Şanlıurfa": ["Akçakale", "Birecik", "Bozova", "Ceylanpınar", "Eyyübiye", "Halfeti", "Haliliye", "Harran", "Hilvan", "Karaköprü", "Siverek", "Suruç", "Viranşehir"],
-    "Şırnak": ["Beytüşşebap", "Cizre", "Güçlükonak", "İdil", "Merkez", "Silopi", "Uludere"],
-    "Tekirdağ": ["Çerkezköy", "Çorlu", "Ergene", "Hayrabolu", "Kapaklı", "Malkara", "Marmaraereğlisi", "Muratlı", "Saray", "Süleymanpaşa", "Şarköy"],
-    "Tokat": ["Almus", "Artova", "Başçiftlik", "Erbaa", "Niksar", "Pazar", "Reşadiye", "Sulusaray", "Turhal", "Yeşilyurt", "Zile", "Merkez"],
-    "Trabzon": ["Akçaabat", "Araklı", "Arsin", "Beşikdüzü", "Çarşıbaşı", "Çaykara", "Dernekpazarı", "Düzköy", "Hayrat", "Köprübaşı", "Maçka", "Of", "Ortahisar", "Sürmene", "Şalpazarı", "Tonya", "Vakfıkebir", "Yomra"],
-    "Tunceli": ["Çemişgezek", "Hozat", "Mazgirt", "Merkez", "Nazımiye", "Ovacık", "Pertek", "Pülümür"],
-    "Uşak": ["Banaz", "Eşme", "Karahallı", "Merkez", "Sivaslı", "Ulubey"],
-    "Van": ["Bahçesaray", "Başkale", "Çaldıran", "Çatak", "Edremit", "Erciş", "Gevaş", "Gürpınar", "İpekyolu", "Muradiye", "Özalp", "Saray", "Tuşba"],
-    "Yalova": ["Altınova", "Armutlu", "Çınarcık", "Çiftlikköy", "Merkez", "Termal"],
-    "Yozgat": ["Akdağmadeni", "Aydıncık", "Boğazlıyan", "Çandır", "Çayıralan", "Çekerek", "Kadışehri", "Saraykent", "Sarıkaya", "Sorgun", "Şefaatli", "Yenifakılı", "Yerköy", "Merkez"],
-    "Zonguldak": ["Alaplı", "Çaycuma", "Devrek", "Ereğli", "Gökçebey", "Kilimli", "Kozlu", "Merkez"]
-  };
-  const baseProvinces = Object.keys(TURKEY_LOCATIONS).filter(p => p !== "İstanbul (Anadolu)" && p !== "İstanbul (Avrupa)");
-  baseProvinces.sort((a, b) => a.localeCompare(b, 'tr'));
-  const PROVINCES = ["İstanbul (Anadolu)", "İstanbul (Avrupa)", ...baseProvinces];
-  const FLOORS = ['Bodrum Kat', 'Giriş Kat', 'Müstakil / Villa', ...Array.from({ length: 30 }, (_, i) => `${i + 1}. Kat`)];
-
-  // DEPOEVİM TESİSLERİ
-  const DEPO_LOCATIONS = [
-    { name: "Pendik Depoevim", province: "İstanbul (Anadolu)", district: "Pendik", address: "Bahçelievler Mah. Yeni Sk. No: 5/A" },
-    { name: "Kartal Depoevim", province: "İstanbul (Anadolu)", district: "Kartal", address: "Yalı Mah. Bağlar Cad. No: 74/2" },
-    { name: "Çekmeköy Depoevim", province: "İstanbul (Anadolu)", district: "Çekmeköy", address: "Ekşioğlu Mah. Atabey Cad. No: 28/2" },
-    { name: "Ümraniye Depoevim", province: "İstanbul (Anadolu)", district: "Ümraniye", address: "Dudullu OSB Mah. 1. Cad. No: 30/4" }
-  ];
-
-  const MESAI_STATUS_OPTIONS = [
-    { code: 'G', label: 'Geldi', color: 'bg-green-100 text-green-700 focus:bg-green-200' },
-    { code: 'FG', label: 'Fazla Gün', color: 'bg-teal-100 text-teal-700 focus:bg-teal-200' },
-    { code: 'FGM', label: 'F.Gün+Mesai', color: 'bg-cyan-100 text-cyan-800 focus:bg-cyan-200' },
-    { code: 'FM', label: 'Fazla Mesai', color: 'bg-blue-100 text-blue-700 focus:bg-blue-200' },
-    { code: 'EM', label: 'Eksik Mesai', color: 'bg-yellow-100 text-yellow-700 focus:bg-yellow-200' },
-    { code: 'D', label: 'Devamsız', color: 'bg-red-100 text-red-700 focus:bg-red-200' },
-    { code: 'R', label: 'Raporlu', color: 'bg-orange-100 text-orange-700 focus:bg-orange-200' },
-    { code: 'Hİ', label: 'Haftalık İzin', color: 'bg-blue-100 text-blue-700 focus:bg-blue-200' },
-    { code: 'Yİ', label: 'Yıllık İzin', color: 'bg-purple-100 text-purple-700 focus:bg-purple-200' },
-    { code: 'Bİ', label: 'Bayram İzni', color: 'bg-pink-100 text-pink-700 focus:bg-pink-200' },
-    { code: 'Üİ', label: 'Ücretsiz İzin', color: 'bg-neutral-200 text-neutral-700 focus:bg-neutral-300' }
-  ];
-
-  // --- GEMINI API CALLER ---
-  const callGeminiAPI = async (prompt, isJson = false) => {
-    const apiKey = "AIzaSyAQNBCWSbtmPEQGD4jQEo7BdoRQC_uoV8I"; // Sistem runtime'da otomatik tanımlar
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
-    const payload = {
-      contents: [{ parts: [{ text: prompt }] }],
-    };
-
-    if (isJson) {
-      payload.generationConfig = {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: "OBJECT",
-          properties: {
-            customerName: { type: "STRING" },
-            customerPhone: { type: "STRING" },
-            date: { type: "STRING", description: "YYYY-MM-DD" },
-            price: { type: "STRING" },
-            summaryNotes: { type: "STRING" }
-          }
-        }
-      };
-    }
-
-    const fetchWithRetry = async (attempt = 0) => {
-      try {
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) {
-          const errInfo = await response.json().catch(() => ({}));
-          throw new Error(errInfo.error?.message || 'API Error');
-        }
-        const data = await response.json();
-        return data.candidates[0].content.parts[0].text;
-      } catch (error) {
-        if (attempt < 5) {
-          await new Promise(r => setTimeout(r, Math.pow(2, attempt) * 1000));
-          return fetchWithRetry(attempt + 1);
-        }
-        throw error;
-      }
-    };
-
-    return fetchWithRetry();
-  };
-
-  const CopyButton = ({ content }) => {
-    const [copied, setCopied] = useState(false);
-    const handleCopy = () => {
-      const el = document.createElement('textarea');
-      el.value = content;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    };
-    
-    return (
-      <button 
-        onClick={handleCopy}
-        type="button"
-        className="w-full py-4 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 transition flex justify-center items-center gap-2 shadow-lg shadow-purple-600/20"
-      >
-        {copied ? <CheckCircle className="w-5 h-5" /> : <Copy className="w-5 h-5" />} 
-        {copied ? 'Kopyalandı! (WhatsApp\'a Yapıştırın)' : 'Panoya Kopyala'}
-      </button>
-    );
-  };
-
-  // --- PERSONEL GÖRÜNÜRLÜK KONTROLÜ (Mevcut ay / Gelecek ay pasiflik kontrolü) ---
-  const isPersonnelVisibleInMonth = (person, year, month) => {
-    if (person.employmentStatus !== 'Pasif') return true;
-    
-    if (person.passiveDate) {
-       const pd = new Date(person.passiveDate);
-       const py = pd.getFullYear();
-       const pm = pd.getMonth() + 1;
-       
-       if (year < py) return true;
-       if (year === py && month <= pm) return true;
-       return false;
-    } else {
-       // Önceden pasif yapılmış ve tarihi olmayan personeller için (Sadece mevcut aya kadar görünürler)
-       const today = new Date();
-       const currY = today.getFullYear();
-       const currM = today.getMonth() + 1;
-       
-       if (year < currY) return true;
-       if (year === currY && month <= currM) return true;
-       
-       return false;
-    }
-  };
-
-  // --- MALZEME TAHMİN MOTORU ---
-  const calculateMaterials = (roomCount, packingType) => {
+    const calculateMaterials = (roomCount, packingType) => {
     let multiplier = 1;
     if (roomCount === '1+0' || roomCount === 'Parça Eşya' || roomCount === 'Depoevim Tesisleri') multiplier = 0.5;
     else if (roomCount === '1+1') multiplier = 1;
@@ -986,8 +774,12 @@ useEffect(() => {
                             <span className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-sm">SAHADAN KARELER</span>
                          </h3>
                          {post.imageUrl && (
-                            <div className="w-full max-w-sm h-48 md:h-64 rounded-xl overflow-hidden shadow-sm border border-blue-100 cursor-pointer group" onClick={() => setViewingImage && setViewingImage({title: post.title, name: post.imageUrl})}>
-                               <img src={post.imageUrl} alt="Paylaşım" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                            <div className="w-full max-w-sm h-48 md:h-64 rounded-xl overflow-hidden shadow-sm border border-blue-100 cursor-pointer group relative" onClick={() => setViewingImage && setViewingImage({title: post.title, name: post.imageUrl})}>
+                               {isVideoUrl(post.imageUrl) ? (
+                                 <video src={post.imageUrl} className="w-full h-full object-cover bg-black" muted />
+                               ) : (
+                                 <img src={post.imageUrl} alt="Paylaşım" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                               )}
                             </div>
                          )}
                          <p className="text-blue-500/80 text-[10px] mt-3 font-bold flex items-center gap-1"><Clock className="w-3 h-3" /> {post.dateStr} • {post.author}</p>
@@ -1058,7 +850,11 @@ useEffect(() => {
                 return (
                   <div key={rev.id} className="bg-white rounded-xl shadow-sm border border-emerald-100 overflow-hidden relative group min-w-[280px] max-w-[320px] shrink-0 flex flex-col">
                     <div className="w-full h-40 bg-neutral-100 cursor-pointer relative" onClick={() => setViewingImage && setViewingImage({title: 'Müşteri Yorumu', name: rev.reviewImage})}>
-                      <img src={rev.reviewImage} alt="Müşteri Yorumu" className="w-full h-full object-cover hover:scale-105 transition duration-300" />
+                      {isVideoUrl(rev.reviewImage) ? (
+                        <video src={rev.reviewImage} className="w-full h-full object-cover bg-black" muted />
+                      ) : (
+                        <img src={rev.reviewImage} alt="Müşteri Yorumu" className="w-full h-full object-cover hover:scale-105 transition duration-300" />
+                      )}
                       <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none"></div>
                       <div className="absolute bottom-2 left-2 right-2 text-white">
                         <h4 className="font-bold text-sm truncate">{rev.customerName}</h4>
@@ -1373,7 +1169,7 @@ useEffect(() => {
                 </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <div  className="space-y-4">
                 {infoType === 'Duyuru' && (
                     <>
                         <div>
@@ -1397,15 +1193,15 @@ useEffect(() => {
                             <label className="block text-sm font-bold text-black mb-1">Görsel Ekle</label>
                             {post.imageUrl && post.imageUrl !== 'Yükleniyor...' && (
                                 <div className="mb-2 w-full max-h-48 overflow-hidden rounded-xl border border-neutral-200">
-                                    <img src={post.imageUrl} alt="Önizleme" className="w-full h-full object-contain bg-neutral-100" />
+                                    {isVideoUrl(post.imageUrl) ? (
+                                      <video src={post.imageUrl} controls className="w-full h-full object-contain bg-black" />
+                                    ) : (
+                                      <img src={post.imageUrl} alt="Önizleme" className="w-full h-full object-contain bg-neutral-100" />
+                                    )}
                                 </div>
                             )}
                             {post.imageUrl === 'Yükleniyor...' && <div className="p-4 text-center font-bold text-neutral-500 animate-pulse bg-neutral-50 rounded-xl border border-neutral-200 mb-2">Görsel Yükleniyor...</div>}
-                            <label className="cursor-pointer w-full py-4 bg-neutral-50 border border-neutral-300 border-dashed rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-100 transition">
-                                <Upload className="w-5 h-5 text-neutral-500" />
-                                <span className="text-sm font-bold text-neutral-600">Fotoğraf Yükle</span>
-                                <input type="file" accept="image/*" className="hidden" onChange={handleFileUpload} disabled={isSubmitting} />
-                            </label>
+                            <MediaCaptureMenu onChange={handleFileUpload} disabled={isSubmitting} buttonLabel="Fotoğraf / Video Yükle" buttonClassName="cursor-pointer w-full py-4 bg-neutral-50 border border-neutral-300 border-dashed rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-100 transition" />
                         </div>
                     </>
                 )}
@@ -1428,10 +1224,10 @@ useEffect(() => {
                     </>
                 )}
 
-                <button type="submit" disabled={isSubmitting || post.imageUrl === 'Yükleniyor...'} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg disabled:opacity-50 mt-6">
+                <button type="button" onClick={handleSubmit} disabled={isSubmitting || post.imageUrl === 'Yükleniyor...'} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg disabled:opacity-50 mt-6">
                     <Send className="w-5 h-5" /> Yayına Al
                 </button>
-            </form>
+            </div>
         </div>
     );
   };
@@ -1458,7 +1254,7 @@ useEffect(() => {
           </button>
         </div>
 
-        <form onSubmit={handleAddJob} className="space-y-6">
+        <div  className="space-y-6">
           {/* MÜŞTERİ VE GENEL BİLGİLER */}
           <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200">
             <h3 className="font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-2">
@@ -2061,11 +1857,11 @@ useEffect(() => {
             </div>
           </div>
 
-          <button type="submit" className="w-full bg-red-600 text-white font-black py-5 rounded-2xl hover:bg-red-700 transition flex justify-center items-center gap-2 text-xl shadow-xl shadow-red-600/30">
+          <button type="button" onClick={handleAddJob} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl hover:bg-red-700 transition flex justify-center items-center gap-2 text-xl shadow-xl shadow-red-600/30">
             <PlusCircle className="w-6 h-6" /> 
             {editingJobId ? 'Kaydı Güncelle' : 'Kaydı Oluştur'}
           </button>
-        </form>
+        </div>
       </div>
     );
   };
@@ -2427,7 +2223,7 @@ useEffect(() => {
     );
   };
 
-  const CustomerListView = ({ jobs, title, handleEditJob }) => {
+  const CustomerListView = ({ jobs, title, handleEditJob, onViewCari }) => {
     const [searchQuery, setSearchQuery] = useState('');
 
     // Sadece başlığa göre filtreleme yapıyoruz
@@ -2440,11 +2236,14 @@ useEffect(() => {
       
       // Telefon numarasını standartlaştırma (Boşlukları temizle vb. gerekirse)
       const phoneKey = job.customerPhone.replace(/\s+/g, '');
+      // YENİ: Cari Profili sayfasına gidebilmek için normalize edilmiş telefon anahtarı
+      const cariKey = normalizeCariPhone(job.customerPhone);
 
       if (!customersMap.has(phoneKey)) {
         customersMap.set(phoneKey, {
             name: job.customerName,
             phone: job.customerPhone,
+            cariKey,
             type: job.customerType || 'Bireysel',
             isSpecial: job.isSpecial,
             jobCount: 1,
@@ -2500,6 +2299,7 @@ useEffect(() => {
                 <th className="p-4 font-bold text-center">Toplam İşlem</th>
                 <th className="p-4 font-bold text-right">Toplam Hacim</th>
                 <th className="p-4 font-bold">Son İşlem Tarihi</th>
+                <th className="p-4 font-bold">Cari Profili</th>
                 <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
               </tr>
             </thead>
@@ -2530,6 +2330,11 @@ useEffect(() => {
                     <span className="flex items-center gap-1.5"><CalendarDays className="w-3.5 h-3.5 text-neutral-400" /> {c.lastJobDate}</span>
                   </td>
                   <td className="p-4">
+                    <button onClick={() => onViewCari && onViewCari(c.cariKey)} className="px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5 w-max">
+                      <FolderOpen className="w-3.5 h-3.5" /> Cari Profiline Git
+                    </button>
+                  </td>
+                  <td className="p-4">
                     <button onClick={() => handleEditJob(c.latestJob)} className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5 w-max">
                       <Edit className="w-3.5 h-3.5" /> Son İşe Git
                     </button>
@@ -2538,12 +2343,412 @@ useEffect(() => {
               ))}
               {customers.length === 0 && (
                 <tr>
-                  <td colSpan="6" className="p-6 text-center text-neutral-500">Müşteri kaydı bulunamadı.</td>
+                  <td colSpan="7" className="p-6 text-center text-neutral-500">Müşteri kaydı bulunamadı.</td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+      </div>
+    );
+  };
+
+  // --- YENİ: CARİ PROFİLİ SAYFASI ---
+  // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir. Ayrı bir "customers"
+  // koleksiyonu oluşturulmadı; profil, aynı isim+telefon numarasına sahip
+  // TÜM iş kayıtlarından (jobs) CANLI olarak türetiliyor. Bu sayede her yeni
+  // iş kaydı otomatik olarak ilgili müşterinin cari profiline işliyor;
+  // ayrıca büyük/küçük harf ve telefon formatı farkı gözetmeksizin aynı
+  // müşteri tek bir cari profilde birleşmiş oluyor.
+  const CustomerProfileView = ({ jobs, cariKey, onBack, handleEditJob, db, appId, addSystemLog }) => {
+    const customerJobs = jobs
+      .filter(j => normalizeCariPhone(j.customerPhone) === cariKey)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // YENİ: Bu tarihten önceki işleri geriye dönük tamamlayamayacağımız için
+    // cari hesapta otomatik olarak "tamamlandı + tahsil edildi" kabul ediyoruz.
+    const CARI_AUTO_COMPLETE_CUTOFF = '2026-07-05';
+    const isBeforeCariCutoff = (dateStr) => !!dateStr && dateStr < CARI_AUTO_COMPLETE_CUTOFF;
+
+    // YENİ: Manuel cari hareketleri (Borç Ekle / Tahsilat Ekle) ve kişisel bilgi düzenlemesi
+    const [cariTransactions, setCariTransactions] = useState([]);
+    const [profileOverride, setProfileOverride] = useState(null);
+    const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+    const [editProfileForm, setEditProfileForm] = useState({ name: '', phone: '', altPhone: '', customerType: 'Bireysel', idNo: '' });
+    const [showAddDebtModal, setShowAddDebtModal] = useState(false);
+    const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
+    const [manualEntryForm, setManualEntryForm] = useState({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
+
+    useEffect(() => {
+      if (!cariKey || !db) return;
+      const unsub1 = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'customerProfiles', cariKey), snap => {
+        setProfileOverride(snap.exists() ? snap.data() : null);
+      }, console.error);
+      const qTrans = query(collection(db, 'artifacts', appId, 'public', 'data', 'cariTransactions'), where('cariKey', '==', cariKey));
+      const unsub2 = onSnapshot(qTrans, snap => {
+        setCariTransactions(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      }, console.error);
+      return () => { unsub1(); unsub2(); };
+    }, [cariKey, db, appId]);
+
+    if (!cariKey || customerJobs.length === 0) {
+      return (
+        <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-8 text-center animate-in fade-in">
+          <button onClick={onBack} className="mb-4 text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
+            <ChevronLeft className="w-4 h-4" /> Listeye Geri Dön
+          </button>
+          <AlertTriangle className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
+          <p className="text-neutral-500 font-medium">Bu müşteriye ait cari profili bulunamadı.</p>
+        </div>
+      );
+    }
+
+    const oldestFirst = [...customerJobs].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const firstJob = oldestFirst[0];
+    const latestJob = customerJobs[0];
+
+    // Kişisel bilgiler: eğer manuel düzenleme yapılmışsa (profileOverride) onu, yoksa iş kayıtlarından türeteni kullan
+    const customerName = profileOverride?.name || latestJob.customerName;
+    const customerPhone = profileOverride?.phone || latestJob.customerPhone;
+    const altPhone = profileOverride?.altPhone ?? (customerJobs.find(j => j.altPhone)?.altPhone || '');
+    const customerType = profileOverride?.customerType || latestJob.customerType || 'Bireysel';
+    const idNo = profileOverride?.idNo ?? ((customerJobs.find(j => j.tcNo)?.tcNo) || (customerJobs.find(j => j.taxNo)?.taxNo) || '');
+
+    // YENİ: Kendi oluşturduğumuz (otomatik) 0 TL'lik Asansör kurulum kayıtları cari hesaba dahil edilmez.
+    // Sadece Nakliye, Depo ve ücretli (0 TL olmayan) Asansör işleri cari hesaba işlenir.
+    const isCariExcluded = (j) => j.type === 'Asansör' && (!j.price || parseFloat(j.price) === 0);
+    const cariEligibleJobs = oldestFirst.filter(j => !isCariExcluded(j));
+
+    const isJobFullyPaid = (j) => {
+      const method = j.endJobDetails?.paymentMethod;
+      return j.status === 'completed' && method && !['Ödeme Yapmadı', 'Ödeme Alınmadı'].includes(method);
+    };
+
+    // --- Ödeme / Cari Hesap Özeti (Depoevim tarzı) ---
+    const rawEntries = [];
+    cariEligibleJobs.forEach(j => {
+      const price = parseFloat(j.price) || 0;
+      const deposit = parseFloat(j.deposit) || 0;
+      // YENİ: Cutoff tarihinden önceki işler otomatik olarak tamamlanmış + tahsil edilmiş kabul edilir
+      const forcedComplete = isBeforeCariCutoff(j.date);
+      const fullyPaid = forcedComplete || isJobFullyPaid(j);
+      const paidAmount = fullyPaid ? price : deposit;
+
+      if (price > 0) rawEntries.push({ date: j.date, desc: `${j.type || 'Nakliye'} İşlemi - ${j.customerName}`, debt: price, credit: 0 });
+      if (paidAmount > 0) rawEntries.push({ date: j.date, desc: fullyPaid ? 'Tahsilat (İş Tamamlandı)' : 'Kapora Tahsilatı', debt: 0, credit: paidAmount });
+    });
+    // YENİ: Manuel eklenen borç/tahsilat kayıtlarını da hesap dökümüne dahil et
+    cariTransactions.forEach(t => {
+      rawEntries.push({
+        date: t.date,
+        desc: t.description || (t.type === 'debt' ? 'Manuel Borç Kaydı' : 'Manuel Tahsilat'),
+        debt: t.type === 'debt' ? (parseFloat(t.amount) || 0) : 0,
+        credit: t.type === 'payment' ? (parseFloat(t.amount) || 0) : 0
+      });
+    });
+    rawEntries.sort((a, b) => new Date(a.date) - new Date(b.date));
+    let runningBalance = 0;
+    const ledgerRows = rawEntries.map((e, idx) => {
+      runningBalance += e.debt - e.credit;
+      return { id: idx, ...e, balance: runningBalance };
+    });
+    const totalAmount = rawEntries.reduce((s, e) => s + e.debt, 0);
+    const totalPaid = rawEntries.reduce((s, e) => s + e.credit, 0);
+    const remainingBalance = totalAmount - totalPaid;
+
+    const handleSaveProfileEdit = async (e) => {
+      e.preventDefault();
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customerProfiles', cariKey), {
+        ...editProfileForm,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      if (addSystemLog) addSystemLog('Cari Profil Düzenlendi', `${editProfileForm.name} müşterisinin cari profil bilgileri güncellendi.`);
+      setShowEditProfileModal(false);
+    };
+
+    const handleAddManualEntry = async (e, type) => {
+      e.preventDefault();
+      if (!manualEntryForm.amount) return;
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'cariTransactions'), {
+        cariKey,
+        type,
+        amount: parseFloat(manualEntryForm.amount) || 0,
+        description: manualEntryForm.description,
+        date: manualEntryForm.date,
+        createdAt: new Date().toISOString()
+      });
+      if (addSystemLog) addSystemLog(type === 'debt' ? 'Cari Borç Eklendi' : 'Cari Tahsilat Eklendi', `${customerName} carisine ${manualEntryForm.amount} TL ${type === 'debt' ? 'borç' : 'tahsilat'} kaydı eklendi.`);
+      setManualEntryForm({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
+      setShowAddDebtModal(false);
+      setShowAddPaymentModal(false);
+    };
+
+    return (
+      <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in pb-8">
+        <button onClick={onBack} className="text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
+          <ChevronLeft className="w-4 h-4" /> Listeye Geri Dön
+        </button>
+
+        {/* Kişisel Bilgiler */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h2 className="text-xl font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-4">
+            <Users className="w-6 h-6 text-red-600" /> Cari Hesap Profili
+          </h2>
+          <div className="flex items-center gap-4 mb-5">
+            <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center text-2xl font-black text-orange-600 shrink-0">
+              {customerName.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1">
+              <h3 className="text-2xl font-black text-black flex items-center gap-2">
+                {customerName}
+                {latestJob.isSpecial && <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />}
+                {/* YENİ: İsmin yanına düzenleme butonu */}
+                <button
+                  type="button"
+                  onClick={() => { setEditProfileForm({ name: customerName, phone: customerPhone, altPhone: altPhone, customerType: customerType, idNo: idNo }); setShowEditProfileModal(true); }}
+                  className="p-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-lg transition"
+                  title="Cari Profilini Düzenle"
+                >
+                  <Edit className="w-4 h-4" />
+                </button>
+              </h3>
+              <p className="text-neutral-500 text-sm font-medium">İlk Kayıt: {firstJob.date}</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 mb-5">
+            <a href={`tel:${(customerPhone || '').replace(/\D/g, '')}`} className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-black text-sm font-bold rounded-xl transition flex items-center gap-2">
+              <Phone className="w-4 h-4" /> Ara
+            </a>
+            <a
+              href={`https://wa.me/${(() => { let p = (customerPhone || '').replace(/\D/g, ''); if (p.startsWith('0')) p = '90' + p.substring(1); else if (!p.startsWith('90')) p = '90' + p; return p; })()}`}
+              target="_blank" rel="noreferrer"
+              className="px-4 py-2 bg-[#25D366] hover:bg-[#128C7E] text-white text-sm font-bold rounded-xl transition flex items-center gap-2"
+            >
+              <MessageCircle className="w-4 h-4" /> WhatsApp
+            </a>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-neutral-50 p-4 rounded-xl border border-neutral-100">
+            <div>
+              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">Telefon</span>
+              <p className="font-bold text-black text-sm">{customerPhone}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">Yedek Telefon</span>
+              <p className="font-bold text-black text-sm">{altPhone || '-'}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">Müşteri Tipi</span>
+              <p className="font-bold text-black text-sm">{customerType}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">{customerType === 'Kurumsal' ? 'Vergi No' : 'TC Kimlik No'}</span>
+              <p className="font-bold text-black text-sm">{idNo || '-'}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Ödeme Bilgileri (Depoevim tarzı Cari Hesap Dökümü) */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2">
+              <Wallet className="w-6 h-6 text-green-600" /> Cari Hesap / Ödeme Bilgileri
+            </h3>
+            {/* YENİ: Manuel Borç Ekle / Tahsilat Ekle butonları */}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => { setManualEntryForm({ amount: '', description: '', date: new Date().toISOString().split('T')[0] }); setShowAddDebtModal(true); }} className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                <PlusCircle className="w-3.5 h-3.5" /> Borç Ekle
+              </button>
+              <button type="button" onClick={() => { setManualEntryForm({ amount: '', description: '', date: new Date().toISOString().split('T')[0] }); setShowAddPaymentModal(true); }} className="px-3 py-2 bg-green-50 hover:bg-green-100 text-green-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                <PlusCircle className="w-3.5 h-3.5" /> Tahsilat Ekle
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+              <span className="text-xs font-bold text-neutral-500 block mb-1">Toplam Anlaşma Tutarı</span>
+              <span className="text-xl font-black text-black">₺{totalAmount.toLocaleString('tr-TR')}</span>
+            </div>
+            <div className="bg-green-50 p-4 rounded-xl border border-green-200">
+              <span className="text-xs font-bold text-green-700 block mb-1">Toplam Tahsilat</span>
+              <span className="text-xl font-black text-green-700">₺{totalPaid.toLocaleString('tr-TR')}</span>
+            </div>
+            <div className={`p-4 rounded-xl border ${remainingBalance > 0 ? 'bg-red-50 border-red-200' : 'bg-neutral-50 border-neutral-200'}`}>
+              <span className={`text-xs font-bold block mb-1 ${remainingBalance > 0 ? 'text-red-700' : 'text-neutral-500'}`}>Kalan Bakiye</span>
+              <span className={`text-xl font-black ${remainingBalance > 0 ? 'text-red-700' : 'text-black'}`}>₺{remainingBalance.toLocaleString('tr-TR')}</span>
+            </div>
+          </div>
+
+          <h4 className="font-bold text-sm text-neutral-600 mb-2 flex items-center gap-1.5"><History className="w-4 h-4" /> Detaylı Hesap Dökümü (Ekstre)</h4>
+          <div className="overflow-x-auto border border-neutral-200 rounded-xl">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600">
+                <tr>
+                  <th className="p-3 font-bold">Tarih</th>
+                  <th className="p-3 font-bold">İşlem Açıklaması</th>
+                  <th className="p-3 font-bold text-right">Borç</th>
+                  <th className="p-3 font-bold text-right">Tahsilat</th>
+                  <th className="p-3 font-bold text-right">Bakiye</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {ledgerRows.map(row => (
+                  <tr key={row.id} className="hover:bg-neutral-50 transition">
+                    <td className="p-3 font-medium text-black whitespace-nowrap">{row.date}</td>
+                    <td className="p-3 text-neutral-600">{row.desc}</td>
+                    <td className="p-3 text-right font-bold text-red-600">{row.debt > 0 ? `₺${row.debt.toLocaleString('tr-TR')}` : '-'}</td>
+                    <td className="p-3 text-right font-bold text-green-600">{row.credit > 0 ? `₺${row.credit.toLocaleString('tr-TR')}` : '-'}</td>
+                    <td className="p-3 text-right font-black text-black">₺{row.balance.toLocaleString('tr-TR')}</td>
+                  </tr>
+                ))}
+                {ledgerRows.length === 0 && (
+                  <tr><td colSpan="5" className="p-4 text-center text-neutral-400">Herhangi bir mali hareket bulunmuyor.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Müşterinin Yaptığı İşler */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2 justify-between">
+            <span className="flex items-center gap-2"><ClipboardList className="w-6 h-6 text-blue-500" /> Yaptığı İşler</span>
+            <span className="text-xs bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200 font-bold text-neutral-500">{customerJobs.length} kayıt</span>
+          </h3>
+          <div className="space-y-3">
+            {customerJobs.map(job => {
+              // YENİ: Cutoff tarihinden önceki işler cari amaçlı "Tamamlandı" olarak gösterilir
+              const forcedComplete = isBeforeCariCutoff(job.date);
+              const statusLabel = forcedComplete
+                ? 'Tamamlandı (Otomatik)'
+                : (job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : job.status === 'cancelled' ? 'İptal Edildi' : 'Bekliyor');
+              return (
+                <div key={job.id} className="bg-neutral-50 border border-neutral-200 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm transition hover:border-blue-200">
+                  <div className="flex items-center gap-3">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase tracking-wider shrink-0 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                      {job.type || 'Nakliye'}
+                    </span>
+                    <div>
+                      <span className="font-bold text-black text-sm block">{job.date} {job.time ? `- ${job.time}` : ''}</span>
+                      <span className={`text-[10px] font-bold uppercase ${forcedComplete || job.status === 'completed' ? 'text-black' : job.status === 'in-progress' ? 'text-red-600' : job.status === 'cancelled' ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                        {statusLabel}
+                        {isCariExcluded(job) && <span className="ml-1.5 text-neutral-400 normal-case font-medium">(Cari hesaba dahil değil)</span>}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {job.price ? <span className="font-black text-green-600 text-sm">₺{parseInt(job.price).toLocaleString('tr-TR')}</span> : null}
+                    <button onClick={() => generateContractPDF(job)} className="px-3 py-2 bg-green-50 border border-green-200 text-green-700 text-xs font-bold rounded-lg hover:bg-green-100 transition flex items-center gap-1.5 whitespace-nowrap">
+                      <FileText className="w-3.5 h-3.5" /> Sözleşmeyi İndir
+                    </button>
+                    <button onClick={() => handleEditJob(job)} className="px-3 py-2 bg-white border border-neutral-200 text-neutral-600 text-xs font-bold rounded-lg hover:bg-neutral-100 transition flex items-center gap-1.5 whitespace-nowrap">
+                      İşe Git <ArrowUpRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* YENİ: Cari Profil Düzenleme Modalı */}
+        {showEditProfileModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-black text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><Edit className="w-5 h-5" /> Cari Profilini Düzenle</h3>
+                <button onClick={() => setShowEditProfileModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleSaveProfileEdit} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Ad Soyad</label>
+                  <input required type="text" value={editProfileForm.name} onChange={e => setEditProfileForm({ ...editProfileForm, name: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Telefon</label>
+                  <input required type="text" value={editProfileForm.phone} onChange={e => setEditProfileForm({ ...editProfileForm, phone: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Yedek Telefon</label>
+                  <input type="text" value={editProfileForm.altPhone} onChange={e => setEditProfileForm({ ...editProfileForm, altPhone: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Müşteri Tipi</label>
+                  <select value={editProfileForm.customerType} onChange={e => setEditProfileForm({ ...editProfileForm, customerType: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white focus:ring-2 focus:ring-red-600">
+                    <option value="Bireysel">Bireysel</option>
+                    <option value="Kurumsal">Kurumsal</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">{editProfileForm.customerType === 'Kurumsal' ? 'Vergi No' : 'TC Kimlik No'}</label>
+                  <input type="text" value={editProfileForm.idNo} onChange={e => setEditProfileForm({ ...editProfileForm, idNo: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <Save className="w-5 h-5" /> Kaydet
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: Manuel Borç Ekle Modalı */}
+        {showAddDebtModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-red-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg">Manuel Borç Ekle</h3>
+                <button onClick={() => setShowAddDebtModal(false)} className="text-red-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={(e) => handleAddManualEntry(e, 'debt')} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tutar (TL)</label>
+                  <input required type="number" value={manualEntryForm.amount} onChange={e => setManualEntryForm({ ...manualEntryForm, amount: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Açıklama</label>
+                  <input type="text" value={manualEntryForm.description} onChange={e => setManualEntryForm({ ...manualEntryForm, description: e.target.value })} placeholder="Örn: Ek hizmet bedeli" className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tarih</label>
+                  <input required type="date" value={manualEntryForm.date} onChange={e => setManualEntryForm({ ...manualEntryForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <PlusCircle className="w-5 h-5" /> Borcu Ekle
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: Manuel Tahsilat Ekle Modalı */}
+        {showAddPaymentModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-green-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg">Manuel Tahsilat Ekle</h3>
+                <button onClick={() => setShowAddPaymentModal(false)} className="text-green-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={(e) => handleAddManualEntry(e, 'payment')} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tutar (TL)</label>
+                  <input required type="number" value={manualEntryForm.amount} onChange={e => setManualEntryForm({ ...manualEntryForm, amount: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-green-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Açıklama</label>
+                  <input type="text" value={manualEntryForm.description} onChange={e => setManualEntryForm({ ...manualEntryForm, description: e.target.value })} placeholder="Örn: Nakit tahsilat" className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-green-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tarih</label>
+                  <input required type="date" value={manualEntryForm.date} onChange={e => setManualEntryForm({ ...manualEntryForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-green-600" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <PlusCircle className="w-5 h-5" /> Tahsilatı Ekle
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -3599,7 +3804,7 @@ useEffect(() => {
     const displayPersonnel = maviYakaList;
 
     return (
-      <div className="flex flex-col h-[calc(100vh-120px)] md:h-[calc(100vh-140px)] animate-in fade-in pb-4">
+      <div className="flex flex-col lg:h-[calc(100vh-140px)] animate-in fade-in pb-4">
         {/* Üst Alan */}
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col md:flex-row justify-between items-center gap-4 mb-4 shrink-0">
           <div>
@@ -3626,10 +3831,10 @@ useEffect(() => {
           </div>
         </div>
 
-        <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 overflow-hidden">
+        <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 lg:overflow-hidden">
            
            {/* SOL: GÜNLER (7 KOLON) */}
-           <div className="flex-1 flex gap-3 overflow-x-auto custom-scrollbar bg-neutral-100/50 p-3 rounded-2xl border border-neutral-200 h-full">
+           <div className="flex-1 flex gap-3 overflow-x-auto custom-scrollbar bg-neutral-100/50 p-3 rounded-2xl border border-neutral-200 h-[420px] lg:h-full shrink-0">
               {weekDays.map((wd, i) => {
                  const isToday = wd.dateStr === new Date().toISOString().split('T')[0];
                  const isWeekendDay = i === 6; // Sunday
@@ -3699,7 +3904,7 @@ useEffect(() => {
            </div>
 
            {/* SAĞ: PERSONEL LİSTESİ */}
-           <div className="w-full lg:w-[160px] xl:w-[180px] h-full flex flex-col bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden shrink-0">
+           <div className="w-full lg:w-[160px] xl:w-[180px] h-[420px] lg:h-full flex flex-col bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden shrink-0">
               <div className="p-3 border-b border-neutral-200 bg-neutral-50 flex items-center justify-between shrink-0">
                 <h3 className="font-black text-xs text-black flex items-center gap-1.5">
                   <UserPlus className="w-3.5 h-3.5 text-blue-500" /> Personel
@@ -3761,7 +3966,7 @@ useEffect(() => {
                 <h3 className="font-bold text-lg flex items-center gap-2"><CalendarDays className="w-5 h-5 text-orange-500" /> Özel Durum Ekle</h3>
                 <button onClick={() => setShowSpecialLeaveModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
-              <form onSubmit={handleAddSpecialLeave} className="p-6 space-y-4">
+              <div  className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-neutral-700 mb-1">Personel Seçin *</label>
                   <select required value={specialLeaveForm.personnelId} onChange={e => setSpecialLeaveForm({...specialLeaveForm, personnelId: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 font-medium bg-white">
@@ -3788,11 +3993,11 @@ useEffect(() => {
                     <input required type="date" min={specialLeaveForm.startDate} value={specialLeaveForm.endDate} onChange={e => setSpecialLeaveForm({...specialLeaveForm, endDate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
                   </div>
                 </div>
-                <button type="submit" disabled={isSaving} className="w-full py-4 bg-orange-500 text-white font-black rounded-xl hover:bg-orange-600 transition shadow-lg shadow-orange-500/30 flex justify-center items-center gap-2 mt-2 disabled:opacity-50">
+                <button type="button" onClick={handleAddSpecialLeave} disabled={isSaving} className="w-full py-4 bg-orange-500 text-white font-black rounded-xl hover:bg-orange-600 transition shadow-lg shadow-orange-500/30 flex justify-center items-center gap-2 mt-2 disabled:opacity-50">
                   {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
                   {isSaving ? 'Kaydediliyor...' : 'Durumu Kaydet'}
                 </button>
-              </form>
+              </div>
             </div>
           </div>
         )}
@@ -4600,7 +4805,7 @@ useEffect(() => {
       <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
         <CheckSquare className="w-6 h-6 text-red-600" /> Yeni Görev Ekle
       </h2>
-      <form onSubmit={handleAddTask} className="space-y-4">
+      <div  className="space-y-4">
         <div>
           <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
           <input required type="text" value={newTask.title} onChange={(e) => setNewTask({...newTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" placeholder="Örn: Müşteri aramaları yapılacak" />
@@ -4627,10 +4832,10 @@ useEffect(() => {
           </div>
         </div>
 
-        <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+        <button type="button" onClick={handleAddTask} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
           <PlusCircle className="w-5 h-5" /> Listeye Kaydet
         </button>
-      </form>
+      </div>
     </div>
   );
 
@@ -4736,7 +4941,7 @@ useEffect(() => {
       <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
         <ListTodo className="w-6 h-6 text-red-600" /> Yeni Yapılacak İş Ekle
       </h2>
-      <form onSubmit={handleAddTodo} className="space-y-4">
+      <div  className="space-y-4">
         <div>
           <label className="block text-sm font-bold text-black mb-1">Başlık</label>
           <input required type="text" value={newTodo.title} onChange={(e) => setNewTodo({...newTodo, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Araç muayenesi randevusu alınacak" />
@@ -4763,10 +4968,10 @@ useEffect(() => {
           </div>
         </div>
 
-        <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+        <button type="button" onClick={handleAddTodo} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
           <PlusCircle className="w-5 h-5" /> Kaydet ve Ekle
         </button>
-      </form>
+      </div>
     </div>
   );
 
@@ -4861,7 +5066,7 @@ useEffect(() => {
             </button>
           )}
         </div>
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <div  className="space-y-5">
           <div>
             <label className="block text-sm font-bold text-black mb-1">Malzeme Adı</label>
             <input required type="text" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-medium" placeholder="Örn: Koli Bantı, 50x50 Koli" />
@@ -4892,10 +5097,10 @@ useEffect(() => {
               </select>
             </div>
           </div>
-          <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+          <button type="button" onClick={handleSubmit} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
             <PlusCircle className="w-5 h-5" /> Malzemeyi Kaydet
           </button>
-        </form>
+        </div>
       </div>
     );
   };
@@ -4927,7 +5132,7 @@ useEffect(() => {
             <X className="w-5 h-5" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-5">
+        <div  className="space-y-5">
           <div>
             <label className="block text-sm font-bold text-black mb-1">Malzeme Seçin</label>
             <select required value={formData.materialId} onChange={(e) => setFormData({...formData, materialId: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-blue-600 outline-none bg-white transition font-medium">
@@ -4963,10 +5168,10 @@ useEffect(() => {
             </div>
           </div>
 
-          <button type="submit" className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg shadow-blue-600/20 mt-4">
+          <button type="button" onClick={handleSubmit} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg shadow-blue-600/20 mt-4">
             <CheckCircle className="w-5 h-5" /> Stokları Güncelle
           </button>
-        </form>
+        </div>
       </div>
     );
   };
@@ -5293,7 +5498,7 @@ useEffect(() => {
            <h3 className="text-lg font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-100 pb-3">
              <PlusCircle className="w-5 h-5 text-red-600" /> Manuel Finansal İşlem Ekle
            </h3>
-           <form onSubmit={handleAddTransaction} className="flex flex-col lg:flex-row gap-4">
+           <div  className="flex flex-col lg:flex-row gap-4">
               <div className="flex bg-neutral-100 p-1 rounded-xl shrink-0">
                 <button type="button" onClick={() => setTransactionType('income')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${transactionType === 'income' ? 'bg-white text-green-600 shadow-sm' : 'text-neutral-500'}`}>Gelir</button>
                 <button type="button" onClick={() => setTransactionType('expense')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${transactionType === 'expense' ? 'bg-white text-red-600 shadow-sm' : 'text-neutral-500'}`}>Gider</button>
@@ -5305,8 +5510,8 @@ useEffect(() => {
                 <option value="bank">Banka / Havale</option>
               </select>
               <input required type="date" value={newTransaction.date} onChange={e => setNewTransaction({...newTransaction, date: e.target.value})} className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" />
-              <button type="submit" className="px-6 py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Kaydet</button>
-           </form>
+              <button type="button" onClick={handleAddTransaction} className="px-6 py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Kaydet</button>
+           </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
@@ -5601,7 +5806,7 @@ useEffect(() => {
           <button onClick={onCancel} className="text-neutral-400 hover:text-black transition"><X className="w-6 h-6" /></button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">Araç Plakası</label>
@@ -5683,22 +5888,21 @@ useEffect(() => {
               <FileText className="w-4 h-4 text-red-600" /> Araç Ruhsat Fotoğrafı
             </label>
             {formData.ruhsatFoto && formData.ruhsatFoto !== 'Yükleniyor...' && (
-              <img src={formData.ruhsatFoto} alt="Ruhsat" className="h-28 rounded-lg border border-neutral-200 mb-2 object-cover" />
+              isVideoUrl(formData.ruhsatFoto) ? (
+                <video src={formData.ruhsatFoto} controls className="h-28 rounded-lg border border-neutral-200 mb-2 bg-black" />
+              ) : (
+                <img src={formData.ruhsatFoto} alt="Ruhsat" className="h-28 rounded-lg border border-neutral-200 mb-2 object-cover" />
+              )
             )}
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleRuhsatUpload}
-              className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-black file:text-white file:font-bold file:cursor-pointer"
-            />
+            <MediaCaptureMenu onChange={handleRuhsatUpload} buttonLabel="Ruhsat Fotoğrafı / Videosu Ekle" />
             {formData.ruhsatFoto === 'Yükleniyor...' && <p className="text-xs text-neutral-400 mt-1">Yükleniyor...</p>}
           </div>
 
           <div className="flex gap-3 pt-4 border-t border-neutral-100">
             <button type="button" onClick={onCancel} className="flex-1 py-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">İptal</button>
-            <button type="submit" className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Aracı Kaydet</button>
+            <button type="button" onClick={handleSubmit} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Aracı Kaydet</button>
           </div>
-        </form>
+        </div>
       </div>
     );
   };
@@ -5853,7 +6057,6 @@ useEffect(() => {
     // YENİ: Artık sadece son 5 değil, bugüne kadar eklenen TÜM kayıtlar (aşağıda kaydırmalı alanda) gösteriliyor
     const recentRecords = allRecords;
 
-
     return (
       <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in pb-8">
         <h2 className="text-2xl font-black text-black flex items-center gap-2 border-b border-neutral-200 pb-4">
@@ -5886,7 +6089,7 @@ useEffect(() => {
                   </span>
                   <span className="text-xs bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200">{selectedVehicle.plate}</span>
                 </h3>
-                <form onSubmit={handleSubmit} className="space-y-4">
+                <div  className="space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                       <label className="block text-sm font-bold text-neutral-700 mb-1">İşlem Türü</label>
@@ -5926,7 +6129,7 @@ useEffect(() => {
                     <textarea value={recordForm.notes} onChange={e => setRecordForm({...recordForm, notes: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none" placeholder="Değişen parçalar, muayene istasyonu vb..."></textarea>
                   </div>
                   <div className="flex gap-2">
-                    <button type="submit" className="flex-1 py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg shadow-red-600/30">
+                    <button type="button" onClick={handleSubmit} className="flex-1 py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg shadow-red-600/30">
                       <Save className="w-5 h-5" /> {editingRecordInfo ? 'Kaydı Güncelle' : 'Kaydı Ekle'}
                     </button>
                     {editingRecordInfo && (
@@ -5935,7 +6138,7 @@ useEffect(() => {
                       </button>
                     )}
                   </div>
-                </form>
+                </div>
               </div>
 
               {/* Geçmiş Kayıtlar Bölümü */}
@@ -6027,6 +6230,7 @@ useEffect(() => {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="font-black text-green-600 text-base">{r.cost ? `₺${parseInt(r.cost).toLocaleString('tr-TR')}` : ''}</span>
+                    {/* YENİ: Duruma göre düzenleme butonu */}
                     <button
                       type="button"
                       onClick={() => handleStartEdit(r.vehicleId, r)}
@@ -6041,10 +6245,191 @@ useEffect(() => {
             </div>
           )}
         </div>
+
       </div>
     );
   };
   
+  // --- YENİ: ARAÇ PROFİLİ SAYFASI ---
+  // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir. Mevcut araç
+  // ekleme/düzenleme/bakım mantığına hiç dokunulmadı.
+  const VehicleProfileView = ({ vehicleId, vehicles, jobs, onBack, setViewingRuhsatUrl, handleEditJob }) => {
+    const vehicle = vehicles.find(v => String(v.id) === String(vehicleId));
+
+    const [periodFilter, setPeriodFilter] = useState('month'); // week | month | year | all
+
+    if (!vehicle) {
+      return (
+        <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-8 text-center animate-in fade-in">
+          <button onClick={onBack} className="mb-4 text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
+            <ChevronLeft className="w-4 h-4" /> Listeye Geri Dön
+          </button>
+          <AlertTriangle className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
+          <p className="text-neutral-500 font-medium">Araç bulunamadı.</p>
+        </div>
+      );
+    }
+
+    const getPeriodStart = () => {
+      const now = new Date();
+      if (periodFilter === 'week') { const d = new Date(now); d.setDate(d.getDate() - 7); return d; }
+      if (periodFilter === 'month') return new Date(now.getFullYear(), now.getMonth(), 1);
+      if (periodFilter === 'year') return new Date(now.getFullYear(), 0, 1);
+      return null;
+    };
+    const periodStart = getPeriodStart();
+
+    const vehicleJobs = jobs.filter(j => j.assignedVehiclePlate === vehicle.plate).sort((a, b) => new Date(b.date) - new Date(a.date));
+    const periodJobs = periodStart ? vehicleJobs.filter(j => new Date(j.date) >= periodStart) : vehicleJobs;
+
+    // --- Muayene / Kritik Bakım Bilgisi ---
+    const todayStr = new Date().toISOString().split('T')[0];
+    const muayeneRecords = (vehicle.maintenanceRecords || []).filter(r => r.type === 'Araç Muayenesi').sort((a, b) => new Date(b.date) - new Date(a.date));
+    const latestMuayene = muayeneRecords[0];
+    const muayeneDue = latestMuayene?.nextDate && latestMuayene.nextDate <= todayStr;
+
+    const allAlerts = (vehicle.maintenanceRecords || []).filter(r => {
+      let isCritical = false;
+      if (r.nextDate && r.nextDate <= todayStr) isCritical = true;
+      if (r.nextKm && vehicle.km && parseInt(vehicle.km) >= parseInt(r.nextKm)) isCritical = true;
+      return isCritical;
+    });
+
+    const recentMaintenance = [...(vehicle.maintenanceRecords || [])].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 5);
+
+    return (
+      <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in pb-8">
+        <button onClick={onBack} className="text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
+          <ChevronLeft className="w-4 h-4" /> Listeye Geri Dön
+        </button>
+
+        {/* Araç Bilgileri */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h2 className="text-xl font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-4">
+            <Car className="w-6 h-6 text-red-600" /> Araç Profili
+          </h2>
+          <div className="flex items-center gap-4 mb-5">
+            <div className="w-16 h-16 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0">
+              <Truck className="w-8 h-8 text-purple-600" />
+            </div>
+            <div>
+              <div className="border-2 border-black rounded px-3 py-1.5 inline-flex items-center gap-2 bg-white shadow-sm mb-1.5">
+                <span className="bg-blue-600 text-white font-black text-[10px] px-1.5 py-0.5 rounded-sm">TR</span>
+                <span className="tracking-widest font-black text-xl">{vehicle.plate.toUpperCase()}</span>
+              </div>
+              <p className="text-neutral-500 text-sm font-bold">{vehicle.type} • {vehicle.model} Model</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-neutral-50 p-4 rounded-xl border border-neutral-100 text-sm mb-4">
+            <div><span className="text-[10px] font-bold text-neutral-400 uppercase block mb-1">Güncel KM</span><p className="font-bold text-black">{vehicle.km || '-'}</p></div>
+            <div><span className="text-[10px] font-bold text-neutral-400 uppercase block mb-1">Hacim</span><p className="font-bold text-black">{vehicle.volume ? `${vehicle.volume} m³` : '-'}</p></div>
+            <div><span className="text-[10px] font-bold text-neutral-400 uppercase block mb-1">Renk</span><p className="font-bold text-black">{vehicle.color || '-'}</p></div>
+            <div><span className="text-[10px] font-bold text-neutral-400 uppercase block mb-1">Vites</span><p className="font-bold text-black">{vehicle.transmission || '-'}</p></div>
+          </div>
+
+          <div className="flex flex-wrap gap-1.5 mb-4">
+            {(vehicle.capacity || []).map(cap => (
+              <span key={cap} className="text-xs px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-bold border border-blue-100">{cap} Ev</span>
+            ))}
+          </div>
+
+          {vehicle.ruhsatFoto && vehicle.ruhsatFoto !== 'Yükleniyor...' ? (
+            <button onClick={() => setViewingRuhsatUrl(vehicle.ruhsatFoto)} className="px-4 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-sm font-bold rounded-xl transition flex items-center gap-2 w-max">
+              <FileText className="w-4 h-4" /> Ruhsatı Gör
+            </button>
+          ) : (
+            <span className="text-xs text-neutral-400 font-medium italic">Ruhsat fotoğrafı yüklenmemiş.</span>
+          )}
+        </div>
+
+        {/* Muayene / Kritik Durum */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2"><AlertTriangle className="w-6 h-6 text-orange-500" /> Muayene ve Kritik Durum</h3>
+          <div className={`p-4 rounded-xl border mb-4 ${muayeneDue ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'}`}>
+            <span className={`text-[10px] font-bold uppercase block mb-1 ${muayeneDue ? 'text-red-600' : 'text-green-700'}`}>Son Muayene Kaydı</span>
+            {latestMuayene ? (
+              <p className={`font-black ${muayeneDue ? 'text-red-700' : 'text-green-800'}`}>
+                {latestMuayene.date} tarihinde yapıldı. {latestMuayene.nextDate ? `Sonraki muayene: ${latestMuayene.nextDate}` : ''} {muayeneDue && '— GECİKMİŞ / YAKLAŞIYOR!'}
+              </p>
+            ) : (
+              <p className="font-bold text-neutral-500">Sistemde kayıtlı bir muayene bilgisi bulunmuyor.</p>
+            )}
+          </div>
+
+          {allAlerts.length > 0 && (
+            <div className="space-y-2">
+              {allAlerts.map((a, i) => (
+                <div key={i} className="bg-red-50 border border-red-200 p-3 rounded-xl flex justify-between items-center text-sm">
+                  <span className="font-bold text-red-900">{a.type}</span>
+                  <span className="text-red-700 font-medium text-xs">{a.nextDate ? `Tarih: ${a.nextDate}` : ''} {a.nextKm ? `KM: ${a.nextKm}` : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Bu Dönem Kaç İşe Gitti */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><BarChart className="w-6 h-6 text-blue-600" /> Operasyon Özeti</h3>
+            <div className="flex bg-neutral-100 p-1 rounded-xl">
+              {[{ k: 'week', l: 'Haftalık' }, { k: 'month', l: 'Aylık' }, { k: 'year', l: 'Bu Sene' }, { k: 'all', l: 'Tüm Zamanlar' }].map(opt => (
+                <button key={opt.k} type="button" onClick={() => setPeriodFilter(opt.k)} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition ${periodFilter === opt.k ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+                  {opt.l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center mb-4">
+            <span className="text-3xl font-black text-black block">{periodJobs.length}</span>
+            <span className="text-xs font-bold text-neutral-500">Bu Dönemde Gidilen İş</span>
+          </div>
+
+          <h4 className="font-bold text-sm text-neutral-600 mb-2">Gittiği İşler</h4>
+          <div className="space-y-2 max-h-72 overflow-y-auto custom-scrollbar">
+            {periodJobs.length === 0 ? (
+              <p className="text-sm text-neutral-500 italic">Bu dönemde bu araçla yapılmış bir iş bulunamadı.</p>
+            ) : periodJobs.map(job => (
+              <div key={job.id} className="bg-neutral-50 border border-neutral-200 p-3 rounded-xl flex justify-between items-center text-sm">
+                <div>
+                  <span className="font-bold text-black block">{job.customerName}</span>
+                  <span className="text-[10px] text-neutral-500 font-bold">{job.date} • {job.type || 'Nakliye'}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${job.status === 'completed' ? 'bg-black text-white' : job.status === 'in-progress' ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>
+                    {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
+                  </span>
+                  <button onClick={() => handleEditJob(job)} className="px-2.5 py-1.5 bg-white border border-neutral-200 text-neutral-600 text-[10px] font-bold rounded-lg hover:bg-neutral-100 transition flex items-center gap-1 whitespace-nowrap">
+                    İşe Git <ArrowUpRight className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Son Bakım Kayıtları */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2"><History className="w-6 h-6 text-neutral-600" /> Son Bakım Kayıtları</h3>
+          <div className="space-y-2">
+            {recentMaintenance.length === 0 ? (
+              <p className="text-sm text-neutral-500 italic">Henüz bakım kaydı girilmemiş.</p>
+            ) : recentMaintenance.map(r => (
+              <div key={r.id} className="bg-neutral-50 border border-neutral-200 p-3 rounded-xl flex justify-between items-center text-sm">
+                <div>
+                  <span className="font-bold text-black block">{r.type}</span>
+                  <span className="text-[10px] text-neutral-500 font-bold">{r.date} {r.km ? `• ${r.km} KM'de yapıldı` : ''}</span>
+                </div>
+                {r.cost && <span className="font-black text-red-600 text-sm">₺{parseInt(r.cost).toLocaleString('tr-TR')}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const AddPersonnelView = ({ onAdd, positions, ranks }) => {
     const [formData, setFormData] = useState({
       fullName: '', email: '', password: '', position: positions?.[0] || 'Şoför', rank: ranks?.[0] || 'Standart',
@@ -6091,7 +6476,7 @@ useEffect(() => {
         <h2 className="text-xl sm:text-2xl font-black text-black mb-8 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <UserPlus className="w-6 h-6 sm:w-7 sm:h-7 text-red-600" /> Personel Ekle
         </h2>
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <div  className="space-y-6">
           
           <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-5 bg-neutral-50 rounded-xl border border-neutral-200">
             <div className="w-20 h-20 rounded-full border border-neutral-300 bg-neutral-100 flex items-center justify-center overflow-hidden shrink-0">
@@ -6105,10 +6490,7 @@ useEffect(() => {
             </div>
             <div className="flex flex-col gap-2 w-full sm:w-auto items-center sm:items-start text-center sm:text-left">
               <span className="text-sm font-bold text-neutral-700">Profil Fotoğrafı</span>
-              <label className="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-lg flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-max shadow-sm text-xs font-bold text-neutral-700">
-                <Upload className="w-4 h-4" /> Fotoğraf Yükle
-                <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={isUploading} />
-              </label>
+              <MediaCaptureMenu onChange={handleImageUpload} disabled={isUploading} compact buttonLabel="Fotoğraf Yükle" buttonClassName="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-lg flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-max shadow-sm text-xs font-bold text-neutral-700" />
             </div>
           </div>
 
@@ -6222,14 +6604,14 @@ useEffect(() => {
             </div>
           </div>
 
-          <button type="submit" disabled={isUploading} className="w-full py-4 mt-2 bg-[#e62020] text-white font-bold text-lg rounded-xl hover:bg-red-700 transition shadow-md disabled:opacity-50">
+          <button type="button" onClick={handleSubmit} disabled={isUploading} className="w-full py-4 mt-2 bg-[#e62020] text-white font-bold text-lg rounded-xl hover:bg-red-700 transition shadow-md disabled:opacity-50">
             Personeli Kaydet
           </button>
-        </form>
+        </div>
       </div>
     );
   };
-  const PersonnelListView = ({ personnelList, onUpdate, positions = [], ranks = [] }) => {
+  const PersonnelListView = ({ personnelList, onUpdate, positions = [], ranks = [], onViewProfile }) => {
     const [filterYaka, setFilterYaka] = useState('');
     const [filterPozisyon, setFilterPozisyon] = useState('');
     const [filterRutbe, setFilterRutbe] = useState('');
@@ -6292,6 +6674,7 @@ useEffect(() => {
                 <th className="p-4 font-bold rounded-tl-xl">Ad Soyad</th>
                 <th className="p-4 font-bold">İletişim</th>
                 <th className="p-4 font-bold">Pozisyon / Rütbe</th>
+                <th className="p-4 font-bold text-center">Profil</th>
                 <th className="p-4 font-bold text-center rounded-tr-xl">Düzenleme</th>
               </tr>
             </thead>
@@ -6321,6 +6704,11 @@ useEffect(() => {
                     <span className="text-xs text-neutral-500">{person.rank || '-'}</span>
                   </td>
                   <td className="p-4 text-center">
+                    <button onClick={() => onViewProfile && onViewProfile(person.id)} className="px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5 w-max mx-auto" title="Profiline Git">
+                      <FolderOpen className="w-3.5 h-3.5" /> Profiline Git
+                    </button>
+                  </td>
+                  <td className="p-4 text-center">
                     <button onClick={() => setEditingUser(person)} className="p-2 text-blue-500 border border-blue-200 bg-white rounded-lg hover:bg-blue-50 hover:border-blue-300 transition shadow-sm" title="Düzenle">
                       <Edit className="w-4 h-4"/>
                     </button>
@@ -6329,7 +6717,7 @@ useEffect(() => {
               ))}
               {filteredList.length === 0 && (
                 <tr>
-                  <td colSpan="4" className="p-8 text-center text-neutral-500 font-medium border-2 border-dashed border-neutral-200 bg-neutral-50/50 m-4 rounded-xl">Bu kritere uygun personel bulunamadı.</td>
+                  <td colSpan="5" className="p-8 text-center text-neutral-500 font-medium border-2 border-dashed border-neutral-200 bg-neutral-50/50 m-4 rounded-xl">Bu kritere uygun personel bulunamadı.</td>
                 </tr>
               )}
             </tbody>
@@ -6343,7 +6731,7 @@ useEffect(() => {
                 <h3 className="font-bold text-lg">Personel Düzenle</h3>
                 <button onClick={() => setEditingUser(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
-              <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
+              <div  className="p-6 space-y-6 max-h-[80vh] overflow-y-auto custom-scrollbar">
                 
                 <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-5 bg-neutral-50 rounded-xl border border-neutral-200">
                   <div className="w-20 h-20 rounded-full border border-neutral-300 bg-neutral-100 flex items-center justify-center overflow-hidden shrink-0">
@@ -6357,10 +6745,7 @@ useEffect(() => {
                   </div>
                   <div className="flex flex-col gap-2 w-full sm:w-auto items-center sm:items-start text-center sm:text-left">
                     <span className="text-sm font-bold text-neutral-700">Profil Fotoğrafı</span>
-                    <label className="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-lg flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-max shadow-sm text-xs font-bold text-neutral-700">
-                      <Upload className="w-4 h-4" /> Fotoğraf Yükle
-                      <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={isUploading} />
-                    </label>
+                    <MediaCaptureMenu onChange={handleImageUpload} disabled={isUploading} compact buttonLabel="Fotoğraf Yükle" buttonClassName="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-lg flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-max shadow-sm text-xs font-bold text-neutral-700" />
                   </div>
                 </div>
 
@@ -6474,8 +6859,547 @@ useEffect(() => {
                   </div>
                 </div>
 
-                <button type="submit" disabled={isUploading} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2 disabled:opacity-50">
+                <button type="button" onClick={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} disabled={isUploading} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2 disabled:opacity-50">
                   <Save className="w-5 h-5" /> Değişiklikleri Kaydet
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // --- YENİ: PERSONEL PROFİL SAYFASI ---
+  // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir. Mevcut personel
+  // düzenleme/listeleme mantığına hiç dokunulmadı.
+  const PERSONNEL_SKILL_DEFS = [
+    { key: 'soforluk', label: 'Şoförlük Gücü' },
+    { key: 'mobilya', label: 'Mobilya Gücü' },
+    { key: 'tasima', label: 'Taşıma Gücü' },
+    { key: 'diyalog', label: 'Diyalog Gücü' },
+    { key: 'liderlik', label: 'Liderlik Gücü' },
+    { key: 'takimCalismasi', label: 'Takım Çalışması Gücü' },
+    { key: 'devamlilik', label: 'Devamlılık Gücü' },
+    { key: 'form', label: 'Form Gücü' }
+  ];
+
+  const getSkillBarColor = (val) => {
+    if (val < 35) return 'bg-red-500';
+    if (val < 60) return 'bg-orange-400';
+    if (val < 80) return 'bg-yellow-400';
+    return 'bg-green-500';
+  };
+  const getSkillTextColor = (val) => {
+    if (val < 35) return 'text-red-600';
+    if (val < 60) return 'text-orange-600';
+    if (val < 80) return 'text-yellow-600';
+    return 'text-green-600';
+  };
+
+  const PersonnelProfileView = ({ personId, personnelList, jobs, db, appId, addSystemLog, onBack, setViewingImage }) => {
+    const person = personnelList.find(p => String(p.id) === String(personId));
+
+    const [periodFilter, setPeriodFilter] = useState('month'); // week | month | year | all
+    const [skills, setSkills] = useState({});
+    const [clothingRecords, setClothingRecords] = useState([]);
+    const [phoneRecords, setPhoneRecords] = useState([]);
+    const [leaveRecords, setLeaveRecords] = useState([]);
+
+    const [showClothingModal, setShowClothingModal] = useState(false);
+    const [clothingForm, setClothingForm] = useState({ item: '', date: new Date().toISOString().split('T')[0], note: '' });
+    const [showPhoneModal, setShowPhoneModal] = useState(false);
+    const [phoneForm, setPhoneForm] = useState({ model: '', date: new Date().toISOString().split('T')[0], note: '' });
+    const [showLeaveModal, setShowLeaveModal] = useState(false);
+    const [leaveForm, setLeaveForm] = useState({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], days: '', note: '' });
+
+    // YENİ: "İşi Bırakma" modalı için state
+    const [showResignModal, setShowResignModal] = useState(false);
+    const [resignForm, setResignForm] = useState({ date: new Date().toISOString().split('T')[0], reason: '' });
+
+    useEffect(() => {
+      if (!personId || !db) return;
+      const unsub1 = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'personnelSkills', String(personId)), snap => {
+        setSkills(snap.exists() ? snap.data() : {});
+      }, console.error);
+      const unsub2 = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'personnelClothing'), where('personnelId', '==', String(personId))), snap => {
+        setClothingRecords(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.date) - new Date(a.date)));
+      }, console.error);
+      const unsub3 = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'personnelPhones'), where('personnelId', '==', String(personId))), snap => {
+        setPhoneRecords(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.date) - new Date(a.date)));
+      }, console.error);
+      const unsub4 = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'personnelAnnualLeave'), where('personnelId', '==', String(personId))), snap => {
+        setLeaveRecords(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.startDate) - new Date(a.startDate)));
+      }, console.error);
+      return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
+    }, [personId, db, appId]);
+
+    if (!person) {
+      return (
+        <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-8 text-center animate-in fade-in">
+          <button onClick={onBack} className="mb-4 text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
+            <ChevronLeft className="w-4 h-4" /> Listeye Geri Dön
+          </button>
+          <AlertTriangle className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
+          <p className="text-neutral-500 font-medium">Personel bulunamadı.</p>
+        </div>
+      );
+    }
+
+    const getPeriodStart = () => {
+      const now = new Date();
+      if (periodFilter === 'week') { const d = new Date(now); d.setDate(d.getDate() - 7); return d; }
+      if (periodFilter === 'month') return new Date(now.getFullYear(), now.getMonth(), 1);
+      if (periodFilter === 'year') return new Date(now.getFullYear(), 0, 1);
+      return null;
+    };
+    const periodStart = getPeriodStart();
+
+    const personJobs = jobs.filter(j => (j.assignedPersonnelIds || []).includes(person.id) || j.assignedPersonnelId === person.id)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+    const periodJobs = periodStart ? personJobs.filter(j => new Date(j.date) >= periodStart) : personJobs;
+    const periodJobsCount = periodJobs.length;
+    const periodReviewsCount = periodJobs.filter(j => j.pointsApproved && j.reviewImage).length;
+
+    const recentJobs = personJobs.slice(0, 5);
+    const recentReviewedJobs = personJobs.filter(j => j.pointsApproved && j.reviewImage).slice(0, 5);
+
+    const handleSkillChange = async (key, delta) => {
+      const current = typeof skills[key] === 'number' ? skills[key] : 50;
+      const newVal = Math.max(0, Math.min(100, current + delta));
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelSkills', String(personId)), { [key]: newVal }, { merge: true });
+    };
+
+    const avgSkill = Math.round(PERSONNEL_SKILL_DEFS.reduce((sum, s) => sum + (typeof skills[s.key] === 'number' ? skills[s.key] : 50), 0) / PERSONNEL_SKILL_DEFS.length);
+
+    const handleAddClothing = async (e) => {
+      e.preventDefault();
+      if (!clothingForm.item) return;
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelClothing'), { personnelId: String(personId), ...clothingForm, createdAt: new Date().toISOString() });
+      if (addSystemLog) addSystemLog('Kıyafet Verildi', `${person.fullName} personeline ${clothingForm.item} verildi.`);
+      setClothingForm({ item: '', date: new Date().toISOString().split('T')[0], note: '' });
+      setShowClothingModal(false);
+    };
+
+    const handleAddPhone = async (e) => {
+      e.preventDefault();
+      if (!phoneForm.model) return;
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelPhones'), { personnelId: String(personId), ...phoneForm, createdAt: new Date().toISOString() });
+      if (addSystemLog) addSystemLog('Telefon Verildi', `${person.fullName} personeline ${phoneForm.model} telefon verildi.`);
+      setPhoneForm({ model: '', date: new Date().toISOString().split('T')[0], note: '' });
+      setShowPhoneModal(false);
+    };
+
+    const handleAddLeave = async (e) => {
+      e.preventDefault();
+      if (!leaveForm.startDate || !leaveForm.endDate) return;
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelAnnualLeave'), { personnelId: String(personId), ...leaveForm, createdAt: new Date().toISOString() });
+      if (addSystemLog) addSystemLog('Yıllık İzin Kaydedildi', `${person.fullName} personeline yıllık izin kaydı eklendi (${leaveForm.startDate} - ${leaveForm.endDate}).`);
+      setLeaveForm({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], days: '', note: '' });
+      setShowLeaveModal(false);
+    };
+
+    // --- YENİ: İŞİ BIRAKMA İŞLEMİ ---
+    // Mevcut "Pasif" yapma mantığına (handleUpdatePersonnel) hiç dokunulmadan,
+    // TAMAMEN AYRI bir akış olarak eklendi. Bu fonksiyon:
+    // 1) Personeli o tarihten itibaren Pasif yapar ve ayrılma nedeni/tarihini kaydeder.
+    // 2) Ayrıldığı aydaki KALAN günleri mesai tablosuna otomatik "İB" (İşi Bıraktı) olarak işler
+    //    (Ücretsiz İzin ile aynı mantıkta: o günler için maaş hesaplanmaz).
+    // 3) isPersonnelVisibleInMonth fonksiyonu zaten passiveDate'ten SONRAKİ ayларda personeli
+    //    otomatik olarak puantaj/mesai/maaş tablolarından gizlediği için, sonraki aylar için
+    //    ekstra bir işlem yapmaya gerek yoktur.
+    const handleResignPersonnel = async (e) => {
+      e.preventDefault();
+      if (!resignForm.date) return;
+
+      const resignDateObj = new Date(resignForm.date);
+      const year = resignDateObj.getFullYear();
+      const month = resignDateObj.getMonth() + 1;
+      const resignDay = resignDateObj.getDate();
+      const daysInMonth = new Date(year, month, 0).getDate();
+
+      // Personelin mavi/beyaz yaka mesai koleksiyon önekini belirle (sistemin geri kalanıyla aynı mantık)
+      const isBeyazYaka = person.collarType === 'Beyaz Yaka' || (person.collarType !== 'Mavi Yaka' && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(person.position));
+      const docPrefix = isBeyazYaka ? 'beyaz_' : '';
+
+      try {
+        // 1) Ayın kalan günlerini "İB" olarak mesai tablosuna işle
+        const mesaiRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${docPrefix}${year}_${month}`);
+        const mesaiSnap = await getDoc(mesaiRef);
+        let records = mesaiSnap.exists() ? mesaiSnap.data().records : {};
+        if (!records[personId]) records[personId] = {};
+        for (let d = resignDay + 1; d <= daysInMonth; d++) {
+          records[personId][d] = { status: 'İB', hours: '' };
+        }
+        await setDoc(mesaiRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
+
+        // 2) Personel kaydını güncelle: Pasif yap, ayrılma tarihi/nedenini kaydet
+        const leaveEvent = { id: Date.now().toString(), date: new Date().toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }), type: 'İşten Ayrıldı' };
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(personId)), {
+          employmentStatus: 'Pasif',
+          passiveDate: resignForm.date,
+          resignationDate: resignForm.date,
+          resignationReason: resignForm.reason,
+          leaveHistory: [...(person.leaveHistory || []), leaveEvent]
+        });
+
+        if (addSystemLog) addSystemLog('Personel İşi Bıraktı', `${person.fullName}, ${resignForm.date} tarihi itibarıyla işi bıraktı. Neden: ${resignForm.reason || 'Belirtilmedi'}.`);
+        setShowResignModal(false);
+      } catch (err) {
+        console.error('İşi bırakma işlemi sırasında hata:', err);
+        alert('İşlem sırasında bir hata oluştu.');
+      }
+    };
+
+    const currentYear = new Date().getFullYear();
+    const totalLeaveDaysThisYear = leaveRecords
+      .filter(r => new Date(r.startDate).getFullYear() === currentYear)
+      .reduce((sum, r) => sum + (parseFloat(r.days) || 0), 0);
+
+    return (
+      <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in pb-8">
+        <button onClick={onBack} className="text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
+          <ChevronLeft className="w-4 h-4" /> Listeye Geri Dön
+        </button>
+
+        {/* Kişisel Bilgiler */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h2 className="text-xl font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-4 justify-between">
+            <span className="flex items-center gap-2"><Briefcase className="w-6 h-6 text-red-600" /> Personel Profili</span>
+            {/* YENİ: İşi Bırak Butonu (zaten ayrılmışsa gösterilmez) */}
+            {!person.resignationDate && (
+              <button
+                type="button"
+                onClick={() => { setResignForm({ date: new Date().toISOString().split('T')[0], reason: '' }); setShowResignModal(true); }}
+                className="px-3 py-2 bg-neutral-900 hover:bg-black text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5"
+              >
+                <LogOut className="w-3.5 h-3.5" /> İşi Bırak
+              </button>
+            )}
+          </h2>
+          <div className="flex items-center gap-4 mb-5">
+            <div className="w-20 h-20 rounded-full bg-neutral-100 border border-neutral-300 overflow-hidden shrink-0 shadow-sm">
+              {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover" /> : <User className="w-10 h-10 m-5 text-neutral-400" />}
+            </div>
+            <div>
+              <h3 className="text-2xl font-black text-black">{person.fullName}</h3>
+              <p className="text-neutral-500 text-sm font-bold">{person.position} • {person.rank}</p>
+              <p className="text-neutral-400 text-xs font-medium mt-0.5">Başlama: {person.startDate || '-'}</p>
+            </div>
+          </div>
+
+          {/* YENİ: İşten ayrılma bilgisi kartı (sadece ayrılmışsa gösterilir) */}
+          {person.resignationDate && (
+            <div className="bg-neutral-900 text-white p-4 rounded-xl mb-5 flex items-start gap-3">
+              <LogOut className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-black text-sm">İşi Bıraktı</p>
+                <p className="text-xs text-neutral-300 mt-1">Tarih: <b className="text-white">{person.resignationDate}</b></p>
+                <p className="text-xs text-neutral-300 mt-0.5">Neden: <b className="text-white">{person.resignationReason || 'Belirtilmedi'}</b></p>
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-neutral-50 p-4 rounded-xl border border-neutral-100 text-sm">
+            <div><span className="text-[10px] font-bold text-neutral-400 uppercase block mb-1">Kişisel Telefon</span><p className="font-bold text-black">{person.personalPhone || '-'}</p></div>
+            <div><span className="text-[10px] font-bold text-neutral-400 uppercase block mb-1">Şirket Telefonu</span><p className="font-bold text-black">{person.companyPhone || '-'}</p></div>
+            <div><span className="text-[10px] font-bold text-neutral-400 uppercase block mb-1">E-Posta</span><p className="font-bold text-black truncate">{person.email || '-'}</p></div>
+            <div><span className="text-[10px] font-bold text-neutral-400 uppercase block mb-1">Yaka Tipi</span><p className="font-bold text-black">{person.collarType || '-'}</p></div>
+          </div>
+        </div>
+
+        {/* Dönem Filtresi ve Özet */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><BarChart className="w-6 h-6 text-blue-600" /> Performans Özeti</h3>
+            <div className="flex bg-neutral-100 p-1 rounded-xl">
+              {[{ k: 'week', l: 'Haftalık' }, { k: 'month', l: 'Aylık' }, { k: 'year', l: 'Bu Sene' }, { k: 'all', l: 'Tüm Zamanlar' }].map(opt => (
+                <button key={opt.k} type="button" onClick={() => setPeriodFilter(opt.k)} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition ${periodFilter === opt.k ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+                  {opt.l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
+              <span className="text-3xl font-black text-black block">{periodJobsCount}</span>
+              <span className="text-xs font-bold text-neutral-500">Yapılan İş</span>
+            </div>
+            <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-center">
+              <span className="text-3xl font-black text-yellow-600 block">{periodReviewsCount}</span>
+              <span className="text-xs font-bold text-yellow-700">Alınan Yorum</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Özellikler / Yetenek Kartı */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><Award className="w-6 h-6 text-purple-600" /> Özellikler</h3>
+            <div className="text-right">
+              <span className="text-[10px] font-bold text-neutral-400 uppercase block">Ortalama Rating</span>
+              <span className={`text-2xl font-black ${getSkillTextColor(avgSkill)}`}>{avgSkill}</span>
+            </div>
+          </div>
+          <div className="space-y-3">
+            {PERSONNEL_SKILL_DEFS.map(s => {
+              const val = typeof skills[s.key] === 'number' ? skills[s.key] : 50;
+              return (
+                <div key={s.key} className="bg-neutral-50 p-3 rounded-xl border border-neutral-200">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-sm font-bold text-black">{s.label}</span>
+                    <span className={`text-sm font-black ${getSkillTextColor(val)}`}>{val}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => handleSkillChange(s.key, -5)} className="w-7 h-7 shrink-0 bg-red-50 text-red-600 rounded-lg font-black hover:bg-red-100 transition">-</button>
+                    <div className="flex-1 h-3 bg-neutral-200 rounded-full overflow-hidden">
+                      <div className={`h-full ${getSkillBarColor(val)} transition-all duration-300`} style={{ width: `${val}%` }}></div>
+                    </div>
+                    <button type="button" onClick={() => handleSkillChange(s.key, 5)} className="w-7 h-7 shrink-0 bg-green-50 text-green-600 rounded-lg font-black hover:bg-green-100 transition">+</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Son Yaptığı İşler */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2"><ClipboardList className="w-6 h-6 text-red-600" /> Son Yaptığı İşler</h3>
+          <div className="space-y-2.5">
+            {recentJobs.length === 0 ? <p className="text-sm text-neutral-500 italic">Henüz bir işe atanmamış.</p> : recentJobs.map(job => (
+              <div key={job.id} className="bg-neutral-50 border border-neutral-200 p-3 rounded-xl flex justify-between items-center text-sm">
+                <div>
+                  <span className="font-bold text-black block">{job.customerName}</span>
+                  <span className="text-[10px] text-neutral-500 font-bold">{job.date} • {job.type || 'Nakliye'}</span>
+                </div>
+                <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${job.status === 'completed' ? 'bg-black text-white' : job.status === 'in-progress' ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>
+                  {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : 'Bekliyor'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Son Yorum Aldığı İşler */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2"><Star className="w-6 h-6 text-yellow-500 fill-yellow-500" /> Son Yorum Aldığı İşler</h3>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {recentReviewedJobs.length === 0 ? <p className="text-sm text-neutral-500 italic col-span-full">Henüz yorum alınmış bir iş yok.</p> : recentReviewedJobs.map(job => (
+              <div key={job.id} className="bg-neutral-50 border border-neutral-200 rounded-xl overflow-hidden cursor-pointer group" onClick={() => setViewingImage && setViewingImage({ title: 'Müşteri Yorumu', name: job.reviewImage })}>
+                <div className="w-full h-24 bg-neutral-200">
+                  {isVideoUrl(job.reviewImage) ? <video src={job.reviewImage} className="w-full h-full object-cover" muted /> : <img src={job.reviewImage} className="w-full h-full object-cover group-hover:scale-105 transition" alt="" />}
+                </div>
+                <div className="p-2">
+                  <span className="text-[10px] font-bold text-black block truncate">{job.customerName}</span>
+                  <span className="text-[9px] text-neutral-500">{job.date}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Kıyafet Takibi */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><Shirt className="w-6 h-6 text-indigo-600" /> Kıyafet Takibi</h3>
+            <button type="button" onClick={() => setShowClothingModal(true)} className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+              <PlusCircle className="w-3.5 h-3.5" /> Kıyafet Ekle
+            </button>
+          </div>
+          {clothingRecords.length === 0 ? (
+            <p className="text-sm text-neutral-500 italic">Henüz kıyafet verilmemiş.</p>
+          ) : (
+            <>
+              <div className="bg-indigo-50 border border-indigo-200 p-3 rounded-xl mb-3">
+                <span className="text-[10px] font-bold text-indigo-500 uppercase block">Son Verilen</span>
+                <span className="font-black text-indigo-800">{clothingRecords[0].item} <span className="font-medium text-xs text-indigo-500">({clothingRecords[0].date})</span></span>
+              </div>
+              <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
+                {clothingRecords.map(r => (
+                  <div key={r.id} className="flex justify-between items-center bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 text-xs">
+                    <span className="font-bold text-black">{r.item} {r.note && <span className="font-medium text-neutral-500">— {r.note}</span>}</span>
+                    <span className="text-neutral-400 font-bold shrink-0 ml-2">{r.date}</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Telefon Takibi */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><Smartphone className="w-6 h-6 text-teal-600" /> Telefon Takibi</h3>
+            <button type="button" onClick={() => setShowPhoneModal(true)} className="px-3 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+              <PlusCircle className="w-3.5 h-3.5" /> Telefon Ekle
+            </button>
+          </div>
+          {phoneRecords.length === 0 ? (
+            <p className="text-sm text-neutral-500 italic">Henüz şirket telefonu verilmemiş.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {phoneRecords.map(r => (
+                <div key={r.id} className="flex justify-between items-center bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 text-xs">
+                  <span className="font-bold text-black">{r.model} {r.note && <span className="font-medium text-neutral-500">— {r.note}</span>}</span>
+                  <span className="text-neutral-400 font-bold shrink-0 ml-2">{r.date}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Yıllık İzin Takibi */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><CalendarDays className="w-6 h-6 text-orange-500" /> Yıllık İzin Takibi</h3>
+            <button type="button" onClick={() => setShowLeaveModal(true)} className="px-3 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+              <PlusCircle className="w-3.5 h-3.5" /> İzin Ekle
+            </button>
+          </div>
+          <div className="bg-orange-50 border border-orange-200 p-3 rounded-xl mb-3">
+            <span className="text-[10px] font-bold text-orange-500 uppercase block">{currentYear} Yılında Kullanılan</span>
+            <span className="font-black text-orange-800 text-lg">{totalLeaveDaysThisYear} Gün</span>
+          </div>
+          {leaveRecords.length === 0 ? (
+            <p className="text-sm text-neutral-500 italic">Henüz yıllık izin kaydı yok.</p>
+          ) : (
+            <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
+              {leaveRecords.map(r => (
+                <div key={r.id} className="flex justify-between items-center bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 text-xs">
+                  <span className="font-bold text-black">{r.startDate} → {r.endDate} {r.note && <span className="font-medium text-neutral-500">— {r.note}</span>}</span>
+                  <span className="text-orange-600 font-black shrink-0 ml-2">{r.days} gün</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Özlük Dosyaları Kısayolu */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-3 flex items-center gap-2"><FolderOpen className="w-6 h-6 text-red-600" /> Özlük Dosyaları</h3>
+          <p className="text-sm text-neutral-500 mb-3">Bu personele ait kimlik, ehliyet, sözleşme gibi belgeleri Özlük Dosyaları modülünden görüntüleyip yükleyebilirsiniz.</p>
+          <span className="inline-flex items-center gap-1.5 px-3 py-2 bg-neutral-100 text-neutral-600 text-xs font-bold rounded-lg">
+            <FolderOpen className="w-3.5 h-3.5" /> {Object.keys(person.ozlukDosyalari || {}).length} belge yüklü
+          </span>
+        </div>
+
+        {/* Maaş ve Mesai Hareketleri Kısayolu */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-3 flex items-center gap-2"><Wallet className="w-6 h-6 text-green-600" /> Maaş & Mesai Hareketleri</h3>
+          <p className="text-sm text-neutral-500">Detaylı maaş ve mesai hareketleri için "Personel Muhasebe" bölümündeki {person.collarType || 'Mavi Yaka'} tablolarını kullanabilirsiniz. Bu personelin adını arayarak ilgili ayın hareketlerine ulaşabilirsiniz.</p>
+        </div>
+
+        {/* Kıyafet Ekleme Modalı */}
+        {showClothingModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-indigo-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg">Kıyafet Ekle</h3>
+                <button onClick={() => setShowClothingModal(false)} className="text-indigo-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleAddClothing} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Kıyafet / Ekipman</label>
+                  <input required type="text" value={clothingForm.item} onChange={e => setClothingForm({ ...clothingForm, item: e.target.value })} placeholder="Örn: Mont, Tişört, Ayakkabı" className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tarih</label>
+                  <input required type="date" value={clothingForm.date} onChange={e => setClothingForm({ ...clothingForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Not (İsteğe Bağlı)</label>
+                  <input type="text" value={clothingForm.note} onChange={e => setClothingForm({ ...clothingForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-600" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition">Kaydet</button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Telefon Ekleme Modalı */}
+        {showPhoneModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-teal-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg">Telefon Ekle</h3>
+                <button onClick={() => setShowPhoneModal(false)} className="text-teal-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleAddPhone} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Telefon Modeli</label>
+                  <input required type="text" value={phoneForm.model} onChange={e => setPhoneForm({ ...phoneForm, model: e.target.value })} placeholder="Örn: Samsung A14" className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-teal-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tarih</label>
+                  <input required type="date" value={phoneForm.date} onChange={e => setPhoneForm({ ...phoneForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-teal-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Not (İsteğe Bağlı)</label>
+                  <input type="text" value={phoneForm.note} onChange={e => setPhoneForm({ ...phoneForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-teal-600" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-teal-600 text-white font-bold rounded-xl hover:bg-teal-700 transition">Kaydet</button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Yıllık İzin Ekleme Modalı */}
+        {showLeaveModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-orange-500 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg">Yıllık İzin Ekle</h3>
+                <button onClick={() => setShowLeaveModal(false)} className="text-orange-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleAddLeave} className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-1">Başlangıç</label>
+                    <input required type="date" value={leaveForm.startDate} onChange={e => setLeaveForm({ ...leaveForm, startDate: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-1">Bitiş</label>
+                    <input required type="date" value={leaveForm.endDate} onChange={e => setLeaveForm({ ...leaveForm, endDate: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Kaç Gün</label>
+                  <input required type="number" value={leaveForm.days} onChange={e => setLeaveForm({ ...leaveForm, days: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Not (İsteğe Bağlı)</label>
+                  <input type="text" value={leaveForm.note} onChange={e => setLeaveForm({ ...leaveForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-orange-500 text-white font-bold rounded-xl hover:bg-orange-600 transition">Kaydet</button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: İşi Bırakma Modalı */}
+        {showResignModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-neutral-900 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><LogOut className="w-5 h-5 text-red-400" /> İşi Bırak</h3>
+                <button onClick={() => setShowResignModal(false)} className="text-neutral-300 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleResignPersonnel} className="p-6 space-y-4">
+                <div className="bg-red-50 border border-red-200 text-red-700 p-3 rounded-xl text-xs font-medium flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <p>Bu işlem personeli seçtiğiniz tarih itibarıyla pasif yapar; o tarihten sonraki günler mesai tablosunda otomatik "İB (İşi Bıraktı)" olarak işlenir ve maaş hesabına dahil edilmez. Personel, bu tarihten sonraki ekip/puantaj listelerinde görünmez.</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">İşi Bırakma Tarihi</label>
+                  <input required type="date" value={resignForm.date} onChange={e => setResignForm({ ...resignForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Ayrılma Nedeni</label>
+                  <textarea value={resignForm.reason} onChange={e => setResignForm({ ...resignForm, reason: e.target.value })} placeholder="Örn: Kendi isteğiyle ayrıldı, performans yetersizliği vb." className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800 h-20 resize-none" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2">
+                  <LogOut className="w-5 h-5" /> İşi Bırakmayı Onayla
                 </button>
               </form>
             </div>
@@ -6737,7 +7661,12 @@ useEffect(() => {
       { id: 'finance', label: 'Finans Yönetimi' },
       { id: 'auth', label: 'Yetkilendirme' },
       { id: 'systemFiles', label: 'Sistem Dosyaları' },
-      { id: 'myComplaint', label: 'Şikayet Bildirim' }
+      { id: 'myComplaint', label: 'Şikayet Bildirim' },
+      // YENİ: Üst arama barı ve alt kategori yetkileri
+      { id: 'globalSearch', label: 'Arama Barı' },
+      { id: 'globalSearchCustomer', label: 'Arama: Müşteri' },
+      { id: 'globalSearchVehicle', label: 'Arama: Araç' },
+      { id: 'globalSearchPersonnel', label: 'Arama: Personel' }
     ];
 
     const handleToggleModule = (moduleId, currentMergedState) => {
@@ -6814,7 +7743,7 @@ useEffect(() => {
                 <button onClick={() => setEditingUser(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               <div className="p-6 overflow-y-auto custom-scrollbar">
-                <form onSubmit={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="space-y-6">
+                <div  className="space-y-6">
                   
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
@@ -6879,10 +7808,10 @@ useEffect(() => {
                       </div>
                   </div>
                   
-                  <button type="submit" className="w-full bg-red-600 text-white p-4 rounded-xl font-bold hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg mt-4">
+                  <button type="button" onClick={(e) => { e.preventDefault(); onUpdate(editingUser); setEditingUser(null); }} className="w-full bg-red-600 text-white p-4 rounded-xl font-bold hover:bg-red-700 transition flex items-center justify-center gap-2 shadow-lg mt-4">
                     <CheckCircle className="w-5 h-5" /> Değişiklikleri Kaydet
                   </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -6898,10 +7827,10 @@ useEffect(() => {
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <Briefcase className="w-6 h-6 text-red-600" /> Pozisyon Yönetimi
         </h2>
-        <form onSubmit={e => { e.preventDefault(); if(newPos) { onAddPosition(newPos); setNewPos(''); } }} className="flex gap-2 mb-6">
+        <div  className="flex gap-2 mb-6">
           <input type="text" value={newPos} onChange={e => setNewPos(e.target.value)} placeholder="Yeni Pozisyon Adı" className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-          <button type="submit" className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
-        </form>
+          <button type="button" onClick={e => { e.preventDefault(); if(newPos) { onAddPosition(newPos); setNewPos(''); } }} className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
+        </div>
         <div className="space-y-2">
           {positions.map((pos, idx) => (
             <div key={idx} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-200">
@@ -6921,10 +7850,10 @@ useEffect(() => {
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <Star className="w-6 h-6 text-red-600" /> Rütbe Yönetimi
         </h2>
-        <form onSubmit={e => { e.preventDefault(); if(newRank) { onAddRank(newRank); setNewRank(''); } }} className="flex gap-2 mb-6">
+        <div  className="flex gap-2 mb-6">
           <input type="text" value={newRank} onChange={e => setNewRank(e.target.value)} placeholder="Yeni Rütbe Adı" className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-          <button type="submit" className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
-        </form>
+          <button type="button" onClick={e => { e.preventDefault(); if(newRank) { onAddRank(newRank); setNewRank(''); } }} className="px-6 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition">Ekle</button>
+        </div>
         <div className="space-y-2">
           {ranks.map((rank, idx) => (
             <div key={idx} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-200">
@@ -6996,7 +7925,12 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       { id: 'finance', label: 'Finans Yönetimi' },
       { id: 'auth', label: 'Yetkilendirme' },
       { id: 'systemFiles', label: 'Sistem Dosyaları' },
-      { id: 'myComplaint', label: 'Şikayet Bildirim' }
+      { id: 'myComplaint', label: 'Şikayet Bildirim' },
+      // YENİ: Üst arama barı ve alt kategori yetkileri
+      { id: 'globalSearch', label: 'Arama Barı' },
+      { id: 'globalSearchCustomer', label: 'Arama: Müşteri' },
+      { id: 'globalSearchVehicle', label: 'Arama: Araç' },
+      { id: 'globalSearchPersonnel', label: 'Arama: Personel' }
     ];
 
     const allGroups = [...new Set([...(positions || []), ...(ranks || [])])];
@@ -7186,14 +8120,14 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 </div>
               ))}
             </div>
-            <form onSubmit={handleAddCategory} className="flex gap-2">
+            <div  className="flex gap-2">
               <input type="text" value={newCategory} onChange={e => setNewCategory(e.target.value)} placeholder="Yeni Kategori Adı" className="p-2 border border-neutral-300 rounded-lg focus:ring-2 focus:ring-blue-600 outline-none text-sm w-64" />
-              <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition">Ekle</button>
-            </form>
+              <button type="button" onClick={handleAddCategory} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 transition">Ekle</button>
+            </div>
           </div>
         )}
 
-        <form onSubmit={handleAdd} className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 mb-8 space-y-4">
+        <div  className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 mb-8 space-y-4">
           <h3 className="font-bold text-black border-b border-neutral-200 pb-2 mb-4 flex items-center gap-2">
             <PlusCircle className="w-5 h-5 text-red-600" /> {editingId ? 'Şifre Bilgilerini Güncelle' : 'Yeni Hesap / Şifre Ekle'}
           </h3>
@@ -7231,11 +8165,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {editingId && (
               <button type="button" onClick={() => { setEditingId(null); setFormData({ platform: '', link: '', username: '', password: '', notes: '', category: categories[0] || 'Genel' }); }} className="flex-1 py-3 bg-neutral-200 text-neutral-700 font-bold rounded-xl hover:bg-neutral-300 transition">İptal</button>
             )}
-            <button type="submit" className="flex-[2] py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-md">
+            <button type="button" onClick={handleAdd} className="flex-[2] py-3 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-md">
               <Save className="w-5 h-5" /> {editingId ? 'Değişiklikleri Kaydet' : 'Sisteme Kaydet'}
             </button>
           </div>
-        </form>
+        </div>
 
         {passwords.length === 0 ? (
           <div className="text-center text-neutral-500 py-10 bg-neutral-50 rounded-2xl border border-neutral-200">
@@ -7312,6 +8246,143 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             })}
           </div>
         )}
+      </div>
+    );
+  };
+
+  // --- YENİ: UYGULAMA AYARLARI (LOGO DEĞİŞTİR) SAYFASI ---
+  // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir. Yüklenen logo ve boyut
+  // ayarı 'settings/appBranding' dokümanında saklanır; App bileşeni bu veriyi
+  // dinleyip giriş ekranı, yükleniyor ekranı, mobil header ve sol menüdeki
+  // logoyu buna göre günceller (varsayılan logo dosyasına hiç dokunulmadı,
+  // sadece yeni bir logo yüklenmişse onun yerine gösteriliyor).
+  const AppSettingsView = ({ db, appId, addSystemLog, appBranding }) => {
+    const [logoPreview, setLogoPreview] = useState(appBranding?.logoUrl || '');
+    const [logoSize, setLogoSize] = useState(appBranding?.logoSize || 100);
+    const [isUploading, setIsUploading] = useState(false);
+    const [saveMessage, setSaveMessage] = useState('');
+
+    useEffect(() => {
+      setLogoPreview(appBranding?.logoUrl || '');
+      setLogoSize(appBranding?.logoSize || 100);
+    }, [appBranding]);
+
+    const handleLogoFileChange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      setIsUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+        setLogoPreview(uploadedUrl);
+      } catch (err) {
+        console.error('Logo yükleme hatası:', err);
+        alert('Logo yüklenemedi.');
+      }
+      setIsUploading(false);
+    };
+
+    const handleSaveBranding = async () => {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'appBranding'), {
+        logoUrl: logoPreview,
+        logoSize: logoSize,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      if (addSystemLog) addSystemLog('Uygulama Logosu Güncellendi', `Sistem logosu ve/veya boyutu değiştirildi (Boyut: %${logoSize}).`);
+      setSaveMessage('Logo ayarları başarıyla kaydedildi!');
+      setTimeout(() => setSaveMessage(''), 3000);
+    };
+
+    const handleResetLogo = async () => {
+      if (!window.confirm('Varsayılan logoya dönmek istediğinize emin misiniz?')) return;
+      setLogoPreview('');
+      setLogoSize(100);
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'appBranding'), {
+        logoUrl: '', logoSize: 100, updatedAt: new Date().toISOString()
+      }, { merge: true });
+      if (addSystemLog) addSystemLog('Uygulama Logosu Sıfırlandı', 'Sistem logosu varsayılan haline döndürüldü.');
+    };
+
+    return (
+      <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in">
+        <h2 className="text-2xl font-bold text-black flex items-center gap-2">
+          <Sparkles className="w-7 h-7 text-red-600" /> Uygulama Ayarları
+        </h2>
+
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="text-lg font-bold text-black mb-1 flex items-center gap-2 border-b border-neutral-200 pb-4">
+            <FileText className="w-5 h-5 text-red-600" /> Logo Değiştir
+          </h3>
+          <p className="text-sm text-neutral-500 mt-4 mb-5">
+            Buradan yüklediğiniz logo; giriş ekranı, yükleniyor ekranı, mobil üst menü ve sol menüdeki
+            mevcut Sembol Nakliyat logosunun yerine otomatik olarak gösterilir.
+          </p>
+
+          {saveMessage && (
+            <div className="mb-5 p-3 bg-green-50 text-green-700 rounded-xl font-bold text-sm border border-green-200 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5" /> {saveMessage}
+            </div>
+          )}
+
+          {/* Önizleme */}
+          <div className="bg-black rounded-2xl p-8 flex justify-center items-center mb-5 border border-neutral-800">
+            <img
+              src={logoPreview || "sembol-nakliyat-logo-zeminsiz-09.jpg"}
+              alt="Logo Önizleme"
+              className="w-auto object-contain"
+              style={{ height: `${96 * (logoSize / 100)}px` }}
+              onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl">S</div>'; }}
+            />
+          </div>
+
+          {/* Logo Yükleme */}
+          <div className="mb-6">
+            <label className="block text-sm font-bold text-black mb-2">Yeni Logo Yükle</label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleLogoFileChange}
+              disabled={isUploading}
+              className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-black file:text-white file:font-bold file:cursor-pointer"
+            />
+            {isUploading && <p className="text-xs text-neutral-400 mt-1.5 animate-pulse">Yükleniyor...</p>}
+          </div>
+
+          {/* Logo Boyutu Ayarı */}
+          <div className="mb-6">
+            <div className="flex justify-between items-center mb-2">
+              <label className="block text-sm font-bold text-black">Logo Boyutu</label>
+              <span className="text-sm font-black text-red-600">%{logoSize}</span>
+            </div>
+            <input
+              type="range"
+              min="50"
+              max="200"
+              step="5"
+              value={logoSize}
+              onChange={(e) => setLogoSize(parseInt(e.target.value))}
+              className="w-full accent-red-600"
+            />
+            <div className="flex justify-between text-[10px] text-neutral-400 font-bold mt-1">
+              <span>%50 (Küçük)</span>
+              <span>%100 (Varsayılan)</span>
+              <span>%200 (Büyük)</span>
+            </div>
+          </div>
+
+          <div className="flex gap-3">
+            <button type="button" onClick={handleResetLogo} className="flex-1 py-3.5 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">
+              Varsayılana Döndür
+            </button>
+            <button type="button" onClick={handleSaveBranding} disabled={isUploading} className="flex-[2] py-3.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20 disabled:opacity-50 flex justify-center items-center gap-2">
+              <Save className="w-5 h-5" /> Logo Ayarlarını Kaydet
+            </button>
+          </div>
+        </div>
       </div>
     );
   };
@@ -8218,9 +9289,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [mesaiData, setMesaiData] = useState({});
 
     // --- YENİ: "FAZLA İŞ ATA" ÖZELLİĞİ İÇİN EKLENEN STATE'LER ---
+    // Not: Mevcut kodların hiçbiri değiştirilmedi, sadece ek özellik için yeni state'ler eklendi.
     const [showFazlaIsAtaModal, setShowFazlaIsAtaModal] = useState(false); // Modal açık/kapalı
     const [fazlaIsAtaPersonId, setFazlaIsAtaPersonId] = useState('');      // Seçilen (meşgul) personel
     const [fazlaIsAtaJobId, setFazlaIsAtaJobId] = useState('');            // Eklenecek hedef iş
+    const [fazlaIsAtaVehiclePlate, setFazlaIsAtaVehiclePlate] = useState(''); // YENİ: Fazladan atanacak araç (boşta olsun olmasın, tüm liste)
     const [fazlaIsAtaError, setFazlaIsAtaError] = useState('');           // Uyarı mesajı
 
     useEffect(() => {
@@ -8255,7 +9328,13 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     const maviYakaList = personnelList.filter(p => {
       if (p.position === 'Firma Sahibi') return false;
-      return p.employmentStatus === 'Aktif' && (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operatör'].includes(p.position)));
+      const isCollarMatch = p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operatör'].includes(p.position));
+      if (!isCollarMatch) return false;
+      if (p.employmentStatus === 'Aktif') return true;
+      // YENİ: İşi bırakan personel, bıraktığı tarihe kadar (o tarih dahil) geçmiş günlerde
+      // hâlâ ekip listesinde görünsün; bıraktığı tarihten SONRAKİ günlerde artık hiç görünmesin.
+      if (p.passiveDate && selectedDate <= p.passiveDate) return true;
+      return false;
     });
 
     const busyPersonnelIdsThisDay = jobs
@@ -8419,49 +9498,71 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     // --- YENİ: "FAZLA İŞ ATA" FONKSİYONU ---
     // Bu fonksiyon TAMAMEN YENİ ve EKLENTİ niteliğindedir; mevcut atama
     // fonksiyonlarına (handleDropToJob, handleDropToUnassigned) hiç dokunulmadı.
-    // Amaç: O gün başka bir işe zaten yazılmış (meşgul) bir personeli, ASIL
+    // Amaç: O gün başka bir işe zaten yazılmış (meşgul) bir personeli/aracı, ASIL
     // işinden ÇIKARMADAN, seçilen farklı bir işe de EK olarak eklemek.
     const handleFazlaIsAta = async () => {
       setFazlaIsAtaError('');
-      if (!fazlaIsAtaPersonId || !fazlaIsAtaJobId) {
-        setFazlaIsAtaError('Lütfen personel ve iş seçin.');
+      if (!fazlaIsAtaJobId || (!fazlaIsAtaPersonId && !fazlaIsAtaVehiclePlate)) {
+        setFazlaIsAtaError('Lütfen bir iş ve en az bir personel veya araç seçin.');
         return;
       }
 
       const targetJob = jobs.find(j => j.id === fazlaIsAtaJobId);
-      const person = personnelList.find(p => String(p.id) === String(fazlaIsAtaPersonId));
-      if (!targetJob || !person) {
-        setFazlaIsAtaError('Personel veya iş bulunamadı.');
+      if (!targetJob) {
+        setFazlaIsAtaError('İş bulunamadı.');
         return;
       }
 
-      // Asansör işlerine sadece Operatör atanabilir kuralı korunuyor
-      if (targetJob.type === 'Asansör' && person.position !== 'Operatör') {
-        setFazlaIsAtaError("Asansör işlerine sadece 'Operatör' pozisyonundaki personeller atanabilir!");
-        return;
+      const updateData = {};
+
+      if (fazlaIsAtaPersonId) {
+        const person = personnelList.find(p => String(p.id) === String(fazlaIsAtaPersonId));
+        if (!person) {
+          setFazlaIsAtaError('Personel bulunamadı.');
+          return;
+        }
+
+        // Asansör işlerine sadece Operatör atanabilir kuralı korunuyor
+        if (targetJob.type === 'Asansör' && person.position !== 'Operatör') {
+          setFazlaIsAtaError("Asansör işlerine sadece 'Operatör' pozisyonundaki personeller atanabilir!");
+          return;
+        }
+
+        let newIds = [...(targetJob.assignedPersonnelIds || [])];
+        if (newIds.includes(fazlaIsAtaPersonId)) {
+          setFazlaIsAtaError('Bu personel zaten bu işe atanmış.');
+          return;
+        }
+        newIds.push(fazlaIsAtaPersonId);
+
+        const manualNames = (targetJob.teamNames || []).filter(name => !targetJob.assignedPersonnelIds?.includes(personnelList.find(p => p.fullName === name)?.id));
+        const systemNames = newIds.map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
+        const allNames = [...systemNames, ...manualNames];
+
+        updateData.assignedPersonnelIds = newIds;
+        updateData.assignedPersonnelId = newIds[0] || null;
+        updateData.teamNames = allNames;
+        updateData.team = allNames.length > 0 ? allNames.join(', ') : 'Atanmadı';
       }
 
-      let newIds = [...(targetJob.assignedPersonnelIds || [])];
-      if (newIds.includes(fazlaIsAtaPersonId)) {
-        setFazlaIsAtaError('Bu personel zaten bu işe atanmış.');
-        return;
+      // YENİ: Fazladan araç ataması - o gün başka bir işte olsa bile (boşta olma şartı aranmadan)
+      // seçilen araç, ilgili işe atanabiliyor.
+      if (fazlaIsAtaVehiclePlate) {
+        updateData.assignedVehiclePlate = fazlaIsAtaVehiclePlate;
       }
-      newIds.push(fazlaIsAtaPersonId);
-
-      const manualNames = (targetJob.teamNames || []).filter(name => !targetJob.assignedPersonnelIds?.includes(personnelList.find(p => p.fullName === name)?.id));
-      const systemNames = newIds.map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
-      const allNames = [...systemNames, ...manualNames];
 
       try {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', fazlaIsAtaJobId), {
-          assignedPersonnelIds: newIds,
-          assignedPersonnelId: newIds[0] || null,
-          teamNames: allNames,
-          team: allNames.length > 0 ? allNames.join(', ') : 'Atanmadı'
-        });
-        if (addSystemLog) addSystemLog('Fazla İş Ata', `${person.fullName}, ${targetJob.customerName || 'iş'} operasyonuna ek personel olarak atandı.`);
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', fazlaIsAtaJobId), updateData);
+
+        const person = fazlaIsAtaPersonId ? personnelList.find(p => String(p.id) === String(fazlaIsAtaPersonId)) : null;
+        const logParts = [];
+        if (person) logParts.push(`${person.fullName} personeli`);
+        if (fazlaIsAtaVehiclePlate) logParts.push(`${fazlaIsAtaVehiclePlate} plakalı araç`);
+        if (addSystemLog) addSystemLog('Fazla İş Ata', `${logParts.join(' ve ')}, ${targetJob.customerName || 'iş'} operasyonuna ek olarak atandı.`);
+
         setFazlaIsAtaPersonId('');
         setFazlaIsAtaJobId('');
+        setFazlaIsAtaVehiclePlate('');
         setShowFazlaIsAtaModal(false);
       } catch (err) {
         console.error('Fazla iş atama sırasında hata:', err);
@@ -8470,7 +9571,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     };
 
     return (
-      <div className="flex flex-col h-[calc(100vh-120px)] md:h-[calc(100vh-140px)] animate-in fade-in pb-4">
+      <div className="flex flex-col lg:h-[calc(100vh-140px)] animate-in fade-in pb-4">
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col md:flex-row justify-between items-center gap-4 mb-4 shrink-0">
           <div>
             <h2 className="text-2xl font-black text-black flex items-center gap-2">
@@ -8489,10 +9590,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         </div>
 
-        <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 overflow-hidden">
+        <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 lg:overflow-hidden">
           
           {/* SOL: İŞ SÜTUNLARI (DİKEY KAYDIRMA AKTİF EDİLDİ) */}
-          <div className="flex-1 overflow-auto custom-scrollbar bg-neutral-100/50 p-3 rounded-2xl border border-neutral-200 h-full relative">
+          <div className="flex-1 overflow-auto custom-scrollbar bg-neutral-100/50 p-3 rounded-2xl border border-neutral-200 h-[520px] lg:h-full relative">
             {dailyJobs.length === 0 ? (
               <div className="w-full h-full flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-neutral-300">
                 <ClipboardList className="w-16 h-16 text-neutral-300 mb-3" />
@@ -8526,10 +9627,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             onDragOver={(e) => handleDragOver(e, 'unassigned')}
             onDragLeave={handleDragLeave}
             onDrop={handleDropToUnassigned}
-            className={`w-full lg:w-[220px] xl:w-[240px] h-full flex flex-col gap-4 shrink-0 transition-colors ${dragOverTarget === 'unassigned' ? 'bg-orange-50/50 rounded-2xl ring-2 ring-orange-400 ring-inset p-2' : ''}`}
+            className={`w-full lg:w-[220px] xl:w-[240px] h-auto lg:h-full flex flex-col gap-4 shrink-0 transition-colors ${dragOverTarget === 'unassigned' ? 'bg-orange-50/50 rounded-2xl ring-2 ring-orange-400 ring-inset p-2' : ''}`}
           >
             {/* Araç Havuzu */}
-            <div className="h-1/3 flex flex-col bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
+            <div className="h-[220px] lg:h-1/3 flex flex-col bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden shrink-0">
               <div className="p-2.5 border-b border-neutral-200 bg-neutral-50 flex items-center justify-between shrink-0">
                 <h3 className="font-black text-xs text-black flex items-center gap-1.5">
                   <Truck className="w-3.5 h-3.5 text-purple-600" /> Boştaki Araçlar
@@ -8560,7 +9661,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             </div>
 
             {/* Personel Havuzu */}
-            <div className="flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
+            <div className="h-[340px] lg:flex-1 flex flex-col bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden shrink-0 lg:shrink">
               <div className="p-2.5 border-b border-neutral-200 bg-neutral-50 flex items-center justify-between shrink-0">
                 <h3 className="font-black text-xs text-black flex items-center gap-1.5">
                   <UserPlus className="w-3.5 h-3.5 text-orange-500" /> Ekipler
@@ -8568,7 +9669,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 {/* YENİ: Fazla İş Ata Butonu - mevcut başlık/yapı değiştirilmeden eklendi */}
                 <button
                   type="button"
-                  onClick={() => { setFazlaIsAtaError(''); setFazlaIsAtaPersonId(''); setFazlaIsAtaJobId(''); setShowFazlaIsAtaModal(true); }}
+                  onClick={() => { setFazlaIsAtaError(''); setFazlaIsAtaPersonId(''); setFazlaIsAtaJobId(''); setFazlaIsAtaVehiclePlate(''); setShowFazlaIsAtaModal(true); }}
                   className="bg-orange-500 hover:bg-orange-600 text-white text-[9px] font-black px-2 py-1 rounded-lg shadow-sm transition flex items-center gap-1"
                 >
                   <UserPlus className="w-3 h-3" /> Fazla İş Ata
@@ -8636,7 +9737,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 )}
 
                 <div>
-                  <label className="block text-sm font-bold text-black mb-1">Meşgul / Ekip Personeli Seçin</label>
+                  <label className="block text-sm font-bold text-black mb-1">Meşgul / Ekip Personeli Seçin (İsteğe Bağlı)</label>
                   <select
                     value={fazlaIsAtaPersonId}
                     onChange={(e) => setFazlaIsAtaPersonId(e.target.value)}
@@ -8668,12 +9769,28 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </select>
                 </div>
 
+                {/* YENİ: Fazladan İşe Gidecek Ek Araç Seçimi - boşta olma şartı aranmadan TÜM araçlar listelenir */}
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Fazladan Gidecek Ek Araç (İsteğe Bağlı)</label>
+                  <select
+                    value={fazlaIsAtaVehiclePlate}
+                    onChange={(e) => setFazlaIsAtaVehiclePlate(e.target.value)}
+                    className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none bg-white font-medium"
+                  >
+                    <option value="">-- Araç Seçilmedi --</option>
+                    {vehicles.map(v => (
+                      <option key={v.id} value={v.plate}>{v.plate} ({v.type})</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] text-neutral-400 mt-1">Bu listede araçların o gün boşta olup olmadığına bakılmaz, tüm filo gösterilir.</p>
+                </div>
+
                 <button
                   type="button"
                   onClick={handleFazlaIsAta}
                   className="w-full py-4 bg-orange-500 text-white font-black rounded-xl hover:bg-orange-600 transition flex justify-center items-center gap-2 shadow-lg mt-2"
                 >
-                  <CheckCircle className="w-5 h-5" /> Ek Personel Olarak Ata
+                  <CheckCircle className="w-5 h-5" /> Fazladan Ata
                 </button>
               </div>
             </div>
@@ -8736,7 +9853,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
          <h2 className="text-2xl font-black text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
            <User className="w-7 h-7 text-red-600" /> Profil Bilgilerim
          </h2>
-         <form onSubmit={handleSaveProfile} className="space-y-6">
+         <div  className="space-y-6">
            <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 p-4 bg-neutral-50 rounded-xl border border-neutral-200">
              <div className="w-24 h-24 rounded-full border-4 border-white shadow-md overflow-hidden bg-neutral-200 flex items-center justify-center shrink-0">
                {editForm.profileImage === 'Yükleniyor...' ? (
@@ -8749,11 +9866,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
              </div>
              <div className="flex flex-col gap-2 w-full sm:w-auto">
                <label className="block text-sm font-bold text-neutral-700">Profil Fotoğrafını Değiştir</label>
-               <label className="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-fit shadow-sm">
-                 <Upload className="w-4 h-4 text-neutral-600" />
-                 <span className="text-sm font-bold text-neutral-700">Fotoğraf Seç</span>
-                 <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={isUploading} />
-               </label>
+               <MediaCaptureMenu onChange={handleImageUpload} disabled={isUploading} compact buttonLabel="Fotoğraf Seç" buttonClassName="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-fit shadow-sm" />
              </div>
            </div>
 
@@ -8776,10 +9889,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
              </div>
            </div>
 
-           <button type="submit" disabled={isUploading} className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 disabled:opacity-50">
+           <button type="button" onClick={handleSaveProfile} disabled={isUploading} className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 disabled:opacity-50">
              Bilgilerimi Güncelle
            </button>
-         </form>
+         </div>
       </div>
     );
   };
@@ -9124,7 +10237,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
          <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
            <AlertTriangle className="w-6 h-6 text-red-600" /> Şikayet / Sorun Bildirimi
          </h2>
-         <form onSubmit={submitComplaint} className="space-y-4">
+         <div  className="space-y-4">
             <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-sm text-blue-800 font-medium mb-4">
                Sistemdeki sorunları, personel şikayetlerini veya araç/ekipman eksikliklerini doğrudan yönetim kuruluna iletebilirsiniz.
             </div>
@@ -9136,10 +10249,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               <label className="block text-sm font-bold text-black mb-1">Detaylı Açıklama</label>
               <textarea required value={complaintContent} onChange={e => setComplaintContent(e.target.value)} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-32 resize-none transition" placeholder="Sorunu tüm detaylarıyla açıklayın..."></textarea>
             </div>
-            <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+            <button type="button" onClick={submitComplaint} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
                <Send className="w-5 h-5" /> Bildirimi Yöneticilere Gönder
             </button>
-         </form>
+         </div>
       </div>
     );
   };
@@ -9907,7 +11020,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             if (val.status && val.status.startsWith('G')) counts.G++;
             else if (val.status === 'FG') counts.FG++;
             else if (val.status === 'D') counts.D++;
-            else if (['R', 'Hİ', 'Yİ', 'Bİ', 'Üİ'].includes(val.status)) counts.I++;
+            else if (['R', 'Hİ', 'Yİ', 'Bİ', 'Üİ', 'İB'].includes(val.status)) counts.I++;
             else if (val.status === 'FM') { counts.G++; counts.FM_H += parseFloat(val.hours) || 0; }
             else if (val.status === 'EM') { counts.G++; counts.EM_H += parseFloat(val.hours) || 0; }
             else if (val.status === 'FGM') { counts.FG++; counts.FM_H += parseFloat(val.hours) || 0; }
@@ -9916,7 +11029,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             if (val && val.startsWith('G')) counts.G++;
             else if (val === 'FG') counts.FG++;
             else if (val === 'D') counts.D++;
-            else if (['R', 'Hİ', 'Yİ', 'Bİ', 'Üİ'].includes(val)) counts.I++;
+            else if (['R', 'Hİ', 'Yİ', 'Bİ', 'Üİ', 'İB'].includes(val)) counts.I++;
             else if (val === 'FGM') counts.FG++;
         }
       });
@@ -10316,7 +11429,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         if (typeof val === 'object' && val !== null) {
           if (val.status === 'D') devamsiz++;
           else if (val.status === 'R') raporCount++;
-          else if (val.status === 'Üİ') ucretsizIzinCount++;
+          // YENİ: "İşi Bıraktı (İB)" kodu, maaş hesabında Ücretsiz İzin (Üİ) ile aynı mantıkla
+          // (o gün için ödeme yapılmaz) işlenir.
+          else if (val.status === 'Üİ' || val.status === 'İB') ucretsizIzinCount++;
           else if (val.status === 'FG') fazlaGunCount++;
           else if (val.status === 'FGM') { fazlaGunCount++; toplamMesaiSaati += parseFloat(val.hours) || 0; }
           else if (val.status === 'FM') toplamMesaiSaati += parseFloat(val.hours) || 0;
@@ -10324,7 +11439,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         } else {
           if (val === 'D') devamsiz++;
           else if (val === 'R') raporCount++;
-          else if (val === 'Üİ') ucretsizIzinCount++;
+          else if (val === 'Üİ' || val === 'İB') ucretsizIzinCount++;
           else if (val === 'FG') fazlaGunCount++;
           else if (val === 'FGM') fazlaGunCount++;
         }
@@ -11026,7 +12141,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     );
   };
 
-  const LoginScreen = ({ onLogin, error }) => {
+  const LoginScreen = ({ onLogin, error, appBranding }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [rememberMe, setRememberMe] = useState(false);
@@ -11055,15 +12170,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
           <div className="bg-neutral-50 p-8 flex flex-col items-center border-b border-neutral-200">
             <img 
-              src="sembol-nakliyat-logo-zeminsiz-09.jpg" 
+              src={appBranding?.logoUrl || "sembol-nakliyat-logo-zeminsiz-09.jpg"} 
               alt="Sembol Nakliyat" 
-              className="w-auto h-24 object-contain mb-2 drop-shadow-sm" 
+              className="w-auto object-contain mb-2 drop-shadow-sm" 
+              style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
               onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-4">S</div><h1 class="text-2xl font-black text-black tracking-widest">SEMBOL</h1>'; }} 
             />
             <p className="text-red-600 text-xs font-bold mt-1 tracking-[0.2em] bg-red-50 px-3 py-1 rounded-full border border-red-100">OPERASYON MERKEZİ</p>
           </div>
           
-          <form onSubmit={handleSubmit} className="p-8 space-y-6">
+          <div  className="p-8 space-y-6">
             {error && (
               <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100">
                 <AlertTriangle className="w-5 h-5 shrink-0" /> {error}
@@ -11113,10 +12229,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </label>
             </div>
             
-            <button type="submit" className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg mt-4">
+            <button type="button" onClick={handleSubmit} className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg mt-4">
               Sisteme Giriş Yap
             </button>
-          </form>
+          </div>
         </div>
       </div>
     );
@@ -11133,6 +12249,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     // Arayüz State'leri
     const [activeTab, setActiveTab] = useState('dashboard'); 
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    // YENİ: Uygulamanın en üstündeki genel arama barı (Araç / Personel / Müşteri) için state
+    const [globalSearchQuery, setGlobalSearchQuery] = useState('');
     const [isSubMenuOpen, setIsSubMenuOpen] = useState(false);
     const [isAddJobSubMenuOpen, setIsAddJobSubMenuOpen] = useState(false);
     const [isVehicleSubMenuOpen, setIsVehicleSubMenuOpen] = useState(false);
@@ -11237,6 +12355,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [positions, setPositions] = useState([]);
     const [ranks, setRanks] = useState([]);
     const [positionModules, setPositionModules] = useState({}); // YENİ EKLENDİ
+    // YENİ: Uygulama Ayarları - Logo Değiştir için state
+    const [appBranding, setAppBranding] = useState({ logoUrl: '', logoSize: 100 });
     const [complaints, setComplaints] = useState([]); // Yeni: Şikayetler State
     const [companyContacts, setCompanyContacts] = useState([]); // Yeni: Şirket İletişim Hattı
     const [todos, setTodos] = useState([]); // Yapılacak Listesi
@@ -11257,6 +12377,12 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [editingContact, setEditingContact] = useState(null);
     // Araç Düzenleme State'leri
     const [editingVehicle, setEditingVehicle] = useState(null);
+    // YENİ: Görüntülenen Cari Profili'nin telefon anahtarı
+    const [viewingCariKey, setViewingCariKey] = useState(null);
+    // YENİ: Görüntülenen Personel Profili'nin ID'si
+    const [viewingPersonnelProfileId, setViewingPersonnelProfileId] = useState(null);
+    // YENİ: Görüntülenen Araç Profili'nin ID'si
+    const [viewingVehicleProfileId, setViewingVehicleProfileId] = useState(null);
     const [vehicleEditForm, setVehicleEditForm] = useState({});
     // YENİ: Araç ruhsatı fotoğrafını büyük önizlemede göstermek için state
     const [viewingRuhsatUrl, setViewingRuhsatUrl] = useState(null);
@@ -11297,6 +12423,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     // Kayıt ekranında aynı isim veya numara girildiğinde uyarı/eşleştirme için
     const [existingCustomerMatch, setExistingCustomerMatch] = useState(null);
+    // YENİ: "Kayıtlı Müşteriden Seç" arama kutusu için state'ler
+    const [showCustomerSearchBox, setShowCustomerSearchBox] = useState(false);
+    const [customerSearchQuery, setCustomerSearchQuery] = useState('');
 
     // Telefon numarası veya isim değiştiğinde mevcut müşterileri kontrol et
     useEffect(() => {
@@ -11340,10 +12469,12 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
       const unsubs = [];
 
-// Son 60 günün operasyonlarını çekmek için tarih hesaplaması
-      const sixtyDaysAgo = new Date();
-      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-      const startDateStr = sixtyDaysAgo.toISOString().split('T')[0];
+// YENİ: Geçmişe dönük 8 yıla kadar müşteri/iş kaydı açılabilmesi için tarih sınırı genişletildi
+      // (Önceden sadece son 60 günün kayıtları çekiliyordu; bu yüzden 8 yıl önceki tarihli
+      // açılan kayıtlar Firestore'a yazılsa bile ekranda hiç görünmüyordu.)
+      const historyStartDate = new Date();
+      historyStartDate.setFullYear(historyStartDate.getFullYear() - 8);
+      const startDateStr = historyStartDate.toISOString().split('T')[0];
 
       const qJobs = query(getCol('jobs'), where('date', '>=', startDateStr));
       const qTrans = query(getCol('transactions'), limit(300));
@@ -11427,6 +12558,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           setPositionModules({}); // YENİ EKLENDİ
         }
         setDataLoadStatus(p => ({...p, settings: true}));
+      }, console.error));
+
+      // YENİ: Uygulama Ayarları (Logo Değiştir) dinleyicisi
+      unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'appBranding'), docSnap => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setAppBranding({ logoUrl: data.logoUrl || '', logoSize: data.logoSize || 100 });
+        } else {
+          setAppBranding({ logoUrl: '', logoSize: 100 });
+        }
       }, console.error));
 
       return () => unsubs.forEach(unsub => unsub());
@@ -12734,9 +13875,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       return (
         <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
           <img 
-            src="sembol-nakliyat-logo-zeminsiz-09.jpg" 
+            src={appBranding?.logoUrl || "sembol-nakliyat-logo-zeminsiz-09.jpg"} 
             alt="Sembol Nakliyat" 
-            className="w-auto h-24 object-contain mb-6 animate-pulse drop-shadow-2xl" 
+            className="w-auto object-contain mb-6 animate-pulse drop-shadow-2xl" 
+            style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
             onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-4 animate-pulse">S</div>'; }} 
           />
           <p className="font-bold tracking-widest text-neutral-400">SİSTEM YÜKLENİYOR...</p>
@@ -12745,7 +13887,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     }
 
     if (!isAuthenticated) {
-      return <LoginScreen onLogin={handleLogin} error={loginError} />;
+      return <LoginScreen onLogin={handleLogin} error={loginError} appBranding={appBranding} />;
     }
 
     if (currentUser?.employmentStatus === 'Pasif') {
@@ -12827,6 +13969,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const showAuth = checkAccess('auth');
     const showSystemFiles = checkAccess('systemFiles');
     const showMyComplaint = checkAccess('myComplaint');
+    // YENİ: Üst arama barı ve alt kategori (Müşteri/Araç/Personel) görüntüleme yetkileri
+    const showGlobalSearch = checkAccess('globalSearch');
+    const showGlobalSearchCustomer = checkAccess('globalSearchCustomer');
+    const showGlobalSearchVehicle = checkAccess('globalSearchVehicle');
+    const showGlobalSearchPersonnel = checkAccess('globalSearchPersonnel');
     
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
     const isStandardBlueCollarApp = isMaviYakaUser && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
@@ -12904,18 +14051,114 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       <div className="flex h-screen bg-neutral-50 font-sans text-neutral-900 overflow-hidden">
         
         {/* Mobil Header & Menü Butonu */}
-        <div className="md:hidden absolute top-0 left-0 right-0 h-16 bg-black text-white flex items-center justify-between px-4 z-30 shadow-md border-b border-red-600">
-          <div className="flex items-center gap-2">
+        <div className="md:hidden absolute top-0 left-0 right-0 h-16 bg-black text-white flex items-center gap-2 px-3 z-30 shadow-md border-b border-red-600">
+          <div className="flex items-center gap-2 shrink-0">
             <img 
-              src="sembol-nakliyat-logo-zeminsiz-09.jpg" 
+              src={appBranding?.logoUrl || "sembol-nakliyat-logo-zeminsiz-09.jpg"} 
               alt="Sembol Nakliyat" 
-              className="h-10 w-auto object-contain" 
+              className="w-auto object-contain" 
+              style={{ height: `${Math.min(48, 40 * ((appBranding?.logoSize || 100) / 100))}px` }}
               onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="flex items-center gap-2"><div class="w-8 h-8 bg-red-600 flex items-center justify-center rounded-lg font-black text-white">S</div><h1 class="font-bold text-lg">Sembol Nakliyat</h1></div>'; }} 
             />
           </div>
+
+          {/* YENİ: Logo ile menü butonu arasına ortalanmış genel arama barı (yetkiye bağlı) */}
+          {showGlobalSearch && (
+          <div className="relative flex-1">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-red-500" />
+              <input
+                type="text"
+                value={globalSearchQuery}
+                onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                placeholder="Araç, personel, müşteri ara..."
+                className="w-full pl-9 pr-8 py-2 bg-white text-black border-2 border-red-500 ring-2 ring-red-500/30 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-red-600 transition"
+              />
+              {globalSearchQuery && (
+                <button onClick={() => setGlobalSearchQuery('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black transition">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {globalSearchQuery.trim() !== '' && (() => {
+              const normalizeSearchStr = (s) => (s || '').toString().toLocaleLowerCase('tr-TR').replace(/\s+/g, '');
+              const q = normalizeSearchStr(globalSearchQuery);
+
+              const vehicleResults = showGlobalSearchVehicle ? vehicles.filter(v => normalizeSearchStr(v.plate).includes(q) || normalizeSearchStr(v.type).includes(q)).slice(0, 5) : [];
+              const personnelResults = showGlobalSearchPersonnel ? personnelList.filter(p =>
+                normalizeSearchStr(p.fullName).includes(q) ||
+                normalizeSearchStr(p.personalPhone).includes(q) ||
+                normalizeSearchStr(p.companyPhone).includes(q)
+              ).slice(0, 5) : [];
+              const customerMap = new Map();
+              if (showGlobalSearchCustomer) {
+                jobs.forEach(j => {
+                  if (!j.customerPhone) return;
+                  const key = normalizeCariPhone(j.customerPhone);
+                  if (!customerMap.has(key)) customerMap.set(key, { name: j.customerName, phone: j.customerPhone, cariKey: key });
+                });
+              }
+              const customerResults = showGlobalSearchCustomer ? Array.from(customerMap.values()).filter(c =>
+                normalizeSearchStr(c.name).includes(q) || normalizeSearchStr(c.phone).includes(q)
+              ).slice(0, 5) : [];
+              const hasAnyResult = vehicleResults.length > 0 || personnelResults.length > 0 || customerResults.length > 0;
+
+              return (
+                <div className="absolute left-0 right-0 mt-2 bg-white border-2 border-red-500 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 max-h-[70vh] overflow-y-auto custom-scrollbar text-black">
+                  {!hasAnyResult && (
+                    <p className="p-5 text-sm text-neutral-500 text-center font-medium">Eşleşen araç, personel veya müşteri bulunamadı.</p>
+                  )}
+
+                  {showGlobalSearchCustomer && customerResults.length > 0 && (
+                    <div className="p-3 border-b border-neutral-100">
+                      <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider px-2 mb-1.5">Müşteriler</p>
+                      {customerResults.map((c, idx) => (
+                        <button key={idx} type="button" onClick={() => { setViewingCariKey(c.cariKey); setActiveTab('customerProfile'); setGlobalSearchQuery(''); setIsSidebarOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-neutral-50 transition flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black text-xs shrink-0">{c.name.charAt(0).toUpperCase()}</div>
+                          <div className="flex-1"><span className="font-bold text-black text-sm block">{c.name}</span><span className="text-[10px] text-neutral-500">{c.phone}</span></div>
+                          <span className="text-[10px] font-bold text-orange-600">Cariye Git →</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {showGlobalSearchPersonnel && personnelResults.length > 0 && (
+                    <div className="p-3 border-b border-neutral-100">
+                      <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider px-2 mb-1.5">Personel</p>
+                      {personnelResults.map(p => (
+                        <button key={p.id} type="button" onClick={() => { setViewingPersonnelProfileId(p.id); setActiveTab('personnelProfile'); setGlobalSearchQuery(''); setIsSidebarOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-neutral-50 transition flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-full bg-neutral-200 overflow-hidden shrink-0 flex items-center justify-center">
+                            {p.profileImage ? <img src={p.profileImage} className="w-full h-full object-cover" /> : <User className="w-4 h-4 text-neutral-400" />}
+                          </div>
+                          <div className="flex-1"><span className="font-bold text-black text-sm block">{p.fullName}</span><span className="text-[10px] text-neutral-500">{p.position}</span></div>
+                          <span className="text-[10px] font-bold text-orange-600">Profiline Git →</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {showGlobalSearchVehicle && vehicleResults.length > 0 && (
+                    <div className="p-3">
+                      <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider px-2 mb-1.5">Araçlar</p>
+                      {vehicleResults.map(v => (
+                        <button key={v.id} type="button" onClick={() => { setViewingVehicleProfileId(v.id); setActiveTab('vehicleProfile'); setGlobalSearchQuery(''); setIsSidebarOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-neutral-50 transition flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center shrink-0"><Truck className="w-4 h-4" /></div>
+                          <div className="flex-1"><span className="font-bold text-black text-sm block">{v.plate}</span><span className="text-[10px] text-neutral-500">{v.type}</span></div>
+                          <span className="text-[10px] font-bold text-orange-600">Profiline Git →</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+          )}
+
           <button 
             onClick={() => setIsSidebarOpen(!isSidebarOpen)} 
-            className="p-2 hover:bg-neutral-800 rounded-lg transition"
+            className="p-2 hover:bg-neutral-800 rounded-lg transition shrink-0"
           >
             {isSidebarOpen ? <X className="w-6 h-6" /> : <div className="space-y-1.5"><div className="w-6 h-0.5 bg-white"></div><div className="w-6 h-0.5 bg-white"></div><div className="w-6 h-0.5 bg-white"></div></div>}
           </button>
@@ -12932,9 +14175,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         <aside className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative top-0 left-0 z-40 w-64 md:min-w-[256px] bg-black text-white flex flex-col shadow-2xl shrink-0 h-full transition-transform duration-300 ease-in-out border-r border-neutral-800`}>
           <div className="p-6 flex flex-col items-center gap-2 border-b border-neutral-800 text-center">
             <img 
-              src="sembol-nakliyat-logo-zeminsiz-09.jpg" 
+              src={appBranding?.logoUrl || "sembol-nakliyat-logo-zeminsiz-09.jpg"} 
               alt="Sembol Nakliyat" 
-              className="w-full max-w-[180px] object-contain mb-2" 
+              className="w-full object-contain mb-2" 
+              style={{ maxWidth: `${180 * ((appBranding?.logoSize || 100) / 100)}px` }}
               onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="flex items-center gap-4"><div class="shrink-0 w-16 h-16 flex items-center justify-center overflow-hidden rounded-full border-2 border-neutral-800/50 bg-red-600"><span class="font-black text-3xl text-white">S</span></div><div><h1 class="text-2xl font-black leading-tight text-white tracking-widest">SEMBOL</h1></div></div>'; }} 
             />
             <p className="text-red-600 text-[10px] font-bold mt-0.5 tracking-[0.2em] bg-red-600/10 px-3 py-1 rounded-full border border-red-600/20">OPERASYON MERKEZİ</p>
@@ -13498,6 +14742,17 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
+            {/* YENİ: Uygulama Ayarları (Sistem Dosyaları'nın hemen altında) */}
+            {showSystemFiles && (
+              <button 
+                onClick={() => { setActiveTab('appSettings'); setIsSidebarOpen(false); setIsSystemFilesSubMenuOpen(false); }}
+                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'appSettings' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+              >
+                <Sparkles className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Uygulama Ayarları</span>
+              </button>
+            )}
+
+
             {showMyComplaint && (
               <button 
                 onClick={() => { setActiveTab('myComplaint'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
@@ -13581,6 +14836,89 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
               <div className="space-y-4">
+                {/* YENİ: Kayıtlı Müşteriden Seç */}
+                <div className="max-w-4xl mx-auto">
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomerSearchBox(o => !o)}
+                    className="px-4 py-2.5 bg-neutral-800 hover:bg-black text-white text-sm font-bold rounded-xl transition flex items-center gap-2 shadow-sm"
+                  >
+                    <Search className="w-4 h-4" /> Kayıtlı Müşteriden Seç
+                  </button>
+
+                  {showCustomerSearchBox && (() => {
+                    // YENİ: Mevcut iş kayıtlarından benzersiz müşteri listesi türet
+                    const uniqueCustomers = new Map();
+                    jobs.forEach(j => {
+                      if (!j.customerPhone) return;
+                      const key = normalizeCariPhone(j.customerPhone);
+                      if (!uniqueCustomers.has(key)) {
+                        uniqueCustomers.set(key, j);
+                      }
+                    });
+                    const q = customerSearchQuery.trim().toLocaleLowerCase('tr-TR');
+                    const results = Array.from(uniqueCustomers.values()).filter(j =>
+                      q === '' ? false : (normalizeCariName(j.customerName).includes(q) || normalizeCariPhone(j.customerPhone).includes(q.replace(/\D/g, '')))
+                    ).slice(0, 8);
+
+                    return (
+                      <div className="mt-2 bg-white border border-neutral-200 rounded-xl shadow-lg p-3 animate-in fade-in slide-in-from-top-2">
+                        <input
+                          type="text"
+                          autoFocus
+                          value={customerSearchQuery}
+                          onChange={(e) => setCustomerSearchQuery(e.target.value)}
+                          placeholder="Müşteri adı veya telefon numarası yazın..."
+                          className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition mb-2"
+                        />
+                        <div className="max-h-56 overflow-y-auto custom-scrollbar space-y-1.5">
+                          {results.map((j, idx) => (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => {
+                                setFormData(prev => ({
+                                  ...prev,
+                                  customerName: j.customerName,
+                                  customerPhone: j.customerPhone,
+                                  altPhone: j.altPhone || '',
+                                  customerType: j.customerType || 'Bireysel',
+                                  tcNo: j.tcNo || '',
+                                  taxNo: j.taxNo || ''
+                                }));
+                                setShowCustomerSearchBox(false);
+                                setCustomerSearchQuery('');
+                              }}
+                              className="w-full text-left p-3 bg-neutral-50 hover:bg-red-50 border border-neutral-200 hover:border-red-200 rounded-xl transition flex items-center justify-between gap-2"
+                            >
+                              <span className="font-bold text-black text-sm">{j.customerName}</span>
+                              <span className="text-xs text-neutral-500">{j.customerPhone}</span>
+                            </button>
+                          ))}
+                          {q !== '' && results.length === 0 && (
+                            <p className="text-xs text-neutral-500 italic p-2">Eşleşen kayıtlı müşteri bulunamadı.</p>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* YENİ: Aynı ad soyad + telefon ile eşleşen mevcut cari profili uyarısı */}
+                {formData.customerName && formData.customerPhone && (() => {
+                  const cariMatchJob = jobs.find(j =>
+                    normalizeCariName(j.customerName) === normalizeCariName(formData.customerName) &&
+                    normalizeCariPhone(j.customerPhone) === normalizeCariPhone(formData.customerPhone)
+                  );
+                  if (!cariMatchJob) return null;
+                  return (
+                    <div className="max-w-4xl mx-auto bg-green-50 border border-green-200 text-green-800 p-4 rounded-xl flex items-center gap-3 shadow-sm animate-in fade-in">
+                      <CheckCircle className="w-5 h-5 text-green-600 shrink-0" />
+                      <p className="text-sm font-bold">Bu müşterinin sistemde zaten bir cari kaydı var. Bu yeni iş de aynı cari profiline otomatik olarak eklenecek.</p>
+                    </div>
+                  );
+                })()}
+
                 {existingCustomerMatch && (
                   <div className="max-w-4xl mx-auto bg-blue-50 border border-blue-200 text-blue-800 p-4 rounded-xl flex items-center justify-between shadow-sm animate-in fade-in">
                     <div className="flex items-center gap-3">
@@ -13626,10 +14964,12 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             }
             {activeTab === 'allCustomers' && showCustomers && (
               <div className="space-y-4">
-                 <CustomerListView jobs={jobs} title="Tüm Müşteriler" handleEditJob={handleEditJob} />
+                 <CustomerListView jobs={jobs} title="Tüm Müşteriler" handleEditJob={handleEditJob} onViewCari={(key) => { setViewingCariKey(key); setActiveTab('customerProfile'); }} />
               </div>
             )}
-            {activeTab === 'specialCustomers' && showCustomers && <CustomerListView jobs={jobs} title="Özel Müşteriler" handleEditJob={handleEditJob} />}
+            {activeTab === 'specialCustomers' && showCustomers && <CustomerListView jobs={jobs} title="Özel Müşteriler" handleEditJob={handleEditJob} onViewCari={(key) => { setViewingCariKey(key); setActiveTab('customerProfile'); }} />}
+            {/* YENİ: Cari Profili Sayfası */}
+            {activeTab === 'customerProfile' && showCustomers && <CustomerProfileView jobs={jobs} cariKey={viewingCariKey} handleEditJob={handleEditJob} onBack={() => setActiveTab('allCustomers')} db={db} appId={appId} addSystemLog={addSystemLog} />}
 
             {/* İş Listesi Modülleri */}
             {activeTab === 'currentJobs' && showJobList && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
@@ -13642,7 +14982,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             
             {/* Personel ve Araç Modülleri */}
             {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
-            {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" />}
+            {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} />}
+            {/* YENİ: Personel Profili Sayfası */}
+            {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {activeTab === 'addVehicle' && showOperasyon && <AddVehicleView onAdd={handleAddVehicle} onCancel={() => setActiveTab('vehicleList')} />}
@@ -13669,6 +15011,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                           <th className="p-4 font-bold">Taşıma Kapasitesi</th>
                           <th className="p-4 font-bold">Araç Detayları</th>
                           <th className="p-4 font-bold">Ruhsat</th>
+                          <th className="p-4 font-bold">Profil</th>
                           <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
                         </tr>
                       </thead>
@@ -13714,6 +15057,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                                 <span className="text-xs text-neutral-400 font-medium">Yüklenmedi</span>
                               )}
                             </td>
+                            {/* YENİ: Araç Profili sütunu */}
+                            <td className="p-4">
+                              <button
+                                type="button"
+                                onClick={() => { setViewingVehicleProfileId(vehicle.id); setActiveTab('vehicleProfile'); }}
+                                className="px-3 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5 whitespace-nowrap"
+                              >
+                                <FolderOpen className="w-3.5 h-3.5" /> Araç Profiline Git
+                              </button>
+                            </td>
                             <td className="p-4">
                               <div className="flex items-center gap-2">
                                 <button 
@@ -13735,7 +15088,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         ))}
                         {vehicles.length === 0 && (
                           <tr>
-                            <td colSpan="6" className="p-6 text-center text-neutral-500">Kayıtlı araç bulunamadı.</td>
+                            <td colSpan="7" className="p-6 text-center text-neutral-500">Kayıtlı araç bulunamadı.</td>
                           </tr>
                         )}
                       </tbody>
@@ -13752,7 +15105,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         <button onClick={() => setEditingVehicle(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
                       </div>
                       
-                      <form onSubmit={(e) => { e.preventDefault(); handleUpdateVehicle(vehicleEditForm); }} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+                      <div  className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
                             <label className="block text-sm font-bold text-neutral-700 mb-1">Araç Plakası</label>
@@ -13834,11 +15187,14 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                             <FileText className="w-4 h-4 text-red-600" /> Araç Ruhsat Fotoğrafı
                           </label>
                           {vehicleEditForm.ruhsatFoto && vehicleEditForm.ruhsatFoto !== 'Yükleniyor...' && (
-                            <img src={vehicleEditForm.ruhsatFoto} alt="Ruhsat" className="h-28 rounded-lg border border-neutral-200 mb-2 object-cover" />
+                            isVideoUrl(vehicleEditForm.ruhsatFoto) ? (
+                              <video src={vehicleEditForm.ruhsatFoto} controls className="h-28 rounded-lg border border-neutral-200 mb-2 bg-black" />
+                            ) : (
+                              <img src={vehicleEditForm.ruhsatFoto} alt="Ruhsat" className="h-28 rounded-lg border border-neutral-200 mb-2 object-cover" />
+                            )
                           )}
-                          <input
-                            type="file"
-                            accept="image/*"
+                          <MediaCaptureMenu
+                            buttonLabel="Ruhsat Fotoğrafı / Videosu Ekle"
                             onChange={async (e) => {
                               const file = e.target.files[0];
                               if (!file) return;
@@ -13856,16 +15212,15 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                                 setVehicleEditForm(prev => ({ ...prev, ruhsatFoto: '' }));
                               }
                             }}
-                            className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white text-sm file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-black file:text-white file:font-bold file:cursor-pointer"
                           />
                           {vehicleEditForm.ruhsatFoto === 'Yükleniyor...' && <p className="text-xs text-neutral-400 mt-1">Yükleniyor...</p>}
                         </div>
 
                         <div className="flex gap-3 pt-4 border-t border-neutral-100">
                           <button type="button" onClick={() => setEditingVehicle(null)} className="flex-1 py-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">İptal</button>
-                          <button type="submit" className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Değişiklikleri Kaydet</button>
+                          <button type="button" onClick={(e) => { e.preventDefault(); handleUpdateVehicle(vehicleEditForm); }} className="flex-1 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/20">Değişiklikleri Kaydet</button>
                         </div>
-                      </form>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -13881,12 +15236,18 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <button onClick={() => setViewingRuhsatUrl(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
                   </div>
                   <div className="p-4 bg-neutral-100 flex justify-center">
-                    <img src={viewingRuhsatUrl} alt="Araç Ruhsatı" className="max-h-[70vh] rounded-lg object-contain" />
+                    {isVideoUrl(viewingRuhsatUrl) ? (
+                      <video src={viewingRuhsatUrl} controls autoPlay className="max-h-[70vh] rounded-lg bg-black" />
+                    ) : (
+                      <img src={viewingRuhsatUrl} alt="Araç Ruhsatı" className="max-h-[70vh] rounded-lg object-contain" />
+                    )}
                   </div>
                 </div>
               </div>
             )}
             {activeTab === 'vehicleMaintenance' && showOperasyon && <VehicleMaintenanceView vehicles={vehicles} onUpdateVehicle={handleUpdateVehicle} addSystemLog={addSystemLog} />}
+            {/* YENİ: Araç Profili Sayfası */}
+            {activeTab === 'vehicleProfile' && showOperasyon && <VehicleProfileView vehicleId={viewingVehicleProfileId} vehicles={vehicles} jobs={jobs} handleEditJob={handleEditJob} setViewingRuhsatUrl={setViewingRuhsatUrl} onBack={() => setActiveTab('vehicleList')} />}
 
             {/* Yapılacak Listesi Modülleri */}
             {activeTab === 'addTodo' && showTodos && <AddTodoView newTodo={newTodo} setNewTodo={setNewTodo} handleAddTodo={handleAddTodo} />}
@@ -13933,6 +15294,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'systemLogs' && showSystemFiles && <SystemLogsView logs={systemLogs} />}
             {activeTab === 'userActivities' && showSystemFiles && <UserActivitiesView personnelList={personnelList} />}
             {activeTab === 'companyPasswords' && showSystemFiles && <CompanyPasswordsView passwords={companyPasswords} db={db} appId={appId} addSystemLog={addSystemLog} />}
+            {/* YENİ: Uygulama Ayarları (Logo Değiştir) */}
+            {activeTab === 'appSettings' && showSystemFiles && <AppSettingsView db={db} appId={appId} addSystemLog={addSystemLog} appBranding={appBranding} />}
           </div>
         </main>
 
@@ -14045,7 +15408,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     </div>
                   </div>
                 )}
-                <form onSubmit={submitAssignJob} className="space-y-5">
+                <div  className="space-y-5">
                   <p className="text-sm text-neutral-600 pb-2 border-b border-neutral-100">
                     <b className="text-black">Müşteri:</b> {jobToAssign.customerName} <br/>
                     <b className="text-black">Tarih:</b> {jobToAssign.date}
@@ -14307,7 +15670,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20">
+                    <button type="button" onClick={submitAssignJob} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20">
                       <CheckSquare className="w-5 h-5" /> Görevi Onayla ve Atamayı Yap
                     </button>
 
@@ -14317,7 +15680,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       </button>
                     )}
                   </div>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -14369,7 +15732,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               <div className="p-6 flex flex-col items-center w-full">
                 <div className="w-full aspect-video bg-neutral-100 rounded-xl border border-neutral-300 flex flex-col items-center justify-center mb-4 overflow-hidden relative shadow-inner">
                   {viewingImage.name.startsWith('http') ? (
-                    <img src={viewingImage.name} alt="Görsel" className="w-full h-full object-contain z-10" />
+                    isVideoUrl(viewingImage.name) ? (
+                      <video src={viewingImage.name} controls autoPlay muted className="w-full h-full object-contain z-10 bg-black" />
+                    ) : (
+                      <img src={viewingImage.name} alt="Görsel" className="w-full h-full object-contain z-10" />
+                    )
                   ) : (
                     <Camera className="w-16 h-16 text-neutral-300 z-10" />
                   )}
@@ -14401,7 +15768,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <button onClick={() => setShowTaskModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
-              <form onSubmit={handleAddTask} className="p-6 space-y-4">
+              <div  className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
                   <input required type="text" value={newTask.title} onChange={(e) => setNewTask({...newTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" placeholder="Örn: Müşteri aramaları yapılacak" />
@@ -14428,10 +15795,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
                 </div>
 
-                <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+                <button type="button" onClick={handleAddTask} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
                   <PlusCircle className="w-5 h-5" /> Görevi Ekle
                 </button>
-              </form>
+              </div>
             </div>
           </div>
         )}
@@ -14445,7 +15812,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <button onClick={() => setEditingTask(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
-              <form onSubmit={handleUpdateTask} className="p-6 space-y-4">
+              <div  className="p-6 space-y-4">
                 <div>
                   <label className="block text-sm font-bold text-black mb-1">Görev Başlığı</label>
                   <input required type="text" value={editingTask.title} onChange={(e) => setEditingTask({...editingTask, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition" />
@@ -14472,10 +15839,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
                 </div>
 
-                <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
+                <button type="button" onClick={handleUpdateTask} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
                   <CheckCircle className="w-5 h-5" /> Değişiklikleri Kaydet
                 </button>
-              </form>
+              </div>
             </div>
           </div>
         )}
@@ -14495,7 +15862,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <AlertTriangle className="w-5 h-5 shrink-0" /> {endJobError}
                   </div>
                 )}
-                <form onSubmit={submitEndJob} className="space-y-4">
+                <div  className="space-y-4">
                   {jobToEnd.type === 'Asansör' ? (
                     <>
                       <div>
@@ -14533,11 +15900,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                               )}
                             </div>
                           ))}
-                          <label className="cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
-                            <PlusCircle className="w-5 h-5 text-neutral-500" />
-                            <span className="text-sm font-bold text-neutral-600">Fotoğraf Ekle</span>
-                            <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'elevator')} />
-                          </label>
+                          <MediaCaptureMenu onChange={(e) => handleFileUpload(e, 'elevator')} buttonLabel="Fotoğraf / Video Ekle" buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2" />
                         </div>
                       </div>
 
@@ -14627,11 +15990,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                               )}
                             </div>
                           ))}
-                          <label className="cursor-pointer bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
-                            <PlusCircle className="w-5 h-5 text-neutral-500" />
-                            <span className="text-sm font-bold text-neutral-600">Yeni Görsel Ekle</span>
-                            <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => handleFileUpload(e, 'truck')} />
-                          </label>
+                          <MediaCaptureMenu onChange={(e) => handleFileUpload(e, 'truck')} buttonLabel="Yeni Görsel Ekle" buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2" />
                         </div>
                       </div>
 
@@ -14651,11 +16010,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                                 )}
                               </div>
                             ))}
-                            <label className="cursor-pointer bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2">
-                              <PlusCircle className="w-5 h-5 text-red-500" />
-                              <span className="text-sm font-bold text-red-600">Yeni Hasar Fotoğrafı Ekle</span>
-                              <input type="file" accept="image/*" className="hidden" onChange={(e) => handleFileUpload(e, 'damage')} />
-                            </label>
+                            <MediaCaptureMenu onChange={(e) => handleFileUpload(e, 'damage')} buttonLabel="Yeni Hasar Fotoğrafı Ekle" buttonClassName="cursor-pointer w-full bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2 text-red-600" />
                           </div>
                           
                           {endJobData.damageDetails.trim().length > 0 && (
@@ -14753,10 +16108,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     </div>
                   </div>
 
-                  <button type="submit" className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <button type="button" onClick={submitEndJob} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> {jobToEnd.type === 'Asansör' ? 'Asansör İşini Sonlandır' : 'Kodu Doğrula ve İşi Bitir'}
                   </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -14772,7 +16127,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
               
               <div className="p-4 overflow-y-auto custom-scrollbar flex-1">
-                <form onSubmit={submitApprovePoints} className="space-y-4">
+                <div  className="space-y-4">
                   <div className="bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 flex justify-between items-center">
                     <div>
                       <p className="text-xs font-black text-black leading-tight">{jobToApprove.customerName}</p>
@@ -14849,7 +16204,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         <div className="flex-1 flex flex-col">
                           {approveData.reviewImage && approveData.reviewImage !== 'Yükleniyor...' && (
                             <div className="flex-1 w-full min-h-[120px] overflow-hidden rounded-lg border border-neutral-200 relative group">
-                              <img src={approveData.reviewImage} alt="Yorum" className="w-full h-full object-cover bg-neutral-100" />
+                              {isVideoUrl(approveData.reviewImage) ? (
+                                <video src={approveData.reviewImage} controls className="w-full h-full object-cover bg-black" />
+                              ) : (
+                                <img src={approveData.reviewImage} alt="Yorum" className="w-full h-full object-cover bg-neutral-100" />
+                              )}
                               <button type="button" onClick={() => setApproveData(prev => ({...prev, reviewImage: ''}))} className="absolute top-1 right-1 p-1 bg-red-600 text-white rounded opacity-0 group-hover:opacity-100 transition shadow-md">
                                 <X className="w-3 h-3" />
                               </button>
@@ -14861,20 +16220,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                             </div>
                           )}
                           {!approveData.reviewImage && (
-                            <label className="cursor-pointer bg-neutral-50 hover:bg-neutral-100 border border-neutral-300 border-dashed rounded-lg flex-1 min-h-[120px] text-center transition flex flex-col justify-center items-center gap-1.5">
-                              <Upload className="w-5 h-5 text-neutral-400" />
-                              <span className="text-[10px] font-bold text-neutral-600">Yorum Görseli Ekle<br/><span className="font-medium opacity-70">(İsteğe Bağlı)</span></span>
-                              <input type="file" accept="image/*" className="hidden" onChange={handleReviewImageUpload} />
-                            </label>
+                            <MediaCaptureMenu onChange={handleReviewImageUpload} buttonLabel="Yorum Görseli Ekle (İsteğe Bağlı)" buttonClassName="cursor-pointer w-full bg-neutral-50 hover:bg-neutral-100 border border-neutral-300 border-dashed rounded-lg flex-1 min-h-[120px] text-center transition flex flex-col justify-center items-center gap-1.5" />
                           )}
                         </div>
                       </div>
                   </div>
 
-                  <button type="submit" className="w-full py-3 bg-yellow-500 text-black font-black text-sm rounded-xl hover:bg-yellow-600 transition flex justify-center items-center gap-2 shadow-md">
+                  <button type="button" onClick={submitApprovePoints} className="w-full py-3 bg-yellow-500 text-black font-black text-sm rounded-xl hover:bg-yellow-600 transition flex justify-center items-center gap-2 shadow-md">
                     <CheckCircle className="w-4 h-4" /> Onayla ve Puanları İşle
                   </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -14889,7 +16244,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <button onClick={() => setShowMesaiModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               <div className="p-6 overflow-y-auto custom-scrollbar max-h-[80vh]">
-                <form onSubmit={submitMesaiApprove} className="space-y-4">
+                <div  className="space-y-4">
                    <div className="bg-neutral-50 p-3 rounded-xl border border-neutral-200 mb-4">
                       <p className="text-sm font-bold text-black mb-1">Müşteri: {jobForMesai.customerName}</p>
                       <p className="text-xs text-neutral-500">Tarih: {jobForMesai.date}</p>
@@ -14935,10 +16290,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       </div>
                    )}
 
-                   <button type="submit" disabled={Object.keys(mesaiModalData).length === 0} className="w-full py-4 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg mt-4 disabled:opacity-50">
+                   <button type="button" onClick={submitMesaiApprove} disabled={Object.keys(mesaiModalData).length === 0} className="w-full py-4 bg-blue-600 text-white font-black rounded-xl hover:bg-blue-700 transition flex justify-center items-center gap-2 shadow-lg mt-4 disabled:opacity-50">
                      <CheckCircle className="w-5 h-5" /> Mesaileri Kaydet
                    </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -14954,15 +16309,15 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
               
               <div className="p-6 overflow-y-auto custom-scrollbar">
-                <form onSubmit={handleResolveDamageSubmit} className="space-y-4">
+                <div  className="space-y-4">
                   <div>
                     <label className="block text-sm font-bold text-black mb-2">Çözüm Notu / Açıklama</label>
                     <textarea required value={resolveDamageModal.note} onChange={e => setResolveDamageModal({...resolveDamageModal, note: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none transition text-sm" placeholder="Sorun nasıl çözüldü? Müşteri ile nasıl anlaşıldı? (Örn: Tamir masrafı karşılandı.)"></textarea>
                   </div>
-                  <button type="submit" className="w-full py-4 bg-green-500 text-white font-black rounded-xl hover:bg-green-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <button type="button" onClick={handleResolveDamageSubmit} className="w-full py-4 bg-green-500 text-white font-black rounded-xl hover:bg-green-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> Çözüldü Olarak Kaydet
                   </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
@@ -14978,7 +16333,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
               
               <div className="p-6">
-                <form onSubmit={handleAddContact} className="space-y-4">
+                <div  className="space-y-4">
                   {!editingContact && (
                     <>
                       <div>
@@ -15015,10 +16370,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <label className="block text-sm font-bold text-black mb-1">Pozisyon / Unvan</label>
                     <input required type="text" value={contactForm.position} onChange={e => setContactForm({...contactForm, position: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none" placeholder="Örn: Operasyon Müdürü" />
                   </div>
-                  <button type="submit" className="w-full py-4 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <button type="button" onClick={handleAddContact} className="w-full py-4 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> {editingContact ? 'Değişiklikleri Kaydet' : 'Kaydet ve Ekle'}
                   </button>
-                </form>
+                </div>
               </div>
             </div>
           </div>
