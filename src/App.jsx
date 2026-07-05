@@ -34,6 +34,93 @@ import React, { useState, useEffect } from 'react';
   const db = getFirestore(app);
   const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
 
+  // --- YENİ: YÜKLENEN DOSYANIN VİDEO OLUP OLMADIĞINI ANLAMA ---
+  const isVideoUrl = (url) => {
+    if (!url || typeof url !== 'string') return false;
+    return /\.(mp4|mov|webm|avi|3gp|mkv|m4v)(\?.*)?$/i.test(url);
+  };
+
+  // --- YENİ: CARİ PROFİL EŞLEŞTİRME YARDIMCI FONKSİYONLARI ---
+  const normalizeCariName = (name) => (name || '').toString().trim().toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ');
+  const normalizeCariPhone = (phone) => (phone || '').toString().replace(/\D/g, '');
+
+  const CopyButton = ({ content }) => {
+    const [copied, setCopied] = useState(false);
+    const handleCopy = () => {
+      const el = document.createElement('textarea');
+      el.value = content;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    };
+    
+    return (
+      <button 
+        onClick={handleCopy}
+        type="button"
+        className="w-full py-4 bg-purple-600 text-white font-bold rounded-xl hover:bg-purple-700 transition flex justify-center items-center gap-2 shadow-lg shadow-purple-600/20"
+      >
+        {copied ? <CheckCircle className="w-5 h-5" /> : <Copy className="w-5 h-5" />} 
+        {copied ? 'Kopyalandı! (WhatsApp\'a Yapıştırın)' : 'Panoya Kopyala'}
+      </button>
+    );
+  };
+
+  // --- YENİ: FOTOĞRAF/VİDEO EKLEME MENÜSÜ (Şimdi Çek / Galeriden Yükle / Dosyadan) ---
+  const MediaCaptureMenu = ({ onChange, disabled, buttonLabel, buttonClassName, compact = false }) => {
+    const [isOpen, setIsOpen] = useState(false);
+    const cameraInputRef = React.useRef(null);
+    const galleryInputRef = React.useRef(null);
+    const fileInputRef = React.useRef(null);
+
+    const handlePick = (ref) => {
+      setIsOpen(false);
+      ref.current?.click();
+    };
+
+    const defaultButtonClass = compact
+      ? "px-4 py-2 bg-white border border-neutral-300 border-dashed rounded-lg flex items-center justify-center gap-1.5 hover:bg-neutral-50 transition text-xs font-bold text-neutral-600"
+      : "cursor-pointer w-full py-3 bg-neutral-50 border border-neutral-300 border-dashed rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-100 transition";
+
+    return (
+      <div className="relative">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => setIsOpen(o => !o)}
+          className={buttonClassName || defaultButtonClass}
+        >
+          <Upload className={compact ? "w-3.5 h-3.5 text-neutral-500" : "w-5 h-5 text-neutral-500"} />
+          <span className={compact ? "" : "text-sm font-bold text-neutral-600"}>{buttonLabel || 'Fotoğraf / Video Ekle'}</span>
+        </button>
+
+        {isOpen && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
+            <div className="absolute left-0 top-full mt-1.5 w-56 bg-white border border-neutral-200 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95">
+              <button type="button" onClick={() => handlePick(cameraInputRef)} className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-bold text-black hover:bg-neutral-50 transition border-b border-neutral-100">
+                <Camera className="w-4 h-4 text-red-600 shrink-0" /> Şimdi Çek
+              </button>
+              <button type="button" onClick={() => handlePick(galleryInputRef)} className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-bold text-black hover:bg-neutral-50 transition border-b border-neutral-100">
+                <FolderOpen className="w-4 h-4 text-blue-600 shrink-0" /> Galeriden Yükle
+              </button>
+              <button type="button" onClick={() => handlePick(fileInputRef)} className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-bold text-black hover:bg-neutral-50 transition">
+                <FileText className="w-4 h-4 text-neutral-600 shrink-0" /> Dosyadan
+              </button>
+            </div>
+          </>
+        )}
+
+        <input ref={cameraInputRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
+        <input ref={galleryInputRef} type="file" accept="image/*,video/*" className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
+        <input ref={fileInputRef} type="file" accept="*/*" className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
+      </div>
+    );
+  };
+
     const calculateMaterials = (roomCount, packingType) => {
     let multiplier = 1;
     if (roomCount === '1+0' || roomCount === 'Parça Eşya' || roomCount === 'Depoevim Tesisleri') multiplier = 0.5;
