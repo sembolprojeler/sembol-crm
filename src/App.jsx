@@ -8418,7 +8418,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           {/* Önizleme */}
           <div className="bg-black rounded-2xl p-8 flex justify-center items-center mb-5 border border-neutral-800">
             <img
-              src={logoPreview || "sembol-nakliyat-logo-zeminsiz-09.jpg"}
+              src={logoPreview || "sembol-nakliyat-logo.webp"}
               alt="Logo Önizleme"
               className="w-auto object-contain"
               style={{ height: `${96 * (logoSize / 100)}px` }}
@@ -12257,7 +12257,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
           <div className="bg-neutral-50 p-8 flex flex-col items-center border-b border-neutral-200">
             <img 
-              src={appBranding?.logoUrl || "sembol-nakliyat-logo-zeminsiz-09.jpg"} 
+              src={appBranding?.logoUrl || "sembol-nakliyat-logo.webp"} 
               alt="Sembol Nakliyat" 
               className="w-auto object-contain mb-2 drop-shadow-sm" 
               style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
@@ -13962,7 +13962,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       return (
         <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
           <img 
-            src={appBranding?.logoUrl || "sembol-nakliyat-logo-zeminsiz-09.jpg"} 
+            src={appBranding?.logoUrl || "sembol-nakliyat-logo.webp"} 
             alt="Sembol Nakliyat" 
             className="w-auto object-contain mb-6 animate-pulse drop-shadow-2xl" 
             style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
@@ -14141,7 +14141,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         <div className="md:hidden absolute top-0 left-0 right-0 h-16 bg-black text-white flex items-center gap-2 px-3 z-30 shadow-md border-b border-red-600">
           <div className="flex items-center gap-2 shrink-0">
             <img 
-              src={appBranding?.logoUrl || "sembol-nakliyat-logo-zeminsiz-09.jpg"} 
+              src={appBranding?.logoUrl || "sembol-nakliyat-logo.webp"} 
               alt="Sembol Nakliyat" 
               className="w-auto object-contain" 
               style={{ height: `${Math.min(48, 40 * ((appBranding?.logoSize || 100) / 100))}px` }}
@@ -14262,7 +14262,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         <aside className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative top-0 left-0 z-40 w-64 md:min-w-[256px] bg-black text-white flex flex-col shadow-2xl shrink-0 h-full transition-transform duration-300 ease-in-out border-r border-neutral-800`}>
           <div className="p-6 flex flex-col items-center gap-2 border-b border-neutral-800 text-center">
             <img 
-              src={appBranding?.logoUrl || "sembol-nakliyat-logo-zeminsiz-09.jpg"} 
+              src={appBranding?.logoUrl || "sembol-nakliyat-logo.webp"} 
               alt="Sembol Nakliyat" 
               className="w-full object-contain mb-2" 
               style={{ maxWidth: `${180 * ((appBranding?.logoSize || 100) / 100)}px` }}
