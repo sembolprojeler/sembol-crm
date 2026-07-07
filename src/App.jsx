@@ -10,15 +10,26 @@ import React, { useState, useEffect } from 'react';
     Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award
   } from 'lucide-react';
 
-  // --- FIREBASE BAĞLANTISI (GERÇEK / CANLI) ---
+  // --- FIREBASE BAĞLANTISI (CANLI / PRODUCTION MODU) ---
+  // NOT: Önceki önizleme sürümünde burada bellek içi (in-memory) sahte bir
+  // Firestore + Auth katmanı vardı. Canlıya alma kapsamında bu sahte katman
+  // tamamen kaldırıldı ve yerine gerçek Firebase SDK bağlantısı eklendi.
+  // Fonksiyon isimleri (collection, doc, addDoc, onSnapshot, query, where,
+  // orderBy, limit vb.) birebir aynı kaldığı için aşağıdaki dosyanın geri
+  // kalanında HİÇBİR SATIR değiştirilmesine gerek kalmadı.
   import { initializeApp } from "firebase/app";
   import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "firebase/auth";
-  import {
-    getFirestore, collection, addDoc, onSnapshot,
+  import { 
+    getFirestore, collection, addDoc, onSnapshot, 
     doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where
   } from "firebase/firestore";
 
-  // YEREL VE BULUT ORTAMI UYUM KONTROLÜ
+  // GERÇEK FIREBASE PROJE AYARLARI (sembol-operasyon-merkezi)
+  // NOT: apiKey gizli bir sır değildir (Firebase güvenliği Firestore Security
+  // Rules ve Auth ile sağlanır), bu yüzden client tarafında bulunması normaldir.
+  // Vercel'de farklı bir ortam (staging/production) kullanmak isterseniz bu
+  // değerleri Vercel Environment Variables (VITE_FIREBASE_... veya
+  // NEXT_PUBLIC_FIREBASE_...) üzerinden okuyacak şekilde güncelleyebilirsiniz.
   const defaultFirebaseConfig = {
     apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
     authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
@@ -27,13 +38,14 @@ import React, { useState, useEffect } from 'react';
     messagingSenderId: "1054049299174",
     appId: "1:1054049299174:web:2193f916a3501543d92927"
   };
+  // YEREL VE BULUT ORTAMI UYUM KONTROLÜ (bazı çalıştırma ortamları
+  // __firebase_config / __app_id global değişkenlerini enjekte edebilir)
   const firebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_config ? JSON.parse(__firebase_config) : defaultFirebaseConfig;
 
   const app = initializeApp(firebaseConfig);
   const auth = getAuth(app);
   const db = getFirestore(app);
   const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
-
 
   // --- YENİDEN EKLENDİ: TÜRKİYE İL/İLÇE, DEPO KONUMLARI, MESAİ DURUM KODLARI ---
     const TURKEY_LOCATIONS = {
@@ -309,6 +321,215 @@ import React, { useState, useEffect } from 'react';
     );
   };
 
+  // --- YENİ: HAZIR TUTANAK ŞABLONLARI ---
+  // Her şablon; kişi bilgilerine göre otomatik doldurulabilen alanları (Ad Soyad, TC No, Görev,
+  // Tarih) otomatik doldurur; olay detayı, saat, şahitler ve imza gibi elle doldurulması/imzalanması
+  // gereken kısımlar noktalı çizgi olarak bırakılır (fiziksel tutanak mantığına uygun).
+  const TUTANAK_TEMPLATES = [
+    {
+      key: 'devamsizlik',
+      title: 'İşe Gelmeme (Devamsızlık) Tutanağı',
+      body: (p, f) => `
+        <div class="main-title">SEMBOL NAKLİYAT MAZERETSİZ İŞE DEVAMSIZLIK TUTANAĞI</div>
+        <table>
+          <tr><td class="label">Tutanak Tarihi</td><td>${f.date || '..... / ..... / 202...'}</td><td class="label">Tutanak Saati</td><td>..... : .....</td></tr>
+        </table>
+        <table>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${p.tcNo || ''}</td></tr>
+          <tr><td class="label">Görevi</td><td>${p.position || ''}</td></tr>
+        </table>
+        <div class="paragraph">
+          Yukarıda kimlik bilgileri belirtilen şirketimiz personeli, <b>${f.date || '..... / ..... / 202...'}</b> tarihinde mesai başlangıç saati olan <b>..... : .....</b>'da işbaşı yapmamış ve gün boyu işyerine / operasyon sahasına gelmemiştir.
+        </div>
+        <div class="paragraph">
+          Personel, işe gelmeyeceği ile ilgili şirket yönetimine herhangi bir yazılı/sözlü bilgi vermemiş, önceden izin almamış ve mazeretini belgeleyen resmi bir sağlık raporu sunmamıştır. İşbu tutanak, personelin izinsiz ve mazeretsiz olarak işe gelmediğini tespit etmek amacıyla, aşağıda isimleri bulunan şahitler huzurunda mahalinde düzenlenerek imza altına alınmıştır.
+        </div>
+        <table>
+          <tr><td class="label">Tutanağı Düzenleyen (Yetkili/Amir)</td><td>Adı Soyadı: ...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Şahit 1 (Çalışma Arkadaşı)</td><td>Adı Soyadı: ...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Şahit 2 (Çalışma Arkadaşı)</td><td>Adı Soyadı: ...................................... &nbsp; İmza:</td></tr>
+        </table>
+        <p class="note">Not: İşçi orada olmadığı için devamsızlık tutanağında personelin imzası aranmaz.</p>
+      `
+    },
+    {
+      key: 'gec_kalma',
+      title: 'İşe Geç Kalma Tutanağı',
+      body: (p, f) => `
+        <div class="main-title">SEMBOL NAKLİYAT İŞE GEÇ KALMA TUTANAĞI</div>
+        <table><tr><td class="label">Tutanak Tarihi</td><td>${f.date || '..... / ..... / 202...'}</td></tr></table>
+        <table>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">Görevi</td><td>${p.position || ''}</td></tr>
+        </table>
+        <div class="paragraph">
+          Yukarıda bilgileri bulunan personelimiz, <b>${f.date || '..... / ..... / 202...'}</b> tarihinde başlaması gereken mesaisine / müşteri taşıma sahasına mazeretsiz ve izinsiz olarak geç kalmıştır.
+        </div>
+        <table>
+          <tr><td class="label">Mesai/Operasyon Başlama Saati</td><td>..... : .....</td></tr>
+          <tr><td class="label">Personelin İşe Geldiği Saat</td><td>..... : .....</td></tr>
+          <tr><td class="label">Toplam Gecikme Süresi</td><td>....... Saat ....... Dakika</td></tr>
+        </table>
+        <div class="paragraph">
+          Personelin işe geç gelmesi sebebiyle Sembol Nakliyat'ın operasyonel işleyişi ve günlük taşıma planlaması aksamıştır. İşbu tutanak şahitler huzurunda düzenlenmiş ve ilgili personele yüzüne karşı okunarak tebliğ edilmiştir.
+        </div>
+        <table>
+          <tr><td class="label">Tutanağı Düzenleyen (Yetkili)</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Şahit</td><td>...................................... &nbsp; İmza:</td></tr>
+        </table>
+        <div class="section-title">PERSONELİN BEYANI VE İMZASI</div>
+        <div class="desc-box">Geç Kalma Sebebi: .........................................................................................................................</div>
+        <table><tr><td class="label">İlgili Personel İmza</td><td>......................................</td></tr></table>
+      `
+    },
+    {
+      key: 'operasyonel',
+      title: 'İş Kurallarına (Operasyonel) Uymama Tutanağı',
+      body: (p, f) => `
+        <div class="main-title">SEMBOL NAKLİYAT İŞ VE İŞ GÜVENLİĞİ KURALLARINA UYMAMA TUTANAĞI</div>
+        <table>
+          <tr><td class="label">Olay Tarihi / Saati</td><td>${f.date || '..... / ..... / 202...'} - ..... : .....</td></tr>
+          <tr><td class="label">Olayın Gerçekleştiği Yer</td><td>................................................................................. (Depo, Araç içi, Müşteri Evi vb.)</td></tr>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+        </table>
+        <div class="paragraph">
+          Yukarıda bilgileri bulunan personel, belirtilen tarih ve saatte görevini ifa ederken şirketimizin belirlemiş olduğu çalışma, işleyiş ve iş sağlığı güvenliği (İSG) kurallarına aykırı hareket etmiştir.
+        </div>
+        <div class="section-title">İhlal Edilen Kural ve Olayın Özeti</div>
+        <p class="note">(Örnek: Personel, zorunlu olmasına rağmen çelik burunlu ayakkabısını giymemiştir / Müşteri eşyalarını ambalajsız ve dikkatsiz taşıyarak hasar riskine yol açmıştır vb.)</p>
+        <div class="desc-box" style="min-height:60px;">${f.note ? f.note : '................................................................................................................................................................................<br/>................................................................................................................................................................................'}</div>
+        <div class="paragraph">
+          İşbu tutanak, personelin iş sözleşmesinde ve şirket yönetmeliklerinde belirtilen yükümlülüklerine uymadığını kayıt altına almak üzere düzenlenmiş ve şahitler huzurunda imzalanmıştır.
+        </div>
+        <table>
+          <tr><td class="label">Tutanağı Düzenleyen</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Şahit</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">İlgili Personel</td><td>...................................... &nbsp; İmza:</td></tr>
+        </table>
+      `
+    },
+    {
+      key: 'disiplin',
+      title: 'Disiplin ve Davranış Kurallarına Uymama Tutanağı',
+      body: (p, f) => `
+        <div class="main-title">SEMBOL NAKLİYAT DİSİPLİN VE İYİ NİYET KURALLARINA AYKIRILIK TUTANAĞI</div>
+        <table>
+          <tr><td class="label">Olay Tarihi / Saati</td><td>${f.date || '..... / ..... / 202...'} - ..... : .....</td></tr>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+        </table>
+        <div class="paragraph">
+          Yukarıda bilgileri bulunan personel, <b>${f.date || '..... / ..... / 202...'}</b> tarihinde çalışma saatleri içerisinde işyeri disiplinini, hiyerarşiyi ve çalışma huzurunu bozacak davranışlarda bulunmuştur.
+        </div>
+        <div class="section-title">Olayın Özeti (Ne Yaşandı?)</div>
+        <p class="note">(Örnek: Personel, yöneticisi tarafından verilen yasal taşıma görevini "ben yapmam" diyerek reddetmiş, amirine karşı yüksek sesle ve saygısızca konuşmuştur / Müşteri sahasında kurumsal kimliğe yakışmayan hareketler sergilemiştir.)</p>
+        <div class="desc-box" style="min-height:60px;">${f.note ? f.note : '................................................................................................................................................................................<br/>................................................................................................................................................................................'}</div>
+        <div class="paragraph">
+          İş Kanunu ve Sembol Nakliyat şirket içi disiplin kuralları gereğince, personelin bu davranışı ahlak ve iyi niyet kurallarına aykırı olduğundan, işbu tutanak olayın hemen ardından şahitler huzurunda düzenlenmiştir.
+        </div>
+        <table>
+          <tr><td class="label">Tutanağı Düzenleyen</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Şahit 1</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Şahit 2</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">İlgili Personel</td><td>......................................</td></tr>
+        </table>
+      `
+    },
+    {
+      key: 'kavga',
+      title: 'Personel Arası Kavga ve Tartışma Tutanağı',
+      body: (p, f) => `
+        <div class="main-title">SEMBOL NAKLİYAT İŞYERİNDE KAVGA VE ÇALIŞMA BARIŞINI BOZMA TUTANAĞI</div>
+        <p class="note">(İş Kanunu 25/2 maddesi gereği "işçinin başka bir işçiye sataşması" tazminatsız kovulma sebebidir. Mahkemede çok kritik olduğu için sadece gördüğünüz objektif gerçekleri yazınız.)</p>
+        <table>
+          <tr><td class="label">Olay Tarihi ve Saati</td><td>${f.date || '..... / ..... / 202...'} - ..... : .....</td></tr>
+          <tr><td class="label">Olayın Gerçekleştiği Yer</td><td>.................................................................................</td></tr>
+        </table>
+        <div class="section-title">Olaya Karışan Personeller</div>
+        <table>
+          <tr><td class="label">1. Personel</td><td>${p.fullName || ''} (Görevi: ${p.position || ''})</td></tr>
+          <tr><td class="label">2. Personel</td><td>.............................................................. (Görevi: .......................................)</td></tr>
+        </table>
+        <div class="section-title">Olayın Gelişimi ve Tespiti</div>
+        <div class="paragraph">
+          Yukarıda belirtilen tarih ve lokasyonda; şirketimiz personelleri olan şahıslar arasında işyeri huzurunu ve güvenliğini ağır şekilde tehlikeye atan bir olay yaşanmıştır. Şahıslar arasında önce sözlü tartışma başlamış, ardından olay büyüyerek karşılıklı hakaret/küfürleşme ve [ ] Fiziksel Arbede / Darp / Kavga (Varsa işaretleyiniz) boyutuna ulaşmıştır. Olayın detayları aşağıdadır:
+        </div>
+        <div class="desc-box" style="min-height:60px;">${f.note ? f.note : '................................................................................................................................................................................<br/>................................................................................................................................................................................'}</div>
+        <div class="paragraph">
+          İşyerinde kesinlikle yasak olan bu durum, çalışma barışını derinden sarsmış ve nakliye operasyonunu durdurmuştur. Olay, diğer yöneticiler ve çalışanların araya girmesiyle sonlandırılmış olup; şahitlerin ifadeleri ve gözlemleri doğrultusunda işbu tutanak imza altına alınmıştır.
+        </div>
+        <table>
+          <tr><td class="label">Olaya Müdahale Eden / Tutanağı Düzenleyen Amir</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Görgü Tanığı (Şahit 1)</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Görgü Tanığı (Şahit 2)</td><td>...................................... &nbsp; İmza:</td></tr>
+        </table>
+      `
+    },
+    {
+      key: 'trafik_cezasi',
+      title: 'Şoförler İçin Trafik Cezası Bildirim ve Kesinti Tutanağı',
+      body: (p, f) => `
+        <div class="main-title">SEMBOL NAKLİYAT TRAFİK CEZASI BİLDİRİM VE RÜCU (KESİNTİ) TUTANAĞI</div>
+        <table><tr><td class="label">Tutanak Tarihi</td><td>${f.date || '..... / ..... / 202...'}</td></tr></table>
+        <div class="section-title">1. Şoför ve Araç Bilgileri</div>
+        <table>
+          <tr><td class="label">Şoförün Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${p.tcNo || ''}</td></tr>
+          <tr><td class="label">Cezanın Kesildiği Araç Plakası</td><td>........ - ................... - ........</td></tr>
+        </table>
+        <div class="section-title">2. Trafik Cezası Bilgileri</div>
+        <table>
+          <tr><td class="label">Ceza Tarihi ve Saati</td><td>..... / ..... / 202... - ..... : .....</td></tr>
+          <tr><td class="label">Ceza Tutanak / Makbuz No</td><td>................................................................</td></tr>
+          <tr><td class="label">Trafik İhlalinin Nedeni</td><td>........................................................................ (Örn: Hız Sınırı İhlali, Kırmızı Işık, Seyir Halinde Telefon Kullanımı, Hatalı Park vb.)</td></tr>
+          <tr><td class="label">Cezanın Toplam Tutarı</td><td>................................ TL</td></tr>
+          <tr><td class="label">Cezanın İndirimli (Ödenecek) Tutarı</td><td>................................ TL</td></tr>
+        </table>
+        <table>
+          <tr><td class="label">Tutanağı Düzenleyen (Yetkili)</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Şoför (Bilgilendirildi)</td><td>...................................... &nbsp; İmza:</td></tr>
+        </table>
+      `
+    },
+    {
+      key: 'maddi_hasar',
+      title: 'Personel İçin Maddi Hasar Tespit Tutanağı',
+      body: (p, f) => `
+        <div class="main-title">SEMBOL NAKLİYAT MADDİ HASAR VE KUSUR TESPİT TUTANAĞI</div>
+        <table>
+          <tr><td class="label">Olay Tarihi ve Saati</td><td>${f.date || '..... / ..... / 202...'} - ..... : .....</td></tr>
+          <tr><td class="label">Olayın Gerçekleştiği Yer</td><td>................................................................................. (Örn: Kadıköy Müşteri Evi, Merdiven Boşluğu, Kamyon İçi vb.)</td></tr>
+        </table>
+        <div class="section-title">1. Hasara Sebebiyet Veren Personel(ler)</div>
+        <table>
+          <tr><td class="label">1. Personel Adı Soyadı</td><td>${p.fullName || ''} — Görevi: ${p.position || ''}</td></tr>
+          <tr><td class="label">(Varsa) 2. Personel Adı</td><td>.................................................... Görevi: ....................................</td></tr>
+        </table>
+        <div class="section-title">2. Hasar Gören Eşya / Araç Bilgisi</div>
+        <table>
+          <tr><td class="label">Kime Ait Olduğu</td><td>[ ] Müşteriye Ait &nbsp; [ ] Şirkete Ait &nbsp; [ ] Üçüncü Şahsa/Binaya Ait</td></tr>
+          <tr><td class="label">Hasar Gören Eşya/Araç</td><td>............................................................................................. (Örn: Müşteriye ait Samsung 65" TV, Şirket aracının sağ aynası, Yemek masası ayağı vb.)</td></tr>
+          <tr><td class="label">Tahmini Hasar Bedeli</td><td>................................ TL</td></tr>
+        </table>
+        <div class="section-title">3. Olayın Oluş Şekli ve Detayı (Nasıl Oldu?)</div>
+        <div class="paragraph">Yukarıda belirtilen yer ve zamanda, nakliye / taşıma faaliyeti esnasında adı geçen personel(ler)in dikkatsizliği, tedbirsizliği, iş güvenliği/ambalaj kurallarına uymaması neticesinde aşağıdaki hasar meydana gelmiştir:</div>
+        <div class="desc-box" style="min-height:50px;">${f.note ? f.note : '................................................................................................................................................................................<br/>................................................................................................................................................................................'}</div>
+        <p class="note">(Örn: Çamaşır makinesi merdivenden indirilirken ambalaj yapılmamış ve duvara çarpılarak kapağı kırılmıştır.)</p>
+        <div class="section-title">4. Beyan ve Kesinti Kabulü (Muvafakatname)</div>
+        <div class="paragraph">
+          Yukarıda yeri, tarihi ve oluş şekli belirtilen hasar olayı; mesleki dikkat ve özen yükümlülüğüme aykırı davranmam ve tamamen şahsi ihmalim/kusurum neticesinde meydana gelmiştir. Müşterinin / şirketimizin mağduriyetini gidermek adına ödenecek tazminat bedelinin veya eşyanın faturalandırılacak tamir/yenileme masrafı olan tahmini ......................... TL tutarın maaşımdan, avansımdan veya doğacak hak edişlerimden kesilmesini kendi hür irademle kabul ve beyan ederim.
+        </div>
+        <table>
+          <tr><td class="label">Görgü Tanığı (Şahit / Ekip Şefi)</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Tutanağı Düzenleyen Yetkili</td><td>...................................... &nbsp; İmza:</td></tr>
+        </table>
+        <p class="note">Hasara Sebep Olan Personel(ler): (Kendi el yazınız ile "Maddi hasar bedelinin maaşımdan kesilmesini kabul ediyorum" yazarak imzalayınız. İmzalamazsa yetkili kişi buraya "İmzadan İmtina Etti" yazıp şahitlere onaylatacaktır)</p>
+        <div class="desc-box" style="min-height:40px;"></div>
+        <table><tr><td class="label">Adı Soyadı</td><td>...................................... &nbsp; İmza:</td></tr></table>
+      `
+    }
+  ];
+
     const calculateMaterials = (roomCount, packingType) => {
     let multiplier = 1;
     if (roomCount === '1+0' || roomCount === 'Parça Eşya' || roomCount === 'Depoevim Tesisleri') multiplier = 0.5;
@@ -426,7 +647,7 @@ import React, { useState, useEffect } from 'react';
       
       <div class="page">
         <div class="header">
-          <img src="https://www.sembolevdeneve.com/crm/uploads/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
+          <img src="https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
           <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
           <div class="contact-info">
             Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
@@ -499,7 +720,7 @@ import React, { useState, useEffect } from 'react';
       <!-- 2. SAYFA -->
       <div class="page">
         <div class="header">
-          <img src="https://www.sembolevdeneve.com/crm/uploads/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
+          <img src="https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
           <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
           <div class="contact-info">
             Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
@@ -976,6 +1197,59 @@ useEffect(() => {
        );
     };
 
+    // --- YENİ: BEYAZ YAKA İÇİN POZİSYONA GÖRE GÜNLÜK MOTİVE EDİCİ MESAJ ---
+    // Her gün farklı bir mesaj gösterilir (yılın gününe göre rotasyon). Pozisyona
+    // özel mesaj havuzu yoksa genel havuz kullanılır. Çerçevesi renkli olur.
+    const getDailyMotivation = () => {
+      const pos = currentUser?.position || '';
+      const messagePools = {
+        'Firma Sahibi': [
+          'Kurduğun bu düzen, her gün büyüyen bir başarı hikayesi. Bugün de vizyonunla fark yarat!',
+          'Bir liderin gücü, ekibine ilham vermesindedir. Bugün harika işlere imza atacaksın!',
+          'Her karar, şirketini bir adım öteye taşıyor. Bugün de doğru yoldasın!',
+          'Başarı tesadüf değil, senin emeğinin sonucudur. Gününe güçlü başla!'
+        ],
+        'Muhasebe': [
+          'Her rakam senin titizliğinle anlam kazanıyor. Bugün de kusursuz bir gün olacak!',
+          'Düzenin ve dikkatin, şirketin sağlam temeli. İyi çalışmalar!',
+          'Detaylara verdiğin önem fark yaratıyor. Bugün de her şey yerli yerinde!'
+        ],
+        'Satış Sorumlusu': [
+          'Her görüşme yeni bir fırsat! Bugün gülümsemenle kazandır.',
+          'Bir "evet" için attığın her adım değerli. Bugün rekor kırma günü!',
+          'Müşterinin güveni senin en büyük sermayen. Bugün de kazandıracaksın!'
+        ],
+        'Operatör': [
+          'Sahadaki gözün, kulağın sensin. Bugün de her operasyon senin sayende sorunsuz!',
+          'Koordinasyon senin işin, başarı ise sonucu. Harika bir gün olsun!'
+        ]
+      };
+      const generalPool = [
+        'Bugün, dün yapamadığını başarmak için yeni bir fırsat. Haydi başla!',
+        'Küçük adımlar büyük başarılar getirir. Bugün de bir adım daha at!',
+        'Emeğin asla boşa gitmez. Bugün de elinden gelenin en iyisini yap!',
+        'Gülümse, çünkü bugün senin günün. Enerjinle etrafına ilham ver!',
+        'Her yeni gün, yeni bir başlangıçtır. Bugünü değerlendir!',
+        'Başarı, pes etmeyenlerin ödülüdür. Bugün de kararlılıkla ilerle!',
+        'Takımın bir parçası olman, onu güçlü kılıyor. İyi çalışmalar!'
+      ];
+      const pool = messagePools[pos] && messagePools[pos].length > 0 ? messagePools[pos] : generalPool;
+      // Yılın gününe göre her gün farklı mesaj seç
+      const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+      return pool[dayOfYear % pool.length];
+    };
+    // Her gün çerçeve rengi de değişsin (renk paletinden rotasyon)
+    const motivationColors = [
+      'from-red-50 to-orange-50 border-red-300 text-red-800',
+      'from-blue-50 to-cyan-50 border-blue-300 text-blue-800',
+      'from-green-50 to-emerald-50 border-green-300 text-green-800',
+      'from-purple-50 to-fuchsia-50 border-purple-300 text-purple-800',
+      'from-orange-50 to-amber-50 border-orange-300 text-orange-800',
+      'from-teal-50 to-cyan-50 border-teal-300 text-teal-800'
+    ];
+    const dayOfYearForColor = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+    const motivationColor = motivationColors[dayOfYearForColor % motivationColors.length];
+
     return (
       <div className="space-y-6 animate-in fade-in">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
@@ -1011,6 +1285,19 @@ useEffect(() => {
             </div>
           )}
         </div>
+
+        {/* YENİ: Beyaz Yaka için pozisyona göre günlük motive edici mesaj (renkli çerçeve) */}
+        {!isMaviYaka && (
+          <div className={`bg-gradient-to-r ${motivationColor} border-2 p-5 rounded-2xl shadow-sm flex items-center gap-4 animate-in fade-in slide-in-from-top-2`}>
+            <div className="w-12 h-12 bg-white/70 rounded-full flex items-center justify-center shrink-0 shadow-sm">
+              <Sparkles className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-wider opacity-70 mb-1">Günün Motivasyonu • {currentUser?.position || 'Ekip'}</p>
+              <p className="font-bold text-base leading-snug">{getDailyMotivation()}</p>
+            </div>
+          </div>
+        )}
 
         {/* --- YENİ EKLENEN BİLGİLENDİRME PANOSU (DUYURU, PAYLAŞIM, EN İYİLER) --- */}
         {(latestInfo.announcements.length > 0 || latestInfo.posts.length > 0 || latestInfo.bestEmps.length > 0) && (
@@ -1064,8 +1351,8 @@ useEffect(() => {
                </div>
             )}
 
-            {/* EN İYİLER (İkiden fazlası için kaydırma) */}
-            {latestInfo.bestEmps.length > 0 && (
+            {/* EN İYİLER (İkiden fazlası için kaydırma) — sadece Mavi Yaka görür */}
+            {isMaviYaka && latestInfo.bestEmps.length > 0 && (
                <div className="flex flex-col gap-4 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
                  {latestInfo.bestEmps.map((bestEmp) => {
                    const bestEmpPerson = personnelList?.find(p => p.fullName === bestEmp.employeeName);
@@ -1106,8 +1393,8 @@ useEffect(() => {
           </div>
         )}
 
-        {/* --- ALINAN YORUMLAR --- */}
-        {(allJobs || jobs).filter(j => j.pointsApproved && j.reviewImage).length > 0 && (
+        {/* --- ALINAN YORUMLAR --- sadece Mavi Yaka görür */}
+        {isMaviYaka && (allJobs || jobs).filter(j => j.pointsApproved && j.reviewImage).length > 0 && (
           <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl shadow-sm relative overflow-hidden">
             <div className="absolute top-0 left-0 w-1 h-full bg-emerald-600"></div>
             <h3 className="text-emerald-800 font-black flex items-center gap-2 mb-3">
@@ -1167,8 +1454,8 @@ useEffect(() => {
           </div>
         )}
 
-        {/* --- DESTEK YAPANLARA TEŞEKKÜRLER --- */}
-        {(allJobs || jobs).filter(j => j.pointsApproved && j.supportPersonnelIds && j.supportPersonnelIds.length > 0).length > 0 && (
+        {/* --- DESTEK YAPANLARA TEŞEKKÜRLER --- sadece Mavi Yaka görür */}
+        {isMaviYaka && (allJobs || jobs).filter(j => j.pointsApproved && j.supportPersonnelIds && j.supportPersonnelIds.length > 0).length > 0 && (
           <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl shadow-sm relative overflow-hidden mt-6">
             <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
             <h3 className="text-blue-800 font-black flex items-center gap-2 mb-3">
@@ -2635,7 +2922,7 @@ useEffect(() => {
   // iş kaydı otomatik olarak ilgili müşterinin cari profiline işliyor;
   // ayrıca büyük/küçük harf ve telefon formatı farkı gözetmeksizin aynı
   // müşteri tek bir cari profilde birleşmiş oluyor.
-  const CustomerProfileView = ({ jobs, cariKey, onBack, handleEditJob, db, appId, addSystemLog }) => {
+  const CustomerProfileView = ({ jobs, cariKey, onBack, handleEditJob, db, appId, addSystemLog, personnelList = [], vehicles = [] }) => {
     const customerJobs = jobs
       .filter(j => normalizeCariPhone(j.customerPhone) === cariKey)
       .sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -2898,28 +3185,93 @@ useEffect(() => {
               const statusLabel = forcedComplete
                 ? 'Tamamlandı (Otomatik)'
                 : (job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : job.status === 'cancelled' ? 'İptal Edildi' : 'Bekliyor');
+
+              // YENİ: İşin detay bilgilerini derle (araç, ekip, kaydı açan)
+              const teamNames = (job.teamNames && job.teamNames.length > 0)
+                ? job.teamNames
+                : (job.assignedPersonnelIds || []).map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
+              const vehiclePlate = job.assignedVehiclePlate || '';
+              const vehicleInfo = vehiclePlate ? vehicles.find(v => v.plate === vehiclePlate) : null;
+              const creator = job.createdBy || job.creatorName || job.salesPerson || '';
+
               return (
-                <div key={job.id} className="bg-neutral-50 border border-neutral-200 p-4 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm transition hover:border-blue-200">
-                  <div className="flex items-center gap-3">
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase tracking-wider shrink-0 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
-                      {job.type || 'Nakliye'}
-                    </span>
-                    <div>
-                      <span className="font-bold text-black text-sm block">{job.date} {job.time ? `- ${job.time}` : ''}</span>
-                      <span className={`text-[10px] font-bold uppercase ${forcedComplete || job.status === 'completed' ? 'text-black' : job.status === 'in-progress' ? 'text-red-600' : job.status === 'cancelled' ? 'text-neutral-400' : 'text-neutral-500'}`}>
-                        {statusLabel}
-                        {isCariExcluded(job) && <span className="ml-1.5 text-neutral-400 normal-case font-medium">(Cari hesaba dahil değil)</span>}
+                <div key={job.id} className="bg-neutral-50 border border-neutral-200 p-4 rounded-xl shadow-sm transition hover:border-blue-200">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase tracking-wider shrink-0 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                        {job.type || 'Nakliye'}
                       </span>
+                      <div>
+                        <span className="font-bold text-black text-sm block">{job.date} {job.time ? `- ${job.time}` : ''}</span>
+                        <span className={`text-[10px] font-bold uppercase ${forcedComplete || job.status === 'completed' ? 'text-black' : job.status === 'in-progress' ? 'text-red-600' : job.status === 'cancelled' ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                          {statusLabel}
+                          {isCariExcluded(job) && <span className="ml-1.5 text-neutral-400 normal-case font-medium">(Cari hesaba dahil değil)</span>}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {job.price ? <span className="font-black text-green-600 text-sm">₺{parseInt(job.price).toLocaleString('tr-TR')}</span> : null}
+                      <button onClick={() => generateContractPDF(job)} className="px-3 py-2 bg-green-50 border border-green-200 text-green-700 text-xs font-bold rounded-lg hover:bg-green-100 transition flex items-center gap-1.5 whitespace-nowrap">
+                        <FileText className="w-3.5 h-3.5" /> Sözleşmeyi İndir
+                      </button>
+                      <button onClick={() => handleEditJob(job)} className="px-3 py-2 bg-white border border-neutral-200 text-neutral-600 text-xs font-bold rounded-lg hover:bg-neutral-100 transition flex items-center gap-1.5 whitespace-nowrap">
+                        İşe Git <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    {job.price ? <span className="font-black text-green-600 text-sm">₺{parseInt(job.price).toLocaleString('tr-TR')}</span> : null}
-                    <button onClick={() => generateContractPDF(job)} className="px-3 py-2 bg-green-50 border border-green-200 text-green-700 text-xs font-bold rounded-lg hover:bg-green-100 transition flex items-center gap-1.5 whitespace-nowrap">
-                      <FileText className="w-3.5 h-3.5" /> Sözleşmeyi İndir
-                    </button>
-                    <button onClick={() => handleEditJob(job)} className="px-3 py-2 bg-white border border-neutral-200 text-neutral-600 text-xs font-bold rounded-lg hover:bg-neutral-100 transition flex items-center gap-1.5 whitespace-nowrap">
-                      İşe Git <ArrowUpRight className="w-3.5 h-3.5" />
-                    </button>
+
+                  {/* YENİ: İşin detay kart bilgileri (araç, ekip, kaydı açan, güzergah) */}
+                  <div className="mt-3 pt-3 border-t border-neutral-200 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-xs">
+                    <div className="flex items-start gap-2">
+                      <Truck className="w-3.5 h-3.5 text-purple-500 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-neutral-400 font-bold uppercase text-[9px] block">Giden Araç</span>
+                        <span className="font-bold text-black">{vehiclePlate ? `${vehiclePlate}${vehicleInfo ? ` (${vehicleInfo.type})` : ''}` : 'Atanmadı'}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Users className="w-3.5 h-3.5 text-orange-500 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-neutral-400 font-bold uppercase text-[9px] block">Giden Ekip</span>
+                        <span className="font-bold text-black">{teamNames.length > 0 ? teamNames.join(', ') : 'Atanmadı'}</span>
+                      </div>
+                    </div>
+                    {creator && (
+                      <div className="flex items-start gap-2">
+                        <UserPlus className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-neutral-400 font-bold uppercase text-[9px] block">Kaydı Açan</span>
+                          <span className="font-bold text-black">{creator}</span>
+                        </div>
+                      </div>
+                    )}
+                    {(job.fromDistrict || job.toDistrict) && (
+                      <div className="flex items-start gap-2">
+                        <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-neutral-400 font-bold uppercase text-[9px] block">Güzergah</span>
+                          <span className="font-bold text-black">{job.fromDistrict || '?'} → {job.toDistrict || '?'}</span>
+                        </div>
+                      </div>
+                    )}
+                    {job.endJobDetails?.paymentMethod && (
+                      <div className="flex items-start gap-2">
+                        <Wallet className="w-3.5 h-3.5 text-green-500 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-neutral-400 font-bold uppercase text-[9px] block">Ödeme Yöntemi</span>
+                          <span className="font-bold text-black">{job.endJobDetails.paymentMethod}</span>
+                        </div>
+                      </div>
+                    )}
+                    {job.roomCount && (
+                      <div className="flex items-start gap-2">
+                        <Package className="w-3.5 h-3.5 text-neutral-500 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-neutral-400 font-bold uppercase text-[9px] block">Ev / Hacim</span>
+                          <span className="font-bold text-black">{job.roomCount}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
@@ -3739,6 +4091,7 @@ useEffect(() => {
                         <span className="flex items-center gap-1 text-[10px] font-bold bg-white text-neutral-700 px-2 py-1 rounded border border-neutral-200"><Phone className="w-3 h-3 text-black" /> {job.customerPhone}</span>
                         <span className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded border ${job.team === 'Atanmadı' ? 'bg-yellow-50 text-yellow-700 border-yellow-100' : 'bg-blue-50 text-blue-700 border-blue-100'}`}><User className="w-3 h-3" /> {job.team}</span>
                         {job.assignedVehiclePlate && <span className="flex items-center gap-1 text-[10px] font-bold bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100"><Truck className="w-3 h-3" /> {job.assignedVehiclePlate}</span>}
+                        {job.createdBy && <span className="flex items-center gap-1 text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100"><UserPlus className="w-3 h-3" /> Kaydı Açan: {job.createdBy}</span>}
                       </div>
                       <div className="flex flex-wrap items-center justify-end gap-1.5 w-full sm:w-auto mt-2 sm:mt-0">
                         {!isOperator && (
@@ -3765,14 +4118,25 @@ useEffect(() => {
                           <button onClick={() => handleEditJob(job)} className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-neutral-200">
                             <Edit className="w-3 h-3"/> Düzenle
                           </button>
-                          <button onClick={() => { setJobToChangeDate(job); setNewJobDate(job.date); setShowChangeDateModal(true); }} className="px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-orange-200">
-                            <CalendarDays className="w-3 h-3"/> Tarih Değiştir
-                          </button>
-                          {job.status !== 'cancelled' && (
-                            <button onClick={() => setCancelJobId(job.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-red-200">
-                              <Ban className="w-3 h-3"/> İptal Et
-                            </button>
-                          )}
+                          {/* YENİ: Tarih değiştirme ve iptal sadece işi açan kişi VEYA Yönetici/Müdür tarafından yapılabilir */}
+                          {(() => {
+                            const isYonetici = currentUser?.position === 'Firma Sahibi' || currentUser?.rank === 'Müdür' || currentUser?.permissions?.canEdit;
+                            const isCreator = job.createdBy && currentUser?.fullName && job.createdBy === currentUser.fullName;
+                            const canManage = isYonetici || isCreator;
+                            if (!canManage) return null;
+                            return (
+                              <>
+                                <button onClick={() => { setJobToChangeDate(job); setNewJobDate(job.date); setShowChangeDateModal(true); }} className="px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-orange-200">
+                                  <CalendarDays className="w-3 h-3"/> Tarih Değiştir
+                                </button>
+                                {job.status !== 'cancelled' && (
+                                  <button onClick={() => setCancelJobId(job.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-red-200">
+                                    <Ban className="w-3 h-3"/> İptal Et
+                                  </button>
+                                )}
+                              </>
+                            );
+                          })()}
                         </>
                         )}
                       </div>
@@ -4705,7 +5069,7 @@ useEffect(() => {
     filteredJobs.forEach(job => {
       const creator = job.createdBy || 'Sistem / Bilinmeyen';
       if (!reportData[creator]) {
-        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0 };
+        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0 };
       }
       const price = Number(job.price) || 0;
       reportData[creator].count += 1;
@@ -4714,6 +5078,24 @@ useEffect(() => {
       if (job.type === 'Nakliye') { reportData[creator].nakliyeCount += 1; reportData[creator].nakliyeRevenue += price; }
       else if (job.type === 'Depo') { reportData[creator].depoCount += 1; reportData[creator].depoRevenue += price; }
       else if (job.type === 'Asansör') { reportData[creator].asansorCount += 1; reportData[creator].asansorRevenue += price; }
+    });
+
+    // YENİ: İptal edilen işleri ayrıca say — her personelin kaç iş iptal ettiğini
+    // ayrı bir sayaçta topla (bu işler ciro/toplam iş sayısına dahil DEĞİL,
+    // sadece "İş İptali" olarak gösterilir; Nakliye/Depo/Asansör sayıları etkilenmez).
+    jobs.forEach(job => {
+      if (job.status !== 'cancelled') return;
+      if (selectedType !== 'Tümü' && job.type !== selectedType) return;
+      const d = new Date(job.date);
+      const inPeriod = reportPeriod === 'year'
+        ? d.getFullYear() === selectedYear
+        : (d.getFullYear() === selectedYear && (d.getMonth() + 1) === selectedMonth);
+      if (!inPeriod) return;
+      const creator = job.createdBy || 'Sistem / Bilinmeyen';
+      if (!reportData[creator]) {
+        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0 };
+      }
+      reportData[creator].cancelledCount = (reportData[creator].cancelledCount || 0) + 1;
     });
 
     const summaryList = Object.keys(reportData)
@@ -4741,6 +5123,23 @@ useEffect(() => {
     const cancelledNakliye = cancelledJobsInPeriod.filter(j => j.type === 'Nakliye').length;
     const cancelledDepo = cancelledJobsInPeriod.filter(j => j.type === 'Depo').length;
     const cancelledAsansor = cancelledJobsInPeriod.filter(j => j.type === 'Asansör').length;
+
+    // YENİ: Hasarlı İşler (aynı dönem/tip filtresine göre, Nakliye/Depo ayrı gösterim için)
+    const damagedJobsInPeriod = jobs.filter(job => {
+      if (job.status === 'cancelled') return false;
+      if (job.endJobDetails?.damageStatus !== 'Hasar var') return false;
+      if (selectedType !== 'Tümü' && job.type !== selectedType) return false;
+      const d = new Date(job.date);
+      if (reportPeriod === 'year') {
+        return d.getFullYear() === selectedYear;
+      } else {
+        return d.getFullYear() === selectedYear && (d.getMonth() + 1) === selectedMonth;
+      }
+    });
+    const totalDamaged = damagedJobsInPeriod.length;
+    const damagedNakliye = damagedJobsInPeriod.filter(j => j.type === 'Nakliye').length;
+    const damagedDepo = damagedJobsInPeriod.filter(j => j.type === 'Depo').length;
+    const damagedAsansor = damagedJobsInPeriod.filter(j => j.type === 'Asansör').length;
 
     return (
       <div className="space-y-6 animate-in fade-in">
@@ -4838,6 +5237,24 @@ useEffect(() => {
           </div>
         )}
 
+        {/* YENİ: Hasarlı İşler (ekibine "Hasar var" yazılan işler) — Nakliye/Depo/Asansör ayrı gösterilir */}
+        {totalDamaged > 0 && (
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-orange-200">
+            <div className="flex items-start gap-4">
+              <div className="p-4 bg-orange-50 text-orange-600 rounded-2xl shrink-0"><AlertTriangle className="w-8 h-8" /></div>
+              <div className="flex-1">
+                <p className="text-neutral-500 text-sm font-bold mb-1">Dönem İçinde Hasarlı İşler <span className="text-[10px] font-medium text-neutral-400">(ekibine "Hasar var" kaydı yazılan işler)</span></p>
+                <p className="text-3xl font-black text-orange-600 mb-2">{totalDamaged} <span className="text-sm font-medium text-neutral-400">Adet</span></p>
+                <div className="flex flex-wrap gap-2">
+                  <span className="text-xs font-bold bg-red-50 text-red-600 px-2.5 py-1 rounded-lg border border-red-100">{damagedNakliye} Nakliye</span>
+                  <span className="text-xs font-bold bg-blue-50 text-blue-600 px-2.5 py-1 rounded-lg border border-blue-100">{damagedDepo} Depo</span>
+                  <span className="text-xs font-bold bg-green-50 text-green-600 px-2.5 py-1 rounded-lg border border-green-100">{damagedAsansor} Asansör</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Personel Performans Tablosu */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
           <div className="p-4 border-b border-neutral-200 bg-neutral-50 flex items-center gap-2">
@@ -4876,6 +5293,14 @@ useEffect(() => {
                           <span className="bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{item.nakliyeCount} Nak.</span>
                           <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{item.depoCount} Depo</span>
                           <span className="bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{item.asansorCount} Asn.</span>
+                        </div>
+                      )}
+                      {/* YENİ: İptal edilen iş sayısı (ciro ve toplam işe dahil değildir) */}
+                      {item.cancelledCount > 0 && (
+                        <div className="flex items-center justify-center mt-1.5">
+                          <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-lg border border-red-200 text-[10px] font-black flex items-center gap-1">
+                            <Ban className="w-3 h-3" /> {item.cancelledCount} İş İptali
+                          </span>
                         </div>
                       )}
                     </td>
@@ -5652,8 +6077,47 @@ useEffect(() => {
     );
   };
 
-  const FinanceDashboardView = ({ jobs, transactions, transactionType, setTransactionType, newTransaction, setNewTransaction, handleAddTransaction }) => {
+  const FinanceDashboardView = ({ jobs, transactions, transactionType, setTransactionType, newTransaction, setNewTransaction, handleAddTransaction, personnelList = [], handleEditJob, db, appId }) => {
     const [filterPeriod, setFilterPeriod] = useState('today');
+
+    // YENİ: Maaş tablosundaki (maas koleksiyonu) tüm ayların ödeme kayıtlarını canlı dinle.
+    // Personel maaş tablosunda Yemek/Yol/Banka/Nakit/İcra tiklendiğinde yazılan tutarlar
+    // burada GİDER olarak toplanır ve ay bazında Kasa Özeti'ne yansır.
+    const [maasGiderKayitlari, setMaasGiderKayitlari] = useState([]);
+    useEffect(() => {
+      if (!db || !appId) return;
+      const maasColRef = collection(db, 'artifacts', appId, 'public', 'data', 'maas');
+      const unsub = onSnapshot(maasColRef, snap => {
+        const list = [];
+        snap.docs.forEach(d => {
+          const docId = d.id; // format: {prefix}{yıl}_{ay}  (ör. 2026_6 veya beyaz_2026_6)
+          const records = (d.data().records) || {};
+          const m = docId.match(/(\d{4})_(\d{1,2})$/);
+          const yil = m ? parseInt(m[1]) : null;
+          const ay = m ? parseInt(m[2]) : null;
+          Object.keys(records).forEach(personId => {
+            const r = records[personId] || {};
+            const person = personnelList.find(p => String(p.id) === String(personId));
+            const adSoyad = person ? person.fullName : 'Personel';
+            const kalemler = [
+              { odendi: r.yemekOdendi, tutar: r.yemekOdenenTutar, etiket: 'Yemek Parası' },
+              { odendi: r.yolOdendi, tutar: r.yolOdenenTutar, etiket: 'Yol Parası' },
+              { odendi: r.bankaOdendi, tutar: r.bankaOdenenTutar, etiket: 'Maaş (Banka)' },
+              { odendi: r.nakitOdendi, tutar: r.nakitOdenenTutar, etiket: 'Maaş (Nakit)' },
+              { odendi: r.icraOdendi, tutar: r.icraOdenenTutar, etiket: 'İcra Kesintisi' }
+            ];
+            kalemler.forEach((k, idx) => {
+              const tutar = parseFloat(k.tutar) || 0;
+              if (k.odendi && tutar > 0 && yil && ay) {
+                list.push({ personId, adSoyad, yil, ay, tutar, etiket: k.etiket, key: `${docId}_${personId}_${idx}` });
+              }
+            });
+          });
+        });
+        setMaasGiderKayitlari(list);
+      }, console.error);
+      return () => unsub();
+    }, [db, appId, personnelList]);
 
     // Tarih karşılaştırması için bugünü sıfırla
     const today = new Date();
@@ -5661,20 +6125,46 @@ useEffect(() => {
 
     let allRecords = [];
 
-    // İşlerden Gelen Gelirleri Topla (Sadece Tamamlananlar)
-    jobs.filter(j => j.status === 'completed').forEach(job => {
+    // YENİ: Ekip şefini bulan yardımcı — atanan personeller içinde rütbesi yetkili olan ilk kişi,
+    // yoksa listedeki ilk atanan personel.
+    const findTeamLeader = (job) => {
+      const ids = job.assignedPersonnelIds || [];
+      if (ids.length === 0) return '';
+      const assigned = ids.map(id => personnelList.find(p => String(p.id) === String(id))).filter(Boolean);
+      const leader = assigned.find(p => ['Ekip Şefi', 'Müdür', 'Kalfa'].includes(p.rank));
+      if (leader) return leader.fullName;
+      return assigned[0]?.fullName || '';
+    };
+
+    // İşlerden Gelen Kayıtlar — DEĞİŞTİRİLDİ: Artık sadece tamamlananlar değil,
+    // iptal olmayan TÜM işler tabloya dahil edilir (durum sütununda gösterilir).
+    // Ancak Toplam Gelir/Gider ve net kasa hesabı yalnızca tamamlanan işlerden hesaplanır.
+    jobs.filter(j => j.status !== 'cancelled').forEach(job => {
       const jobDate = new Date(job.date);
       jobDate.setHours(0, 0, 0, 0);
+      const price = parseFloat(job.price) || 0;
+      const deposit = parseFloat(job.deposit) || 0;
+      const isCompleted = job.status === 'completed';
       allRecords.push({
         id: 'job_' + job.id,
         rawDate: jobDate,
         displayDate: job.date,
         type: 'income',
         category: (job.type || 'Nakliye') + ' Tahsilatı',
-        amount: parseFloat(job.price) || 0,
+        amount: price,
+        deposit: deposit,
+        remaining: Math.max(0, price - deposit),
+        totalPrice: price,
         customerOrDesc: job.customerName,
         vehicle: job.assignedVehiclePlate || '-',
-        paymentMethod: job.endJobDetails?.paymentMethod || '-'
+        paymentMethod: job.endJobDetails?.paymentMethod || '-',
+        teamLeader: findTeamLeader(job),
+        jobStatus: job.status || 'pending',
+        isCompleted,
+        isJob: true,
+        jobRef: job,
+        // Net kasa/gelir hesabına yalnızca tamamlanan işler katkı sağlasın
+        countInTotals: isCompleted
       });
     });
 
@@ -5689,9 +6179,43 @@ useEffect(() => {
         type: t.type,
         category: t.category,
         amount: parseFloat(t.amount) || 0,
+        deposit: 0,
+        remaining: 0,
+        totalPrice: parseFloat(t.amount) || 0,
         customerOrDesc: t.description || '-',
         vehicle: '-',
-        paymentMethod: t.account === 'cash' ? 'Nakit Kasa' : 'Banka / Havale'
+        paymentMethod: t.account === 'cash' ? 'Nakit Kasa' : 'Banka / Havale',
+        teamLeader: '',
+        jobStatus: 'manual',
+        isCompleted: true,
+        isJob: false,
+        countInTotals: true
+      });
+    });
+
+    // YENİ: Maaş tablosundan gelen ödenmiş (tikli) kalemleri GİDER olarak ekle.
+    // Ay bazında işlensin diye o ayın 1. günü tarih olarak kullanılır; ay/yıl filtreleri doğru çalışır.
+    maasGiderKayitlari.forEach(g => {
+      const gDate = new Date(g.yil, g.ay - 1, 1);
+      gDate.setHours(0, 0, 0, 0);
+      allRecords.push({
+        id: 'maas_' + g.key,
+        rawDate: gDate,
+        displayDate: gDate.toISOString().split('T')[0],
+        type: 'expense',
+        category: 'Personel Ödemesi (' + g.etiket + ')',
+        amount: g.tutar,
+        deposit: 0,
+        remaining: 0,
+        totalPrice: g.tutar,
+        customerOrDesc: g.adSoyad + ' — ' + g.etiket,
+        vehicle: '-',
+        paymentMethod: g.etiket === 'Maaş (Banka)' ? 'Banka / Havale' : 'Nakit Kasa',
+        teamLeader: '',
+        jobStatus: 'manual',
+        isCompleted: true,
+        isJob: false,
+        countInTotals: true
       });
     });
 
@@ -5716,8 +6240,8 @@ useEffect(() => {
       return true; // 'all' (Tümü)
     });
 
-    const totalIncome = filteredRecords.filter(r => r.type === 'income').reduce((sum, r) => sum + r.amount, 0);
-    const totalExpense = filteredRecords.filter(r => r.type === 'expense').reduce((sum, r) => sum + r.amount, 0);
+    const totalIncome = filteredRecords.filter(r => r.type === 'income' && r.countInTotals).reduce((sum, r) => sum + r.amount, 0);
+    const totalExpense = filteredRecords.filter(r => r.type === 'expense' && r.countInTotals).reduce((sum, r) => sum + r.amount, 0);
     const netBalance = totalIncome - totalExpense;
 
     return (
@@ -5800,18 +6324,39 @@ useEffect(() => {
                 <tr>
                   <th className="p-4 font-bold rounded-tl-xl">Tarih</th>
                   <th className="p-4 font-bold">Müşteri / Açıklama</th>
+                  <th className="p-4 font-bold">Durum</th>
+                  <th className="p-4 font-bold">Ekip Şefi</th>
                   <th className="p-4 font-bold">Araç Plakası</th>
                   <th className="p-4 font-bold">Ödeme Şekli (Kasa/Banka)</th>
-                  <th className="p-4 font-bold text-right rounded-tr-xl">Tutar (TL)</th>
+                  <th className="p-4 font-bold text-right">Tutar (TL)</th>
+                  <th className="p-4 font-bold text-center rounded-tr-xl">İş Bilgisi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-neutral-100">
-                {filteredRecords.map(r => (
+                {filteredRecords.map(r => {
+                  // Durum etiketi ve rengi
+                  const statusInfo = !r.isJob
+                    ? { label: 'Manuel İşlem', cls: 'bg-neutral-100 text-neutral-600 border-neutral-200' }
+                    : r.jobStatus === 'completed'
+                      ? { label: 'Tamamlandı', cls: 'bg-green-50 text-green-700 border-green-200' }
+                      : r.jobStatus === 'in-progress'
+                        ? { label: 'Sürüyor', cls: 'bg-orange-50 text-orange-700 border-orange-200' }
+                        : { label: 'Bekliyor', cls: 'bg-yellow-50 text-yellow-700 border-yellow-200' };
+                  return (
                   <tr key={r.id} className="hover:bg-neutral-50 transition">
                     <td className="p-4 font-medium text-black whitespace-nowrap">{r.displayDate}</td>
                     <td className="p-4">
                       <p className="font-bold text-neutral-800 text-base">{r.customerOrDesc}</p>
                       <p className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mt-0.5">{r.category}</p>
+                    </td>
+                    <td className="p-4">
+                      <span className={`px-3 py-1.5 rounded-lg text-xs border font-bold flex items-center gap-1.5 w-max ${statusInfo.cls}`}>
+                        {r.jobStatus === 'completed' ? <CheckCircle className="w-3.5 h-3.5" /> : r.jobStatus === 'in-progress' ? <Loader2 className="w-3.5 h-3.5" /> : r.isJob ? <Clock className="w-3.5 h-3.5" /> : <PlusCircle className="w-3.5 h-3.5" />}
+                        {statusInfo.label}
+                      </span>
+                    </td>
+                    <td className="p-4 font-bold text-neutral-600">
+                      {r.teamLeader ? <span className="bg-yellow-50 text-yellow-800 px-3 py-1.5 rounded-lg text-xs border border-yellow-200 flex items-center gap-1.5 w-max"><Star className="w-3.5 h-3.5 fill-yellow-500 text-yellow-500"/>{r.teamLeader}</span> : <span className="text-neutral-400 italic">-</span>}
                     </td>
                     <td className="p-4 font-bold text-neutral-600">
                       {r.vehicle !== '-' ? <span className="bg-purple-50 text-purple-700 px-3 py-1.5 rounded-lg text-xs border border-purple-100 flex items-center gap-1.5 w-max"><Truck className="w-3.5 h-3.5"/>{r.vehicle}</span> : <span className="text-neutral-400 italic">Belirtilmedi</span>}
@@ -5822,14 +6367,37 @@ useEffect(() => {
                         {r.paymentMethod}
                       </span>
                     </td>
-                    <td className={`p-4 text-right font-black text-base ${r.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                      {r.type === 'income' ? '+' : '-'}₺{r.amount.toLocaleString('tr-TR')}
+                    <td className="p-4 text-right whitespace-nowrap">
+                      <span className={`font-black text-base block ${r.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                        {r.type === 'income' ? '+' : '-'}₺{r.amount.toLocaleString('tr-TR')}
+                      </span>
+                      {r.isJob && (
+                        <div className="mt-1 space-y-0.5">
+                          <span className="block text-[10px] font-bold text-neutral-500">Toplam Ücret: ₺{r.totalPrice.toLocaleString('tr-TR')}</span>
+                          {r.deposit > 0 && <span className="block text-[10px] font-bold text-blue-600">Kapora: ₺{r.deposit.toLocaleString('tr-TR')}</span>}
+                          <span className="block text-[10px] font-bold text-orange-600">Kalan: ₺{r.remaining.toLocaleString('tr-TR')}</span>
+                        </div>
+                      )}
+                    </td>
+                    <td className="p-4 text-center">
+                      {r.isJob && r.jobRef ? (
+                        <button
+                          type="button"
+                          onClick={() => handleEditJob && handleEditJob(r.jobRef)}
+                          className="px-3 py-2 bg-neutral-900 hover:bg-black text-white text-xs font-bold rounded-lg transition inline-flex items-center gap-1.5 whitespace-nowrap"
+                        >
+                          İşe Git <ArrowUpRight className="w-3.5 h-3.5" />
+                        </button>
+                      ) : (
+                        <span className="text-neutral-300 text-xs italic">-</span>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
                 {filteredRecords.length === 0 && (
                   <tr>
-                    <td colSpan="5" className="p-8 text-center text-neutral-500 font-medium">Seçili tarih aralığında finansal hareket bulunamadı.</td>
+                    <td colSpan="8" className="p-8 text-center text-neutral-500 font-medium">Seçili tarih aralığında finansal hareket bulunamadı.</td>
                   </tr>
                 )}
               </tbody>
@@ -6886,12 +7454,21 @@ useEffect(() => {
       </div>
     );
   };
-  const PersonnelListView = ({ personnelList, onUpdate, positions = [], ranks = [], onViewProfile }) => {
+  const PersonnelListView = ({ personnelList, onUpdate, positions = [], ranks = [], onViewProfile, pendingEditPersonnelId, setPendingEditPersonnelId }) => {
     const [filterYaka, setFilterYaka] = useState('');
     const [filterPozisyon, setFilterPozisyon] = useState('');
     const [filterRutbe, setFilterRutbe] = useState('');
     const [editingUser, setEditingUser] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
+
+    // YENİ: Personel Profili'nden "Bilgileri Düzenle" ile gelindiyse düzenleme modalını otomatik aç
+    useEffect(() => {
+      if (pendingEditPersonnelId) {
+        const target = personnelList.find(p => String(p.id) === String(pendingEditPersonnelId));
+        if (target) setEditingUser(target);
+        if (setPendingEditPersonnelId) setPendingEditPersonnelId(null);
+      }
+    }, [pendingEditPersonnelId, personnelList]);
 
     const filteredList = personnelList.filter(p => {
       if (filterYaka && p.collarType !== filterYaka) return false;
@@ -7172,7 +7749,7 @@ useEffect(() => {
     return 'text-green-600';
   };
 
-  const PersonnelProfileView = ({ personId, personnelList, jobs, db, appId, addSystemLog, onBack, setViewingImage }) => {
+  const PersonnelProfileView = ({ personId, personnelList, jobs, db, appId, addSystemLog, onBack, setViewingImage, setActiveTab, setPendingEditPersonnelId }) => {
     const person = personnelList.find(p => String(p.id) === String(personId));
 
     const [periodFilter, setPeriodFilter] = useState('month'); // week | month | year | all
@@ -7182,15 +7759,49 @@ useEffect(() => {
     const [leaveRecords, setLeaveRecords] = useState([]);
 
     const [showClothingModal, setShowClothingModal] = useState(false);
-    const [clothingForm, setClothingForm] = useState({ item: '', date: new Date().toISOString().split('T')[0], note: '' });
+    const [clothingForm, setClothingForm] = useState({ item: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
+    const [editingClothingId, setEditingClothingId] = useState(null);
+    const [clothingUploading, setClothingUploading] = useState(false);
     const [showPhoneModal, setShowPhoneModal] = useState(false);
-    const [phoneForm, setPhoneForm] = useState({ model: '', date: new Date().toISOString().split('T')[0], note: '' });
+    const [phoneForm, setPhoneForm] = useState({ model: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
+    const [editingPhoneId, setEditingPhoneId] = useState(null);
+    const [phoneUploading, setPhoneUploading] = useState(false);
     const [showLeaveModal, setShowLeaveModal] = useState(false);
     const [leaveForm, setLeaveForm] = useState({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], days: '', note: '' });
 
     // YENİ: "İşi Bırakma" modalı için state
     const [showResignModal, setShowResignModal] = useState(false);
     const [resignForm, setResignForm] = useState({ date: new Date().toISOString().split('T')[0], reason: '' });
+
+    // YENİ: İşten çıkış HESAP DÖKÜMÜ / kesin hesap kapama akışı için state'ler
+    // (Yemek/Yol iadesi, İcra, çalışılan gün, kalan banka/nakit tablosu + onay + imzalı belge)
+    const [showSettlementModal, setShowSettlementModal] = useState(false); // hesap dökümü tablosu penceresi
+    const [settlementData, setSettlementData] = useState(null); // hesaplanan döküm
+    const [settlementConfirm, setSettlementConfirm] = useState({ nakitVerildi: false, bankaVerildi: false, belgeUrl: '' });
+    const [settlementUploading, setSettlementUploading] = useState(false);
+
+    // YENİ: Personel Hareket İşlemleri (Avans, Maaş/Yol/Yemek Onayı, Tutanak, Rapor)
+    const [personnelActions, setPersonnelActions] = useState([]);
+    const nowMonth = new Date().toISOString().split('T')[0].substring(0, 7); // YYYY-MM
+    const [showAvansModal, setShowAvansModal] = useState(false);
+    const [avansForm, setAvansForm] = useState({ type: 'nakit', amount: '', month: nowMonth, note: '' });
+    // YENİ: Maaş / Yol / Yemek durumu artık Mavi/Beyaz Maaş Tablosu'ndaki tiklerden otomatik okunur (bildirim mantığı)
+    const [financeMonth, setFinanceMonth] = useState(nowMonth); // YYYY-MM, her zaman şimdiki ay seçili başlar
+    const [financeMonthRow, setFinanceMonthRow] = useState({});
+    const [showTutanakModal, setShowTutanakModal] = useState(false);
+    const [tutanakForm, setTutanakForm] = useState({ title: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
+    // YENİ: Hazır tutanak şablonu seçimi
+    const [tutanakTemplateKey, setTutanakTemplateKey] = useState('');
+    const [showRaporModal, setShowRaporModal] = useState(false);
+    const [raporForm, setRaporForm] = useState({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
+    const [actionUploading, setActionUploading] = useState(false);
+    const [editingAction, setEditingAction] = useState(null);
+
+    // YENİ: Şirkete Borç Ödemesi için state'ler
+    const [showDebtModal, setShowDebtModal] = useState(false);
+    const [debtForm, setDebtForm] = useState({ amount: '', month: nowMonth, note: '' });
+    // Personelin güncel borcu (maas_yearly dokümanındaki borclanma alanından okunur)
+    const [currentDebt, setCurrentDebt] = useState(0);
 
     useEffect(() => {
       if (!personId || !db) return;
@@ -7206,7 +7817,21 @@ useEffect(() => {
       const unsub4 = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'personnelAnnualLeave'), where('personnelId', '==', String(personId))), snap => {
         setLeaveRecords(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.startDate) - new Date(a.startDate)));
       }, console.error);
-      return () => { unsub1(); unsub2(); unsub3(); unsub4(); };
+      // YENİ: Personel hareket işlemleri dinleyicisi
+      const unsub5 = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'personnelActions'), where('personnelId', '==', String(personId))), snap => {
+        setPersonnelActions(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)));
+      }, console.error);
+      // YENİ: Personelin güncel borcunu (maas_yearly/{yıl} → records[personId].borclanma) canlı dinle
+      const debtYear = new Date().getFullYear().toString();
+      const unsub6 = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'maas_yearly', debtYear), snap => {
+        if (snap.exists()) {
+          const records = snap.data().records || {};
+          setCurrentDebt(parseFloat(records[personId]?.borclanma) || 0);
+        } else {
+          setCurrentDebt(0);
+        }
+      }, console.error);
+      return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
     }, [personId, db, appId]);
 
     if (!person) {
@@ -7235,6 +7860,9 @@ useEffect(() => {
     const periodJobs = periodStart ? personJobs.filter(j => new Date(j.date) >= periodStart) : personJobs;
     const periodJobsCount = periodJobs.length;
     const periodReviewsCount = periodJobs.filter(j => j.pointsApproved && j.reviewImage).length;
+    // YENİ: Bu personelin ekibine yazılmış (hasar var) işlerin dönem içi sayısı ve son hasarlı işler listesi
+    const periodDamagesCount = periodJobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var').length;
+    const recentDamagedJobs = personJobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var').slice(0, 5);
 
     const recentJobs = personJobs.slice(0, 5);
     const recentReviewedJobs = personJobs.filter(j => j.pointsApproved && j.reviewImage).slice(0, 5);
@@ -7245,24 +7873,274 @@ useEffect(() => {
       await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelSkills', String(personId)), { [key]: newVal }, { merge: true });
     };
 
-    const avgSkill = Math.round(PERSONNEL_SKILL_DEFS.reduce((sum, s) => sum + (typeof skills[s.key] === 'number' ? skills[s.key] : 50), 0) / PERSONNEL_SKILL_DEFS.length);
+    // YENİ: Özellikler bölümü sadece Mavi Yaka'da gösterilir; Temizlik Görevlisi ve
+    // Asansör Operatörü hariç. Şoförlük Gücü özelliği ise sadece Şoför pozisyonunda gösterilir.
+    const isMaviYakaPerson = person && (person.collarType === 'Mavi Yaka' || (!person.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Operatör'].includes(person.position)));
+    const skillsHiddenPositions = ['Temizlik Görevlisi', 'Operatör'];
+    const showSkillsSection = isMaviYakaPerson && !skillsHiddenPositions.includes(person?.position);
+    // Şoförlük Gücü sadece Şoför pozisyonunda görünür
+    const visibleSkillDefs = PERSONNEL_SKILL_DEFS.filter(s => s.key !== 'soforluk' || person?.position === 'Şoför');
+    const avgSkill = visibleSkillDefs.length > 0
+      ? Math.round(visibleSkillDefs.reduce((sum, s) => sum + (typeof skills[s.key] === 'number' ? skills[s.key] : 50), 0) / visibleSkillDefs.length)
+      : 0;
 
     const handleAddClothing = async (e) => {
       e.preventDefault();
       if (!clothingForm.item) return;
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelClothing'), { personnelId: String(personId), ...clothingForm, createdAt: new Date().toISOString() });
-      if (addSystemLog) addSystemLog('Kıyafet Verildi', `${person.fullName} personeline ${clothingForm.item} verildi.`);
-      setClothingForm({ item: '', date: new Date().toISOString().split('T')[0], note: '' });
+      if (editingClothingId) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelClothing', editingClothingId), { ...clothingForm });
+        if (addSystemLog) addSystemLog('Kıyafet Kaydı Güncellendi', `${person.fullName} personelinin ${clothingForm.item} kaydı güncellendi.`);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelClothing'), { personnelId: String(personId), ...clothingForm, createdAt: new Date().toISOString() });
+        if (addSystemLog) addSystemLog('Kıyafet Verildi', `${person.fullName} personeline ${clothingForm.item} verildi.`);
+      }
+      setClothingForm({ item: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
+      setEditingClothingId(null);
       setShowClothingModal(false);
+    };
+
+    // YENİ: Kıyafet/Ekipman belgesini yükleme (Şimdi Çek / Galeriden / Dosyadan)
+    const handleClothingFileUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      setClothingUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+        setClothingForm(prev => ({ ...prev, fileUrl: uploadedUrl }));
+      } catch (err) {
+        console.error('Belge yükleme hatası:', err);
+        alert('Belge yüklenemedi.');
+      }
+      setClothingUploading(false);
+    };
+
+    // YENİ: Personel Kıyafet ve Donanım Zimmet Sözleşmesi ve Teslim Tutanağı PDF'i — personel profiline göre otomatik dolar
+    const generateClothingContractPDF = () => {
+      const printWindow = window.open('', '_blank');
+      const today = new Date();
+      const gun = clothingForm.date ? clothingForm.date.split('-')[2] : today.getDate().toString().padStart(2, '0');
+      const ay = clothingForm.date ? clothingForm.date.split('-')[1] : (today.getMonth() + 1).toString().padStart(2, '0');
+      const yil = clothingForm.date ? clothingForm.date.split('-')[0] : today.getFullYear().toString();
+
+      const html = `
+      <!DOCTYPE html>
+      <html lang="tr">
+      <head>
+        <meta charset="UTF-8">
+        <title>${person.fullName} - Kıyafet Zimmet Sözleşmesi</title>
+        <style>
+          @page { size: A4; margin: 0; }
+          * { box-sizing: border-box; }
+          body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background: #525659; display: flex; flex-direction: column; align-items: center; font-size: 11px; }
+          .page { width: 210mm; min-height: 297mm; background: white; padding: 12mm 15mm; margin: 10mm auto; box-shadow: 0 0 10px rgba(0,0,0,0.5); position: relative; }
+          @media print {
+            @page { margin: 0 !important; }
+            body { background: white; margin: 0; -webkit-print-color-adjust: exact; }
+            .page { margin: 0; padding: 12mm 15mm; box-shadow: none; border: none; }
+          }
+          .header { text-align: center; border-bottom: 2px solid #d32f2f; padding-bottom: 8px; margin-bottom: 14px; display: flex; flex-direction: column; align-items: center; }
+          .logo-img { height: 44px; margin-bottom: 4px; object-fit: contain; }
+          .subtitle { font-size: 11px; color: #333; font-weight: bold; margin-bottom: 3px; letter-spacing: 1px; }
+          .contact-info { font-size: 9px; color: #555; line-height: 1.2; }
+          .main-title { font-size: 13px; font-weight: bold; text-align: center; margin: 10px 0 16px; padding: 8px; background: #f0f0f0; border: 1px solid #ccc; text-transform: uppercase; line-height: 1.4; }
+          .section-title { font-weight: bold; font-size: 12px; color: #d32f2f; margin-top: 14px; margin-bottom: 6px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 11px; }
+          th { background: #f0f0f0; padding: 6px; border: 1px solid #ccc; text-align: left; font-size: 11px; color: #d32f2f; }
+          td { padding: 6px 8px; border: 1px solid #ccc; vertical-align: top; }
+          .label { font-weight: bold; width: 32%; background: #fafafa; }
+          .paragraph { font-size: 10.5px; line-height: 1.55; text-align: justify; margin-bottom: 10px; }
+          .signatures { display: flex; justify-content: space-between; margin-top: 40px; }
+          .sign-box { width: 45%; font-size: 10.5px; text-align: center; }
+          .sign-line { border-top: 1px solid #000; margin-top: 40px; padding-top: 4px; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <div class="page">
+          <div class="header">
+            <img src="https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" onerror="this.style.display='none'" />
+            <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
+            <div class="contact-info">Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99</div>
+          </div>
+
+          <div class="main-title">PERSONEL KIYAFET VE DONANIM ZİMMET SÖZLEŞMESİ VE TESLİM TUTANAĞI</div>
+
+          <div class="section-title">1. PERSONEL BİLGİLERİ</div>
+          <table>
+            <tr><td class="label">Adı ve Soyadı</td><td>${person.fullName || ''}</td></tr>
+            <tr><td class="label">T.C. Kimlik No</td><td>${person.tcNo || ''}</td></tr>
+            <tr><td class="label">Görevi / Unvanı</td><td>${person.position || ''}${person.rank ? ' / ' + person.rank : ''}</td></tr>
+            <tr><td class="label">Veriliş Tarihi</td><td>${gun} / ${ay} / ${yil}</td></tr>
+            <tr><td class="label">İletişim Numarası</td><td>${person.personalPhone || person.companyPhone || ''}</td></tr>
+          </table>
+
+          <div class="section-title">2. TESLİM EDİLEN MALZEMELER</div>
+          <div class="paragraph">
+            Aşağıda cinsi, miktarı ve bedeni/numarası belirtilen iş kıyafetleri ile koruyucu donanımlar, Sembol Nakliyat yetkilileri tarafından aşağıda imzası bulunan personele eksiksiz, yeni, hasarsız ve kullanıma uygun durumda elden teslim edilmiştir.
+          </div>
+          <table>
+            <tr><th>Kıyafet / Ekipman</th><th>Tarih</th><th>Not</th></tr>
+            <tr>
+              <td>${clothingForm.item || ''}</td>
+              <td>${clothingForm.date || ''}</td>
+              <td>${clothingForm.note || '-'}</td>
+            </tr>
+          </table>
+
+          <div class="paragraph" style="margin-top:14px;">
+            Personel, yukarıda belirtilen kıyafet ve donanımı teslim aldığını, bunları özenle kullanacağını, iş bu zimmetin kendisine ait olduğunu, işten ayrılması veya şirket tarafından talep edilmesi halinde eksiksiz ve kullanılabilir durumda iade edeceğini kabul ve beyan eder.
+          </div>
+
+          <div class="signatures">
+            <div class="sign-box">
+              <div class="sign-line">Teslim Eden (Şirket Yetkilisi)</div>
+            </div>
+            <div class="sign-box">
+              <div class="sign-line">Teslim Alan (${person.fullName || ''})</div>
+            </div>
+          </div>
+        </div>
+        <script>
+          window.onload = function() { window.print(); };
+        </script>
+      </body>
+      </html>
+      `;
+      printWindow.document.write(html);
+      printWindow.document.close();
     };
 
     const handleAddPhone = async (e) => {
       e.preventDefault();
       if (!phoneForm.model) return;
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelPhones'), { personnelId: String(personId), ...phoneForm, createdAt: new Date().toISOString() });
-      if (addSystemLog) addSystemLog('Telefon Verildi', `${person.fullName} personeline ${phoneForm.model} telefon verildi.`);
-      setPhoneForm({ model: '', date: new Date().toISOString().split('T')[0], note: '' });
+      if (editingPhoneId) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelPhones', editingPhoneId), { ...phoneForm });
+        if (addSystemLog) addSystemLog('Telefon Kaydı Güncellendi', `${person.fullName} personelinin ${phoneForm.model} kaydı güncellendi.`);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelPhones'), { personnelId: String(personId), ...phoneForm, createdAt: new Date().toISOString() });
+        if (addSystemLog) addSystemLog('Telefon Verildi', `${person.fullName} personeline ${phoneForm.model} telefon verildi.`);
+      }
+      setPhoneForm({ model: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
+      setEditingPhoneId(null);
       setShowPhoneModal(false);
+    };
+
+    // YENİ: Telefon/GSM zimmet belgesini yükleme (Şimdi Çek / Galeriden / Dosyadan)
+    const handlePhoneFileUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      setPhoneUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+        setPhoneForm(prev => ({ ...prev, fileUrl: uploadedUrl }));
+      } catch (err) {
+        console.error('Belge yükleme hatası:', err);
+        alert('Belge yüklenemedi.');
+      }
+      setPhoneUploading(false);
+    };
+
+    // YENİ: Şirket Telefonu ve GSM Hattı Zimmet Sözleşmesi ve Teslim Tutanağı PDF'i — personel profiline göre otomatik dolar
+    const generatePhoneContractPDF = () => {
+      const printWindow = window.open('', '_blank');
+      const start = person.startDate ? person.startDate.split('-') : null;
+      const gun = start ? start[2] : '.....';
+      const ay = start ? start[1] : '.....';
+      const yil = start ? start[0] : '202...';
+
+      const html = `
+      <!DOCTYPE html>
+      <html lang="tr">
+      <head>
+        <meta charset="UTF-8">
+        <title>${person.fullName} - Telefon Zimmet Sözleşmesi</title>
+        <style>
+          @page { size: A4; margin: 0; }
+          * { box-sizing: border-box; }
+          body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background: #525659; display: flex; flex-direction: column; align-items: center; font-size: 11px; }
+          .page { width: 210mm; min-height: 297mm; background: white; padding: 12mm 15mm; margin: 10mm auto; box-shadow: 0 0 10px rgba(0,0,0,0.5); position: relative; }
+          @media print {
+            @page { margin: 0 !important; }
+            body { background: white; margin: 0; -webkit-print-color-adjust: exact; }
+            .page { margin: 0; padding: 12mm 15mm; box-shadow: none; border: none; }
+          }
+          .header { text-align: center; border-bottom: 2px solid #d32f2f; padding-bottom: 8px; margin-bottom: 14px; display: flex; flex-direction: column; align-items: center; }
+          .logo-img { height: 44px; margin-bottom: 4px; object-fit: contain; }
+          .subtitle { font-size: 11px; color: #333; font-weight: bold; margin-bottom: 3px; letter-spacing: 1px; }
+          .contact-info { font-size: 9px; color: #555; line-height: 1.2; }
+          .main-title { font-size: 13px; font-weight: bold; text-align: center; margin: 10px 0 16px; padding: 8px; background: #f0f0f0; border: 1px solid #ccc; text-transform: uppercase; line-height: 1.4; }
+          .section-title { font-weight: bold; font-size: 12px; color: #d32f2f; margin-top: 14px; margin-bottom: 6px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 11px; }
+          th { background: #f0f0f0; padding: 6px; border: 1px solid #ccc; text-align: left; font-size: 11px; color: #d32f2f; }
+          td { padding: 6px 8px; border: 1px solid #ccc; vertical-align: top; }
+          .label { font-weight: bold; width: 32%; background: #fafafa; }
+          .paragraph { font-size: 10.5px; line-height: 1.55; text-align: justify; margin-bottom: 10px; }
+          .signatures { display: flex; justify-content: space-between; margin-top: 40px; }
+          .sign-box { width: 45%; font-size: 10.5px; text-align: center; }
+          .sign-line { border-top: 1px solid #000; margin-top: 40px; padding-top: 4px; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <div class="page">
+          <div class="header">
+            <img src="https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" onerror="this.style.display='none'" />
+            <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
+            <div class="contact-info">Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99</div>
+          </div>
+
+          <div class="main-title">ŞİRKET TELEFONU VE GSM HATTI ZİMMET SÖZLEŞMESİ VE TESLİM TUTANAĞI</div>
+
+          <div class="section-title">1. PERSONEL BİLGİLERİ</div>
+          <table>
+            <tr><td class="label">Adı ve Soyadı</td><td>${person.fullName || ''}</td></tr>
+            <tr><td class="label">T.C. Kimlik No</td><td>${person.tcNo || ''}</td></tr>
+            <tr><td class="label">Görevi / Unvanı</td><td>${person.position || ''}${person.rank ? ' / ' + person.rank : ''}</td></tr>
+            <tr><td class="label">İşe Başlama Tarihi</td><td>${gun} / ${ay} / ${yil}</td></tr>
+          </table>
+
+          <div class="section-title">2. TESLİM EDİLEN CİHAZ VE HAT BİLGİLERİ</div>
+          <div class="paragraph">
+            Sembol Nakliyat tarafından, şirket işlerinin yürütülmesi amacıyla aşağıda özellikleri belirtilen mobil cihaz (cep telefonu), aksesuarları ve GSM hattı (SIM kart), aşağıda imzası bulunan personele çalışır, hasarsız ve eksiksiz durumda elden teslim edilmiştir.
+          </div>
+          <table>
+            <tr><th>Cihaz / Model</th><th>Teslim Tarihi</th><th>Hat / Not</th></tr>
+            <tr>
+              <td>${phoneForm.model || ''}</td>
+              <td>${phoneForm.date || ''}</td>
+              <td>${phoneForm.note || person.companyPhone || '-'}</td>
+            </tr>
+          </table>
+
+          <div class="paragraph" style="margin-top:14px;">
+            Personel, yukarıda belirtilen cihaz ve hattı teslim aldığını, bunları özenle ve yalnızca iş amaçlı kullanacağını, işten ayrılması veya şirket tarafından talep edilmesi halinde eksiksiz ve çalışır durumda iade edeceğini kabul ve beyan eder.
+          </div>
+
+          <div class="signatures">
+            <div class="sign-box">
+              <div class="sign-line">Teslim Eden (Şirket Yetkilisi)</div>
+            </div>
+            <div class="sign-box">
+              <div class="sign-line">Teslim Alan (${person.fullName || ''})</div>
+            </div>
+          </div>
+        </div>
+        <script>
+          window.onload = function() { window.print(); };
+        </script>
+      </body>
+      </html>
+      `;
+      printWindow.document.write(html);
+      printWindow.document.close();
     };
 
     const handleAddLeave = async (e) => {
@@ -7320,10 +8198,398 @@ useEffect(() => {
 
         if (addSystemLog) addSystemLog('Personel İşi Bıraktı', `${person.fullName}, ${resignForm.date} tarihi itibarıyla işi bıraktı. Neden: ${resignForm.reason || 'Belirtilmedi'}.`);
         setShowResignModal(false);
+
+        // YENİ: İşi bırakma onaylanınca, kesin hesap dökümünü hesapla ve hesap kapama penceresini aç
+        computeSettlement(resignForm.date);
       } catch (err) {
         console.error('İşi bırakma işlemi sırasında hata:', err);
         alert('İşlem sırasında bir hata oluştu.');
       }
+    };
+
+    // YENİ: İşten çıkış kesin hesap dökümünü hesaplar.
+    // Mantık: Yemek ve yol parası AY BAŞINDA peşin (1 aylık) verildiği için, çalışılmayan günlerin
+    // yemek/yol bedeli personelden İADE alınır. Bu iade, önce Kalan Nakit'ten, yetmezse Kalan Banka'dan düşülür.
+    // Banka/İcra hesabı, maaş tablosundaki formülün aynısıdır (çalışılan güne orantılı).
+    const computeSettlement = (dateStr) => {
+      const d = new Date(dateStr);
+      const year = d.getFullYear();
+      const month = d.getMonth() + 1;
+      const resignDay = d.getDate();
+      const daysInMonth = new Date(year, month, 0).getDate();
+      const calışılanGun = resignDay;        // ayın 1'inden ayrılış gününe kadar çalıştı sayılır
+      const calışılmayanGun = daysInMonth - resignDay;
+
+      const maas = parseFloat(person.maas) || 0;
+      const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
+      const yemekAylik = parseFloat(person.yemek) || 0;
+      const yolAylik = parseFloat(person.yol) || 0;
+
+      // Maaş tablosu ile aynı formüller (çalışılan güne orantılı)
+      const hesaplananBanka = (bankaParasiBase / 30) * calışılanGun;
+      const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
+      const netMaas = (maas / 30) * calışılanGun;
+
+      // Peşin verilen yemek/yol'un, çalışılmayan güne düşen İADE tutarı
+      const yemekIade = (yemekAylik / daysInMonth) * calışılmayanGun;
+      const yolIade = (yolAylik / daysInMonth) * calışılmayanGun;
+      const toplamIade = yemekIade + yolIade;
+
+      // Kalan tutarlar (avans bu ekranda 0 kabul; profil ana kaynağı maaş tablosudur)
+      let kalanNakit = netMaas - hesaplananBanka;   // nakit el ödemesi kısmı
+      let kalanBanka = hesaplananBanka - icraKesintisi;
+
+      // İADE'yi önce Kalan Nakit'ten düş, yetmezse Kalan Banka'dan
+      let iadeKalan = toplamIade;
+      let nakittenDusulen = 0, bankadanDusulen = 0;
+      if (iadeKalan > 0) {
+        nakittenDusulen = Math.min(kalanNakit, iadeKalan);
+        kalanNakit -= nakittenDusulen;
+        iadeKalan -= nakittenDusulen;
+      }
+      if (iadeKalan > 0) {
+        bankadanDusulen = Math.min(kalanBanka, iadeKalan);
+        kalanBanka -= bankadanDusulen;
+        iadeKalan -= bankadanDusulen;
+      }
+
+      setSettlementData({
+        dateStr, year, month, daysInMonth, calışılanGun, calışılmayanGun,
+        maas, netMaas, hesaplananBanka, icraKesintisi,
+        yemekAylik, yolAylik, yemekIade, yolIade, toplamIade,
+        nakittenDusulen, bankadanDusulen,
+        finalKalanNakit: Math.max(0, kalanNakit),
+        finalKalanBanka: Math.max(0, kalanBanka)
+      });
+      setSettlementConfirm({ nakitVerildi: false, bankaVerildi: false, belgeUrl: '' });
+      setShowSettlementModal(true);
+    };
+
+    // YENİ: Çıkış için imzalı belge yükleme (3 seçenekli MediaCaptureMenu ile kullanılır)
+    const handleSettlementFileUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      setSettlementUploading(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+        setSettlementConfirm(prev => ({ ...prev, belgeUrl: uploadedUrl }));
+      } catch (err) {
+        console.error('Çıkış belgesi yükleme hatası:', err);
+        alert('Belge yüklenemedi, tekrar deneyin.');
+      }
+      setSettlementUploading(false);
+    };
+
+    // YENİ: Çıkışı kesinleştir — özlük dosyasına belge + hesap dökümünü ekle, çıkışı tamamla
+    const finalizeSettlement = async () => {
+      if (!settlementData) return;
+      if (!settlementConfirm.nakitVerildi || !settlementConfirm.bankaVerildi) {
+        alert('Lütfen hem nakit hem banka ödemesinin yapıldığını onaylayın.');
+        return;
+      }
+      if (!settlementConfirm.belgeUrl) {
+        alert('Lütfen imzalı çıkış belgesini yükleyin.');
+        return;
+      }
+      try {
+        // Özlük dosyasına (ozlukDosyalari objesi — sistemdeki mevcut desen) çıkış belgesini ekle
+        const ozluk = person.ozlukDosyalari || {};
+        const key = `cikis_hesap_${Date.now()}`;
+        const detayNot = `Çıkış: ${settlementData.dateStr} | Kalan Banka: ₺${settlementData.finalKalanBanka.toLocaleString('tr-TR', {maximumFractionDigits: 2})} | Kalan Nakit: ₺${settlementData.finalKalanNakit.toLocaleString('tr-TR', {maximumFractionDigits: 2})} | Tüm maaş ödemesi ve sözleşmeler imzalandı.`;
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(personId)), {
+          ozlukDosyalari: { ...ozluk, [key]: { name: 'İşten Çıkış / Hesap Kapama Belgesi', url: settlementConfirm.belgeUrl, date: settlementData.dateStr, note: detayNot } },
+          cikisOnaylandi: true,
+          cikisHesapDetay: settlementData,
+          cikisBelgeUrl: settlementConfirm.belgeUrl
+        });
+        if (addSystemLog) addSystemLog('İşten Çıkış Tamamlandı', `${person.fullName} için tüm maaş ödemesi ve sözleşmeler imzalandı. Çıkış tamamlandı.`);
+        setShowSettlementModal(false);
+        alert('Çıkış tamamlandı. Tüm maaş ödemesi ve sözleşmeler imzalandı.');
+      } catch (err) {
+        console.error('Çıkış kesinleştirme hatası:', err);
+        alert('Çıkış kaydedilirken bir hata oluştu.');
+      }
+    };
+
+    // --- YENİ: PERSONEL HAREKET İŞLEMLERİ FONKSİYONLARI ---
+    // Beyaz/Mavi yaka mesai koleksiyon önekini belirle (sistemin geri kalanıyla aynı mantık)
+    const isBeyazYakaPerson = person && (person.collarType === 'Beyaz Yaka' || (person.collarType !== 'Mavi Yaka' && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(person.position)));
+    const maasDocPrefix = isBeyazYakaPerson ? 'beyaz_' : '';
+
+    // YENİ: Seçilen aya ait Maaş Tablosu (maas koleksiyonu) kaydını canlı dinle — Maaş/Yol/Yemek bildirimleri için
+    useEffect(() => {
+      if (!personId || !db || !financeMonth) return;
+      const [fy, fm] = financeMonth.split('-');
+      const financeRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${maasDocPrefix}${parseInt(fy)}_${parseInt(fm)}`);
+      const unsubFinance = onSnapshot(financeRef, snap => {
+        const records = snap.exists() ? (snap.data().records || {}) : {};
+        setFinanceMonthRow(records[personId] || {});
+      }, console.error);
+      return () => unsubFinance();
+    }, [personId, db, appId, financeMonth, maasDocPrefix]);
+
+    // YENİ: Ay adları ve seçilen ayın okunabilir etiketi (örn. "2026 Temmuz")
+    const financeMonthNamesTR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+    const [financeYearStr, financeMonthNumStr] = financeMonth.split('-');
+    const financeMonthLabel = `${financeYearStr} ${financeMonthNamesTR[parseInt(financeMonthNumStr) - 1]}`;
+
+    // Maaş durumu: Avans yatırıldı → Maaş Bekleniyor → (kalan ödendiğinde) Maaş Yatırıldı
+    const financeHasAvans = (parseFloat(financeMonthRow.nakitAvans) || 0) > 0 || (parseFloat(financeMonthRow.resmiAvans) || 0) > 0;
+    const financeFullyPaid = !!financeMonthRow.nakitOdendi && !!financeMonthRow.bankaOdendi;
+    let maasStatusText = `${financeMonthLabel} Maaşı Bekleniyor`;
+    let maasStatusStyle = 'bg-neutral-50 border-neutral-200 text-neutral-500';
+    if (financeFullyPaid) {
+      maasStatusText = `${financeMonthLabel} Maaşı Yatırıldı`;
+      maasStatusStyle = 'bg-green-50 border-green-200 text-green-700';
+    } else if (financeHasAvans) {
+      maasStatusText = `${financeMonthLabel} Avans Yatırıldı`;
+      maasStatusStyle = 'bg-blue-50 border-blue-200 text-blue-700';
+    }
+    const yemekStatusText = financeMonthRow.yemekOdendi ? `${financeMonthLabel} Yemek Kartı Yatırıldı` : `${financeMonthLabel} Yemek Kartı Bekleniyor`;
+    const yemekStatusStyle = financeMonthRow.yemekOdendi ? 'bg-green-50 border-green-200 text-green-700' : 'bg-neutral-50 border-neutral-200 text-neutral-500';
+    const yolStatusText = financeMonthRow.yolOdendi ? `${financeMonthLabel} Yol Parası Yatırıldı` : `${financeMonthLabel} Yol Parası Bekleniyor`;
+    const yolStatusStyle = financeMonthRow.yolOdendi ? 'bg-green-50 border-green-200 text-green-700' : 'bg-neutral-50 border-neutral-200 text-neutral-500';
+
+    // YENİ: Personelin ne zamandır çalıştığını gösteren kıdem metni (örn. "9 aydır", "1 sene 3 aydır")
+    const getTenureText = (startDateStr) => {
+      if (!startDateStr) return null;
+      const start = new Date(startDateStr);
+      if (isNaN(start.getTime())) return null;
+      const now = new Date();
+      let years = now.getFullYear() - start.getFullYear();
+      let months = now.getMonth() - start.getMonth();
+      if (now.getDate() < start.getDate()) months -= 1;
+      if (months < 0) { years -= 1; months += 12; }
+      if (years <= 0 && months <= 0) return 'Bu ay işe başladı';
+      if (years <= 0) return `${months} aydır çalışıyor`;
+      if (months === 0) return `${years} senedir çalışıyor`;
+      return `${years} sene ${months} aydır çalışıyor`;
+    };
+    const tenureText = getTenureText(person.startDate);
+
+
+    // Belge yükleme (upload.php) yardımcı fonksiyonu
+    const uploadActionFile = async (file) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
+      const text = await res.text();
+      let uploadedUrl = file.name;
+      try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+      return uploadedUrl;
+    };
+
+    // Maaş tablosundaki (personnelMaas) ilgili aya avans/onay verisini işleyen ortak fonksiyon
+    const applyToMaasRow = async (monthStr, patch) => {
+      const [y, m] = monthStr.split('-');
+      const maasRef = doc(db, 'artifacts', appId, 'public', 'data', 'personnelMaas', `${maasDocPrefix}${parseInt(y)}_${parseInt(m)}`);
+      const snap = await getDoc(maasRef);
+      const data = snap.exists() ? snap.data() : { rows: {} };
+      const rows = data.rows || {};
+      const existingRow = rows[personId] || {};
+      rows[personId] = { ...existingRow, ...patch(existingRow) };
+      await setDoc(maasRef, { rows, updatedAt: new Date().toISOString() }, { merge: true });
+    };
+
+    const logAction = async (actionData) => {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelActions'), {
+        personnelId: String(personId),
+        ...actionData,
+        createdAt: new Date().toISOString()
+      });
+    };
+
+    // 1) AVANS GİRİŞİ (Nakit / Resmi) — Personel Muhasebe (maaş tablosu) ilgili aya işlenir
+    const handleAvansSubmit = async (e) => {
+      e.preventDefault();
+      if (!avansForm.amount) return;
+      const amount = parseFloat(avansForm.amount) || 0;
+      const fieldKey = avansForm.type === 'nakit' ? 'nakitAvans' : 'resmiAvans';
+      try {
+        await applyToMaasRow(avansForm.month, (row) => ({
+          [fieldKey]: (parseFloat(row[fieldKey]) || 0) + amount
+        }));
+        await logAction({
+          type: 'avans',
+          title: `${avansForm.type === 'nakit' ? 'Nakit' : 'Resmi'} Avans`,
+          amount, month: avansForm.month, note: avansForm.note, date: new Date().toISOString().split('T')[0]
+        });
+        if (addSystemLog) addSystemLog('Personel Avans Girişi', `${person.fullName} için ${avansForm.month} ayına ${amount} TL ${avansForm.type} avans girildi.`);
+        setAvansForm({ type: 'nakit', amount: '', month: nowMonth, note: '' });
+        setShowAvansModal(false);
+      } catch (err) { console.error(err); alert('Avans işlenirken hata oluştu.'); }
+    };
+
+    // YENİ: ŞİRKETE BORÇ ÖDEMESİ — Personel Muhasebe borçlandırma ile entegre.
+    // Girilen tutar:
+    //   1) O yılın borçlandırma (borclanma) tutarından düşülür,
+    //   2) O ayın maaş satırındaki Kalan Nakit'i azaltmak için nakitAvans'a eklenir;
+    //      nakit yetersizse kalan kısım banka tarafına (resmiAvans) yansıtılır.
+    // Not: Sistemde kalan nakit = netMaas - hesaplananBanka - nakitAvans (+mesai),
+    // kalan banka = hesaplananBanka - icra - resmiAvans olduğundan; nakitAvans/resmiAvans
+    // artırmak doğrudan ilgili "kalan" tutarı düşürür.
+    const handleDebtPaymentSubmit = async (e) => {
+      e.preventDefault();
+      const amount = parseFloat(debtForm.amount) || 0;
+      if (amount <= 0) return;
+
+      try {
+        const year = parseInt(debtForm.month.split('-')[0]);
+        const month = parseInt(debtForm.month.split('-')[1]);
+
+        // 1) Seçilen aya ait maaş satırını oku (o ayın kalan nakit/banka hesabı için)
+        // Maaş verisi 'maas' koleksiyonunda {records: {personId: {...}}} yapısında tutulur.
+        const maasColRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${maasDocPrefix}${year}_${month}`);
+        const maasSnap = await getDoc(maasColRef);
+        const maasDocData = maasSnap.exists() ? maasSnap.data() : { records: {} };
+        const records = maasDocData.records || {};
+        const row = records[personId] || {};
+
+        const netMaas = parseFloat(row.netMaasManuel ?? row.netMaas) || parseFloat(person.salary) || 0;
+        const hesaplananBanka = parseFloat(row.hesaplananBanka) || 0;
+        const mevcutNakitAvans = parseFloat(row.nakitAvans) || 0;
+        const mevcutResmiAvans = parseFloat(row.resmiAvans) || 0;
+
+        // O anki kullanılabilir kalan nakit (yaklaşık): netMaas - hesaplananBanka - mevcutNakitAvans
+        const kullanilabilirNakit = Math.max(0, netMaas - hesaplananBanka - mevcutNakitAvans);
+        const nakittenDusulecek = Math.min(amount, kullanilabilirNakit);
+        const bankadanDusulecek = amount - nakittenDusulecek;
+
+        // Maaş satırını güncelle: nakit ve (gerekirse) banka avansına yansıt
+        records[personId] = {
+          ...row,
+          nakitAvans: mevcutNakitAvans + nakittenDusulecek,
+          resmiAvans: mevcutResmiAvans + bankadanDusulecek
+        };
+        await setDoc(maasColRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
+
+        // 2) Yıllık borçlandırma tutarından düş
+        const yearlyRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas_yearly', year.toString());
+        const yearlySnap = await getDoc(yearlyRef);
+        const yData = yearlySnap.exists() ? yearlySnap.data() : { records: {} };
+        const yRecords = yData.records || {};
+        const mevcutBorc = parseFloat(yRecords[personId]?.borclanma) || 0;
+        const yeniBorc = Math.max(0, mevcutBorc - amount);
+        yRecords[personId] = { ...(yRecords[personId] || {}), borclanma: yeniBorc };
+        await setDoc(yearlyRef, { records: yRecords, updatedAt: new Date().toISOString() }, { merge: true });
+
+        // 3) Hareket kaydına ekle
+        await logAction({
+          type: 'borcOdeme',
+          title: 'Şirkete Borç Ödemesi',
+          amount, month: debtForm.month, date: new Date().toISOString().split('T')[0],
+          note: `${debtForm.note ? debtForm.note + ' • ' : ''}Nakitten: ₺${nakittenDusulecek.toLocaleString('tr-TR')}${bankadanDusulecek > 0 ? ` • Bankadan: ₺${bankadanDusulecek.toLocaleString('tr-TR')}` : ''}`
+        });
+
+        if (addSystemLog) addSystemLog('Personel Borç Ödemesi', `${person.fullName} ${amount} TL şirket borcu ödedi. Kalan borç: ₺${yeniBorc.toLocaleString('tr-TR')}.`);
+        setDebtForm({ amount: '', month: nowMonth, note: '' });
+        setShowDebtModal(false);
+      } catch (err) { console.error(err); alert('Borç ödemesi işlenirken hata oluştu.'); }
+    };
+
+    // 2) YENİ: MAAŞ / YOL / YEMEK DURUMU — artık manuel onay yerine Maaş Tablosu'ndaki tikler canlı okunur
+    // (Aşağıdaki useEffect, financeMonth her değiştiğinde ilgili aya ait 'maas' koleksiyon kaydını dinler)
+
+    // 3) TUTANAK TUT — belge yüklenir, özlük dosyasına da otomatik eklenir
+    // YENİ: Seçilen tutanak şablonunu personel bilgileriyle doldurup yazdırma penceresinde açar
+    const generateTutanakPDF = () => {
+      const template = TUTANAK_TEMPLATES.find(t => t.key === tutanakTemplateKey);
+      if (!template) { alert('Lütfen önce bir tutanak şablonu seçin.'); return; }
+      const printWindow = window.open('', '_blank');
+      const html = `
+      <!DOCTYPE html>
+      <html lang="tr">
+      <head>
+        <meta charset="UTF-8">
+        <title>${person.fullName} - ${template.title}</title>
+        <style>
+          @page { size: A4; margin: 0; }
+          * { box-sizing: border-box; }
+          body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background: #525659; display: flex; flex-direction: column; align-items: center; font-size: 10.5px; }
+          .page { width: 210mm; min-height: 297mm; background: white; padding: 10mm 14mm; margin: 10mm auto; box-shadow: 0 0 10px rgba(0,0,0,0.5); position: relative; }
+          @media print {
+            @page { margin: 0 !important; }
+            body { background: white; margin: 0; -webkit-print-color-adjust: exact; }
+            .page { margin: 0; padding: 10mm 14mm; box-shadow: none; border: none; }
+          }
+          .header { text-align: center; border-bottom: 2px solid #d32f2f; padding-bottom: 6px; margin-bottom: 10px; display: flex; flex-direction: column; align-items: center; }
+          .logo-img { height: 40px; margin-bottom: 4px; object-fit: contain; }
+          .subtitle { font-size: 10px; color: #333; font-weight: bold; margin-bottom: 3px; letter-spacing: 1px; }
+          .contact-info { font-size: 8.5px; color: #555; line-height: 1.2; }
+          .main-title { font-size: 12px; font-weight: bold; text-align: center; margin: 8px 0 14px; padding: 7px; background: #f0f0f0; border: 1px solid #ccc; text-transform: uppercase; line-height: 1.4; }
+          .section-title { font-weight: bold; font-size: 11px; color: #d32f2f; margin-top: 12px; margin-bottom: 5px; border-bottom: 1px solid #ccc; padding-bottom: 3px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 8px; font-size: 10.5px; }
+          td { padding: 5px 7px; border: 1px solid #ccc; vertical-align: top; }
+          .label { font-weight: bold; width: 32%; background: #fafafa; }
+          .paragraph { font-size: 10px; line-height: 1.5; text-align: justify; margin-bottom: 8px; }
+          .desc-box { padding: 8px; border: 1px dashed #ccc; font-size: 10px; min-height: 30px; margin-bottom: 8px; background: #fafafa; line-height: 1.6; }
+          .note { font-size: 9px; color: #666; font-style: italic; margin: 4px 0 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="page">
+          <div class="header">
+            <img src="https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" onerror="this.style.display='none'" />
+            <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
+            <div class="contact-info">Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99</div>
+          </div>
+          ${template.body(person, tutanakForm)}
+        </div>
+        <script>
+          window.onload = function() { window.print(); };
+        </script>
+      </body>
+      </html>
+      `;
+      printWindow.document.write(html);
+      printWindow.document.close();
+    };
+
+    const handleTutanakSubmit = async (e) => {
+      e.preventDefault();
+      if (!tutanakForm.title) return;
+      try {
+        // Özlük dosyasına otomatik ekle
+        if (tutanakForm.fileUrl) {
+          const ozluk = person.ozlukDosyalari || {};
+          const key = `tutanak_${Date.now()}`;
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(personId)), {
+            ozlukDosyalari: { ...ozluk, [key]: { name: `Tutanak: ${tutanakForm.title}`, url: tutanakForm.fileUrl, date: tutanakForm.date } }
+          });
+        }
+        await logAction({ type: 'tutanak', title: tutanakForm.title, date: tutanakForm.date, note: tutanakForm.note, fileUrl: tutanakForm.fileUrl });
+        if (addSystemLog) addSystemLog('Personel Tutanağı', `${person.fullName} için "${tutanakForm.title}" tutanağı eklendi.`);
+        setTutanakForm({ title: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
+        setShowTutanakModal(false);
+      } catch (err) { console.error(err); alert('Tutanak eklenirken hata oluştu.'); }
+    };
+
+    // 4) RAPOR EKLE (Sağlık Raporu) — belge yüklenir, özlük dosyasına da otomatik eklenir
+    const handleRaporSubmit = async (e) => {
+      e.preventDefault();
+      try {
+        if (raporForm.fileUrl) {
+          const ozluk = person.ozlukDosyalari || {};
+          const key = `rapor_${Date.now()}`;
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(personId)), {
+            ozlukDosyalari: { ...ozluk, [key]: { name: `Sağlık Raporu (${raporForm.startDate})`, url: raporForm.fileUrl, date: raporForm.startDate } }
+          });
+        }
+        await logAction({ type: 'rapor', title: 'Sağlık Raporu', startDate: raporForm.startDate, endDate: raporForm.endDate, note: raporForm.note, fileUrl: raporForm.fileUrl, date: raporForm.startDate });
+        if (addSystemLog) addSystemLog('Personel Sağlık Raporu', `${person.fullName} için sağlık raporu eklendi (${raporForm.startDate} - ${raporForm.endDate}).`);
+        setRaporForm({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
+        setShowRaporModal(false);
+      } catch (err) { console.error(err); alert('Rapor eklenirken hata oluştu.'); }
+    };
+
+    const handleDeleteAction = async (actionId) => {
+      if (!window.confirm('Bu hareket kaydını silmek istediğinize emin misiniz?')) return;
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelActions', actionId));
     };
 
     const currentYear = new Date().getFullYear();
@@ -7367,10 +8633,17 @@ useEffect(() => {
           {person.resignationDate && (
             <div className="bg-neutral-900 text-white p-4 rounded-xl mb-5 flex items-start gap-3">
               <LogOut className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
-              <div>
+              <div className="flex-1">
                 <p className="font-black text-sm">İşi Bıraktı</p>
                 <p className="text-xs text-neutral-300 mt-1">Tarih: <b className="text-white">{person.resignationDate}</b></p>
                 <p className="text-xs text-neutral-300 mt-0.5">Neden: <b className="text-white">{person.resignationReason || 'Belirtilmedi'}</b></p>
+                {person.cikisOnaylandi ? (
+                  <p className="mt-2 text-[11px] font-bold text-green-300 bg-green-900/40 border border-green-700 rounded-lg px-2 py-1.5 inline-block">✓ Tüm maaş ödemesi ve sözleşmeler imzalandı. Çıkış tamamlandı.</p>
+                ) : (
+                  <button type="button" onClick={() => computeSettlement(person.resignationDate)} className="mt-2 px-3 py-2 bg-white text-neutral-900 text-xs font-black rounded-lg hover:bg-neutral-100 transition flex items-center gap-1.5">
+                    <Wallet className="w-3.5 h-3.5" /> Çıkış Hesap Dökümünü Aç / Tamamla
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -7381,6 +8654,244 @@ useEffect(() => {
             <div><span className="text-[10px] font-bold text-neutral-400 uppercase block mb-1">E-Posta</span><p className="font-bold text-black truncate">{person.email || '-'}</p></div>
             <div><span className="text-[10px] font-bold text-neutral-400 uppercase block mb-1">Yaka Tipi</span><p className="font-bold text-black">{person.collarType || '-'}</p></div>
           </div>
+
+          {/* YENİ: Personelin ne zamandır çalıştığını gösteren kıdem bildirimi */}
+          {tenureText && (
+            <div className="mt-3 bg-indigo-50 border border-indigo-200 text-indigo-700 px-4 py-3 rounded-xl flex items-center gap-2.5 text-sm font-bold">
+              <Clock className="w-4 h-4 shrink-0" />
+              <span>Şirkette {tenureText}{person.startDate ? ` (İşe Başlama: ${person.startDate})` : ''}</span>
+            </div>
+          )}
+        </div>
+
+        {/* YENİ: Personel İşlem Butonları */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2"><Wallet className="w-6 h-6 text-green-600" /> Personel İşlemleri</h3>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            <button type="button" onClick={() => { setAvansForm({ type: 'nakit', amount: '', month: nowMonth, note: '' }); setShowAvansModal(true); }} className="p-3 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
+              <DollarSign className="w-5 h-5" /> Avans Girişi Yap
+            </button>
+            <button type="button" onClick={() => { setTutanakForm({ title: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setTutanakTemplateKey(''); setShowTutanakModal(true); }} className="p-3 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
+              <FileText className="w-5 h-5" /> Tutanak Tut
+            </button>
+            <button type="button" onClick={() => { setRaporForm({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setShowRaporModal(true); }} className="p-3 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
+              <PlusCircle className="w-5 h-5" /> Rapor Ekle
+            </button>
+            {/* YENİ: Bilgileri Düzenle — personelin kaydedildiği Personel Listesi ekranına gidip düzenleme (giriş bilgileri dahil) modalını otomatik açar */}
+            <button type="button" onClick={() => { if (setPendingEditPersonnelId) setPendingEditPersonnelId(person.id); if (setActiveTab) setActiveTab('personnelList'); }} className="p-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
+              <Edit className="w-5 h-5" /> Bilgileri Düzenle
+            </button>
+            {/* YENİ: Şirkete Borç Ödemesi Yap — güncel borcu da gösterir */}
+            <button type="button" onClick={() => { setDebtForm({ amount: '', month: nowMonth, note: '' }); setShowDebtModal(true); }} className="p-3 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5 relative col-span-2 md:col-span-1">
+              <Landmark className="w-5 h-5" /> Şirkete Borç Ödemesi
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${currentDebt > 0 ? 'bg-rose-600 text-white' : 'bg-green-100 text-green-700'}`}>
+                {currentDebt > 0 ? `Güncel Borç: ₺${currentDebt.toLocaleString('tr-TR')}` : 'Borç Yok'}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* YENİ: Maaş / Yol / Yemek Durumu — artık buton değil, Maaş Tablosu tiklerinden otomatik okunan bildirim */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><Wallet className="w-6 h-6 text-green-600" /> Maaş / Yol / Yemek Durumu</h3>
+            <input
+              type="month"
+              value={financeMonth}
+              onChange={e => setFinanceMonth(e.target.value || nowMonth)}
+              className="p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-green-600 font-bold text-sm bg-white"
+            />
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className={`p-4 rounded-xl border-2 ${maasStatusStyle} flex items-center gap-3`}>
+              <CheckCircle className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Maaş Durumu</span>
+                <span className="block font-black text-sm leading-snug">{maasStatusText}</span>
+              </div>
+            </div>
+            <div className={`p-4 rounded-xl border-2 ${yolStatusStyle} flex items-center gap-3`}>
+              <Car className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Yol Parası Durumu</span>
+                <span className="block font-black text-sm leading-snug">{yolStatusText}</span>
+              </div>
+            </div>
+            <div className={`p-4 rounded-xl border-2 ${yemekStatusStyle} flex items-center gap-3`}>
+              <CreditCard className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Yemek Kartı Durumu</span>
+                <span className="block font-black text-sm leading-snug">{yemekStatusText}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* YENİ: Personel Hareket İşlemleri (geçmiş) */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2"><History className="w-6 h-6 text-purple-600" /> Personel Hareket İşlemleri</h3>
+          {personnelActions.length === 0 ? (
+            <p className="text-sm text-neutral-500 italic">Henüz bir hareket kaydı yok.</p>
+          ) : (
+            <div className="space-y-2.5">
+              {personnelActions.map(a => {
+                const typeStyles = {
+                  avans: { bg: 'bg-blue-50 border-blue-200', badge: 'bg-blue-600', icon: <DollarSign className="w-4 h-4 text-white" /> },
+                  onay: { bg: 'bg-green-50 border-green-200', badge: 'bg-green-600', icon: <CheckCircle className="w-4 h-4 text-white" /> },
+                  tutanak: { bg: 'bg-neutral-50 border-neutral-200', badge: 'bg-neutral-700', icon: <FileText className="w-4 h-4 text-white" /> },
+                  rapor: { bg: 'bg-red-50 border-red-200', badge: 'bg-red-600', icon: <PlusCircle className="w-4 h-4 text-white" /> },
+                  borcOdeme: { bg: 'bg-rose-50 border-rose-200', badge: 'bg-rose-600', icon: <Landmark className="w-4 h-4 text-white" /> }
+                };
+                const st = typeStyles[a.type] || typeStyles.tutanak;
+                return (
+                  <div key={a.id} className={`border p-3 rounded-xl flex items-center justify-between gap-3 ${st.bg}`}>
+                    <div className="flex items-center gap-3 flex-1 min-w-0">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${st.badge}`}>{st.icon}</div>
+                      <div className="min-w-0">
+                        <span className="font-bold text-black text-sm block truncate">
+                          {a.title}
+                          {a.amount > 0 && <span className="text-green-700"> — ₺{parseFloat(a.amount).toLocaleString('tr-TR')}</span>}
+                        </span>
+                        <span className="text-[10px] text-neutral-500 font-medium">
+                          {a.month ? `Dönem: ${a.month}` : ''} {a.date ? `• ${a.date}` : ''} {a.endDate ? `→ ${a.endDate}` : ''} {a.note ? `• ${a.note}` : ''}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {a.fileUrl && (
+                        <button onClick={() => setViewingImage && setViewingImage({ title: a.title, name: a.fileUrl })} className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:bg-neutral-100 transition" title="Belgeyi Gör">
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button onClick={() => handleDeleteAction(a.id)} className="p-1.5 bg-white border border-red-200 text-red-500 rounded-lg hover:bg-red-50 transition" title="Sil">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Kıyafet Takibi */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><Shirt className="w-6 h-6 text-indigo-600" /> Kıyafet Takibi</h3>
+            <button type="button" onClick={() => { setEditingClothingId(null); setClothingForm({ item: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setShowClothingModal(true); }} className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+              <PlusCircle className="w-3.5 h-3.5" /> Kıyafet Ekle
+            </button>
+          </div>
+          {clothingRecords.length === 0 ? (
+            <p className="text-sm text-neutral-500 italic">Henüz kıyafet verilmemiş.</p>
+          ) : (
+            <>
+              <div className="bg-indigo-50 border border-indigo-200 p-3 rounded-xl mb-3">
+                <span className="text-[10px] font-bold text-indigo-500 uppercase block">Son Verilen</span>
+                <span className="font-black text-indigo-800">{clothingRecords[0].item} <span className="font-medium text-xs text-indigo-500">({clothingRecords[0].date})</span></span>
+              </div>
+              <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
+                {clothingRecords.map(r => (
+                  <div key={r.id} className="flex justify-between items-center bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 text-xs gap-2">
+                    <div className="min-w-0 flex-1">
+                      <span className="font-bold text-black block truncate">{r.item} {r.note && <span className="font-medium text-neutral-500">— {r.note}</span>}</span>
+                      <span className="text-neutral-400 font-bold">{r.date}</span>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      {r.fileUrl && (
+                        <button type="button" onClick={() => setViewingImage && setViewingImage({ title: `${r.item} - İmzalı Belge`, name: r.fileUrl })} className="p-1.5 bg-white border border-indigo-200 text-indigo-600 rounded-lg hover:bg-indigo-50 transition" title="İmzalı Belgeyi Gör">
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      {/* YENİ: Kaydı düzenleme butonu */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingClothingId(r.id);
+                          setClothingForm({ item: r.item || '', date: r.date || new Date().toISOString().split('T')[0], note: r.note || '', fileUrl: r.fileUrl || '' });
+                          setShowClothingModal(true);
+                        }}
+                        className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:bg-neutral-100 transition"
+                        title="Düzenle"
+                      >
+                        <Edit className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Telefon Takibi */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><Smartphone className="w-6 h-6 text-teal-600" /> Telefon Takibi</h3>
+            <button type="button" onClick={() => { setEditingPhoneId(null); setPhoneForm({ model: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setShowPhoneModal(true); }} className="px-3 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+              <PlusCircle className="w-3.5 h-3.5" /> Telefon Ekle
+            </button>
+          </div>
+          {phoneRecords.length === 0 ? (
+            <p className="text-sm text-neutral-500 italic">Henüz şirket telefonu verilmemiş.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {phoneRecords.map(r => (
+                <div key={r.id} className="flex justify-between items-center bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 text-xs gap-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="font-bold text-black block truncate">{r.model} {r.note && <span className="font-medium text-neutral-500">— {r.note}</span>}</span>
+                    <span className="text-neutral-400 font-bold">{r.date}</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {r.fileUrl && (
+                      <button type="button" onClick={() => setViewingImage && setViewingImage({ title: `${r.model} - İmzalı Belge`, name: r.fileUrl })} className="p-1.5 bg-white border border-teal-200 text-teal-600 rounded-lg hover:bg-teal-50 transition" title="İmzalı Belgeyi Gör">
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {/* YENİ: Kaydı düzenleme butonu */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingPhoneId(r.id);
+                        setPhoneForm({ model: r.model || '', date: r.date || new Date().toISOString().split('T')[0], note: r.note || '', fileUrl: r.fileUrl || '' });
+                        setShowPhoneModal(true);
+                      }}
+                      className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:bg-neutral-100 transition"
+                      title="Düzenle"
+                    >
+                      <Edit className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Yıllık İzin Takibi */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><CalendarDays className="w-6 h-6 text-orange-500" /> Yıllık İzin Takibi</h3>
+            <button type="button" onClick={() => setShowLeaveModal(true)} className="px-3 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+              <PlusCircle className="w-3.5 h-3.5" /> İzin Ekle
+            </button>
+          </div>
+          <div className="bg-orange-50 border border-orange-200 p-3 rounded-xl mb-3">
+            <span className="text-[10px] font-bold text-orange-500 uppercase block">{currentYear} Yılında Kullanılan</span>
+            <span className="font-black text-orange-800 text-lg">{totalLeaveDaysThisYear} Gün</span>
+          </div>
+          {leaveRecords.length === 0 ? (
+            <p className="text-sm text-neutral-500 italic">Henüz yıllık izin kaydı yok.</p>
+          ) : (
+            <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
+              {leaveRecords.map(r => (
+                <div key={r.id} className="flex justify-between items-center bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 text-xs">
+                  <span className="font-bold text-black">{r.startDate} → {r.endDate} {r.note && <span className="font-medium text-neutral-500">— {r.note}</span>}</span>
+                  <span className="text-orange-600 font-black shrink-0 ml-2">{r.days} gün</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Dönem Filtresi ve Özet */}
@@ -7395,7 +8906,7 @@ useEffect(() => {
               ))}
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
               <span className="text-3xl font-black text-black block">{periodJobsCount}</span>
               <span className="text-xs font-bold text-neutral-500">Yapılan İş</span>
@@ -7404,10 +8915,16 @@ useEffect(() => {
               <span className="text-3xl font-black text-yellow-600 block">{periodReviewsCount}</span>
               <span className="text-xs font-bold text-yellow-700">Alınan Yorum</span>
             </div>
+            {/* YENİ: Ekibine hasar kaydı yazılmış iş sayısı */}
+            <div className="bg-red-50 p-4 rounded-xl border border-red-200 text-center col-span-2 md:col-span-1">
+              <span className="text-3xl font-black text-red-600 block">{periodDamagesCount}</span>
+              <span className="text-xs font-bold text-red-700">Hasarlı İş</span>
+            </div>
           </div>
         </div>
 
-        {/* Özellikler / Yetenek Kartı */}
+        {/* Özellikler / Yetenek Kartı — sadece uygun mavi yaka personelde gösterilir */}
+        {showSkillsSection && (
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
           <div className="flex justify-between items-center mb-4">
             <h3 className="font-bold text-lg text-black flex items-center gap-2"><Award className="w-6 h-6 text-purple-600" /> Özellikler</h3>
@@ -7417,7 +8934,7 @@ useEffect(() => {
             </div>
           </div>
           <div className="space-y-3">
-            {PERSONNEL_SKILL_DEFS.map(s => {
+            {visibleSkillDefs.map(s => {
               const val = typeof skills[s.key] === 'number' ? skills[s.key] : 50;
               return (
                 <div key={s.key} className="bg-neutral-50 p-3 rounded-xl border border-neutral-200">
@@ -7437,6 +8954,7 @@ useEffect(() => {
             })}
           </div>
         </div>
+        )}
 
         {/* Son Yaptığı İşler */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
@@ -7474,78 +8992,33 @@ useEffect(() => {
           </div>
         </div>
 
-        {/* Kıyafet Takibi */}
+        {/* YENİ: Son Hasar Alınan İşler — ekibine hasar kaydı yazılmış son işler */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-lg text-black flex items-center gap-2"><Shirt className="w-6 h-6 text-indigo-600" /> Kıyafet Takibi</h3>
-            <button type="button" onClick={() => setShowClothingModal(true)} className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
-              <PlusCircle className="w-3.5 h-3.5" /> Kıyafet Ekle
-            </button>
-          </div>
-          {clothingRecords.length === 0 ? (
-            <p className="text-sm text-neutral-500 italic">Henüz kıyafet verilmemiş.</p>
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2"><AlertTriangle className="w-6 h-6 text-red-600" /> Son Hasar Alınan İşler</h3>
+          {recentDamagedJobs.length === 0 ? (
+            <p className="text-sm text-neutral-500 italic">Bu personelin ekibine yazılmış herhangi bir hasar kaydı yok. 🎉</p>
           ) : (
-            <>
-              <div className="bg-indigo-50 border border-indigo-200 p-3 rounded-xl mb-3">
-                <span className="text-[10px] font-bold text-indigo-500 uppercase block">Son Verilen</span>
-                <span className="font-black text-indigo-800">{clothingRecords[0].item} <span className="font-medium text-xs text-indigo-500">({clothingRecords[0].date})</span></span>
-              </div>
-              <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
-                {clothingRecords.map(r => (
-                  <div key={r.id} className="flex justify-between items-center bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 text-xs">
-                    <span className="font-bold text-black">{r.item} {r.note && <span className="font-medium text-neutral-500">— {r.note}</span>}</span>
-                    <span className="text-neutral-400 font-bold shrink-0 ml-2">{r.date}</span>
+            <div className="space-y-2.5">
+              {recentDamagedJobs.map(job => {
+                const damageImg = job.endJobDetails?.damageImages?.[0];
+                return (
+                  <div key={job.id} className="bg-red-50 border border-red-200 p-3 rounded-xl flex items-center gap-3">
+                    {damageImg && (
+                      <div className="w-14 h-14 rounded-lg overflow-hidden shrink-0 bg-red-100 cursor-pointer" onClick={() => setViewingImage && setViewingImage({ title: 'Hasar Fotoğrafı', name: damageImg })}>
+                        {isVideoUrl(damageImg) ? <video src={damageImg} className="w-full h-full object-cover" muted /> : <img src={damageImg} className="w-full h-full object-cover" alt="" />}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <span className="font-bold text-black text-sm block truncate">{job.customerName} <span className="text-[10px] font-medium text-neutral-500">({job.type || 'Nakliye'})</span></span>
+                      <span className="text-[10px] text-neutral-500 block">{job.date}</span>
+                      {job.endJobDetails?.damageDetails && <p className="text-[11px] text-red-700 font-medium mt-1 line-clamp-2">{job.endJobDetails.damageDetails}</p>}
+                    </div>
+                    <span className={`text-[10px] font-bold px-2 py-1 rounded-lg shrink-0 ${job.endJobDetails?.damageResolved ? 'bg-green-100 text-green-700' : 'bg-red-600 text-white'}`}>
+                      {job.endJobDetails?.damageResolved ? 'Çözüldü' : 'Bekliyor'}
+                    </span>
                   </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Telefon Takibi */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-lg text-black flex items-center gap-2"><Smartphone className="w-6 h-6 text-teal-600" /> Telefon Takibi</h3>
-            <button type="button" onClick={() => setShowPhoneModal(true)} className="px-3 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
-              <PlusCircle className="w-3.5 h-3.5" /> Telefon Ekle
-            </button>
-          </div>
-          {phoneRecords.length === 0 ? (
-            <p className="text-sm text-neutral-500 italic">Henüz şirket telefonu verilmemiş.</p>
-          ) : (
-            <div className="space-y-1.5">
-              {phoneRecords.map(r => (
-                <div key={r.id} className="flex justify-between items-center bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 text-xs">
-                  <span className="font-bold text-black">{r.model} {r.note && <span className="font-medium text-neutral-500">— {r.note}</span>}</span>
-                  <span className="text-neutral-400 font-bold shrink-0 ml-2">{r.date}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Yıllık İzin Takibi */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-lg text-black flex items-center gap-2"><CalendarDays className="w-6 h-6 text-orange-500" /> Yıllık İzin Takibi</h3>
-            <button type="button" onClick={() => setShowLeaveModal(true)} className="px-3 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
-              <PlusCircle className="w-3.5 h-3.5" /> İzin Ekle
-            </button>
-          </div>
-          <div className="bg-orange-50 border border-orange-200 p-3 rounded-xl mb-3">
-            <span className="text-[10px] font-bold text-orange-500 uppercase block">{currentYear} Yılında Kullanılan</span>
-            <span className="font-black text-orange-800 text-lg">{totalLeaveDaysThisYear} Gün</span>
-          </div>
-          {leaveRecords.length === 0 ? (
-            <p className="text-sm text-neutral-500 italic">Henüz yıllık izin kaydı yok.</p>
-          ) : (
-            <div className="space-y-1.5 max-h-52 overflow-y-auto custom-scrollbar">
-              {leaveRecords.map(r => (
-                <div key={r.id} className="flex justify-between items-center bg-neutral-50 p-2.5 rounded-lg border border-neutral-200 text-xs">
-                  <span className="font-bold text-black">{r.startDate} → {r.endDate} {r.note && <span className="font-medium text-neutral-500">— {r.note}</span>}</span>
-                  <span className="text-orange-600 font-black shrink-0 ml-2">{r.days} gün</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -7559,19 +9032,13 @@ useEffect(() => {
           </span>
         </div>
 
-        {/* Maaş ve Mesai Hareketleri Kısayolu */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <h3 className="font-bold text-lg text-black mb-3 flex items-center gap-2"><Wallet className="w-6 h-6 text-green-600" /> Maaş & Mesai Hareketleri</h3>
-          <p className="text-sm text-neutral-500">Detaylı maaş ve mesai hareketleri için "Personel Muhasebe" bölümündeki {person.collarType || 'Mavi Yaka'} tablolarını kullanabilirsiniz. Bu personelin adını arayarak ilgili ayın hareketlerine ulaşabilirsiniz.</p>
-        </div>
-
         {/* Kıyafet Ekleme Modalı */}
         {showClothingModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
-              <div className="bg-indigo-600 text-white p-4 flex justify-between items-center">
-                <h3 className="font-bold text-lg">Kıyafet Ekle</h3>
-                <button onClick={() => setShowClothingModal(false)} className="text-indigo-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[90vh] overflow-y-auto custom-scrollbar">
+              <div className="bg-indigo-600 text-white p-4 flex justify-between items-center sticky top-0 z-10">
+                <h3 className="font-bold text-lg">{editingClothingId ? 'Kıyafet Kaydını Düzenle' : 'Kıyafet Ekle'}</h3>
+                <button onClick={() => { setShowClothingModal(false); setEditingClothingId(null); setClothingForm({ item: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); }} className="text-indigo-100 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               <form onSubmit={handleAddClothing} className="p-6 space-y-4">
                 <div>
@@ -7586,7 +9053,29 @@ useEffect(() => {
                   <label className="block text-sm font-bold text-black mb-1">Not (İsteğe Bağlı)</label>
                   <input type="text" value={clothingForm.note} onChange={e => setClothingForm({ ...clothingForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-600" />
                 </div>
-                <button type="submit" className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition">Kaydet</button>
+
+                {/* YENİ: PDF Zimmet Sözleşmesi Hazırla ve Yazdır — personel profiline göre otomatik doldurulur */}
+                <button
+                  type="button"
+                  onClick={generateClothingContractPDF}
+                  disabled={!clothingForm.item}
+                  className="w-full py-3 bg-neutral-900 hover:bg-black text-white font-bold rounded-xl transition flex justify-center items-center gap-2 disabled:opacity-40"
+                >
+                  <FileText className="w-4 h-4" /> Zimmet Sözleşmesi Hazırla / Yazdır
+                </button>
+
+                {/* YENİ: İmzalattığımız belgeyi ekleme (Şimdi Çek / Galeriden / Dosyadan) */}
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">İmzalı Belgeyi Ekle (İsteğe Bağlı)</label>
+                  <MediaCaptureMenu
+                    disabled={clothingUploading}
+                    buttonLabel={clothingForm.fileUrl ? 'Belge Yüklendi ✓' : 'İmzalı Belgeyi Yükle'}
+                    onChange={handleClothingFileUpload}
+                  />
+                  {clothingUploading && <p className="text-xs text-neutral-400 mt-1.5 animate-pulse">Yükleniyor...</p>}
+                </div>
+
+                <button type="submit" className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition">{editingClothingId ? 'Güncelle' : 'Kaydet'}</button>
               </form>
             </div>
           </div>
@@ -7595,10 +9084,10 @@ useEffect(() => {
         {/* Telefon Ekleme Modalı */}
         {showPhoneModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
-              <div className="bg-teal-600 text-white p-4 flex justify-between items-center">
-                <h3 className="font-bold text-lg">Telefon Ekle</h3>
-                <button onClick={() => setShowPhoneModal(false)} className="text-teal-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[90vh] overflow-y-auto custom-scrollbar">
+              <div className="bg-teal-600 text-white p-4 flex justify-between items-center sticky top-0 z-10">
+                <h3 className="font-bold text-lg">{editingPhoneId ? 'Telefon Kaydını Düzenle' : 'Telefon Ekle'}</h3>
+                <button onClick={() => { setShowPhoneModal(false); setEditingPhoneId(null); setPhoneForm({ model: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); }} className="text-teal-100 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               <form onSubmit={handleAddPhone} className="p-6 space-y-4">
                 <div>
@@ -7610,10 +9099,32 @@ useEffect(() => {
                   <input required type="date" value={phoneForm.date} onChange={e => setPhoneForm({ ...phoneForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-teal-600" />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-black mb-1">Not (İsteğe Bağlı)</label>
+                  <label className="block text-sm font-bold text-black mb-1">Not / Hat Numarası (İsteğe Bağlı)</label>
                   <input type="text" value={phoneForm.note} onChange={e => setPhoneForm({ ...phoneForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-teal-600" />
                 </div>
-                <button type="submit" className="w-full py-4 bg-teal-600 text-white font-bold rounded-xl hover:bg-teal-700 transition">Kaydet</button>
+
+                {/* YENİ: PDF Zimmet Sözleşmesi Hazırla ve Yazdır — personel profiline göre otomatik doldurulur */}
+                <button
+                  type="button"
+                  onClick={generatePhoneContractPDF}
+                  disabled={!phoneForm.model}
+                  className="w-full py-3 bg-neutral-900 hover:bg-black text-white font-bold rounded-xl transition flex justify-center items-center gap-2 disabled:opacity-40"
+                >
+                  <FileText className="w-4 h-4" /> Zimmet Sözleşmesi Hazırla / Yazdır
+                </button>
+
+                {/* YENİ: İmzalattığımız belgeyi ekleme (Şimdi Çek / Galeriden / Dosyadan) */}
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">İmzalı Belgeyi Ekle (İsteğe Bağlı)</label>
+                  <MediaCaptureMenu
+                    disabled={phoneUploading}
+                    buttonLabel={phoneForm.fileUrl ? 'Belge Yüklendi ✓' : 'İmzalı Belgeyi Yükle'}
+                    onChange={handlePhoneFileUpload}
+                  />
+                  {phoneUploading && <p className="text-xs text-neutral-400 mt-1.5 animate-pulse">Yükleniyor...</p>}
+                </div>
+
+                <button type="submit" className="w-full py-4 bg-teal-600 text-white font-bold rounded-xl hover:bg-teal-700 transition">{editingPhoneId ? 'Güncelle' : 'Kaydet'}</button>
               </form>
             </div>
           </div>
@@ -7676,6 +9187,296 @@ useEffect(() => {
                 <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2">
                   <LogOut className="w-5 h-5" /> İşi Bırakmayı Onayla
                 </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: İŞTEN ÇIKIŞ — KESİN HESAP DÖKÜMÜ, ONAY VE İMZALI BELGE MODALI */}
+        {showSettlementModal && settlementData && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-start md:items-center p-4 overflow-y-auto">
+            <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 my-4">
+              <div className="bg-gradient-to-r from-neutral-900 to-neutral-700 text-white p-4 flex justify-between items-center sticky top-0 z-10">
+                <h3 className="font-bold text-lg flex items-center gap-2"><LogOut className="w-5 h-5 text-red-400" /> İşten Çıkış Hesap Dökümü</h3>
+                <button onClick={() => setShowSettlementModal(false)} className="text-neutral-300 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+                {/* Personel & Tarih bilgisi */}
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-sm">
+                  <p className="font-black text-black">{person.fullName}</p>
+                  <p className="text-neutral-500 text-xs mt-0.5">{person.position || person.rank || '-'} • Çıkış Tarihi: <span className="font-bold text-black">{settlementData.dateStr}</span></p>
+                </div>
+
+                {/* Neden bu paranın kaldığını açıklayan tablo */}
+                <div className="border border-neutral-200 rounded-xl overflow-hidden">
+                  <div className="bg-neutral-800 text-white px-3 py-2 text-xs font-black uppercase tracking-wide">Hesap Detayı</div>
+                  <table className="w-full text-sm">
+                    <tbody className="divide-y divide-neutral-100">
+                      <tr><td className="p-2.5 text-neutral-600">Bu Ay Çalışılan Gün</td><td className="p-2.5 text-right font-bold text-black">{settlementData.calışılanGun} / {settlementData.daysInMonth} gün</td></tr>
+                      <tr><td className="p-2.5 text-neutral-600">Çalışılmayan Gün (İade Bazı)</td><td className="p-2.5 text-right font-bold text-black">{settlementData.calışılmayanGun} gün</td></tr>
+                      <tr><td className="p-2.5 text-neutral-600">Hak Edilen Net Maaş</td><td className="p-2.5 text-right font-bold text-black">₺{settlementData.netMaas.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                      <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yemek Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− ₺{settlementData.yemekIade.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                      <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yol Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− ₺{settlementData.yolIade.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                      {settlementData.icraKesintisi > 0 && (
+                        <tr className="bg-orange-50"><td className="p-2.5 text-orange-700">İcra Kesintisi</td><td className="p-2.5 text-right font-bold text-orange-700">₺{settlementData.icraKesintisi.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                      )}
+                      <tr><td className="p-2.5 text-neutral-500 text-xs">İadenin Nakitten Düşülen Kısmı</td><td className="p-2.5 text-right text-xs text-neutral-500">₺{settlementData.nakittenDusulen.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                      <tr><td className="p-2.5 text-neutral-500 text-xs">İadenin Bankadan Düşülen Kısmı</td><td className="p-2.5 text-right text-xs text-neutral-500">₺{settlementData.bankadanDusulen.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Final tutarlar */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-3 text-center">
+                    <p className="text-[10px] font-black uppercase text-yellow-700 mb-1">Kalan Banka Parası</p>
+                    <p className="text-xl font-black text-yellow-800">₺{settlementData.finalKalanBanka.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</p>
+                  </div>
+                  <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-3 text-center">
+                    <p className="text-[10px] font-black uppercase text-orange-700 mb-1">Kalan Nakit Parası</p>
+                    <p className="text-xl font-black text-orange-800">₺{settlementData.finalKalanNakit.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</p>
+                  </div>
+                </div>
+
+                {/* Ödeme onayları */}
+                <div className="border-t border-neutral-200 pt-4 space-y-2">
+                  <p className="font-bold text-sm text-black mb-1">Ödeme Onayı</p>
+                  <button type="button" onClick={() => setSettlementConfirm(p => ({...p, nakitVerildi: !p.nakitVerildi}))} className={`w-full p-3 rounded-xl border-2 flex justify-between items-center transition ${settlementConfirm.nakitVerildi ? 'bg-green-50 border-green-400 text-green-800' : 'bg-neutral-50 border-neutral-200 text-neutral-600'}`}>
+                    <span className="font-bold text-sm">Personele Kalan Nakit Parası Verildi mi?</span>
+                    <span className={`text-xs font-black px-2 py-1 rounded-lg ${settlementConfirm.nakitVerildi ? 'bg-green-600 text-white' : 'bg-neutral-200 text-neutral-500'}`}>{settlementConfirm.nakitVerildi ? 'EVET' : 'HAYIR'}</span>
+                  </button>
+                  <button type="button" onClick={() => setSettlementConfirm(p => ({...p, bankaVerildi: !p.bankaVerildi}))} className={`w-full p-3 rounded-xl border-2 flex justify-between items-center transition ${settlementConfirm.bankaVerildi ? 'bg-green-50 border-green-400 text-green-800' : 'bg-neutral-50 border-neutral-200 text-neutral-600'}`}>
+                    <span className="font-bold text-sm">Personele Kalan Banka Parası Verildi mi?</span>
+                    <span className={`text-xs font-black px-2 py-1 rounded-lg ${settlementConfirm.bankaVerildi ? 'bg-green-600 text-white' : 'bg-neutral-200 text-neutral-500'}`}>{settlementConfirm.bankaVerildi ? 'EVET' : 'HAYIR'}</span>
+                  </button>
+                </div>
+
+                {/* İmzalı belge yükleme (3 seçenekli) */}
+                <div className="border-t border-neutral-200 pt-4">
+                  <p className="font-bold text-sm text-black mb-2">Çıkış İçin İmzalatılacak Belgeler</p>
+                  {settlementConfirm.belgeUrl ? (
+                    <div className="bg-green-50 border border-green-300 rounded-xl p-3 flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-green-700 flex items-center gap-1.5"><CheckCircle className="w-4 h-4" /> İmzalı belge yüklendi</span>
+                      <div className="flex items-center gap-2">
+                        {setViewingImage && <button type="button" onClick={() => setViewingImage({ title: 'Çıkış Belgesi', name: settlementConfirm.belgeUrl })} className="text-[10px] font-bold bg-white text-green-700 px-2 py-1 rounded-lg border border-green-200">Görüntüle</button>}
+                        <button type="button" onClick={() => setSettlementConfirm(p => ({...p, belgeUrl: ''}))} className="text-[10px] font-bold bg-white text-red-600 px-2 py-1 rounded-lg border border-red-200">Kaldır</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <MediaCaptureMenu
+                      disabled={settlementUploading}
+                      buttonLabel={settlementUploading ? 'Yükleniyor...' : 'İmzalı Belge Yükle'}
+                      onChange={handleSettlementFileUpload}
+                      buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2 text-neutral-700 font-bold text-sm"
+                    />
+                  )}
+                </div>
+
+                {/* Kesinleştir */}
+                <button type="button" onClick={finalizeSettlement} className="w-full py-4 bg-green-600 text-white font-black rounded-xl hover:bg-green-700 transition flex justify-center items-center gap-2">
+                  <CheckCircle className="w-5 h-5" /> Verildi ve İmzalar Atıldı — Çıkışı Onayla
+                </button>
+                {person.cikisOnaylandi && (
+                  <p className="text-center text-xs font-bold text-green-700 bg-green-50 border border-green-200 rounded-xl p-2">✓ Bu personel için tüm maaş ödemesi ve sözleşmeler imzalandı. Çıkış tamamlandı.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: Avans Girişi Modalı */}
+        {showAvansModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-blue-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><DollarSign className="w-5 h-5" /> Avans Girişi</h3>
+                <button onClick={() => setShowAvansModal(false)} className="text-blue-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleAvansSubmit} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Avans Türü</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button type="button" onClick={() => setAvansForm({ ...avansForm, type: 'nakit' })} className={`p-3 rounded-xl font-bold text-sm border-2 transition ${avansForm.type === 'nakit' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-neutral-200 text-neutral-500'}`}>Nakit Avans</button>
+                    <button type="button" onClick={() => setAvansForm({ ...avansForm, type: 'resmi' })} className={`p-3 rounded-xl font-bold text-sm border-2 transition ${avansForm.type === 'resmi' ? 'border-blue-600 bg-blue-50 text-blue-700' : 'border-neutral-200 text-neutral-500'}`}>Resmi Avans</button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tutar (TL)</label>
+                  <input required type="number" value={avansForm.amount} onChange={e => setAvansForm({ ...avansForm, amount: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Hangi Ay (Maaş Tablosu)</label>
+                  <input required type="month" value={avansForm.month} onChange={e => setAvansForm({ ...avansForm, month: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Not (İsteğe Bağlı)</label>
+                  <input type="text" value={avansForm.note} onChange={e => setAvansForm({ ...avansForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-600" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition">Avansı Kaydet</button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Maaş / Yol / Yemek Onay Modalı kaldırıldı — artık Maaş Tablosu tiklerinden otomatik bildirim olarak gösteriliyor (yukarıda) */}
+
+        {/* YENİ: Tutanak Tut Modalı */}
+        {showTutanakModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[90vh] overflow-y-auto custom-scrollbar">
+              <div className="bg-neutral-800 text-white p-4 flex justify-between items-center sticky top-0 z-10">
+                <h3 className="font-bold text-lg flex items-center gap-2"><FileText className="w-5 h-5" /> Tutanak Tut</h3>
+                <button onClick={() => { setShowTutanakModal(false); setTutanakTemplateKey(''); }} className="text-neutral-300 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleTutanakSubmit} className="p-6 space-y-4">
+                {/* YENİ: Hazır Tutanak Şablonu Seçimi */}
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Hazır Tutanak Şablonu Seç</label>
+                  <select
+                    value={tutanakTemplateKey}
+                    onChange={e => {
+                      const key = e.target.value;
+                      setTutanakTemplateKey(key);
+                      const tpl = TUTANAK_TEMPLATES.find(t => t.key === key);
+                      if (tpl) setTutanakForm(prev => ({ ...prev, title: tpl.title }));
+                    }}
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800 bg-white"
+                  >
+                    <option value="">— Şablon Seçin (İsteğe Bağlı) —</option>
+                    {TUTANAK_TEMPLATES.map(t => (
+                      <option key={t.key} value={t.key}>{t.title}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tutanak Başlığı</label>
+                  <input required type="text" value={tutanakForm.title} onChange={e => setTutanakForm({ ...tutanakForm, title: e.target.value })} placeholder="Örn: Devamsızlık Tutanağı" className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tarih</label>
+                  <input required type="date" value={tutanakForm.date} onChange={e => setTutanakForm({ ...tutanakForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Olay Detayı (İsteğe Bağlı — Şablonda "Olayın Özeti" alanına yazılır)</label>
+                  <textarea value={tutanakForm.note} onChange={e => setTutanakForm({ ...tutanakForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800 h-16 resize-none" />
+                </div>
+
+                {/* YENİ: Seçilen şablonu personel bilgilerine göre doldurup yazdır */}
+                <button
+                  type="button"
+                  onClick={generateTutanakPDF}
+                  disabled={!tutanakTemplateKey}
+                  className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl transition flex justify-center items-center gap-2 disabled:opacity-40"
+                >
+                  <FileText className="w-4 h-4" /> Tutanağı Hazırla / Yazdır
+                </button>
+
+                {/* İmzalattığımız belgeyi ekleme (Şimdi Çek / Galeriden / Dosyadan) — Özlük dosyasına da eklenir */}
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">İmzalanmış Tutanağı Ekle</label>
+                  <MediaCaptureMenu
+                    disabled={actionUploading}
+                    buttonLabel={tutanakForm.fileUrl ? 'Belge Yüklendi ✓' : 'İmzalı Belgeyi Yükle'}
+                    onChange={async (e) => {
+                      const file = e.target.files[0]; if (!file) return;
+                      setActionUploading(true);
+                      try { const url = await uploadActionFile(file); setTutanakForm(prev => ({ ...prev, fileUrl: url })); } catch (err) { alert('Yükleme hatası'); }
+                      setActionUploading(false);
+                    }}
+                  />
+                </div>
+
+                <button type="submit" disabled={actionUploading} className="w-full py-4 bg-neutral-800 text-white font-bold rounded-xl hover:bg-black transition disabled:opacity-50">Tutanağı Kaydet</button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: Rapor Ekle Modalı */}
+        {showRaporModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-red-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><PlusCircle className="w-5 h-5" /> Sağlık Raporu Ekle</h3>
+                <button onClick={() => setShowRaporModal(false)} className="text-red-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleRaporSubmit} className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-1">Başlangıç</label>
+                    <input required type="date" value={raporForm.startDate} onChange={e => setRaporForm({ ...raporForm, startDate: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-1">Bitiş</label>
+                    <input required type="date" value={raporForm.endDate} onChange={e => setRaporForm({ ...raporForm, endDate: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Rapor Belgesi (Fotoğraf/Dosya) — Özlük dosyasına da eklenir</label>
+                  <MediaCaptureMenu
+                    disabled={actionUploading}
+                    buttonLabel={raporForm.fileUrl ? 'Belge Yüklendi ✓' : 'Rapor Belgesi Ekle'}
+                    onChange={async (e) => {
+                      const file = e.target.files[0]; if (!file) return;
+                      setActionUploading(true);
+                      try { const url = await uploadActionFile(file); setRaporForm(prev => ({ ...prev, fileUrl: url })); } catch (err) { alert('Yükleme hatası'); }
+                      setActionUploading(false);
+                    }}
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Açıklama (İsteğe Bağlı)</label>
+                  <input type="text" value={raporForm.note} onChange={e => setRaporForm({ ...raporForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <button type="submit" disabled={actionUploading} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition disabled:opacity-50">Raporu Kaydet</button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: Şirkete Borç Ödemesi Modalı */}
+        {showDebtModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-rose-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><Landmark className="w-5 h-5" /> Şirkete Borç Ödemesi</h3>
+                <button onClick={() => setShowDebtModal(false)} className="text-rose-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleDebtPaymentSubmit} className="p-6 space-y-4">
+                {/* Güncel borç bilgisi */}
+                <div className={`p-4 rounded-xl border-2 text-center ${currentDebt > 0 ? 'bg-rose-50 border-rose-200' : 'bg-green-50 border-green-200'}`}>
+                  <span className="text-[10px] font-bold uppercase tracking-wider block mb-1 opacity-70">Güncel Şirket Borcu</span>
+                  <span className={`text-2xl font-black ${currentDebt > 0 ? 'text-rose-700' : 'text-green-700'}`}>
+                    ₺{currentDebt.toLocaleString('tr-TR')}
+                  </span>
+                </div>
+
+                {currentDebt <= 0 ? (
+                  <p className="text-sm text-green-700 font-medium text-center bg-green-50 p-3 rounded-xl border border-green-200">Bu personelin ödenmemiş bir şirket borcu bulunmuyor. 🎉</p>
+                ) : (
+                  <>
+                    <div className="bg-rose-50 border border-rose-200 text-rose-700 p-3 rounded-xl text-xs font-medium flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                      <p>Girilen tutar, borçlandırma tutarından düşülür. Ödeme önce Kalan Nakit'ten karşılanır; nakit yetersizse kalan kısım Kalan Banka tarafından tahsil edilir.</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-black mb-1">Ödenecek Tutar (TL)</label>
+                      <input required type="number" max={currentDebt} value={debtForm.amount} onChange={e => setDebtForm({ ...debtForm, amount: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-rose-600" placeholder={`En fazla ₺${currentDebt.toLocaleString('tr-TR')}`} />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-black mb-1">Kesintinin Yapılacağı Ay</label>
+                      <input required type="month" value={debtForm.month} onChange={e => setDebtForm({ ...debtForm, month: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-rose-600" />
+                      <p className="text-[10px] text-neutral-500 font-medium mt-1">Ödeme, seçtiğiniz ayın Kalan Nakit'inden (yetmezse Kalan Banka'sından) düşülür.</p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-black mb-1">Not (İsteğe Bağlı)</label>
+                      <input type="text" value={debtForm.note} onChange={e => setDebtForm({ ...debtForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-rose-600" />
+                    </div>
+                    <button type="submit" className="w-full py-4 bg-rose-600 text-white font-bold rounded-xl hover:bg-rose-700 transition flex justify-center items-center gap-2">
+                      <Landmark className="w-5 h-5" /> Borç Ödemesini Kaydet
+                    </button>
+                  </>
+                )}
               </form>
             </div>
           </div>
@@ -7847,10 +9648,13 @@ useEffect(() => {
                       </div>
                     ) : (
                       <div className="mt-auto">
-                        <label className="cursor-pointer w-full py-2 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs rounded-lg transition flex items-center justify-center gap-2 border border-red-100 border-dashed">
-                          <Upload className="w-4 h-4" /> Yükle
-                          <input type="file" accept="image/*,application/pdf" className="hidden" onChange={(e) => handleFileUpload(e, docType.id)} />
-                        </label>
+                        <MediaCaptureMenu
+                          onChange={(e) => handleFileUpload(e, docType.id)}
+                          disabled={isUploading}
+                          buttonLabel="Yükle"
+                          compact={true}
+                          buttonClassName="cursor-pointer w-full py-2 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs rounded-lg transition flex items-center justify-center gap-2 border border-red-100 border-dashed"
+                        />
                       </div>
                     )}
                   </div>
@@ -8606,7 +10410,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           {/* Önizleme */}
           <div className="bg-black rounded-2xl p-8 flex justify-center items-center mb-5 border border-neutral-800">
             <img
-              src={logoPreview || "sembol-nakliyat-logo.webp"}
+              src={logoPreview || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"}
               alt="Logo Önizleme"
               className="w-auto object-contain"
               style={{ height: `${96 * (logoSize / 100)}px` }}
@@ -8870,7 +10674,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
   };
 
   // --- YENİ EKLENEN: PERSONEL TAHTASI BİLEŞENİ ---
-  const PersonelTahtasiView = ({ personnelList }) => {
+  const PersonelTahtasiView = ({ personnelList, setViewingPersonnelProfileId, setActiveTab }) => {
     const [searchQuery, setSearchQuery] = useState('');
 
     // Sadece Mavi Yaka veya saha personeli olarak işaretlenenleri al
@@ -8957,7 +10761,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                      <p className="text-center text-xs font-medium text-neutral-400 py-6 border-2 border-dashed border-neutral-200 rounded-xl bg-white">Bu bölümde personel bulunmuyor.</p>
                    ) : (
                      colPersonnel.map(person => (
-                       <div key={person.id} className={`bg-white p-3 rounded-xl shadow-sm border transition hover:-translate-y-1 hover:shadow-md group relative overflow-hidden ${person.employmentStatus === 'Pasif' ? 'border-red-200 bg-red-50/30' : 'border-neutral-200 hover:border-orange-400'}`}>
+                       <div key={person.id} onClick={() => { if (setViewingPersonnelProfileId && setActiveTab) { setViewingPersonnelProfileId(person.id); setActiveTab('personnelProfile'); } }} className={`bg-white p-3 rounded-xl shadow-sm border transition hover:-translate-y-1 hover:shadow-md group relative overflow-hidden cursor-pointer ${person.employmentStatus === 'Pasif' ? 'border-red-200 bg-red-50/30' : 'border-neutral-200 hover:border-orange-400'}`}>
                          <div className={`absolute top-0 left-0 w-1.5 h-full ${person.employmentStatus === 'Pasif' ? 'bg-red-500' : column.color.replace('bg-', 'bg-')}`}></div>
                          <div className="flex items-start gap-3 pl-2">
                            <div className={`w-12 h-12 rounded-full flex items-center justify-center font-bold overflow-hidden shrink-0 border-2 shadow-sm ${person.employmentStatus === 'Pasif' ? 'border-red-200 grayscale' : 'border-white'}`}>
@@ -9016,7 +10820,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                  </div>
                  <div className="p-3 flex-1 overflow-y-auto space-y-3 custom-scrollbar min-h-0 bg-white/40">
                     {uncategorizedList.map(person => (
-                       <div key={person.id} className="bg-white p-3 rounded-xl shadow-sm border border-neutral-200 relative overflow-hidden group">
+                       <div key={person.id} onClick={() => { if (setViewingPersonnelProfileId && setActiveTab) { setViewingPersonnelProfileId(person.id); setActiveTab('personnelProfile'); } }} className="bg-white p-3 rounded-xl shadow-sm border border-neutral-200 relative overflow-hidden group cursor-pointer hover:-translate-y-1 hover:shadow-md transition">
                            <div className="absolute top-0 left-0 w-1.5 h-full bg-neutral-400"></div>
                            <div className="flex items-start gap-3 pl-2">
                                <div className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center font-bold overflow-hidden shrink-0 border-2 border-white shadow-sm">
@@ -9082,6 +10886,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       <span className="text-[11px] font-bold text-neutral-600"><Clock className="w-3 h-3 inline mr-1" />{job.time}</span>
                     </div>
                     <h3 className="font-black text-[15px] text-black truncate mb-1" title={job.customerName}>{job.customerName}</h3>
+                    {job.assignedVehiclePlate && (
+                      <div className="flex items-center gap-1 text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded w-fit mb-1.5">
+                        <Truck className="w-3 h-3 shrink-0" /> {job.assignedVehiclePlate}
+                      </div>
+                    )}
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-700 mb-2">
                       <span className="truncate flex-1"><MapPin className="w-3 h-3 inline mr-0.5 text-neutral-400"/>{job.fromDistrict} ➔ {job.toDistrict || '?'}</span>
                     </div>
@@ -11679,6 +13488,26 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       }));
     };
 
+    // YENİ: Ödeme tiki (yemek/yol/banka/nakit/icra) yapıldığında, o kalemin TUTARINI ve
+    // hangi aya ait olduğunu da maaş kaydına yazar. Böylece Kasa Özeti bu tikli tutarları
+    // ay bazında GİDER olarak okuyabilir. Tik kaldırılırsa tutar sıfırlanır (gider düşer).
+    const handlePaymentToggle = (personId, field, amountField, amountValue) => {
+      const row = maasData[personId] || {};
+      const newChecked = !row[field];
+      setMaasData(prev => ({
+        ...prev,
+        [personId]: {
+          ...(prev[personId] || {}),
+          [field]: newChecked,
+          // Tik açıkken tutarı yaz, kapalıyken 0 yaz (gider hesabından düşsün)
+          [amountField]: newChecked ? (parseFloat(amountValue) || 0) : 0,
+          // Bu satırın ait olduğu ay bilgisini kaydet (Kasa Özeti ay filtresi için)
+          _giderYil: currentYear,
+          _giderAy: currentMonth
+        }
+      }));
+    };
+
     const handleYearlyChange = (personId, field, value) => {
       setYearlyData(prev => ({
         ...prev,
@@ -11960,7 +13789,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <td className={`border-r border-neutral-300 p-1 ${row.yemekOdendi ? 'bg-green-50' : ''}`}>
                       <div className="flex items-center gap-1">
                         <input type="number" value={row.yemek !== undefined ? row.yemek : (person.yemek || '')} onChange={e => handleCellChange(person.id, 'yemek', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
-                        <button type="button" onClick={() => handleCellChange(person.id, 'yemekOdendi', !row.yemekOdendi)} className={`p-1 shrink-0 rounded transition ${row.yemekOdendi ? 'text-green-600' : 'text-neutral-300 hover:text-neutral-500'}`} title={row.yemekOdendi ? 'Ödendi' : 'Ödenmedi'}>
+                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'yemekOdendi', 'yemekOdenenTutar', (row.yemek !== undefined ? row.yemek : (person.yemek || 0)))} className={`p-1 shrink-0 rounded transition ${row.yemekOdendi ? 'text-green-600' : 'text-neutral-300 hover:text-neutral-500'}`} title={row.yemekOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
                           <CheckCircle className="w-4 h-4" />
                         </button>
                       </div>
@@ -11968,7 +13797,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <td className={`border-r border-neutral-300 p-1 ${row.yolOdendi ? 'bg-green-50' : ''}`}>
                       <div className="flex items-center gap-1">
                         <input type="number" value={row.yol !== undefined ? row.yol : (person.yol || '')} onChange={e => handleCellChange(person.id, 'yol', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
-                        <button type="button" onClick={() => handleCellChange(person.id, 'yolOdendi', !row.yolOdendi)} className={`p-1 shrink-0 rounded transition ${row.yolOdendi ? 'text-green-600' : 'text-neutral-300 hover:text-neutral-500'}`} title={row.yolOdendi ? 'Ödendi' : 'Ödenmedi'}>
+                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'yolOdendi', 'yolOdenenTutar', (row.yol !== undefined ? row.yol : (person.yol || 0)))} className={`p-1 shrink-0 rounded transition ${row.yolOdendi ? 'text-green-600' : 'text-neutral-300 hover:text-neutral-500'}`} title={row.yolOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
                           <CheckCircle className="w-4 h-4" />
                         </button>
                       </div>
@@ -11976,13 +13805,20 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <td className="border-r border-neutral-300 p-1 bg-red-50/50">
                       <input type="number" value={(yearlyData[person.id] && yearlyData[person.id].borclanma) || ''} onChange={e => handleYearlyChange(person.id, 'borclanma', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-red-100 focus:ring-1 focus:ring-red-400 rounded text-red-700 font-bold" placeholder="0" title="Tüm yıl boyunca geçerlidir. Yıl sonunda sıfırlanır." />
                     </td>
-                    <td className="border-r border-neutral-300 p-1 bg-red-100 font-black text-red-800 text-center align-middle">
-                      {c.icraKesintisi.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                    <td className={`border-r border-neutral-300 p-1 font-black text-center align-middle ${row.icraOdendi ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      <div className="flex items-center justify-center gap-1">
+                        <span className={row.icraOdendi ? 'line-through opacity-70' : ''}>{c.icraKesintisi.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
+                        {c.icraKesintisi > 0 && (
+                          <button type="button" onClick={() => handlePaymentToggle(person.id, 'icraOdendi', 'icraOdenenTutar', c.icraKesintisi)} className={`p-0.5 shrink-0 rounded transition ${row.icraOdendi ? 'text-green-700' : 'text-red-600/50 hover:text-red-800'}`} title={row.icraOdendi ? 'İcra Kesintisi Yatırıldı (Gidere işlendi)' : 'İcra Kesintisi Ödenmedi'}>
+                            <CheckCircle className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td className={`border-r border-neutral-300 p-1 align-middle ${row.bankaOdendi ? 'bg-green-200' : 'bg-yellow-100'}`}>
                       <div className="flex items-center justify-center gap-1">
                         <span className={`font-black ${row.bankaOdendi ? 'text-green-800 line-through opacity-70' : 'text-yellow-900'}`}>{c.bankaKalan.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
-                        <button type="button" onClick={() => handleCellChange(person.id, 'bankaOdendi', !row.bankaOdendi)} className={`p-0.5 shrink-0 rounded transition ${row.bankaOdendi ? 'text-green-700' : 'text-yellow-600/50 hover:text-yellow-800'}`} title={row.bankaOdendi ? 'Ödendi' : 'Ödenmedi'}>
+                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'bankaOdendi', 'bankaOdenenTutar', c.bankaKalan)} className={`p-0.5 shrink-0 rounded transition ${row.bankaOdendi ? 'text-green-700' : 'text-yellow-600/50 hover:text-yellow-800'}`} title={row.bankaOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
                           <CheckCircle className="w-4 h-4" />
                         </button>
                       </div>
@@ -11990,7 +13826,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <td className={`p-1 align-middle ${row.nakitOdendi ? 'bg-green-300' : 'bg-orange-100'}`}>
                       <div className="flex items-center justify-center gap-1">
                         <span className={`font-black ${row.nakitOdendi ? 'text-green-900 line-through opacity-70' : 'text-orange-900'}`}>{c.kalanNakit.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
-                        <button type="button" onClick={() => handleCellChange(person.id, 'nakitOdendi', !row.nakitOdendi)} className={`p-0.5 shrink-0 rounded transition ${row.nakitOdendi ? 'text-green-800' : 'text-orange-600/50 hover:text-orange-800'}`} title={row.nakitOdendi ? 'Ödendi' : 'Ödenmedi'}>
+                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'nakitOdendi', 'nakitOdenenTutar', c.kalanNakit)} className={`p-0.5 shrink-0 rounded transition ${row.nakitOdendi ? 'text-green-800' : 'text-orange-600/50 hover:text-orange-800'}`} title={row.nakitOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
                           <CheckCircle className="w-4 h-4" />
                         </button>
                       </div>
@@ -12445,7 +14281,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
           <div className="bg-neutral-50 p-8 flex flex-col items-center border-b border-neutral-200">
             <img 
-              src={appBranding?.logoUrl || "sembol-nakliyat-logo.webp"} 
+              src={appBranding?.logoUrl || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"} 
               alt="Sembol Nakliyat" 
               className="w-auto object-contain mb-2 drop-shadow-sm" 
               style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
@@ -12626,6 +14462,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [systemLogs, setSystemLogs] = useState([]);
     const [vehicles, setVehicles] = useState([]);
     const [materials, setMaterials] = useState([]);
+    // YENİ: Malzeme seed/temizleme işleminin aynı anda birden çok kez çalışıp kopya üretmesini engelleyen kilit
+    const materialSeedRunning = React.useRef(false);
     const [personnelList, setPersonnelList] = useState([]);
     const [positions, setPositions] = useState([]);
     const [ranks, setRanks] = useState([]);
@@ -12656,6 +14494,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [viewingCariKey, setViewingCariKey] = useState(null);
     // YENİ: Görüntülenen Personel Profili'nin ID'si
     const [viewingPersonnelProfileId, setViewingPersonnelProfileId] = useState(null);
+    // YENİ: Personel Profili'nden "Bilgileri Düzenle" ile Personel Listesi'ne geçişte otomatik açılacak düzenleme ID'si
+    const [pendingEditPersonnelId, setPendingEditPersonnelId] = useState(null);
     // YENİ: Görüntülenen Araç Profili'nin ID'si
     const [viewingVehicleProfileId, setViewingVehicleProfileId] = useState(null);
     const [vehicleEditForm, setVehicleEditForm] = useState({});
@@ -12777,21 +14617,50 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         setMaterials(list); 
         setDataLoadStatus(p => ({...p, mat: true})); 
 
-        // SİSTEM HARİCİ VE VARSAYILAN MALZEMELERİ OTOMATİK OLUŞTURMA (EŞLEŞTİRME)
-        if (firebaseUser && !snap.metadata.hasPendingWrites) {
-            const defaultMats = [
-                { name: 'Streç', category: 'Ambalaj Malzemesi', stock: '0', unit: 'Rulo', checkKey: 'streç' },
-                { name: 'Bant', category: 'Ambalaj Malzemesi', stock: '0', unit: 'Adet', checkKey: 'bant' },
-                { name: 'Poşet', category: 'Ambalaj Malzemesi', stock: '0', unit: 'Adet', checkKey: 'poşet' },
-                { name: 'Kağıt', category: 'Ambalaj Malzemesi', stock: '0', unit: 'Kg', checkKey: 'kağıt' },
-                { name: 'Koli', category: 'Ambalaj Malzemesi', stock: '0', unit: 'Adet', checkKey: 'koli' }
-            ];
-            
-            for (const mat of defaultMats) {
-                if (!list.some(m => (m.name || '').toLowerCase().includes(mat.checkKey))) {
-                    const { checkKey, ...dataToAdd } = mat;
-                    await addDoc(getCol('materials'), dataToAdd);
-                }
+        // MALZEME LİSTESİ: Sadece ekip kurma tahtasındaki 5 ana malzeme (Streç, Bant, Poşet, Kağıt, Koli) tutulur.
+        // Bu blok hem eksik olan varsayılan malzemeleri OLUŞTURUR hem de yanlışlıkla oluşmuş
+        // KOPYA (duplike) kayıtları TEMİZLER — böylece stok tablosu ve otomatik düşüm şişmez.
+        if (firebaseUser && !snap.metadata.hasPendingWrites && !materialSeedRunning.current) {
+            materialSeedRunning.current = true; // Yarış koşulunu (aynı anda tekrar tekrar ekleme) engelle
+            try {
+              // 5 ana malzemenin tanımı ve hangi kelimeyle eşleşeceği
+              const defaultMats = [
+                  { name: 'Streç', category: 'Ambalaj Malzemesi', unit: 'Rulo', checkKey: 'streç' },
+                  { name: 'Bant', category: 'Ambalaj Malzemesi', unit: 'Adet', checkKey: 'bant' },
+                  { name: 'Poşet', category: 'Ambalaj Malzemesi', unit: 'Adet', checkKey: 'poşet' },
+                  { name: 'Kağıt', category: 'Ambalaj Malzemesi', unit: 'Kg', checkKey: 'kağıt' },
+                  { name: 'Koli', category: 'Ambalaj Malzemesi', unit: 'Adet', checkKey: 'koli' }
+              ];
+
+              const norm = (s) => (s || '').toLocaleLowerCase('tr-TR');
+
+              for (const mat of defaultMats) {
+                  // Bu ana malzemeye ait TÜM kayıtları bul (kopyalar dahil)
+                  const matches = list.filter(m => norm(m.name).includes(mat.checkKey));
+
+                  if (matches.length === 0) {
+                      // Hiç yoksa: sıfır stokla tek kayıt oluştur
+                      await addDoc(getCol('materials'), { name: mat.name, category: mat.category, unit: mat.unit, stock: '0' });
+                  } else if (matches.length > 1) {
+                      // KOPYA VARSA: stokları topla, ilkini güncelle, diğerlerini sil
+                      const totalStock = matches.reduce((sum, m) => sum + (parseFloat(m.stock) || 0), 0);
+                      const keep = matches[0];
+                      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', keep.id), {
+                          name: mat.name, category: mat.category, unit: mat.unit, stock: String(totalStock)
+                      });
+                      for (let i = 1; i < matches.length; i++) {
+                          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', matches[i].id));
+                      }
+                  }
+              }
+
+              // 5 ana malzeme dışında kalan (yanlış eklenmiş) hiçbir malzeme kalmasın diye:
+              // Not: kullanıcı isterse ileride ekstra malzeme ekleyebilir; burada sadece
+              // ana 5 malzemenin kopyaları temizlenir, başka isimli kayıtlara dokunulmaz.
+            } catch (err) {
+              console.error('Malzeme senkronizasyon/temizleme hatası:', err);
+            } finally {
+              materialSeedRunning.current = false;
             }
         }
       }, console.error));
@@ -14009,23 +15878,31 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       if (!jobToEnd.materialsDeducted && jobToEnd.type !== 'Asansör') {
         const estData = jobToEnd.assignedMaterials || calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking);
         const customMats = jobToEnd.customMaterials || [];
-        let deductedList = []; // YENİ EKLENDİ: Log için düşülen malzemeleri tutacak
+        let deductedList = []; // Log için düşülen malzemeleri tutar
 
-        for (const m of materials) {
-          let deductAmount = 0;
-          if (m.name.includes('Streç')) deductAmount = estData.strec || 0;
-          if (m.name === 'Bant') deductAmount = estData.bant || 0;
-          if (m.name === 'Poşet') deductAmount = estData.poset || 0;
-          if (m.name.includes('Kağıt')) deductAmount = estData.kagit || 0;
-          if (m.name === 'Koli') deductAmount = estData.koli || 0;
-          
-          // Özel (Sistem Harici) eklenen malzemeleri kontrol et
-          const cMat = customMats.find(cm => cm.name.toLowerCase() === m.name.toLowerCase());
+        const norm = (s) => (s || '').toLocaleLowerCase('tr-TR');
+        // Her ana malzeme tipi için, listedeki SADECE İLK eşleşen kayda bir kez düşülür.
+        // (Kopya kayıtlar temizlense de, olası bir yarış anında tekrar düşmeyi önler.)
+        const materialTypes = [
+          { key: 'streç', amount: estData.strec || 0 },
+          { key: 'bant', amount: estData.bant || 0 },
+          { key: 'poşet', amount: estData.poset || 0 },
+          { key: 'kağıt', amount: estData.kagit || 0 },
+          { key: 'koli', amount: estData.koli || 0 }
+        ];
+
+        for (const mt of materialTypes) {
+          const target = materials.find(m => norm(m.name).includes(mt.key));
+          if (!target) continue;
+
+          let deductAmount = mt.amount;
+          // Bu tipe ait özel (sistem harici) eklenen malzemeleri de ekle
+          const cMat = customMats.find(cm => norm(cm.name).includes(mt.key));
           if (cMat) deductAmount += parseFloat(cMat.amount) || 0;
 
           if (deductAmount > 0) {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', m.id), { stock: String((parseFloat(m.stock) || 0) - deductAmount) });
-            deductedList.push(`${deductAmount} ${m.unit} ${m.name}`); // YENİ EKLENDİ
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', target.id), { stock: String((parseFloat(target.stock) || 0) - deductAmount) });
+            deductedList.push(`${deductAmount} ${target.unit} ${target.name}`);
           }
         }
         
@@ -14064,22 +15941,29 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       const job = jobs.find(j => j.id === jobId);
       const customMats = job?.customMaterials || [];
       const actualEst = job?.assignedMaterials || estData;
-      let deductedList = []; // YENİ EKLENDİ
+      let deductedList = [];
 
-      for (const m of materials) {
-        let deductAmount = 0;
-        if (m.name.includes('Streç')) deductAmount = actualEst.strec || 0;
-        if (m.name === 'Bant') deductAmount = actualEst.bant || 0;
-        if (m.name === 'Poşet') deductAmount = actualEst.poset || 0;
-        if (m.name.includes('Kağıt')) deductAmount = actualEst.kagit || 0;
-        if (m.name === 'Koli') deductAmount = actualEst.koli || 0;
+      const norm = (s) => (s || '').toLocaleLowerCase('tr-TR');
+      // Her ana malzeme tipi için listedeki SADECE İLK eşleşen kayda bir kez düşülür
+      const materialTypes = [
+        { key: 'streç', amount: actualEst.strec || 0 },
+        { key: 'bant', amount: actualEst.bant || 0 },
+        { key: 'poşet', amount: actualEst.poset || 0 },
+        { key: 'kağıt', amount: actualEst.kagit || 0 },
+        { key: 'koli', amount: actualEst.koli || 0 }
+      ];
 
-        const cMat = customMats.find(cm => cm.name.toLowerCase() === m.name.toLowerCase());
+      for (const mt of materialTypes) {
+        const target = materials.find(m => norm(m.name).includes(mt.key));
+        if (!target) continue;
+
+        let deductAmount = mt.amount;
+        const cMat = customMats.find(cm => norm(cm.name).includes(mt.key));
         if (cMat) deductAmount += parseFloat(cMat.amount) || 0;
 
         if (deductAmount > 0) {
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', m.id), { stock: String((parseFloat(m.stock) || 0) - deductAmount) });
-          deductedList.push(`${deductAmount} ${m.unit} ${m.name}`); // YENİ EKLENDİ
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', target.id), { stock: String((parseFloat(target.stock) || 0) - deductAmount) });
+          deductedList.push(`${deductAmount} ${target.unit} ${target.name}`);
         }
       }
 
@@ -14150,7 +16034,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       return (
         <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
           <img 
-            src={appBranding?.logoUrl || "sembol-nakliyat-logo.webp"} 
+            src={appBranding?.logoUrl || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"} 
             alt="Sembol Nakliyat" 
             className="w-auto object-contain mb-6 animate-pulse drop-shadow-2xl" 
             style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
@@ -14329,7 +16213,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         <div className="md:hidden absolute top-0 left-0 right-0 h-16 bg-black text-white flex items-center gap-2 px-3 z-30 shadow-md border-b border-red-600">
           <div className="flex items-center gap-2 shrink-0">
             <img 
-              src={appBranding?.logoUrl || "sembol-nakliyat-logo.webp"} 
+              src={appBranding?.logoUrl || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"} 
               alt="Sembol Nakliyat" 
               className="w-auto object-contain" 
               style={{ height: `${Math.min(48, 40 * ((appBranding?.logoSize || 100) / 100))}px` }}
@@ -14450,7 +16334,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         <aside className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative top-0 left-0 z-40 w-64 md:min-w-[256px] bg-black text-white flex flex-col shadow-2xl shrink-0 h-full transition-transform duration-300 ease-in-out border-r border-neutral-800`}>
           <div className="p-6 flex flex-col items-center gap-2 border-b border-neutral-800 text-center">
             <img 
-              src={appBranding?.logoUrl || "sembol-nakliyat-logo.webp"} 
+              src={appBranding?.logoUrl || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"} 
               alt="Sembol Nakliyat" 
               className="w-full object-contain mb-2" 
               style={{ maxWidth: `${180 * ((appBranding?.logoSize || 100) / 100)}px` }}
@@ -14696,6 +16580,56 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
+            {/* YENİ: Finans Bölümü — Operasyon Bölümü'nün hemen altına taşındı, mavi gradyanlı dikkat çekici başlık */}
+            {showFinance && (
+              <div className="flex flex-col gap-1 mt-2 mb-2">
+                <button 
+                  onClick={() => { setIsFinanceSubMenuOpen(!isFinanceSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-sky-500 to-blue-700 text-white shadow-lg shadow-blue-600/30 hover:scale-[1.02]`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Wallet className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Finans Bölümü</span>
+                  </div>
+                  {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+                
+                {isFinanceSubMenuOpen && (
+                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    <button 
+                      onClick={() => { setActiveTab('financeDashboard'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'financeDashboard' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'financeDashboard' ? 'bg-white' : 'bg-blue-500'}`}></div> Kasa Özeti
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('reporting'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'reporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'reporting' ? 'bg-white' : 'bg-blue-500'}`}></div> Genel Ciro Raporu
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('advancedReporting'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'advancedReporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'advancedReporting' ? 'bg-white' : 'bg-blue-500'}`}></div> Analiz & İstatistik
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('personelMuhasebe'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelMuhasebe' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelMuhasebe' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Muhasebe
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('personelOdeme'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelOdeme' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelOdeme' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Ödemeleri
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* İş Listesi */}
             {showJobList && (
               <div className="flex flex-col gap-1">
@@ -14873,55 +16807,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {/* Finans Listesi */}
-            {showFinance && (
-              <div className="flex flex-col gap-1">
-                <button 
-                  onClick={() => { setIsFinanceSubMenuOpen(!isFinanceSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'financeDashboard' || activeTab === 'reporting' || activeTab === 'personelMuhasebe' || activeTab === 'personelOdeme' || activeTab === 'advancedReporting') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Wallet className={`w-5 h-5 shrink-0 ${(activeTab === 'financeDashboard' || activeTab === 'reporting' || activeTab === 'personelMuhasebe' || activeTab === 'personelOdeme' || activeTab === 'advancedReporting') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Finans Yönetimi</span>
-                  </div>
-                  {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-                
-                {isFinanceSubMenuOpen && (
-                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
-                    <button 
-                      onClick={() => { setActiveTab('financeDashboard'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'financeDashboard' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'financeDashboard' ? 'bg-white' : 'bg-red-600'}`}></div> Kasa Özeti
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('reporting'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'reporting' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'reporting' ? 'bg-white' : 'bg-red-600'}`}></div> Genel Ciro Raporu
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('advancedReporting'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'advancedReporting' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'advancedReporting' ? 'bg-white' : 'bg-red-600'}`}></div> Analiz & İstatistik
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('personelMuhasebe'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelMuhasebe' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelMuhasebe' ? 'bg-white' : 'bg-red-600'}`}></div> Personel Muhasebe
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('personelOdeme'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelOdeme' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelOdeme' ? 'bg-white' : 'bg-red-600'}`}></div> Personel Ödemeleri
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Finans Bölümü buradan Operasyon Bölümü'nün altına taşındı */}
 
             {/* Yetkilendirme */}
             {showAuth && (
@@ -15064,7 +16950,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                              <span className="text-emerald-200/70 text-[9px] truncate mt-0.5">{c.position} - {c.phone}</span>
                           </a>
                           {isManager && (
-                             <div className="flex items-center opacity-0 group-hover:opacity-100 transition shrink-0 gap-1 bg-emerald-900/50 p-1 rounded-lg">
+                             <div className="flex items-center shrink-0 gap-1 bg-emerald-900/50 p-1 rounded-lg">
                                 <button disabled={index === 0} onClick={() => handleReorderContact(index, 'up')} className="text-neutral-400 hover:text-white disabled:opacity-30 p-0.5"><ChevronUp className="w-3 h-3"/></button>
                                 <button disabled={index === companyContacts.length - 1} onClick={() => handleReorderContact(index, 'down')} className="text-neutral-400 hover:text-white disabled:opacity-30 p-0.5"><ChevronDown className="w-3 h-3"/></button>
                                 <button onClick={() => { setEditingContact(c); setContactForm({name: c.name, phone: c.phone, position: c.position}); setShowContactModal(true); }} className="text-blue-400 hover:text-blue-300 p-0.5"><Edit className="w-3 h-3"/></button>
@@ -15092,6 +16978,100 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         {/* Main Content Area */}
         <main className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
           <div className="max-w-6xl mx-auto">
+            {/* YENİ: Masaüstü Görünümde Genel Arama Barı (mobildeki ile aynı mantık, sadece md ve üstünde görünür) */}
+            {showGlobalSearch && (
+              <div className="hidden md:block relative mb-6">
+                <div className="relative">
+                  <Search className="w-5 h-5 absolute left-4 top-1/2 -translate-y-1/2 text-red-500" />
+                  <input
+                    type="text"
+                    value={globalSearchQuery}
+                    onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                    placeholder="Araç plakası, personel adı veya müşteri adı/telefon numarası ara..."
+                    className="w-full pl-12 pr-4 py-3.5 bg-white text-black border-2 border-red-500 ring-4 ring-red-100 rounded-2xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-600 transition shadow-sm"
+                  />
+                  {globalSearchQuery && (
+                    <button onClick={() => setGlobalSearchQuery('')} className="absolute right-4 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-black transition">
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                {globalSearchQuery.trim() !== '' && (() => {
+                  const normalizeSearchStr = (s) => (s || '').toString().toLocaleLowerCase('tr-TR').replace(/\s+/g, '');
+                  const q = normalizeSearchStr(globalSearchQuery);
+
+                  const vehicleResults = showGlobalSearchVehicle ? vehicles.filter(v => normalizeSearchStr(v.plate).includes(q) || normalizeSearchStr(v.type).includes(q)).slice(0, 5) : [];
+                  const personnelResults = showGlobalSearchPersonnel ? personnelList.filter(p =>
+                    normalizeSearchStr(p.fullName).includes(q) ||
+                    normalizeSearchStr(p.personalPhone).includes(q) ||
+                    normalizeSearchStr(p.companyPhone).includes(q)
+                  ).slice(0, 5) : [];
+                  const customerMap = new Map();
+                  if (showGlobalSearchCustomer) {
+                    jobs.forEach(j => {
+                      if (!j.customerPhone) return;
+                      const key = normalizeCariPhone(j.customerPhone);
+                      if (!customerMap.has(key)) customerMap.set(key, { name: j.customerName, phone: j.customerPhone, cariKey: key });
+                    });
+                  }
+                  const customerResults = showGlobalSearchCustomer ? Array.from(customerMap.values()).filter(c =>
+                    normalizeSearchStr(c.name).includes(q) || normalizeSearchStr(c.phone).includes(q)
+                  ).slice(0, 5) : [];
+                  const hasAnyResult = vehicleResults.length > 0 || personnelResults.length > 0 || customerResults.length > 0;
+
+                  return (
+                    <div className="absolute left-0 right-0 mt-2 bg-white border-2 border-red-500 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 max-h-[70vh] overflow-y-auto custom-scrollbar text-black">
+                      {!hasAnyResult && (
+                        <p className="p-5 text-sm text-neutral-500 text-center font-medium">Eşleşen araç, personel veya müşteri bulunamadı.</p>
+                      )}
+
+                      {showGlobalSearchCustomer && customerResults.length > 0 && (
+                        <div className="p-3 border-b border-neutral-100">
+                          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider px-2 mb-1.5">Müşteriler (İsim veya Telefon Numarasıyla)</p>
+                          {customerResults.map((c, idx) => (
+                            <button key={idx} type="button" onClick={() => { setViewingCariKey(c.cariKey); setActiveTab('customerProfile'); setGlobalSearchQuery(''); }} className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-neutral-50 transition flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-black text-xs shrink-0">{c.name.charAt(0).toUpperCase()}</div>
+                              <div className="flex-1"><span className="font-bold text-black text-sm block">{c.name}</span><span className="text-[10px] text-neutral-500">{c.phone}</span></div>
+                              <span className="text-[10px] font-bold text-orange-600">Cariye Git →</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {showGlobalSearchPersonnel && personnelResults.length > 0 && (
+                        <div className="p-3 border-b border-neutral-100">
+                          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider px-2 mb-1.5">Personel</p>
+                          {personnelResults.map(p => (
+                            <button key={p.id} type="button" onClick={() => { setViewingPersonnelProfileId(p.id); setActiveTab('personnelProfile'); setGlobalSearchQuery(''); }} className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-neutral-50 transition flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-full bg-neutral-200 overflow-hidden shrink-0 flex items-center justify-center">
+                                {p.profileImage ? <img src={p.profileImage} className="w-full h-full object-cover" /> : <User className="w-4 h-4 text-neutral-400" />}
+                              </div>
+                              <div className="flex-1"><span className="font-bold text-black text-sm block">{p.fullName}</span><span className="text-[10px] text-neutral-500">{p.position}</span></div>
+                              <span className="text-[10px] font-bold text-orange-600">Profiline Git →</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
+                      {showGlobalSearchVehicle && vehicleResults.length > 0 && (
+                        <div className="p-3">
+                          <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider px-2 mb-1.5">Araçlar</p>
+                          {vehicleResults.map(v => (
+                            <button key={v.id} type="button" onClick={() => { setViewingVehicleProfileId(v.id); setActiveTab('vehicleProfile'); setGlobalSearchQuery(''); }} className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-neutral-50 transition flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center shrink-0"><Truck className="w-4 h-4" /></div>
+                              <div className="flex-1"><span className="font-bold text-black text-sm block">{v.plate}</span><span className="text-[10px] text-neutral-500">{v.type}</span></div>
+                              <span className="text-[10px] font-bold text-orange-600">Profiline Git →</span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {activeTab === 'dashboard' && showDashboard && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions} />}
             {activeTab === 'notifications' && <NotificationsView notifications={visibleNotifications} markNotificationsAsRead={markNotificationsAsRead} currentUser={currentUser} />}
             {activeTab === 'calendar' && showCalendar && <CalendarView jobs={currentUser?.position === 'Operatör' ? jobs : visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} setJobToChangeDate={setJobToChangeDate} setNewJobDate={setNewJobDate} setShowChangeDateModal={setShowChangeDateModal} setCancelJobId={setCancelJobId} />}
@@ -15102,7 +17082,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'isOnaylamaTahtasi' && showOperasyon && <IsOnaylamaTahtasiView jobs={visibleJobs} handleEditJob={handleEditJob} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} />}
             {activeTab === 'ekipKurmaTahtasi' && showOperasyon && <EkipKurmaTahtasiView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'izinTahtasi' && showOperasyon && <IzinTahtasiView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
-            {activeTab === 'personelTahtasi' && showOperasyon && <PersonelTahtasiView personnelList={personnelList} />}
+            {activeTab === 'personelTahtasi' && showOperasyon && <PersonelTahtasiView personnelList={personnelList} setViewingPersonnelProfileId={setViewingPersonnelProfileId} setActiveTab={setActiveTab} />}
             {activeTab === 'puantajTahtasi' && showOperasyon && <PuantajTahtasiView personnelList={personnelList} db={db} appId={appId} />}
             {activeTab === 'maviMesaiTahtasi' && showOperasyon && <MaviMesaiTahtasiView personnelList={personnelList} db={db} appId={appId} />}
             
@@ -15122,19 +17102,38 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </button>
 
                   {showCustomerSearchBox && (() => {
-                    // YENİ: Mevcut iş kayıtlarından benzersiz müşteri listesi türet
+                    // DÜZELTME: Aynı telefon numarasına ait BİRDEN FAZLA iş kaydı olabilir ve
+                    // bunlardan bazılarında isim boş/eksik girilmiş olabilir. Eskiden sadece o
+                    // telefona ait İLK rastlanan kayıt temsilci seçiliyordu; bu kayıtta isim
+                    // boşsa müşteri aramada hiç bulunamıyordu. Şimdi aynı telefona ait TÜM
+                    // kayıtlar taranıp en eksiksiz (dolu) isim/bilgiler birleştiriliyor.
                     const uniqueCustomers = new Map();
                     jobs.forEach(j => {
                       if (!j.customerPhone) return;
                       const key = normalizeCariPhone(j.customerPhone);
-                      if (!uniqueCustomers.has(key)) {
-                        uniqueCustomers.set(key, j);
+                      if (!key) return;
+                      const existing = uniqueCustomers.get(key);
+                      if (!existing) {
+                        uniqueCustomers.set(key, { ...j });
+                      } else {
+                        // Boş kalan alanları, bu telefona ait diğer kayıtlardan doldur
+                        if (!existing.customerName && j.customerName) existing.customerName = j.customerName;
+                        if (!existing.altPhone && j.altPhone) existing.altPhone = j.altPhone;
+                        if (!existing.tcNo && j.tcNo) existing.tcNo = j.tcNo;
+                        if (!existing.taxNo && j.taxNo) existing.taxNo = j.taxNo;
+                        if (!existing.customerType && j.customerType) existing.customerType = j.customerType;
+                        // Daha yeni tarihli kayıt varsa ismi/tipini onunla güncelle (en güncel bilgi öne çıksın)
+                        if (j.date && existing.date && new Date(j.date) > new Date(existing.date)) {
+                          if (j.customerName) existing.customerName = j.customerName;
+                          if (j.customerType) existing.customerType = j.customerType;
+                          existing.date = j.date;
+                        }
                       }
                     });
                     const q = customerSearchQuery.trim().toLocaleLowerCase('tr-TR');
                     const results = Array.from(uniqueCustomers.values()).filter(j =>
-                      q === '' ? false : (normalizeCariName(j.customerName).includes(q) || normalizeCariPhone(j.customerPhone).includes(q.replace(/\D/g, '')))
-                    ).slice(0, 8);
+                      q === '' ? true : (normalizeCariName(j.customerName).includes(q) || normalizeCariPhone(j.customerPhone).includes(q.replace(/\D/g, '')))
+                    ).slice(0, 20);
 
                     return (
                       <div className="mt-2 bg-white border border-neutral-200 rounded-xl shadow-lg p-3 animate-in fade-in slide-in-from-top-2">
@@ -15244,7 +17243,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             )}
             {activeTab === 'specialCustomers' && showCustomers && <CustomerListView jobs={jobs} title="Özel Müşteriler" handleEditJob={handleEditJob} onViewCari={(key) => { setViewingCariKey(key); setActiveTab('customerProfile'); }} />}
             {/* YENİ: Cari Profili Sayfası */}
-            {activeTab === 'customerProfile' && showCustomers && <CustomerProfileView jobs={jobs} cariKey={viewingCariKey} handleEditJob={handleEditJob} onBack={() => setActiveTab('allCustomers')} db={db} appId={appId} addSystemLog={addSystemLog} />}
+            {activeTab === 'customerProfile' && showCustomers && <CustomerProfileView jobs={jobs} cariKey={viewingCariKey} handleEditJob={handleEditJob} onBack={() => setActiveTab('allCustomers')} db={db} appId={appId} addSystemLog={addSystemLog} personnelList={personnelList} vehicles={vehicles} />}
 
             {/* İş Listesi Modülleri */}
             {activeTab === 'currentJobs' && showJobList && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
@@ -15257,9 +17256,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             
             {/* Personel ve Araç Modülleri */}
             {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
-            {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} />}
+            {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} />}
             {/* YENİ: Personel Profili Sayfası */}
-            {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} />}
+            {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {activeTab === 'addVehicle' && showOperasyon && <AddVehicleView onAdd={handleAddVehicle} onCancel={() => setActiveTab('vehicleList')} />}
@@ -15532,7 +17531,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'materialList' && showOperasyon && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} onUpdateStock={handleUpdateMaterialStock} onAdd={handleAddMaterial} systemLogs={systemLogs} />}
             
             {/* Finans Yönetimi Modülleri */}
-            {activeTab === 'financeDashboard' && showFinance && <FinanceDashboardView jobs={jobs} transactions={transactions} transactionType={transactionType} setTransactionType={setTransactionType} newTransaction={newTransaction} setNewTransaction={setNewTransaction} handleAddTransaction={handleAddTransaction} />}
+            {activeTab === 'financeDashboard' && showFinance && <FinanceDashboardView jobs={jobs} transactions={transactions} transactionType={transactionType} setTransactionType={setTransactionType} newTransaction={newTransaction} setNewTransaction={setNewTransaction} handleAddTransaction={handleAddTransaction} personnelList={personnelList} handleEditJob={handleEditJob} db={db} appId={appId} />}
             {activeTab === 'reporting' && showFinance && <ReportingView jobs={jobs} personnelList={personnelList} />}
             {activeTab === 'advancedReporting' && showFinance && <AdvancedReportingView jobs={jobs} />}
             {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
