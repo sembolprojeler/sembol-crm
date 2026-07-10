@@ -307,6 +307,18 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
     );
   };
 
+  // 4857 Sayılı İş Kanunu Madde 17 uyarınca kıdeme göre ihbar (bildirim) süresini hesaplar.
+  export const getIhbarSuresiBilgisi = (startDateStr, referenceDateStr) => {
+    if (!startDateStr) return { hafta: 2, aciklama: 'Kıdem bilgisi sistemde bulunamadığından asgari süre (2 hafta) esas alınmıştır.' };
+    const start = new Date(startDateStr);
+    const ref = referenceDateStr ? new Date(referenceDateStr) : new Date();
+    const ay = Math.max(0, (ref - start) / (1000 * 60 * 60 * 24 * 30.44));
+    if (ay < 6) return { hafta: 2, aciklama: '6 aydan az kıdemi bulunan işçi (4857 Sayılı İş Kanunu Madde 17/2-a)' };
+    if (ay < 18) return { hafta: 4, aciklama: '6 ay ile 1,5 yıl arası kıdemi bulunan işçi (4857 Sayılı İş Kanunu Madde 17/2-b)' };
+    if (ay < 36) return { hafta: 6, aciklama: '1,5 yıl ile 3 yıl arası kıdemi bulunan işçi (4857 Sayılı İş Kanunu Madde 17/2-c)' };
+    return { hafta: 8, aciklama: '3 yıldan fazla kıdemi bulunan işçi (4857 Sayılı İş Kanunu Madde 17/2-d)' };
+  };
+
   // --- YENİ: HAZIR TUTANAK ŞABLONLARI ---
   // Her şablon; kişi bilgilerine göre otomatik doldurulabilen alanları (Ad Soyad, TC No, Görev,
   // Tarih) otomatik doldurur; olay detayı, saat, şahitler ve imza gibi elle doldurulması/imzalanması
@@ -513,6 +525,223 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
         <div class="desc-box" style="min-height:40px;"></div>
         <table><tr><td class="label">Adı Soyadı</td><td>...................................... &nbsp; İmza:</td></tr></table>
       `
+    },
+    {
+      key: 'ihbar_dilekcesi',
+      title: 'İhbar Süreli Fesih Bildirimi (İhbar Dilekçesi)',
+      body: (p, f) => {
+        const baslangic = f.ihbarBaslangic || f.date || new Date().toISOString().split('T')[0];
+        const ihbarInfo = getIhbarSuresiBilgisi(p.startDate, baslangic);
+        const ihbarGun = ihbarInfo.hafta * 7;
+        const bitis = new Date(baslangic);
+        bitis.setDate(bitis.getDate() + ihbarGun);
+        const baslangicStr = new Date(baslangic).toLocaleDateString('tr-TR');
+        const bitisStr = bitis.toLocaleDateString('tr-TR');
+        const iseBaslamaStr = p.startDate ? new Date(p.startDate).toLocaleDateString('tr-TR') : '..... / ..... / 202...';
+        return `
+        <div class="main-title">SEMBOL NAKLİYAT İHBAR SÜRELİ FESİH BİLDİRİMİ (İHBARNAME)</div>
+        <table>
+          <tr><td class="label">Bildirim Tarihi</td><td>${f.date || baslangicStr}</td></tr>
+        </table>
+        <table>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${p.tcNo || ''}</td></tr>
+          <tr><td class="label">Görevi</td><td>${p.position || ''}</td></tr>
+          <tr><td class="label">İşe Başlama Tarihi</td><td>${iseBaslamaStr}</td></tr>
+        </table>
+        <div class="paragraph">
+          Sayın <b>${p.fullName || ''}</b>,
+        </div>
+        <div class="paragraph">
+          Şirketimiz bünyesinde <b>${iseBaslamaStr}</b> tarihinden bu yana <b>${p.position || ''}</b> pozisyonunda görev yapmaktasınız. 4857 Sayılı İş Kanunu'nun 17. maddesi hükümleri gereğince, iş sözleşmenizin İHBAR SÜRELİ olarak feshedilmesine karar verilmiştir.
+        </div>
+        <div class="section-title">Kıdem ve İhbar Süresi Tespiti</div>
+        <table>
+          <tr><td class="label">Kıdem Durumu</td><td>${ihbarInfo.aciklama}</td></tr>
+          <tr><td class="label">Uygulanacak Yasal İhbar Süresi</td><td>${ihbarInfo.hafta} Hafta (${ihbarGun} Gün)</td></tr>
+          <tr><td class="label">İhbar Süresinin Başlangıç Tarihi</td><td>${baslangicStr}</td></tr>
+          <tr><td class="label">İhbar Süresinin Bitiş Tarihi</td><td><b>${bitisStr}</b></td></tr>
+        </table>
+        <div class="paragraph">
+          Yukarıda belirtilen ${baslangicStr} - ${bitisStr} tarihleri arasındaki ihbar süresi zarfında iş sözleşmeniz aynı şartlarla devam edecek olup, İş Kanunu'nun 27. maddesi uyarınca yeni bir iş arama iznine ilişkin yasal haklarınız saklıdır. İhbar süresinin sonunda iş sözleşmeniz herhangi bir tazminat ödenmeksizin/ödenerek (duruma göre işaretleyiniz) sona erecektir:
+        </div>
+        <table>
+          <tr><td class="label">Fesih Sebebi</td><td>[ ] İşveren Feshi &nbsp; [ ] İşçi İstifası &nbsp; [ ] Karşılıklı Anlaşma (İkale)</td></tr>
+        </table>
+        <div class="section-title">Fesih Gerekçesi / Açıklama</div>
+        <div class="desc-box" style="min-height:50px;">${f.note ? f.note : '................................................................................................................................................................................<br/>................................................................................................................................................................................'}</div>
+        <div class="paragraph">
+          İşbu ihbarname iki nüsha olarak düzenlenmiş olup, bir nüshası tarafınıza tebliğ edilmek üzere elden teslim edilmiştir. Çalışma süreniz boyunca göstermiş olduğunuz emek ve katkılardan dolayı teşekkür eder, bundan sonraki hayatınızda başarılar dileriz.
+        </div>
+        <table>
+          <tr><td class="label">Bildirimi Yapan (Yetkili / İşveren)</td><td>Adı Soyadı: ...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Şahit</td><td>Adı Soyadı: ...................................... &nbsp; İmza:</td></tr>
+        </table>
+        <div class="section-title">TEBLİĞ ALAN PERSONEL</div>
+        <div class="paragraph">İşbu ihbarnameyi ${f.date || baslangicStr} tarihinde elden teslim aldım, okudum ve içeriğini anladım.</div>
+        <table><tr><td class="label">Adı Soyadı / İmza</td><td>${p.fullName || ''} &nbsp;&nbsp;&nbsp; İmza: ......................................</td></tr></table>
+        <p class="note">Not: Personel tebellüğden (belgeyi almaktan) imtina ederse, bu durum şahitler huzurunda ayrı bir tutanakla (İşe Gelmeme/Devamsızlık ya da noter kanalıyla) belgelenmelidir.</p>
+      `;
+      }
+    },
+    {
+      key: 'ibraname',
+      title: 'Sulh ve İbraname (İşten Ayrılış Belgesi)',
+      body: (p, f) => {
+        const birakmaTarihi = f.isiBirakmaTarihi || f.date || new Date().toISOString().split('T')[0];
+        const birakmaStr = new Date(birakmaTarihi).toLocaleDateString('tr-TR');
+        const baslamaStr = p.startDate ? new Date(p.startDate).toLocaleDateString('tr-TR') : '..... / ..... / 202...';
+        return `
+        <div class="main-title" style="text-decoration:underline;">SULH VE İBRANAME</div>
+        <table><tr><td class="label">Düzenleme Tarihi</td><td>${birakmaStr}</td></tr></table>
+        <div class="paragraph">
+          BAHÇELİEVLER MAHALLESİ YENİ SK RAVZA APT NO: 5/C PENDİK / İSTANBUL adresinde kurulu SEMBOL NAKLİYAT DEPOCULUK TİC. LTD. ŞTİ.'nde çalışmaya başladığım tarih olan <b>${baslamaStr}</b> tarihinden, istifa ettiğim ve hizmet akdimin feshediliş tarihi olan <b>${birakmaStr}</b> tarihine kadar geçen çalışma sürem boyunca; iş sözleşmesi hükümlerinden doğan bütün hak ve alacaklarımı, normal ücretlerimi, çalışma süreme ilişkin alacaklarım dahil olmak üzere, 506 sayılı Sosyal Sigortalar Kanunu ve 4857 sayılı İş Kanunu ile 5510 sayılı Kanun ve sair mevzuattan doğan bilcümle haklarımın tamamını ve (varsa) senelik izin haklarımı işverenden noksansız bir şekilde tahsil ettim. Kendi rızam ile hiçbir baskı altında kalmadan işten ayrıldım. İşverenden başkaca hiçbir alacağım kalmamıştır.
+        </div>
+        <div class="paragraph">
+          İş sözleşmemden ve kanuni haklarımdan dolayı hiçbir şekil ve surette alacağım kalmadığını, şirketle gayrikabili rücu ve bütün hukuki neticelerini kapsamak üzere tam ve kesin olarak sulh olduğumu ve işvereni tam olarak ibra ettiğimden, doğmuş ve doğacak yukarıda belirtmiş olduğum bütün alacak haklarımdan feragat ettiğimi beyan ederim. Bu ibraname iki nüsha olarak düzenlenmiş olup bir nüshası işçiye, bir nüshası da işverene verilmiştir.
+        </div>
+        ${f.note ? `<div class="section-title">Ek Açıklama</div><div class="desc-box">${f.note}</div>` : ''}
+        <div class="paragraph">Yukarıdaki bilgiler, tarafımdan okunarak imza edilmiştir.</div>
+        <div class="paragraph">Ödemeyi Alan Personel,</div>
+        <table>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${p.tcNo || ''}</td></tr>
+        </table>
+        <table>
+          <tr><td class="label">Personel İmza</td><td></td></tr>
+        </table>
+        <table>
+          <tr><td class="label">İşveren İmza</td><td></td></tr>
+        </table>
+      `;
+      }
+    },
+    {
+      key: 'ucretli_izin',
+      title: 'Ücretli (Yıllık) İzin Talep ve Onay Formu',
+      body: (p, f) => {
+        const baslangic = f.izinBaslangic || f.date || new Date().toISOString().split('T')[0];
+        const bitis = f.izinBitis || baslangic;
+        const baslangicStr = new Date(baslangic).toLocaleDateString('tr-TR');
+        const bitisStr = new Date(bitis).toLocaleDateString('tr-TR');
+        const gunSayisi = Math.max(1, Math.round((new Date(bitis) - new Date(baslangic)) / 86400000) + 1);
+        const baslamaStr = p.startDate ? new Date(p.startDate).toLocaleDateString('tr-TR') : '..... / ..... / 202...';
+        return `
+        <div class="main-title">SEMBOL NAKLİYAT ÜCRETLİ (YILLIK) İZİN TALEP VE ONAY FORMU</div>
+        <table><tr><td class="label">Form Düzenleme Tarihi</td><td>${f.date || baslangicStr}</td></tr></table>
+        <table>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${p.tcNo || ''}</td></tr>
+          <tr><td class="label">Görevi</td><td>${p.position || ''}</td></tr>
+          <tr><td class="label">İşe Başlama Tarihi</td><td>${baslamaStr}</td></tr>
+        </table>
+        <div class="section-title">İzin Talep Bilgileri</div>
+        <table>
+          <tr><td class="label">İzin Türü</td><td>Yıllık Ücretli İzin (4857 Sayılı İş Kanunu Madde 53-60)</td></tr>
+          <tr><td class="label">İzin Başlangıç Tarihi</td><td><b>${baslangicStr}</b></td></tr>
+          <tr><td class="label">İzin Bitiş Tarihi</td><td><b>${bitisStr}</b></td></tr>
+          <tr><td class="label">Toplam İzin Süresi</td><td><b>${gunSayisi} Gün</b></td></tr>
+          <tr><td class="label">İzin Dönüşü İşbaşı Tarihi</td><td>${new Date(new Date(bitis).getTime() + 86400000).toLocaleDateString('tr-TR')}</td></tr>
+        </table>
+        <div class="paragraph">
+          Yukarıda belirtilen tarihler arasında yıllık ücretli iznimi kullanmak istediğimi beyan ederim. İzin süresi boyunca ücretimin eksiksiz olarak tarafıma ödeneceğini bildiğimi, izin dönüşünde belirtilen tarihte işbaşı yapacağımı taahhüt ederim.
+        </div>
+        ${f.note ? `<div class="section-title">Ek Açıklama / Not</div><div class="desc-box">${f.note}</div>` : ''}
+        <div class="section-title">Talep Eden Personel</div>
+        <table>
+          <tr><td class="label">Adı Soyadı / İmza</td><td>${p.fullName || ''} &nbsp;&nbsp;&nbsp; İmza: ......................................</td></tr>
+          <tr><td class="label">Tarih</td><td>${f.date || baslangicStr}</td></tr>
+        </table>
+        <div class="section-title">Onaylayan Yetkili</div>
+        <table>
+          <tr><td class="label">Adı Soyadı / İmza</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Onay Durumu</td><td>[ ] Onaylandı &nbsp; &nbsp; [ ] Reddedildi</td></tr>
+        </table>
+      `;
+      }
+    },
+    {
+      key: 'ucretsiz_izin',
+      title: 'Ücretsiz İzin Talep ve Onay Formu',
+      body: (p, f) => {
+        const baslangic = f.izinBaslangic || f.date || new Date().toISOString().split('T')[0];
+        const bitis = f.izinBitis || baslangic;
+        const baslangicStr = new Date(baslangic).toLocaleDateString('tr-TR');
+        const bitisStr = new Date(bitis).toLocaleDateString('tr-TR');
+        const gunSayisi = Math.max(1, Math.round((new Date(bitis) - new Date(baslangic)) / 86400000) + 1);
+        const baslamaStr = p.startDate ? new Date(p.startDate).toLocaleDateString('tr-TR') : '..... / ..... / 202...';
+        return `
+        <div class="main-title">SEMBOL NAKLİYAT ÜCRETSİZ İZİN TALEP VE ONAY FORMU</div>
+        <table><tr><td class="label">Form Düzenleme Tarihi</td><td>${f.date || baslangicStr}</td></tr></table>
+        <table>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${p.tcNo || ''}</td></tr>
+          <tr><td class="label">Görevi</td><td>${p.position || ''}</td></tr>
+          <tr><td class="label">İşe Başlama Tarihi</td><td>${baslamaStr}</td></tr>
+        </table>
+        <div class="section-title">İzin Talep Bilgileri</div>
+        <table>
+          <tr><td class="label">İzin Türü</td><td>Ücretsiz İzin</td></tr>
+          <tr><td class="label">İzin Başlangıç Tarihi</td><td><b>${baslangicStr}</b></td></tr>
+          <tr><td class="label">İzin Bitiş Tarihi</td><td><b>${bitisStr}</b></td></tr>
+          <tr><td class="label">Toplam İzin Süresi</td><td><b>${gunSayisi} Gün</b></td></tr>
+          <tr><td class="label">İzin Dönüşü İşbaşı Tarihi</td><td>${new Date(new Date(bitis).getTime() + 86400000).toLocaleDateString('tr-TR')}</td></tr>
+        </table>
+        <div class="section-title">Talep Gerekçesi</div>
+        <div class="desc-box" style="min-height:40px;">${f.note ? f.note : '................................................................................................................................................................................'}</div>
+        <div class="paragraph">
+          Yukarıda belirtilen tarihler arasında ücretsiz izin kullanmak istediğimi beyan ederim. Bu süre zarfında herhangi bir ücret ödemesi yapılmayacağını, ücretsiz izinli olduğum günlerin yıllık ücretli izin hesabına dahil edilmeyeceğini ve iş sözleşmemin bu süre boyunca askıda kalacağını bildiğimi kabul eder, izin dönüşünde belirtilen tarihte işbaşı yapacağımı taahhüt ederim.
+        </div>
+        <div class="section-title">Talep Eden Personel</div>
+        <table>
+          <tr><td class="label">Adı Soyadı / İmza</td><td>${p.fullName || ''} &nbsp;&nbsp;&nbsp; İmza: ......................................</td></tr>
+          <tr><td class="label">Tarih</td><td>${f.date || baslangicStr}</td></tr>
+        </table>
+        <div class="section-title">Onaylayan Yetkili</div>
+        <table>
+          <tr><td class="label">Adı Soyadı / İmza</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">Onay Durumu</td><td>[ ] Onaylandı &nbsp; &nbsp; [ ] Reddedildi</td></tr>
+        </table>
+      `;
+      }
+    },
+    {
+      key: 'istifa_dilekcesi',
+      title: 'İstifa Dilekçesi',
+      body: (p, f) => {
+        const istifaTarihi = f.istifaTarihi || f.date || new Date().toISOString().split('T')[0];
+        const istifaStr = new Date(istifaTarihi).toLocaleDateString('tr-TR');
+        const baslamaStr = p.startDate ? new Date(p.startDate).toLocaleDateString('tr-TR') : '..... / ..... / 202...';
+        return `
+        <div class="main-title">İSTİFA DİLEKÇESİ</div>
+        <table><tr><td class="label">Dilekçe Tarihi</td><td>${f.date || istifaStr}</td></tr></table>
+        <div class="paragraph"><b>SEMBOL NAKLİYAT DEPOCULUK TİC. LTD. ŞTİ. YETKİLİSİ'NE,</b></div>
+        <div class="paragraph">
+          BAHÇELİEVLER MAHALLESİ YENİ SK RAVZA APT NO: 5/C PENDİK / İSTANBUL adresinde bulunan şirketinizde <b>${baslamaStr}</b> tarihinden bu yana <b>${p.position || ''}</b> pozisyonunda çalışmaktayım.
+        </div>
+        <div class="paragraph">
+          Kendi isteğim ve özgür irademle, hiçbir baskı altında kalmadan iş akdimi sona erdirmek istiyorum. İstifamın <b>${istifaStr}</b> tarihi itibarıyla kabul edilmesini ve hesabımın buna göre kapatılmasını saygılarımla arz ederim.
+        </div>
+        ${f.note ? `<div class="section-title">İstifa Gerekçesi (Belirtilmek İstenirse)</div><div class="desc-box">${f.note}</div>` : ''}
+        <div class="paragraph">
+          İstifa tarihine kadar üzerimde bulunan görev ve sorumlulukları eksiksiz olarak yerine getireceğimi, şirkete ait zimmetimdeki tüm demirbaş, evrak ve malzemeleri eksiksiz teslim edeceğimi taahhüt ederim. Çalışma sürem boyunca göstermiş olduğunuz güven ve destek için teşekkür eder, şirketinize başarılar dilerim.
+        </div>
+        <table>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${p.tcNo || ''}</td></tr>
+          <tr><td class="label">Görevi</td><td>${p.position || ''}</td></tr>
+        </table>
+        <table>
+          <tr><td class="label">Personel İmza</td><td>${p.fullName || ''} &nbsp;&nbsp;&nbsp; İmza: ......................................</td></tr>
+        </table>
+        <div class="section-title">TEBELLÜĞ EDEN YETKİLİ (İşveren)</div>
+        <table>
+          <tr><td class="label">Teslim Alınma Tarihi</td><td>${f.date || istifaStr}</td></tr>
+          <tr><td class="label">Adı Soyadı / İmza</td><td>...................................... &nbsp; İmza:</td></tr>
+        </table>
+        <p class="note">Not: Bu dilekçe ile birlikte "Sulh ve İbraname" ve gerekiyorsa "Zimmet İade Tutanağı" ayrıca düzenlenmelidir.</p>
+      `;
+      }
     }
   ];
 

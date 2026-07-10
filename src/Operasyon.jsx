@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Calendar, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award } from 'lucide-react';
+import { Truck, Calendar, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, where } from 'firebase/firestore';
-import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, calculateMaterials } from './shared.jsx';
+import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, calculateMaterials, getIhbarSuresiBilgisi } from './shared.jsx';
   export const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [mesaiData, setMesaiData] = useState({});
@@ -146,14 +146,56 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
   export const AddInfoView = ({ currentUser, personnelList, addSystemLog }) => {
     const [infoType, setInfoType] = useState('Duyuru'); // Duyuru, Paylaşım, En İyiler
-    
+
     // Form States
     const [announcement, setAnnouncement] = useState({ title: '', content: '' });
     const [post, setPost] = useState({ title: '', imageUrl: '' });
     const [bestEmp, setBestEmp] = useState({ title: 'Ayın En İyi Personeli', employeeName: '' });
-    
+
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [successMsg, setSuccessMsg] = useState('');
+
+    // YENİ: Yayınlanan bilgilendirmeleri yönetme (listele / sırala / yayından al / düzenle)
+    const [publishedItems, setPublishedItems] = useState([]);
+    const [editingInfoItem, setEditingInfoItem] = useState(null);
+    useEffect(() => {
+      const colName = infoType === 'Duyuru' ? 'announcements' : infoType === 'Paylaşım' ? 'posts' : 'bestEmployees';
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', colName), snap => {
+        const items = snap.docs.map(d => ({ ...d.data(), id: d.id }))
+          .filter(item => !item.hidden)
+          .sort((a, b) => (a.sortOrder ?? a.timestamp ?? 0) - (b.sortOrder ?? b.timestamp ?? 0));
+        setPublishedItems(items);
+      }, console.error);
+      return () => unsub();
+    }, [infoType]);
+
+    const infoColName = infoType === 'Duyuru' ? 'announcements' : infoType === 'Paylaşım' ? 'posts' : 'bestEmployees';
+
+    const toggleInfoHidden = async (item) => {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', infoColName, item.id), { hidden: !item.hidden });
+      if (addSystemLog) addSystemLog(item.hidden ? 'Bilgilendirme Yayına Alındı' : 'Bilgilendirme Yayından Alındı', `${infoType}: ${item.title || item.employeeName || ''}`);
+    };
+
+    const moveInfoItem = async (index, direction) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= publishedItems.length) return;
+      const a = publishedItems[index];
+      const b = publishedItems[targetIndex];
+      const aOrder = a.sortOrder ?? a.timestamp ?? 0;
+      const bOrder = b.sortOrder ?? b.timestamp ?? 0;
+      await Promise.all([
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', infoColName, a.id), { sortOrder: bOrder }),
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', infoColName, b.id), { sortOrder: aOrder })
+      ]);
+    };
+
+    const handleSaveEditInfo = async () => {
+      if (!editingInfoItem) return;
+      const { id, ...rest } = editingInfoItem;
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', infoColName, id), rest);
+      if (addSystemLog) addSystemLog('Bilgilendirme Düzenlendi', `${infoType}: ${rest.title || rest.employeeName || ''}`);
+      setEditingInfoItem(null);
+    };
 
     const handleFileUpload = async (e) => {
         const file = e.target.files[0];
@@ -226,6 +268,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     };
 
     return (
+      <>
         <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
             <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
                 <Bell className="w-6 h-6 text-red-600" /> Bilgilendirme Ekle
@@ -309,7 +352,74 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     <Send className="w-5 h-5" /> Yayına Al
                 </button>
             </div>
+
+            {/* YENİ: Yayınlanan {infoType} Listesi — sıralama, düzenleme, yayından alma */}
+            <div className="mt-8 pt-6 border-t border-neutral-200">
+              <h3 className="font-bold text-black mb-3">Yayınlanan {infoType} Listesi</h3>
+              {publishedItems.length === 0 ? (
+                <p className="text-sm text-neutral-500 italic">Henüz yayınlanmış bir {infoType.toLowerCase()} yok.</p>
+              ) : (
+                <div className="space-y-2">
+                  {publishedItems.map((item, index) => (
+                    <div key={item.id} className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+                      <div className="flex flex-col gap-0.5 shrink-0">
+                        <button type="button" disabled={index === 0} onClick={() => moveInfoItem(index, -1)} className="w-6 h-6 flex items-center justify-center rounded bg-white border border-neutral-200 hover:bg-neutral-100 disabled:opacity-30 transition"><ChevronUp className="w-3.5 h-3.5" /></button>
+                        <button type="button" disabled={index === publishedItems.length - 1} onClick={() => moveInfoItem(index, 1)} className="w-6 h-6 flex items-center justify-center rounded bg-white border border-neutral-200 hover:bg-neutral-100 disabled:opacity-30 transition"><ChevronDown className="w-3.5 h-3.5" /></button>
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-black truncate">{item.title || item.employeeName || 'Başlıksız'}</p>
+                        {item.dateStr && <p className="text-[10px] text-neutral-400 font-medium">{item.dateStr}</p>}
+                      </div>
+                      <button type="button" onClick={() => setEditingInfoItem(item)} className="p-2 rounded-lg bg-white border border-neutral-200 hover:bg-neutral-100 transition shrink-0" title="Düzenle"><Edit className="w-4 h-4 text-neutral-600" /></button>
+                      <button type="button" onClick={() => toggleInfoHidden(item)} className="p-2 rounded-lg bg-white border border-neutral-200 hover:bg-neutral-100 transition shrink-0" title="Yayından Al"><EyeOff className="w-4 h-4 text-neutral-600" /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
         </div>
+
+        {editingInfoItem && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditingInfoItem(null)}>
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+              <h3 className="font-bold text-lg text-black mb-4">Bilgilendirmeyi Düzenle</h3>
+              <div className="space-y-3">
+                {infoType !== 'En İyiler' ? (
+                  <>
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Başlık</label>
+                      <input type="text" value={editingInfoItem.title || ''} onChange={e => setEditingInfoItem({ ...editingInfoItem, title: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                    </div>
+                    {infoType === 'Duyuru' && (
+                      <div>
+                        <label className="block text-sm font-bold text-neutral-700 mb-1">İçerik</label>
+                        <textarea value={editingInfoItem.content || ''} onChange={e => setEditingInfoItem({ ...editingInfoItem, content: e.target.value })} rows={4} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Başlık</label>
+                      <input type="text" value={editingInfoItem.title || ''} onChange={e => setEditingInfoItem({ ...editingInfoItem, title: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Personel</label>
+                      <select value={editingInfoItem.employeeName || ''} onChange={e => setEditingInfoItem({ ...editingInfoItem, employeeName: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600 bg-white">
+                        {personnelList.map(p => <option key={p.id} value={p.fullName}>{p.fullName}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="flex gap-2 pt-4">
+                <button type="button" onClick={() => setEditingInfoItem(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition">İptal</button>
+                <button type="button" onClick={handleSaveEditInfo} className="flex-1 py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition">Kaydet</button>
+              </div>
+            </div>
+          </div>
+        )}
+    </>
     );
   };
 
@@ -2418,7 +2528,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <select required value={formData.materialId} onChange={(e) => setFormData({...formData, materialId: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-blue-600 outline-none bg-white transition font-medium">
               <option value="">Lütfen listeden bir malzeme seçin...</option>
               {materials.map(m => (
-                <option key={m.id} value={m.id}>{m.name} (Mevcut Stok: {m.stock} {m.unit})</option>
+                <option key={m.id} value={m.id}>{m.name} (Mevcut Stok: {(Math.round((parseFloat(m.stock) || 0) * 10) / 10).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })} {m.unit})</option>
               ))}
             </select>
           </div>
@@ -2527,7 +2637,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     </td>
                     <td className="p-4 text-center">
                       <span className={`text-sm font-black px-3 py-1 rounded-xl ${parseInt(material.stock) <= 10 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>
-                        {material.stock} <span className="text-xs font-bold opacity-70">{material.unit}</span>
+                        {(Math.round((parseFloat(material.stock) || 0) * 10) / 10).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 1 })} <span className="text-xs font-bold opacity-70">{material.unit}</span>
                       </span>
                       {parseInt(material.stock) <= 10 && <div className="text-[10px] text-red-500 font-bold mt-1">Kritik Stok!</div>}
                     </td>
@@ -2852,7 +2962,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
   export const AddVehicleView = ({ onAdd, onCancel }) => {
     const [formData, setFormData] = useState({
-      plate: '', type: 'Kamyon', capacity: [], volume: '', km: '', model: '', color: 'Beyaz', transmission: 'Manuel', ruhsatFoto: ''
+      plate: '', type: 'Kamyon', capacity: [], volume: '', km: '', model: '', color: 'Beyaz', transmission: 'Manuel', ruhsatFoto: '', vehiclePhoto: '', requiredLicense: 'Küçük Ehliyet'
     });
 
     const handleRuhsatUpload = async (e) => {
@@ -2870,6 +2980,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       } catch (err) {
         console.error('Ruhsat yükleme hatası:', err);
         setFormData(prev => ({ ...prev, ruhsatFoto: '' }));
+      }
+    };
+
+    const handleVehiclePhotoUpload = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      setFormData(prev => ({ ...prev, vehiclePhoto: 'Yükleniyor...' }));
+      const uploadData = new FormData();
+      uploadData.append('file', file);
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: uploadData });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+        setFormData(prev => ({ ...prev, vehiclePhoto: uploadedUrl }));
+      } catch (err) {
+        console.error('Araç fotoğrafı yükleme hatası:', err);
+        setFormData(prev => ({ ...prev, vehiclePhoto: '' }));
       }
     };
 
@@ -2901,6 +3029,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <option value="Minivan">Minivan</option>
               </select>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-neutral-700 mb-1">Gerekli Ehliyet</label>
+            <select required value={formData.requiredLicense} onChange={(e) => setFormData({...formData, requiredLicense: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+              <option value="Küçük Ehliyet">Küçük Ehliyet</option>
+              <option value="Büyük Ehliyet">Büyük Ehliyet</option>
+            </select>
           </div>
 
           <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
@@ -2976,6 +3112,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             )}
             <MediaCaptureMenu onChange={handleRuhsatUpload} buttonLabel="Ruhsat Fotoğrafı / Videosu Ekle" />
             {formData.ruhsatFoto === 'Yükleniyor...' && <p className="text-xs text-neutral-400 mt-1">Yükleniyor...</p>}
+          </div>
+
+          {/* YENİ: Araç Fotoğrafı */}
+          <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+            <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
+              <Camera className="w-4 h-4 text-red-600" /> Araç Fotoğrafı
+            </label>
+            {formData.vehiclePhoto && formData.vehiclePhoto !== 'Yükleniyor...' && (
+              <img src={formData.vehiclePhoto} alt="Araç" className="h-28 rounded-lg border border-neutral-200 mb-2 object-cover" />
+            )}
+            <MediaCaptureMenu onChange={handleVehiclePhotoUpload} buttonLabel="Araç Fotoğrafı Ekle" />
+            {formData.vehiclePhoto === 'Yükleniyor...' && <p className="text-xs text-neutral-400 mt-1">Yükleniyor...</p>}
           </div>
 
           <div className="flex gap-3 pt-4 border-t border-neutral-100">
@@ -3389,9 +3537,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <Car className="w-6 h-6 text-red-600" /> Araç Profili
           </h2>
           <div className="flex items-center gap-4 mb-5">
-            <div className="w-16 h-16 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0">
-              <Truck className="w-8 h-8 text-purple-600" />
-            </div>
+            {vehicle.vehiclePhoto && vehicle.vehiclePhoto !== 'Yükleniyor...' ? (
+              <div className="w-16 h-16 rounded-2xl overflow-hidden shrink-0 border border-neutral-200 shadow-sm">
+                <img src={vehicle.vehiclePhoto} alt={vehicle.plate} className="w-full h-full object-cover" />
+              </div>
+            ) : (
+              <div className="w-16 h-16 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0">
+                <Truck className="w-8 h-8 text-purple-600" />
+              </div>
+            )}
             <div>
               <div className="border-2 border-black rounded px-3 py-1.5 inline-flex items-center gap-2 bg-white shadow-sm mb-1.5">
                 <span className="bg-blue-600 text-white font-black text-[10px] px-1.5 py-0.5 rounded-sm">TR</span>
@@ -3673,6 +3827,29 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             </div>
           </div>
 
+          {/* YENİ: Mavi Yaka için opsiyonel ikinci özellik ve ehliyet bilgisi */}
+          {formData.collarType === 'Mavi Yaka' && ['Şoför', 'Mobilya Ustası', 'Taşıma Elemanı'].includes(formData.position) && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+              <div>
+                <label className="block text-sm font-bold text-neutral-700 mb-1">İkinci Özellik (Opsiyonel)</label>
+                <select value={formData.secondaryPosition || ''} onChange={e => setFormData({...formData, secondaryPosition: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
+                  <option value="">Yok</option>
+                  {['Şoför', 'Mobilya Ustası', 'Taşıma Elemanı'].filter(p => p !== formData.position).map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </div>
+              {(formData.position === 'Şoför' || formData.secondaryPosition === 'Şoför') && (
+                <div>
+                  <label className="block text-sm font-bold text-neutral-700 mb-1">Ehliyet Var mı?</label>
+                  <select value={formData.ehliyet || 'Yok'} onChange={e => setFormData({...formData, ehliyet: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
+                    <option value="Yok">Yok</option>
+                    <option value="Küçük Ehliyet">Küçük Ehliyet</option>
+                    <option value="Büyük Ehliyet">Büyük Ehliyet</option>
+                  </select>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">E-Posta (Sisteme Giriş İçin) *</label>
@@ -3695,6 +3872,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const [filterYaka, setFilterYaka] = useState('');
     const [filterPozisyon, setFilterPozisyon] = useState('');
     const [filterRutbe, setFilterRutbe] = useState('');
+    const [filterDurum, setFilterDurum] = useState('Aktif');
     const [editingUser, setEditingUser] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
 
@@ -3711,6 +3889,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       if (filterYaka && p.collarType !== filterYaka) return false;
       if (filterPozisyon && p.position !== filterPozisyon) return false;
       if (filterRutbe && p.rank !== filterRutbe) return false;
+      const durum = p.employmentStatus === 'Pasif' ? 'Pasif' : 'Aktif';
+      if (filterDurum === 'Aktif' && durum !== 'Aktif') return false;
+      if (filterDurum === 'Pasif' && durum !== 'Pasif') return false;
       return true;
     });
 
@@ -3738,9 +3919,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4">
           <h2 className="text-xl font-bold text-black flex items-center gap-2">
-            <Briefcase className="w-6 h-6 text-red-600" /> Tüm Personel
+            <Briefcase className="w-6 h-6 text-red-600" /> {filterDurum === 'Aktif' ? 'Çalışan Personel' : filterDurum === 'Pasif' ? 'İşten Ayrılan Personel' : 'Tüm Personel'}
           </h2>
           <div className="flex flex-wrap items-center gap-2">
+            <select value={filterDurum} onChange={e=>setFilterDurum(e.target.value)} className="p-2 border border-neutral-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-red-500 bg-neutral-50 text-neutral-700 font-bold cursor-pointer transition hover:border-neutral-300">
+              <option value="Aktif">Çalışan Personel</option>
+              <option value="Pasif">İşten Ayrılanlar</option>
+              <option value="">Tümü</option>
+            </select>
             <select value={filterYaka} onChange={e=>setFilterYaka(e.target.value)} className="p-2 border border-neutral-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-red-500 bg-neutral-50 text-neutral-700 font-medium cursor-pointer transition hover:border-neutral-300">
               <option value="">Tüm Yakalar</option>
               <option value="Mavi Yaka">Mavi Yaka</option>
@@ -3937,6 +4123,29 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                   </div>
                 </div>
 
+                {/* YENİ: Mavi Yaka için opsiyonel ikinci özellik ve ehliyet bilgisi */}
+                {editingUser.collarType === 'Mavi Yaka' && ['Şoför', 'Mobilya Ustası', 'Taşıma Elemanı'].includes(editingUser.position) && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                    <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">İkinci Özellik (Opsiyonel)</label>
+                      <select value={editingUser.secondaryPosition || ''} onChange={e => setEditingUser({...editingUser, secondaryPosition: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
+                        <option value="">Yok</option>
+                        {['Şoför', 'Mobilya Ustası', 'Taşıma Elemanı'].filter(p => p !== editingUser.position).map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                    {(editingUser.position === 'Şoför' || editingUser.secondaryPosition === 'Şoför') && (
+                      <div>
+                        <label className="block text-sm font-bold text-neutral-700 mb-1">Ehliyet Var mı?</label>
+                        <select value={editingUser.ehliyet || 'Yok'} onChange={e => setEditingUser({...editingUser, ehliyet: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
+                          <option value="Yok">Yok</option>
+                          <option value="Küçük Ehliyet">Küçük Ehliyet</option>
+                          <option value="Büyük Ehliyet">Büyük Ehliyet</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                   <div>
                     <label className="block text-sm font-bold text-neutral-700 mb-1">E-Posta (Sisteme Giriş İçin) *</label>
@@ -3963,13 +4172,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
   // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir. Mevcut personel
   // düzenleme/listeleme mantığına hiç dokunulmadı.
   export const PERSONNEL_SKILL_DEFS = [
-    { key: 'soforluk', label: 'Şoförlük Gücü' },
-    { key: 'mobilya', label: 'Mobilya Gücü' },
-    { key: 'tasima', label: 'Taşıma Gücü' },
-    { key: 'diyalog', label: 'Diyalog Gücü' },
+    { key: 'soforluk', label: 'Şoförlük Gücü', positions: ['Şoför'] },
+    { key: 'mobilya', label: 'Mobilya Gücü', positions: ['Mobilya Ustası'] },
+    { key: 'tasima', label: 'Taşıma Gücü', positions: ['Taşıma Elemanı'] },
+    { key: 'disiplin', label: 'Disiplin Gücü' },
     { key: 'liderlik', label: 'Liderlik Gücü' },
     { key: 'takimCalismasi', label: 'Takım Çalışması Gücü' },
-    { key: 'devamlilik', label: 'Devamlılık Gücü' },
+    { key: 'tecrube', label: 'Tecrübe Gücü' },
     { key: 'form', label: 'Form Gücü' }
   ];
 
@@ -3985,12 +4194,329 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     if (val < 80) return 'text-yellow-600';
     return 'text-green-600';
   };
+  export const getSkillCircleColor = (val) => {
+    if (val < 35) return 'bg-red-500';
+    if (val < 60) return 'bg-orange-400';
+    if (val < 80) return 'bg-yellow-400';
+    return 'bg-green-500';
+  };
 
-  export const PersonnelProfileView = ({ personId, personnelList, jobs, db, appId, addSystemLog, onBack, setViewingImage, setActiveTab, setPendingEditPersonnelId }) => {
+  export const isSkillVisibleForPerson = (skillDef, person) => {
+    if (!skillDef.positions) return true;
+    return skillDef.positions.some(pos => person?.position === pos || person?.secondaryPosition === pos);
+  };
+
+  // --- YENİ: OTOMATİK ÖZELLİK PUANI HESAPLAMA MOTORU ---
+  // Elle +/- yapılan puanlar yerine, sistemdeki gerçek verilerden (işler, tutanaklar, mesai/puantaj,
+  // kıdem) otomatik ve mavi yaka personeli birbirine göre kıyaslayarak (min-max normalizasyonu,
+  // 20-100 aralığı) puan üretir.
+  const MAVI_YAKA_POSITIONS_FOR_SKILL = ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operatör'];
+
+  const normalizeSkillScores = (rawMap) => {
+    const ids = Object.keys(rawMap);
+    if (ids.length === 0) return {};
+    const values = ids.map(id => rawMap[id]);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const result = {};
+    ids.forEach(id => {
+      if (max === min) { result[id] = ids.length === 1 ? 65 : 60; return; }
+      result[id] = Math.round(20 + ((rawMap[id] - min) / (max - min)) * 80);
+    });
+    return result;
+  };
+
+  const monthsBetweenDates = (dateStr, endDate) => {
+    if (!dateStr) return 0;
+    const start = new Date(dateStr);
+    if (isNaN(start.getTime())) return 0;
+    return Math.max(0, (endDate - start) / (1000 * 60 * 60 * 24 * 30.44));
+  };
+
+  const computeMedianJobPrice = (allJobs) => {
+    const prices = allJobs.filter(j => j.status === 'completed' && (parseFloat(j.price) || 0) > 0).map(j => parseFloat(j.price)).sort((a, b) => a - b);
+    if (prices.length === 0) return 0;
+    const mid = Math.floor(prices.length / 2);
+    return prices.length % 2 === 0 ? (prices[mid - 1] + prices[mid]) / 2 : prices[mid];
+  };
+
+  const computeSoforlukRaw = (person, allJobs, allVehicles) => {
+    const driverJobs = allJobs.filter(j => j.status === 'completed' && (j.assignedPersonnelIds || [])[0] === person.id);
+    if (driverJobs.length === 0) return null;
+    const medianPrice = computeMedianJobPrice(allJobs);
+    let activityScore = 0;
+    driverJobs.forEach(j => {
+      let weight = 1;
+      const vehicle = allVehicles.find(v => v.plate === j.assignedVehiclePlate);
+      if (vehicle && (vehicle.requiredLicense === 'Büyük Ehliyet' || vehicle.type === 'Kamyon')) weight += 0.6;
+      if (j.fromProvince && j.toProvince && j.fromProvince !== j.toProvince) weight += 0.6;
+      if (medianPrice > 0 && (parseFloat(j.price) || 0) > medianPrice * 1.5) weight += 0.2;
+      activityScore += weight;
+    });
+    const positive = driverJobs.filter(j => ['Yorum yazdı.', 'Video alındı.'].includes(j.endJobDetails?.customerSatisfaction)).length;
+    const damaged = driverJobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var').length;
+    const feedbackScore = (positive - damaged * 1.5) / driverJobs.length;
+    return activityScore + feedbackScore;
+  };
+
+  const ROOM_COUNT_WEIGHTS = { '1+0': 1, '1+1': 1.15, '2+1': 1.3, '3+1': 1.45, '4+1': 1.6 };
+  const JOB_TYPE_WEIGHTS = { 'Nakliye': 1.3, 'Depo': 1.0, 'Asansör': 0.7 };
+  const computeJobDifficulty = (job, medianPrice) => {
+    const typeW = JOB_TYPE_WEIGHTS[job.type] || 1;
+    const roomW = ROOM_COUNT_WEIGHTS[job.fromRoomCount] || 1;
+    const price = parseFloat(job.price) || 0;
+    let priceW = 1;
+    if (medianPrice > 0 && price > 0) {
+      priceW = Math.max(0.7, Math.min(1.5, 0.5 + (price / medianPrice) * 0.5));
+    }
+    return typeW * roomW * priceW;
+  };
+
+  const computePositionReviewRaw = (person, allJobs) => {
+    const personJobs = allJobs.filter(j => j.status === 'completed' && ((j.assignedPersonnelIds || []).includes(person.id) || j.assignedPersonnelId === person.id));
+    if (personJobs.length === 0) return null;
+    const medianPrice = computeMedianJobPrice(allJobs);
+    let totalScore = 0, totalWeight = 0;
+    personJobs.forEach(j => {
+      const difficulty = computeJobDifficulty(j, medianPrice);
+      const isPositive = ['Yorum yazdı.', 'Video alındı.'].includes(j.endJobDetails?.customerSatisfaction);
+      const isDamaged = j.endJobDetails?.damageStatus === 'Hasar var';
+      let jobScore = isDamaged ? -difficulty * 1.5 : difficulty * 0.4;
+      if (isPositive) jobScore += difficulty * 1.0;
+      totalScore += jobScore;
+      totalWeight += difficulty;
+    });
+    const qualityRatio = totalWeight > 0 ? totalScore / totalWeight : 0;
+    const volumeBonus = Math.log(personJobs.length + 1) * 0.12;
+    return qualityRatio + volumeBonus;
+  };
+
+  const NEGATIVE_TUTANAK_KEYWORDS = ['devamsız', 'geç kal', 'disiplin', 'kavga', 'trafik cezas', 'maddi hasar'];
+  const computeDisiplinRaw = (person, allActions, allMesai = []) => {
+    const personActions = allActions.filter(a => String(a.personnelId) === String(person.id) && a.type === 'tutanak');
+    const negativeCount = personActions.filter(a => NEGATIVE_TUTANAK_KEYWORDS.some(k => (a.title || '').toLocaleLowerCase('tr-TR').includes(k))).length;
+    const devamsizGunSayisi = allMesai.filter(m => String(m.personId) === String(person.id) && m.code === 'D').length;
+    const tenureMonths = Math.max(1, monthsBetweenDates(person.startDate, new Date()));
+    return -((negativeCount * 1.5 + devamsizGunSayisi) / tenureMonths);
+  };
+
+  const computeLiderlikRaw = (person, allJobs) => {
+    const ledJobs = allJobs.filter(j => j.status === 'completed' && j.assignedPersonnelId === person.id);
+    if (ledJobs.length === 0) return null;
+    const positive = ledJobs.filter(j => ['Yorum yazdı.', 'Video alındı.'].includes(j.endJobDetails?.customerSatisfaction)).length;
+    const damaged = ledJobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var').length;
+    return (positive - damaged * 1.5) / ledJobs.length + Math.log(ledJobs.length + 1) * 0.15;
+  };
+
+  const computeTakimRaw = (person, allJobs) => {
+    const supportJobs = allJobs.filter(j => (j.supportPersonnelIds || []).includes(person.id));
+    if (supportJobs.length === 0) return 0;
+    let score = 0;
+    supportJobs.forEach(j => {
+      let weight = 1;
+      if (j.status === 'completed') {
+        if (j.endJobDetails?.damageStatus === 'Hasar var') weight -= 0.5;
+        if (['Yorum yazdı.', 'Video alındı.'].includes(j.endJobDetails?.customerSatisfaction)) weight += 0.3;
+      }
+      score += weight;
+    });
+    return score;
+  };
+
+  const computeTecrubeRaw = (person) => {
+    if (!person.startDate) return 0;
+    return (new Date() - new Date(person.startDate)) / 86400000;
+  };
+
+  const FAZLA_MESAI_CODES = ['FG', 'FGM', 'FM'];
+  const computeFormRaw = (person, allJobs, allActions, allMesai = []) => {
+    const personJobs = allJobs.filter(j => j.status === 'completed' && ((j.assignedPersonnelIds || []).includes(person.id) || j.assignedPersonnelId === person.id));
+    const tenureMonths = Math.max(1, monthsBetweenDates(person.startDate, new Date()));
+    const raporCountAction = allActions.filter(a => String(a.personnelId) === String(person.id) && a.type === 'rapor').length;
+    const personMesai = allMesai.filter(m => String(m.personId) === String(person.id));
+    const geldiGun = personMesai.filter(m => m.code === 'G').length;
+    const fazlaMesaiGun = personMesai.filter(m => FAZLA_MESAI_CODES.includes(m.code)).length;
+    const eksikMesaiGun = personMesai.filter(m => m.code === 'EM').length;
+    const devamsizGun = personMesai.filter(m => m.code === 'D').length;
+    const raporGun = personMesai.filter(m => m.code === 'R').length;
+    const ucretsizIzinGun = personMesai.filter(m => m.code === 'Üİ').length;
+    const calisilanGun = geldiGun + fazlaMesaiGun;
+    const degerlendirilebilirGun = calisilanGun + eksikMesaiGun + devamsizGun + raporGun + ucretsizIzinGun;
+    const gelmeOrani = degerlendirilebilirGun > 0 ? calisilanGun / degerlendirilebilirGun : 0.5;
+    return (
+      gelmeOrani * 10
+      + (fazlaMesaiGun / tenureMonths) * 2.5
+      - (devamsizGun / tenureMonths) * 4
+      - (raporGun / tenureMonths) * 2
+      - (raporCountAction / tenureMonths) * 1
+      - (ucretsizIzinGun / tenureMonths) * 1
+      - (eksikMesaiGun / tenureMonths) * 0.8
+      + (personJobs.length / tenureMonths) * 0.5
+    );
+  };
+
+  const computeMesaiGlobalModifier = (person, allMesai = []) => {
+    const personMesai = allMesai.filter(m => String(m.personId) === String(person.id));
+    if (personMesai.length === 0) return 0;
+    const geldiGun = personMesai.filter(m => m.code === 'G').length;
+    const fazlaMesaiGun = personMesai.filter(m => FAZLA_MESAI_CODES.includes(m.code)).length;
+    const devamsizGun = personMesai.filter(m => m.code === 'D').length;
+    const raporGun = personMesai.filter(m => m.code === 'R').length;
+    const ucretsizIzinGun = personMesai.filter(m => m.code === 'Üİ').length;
+    const calisilanGun = geldiGun + fazlaMesaiGun;
+    const degerlendirilebilirGun = calisilanGun + devamsizGun + raporGun + ucretsizIzinGun;
+    if (degerlendirilebilirGun === 0) return 0;
+    const gelmeOrani = calisilanGun / degerlendirilebilirGun;
+    const base = (gelmeOrani - 0.85) * 30;
+    const mesaiBonus = Math.min(2, fazlaMesaiGun * 0.1);
+    return Math.max(-6, Math.min(6, Math.round(base + mesaiBonus)));
+  };
+
+  export const computeAllAutoSkills = (allPersonnel, allJobs, allActions, allVehicles = [], allMesai = []) => {
+    const maviYaka = (allPersonnel || []).filter(p => p.collarType === 'Mavi Yaka' || (!p.collarType && MAVI_YAKA_POSITIONS_FOR_SKILL.includes(p.position)));
+    const jobs_ = allJobs || [], actions_ = allActions || [], vehicles_ = allVehicles || [], mesai_ = allMesai || [];
+    const result = {};
+    maviYaka.forEach(p => { result[p.id] = {}; });
+
+    {
+      const eligible = maviYaka.filter(p => p.position === 'Şoför' || p.secondaryPosition === 'Şoför');
+      const rawMap = {};
+      eligible.forEach(p => { const raw = computeSoforlukRaw(p, jobs_, vehicles_); if (raw !== null) rawMap[p.id] = raw; });
+      const normalized = normalizeSkillScores(rawMap);
+      eligible.forEach(p => { result[p.id].soforluk = normalized[p.id] !== undefined ? normalized[p.id] : 50; });
+    }
+    [{ pos: 'Taşıma Elemanı', key: 'tasima' }, { pos: 'Mobilya Ustası', key: 'mobilya' }].forEach(({ pos, key }) => {
+      const eligible = maviYaka.filter(p => p.position === pos || p.secondaryPosition === pos);
+      const rawMap = {};
+      eligible.forEach(p => { const raw = computePositionReviewRaw(p, jobs_); if (raw !== null) rawMap[p.id] = raw; });
+      const normalized = normalizeSkillScores(rawMap);
+      eligible.forEach(p => { result[p.id][key] = normalized[p.id] !== undefined ? normalized[p.id] : 50; });
+    });
+    {
+      const rawMap = {};
+      maviYaka.forEach(p => { rawMap[p.id] = computeDisiplinRaw(p, actions_, mesai_); });
+      const normalized = normalizeSkillScores(rawMap);
+      maviYaka.forEach(p => { result[p.id].disiplin = normalized[p.id] ?? 50; });
+    }
+    {
+      const leaders = maviYaka.filter(p => ['Ekip Şefi', 'Heryerden Usta', 'Kalfa'].includes(p.rank));
+      const rawMap = {};
+      leaders.forEach(p => { const raw = computeLiderlikRaw(p, jobs_); if (raw !== null) rawMap[p.id] = raw; });
+      const normalized = normalizeSkillScores(rawMap);
+      maviYaka.forEach(p => {
+        result[p.id].liderlik = ['Ekip Şefi', 'Heryerden Usta', 'Kalfa'].includes(p.rank) ? (normalized[p.id] !== undefined ? normalized[p.id] : 50) : 50;
+      });
+    }
+    {
+      const rawMap = {};
+      maviYaka.forEach(p => { rawMap[p.id] = computeTakimRaw(p, jobs_); });
+      const normalized = normalizeSkillScores(rawMap);
+      maviYaka.forEach(p => { result[p.id].takimCalismasi = normalized[p.id] ?? 50; });
+    }
+    {
+      const rawMap = {};
+      maviYaka.forEach(p => { rawMap[p.id] = computeTecrubeRaw(p); });
+      const normalized = normalizeSkillScores(rawMap);
+      maviYaka.forEach(p => { result[p.id].tecrube = normalized[p.id] ?? 50; });
+    }
+    {
+      const rawMap = {};
+      maviYaka.forEach(p => { rawMap[p.id] = computeFormRaw(p, jobs_, actions_, mesai_); });
+      const normalized = normalizeSkillScores(rawMap);
+      maviYaka.forEach(p => { result[p.id].form = normalized[p.id] ?? 50; });
+    }
+    maviYaka.forEach(p => {
+      const modifier = computeMesaiGlobalModifier(p, mesai_);
+      if (modifier === 0) return;
+      Object.keys(result[p.id]).forEach(key => {
+        result[p.id][key] = Math.max(0, Math.min(100, result[p.id][key] + modifier));
+      });
+    });
+    return result;
+  };
+
+  export const computeAvgSkillForPerson = (person, skillsMap) => {
+    if (!person) return 0;
+    const personSkills = (skillsMap && skillsMap[String(person.id)]) || {};
+    const visibleDefs = PERSONNEL_SKILL_DEFS.filter(s => isSkillVisibleForPerson(s, person));
+    if (visibleDefs.length === 0) return 0;
+    return Math.round(visibleDefs.reduce((sum, s) => sum + (typeof personSkills[s.key] === 'number' ? personSkills[s.key] : 50), 0) / visibleDefs.length);
+  };
+
+  export const SkillScoreBadge = ({ person, skillsMap }) => {
+    const [showPopup, setShowPopup] = useState(false);
+    const personSkills = (skillsMap && skillsMap[String(person.id)]) || {};
+    const visibleDefs = PERSONNEL_SKILL_DEFS.filter(s => isSkillVisibleForPerson(s, person));
+    const avg = computeAvgSkillForPerson(person, skillsMap);
+    return (
+      <div className="relative inline-block" onMouseEnter={() => setShowPopup(true)} onMouseLeave={() => setShowPopup(false)}>
+        <button type="button" onClick={(e) => { e.stopPropagation(); setShowPopup(p => !p); }} title="Özellik Puanları (Otomatik)"
+          className={`w-7 h-7 rounded-full flex items-center justify-center text-white text-[10px] font-black shadow-sm border-2 border-white shrink-0 ${getSkillCircleColor(avg)}`}>
+          {avg}
+        </button>
+        {showPopup && (
+          <div onClick={e => e.stopPropagation()} className="absolute z-50 top-full right-0 mt-1 w-52 bg-white rounded-xl shadow-xl border border-neutral-200 p-3 animate-in fade-in zoom-in-95">
+            <p className="text-[10px] font-black text-neutral-400 uppercase mb-2 truncate">{person.fullName} • Özellik Puanları</p>
+            <div className="space-y-1.5">
+              {visibleDefs.map(s => {
+                const val = typeof personSkills[s.key] === 'number' ? personSkills[s.key] : 50;
+                return (
+                  <div key={s.key} className="flex items-center justify-between text-[11px] gap-2">
+                    <span className="font-bold text-neutral-600 truncate">{s.label}</span>
+                    <span className={`font-black shrink-0 ${getSkillTextColor(val)}`}>{val}</span>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="border-t border-neutral-100 mt-2 pt-2 flex justify-between items-center">
+              <span className="text-[10px] font-bold text-neutral-500">Ortalama</span>
+              <span className={`text-xs font-black ${getSkillTextColor(avg)}`}>{avg}</span>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const SteeringWheelIcon = ({ className }) => (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="2.3" fill="currentColor" stroke="none" />
+      <line x1="12" y1="3" x2="12" y2="9.3" /><line x1="5.3" y1="16.5" x2="10.2" y2="13.3" /><line x1="18.7" y1="16.5" x2="13.8" y2="13.3" />
+    </svg>
+  );
+  const DrillIcon = ({ className }) => (
+    <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2.5" y="9" width="9" height="6" rx="1" /><path d="M11.5 10.5h4.5l4.5-2v9l-4.5-2h-4.5z" /><line x1="20.5" y1="12" x2="22.5" y2="12" />
+    </svg>
+  );
+  const getPositionSkillIcon = (pos, person, keyName) => {
+    if (pos === 'Şoför') {
+      const isBuyuk = person.ehliyet === 'Büyük Ehliyet';
+      return <span key={keyName} title={`Şoför${person.ehliyet ? ' • ' + person.ehliyet : ''}`}><SteeringWheelIcon className={`w-3.5 h-3.5 shrink-0 ${isBuyuk ? 'text-yellow-500' : 'text-neutral-300'}`} /></span>;
+    }
+    if (pos === 'Mobilya Ustası') return <span key={keyName} title="Mobilya Ustası"><DrillIcon className="w-3.5 h-3.5 shrink-0 text-orange-600" /></span>;
+    if (pos === 'Taşıma Elemanı') return <span key={keyName} title="Taşıma Elemanı"><Zap className="w-3.5 h-3.5 shrink-0 text-blue-600 fill-blue-500" /></span>;
+    return null;
+  };
+  export const PersonPositionRankIcons = ({ person }) => {
+    if (!person) return null;
+    const items = [];
+    if (person.rank === 'Ekip Şefi') items.push(<Star key="rank" className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500 shrink-0" title="Ekip Şefi" />);
+    else if (person.rank === 'Heryerden Usta' || person.rank === 'Kalfa') items.push(<Star key="rank" className="w-3.5 h-3.5 text-neutral-400 fill-white shrink-0" title="Heryerden Usta" />);
+    const primaryIcon = getPositionSkillIcon(person.position, person, 'primary');
+    if (primaryIcon) items.push(primaryIcon);
+    if (person.secondaryPosition) {
+      const secondaryIcon = getPositionSkillIcon(person.secondaryPosition, person, 'secondary');
+      if (secondaryIcon) items.push(secondaryIcon);
+    }
+    if (items.length === 0) return null;
+    return <div className="flex items-center gap-1 shrink-0">{items}</div>;
+  };
+
+  export const PersonnelProfileView = ({ personId, personnelList, jobs, db, appId, addSystemLog, onBack, setViewingImage, setActiveTab, setPendingEditPersonnelId, allPersonnelActions = [], vehicles = [], currentUser, allMesaiRecords = [] }) => {
     const person = personnelList.find(p => String(p.id) === String(personId));
 
-    const [periodFilter, setPeriodFilter] = useState('month'); // week | month | year | all
-    const [skills, setSkills] = useState({});
+    const [periodFilter, setPeriodFilter] = useState('month'); // week | month | lastMonth | year | all
     const [clothingRecords, setClothingRecords] = useState([]);
     const [phoneRecords, setPhoneRecords] = useState([]);
     const [leaveRecords, setLeaveRecords] = useState([]);
@@ -4040,11 +4566,61 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     // Personelin güncel borcu (maas_yearly dokümanındaki borclanma alanından okunur)
     const [currentDebt, setCurrentDebt] = useState(0);
 
+    // YENİ: Prim Ödeme Gir — Maaş Tablosu'ndaki prim (fazla mesai saati) alanına saat veya tutar girişi
+    const [showPrimModal, setShowPrimModal] = useState(false);
+    const [primForm, setPrimForm] = useState({ mode: 'tutar', value: '', month: nowMonth, note: '' });
+    const [primSubmitting, setPrimSubmitting] = useState(false);
+
+    // YENİ: Otomatik özellik puanı hesaplaması için TÜM personelin üzerine, sadece bu kişiye
+    // ait manuel Performans Değerlendirme düzeltmeleri Firestore'dan dinlenir.
+    const autoSkillsMap = React.useMemo(() => computeAllAutoSkills(personnelList, jobs, allPersonnelActions, vehicles, allMesaiRecords), [personnelList, jobs, allPersonnelActions, vehicles, allMesaiRecords]);
+    const autoSkills = autoSkillsMap[String(personId)] || {};
+    const isManagerUser = currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi' || currentUser?.permissions?.canEdit;
+    const [skillAdjustments, setSkillAdjustments] = useState([]);
     useEffect(() => {
       if (!personId || !db) return;
-      const unsub1 = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'personnelSkills', String(personId)), snap => {
-        setSkills(snap.exists() ? snap.data() : {});
+      const unsubAdj = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'personnelSkillAdjustments'), where('personnelId', '==', String(personId))), snap => {
+        setSkillAdjustments(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.date) - new Date(a.date)));
       }, console.error);
+      return () => unsubAdj();
+    }, [personId, db, appId]);
+    const skills = React.useMemo(() => {
+      const merged = { ...autoSkills };
+      skillAdjustments.forEach(adj => {
+        const base = typeof merged[adj.skillKey] === 'number' ? merged[adj.skillKey] : 50;
+        merged[adj.skillKey] = Math.max(0, Math.min(100, base + (parseFloat(adj.delta) || 0)));
+      });
+      return merged;
+    }, [autoSkills, skillAdjustments]);
+
+    const [showEvalModal, setShowEvalModal] = useState(false);
+    const [evalForm, setEvalForm] = useState({ skillKey: '', delta: '', reason: '' });
+    const handleSubmitEval = async (e) => {
+      e.preventDefault();
+      if (!evalForm.skillKey || !evalForm.delta || !evalForm.reason.trim()) {
+        alert('Lütfen özellik, puan miktarı ve gerekçe alanlarını doldurun.');
+        return;
+      }
+      try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelSkillAdjustments'), {
+          personnelId: String(personId),
+          skillKey: evalForm.skillKey,
+          delta: parseFloat(evalForm.delta),
+          reason: evalForm.reason.trim(),
+          evaluatedBy: currentUser?.fullName || currentUser?.email || 'Yönetici',
+          date: new Date().toISOString()
+        });
+        if (addSystemLog) addSystemLog('Performans Değerlendirmesi', `${person?.fullName} için ${evalForm.skillKey} özelliğine ${evalForm.delta > 0 ? '+' : ''}${evalForm.delta} puan verildi. Gerekçe: ${evalForm.reason.trim()}`);
+        setEvalForm({ skillKey: '', delta: '', reason: '' });
+        setShowEvalModal(false);
+      } catch (err) {
+        console.error('Performans değerlendirme hatası:', err);
+        alert('Değerlendirme kaydedilirken bir hata oluştu.');
+      }
+    };
+
+    useEffect(() => {
+      if (!personId || !db) return;
       const unsub2 = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'personnelClothing'), where('personnelId', '==', String(personId))), snap => {
         setClothingRecords(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.date) - new Date(a.date)));
       }, console.error);
@@ -4068,7 +4644,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
           setCurrentDebt(0);
         }
       }, console.error);
-      return () => { unsub1(); unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
+      return () => { unsub2(); unsub3(); unsub4(); unsub5(); unsub6(); };
     }, [personId, db, appId]);
 
     if (!person) {
@@ -4083,18 +4659,33 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       );
     }
 
-    const getPeriodStart = () => {
+    const getPeriodRange = () => {
       const now = new Date();
-      if (periodFilter === 'week') { const d = new Date(now); d.setDate(d.getDate() - 7); return d; }
-      if (periodFilter === 'month') return new Date(now.getFullYear(), now.getMonth(), 1);
-      if (periodFilter === 'year') return new Date(now.getFullYear(), 0, 1);
-      return null;
+      if (periodFilter === 'week') {
+        const day = now.getDay();
+        const diffToMonday = day === 0 ? 6 : day - 1;
+        const start = new Date(now); start.setDate(now.getDate() - diffToMonday); start.setHours(0, 0, 0, 0);
+        return { start, end: null };
+      }
+      if (periodFilter === 'month') return { start: new Date(now.getFullYear(), now.getMonth(), 1), end: null };
+      if (periodFilter === 'lastMonth') {
+        const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+        return { start, end };
+      }
+      if (periodFilter === 'year') return { start: new Date(now.getFullYear(), 0, 1), end: null };
+      return { start: null, end: null };
     };
-    const periodStart = getPeriodStart();
+    const { start: periodStart, end: periodEnd } = getPeriodRange();
 
     const personJobs = jobs.filter(j => (j.assignedPersonnelIds || []).includes(person.id) || j.assignedPersonnelId === person.id)
       .sort((a, b) => new Date(b.date) - new Date(a.date));
-    const periodJobs = periodStart ? personJobs.filter(j => new Date(j.date) >= periodStart) : personJobs;
+    const periodJobs = personJobs.filter(j => {
+      const d = new Date(j.date);
+      if (periodStart && d < periodStart) return false;
+      if (periodEnd && d > periodEnd) return false;
+      return true;
+    });
     const periodJobsCount = periodJobs.length;
     const periodReviewsCount = periodJobs.filter(j => j.pointsApproved && j.reviewImage).length;
     // YENİ: Bu personelin ekibine yazılmış (hasar var) işlerin dönem içi sayısı ve son hasarlı işler listesi
@@ -4104,19 +4695,26 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const recentJobs = personJobs.slice(0, 5);
     const recentReviewedJobs = personJobs.filter(j => j.pointsApproved && j.reviewImage).slice(0, 5);
 
-    const handleSkillChange = async (key, delta) => {
-      const current = typeof skills[key] === 'number' ? skills[key] : 50;
-      const newVal = Math.max(0, Math.min(100, current + delta));
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelSkills', String(personId)), { [key]: newVal }, { merge: true });
-    };
+    // YENİ: Seçili döneme göre mesai tabanlı sayaçlar (Fazla Mesai / Devamsızlık / Rapor / İzin)
+    const personMesaiForPeriod = (allMesaiRecords || []).filter(m => {
+      if (String(m.personId) !== String(person.id)) return false;
+      const d = new Date(m.year, m.month - 1, m.day);
+      if (periodStart && d < periodStart) return false;
+      if (periodEnd && d > periodEnd) return false;
+      return true;
+    });
+    const periodFazlaMesaiSayisi = personMesaiForPeriod.filter(m => ['FG', 'FGM', 'FM'].includes(m.code)).length;
+    const periodRaporGunSayisi = personMesaiForPeriod.filter(m => m.code === 'R').length;
+    const periodDevamsizlikSayisi = personMesaiForPeriod.filter(m => m.code === 'D').length;
+    const periodUcretsizIzinSayisi = personMesaiForPeriod.filter(m => m.code === 'Üİ').length;
+    const periodUcretliIzinSayisi = personMesaiForPeriod.filter(m => m.code === 'Yİ').length;
 
     // YENİ: Özellikler bölümü sadece Mavi Yaka'da gösterilir; Temizlik Görevlisi ve
-    // Asansör Operatörü hariç. Şoförlük Gücü özelliği ise sadece Şoför pozisyonunda gösterilir.
+    // Asansör Operatörü hariç.
     const isMaviYakaPerson = person && (person.collarType === 'Mavi Yaka' || (!person.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Operatör'].includes(person.position)));
     const skillsHiddenPositions = ['Temizlik Görevlisi', 'Operatör'];
     const showSkillsSection = isMaviYakaPerson && !skillsHiddenPositions.includes(person?.position);
-    // Şoförlük Gücü sadece Şoför pozisyonunda görünür
-    const visibleSkillDefs = PERSONNEL_SKILL_DEFS.filter(s => s.key !== 'soforluk' || person?.position === 'Şoför');
+    const visibleSkillDefs = PERSONNEL_SKILL_DEFS.filter(s => isSkillVisibleForPerson(s, person));
     const avgSkill = visibleSkillDefs.length > 0
       ? Math.round(visibleSkillDefs.reduce((sum, s) => sum + (typeof skills[s.key] === 'number' ? skills[s.key] : 50), 0) / visibleSkillDefs.length)
       : 0;
@@ -4462,10 +5060,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       const yemekAylik = parseFloat(person.yemek) || 0;
       const yolAylik = parseFloat(person.yol) || 0;
 
-      // Maaş tablosu ile aynı formüller (çalışılan güne orantılı)
-      const hesaplananBanka = (bankaParasiBase / 30) * calışılanGun;
+      // YENİ: Gerçek puantaj verisiyle kırılım — ayın 1'inden ayrılış gününe kadar
+      // Devamsız/Rapor/Ücretsiz İzin günleri "Ödenecek Gün"den düşülür; Fazla Mesai/Gün günleri
+      // fazla mesai ücreti olarak ayrıca eklenir.
+      const personMesaiUpToResign = (allMesaiRecords || []).filter(m => String(m.personId) === String(personId) && m.year === year && m.month === month && m.day <= resignDay);
+      const devamsizGun = personMesaiUpToResign.filter(m => m.code === 'D').length;
+      const raporGun = personMesaiUpToResign.filter(m => m.code === 'R').length;
+      const ucretsizIzinGun = personMesaiUpToResign.filter(m => m.code === 'Üİ').length;
+      const fazlaGunSayisi = personMesaiUpToResign.filter(m => ['FG', 'FGM', 'FM'].includes(m.code)).length;
+      const odenecekGun = Math.max(0, calışılanGun - devamsizGun - raporGun - ucretsizIzinGun);
+
+      // Maaş tablosu ile aynı formüller (Devamsız/Rapor/Ücretsiz İzin düşülmüş "Ödenecek Gün"e orantılı)
+      const hesaplananBanka = (bankaParasiBase / 30) * odenecekGun;
       const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
-      const netMaas = (maas / 30) * calışılanGun;
+      const saatlikUcret = maas / 200;
+      const fazlaMesaiUcreti = saatlikUcret * ((fazlaGunSayisi * 10) - (devamsizGun * 3));
+      const netMaas = (maas / 30) * odenecekGun + fazlaMesaiUcreti;
 
       // Peşin verilen yemek/yol'un, çalışılmayan güne düşen İADE tutarı
       const yemekIade = (yemekAylik / daysInMonth) * calışılmayanGun;
@@ -4492,6 +5102,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
       setSettlementData({
         dateStr, year, month, daysInMonth, calışılanGun, calışılmayanGun,
+        devamsizGun, raporGun, ucretsizIzinGun, fazlaGunSayisi, odenecekGun, fazlaMesaiUcreti,
         maas, netMaas, hesaplananBanka, icraKesintisi,
         yemekAylik, yolAylik, yemekIade, yolIade, toplamIade,
         nakittenDusulen, bankadanDusulen,
@@ -4591,6 +5202,30 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const yemekStatusStyle = financeMonthRow.yemekOdendi ? 'bg-green-50 border-green-200 text-green-700' : 'bg-neutral-50 border-neutral-200 text-neutral-500';
     const yolStatusText = financeMonthRow.yolOdendi ? `${financeMonthLabel} Yol Parası Yatırıldı` : `${financeMonthLabel} Yol Parası Bekleniyor`;
     const yolStatusStyle = financeMonthRow.yolOdendi ? 'bg-green-50 border-green-200 text-green-700' : 'bg-neutral-50 border-neutral-200 text-neutral-500';
+
+    // YENİ: Prim ve Mesai Durumu — Maaş Tablosu'ndaki prim (fazla mesai saati) alanından hesaplanır
+    const financeSaatlikUcret = (parseFloat(person.maas) || 0) / 200;
+    const financePrimSaat = parseFloat(financeMonthRow.prim) || 0;
+    const financePrimHesaplananTutar = financePrimSaat * financeSaatlikUcret;
+    const financePrimManuelTutar = parseFloat(financeMonthRow.primOdenenTutar) || 0;
+    const financePrimTutar = financePrimManuelTutar > 0 ? financePrimManuelTutar : financePrimHesaplananTutar;
+    const financePrimOdendi = financePrimManuelTutar > 0 || (financeFullyPaid && financePrimSaat > 0);
+    const primStatusText = financePrimOdendi ? `${financeMonthLabel} Prim Ödendi (₺${financePrimTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})})` : (financePrimTutar > 0 ? `${financeMonthLabel} Prim Bekleniyor (₺${financePrimTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})})` : `${financeMonthLabel} Prim Bekleniyor`);
+    const primStatusStyle = financePrimOdendi ? 'bg-green-50 border-green-200 text-green-700' : 'bg-neutral-50 border-neutral-200 text-neutral-500';
+
+    const [financeYearNum, financeMonthNum] = financeMonth.split('-').map(v => parseInt(v));
+    const financePersonMesai = (allMesaiRecords || []).filter(m => String(m.personId) === String(personId) && m.year === financeYearNum && m.month === financeMonthNum);
+    const financeFazlaGunSayisi = financePersonMesai.filter(m => ['FG', 'FGM', 'FM'].includes(m.code)).length;
+    const financeDevamsizGunSayisi = financePersonMesai.filter(m => m.code === 'D').length;
+    const financeMesaiSaat = (financeFazlaGunSayisi * 10) - (financeDevamsizGunSayisi * 3) + financePrimSaat;
+    const financeMesaiTutar = financeMesaiSaat * financeSaatlikUcret;
+
+    const financeAvansTutar = (parseFloat(financeMonthRow.nakitAvans) || 0) + (parseFloat(financeMonthRow.resmiAvans) || 0);
+    const financeKalanOdenenTutar = (financeMonthRow.bankaOdendi ? (parseFloat(financeMonthRow.bankaOdenenTutar) || 0) : 0) + (financeMonthRow.nakitOdendi ? (parseFloat(financeMonthRow.nakitOdenenTutar) || 0) : 0);
+    const financeMaasOdenenTutar = financeAvansTutar + financeKalanOdenenTutar;
+    const financeYemekTutar = parseFloat(financeMonthRow.yemekOdenenTutar) || 0;
+    const financeYolTutar = parseFloat(financeMonthRow.yolOdenenTutar) || 0;
+    const financeToplamOdenenTutar = financeMaasOdenenTutar + (financeMonthRow.yolOdendi ? financeYolTutar : 0) + (financeMonthRow.yemekOdendi ? financeYemekTutar : 0) + (financePrimOdendi ? financePrimTutar : 0);
 
     // YENİ: Personelin ne zamandır çalıştığını gösteren kıdem metni (örn. "9 aydır", "1 sene 3 aydır")
     const getTenureText = (startDateStr) => {
@@ -4728,6 +5363,49 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       } catch (err) { console.error(err); alert('Borç ödemesi işlenirken hata oluştu.'); }
     };
 
+    // YENİ: PRİM ÖDEME GİR — Maaş Tablosu'ndaki (maas koleksiyonu) prim (fazla mesai saati) alanına
+    // saat veya tutar (₺) olarak giriş yapar. Tutar girilirse saatlik ücret × 1.5 (fazla mesai zammı)
+    // ile saate çevrilir.
+    const handlePrimSubmit = async (e) => {
+      e.preventDefault();
+      const rawVal = parseFloat(primForm.value) || 0;
+      if (rawVal <= 0) { alert('Lütfen geçerli bir değer girin.'); return; }
+      setPrimSubmitting(true);
+      try {
+        const [py, pm] = primForm.month.split('-');
+        const maasDocId = `${maasDocPrefix}${parseInt(py)}_${parseInt(pm)}`;
+        const maasRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', maasDocId);
+        const snap = await getDoc(maasRef);
+        const existingData = snap.exists() ? snap.data() : {};
+        const existingRecords = existingData.records || {};
+        const existingRow = existingRecords[String(personId)] || {};
+
+        const saatlikUcret = (parseFloat(person.maas) || 0) / 200;
+        const fazlaMesaiSaatlikUcret = saatlikUcret * 1.5;
+        let eklenecekSaat = 0, tutarKarsiligi = 0;
+        if (primForm.mode === 'saat') {
+          eklenecekSaat = rawVal;
+          tutarKarsiligi = rawVal * fazlaMesaiSaatlikUcret;
+        } else {
+          eklenecekSaat = fazlaMesaiSaatlikUcret > 0 ? rawVal / fazlaMesaiSaatlikUcret : 0;
+          tutarKarsiligi = rawVal;
+        }
+        const yeniPrimSaat = (parseFloat(existingRow.prim) || 0) + eklenecekSaat;
+        const yeniPrimTutar = (parseFloat(existingRow.primOdenenTutar) || 0) + tutarKarsiligi;
+        const updatedRow = { ...existingRow, prim: yeniPrimSaat, primOdenenTutar: yeniPrimTutar };
+        await setDoc(maasRef, { records: { ...existingRecords, [String(personId)]: updatedRow } }, { merge: true });
+
+        await logAction({ type: 'prim', title: 'Prim Ödemesi', month: primForm.month, mode: primForm.mode, amount: rawVal, equivalentHours: eklenecekSaat, equivalentAmount: tutarKarsiligi, note: primForm.note, date: new Date().toISOString().split('T')[0] });
+        if (addSystemLog) addSystemLog('Prim Ödemesi', `${person.fullName} için ${primForm.month} ayına ${primForm.mode === 'saat' ? `${rawVal} saat` : `₺${rawVal.toLocaleString('tr-TR')}`} prim girildi (Maaş Tablosu'na ${eklenecekSaat.toFixed(2)} saat olarak yansıdı).`);
+        setPrimForm({ mode: 'tutar', value: '', month: nowMonth, note: '' });
+        setShowPrimModal(false);
+      } catch (err) {
+        console.error('Prim ödemesi girilirken hata:', err);
+        alert('Prim ödemesi girilirken bir hata oluştu.');
+      }
+      setPrimSubmitting(false);
+    };
+
     // 2) YENİ: MAAŞ / YOL / YEMEK DURUMU — artık manuel onay yerine Maaş Tablosu'ndaki tikler canlı okunur
     // (Aşağıdaki useEffect, financeMonth her değiştiğinde ilgili aya ait 'maas' koleksiyon kaydını dinler)
 
@@ -4833,6 +5511,34 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       .filter(r => new Date(r.startDate).getFullYear() === currentYear)
       .reduce((sum, r) => sum + (parseFloat(r.days) || 0), 0);
 
+    // YENİ: Yıllık İzin Takibi — 4857 Sayılı İş Kanunu Madde 53 uyarınca kıdeme göre otomatik hak hesabı
+    const getYillikIzinHakki = (kidemYili) => {
+      if (kidemYili < 1) return 0;
+      if (kidemYili <= 5) return 14;
+      if (kidemYili <= 15) return 20;
+      return 26;
+    };
+    const [selectedLeaveYear, setSelectedLeaveYear] = useState(String(currentYear));
+    const leaveYearOptions = React.useMemo(() => {
+      if (!person?.startDate) return [currentYear];
+      const startYear = new Date(person.startDate).getFullYear();
+      const years = [];
+      for (let y = startYear; y <= currentYear; y++) years.push(y);
+      return years.length > 0 ? years : [currentYear];
+    }, [person?.startDate, currentYear]);
+    const leaveYearSummaries = React.useMemo(() => {
+      return leaveYearOptions.map(year => {
+        const kidemYili = person?.startDate ? (new Date(`${year}-12-31`) - new Date(person.startDate)) / (1000 * 60 * 60 * 24 * 365.25) : 0;
+        const hakEdilen = getYillikIzinHakki(kidemYili);
+        const isPastYear = year < currentYear;
+        const manualUsed = leaveRecords.filter(r => new Date(r.startDate).getFullYear() === year).reduce((sum, r) => sum + (parseFloat(r.days) || 0), 0);
+        const kullanilan = isPastYear ? hakEdilen : manualUsed;
+        const kalan = Math.max(0, hakEdilen - kullanilan);
+        return { year, hakEdilen, kullanilan, kalan, isPastYear, isAuto: isPastYear };
+      }).sort((a, b) => b.year - a.year);
+    }, [leaveYearOptions, person?.startDate, leaveRecords, currentYear]);
+    const visibleLeaveSummaries = selectedLeaveYear === 'all' ? leaveYearSummaries : leaveYearSummaries.filter(s => String(s.year) === selectedLeaveYear);
+
     return (
       <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in pb-8">
         <button onClick={onBack} className="text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
@@ -4918,16 +5624,20 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <Edit className="w-5 h-5" /> Bilgileri Düzenle
             </button>
             {/* YENİ: Şirkete Borç Ödemesi Yap — güncel borcu da gösterir */}
-            <button type="button" onClick={() => { setDebtForm({ amount: '', month: nowMonth, note: '' }); setShowDebtModal(true); }} className="p-3 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5 relative col-span-2 md:col-span-1">
+            <button type="button" onClick={() => { setDebtForm({ amount: '', month: nowMonth, note: '' }); setShowDebtModal(true); }} className="p-3 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl transition flex flex-col items-center justify-center gap-1.5 relative col-span-2 md:col-span-1 min-h-[84px]">
               <Landmark className="w-5 h-5" /> Şirkete Borç Ödemesi
               <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${currentDebt > 0 ? 'bg-rose-600 text-white' : 'bg-green-100 text-green-700'}`}>
                 {currentDebt > 0 ? `Güncel Borç: ₺${currentDebt.toLocaleString('tr-TR')}` : 'Borç Yok'}
               </span>
             </button>
+            {/* YENİ: Prim Ödeme Gir — Maaş Tablosu'ndaki prim (fazla mesai saati) alanına saat/tutar girişi */}
+            <button type="button" onClick={() => { setPrimForm({ mode: 'tutar', value: '', month: nowMonth, note: '' }); setShowPrimModal(true); }} className="p-3 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-xl transition flex flex-col items-center justify-center gap-1.5 min-h-[84px]">
+              <Star className="w-5 h-5" /> Prim Ödeme Gir
+            </button>
           </div>
         </div>
 
-        {/* YENİ: Maaş / Yol / Yemek Durumu — artık buton değil, Maaş Tablosu tiklerinden otomatik okunan bildirim */}
+        {/* YENİ: Maaş / Yol / Yemek / Prim / Mesai Durumu — artık buton değil, Maaş Tablosu tiklerinden otomatik okunan bildirim */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <h3 className="font-bold text-lg text-black flex items-center gap-2"><Wallet className="w-6 h-6 text-green-600" /> Maaş / Yol / Yemek Durumu</h3>
@@ -4938,7 +5648,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               className="p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-green-600 font-bold text-sm bg-white"
             />
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div className={`p-4 rounded-xl border-2 ${maasStatusStyle} flex items-center gap-3`}>
               <CheckCircle className="w-6 h-6 shrink-0" />
               <div>
@@ -4960,6 +5670,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <span className="block font-black text-sm leading-snug">{yemekStatusText}</span>
               </div>
             </div>
+            <div className={`p-4 rounded-xl border-2 ${primStatusStyle} flex items-center gap-3`}>
+              <Star className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Prim Durumu</span>
+                <span className="block font-black text-sm leading-snug">{primStatusText}</span>
+              </div>
+            </div>
+            <div className="p-4 rounded-xl border-2 bg-blue-50 border-blue-200 text-blue-700 flex items-center gap-3 md:col-span-2">
+              <Clock className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Mesai Durumu ({financeMonthLabel})</span>
+                <span className="block font-black text-sm leading-snug">{financeMesaiSaat.toFixed(1)} Saat (₺{financeMesaiTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})})</span>
+              </div>
+            </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-neutral-100 flex justify-between items-center">
+            <span className="text-sm font-bold text-neutral-500">Toplam Ödenen ({financeMonthLabel})</span>
+            <span className="text-lg font-black text-black">₺{financeToplamOdenenTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
           </div>
         </div>
 
@@ -5106,15 +5834,31 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
         {/* Yıllık İzin Takibi */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-4">
             <h3 className="font-bold text-lg text-black flex items-center gap-2"><CalendarDays className="w-6 h-6 text-orange-500" /> Yıllık İzin Takibi</h3>
-            <button type="button" onClick={() => setShowLeaveModal(true)} className="px-3 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
-              <PlusCircle className="w-3.5 h-3.5" /> İzin Ekle
-            </button>
+            <div className="flex items-center gap-2">
+              <select value={selectedLeaveYear} onChange={e => setSelectedLeaveYear(e.target.value)} className="p-2 border border-neutral-200 rounded-lg text-xs outline-none focus:ring-1 focus:ring-orange-500 bg-neutral-50 text-neutral-700 font-bold cursor-pointer">
+                {leaveYearOptions.slice().reverse().map(y => <option key={y} value={String(y)}>{y}</option>)}
+                <option value="all">Tüm Yıllar</option>
+              </select>
+              <button type="button" onClick={() => setShowLeaveModal(true)} className="px-3 py-2 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                <PlusCircle className="w-3.5 h-3.5" /> İzin Ekle
+              </button>
+            </div>
           </div>
-          <div className="bg-orange-50 border border-orange-200 p-3 rounded-xl mb-3">
-            <span className="text-[10px] font-bold text-orange-500 uppercase block">{currentYear} Yılında Kullanılan</span>
-            <span className="font-black text-orange-800 text-lg">{totalLeaveDaysThisYear} Gün</span>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+            {visibleLeaveSummaries.map(s => (
+              <div key={s.year} className="bg-orange-50 border border-orange-200 p-3 rounded-xl">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[10px] font-bold text-orange-500 uppercase">{s.year} {s.isPastYear && <span className="text-neutral-400 normal-case">(geçmiş yıl)</span>}</span>
+                  <span className="text-[10px] font-bold text-orange-400">Hak: {s.hakEdilen} gün</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="font-black text-orange-800">{s.kullanilan} gün kullanılan</span>
+                  <span className={`font-black ${s.kalan > 0 ? 'text-green-700' : 'text-neutral-400'}`}>{s.kalan} gün kalan</span>
+                </div>
+              </div>
+            ))}
           </div>
           {leaveRecords.length === 0 ? (
             <p className="text-sm text-neutral-500 italic">Henüz yıllık izin kaydı yok.</p>
@@ -5134,8 +5878,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
           <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
             <h3 className="font-bold text-lg text-black flex items-center gap-2"><BarChart className="w-6 h-6 text-blue-600" /> Performans Özeti</h3>
-            <div className="flex bg-neutral-100 p-1 rounded-xl">
-              {[{ k: 'week', l: 'Haftalık' }, { k: 'month', l: 'Aylık' }, { k: 'year', l: 'Bu Sene' }, { k: 'all', l: 'Tüm Zamanlar' }].map(opt => (
+            <div className="flex bg-neutral-100 p-1 rounded-xl flex-wrap">
+              {[{ k: 'week', l: 'Bu Hafta' }, { k: 'month', l: 'Bu Ay' }, { k: 'lastMonth', l: 'Geçen Ay' }, { k: 'year', l: 'Bu Sene' }, { k: 'all', l: 'Tüm Zamanlar' }].map(opt => (
                 <button key={opt.k} type="button" onClick={() => setPeriodFilter(opt.k)} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition ${periodFilter === opt.k ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
                   {opt.l}
                 </button>
@@ -5156,6 +5900,27 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <span className="text-3xl font-black text-red-600 block">{periodDamagesCount}</span>
               <span className="text-xs font-bold text-red-700">Hasarlı İş</span>
             </div>
+            {/* YENİ: Mesai/puantaj tabanlı sayaçlar */}
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-center">
+              <span className="text-3xl font-black text-blue-600 block">{periodFazlaMesaiSayisi}</span>
+              <span className="text-xs font-bold text-blue-700">Fazla Mesai</span>
+            </div>
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
+              <span className="text-3xl font-black text-neutral-600 block">{periodDevamsizlikSayisi}</span>
+              <span className="text-xs font-bold text-neutral-500">Devamsızlık</span>
+            </div>
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
+              <span className="text-3xl font-black text-neutral-600 block">{periodRaporGunSayisi}</span>
+              <span className="text-xs font-bold text-neutral-500">Raporlu Gün</span>
+            </div>
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
+              <span className="text-3xl font-black text-neutral-600 block">{periodUcretliIzinSayisi}</span>
+              <span className="text-xs font-bold text-neutral-500">Ücretli İzin</span>
+            </div>
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
+              <span className="text-3xl font-black text-neutral-600 block">{periodUcretsizIzinSayisi}</span>
+              <span className="text-xs font-bold text-neutral-500">Ücretsiz İzin</span>
+            </div>
           </div>
         </div>
 
@@ -5163,9 +5928,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         {showSkillsSection && (
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
           <div className="flex justify-between items-center mb-4">
-            <h3 className="font-bold text-lg text-black flex items-center gap-2"><Award className="w-6 h-6 text-purple-600" /> Özellikler</h3>
-            <div className="text-right">
-              <span className="text-[10px] font-bold text-neutral-400 uppercase block">Ortalama Rating</span>
+            <div>
+              <h3 className="font-bold text-lg text-black flex items-center gap-2"><Award className="w-6 h-6 text-purple-600" /> Özellikler</h3>
+              <p className="text-[11px] text-neutral-400 font-medium mt-0.5">Puanlar sistemdeki gerçek verilerden (işler, tutanaklar, mesai) otomatik hesaplanır.</p>
+            </div>
+            <div className="text-right shrink-0">
+              <span className="text-[10px] font-bold text-neutral-400 uppercase block">Ortalama Puan</span>
               <span className={`text-2xl font-black ${getSkillTextColor(avgSkill)}`}>{avgSkill}</span>
             </div>
           </div>
@@ -5178,18 +5946,59 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     <span className="text-sm font-bold text-black">{s.label}</span>
                     <span className={`text-sm font-black ${getSkillTextColor(val)}`}>{val}</span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button type="button" onClick={() => handleSkillChange(s.key, -5)} className="w-7 h-7 shrink-0 bg-red-50 text-red-600 rounded-lg font-black hover:bg-red-100 transition">-</button>
-                    <div className="flex-1 h-3 bg-neutral-200 rounded-full overflow-hidden">
-                      <div className={`h-full ${getSkillBarColor(val)} transition-all duration-300`} style={{ width: `${val}%` }}></div>
-                    </div>
-                    <button type="button" onClick={() => handleSkillChange(s.key, 5)} className="w-7 h-7 shrink-0 bg-green-50 text-green-600 rounded-lg font-black hover:bg-green-100 transition">+</button>
+                  <div className="flex-1 h-3 bg-neutral-200 rounded-full overflow-hidden">
+                    <div className={`h-full ${getSkillBarColor(val)} transition-all duration-300`} style={{ width: `${val}%` }}></div>
                   </div>
                 </div>
               );
             })}
           </div>
+          {isManagerUser && (
+            <div className="mt-4 pt-4 border-t border-neutral-100">
+              <button type="button" onClick={() => { setEvalForm({ skillKey: visibleSkillDefs[0]?.key || '', delta: '', reason: '' }); setShowEvalModal(true); }} className="w-full py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 text-sm font-bold rounded-xl transition flex items-center justify-center gap-2">
+                <Award className="w-4 h-4" /> Personeli Değerlendir
+              </button>
+              {skillAdjustments.length > 0 && (
+                <div className="mt-3 space-y-1.5 max-h-32 overflow-y-auto">
+                  {skillAdjustments.slice(0, 5).map(adj => (
+                    <div key={adj.id} className="text-[11px] text-neutral-500 flex justify-between gap-2">
+                      <span className="truncate">{PERSONNEL_SKILL_DEFS.find(s => s.key === adj.skillKey)?.label || adj.skillKey}: {adj.reason}</span>
+                      <span className={`font-bold shrink-0 ${adj.delta > 0 ? 'text-green-600' : 'text-red-600'}`}>{adj.delta > 0 ? '+' : ''}{adj.delta}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
+        )}
+
+        {showEvalModal && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowEvalModal(false)}>
+            <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+              <h3 className="font-bold text-lg text-black mb-4">Personeli Değerlendir</h3>
+              <form onSubmit={handleSubmitEval} className="space-y-3">
+                <div>
+                  <label className="block text-sm font-bold text-neutral-700 mb-1">Özellik</label>
+                  <select required value={evalForm.skillKey} onChange={e => setEvalForm({ ...evalForm, skillKey: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
+                    {visibleSkillDefs.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-neutral-700 mb-1">Puan Değişimi (+/-)</label>
+                  <input required type="number" value={evalForm.delta} onChange={e => setEvalForm({ ...evalForm, delta: e.target.value })} placeholder="Örn: 5 veya -5" className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-neutral-700 mb-1">Gerekçe</label>
+                  <textarea required value={evalForm.reason} onChange={e => setEvalForm({ ...evalForm, reason: e.target.value })} rows={3} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" />
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button type="button" onClick={() => setShowEvalModal(false)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition">İptal</button>
+                  <button type="submit" className="flex-1 py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition">Kaydet</button>
+                </div>
+              </form>
+            </div>
+          </div>
         )}
 
         {/* Son Yaptığı İşler */}
@@ -5450,6 +6259,20 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     <tbody className="divide-y divide-neutral-100">
                       <tr><td className="p-2.5 text-neutral-600">Bu Ay Çalışılan Gün</td><td className="p-2.5 text-right font-bold text-black">{settlementData.calışılanGun} / {settlementData.daysInMonth} gün</td></tr>
                       <tr><td className="p-2.5 text-neutral-600">Çalışılmayan Gün (İade Bazı)</td><td className="p-2.5 text-right font-bold text-black">{settlementData.calışılmayanGun} gün</td></tr>
+                      {/* YENİ: Gerçek puantaj verisiyle kırılım */}
+                      {(settlementData.devamsizGun > 0 || settlementData.raporGun > 0 || settlementData.ucretsizIzinGun > 0 || settlementData.fazlaGunSayisi > 0) && (
+                        <>
+                          <tr className="bg-neutral-50"><td className="p-2.5 text-neutral-500 text-xs">Devamsız / Raporlu / Ücretsiz İzin Günü</td><td className="p-2.5 text-right text-xs text-neutral-500">{settlementData.devamsizGun} / {settlementData.raporGun} / {settlementData.ucretsizIzinGun} gün</td></tr>
+                          <tr className="bg-neutral-50"><td className="p-2.5 text-neutral-500 text-xs">Fazla Mesai / Gün Sayısı</td><td className="p-2.5 text-right text-xs text-neutral-500">{settlementData.fazlaGunSayisi} gün</td></tr>
+                        </>
+                      )}
+                      <tr><td className="p-2.5 text-neutral-600">Ödenecek Gün (Puantaj Kırılımlı)</td><td className="p-2.5 text-right font-bold text-black">{settlementData.odenecekGun} gün</td></tr>
+                      {settlementData.fazlaMesaiUcreti !== 0 && (
+                        <tr className={settlementData.fazlaMesaiUcreti > 0 ? 'bg-green-50' : 'bg-red-50'}>
+                          <td className={`p-2.5 ${settlementData.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>Fazla Mesai / Devamsızlık Ücret Etkisi</td>
+                          <td className={`p-2.5 text-right font-bold ${settlementData.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>{settlementData.fazlaMesaiUcreti > 0 ? '+' : ''}₺{settlementData.fazlaMesaiUcreti.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td>
+                        </tr>
+                      )}
                       <tr><td className="p-2.5 text-neutral-600">Hak Edilen Net Maaş</td><td className="p-2.5 text-right font-bold text-black">₺{settlementData.netMaas.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
                       <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yemek Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− ₺{settlementData.yemekIade.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
                       <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yol Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− ₺{settlementData.yolIade.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
@@ -5717,6 +6540,42 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             </div>
           </div>
         )}
+
+        {/* YENİ: Prim Ödeme Gir Modalı */}
+        {showPrimModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-amber-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><Star className="w-5 h-5" /> Prim Ödeme Gir</h3>
+                <button onClick={() => setShowPrimModal(false)} className="text-amber-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handlePrimSubmit} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Giriş Türü</label>
+                  <div className="flex bg-neutral-100 p-1 rounded-xl">
+                    <button type="button" onClick={() => setPrimForm({ ...primForm, mode: 'tutar' })} className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${primForm.mode === 'tutar' ? 'bg-white text-black shadow-sm' : 'text-neutral-500'}`}>Tutar (₺)</button>
+                    <button type="button" onClick={() => setPrimForm({ ...primForm, mode: 'saat' })} className={`flex-1 py-2 text-xs font-bold rounded-lg transition ${primForm.mode === 'saat' ? 'bg-white text-black shadow-sm' : 'text-neutral-500'}`}>Saat</button>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">{primForm.mode === 'saat' ? 'Fazla Mesai Saati' : 'Prim Tutarı (TL)'}</label>
+                  <input required type="number" step="0.1" value={primForm.value} onChange={e => setPrimForm({ ...primForm, value: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-amber-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Ait Olduğu Ay</label>
+                  <input required type="month" value={primForm.month} onChange={e => setPrimForm({ ...primForm, month: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-amber-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Not (İsteğe Bağlı)</label>
+                  <input type="text" value={primForm.note} onChange={e => setPrimForm({ ...primForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-amber-600" />
+                </div>
+                <button type="submit" disabled={primSubmitting} className="w-full py-4 bg-amber-600 text-white font-bold rounded-xl hover:bg-amber-700 transition flex justify-center items-center gap-2 disabled:opacity-50">
+                  <Star className="w-5 h-5" /> {primSubmitting ? 'Kaydediliyor...' : 'Prim Ödemesini Kaydet'}
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -5958,17 +6817,23 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     );
   };
 
-  export const PersonelTahtasiView = ({ personnelList, setViewingPersonnelProfileId, setActiveTab }) => {
+  export const PersonelTahtasiView = ({ personnelList, setViewingPersonnelProfileId, setActiveTab, jobs = [], allPersonnelActions = [], vehicles = [], allMesaiRecords = [] }) => {
     const [searchQuery, setSearchQuery] = useState('');
 
+    // YENİ: İşten ayrılmış/pasif personel tahtada hiç gösterilmez
+    const activePersonnelList = personnelList.filter(p => p.employmentStatus !== 'Pasif' && !p.resignationDate);
+
     // Sadece Mavi Yaka veya saha personeli olarak işaretlenenleri al
-    const maviYakaList = personnelList.filter(p => 
+    const maviYakaList = activePersonnelList.filter(p =>
       p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operatör'].includes(p.position))
     );
 
+    // YENİ: Otomatik özellik puanları (tüm personel için hesaplanır)
+    const skillsMap = React.useMemo(() => computeAllAutoSkills(personnelList, jobs, allPersonnelActions, vehicles, allMesaiRecords), [personnelList, jobs, allPersonnelActions, vehicles, allMesaiRecords]);
+
     // Aramaya göre filtrele
-    const filteredList = maviYakaList.filter(p => 
-      p.fullName.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    const filteredList = maviYakaList.filter(p =>
+      p.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       (p.position && p.position.toLowerCase().includes(searchQuery.toLowerCase()))
     );
 
@@ -5982,8 +6847,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
     const getColumnPersonnel = (matches) => {
        return filteredList.filter(p => matches.includes(p.position)).sort((a, b) => {
-           // Rütbeye göre sıralama (Müdür > Ekip Şefi > Kalfa > Standart)
-           const rankOrder = { 'Müdür': 1, 'Ekip Şefi': 2, 'Kalfa': 3, 'Asistan': 4, 'Standart': 5 };
+           const skillDiff = computeAvgSkillForPerson(b, skillsMap) - computeAvgSkillForPerson(a, skillsMap);
+           if (skillDiff !== 0) return skillDiff;
+           // Rütbeye göre sıralama (Müdür > Ekip Şefi > Heryerden Usta/Kalfa > Standart)
+           const rankOrder = { 'Müdür': 1, 'Ekip Şefi': 2, 'Heryerden Usta': 3, 'Kalfa': 3, 'Asistan': 4, 'Standart': 5 };
            return (rankOrder[a.rank] || 99) - (rankOrder[b.rank] || 99);
        });
     };
@@ -6060,18 +6927,25 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                                <h4 className={`font-black text-sm truncate ${person.employmentStatus === 'Pasif' ? 'text-neutral-500 line-through' : 'text-black'}`} title={person.fullName}>
                                   {person.fullName}
                                </h4>
-                               {person.rank === 'Ekip Şefi' && <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500 shrink-0" title="Ekip Şefi" />}
+                               <div className="flex items-center gap-1 shrink-0">
+                                 <PersonPositionRankIcons person={person} />
+                                 <SkillScoreBadge person={person} skillsMap={skillsMap} />
+                               </div>
                              </div>
-                             
+
                              <div className="flex flex-col gap-1.5 mt-1.5">
                                 <span className={`text-[10px] font-bold w-max px-2 py-0.5 rounded border ${
-                                    person.rank === 'Ekip Şefi' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' : 
-                                    person.rank === 'Kalfa' ? 'bg-blue-50 text-blue-700 border-blue-200' : 
+                                    person.rank === 'Ekip Şefi' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' :
+                                    (person.rank === 'Heryerden Usta' || person.rank === 'Kalfa') ? 'bg-blue-50 text-blue-700 border-blue-200' :
                                     'bg-neutral-100 text-neutral-600 border-neutral-200'
                                 }`}>
                                    {person.rank || 'Belirtilmedi'}
                                 </span>
-                                
+                                {person.secondaryPosition && (
+                                  <span className="text-[10px] font-bold w-max px-2 py-0.5 rounded border bg-purple-50 text-purple-700 border-purple-200">
+                                    + {person.secondaryPosition}
+                                  </span>
+                                )}
                                 <span className="text-[10px] text-neutral-500 font-medium truncate flex items-center gap-1">
                                    <Phone className="w-3 h-3" /> {person.personalPhone || person.companyPhone || 'Kayıtlı Numara Yok'}
                                 </span>
@@ -6127,13 +7001,70 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
   };
   // --- PERSONEL TAHTASI BİLEŞENİ SONU ---
 
-  export const IsOnaylamaTahtasiView = ({ jobs, handleEditJob, setMarkDamageJobId, canApprovePoints, handleOpenApproveModal, handleOpenMesaiModal }) => {
+  export const IsOnaylamaTahtasiView = ({ jobs, handleEditJob, setMarkDamageJobId, canApprovePoints, handleOpenApproveModal, handleOpenMesaiModal, personnelList = [], db, appId, addSystemLog, setViewingImage, handleOpenEndJobModal, isManager }) => {
     const today = new Date().toISOString().split('T')[0];
     const [selectedDate, setSelectedDate] = useState(today);
 
-    const completedJobs = jobs.filter(j => j.status === 'completed' && j.date === selectedDate).sort((a,b) => new Date(a.date + 'T' + a.time) - new Date(b.date + 'T' + b.time));
+    // YENİ: "Ekibi Düzenle" modalı — ekipten sistemli/sistem dışı personel ekleme-çıkarma
+    const [editingTeamJob, setEditingTeamJob] = useState(null);
+    const [teamManualNameInput, setTeamManualNameInput] = useState('');
+
+    const getTeamSystemNames = (job) => (job.assignedPersonnelIds || []).map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
+    const getTeamManualNames = (job) => {
+      const systemNames = getTeamSystemNames(job);
+      return (job.teamNames || []).filter(name => !systemNames.includes(name));
+    };
+
+    const saveTeam = async (job, assignedPersonnelIds, teamNames) => {
+      const systemNames = assignedPersonnelIds.map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
+      const displayNames = [...systemNames, ...teamNames.filter(n => !systemNames.includes(n))];
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), {
+        assignedPersonnelIds,
+        teamNames,
+        team: displayNames.length > 0 ? displayNames.join(', ') : 'Atanmadı'
+      });
+    };
+
+    const handleAddToTeam = async (job, personId) => {
+      const currentIds = job.assignedPersonnelIds || [];
+      if (currentIds.includes(personId)) return;
+      await saveTeam(job, [...currentIds, personId], job.teamNames || []);
+      if (addSystemLog) addSystemLog('Ekip Düzenlendi', `${job.customerName} işine personel eklendi.`);
+    };
+
+    const handleRemoveFromTeam = async (job, personId) => {
+      const currentIds = (job.assignedPersonnelIds || []).filter(id => id !== personId);
+      await saveTeam(job, currentIds, job.teamNames || []);
+      if (addSystemLog) addSystemLog('Ekip Düzenlendi', `${job.customerName} işinden personel çıkarıldı.`);
+    };
+
+    const handleAddManualName = async (job) => {
+      const name = teamManualNameInput.trim();
+      if (!name) return;
+      const currentNames = job.teamNames || [];
+      if (currentNames.includes(name)) { setTeamManualNameInput(''); return; }
+      await saveTeam(job, job.assignedPersonnelIds || [], [...currentNames, name]);
+      setTeamManualNameInput('');
+      if (addSystemLog) addSystemLog('Ekip Düzenlendi', `${job.customerName} işine "${name}" sistem dışı olarak eklendi.`);
+    };
+
+    const handleRemoveManualName = async (job, name) => {
+      const currentNames = (job.teamNames || []).filter(n => n !== name);
+      await saveTeam(job, job.assignedPersonnelIds || [], currentNames);
+      if (addSystemLog) addSystemLog('Ekip Düzenlendi', `${job.customerName} işinden "${name}" çıkarıldı.`);
+    };
+
+    // YENİ: Artık sadece tamamlananlar değil, o güne ait tüm işler (iptal hariç) gösterilir;
+    // tamamlanmamışlar "Sürüyor" rozetiyle soluk gösterilir. İşler tip sırasına göre sıralanır.
+    const JOB_TYPE_ORDER_ONAY = { 'Nakliye': 0, 'Depo': 1, 'Asansör': 2 };
+    const completedJobs = jobs.filter(j => j.status !== 'cancelled' && j.date === selectedDate).sort((a, b) => {
+      const typeDiff = (JOB_TYPE_ORDER_ONAY[a.type] ?? 3) - (JOB_TYPE_ORDER_ONAY[b.type] ?? 3);
+      if (typeDiff !== 0) return typeDiff;
+      return new Date(a.date + 'T' + a.time) - new Date(b.date + 'T' + b.time);
+    });
 
     return (
+      <>
       <div className="flex flex-col h-[calc(100vh-120px)] md:h-[calc(100vh-140px)] animate-in fade-in pb-4">
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col md:flex-row justify-between items-center gap-4 mb-4 shrink-0">
           <div>
@@ -6169,6 +7100,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                       <span className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-widest text-white ${job.type === 'Nakliye' ? 'bg-red-600' : job.type === 'Asansör' ? 'bg-green-600' : 'bg-blue-600'}`}>{job.type || 'Nakliye'}</span>
                       <span className="text-[11px] font-bold text-neutral-600"><Clock className="w-3 h-3 inline mr-1" />{job.time}</span>
                     </div>
+                    {job.status !== 'completed' && (
+                      <span className="inline-block text-[9px] font-black px-1.5 py-0.5 rounded bg-neutral-400 text-white uppercase tracking-widest mb-1">Sürüyor</span>
+                    )}
                     <h3 className="font-black text-[15px] text-black truncate mb-1" title={job.customerName}>{job.customerName}</h3>
                     {job.assignedVehiclePlate && (
                       <div className="flex items-center gap-1 text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded w-fit mb-1.5">
@@ -6196,17 +7130,52 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                              <span className="font-bold text-neutral-800">{job.endJobDetails.paymentMethod}</span>
                           </span>
                           <span className="flex items-start gap-1">
-                             <span className="font-bold text-neutral-500 w-16 shrink-0">M.Memnun.:</span> 
+                             <span className="font-bold text-neutral-500 w-16 shrink-0">M.Memnun.:</span>
                              <span className="font-bold text-neutral-800">{job.endJobDetails.customerSatisfaction}</span>
                           </span>
                        </div>
                      ) : (
                        <div className="text-xs text-neutral-400 italic text-center py-2">Sonlandırma detayı yok.</div>
                      )}
+                     {/* YENİ: Ekip şefinin yüklediği kasa/hasar/asansör medyalarının görüntülenmesi */}
+                     {setViewingImage && (job.endJobDetails?.truckImages || job.endJobDetails?.damageImages || job.endJobDetails?.elevatorImages) && (
+                       <div className="flex flex-wrap gap-1.5">
+                         {(job.endJobDetails?.truckImages || []).filter(img => img && img !== 'Yükleniyor...').map((img, idx) => (
+                           <button key={'truck'+idx} onClick={() => setViewingImage({ title: 'Kasa Fotoğrafı', name: img })} className="text-[10px] font-bold px-2 py-1 rounded-lg bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition flex items-center gap-1">
+                             <Camera className="w-3 h-3" /> Kasa {idx > 0 ? idx + 1 : ''}
+                           </button>
+                         ))}
+                         {(job.endJobDetails?.damageImages || []).filter(img => img && img !== 'Yükleniyor...').map((img, idx) => (
+                           <button key={'dmg'+idx} onClick={() => setViewingImage({ title: 'Hasar Fotoğrafı', name: img })} className="text-[10px] font-bold px-2 py-1 rounded-lg bg-red-100 text-red-700 hover:bg-red-200 transition flex items-center gap-1">
+                             <Camera className="w-3 h-3" /> Hasar {idx > 0 ? idx + 1 : ''}
+                           </button>
+                         ))}
+                         {(job.endJobDetails?.elevatorImages || []).filter(img => img && img !== 'Yükleniyor...').map((img, idx) => (
+                           <button key={'elv'+idx} onClick={() => setViewingImage({ title: 'Asansör Fotoğrafı', name: img })} className="text-[10px] font-bold px-2 py-1 rounded-lg bg-green-100 text-green-700 hover:bg-green-200 transition flex items-center gap-1">
+                             <Camera className="w-3 h-3" /> Asansör {idx > 0 ? idx + 1 : ''}
+                           </button>
+                         ))}
+                       </div>
+                     )}
                   </div>
 
                   {/* Actions */}
-                  {canApprovePoints && (
+                  <div className="p-2 border-t border-neutral-200 bg-neutral-50 flex flex-col gap-1.5 shrink-0">
+                    {/* YENİ: Ekibi Düzenle — sistemli/sistem dışı personel ekleme-çıkarma */}
+                    {isManager && (
+                      <button onClick={() => setEditingTeamJob(job)} className="w-full py-2 bg-indigo-50 text-indigo-700 font-bold text-xs rounded-lg hover:bg-indigo-100 transition flex justify-center items-center gap-1.5 border border-indigo-200">
+                        <Users className="w-4 h-4" /> Ekibi Düzenle
+                      </button>
+                    )}
+                    {/* YENİ: Tamamlanmamış işler için yönetici manuel kapatabilir */}
+                    {isManager && job.status !== 'completed' && handleOpenEndJobModal && (
+                      <button onClick={() => handleOpenEndJobModal(job)} className="w-full py-2 bg-neutral-800 text-white font-bold text-xs rounded-lg hover:bg-black transition flex justify-center items-center gap-1.5">
+                        <CheckSquare className="w-4 h-4" /> Manuel Kapat
+                      </button>
+                    )}
+                  </div>
+
+                  {canApprovePoints && job.status === 'completed' && (
                   <div className="p-2 border-t border-neutral-200 bg-neutral-50 flex flex-col gap-1.5 shrink-0">
                     {!job.pointsApproved ? (
                       <button onClick={() => handleOpenApproveModal(job)} className="w-full py-2 bg-yellow-50 text-yellow-700 font-bold text-xs rounded-lg hover:bg-yellow-100 transition flex justify-center items-center gap-1.5 border border-yellow-200">
@@ -6246,6 +7215,71 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
           )}
         </div>
       </div>
+
+      {/* YENİ: Ekibi Düzenle Modalı */}
+      {editingTeamJob && (() => {
+        const job = jobs.find(j => j.id === editingTeamJob.id) || editingTeamJob;
+        const assignedIds = job.assignedPersonnelIds || [];
+        const manualNames = getTeamManualNames(job);
+        const availablePersonnel = personnelList.filter(p => !assignedIds.includes(p.id) && p.employmentStatus !== 'Pasif');
+        return (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4" onClick={() => setEditingTeamJob(null)}>
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+              <div className="bg-indigo-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><Users className="w-5 h-5" /> Ekibi Düzenle</h3>
+                <button onClick={() => setEditingTeamJob(null)} className="text-indigo-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto custom-scrollbar">
+                <p className="text-xs font-bold text-neutral-400 uppercase">{job.customerName} — {job.date}</p>
+
+                <div>
+                  <h4 className="text-sm font-bold text-black mb-2">Mevcut Ekip</h4>
+                  {assignedIds.length === 0 && manualNames.length === 0 ? (
+                    <p className="text-xs text-neutral-400 italic">Ekipte henüz kimse yok.</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {assignedIds.map(pId => {
+                        const person = personnelList.find(p => String(p.id) === String(pId));
+                        return (
+                          <div key={pId} className="flex items-center justify-between bg-neutral-50 border border-neutral-200 rounded-lg p-2">
+                            <span className="text-sm font-bold text-black">{person?.fullName || 'Bilinmeyen Personel'}</span>
+                            <button onClick={() => handleRemoveFromTeam(job, pId)} className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition"><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        );
+                      })}
+                      {manualNames.map(name => (
+                        <div key={name} className="flex items-center justify-between bg-purple-50 border border-purple-200 rounded-lg p-2">
+                          <span className="text-sm font-bold text-purple-800">{name} <span className="text-[10px] font-medium text-purple-400">(sistem dışı)</span></span>
+                          <button onClick={() => handleRemoveManualName(job, name)} className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 transition"><X className="w-3.5 h-3.5" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-bold text-black mb-2">Personel Ekle</h4>
+                  <select onChange={e => { if (e.target.value) { handleAddToTeam(job, e.target.value); e.target.value = ''; } }} defaultValue="" className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 bg-white text-sm font-medium">
+                    <option value="">Sistemden personel seçin...</option>
+                    {availablePersonnel.map(p => <option key={p.id} value={p.id}>{p.fullName} ({p.position || p.rank})</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <h4 className="text-sm font-bold text-black mb-2">Sistem Dışı İsim Ekle</h4>
+                  <div className="flex gap-2">
+                    <input type="text" value={teamManualNameInput} onChange={e => setTeamManualNameInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAddManualName(job)} placeholder="Örn: Yardımcı Şoför" className="flex-1 p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-indigo-500 text-sm" />
+                    <button onClick={() => handleAddManualName(job)} className="px-4 py-2 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition text-sm">Ekle</button>
+                  </div>
+                </div>
+
+                <button onClick={() => setEditingTeamJob(null)} className="w-full py-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">Kapat</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      </>
     );
   };
 
@@ -6283,6 +7317,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const systemNames = (job.assignedPersonnelIds || []).map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
     const manualNames = (job.teamNames || []).filter(name => !systemNames.includes(name));
     const currentCount = systemNames.length + manualNames.length;
+
+    // YENİ: Ekipteki ilk kişi (fiili şoför) ile atanan aracın gerekli ehliyeti karşılaştırılır
+    const driverPerson = (job.assignedPersonnelIds || []).length > 0 ? personnelList.find(p => String(p.id) === String(job.assignedPersonnelIds[0])) : null;
+    const assignedVehicle = job.assignedVehiclePlate ? (vehicles || []).find(v => v.plate === job.assignedVehiclePlate) : null;
+    const licenseWarning = !!(driverPerson && assignedVehicle && assignedVehicle.requiredLicense === 'Büyük Ehliyet' && driverPerson.ehliyet !== 'Büyük Ehliyet');
     const isNakliye = job.type === 'Nakliye' || !job.type;
     const isAsansor = job.type === 'Asansör';
     const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking);
@@ -6486,7 +7525,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               </div>
               <GripVertical className="w-3.5 h-3.5 text-neutral-300 opacity-0 group-hover:opacity-100 transition" />
             </div>
-          ) : (
+          ) : null}
+          {licenseWarning && (
+            <div className="mt-1.5 bg-red-50 border border-red-200 text-red-700 rounded-lg p-1.5 flex items-center gap-1.5 text-[9px] font-bold">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Şoförün ehliyeti bu araç için yetersiz!
+            </div>
+          )}
+          {!job.assignedVehiclePlate && (
             <div className="border-2 border-dashed border-neutral-300 rounded-xl p-2 flex flex-col items-center justify-center text-neutral-400 bg-white/50 h-[46px]">
               <span className="text-[9px] font-bold flex items-center gap-1.5"><Truck className="w-3.5 h-3.5"/> Aracı Sürükleyin</span>
             </div>
@@ -6650,7 +7695,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     );
   };
 
-  export const EkipKurmaTahtasiView = ({ jobs, personnelList, vehicles, materials, db, appId, addSystemLog }) => {
+  export const EkipKurmaTahtasiView = ({ jobs, personnelList, vehicles, materials, db, appId, addSystemLog, allPersonnelActions = [], allMesaiRecords = [] }) => {
     const today = new Date().toISOString().split('T')[0];
     const [selectedDate, setSelectedDate] = useState(today);
     const [dragOverTarget, setDragOverTarget] = useState(null);
@@ -6722,11 +7767,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
        return true;
     });
 
+    // YENİ: Aynı pozisyon içinde artık otomatik özellik puanına göre sıralanır
+    const skillsMap = React.useMemo(() => computeAllAutoSkills(personnelList, jobs, allPersonnelActions, vehicles, allMesaiRecords), [personnelList, jobs, allPersonnelActions, vehicles, allMesaiRecords]);
     const posOrder = { 'Şoför': 1, 'Mobilya Ustası': 2, 'Taşıma Elemanı': 3, 'Operatör': 4 };
     displayPersonnel.sort((a, b) => {
         const orderA = posOrder[a.position] || 99;
         const orderB = posOrder[b.position] || 99;
         if (orderA !== orderB) return orderA - orderB;
+        const skillDiff = computeAvgSkillForPerson(b, skillsMap) - computeAvgSkillForPerson(a, skillsMap);
+        if (skillDiff !== 0) return skillDiff;
         return a.fullName.localeCompare(b.fullName);
     });
     
@@ -6775,7 +7824,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
           }
 
           if (newIds.length === 0 && targetJob.type !== 'Asansör') {
-              const isValidFirst = (person.rank === 'Ekip Şefi' || person.rank === 'Kalfa' || person.rank === 'Müdür' || person.position === 'Firma Sahibi');
+              const isValidFirst = (person.rank === 'Ekip Şefi' || person.rank === 'Heryerden Usta' || person.rank === 'Kalfa' || person.rank === 'Müdür' || person.position === 'Firma Sahibi');
 
               if (!isValidFirst) {
                   alert("İşin en başına eklenecek ilk kişi Ekip Şefi veya yetkili biri olmalıdır!");
@@ -7066,6 +8115,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                           </div>
                           <p className="text-[9px] font-bold text-neutral-500 uppercase tracking-wider">{person.position}</p>
                         </div>
+                        <PersonPositionRankIcons person={person} />
+                        <SkillScoreBadge person={person} skillsMap={skillsMap} />
                         <GripVertical className="w-3.5 h-3.5 text-neutral-300 shrink-0 opacity-0 group-hover:opacity-100 transition" />
                       </div>
                     );
@@ -7180,7 +8231,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const todayStr = new Date().toISOString().split('T')[0];
     
     // YENİ EKLENEN: Mavi yaka ve Ekip Şefi OLMAYAN durumu kontrol et
-    const isStandardBlueCollar = (currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position))) && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
+    const isStandardBlueCollar = (currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position))) && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Heryerden Usta' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
 
     const myJobs = jobs.filter(j => {
         const isAssigned = j.assignedPersonnelIds?.includes(currentUser.id) || j.assignedPersonnelId === currentUser.id;

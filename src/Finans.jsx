@@ -36,7 +36,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
     filteredJobs.forEach(job => {
       const creator = job.createdBy || 'Sistem / Bilinmeyen';
       if (!reportData[creator]) {
-        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0 };
+        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0, cancelledNakliyeCount: 0, cancelledDepoCount: 0, cancelledAsansorCount: 0 };
       }
       const price = Number(job.price) || 0;
       reportData[creator].count += 1;
@@ -52,6 +52,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
     // sadece "İş İptali" olarak gösterilir; Nakliye/Depo/Asansör sayıları etkilenmez).
     jobs.forEach(job => {
       if (job.status !== 'cancelled') return;
+      // YENİ: 0 TL'lik (kendi işimiz olan) Asansör işlerinin iptali hiç sayılmaz
+      if (job.type === 'Asansör' && (Number(job.price) || 0) === 0) return;
       if (selectedType !== 'Tümü' && job.type !== selectedType) return;
       const d = new Date(job.date);
       const inPeriod = reportPeriod === 'year'
@@ -60,9 +62,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
       if (!inPeriod) return;
       const creator = job.createdBy || 'Sistem / Bilinmeyen';
       if (!reportData[creator]) {
-        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0 };
+        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0, cancelledNakliyeCount: 0, cancelledDepoCount: 0, cancelledAsansorCount: 0 };
       }
       reportData[creator].cancelledCount = (reportData[creator].cancelledCount || 0) + 1;
+      if (job.type === 'Nakliye') reportData[creator].cancelledNakliyeCount = (reportData[creator].cancelledNakliyeCount || 0) + 1;
+      else if (job.type === 'Depo') reportData[creator].cancelledDepoCount = (reportData[creator].cancelledDepoCount || 0) + 1;
+      else if (job.type === 'Asansör') reportData[creator].cancelledAsansorCount = (reportData[creator].cancelledAsansorCount || 0) + 1;
     });
 
     const summaryList = Object.keys(reportData)
@@ -78,6 +83,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
     // --- YENİ: İptal Edilen İşler (aynı dönem/tip filtresine göre, sadece ayrı gösterim için) ---
     const cancelledJobsInPeriod = jobs.filter(job => {
       if (job.status !== 'cancelled') return false;
+      if (job.type === 'Asansör' && (Number(job.price) || 0) === 0) return false;
       if (selectedType !== 'Tümü' && job.type !== selectedType) return false;
       const d = new Date(job.date);
       if (reportPeriod === 'year') {
@@ -264,10 +270,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                       )}
                       {/* YENİ: İptal edilen iş sayısı (ciro ve toplam işe dahil değildir) */}
                       {item.cancelledCount > 0 && (
-                        <div className="flex items-center justify-center mt-1.5">
+                        <div className="flex flex-col items-center gap-1 mt-1.5">
                           <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-lg border border-red-200 text-[10px] font-black flex items-center gap-1">
                             <Ban className="w-3 h-3" /> {item.cancelledCount} İş İptali
                           </span>
+                          <div className="flex items-center justify-center gap-1.5 text-[9px] font-bold">
+                            <span className="bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{item.cancelledNakliyeCount || 0} Nak.</span>
+                            <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{item.cancelledDepoCount || 0} Depo</span>
+                            <span className="bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{item.cancelledAsansorCount || 0} Asn.</span>
+                          </div>
                         </div>
                       )}
                     </td>
@@ -521,7 +532,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
       const ids = job.assignedPersonnelIds || [];
       if (ids.length === 0) return '';
       const assigned = ids.map(id => personnelList.find(p => String(p.id) === String(id))).filter(Boolean);
-      const leader = assigned.find(p => ['Ekip Şefi', 'Müdür', 'Kalfa'].includes(p.rank));
+      const leader = assigned.find(p => ['Ekip Şefi', 'Müdür', 'Heryerden Usta', 'Kalfa'].includes(p.rank));
       if (leader) return leader.fullName;
       return assigned[0]?.fullName || '';
     };
@@ -609,8 +620,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
       });
     });
 
-    // Tarihe göre yeniden eskiye sırala
-    allRecords.sort((a, b) => b.rawDate - a.rawDate);
+    // YENİ: Önce iş tipine göre (Nakliye → Depo → Asansör) sırala, aynı tip içinde ise tarihe göre yeniden eskiye
+    const JOB_TYPE_ORDER_FINANCE = { 'Nakliye': 0, 'Depo': 1, 'Asansör': 2 };
+    allRecords.sort((a, b) => {
+      const typeA = a.isJob ? (JOB_TYPE_ORDER_FINANCE[a.jobRef?.type] ?? 3) : 4;
+      const typeB = b.isJob ? (JOB_TYPE_ORDER_FINANCE[b.jobRef?.type] ?? 3) : 4;
+      if (typeA !== typeB) return typeA - typeB;
+      return b.rawDate - a.rawDate;
+    });
 
     // Seçilen Filtreye Göre Verileri Ayır
     const filteredRecords = allRecords.filter(r => {

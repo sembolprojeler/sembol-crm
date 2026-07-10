@@ -2238,6 +2238,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     // YENİ: Malzeme seed/temizleme işleminin aynı anda birden çok kez çalışıp kopya üretmesini engelleyen kilit
     const materialSeedRunning = React.useRef(false);
     const [personnelList, setPersonnelList] = useState([]);
+    // YENİ: Otomatik özellik puanı hesaplaması için TÜM personelin hareket kayıtları (tutanak/rapor)
+    const [allPersonnelActions, setAllPersonnelActions] = useState([]);
+    // YENİ: Otomatik özellik puanı hesaplaması için TÜM ayların mesai (devamsızlık/rapor/fazla mesai) kayıtları
+    const [allMesaiRecords, setAllMesaiRecords] = useState([]);
     const [positions, setPositions] = useState([]);
     const [ranks, setRanks] = useState([]);
     const [positionModules, setPositionModules] = useState({}); // YENİ EKLENDİ
@@ -2460,6 +2464,31 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         setIsAuthChecking(false);
       }, console.error));
 
+      // YENİ: Otomatik özellik puanı hesaplaması için TÜM personelin hareket kayıtlarını (tutanak/rapor) dinle
+      unsubs.push(onSnapshot(getCol('personnelActions'), snap => {
+        setAllPersonnelActions(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      }, console.error));
+
+      // YENİ: Otomatik özellik puanı hesaplaması için TÜM ayların mesai (puantaj) kayıtlarını dinle ve
+      // { personId, year, month, day, code } şeklinde düz (flat) bir diziye dönüştür.
+      unsubs.push(onSnapshot(getCol('mesai'), snap => {
+        const flat = [];
+        snap.docs.forEach(d => {
+          const m = d.id.match(/(\d{4})_(\d{1,2})/);
+          if (!m) return;
+          const records = d.data().records || {};
+          Object.keys(records).forEach(personId => {
+            const dayMap = records[personId] || {};
+            Object.keys(dayMap).forEach(dayNum => {
+              const dayData = dayMap[dayNum];
+              const code = typeof dayData === 'object' && dayData !== null ? dayData.status : dayData;
+              flat.push({ personId, year: parseInt(m[1]), month: parseInt(m[2]), day: parseInt(dayNum), code });
+            });
+          });
+        });
+        setAllMesaiRecords(flat);
+      }, console.error));
+
       unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), async docSnap => {
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -2468,7 +2497,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           setPositionModules(data.positionModules || {}); // YENİ EKLENDİ
         } else {
           const defaultPos = ['Şoför', 'Taşıma Elemanı', 'Muhasebe', 'Mobilya Ustası', 'Satış Personeli', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operasyon', 'Operatör', 'Firma Sahibi'];
-          const defaultRanks = ['Müdür', 'Ekip Şefi', 'Asistan', 'Standart', 'Kalfa'];
+          const defaultRanks = ['Müdür', 'Ekip Şefi', 'Asistan', 'Standart', 'Heryerden Usta', 'Kalfa'];
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { positions: defaultPos, ranks: defaultRanks, positionModules: {} });
           setPositions(defaultPos);
           setRanks(defaultRanks);
@@ -3377,7 +3406,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
       // Puan/Rank sıralaması (Önceliklendirme)
       available.sort((a, b) => {
-         const rankWeight = { 'Müdür': 5, 'Ekip Şefi': 4, 'Kalfa': 3, 'Asistan': 2, 'Standart': 1 };
+         const rankWeight = { 'Müdür': 5, 'Ekip Şefi': 4, 'Heryerden Usta': 3, 'Kalfa': 3, 'Asistan': 2, 'Standart': 1 };
          let scoreA = rankWeight[a.rank] || 0;
          let scoreB = rankWeight[b.rank] || 0;
          
@@ -3908,7 +3937,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const showGlobalSearchPersonnel = checkAccess('globalSearchPersonnel');
     
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
-    const isStandardBlueCollarApp = isMaviYakaUser && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
+    const isStandardBlueCollarApp = isMaviYakaUser && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Heryerden Usta' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
     
     const myTasksForBadge = tasks.filter(t => t.assignee === currentUser?.fullName || t.assignee === 'Tüm Personeller');
     const unreadTasksCount = myTasksForBadge.filter(t => t.status !== 'completed').length;
@@ -4851,10 +4880,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'myAssignedJobs' && <MyAssignedJobsView currentUser={currentUser} jobs={visibleJobs} handleOpenEndJobModal={handleOpenEndJobModal} markNotificationsAsRead={markNotificationsAsRead} />}
             {activeTab === 'mySpecialTasks' && showMySpecialTasks && <MyTasksView currentUser={currentUser} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
             
-            {activeTab === 'isOnaylamaTahtasi' && showOperasyon && <IsOnaylamaTahtasiView jobs={visibleJobs} handleEditJob={handleEditJob} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} />}
-            {activeTab === 'ekipKurmaTahtasi' && showOperasyon && <EkipKurmaTahtasiView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} />}
+            {activeTab === 'isOnaylamaTahtasi' && showOperasyon && <IsOnaylamaTahtasiView jobs={visibleJobs} handleEditJob={handleEditJob} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} handleOpenEndJobModal={handleOpenEndJobModal} isManager={isManager} />}
+            {activeTab === 'ekipKurmaTahtasi' && showOperasyon && <EkipKurmaTahtasiView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} allPersonnelActions={allPersonnelActions} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'izinTahtasi' && showOperasyon && <IzinTahtasiView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
-            {activeTab === 'personelTahtasi' && showOperasyon && <PersonelTahtasiView personnelList={personnelList} setViewingPersonnelProfileId={setViewingPersonnelProfileId} setActiveTab={setActiveTab} />}
+            {activeTab === 'personelTahtasi' && showOperasyon && <PersonelTahtasiView personnelList={personnelList} setViewingPersonnelProfileId={setViewingPersonnelProfileId} setActiveTab={setActiveTab} jobs={jobs} allPersonnelActions={allPersonnelActions} vehicles={vehicles} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'puantajTahtasi' && showOperasyon && <PuantajTahtasiView personnelList={personnelList} db={db} appId={appId} />}
             {activeTab === 'maviMesaiTahtasi' && showOperasyon && <MaviMesaiTahtasiView personnelList={personnelList} db={db} appId={appId} />}
             
@@ -5030,7 +5059,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
             {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} />}
             {/* YENİ: Personel Profili Sayfası */}
-            {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} />}
+            {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} allPersonnelActions={allPersonnelActions} vehicles={vehicles} currentUser={currentUser} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {activeTab === 'addVehicle' && showOperasyon && <AddVehicleView onAdd={handleAddVehicle} onCancel={() => setActiveTab('vehicleList')} />}
@@ -5053,6 +5082,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       <thead className="bg-black text-white border-b border-neutral-200">
                         <tr>
                           <th className="p-4 font-bold rounded-tl-xl">Araç Plakası</th>
+                          <th className="p-4 font-bold">Araç Fotoğrafı</th>
                           <th className="p-4 font-bold">Araç Cinsi</th>
                           <th className="p-4 font-bold">Taşıma Kapasitesi</th>
                           <th className="p-4 font-bold">Araç Detayları</th>
@@ -5069,6 +5099,15 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                                 <span className="bg-blue-600 text-white font-black text-[10px] px-1.5 py-0.5 rounded-sm">TR</span>
                                 <span className="tracking-widest">{vehicle.plate.toUpperCase()}</span>
                               </div>
+                            </td>
+                            <td className="p-4">
+                              {vehicle.vehiclePhoto && vehicle.vehiclePhoto !== 'Yükleniyor...' ? (
+                                <button type="button" onClick={() => setViewingImage({ title: `${vehicle.plate} - Araç Fotoğrafı`, name: vehicle.vehiclePhoto })} className="block">
+                                  <img src={vehicle.vehiclePhoto} alt={vehicle.plate} className="w-16 h-12 object-cover rounded-lg border border-neutral-200 hover:opacity-80 transition" />
+                                </button>
+                              ) : (
+                                <span className="text-xs text-neutral-400 font-medium">Yüklenmedi</span>
+                              )}
                             </td>
                             <td className="p-4 font-bold text-neutral-800 text-base">{vehicle.type}</td>
                             <td className="p-4">
@@ -5134,7 +5173,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         ))}
                         {vehicles.length === 0 && (
                           <tr>
-                            <td colSpan="7" className="p-6 text-center text-neutral-500">Kayıtlı araç bulunamadı.</td>
+                            <td colSpan="8" className="p-6 text-center text-neutral-500">Kayıtlı araç bulunamadı.</td>
                           </tr>
                         )}
                       </tbody>
@@ -5225,6 +5264,45 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                               <option value="Otomatik">Otomatik</option>
                             </select>
                           </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-sm font-bold text-neutral-700 mb-1">Gerekli Ehliyet</label>
+                          <select required value={vehicleEditForm.requiredLicense || 'Küçük Ehliyet'} onChange={(e) => setVehicleEditForm({...vehicleEditForm, requiredLicense: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition">
+                            <option value="Küçük Ehliyet">Küçük Ehliyet</option>
+                            <option value="Büyük Ehliyet">Büyük Ehliyet</option>
+                          </select>
+                        </div>
+
+                        {/* YENİ: Araç Fotoğrafı */}
+                        <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+                          <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
+                            <Camera className="w-4 h-4 text-red-600" /> Araç Fotoğrafı
+                          </label>
+                          {vehicleEditForm.vehiclePhoto && vehicleEditForm.vehiclePhoto !== 'Yükleniyor...' && (
+                            <img src={vehicleEditForm.vehiclePhoto} alt="Araç" className="h-28 rounded-lg border border-neutral-200 mb-2 object-cover" />
+                          )}
+                          <MediaCaptureMenu
+                            buttonLabel="Araç Fotoğrafı Ekle"
+                            onChange={async (e) => {
+                              const file = e.target.files[0];
+                              if (!file) return;
+                              setVehicleEditForm(prev => ({ ...prev, vehiclePhoto: 'Yükleniyor...' }));
+                              const uploadData = new FormData();
+                              uploadData.append('file', file);
+                              try {
+                                const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: uploadData });
+                                const text = await res.text();
+                                let uploadedUrl = file.name;
+                                try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+                                setVehicleEditForm(prev => ({ ...prev, vehiclePhoto: uploadedUrl }));
+                              } catch (err) {
+                                console.error('Araç fotoğrafı yükleme hatası:', err);
+                                setVehicleEditForm(prev => ({ ...prev, vehiclePhoto: '' }));
+                              }
+                            }}
+                          />
+                          {vehicleEditForm.vehiclePhoto === 'Yükleniyor...' && <p className="text-xs text-neutral-400 mt-1">Yükleniyor...</p>}
                         </div>
 
                         {/* YENİ: Araç Ruhsat Fotoğrafı Ekleme */}
