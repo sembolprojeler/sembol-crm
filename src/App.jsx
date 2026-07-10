@@ -7,15 +7,7 @@ import { AddJobView, CustomerListView, CustomerProfileView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView } from './Finans.jsx';
   const DashboardView = ({ jobs, allJobs, personnelList, vehicles, materials, systemLogs, currentUser, setViewingImage, transactions }) => {
-    const isAdmin = ['Müdür', 'Firma Sahibi', 'Operasyon'].some(role => currentUser?.position?.includes(role) || currentUser?.rank === role) || currentUser?.permissions?.canEdit;
-    
-    const [myScore, setMyScore] = useState(0);
-    const [dailyData, setDailyData] = useState({ today: { mesai: null, puan: 0 }, yesterday: { mesai: null, puan: 0 } });
-    const [isRefreshing, setIsRefreshing] = useState(false);
     const [filterPeriod, setFilterPeriod] = useState('today');
-
-    // YENİ EKLENEN STATE (BİLGİLENDİRMELER İÇİN - Dizi Olarak Güncellendi)
-    const [latestInfo, setLatestInfo] = useState({ announcements: [], posts: [], bestEmps: [] });
 
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
@@ -31,517 +23,60 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
       return true;
     });
 
-    const isMaviYaka = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
-
-    // YENİ EKLENEN EFFECT
-    useEffect(() => {
-      const annRef = collection(db, 'artifacts', appId, 'public', 'data', 'announcements');
-      const postRef = collection(db, 'artifacts', appId, 'public', 'data', 'posts');
-      const bestRef = collection(db, 'artifacts', appId, 'public', 'data', 'bestEmployees');
-
-const qAnn = query(annRef, orderBy('timestamp', 'desc'), limit(15));
-      const qPost = query(postRef, orderBy('timestamp', 'desc'), limit(15));
-      const qBest = query(bestRef, orderBy('timestamp', 'desc'), limit(15));
-
-      const unsubs = [];
-      unsubs.push(onSnapshot(qAnn, snap => {
-        setLatestInfo(prev => ({...prev, announcements: snap.docs.map(d => ({ ...d.data(), id: d.id }))}));
-      }));
-      unsubs.push(onSnapshot(qPost, snap => {
-        setLatestInfo(prev => ({...prev, posts: snap.docs.map(d => ({ ...d.data(), id: d.id }))}));
-      }));
-      unsubs.push(onSnapshot(qBest, snap => {
-        setLatestInfo(prev => ({...prev, bestEmps: snap.docs.map(d => ({ ...d.data(), id: d.id }))}));
-      }));
-
-      return () => unsubs.forEach(u => u());
-    }, []);
-
-    const handleDeleteInfo = async (colName, id) => {
-       try {
-           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colName, id));
-       } catch (err) { console.error("Silme hatası:", err); }
-    };
-
-    const fetchMyScoreAndStatus = async () => {
-      try {
-        const currentYear = today.getFullYear();
-        const currentMonth = today.getMonth() + 1;
-        const currentDay = today.getDate();
-
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yYear = yesterday.getFullYear();
-        const yMonth = yesterday.getMonth() + 1;
-        const yDay = yesterday.getDate();
-
-        // 1. Fetch current month Puantaj
-        const docRefPuantaj = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${currentYear}_${currentMonth}`);
-        const snapPuantaj = await getDoc(docRefPuantaj);
-        let currentMonthPuantajRecords = {};
-        if (snapPuantaj.exists()) {
-          currentMonthPuantajRecords = snapPuantaj.data().records || {};
-          const myRecord = currentMonthPuantajRecords[currentUser.id] || {};
-          const total = Object.values(myRecord).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
-          setMyScore(total);
-        }
-
-        let todayPuan = parseFloat(currentMonthPuantajRecords[currentUser.id]?.[currentDay]) || 0;
-        let yesterdayPuan = 0;
-
-        // 2. Fetch yesterday Puantaj (if previous month)
-        if (currentMonth === yMonth && currentYear === yYear) {
-            yesterdayPuan = parseFloat(currentMonthPuantajRecords[currentUser.id]?.[yDay]) || 0;
-        } else {
-            const docRefPuantajYest = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${yYear}_${yMonth}`);
-            const snapPuantajYest = await getDoc(docRefPuantajYest);
-            if (snapPuantajYest.exists()) {
-                const yRecords = snapPuantajYest.data().records || {};
-                yesterdayPuan = parseFloat(yRecords[currentUser.id]?.[yDay]) || 0;
-            }
-        }
-
-        // 3. Fetch current month Mesai
-        const docRefMesaiToday = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${currentYear}_${currentMonth}`);
-        const snapMesaiToday = await getDoc(docRefMesaiToday);
-        let todayStatus = null;
-        let currentMonthMesaiRecords = {};
-        if (snapMesaiToday.exists()) {
-           currentMonthMesaiRecords = snapMesaiToday.data().records || {};
-           const myRecord = currentMonthMesaiRecords[currentUser.id] || {};
-           const tData = myRecord[currentDay];
-           if (tData) todayStatus = typeof tData === 'object' ? tData.status : tData;
-        }
-
-        // 4. Fetch yesterday Mesai
-        let yesterdayStatus = null;
-        if (currentMonth === yMonth && currentYear === yYear) {
-           const myRecord = currentMonthMesaiRecords[currentUser.id] || {};
-           const yData = myRecord[yDay];
-           if (yData) yesterdayStatus = typeof yData === 'object' ? yData.status : yData;
-        } else {
-           const docRefMesaiYesterday = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${yYear}_${yMonth}`);
-           const snapMesaiYesterday = await getDoc(docRefMesaiYesterday);
-           if (snapMesaiYesterday.exists()) {
-             const records = snapMesaiYesterday.data().records || {};
-             const myRecord = records[currentUser.id] || {};
-             const yData = myRecord[yDay];
-             if (yData) yesterdayStatus = typeof yData === 'object' ? yData.status : yData;
-           }
-        }
-
-        setDailyData({
-            today: { mesai: todayStatus, puan: todayPuan },
-            yesterday: { mesai: yesterdayStatus, puan: yesterdayPuan }
-        });
-
-      } catch (error) {
-        console.error("Veriler yüklenemedi", error);
-      }
-    };
-
-useEffect(() => {
-      if (!isMaviYaka || !currentUser) return;
-      fetchMyScoreAndStatus();
-    }, [currentUser, isMaviYaka]);
-
-    const handleRefresh = async () => {
-      setIsRefreshing(true);
-      await fetchMyScoreAndStatus();
-      setTimeout(() => setIsRefreshing(false), 800);
-    };
-
-    let scoreColor = '';
-    let scoreTextColor = '';
-    let scoreMessage = '';
-    let scoreIcon = null;
-
-    if (myScore < 10) {
-      scoreColor = 'bg-red-50 border-red-200';
-      scoreTextColor = 'text-red-600';
-      scoreMessage = 'Daha iyi! Azimlen, başarabilirsin! 💪';
-      scoreIcon = <AlertTriangle className="w-6 h-6 text-red-600" />;
-    } else if (myScore < 25) {
-      scoreColor = 'bg-yellow-50 border-yellow-200';
-      scoreTextColor = 'text-yellow-600';
-      scoreMessage = 'Gayret! Potaya girmeye az kaldı! 🏃‍♂️';
-      scoreIcon = <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />;
-    } else {
-      scoreColor = 'bg-green-50 border-green-200';
-      scoreTextColor = 'text-green-600';
-      scoreMessage = 'Birinciliğe göz dikmişsin! Çok iyisin, en iyisi olacaksın! 🏆';
-      scoreIcon = <CheckCircle className="w-6 h-6 text-green-600" />;
-    }
-
-    // --- MESAİ DURUM BİLDİRİMİ HAZIRLIĞI ---
-    const renderDailySummary = (data, dayLabel) => {
-       if (!data || (!data.mesai && data.puan === 0)) return null;
-
-       const boxes = [];
-
-       if (data.puan > 0) {
-            let pTitle = '';
-            let pMsg = '';
-            let pBg = 'bg-yellow-50';
-            let pBorder = 'border-yellow-200';
-            let pTextCol = 'text-yellow-800';
-            let pIcon = <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />;
-
-            if (data.puan === 0.5) {
-                pTitle = `${dayLabel} Destek Puanı!`;
-                pMsg = 'Takım arkadaşlarına yardımcı olduğun için 0.5 puan kazandın. Harika bir takım oyuncususun!';
-                pBg = 'bg-blue-50'; pBorder = 'border-blue-200'; pTextCol = 'text-blue-800';
-                pIcon = <Users className="w-6 h-6 text-blue-600" />;
-            } else if (data.puan === 1) {
-                pTitle = `${dayLabel} Müşteri Puanı!`;
-                pMsg = 'Müşteri memnuniyetini sağladığın için 1 tam puan kazandın. Tebrikler!';
-            } else if (data.puan > 1) {
-                pTitle = `${dayLabel} Harika Performans!`;
-                pMsg = `Hem müşteri memnuniyeti hem de takım desteği ile toplam ${data.puan} puan kazandın!`;
-                pBg = 'bg-emerald-50'; pBorder = 'border-emerald-200'; pTextCol = 'text-emerald-800';
-                pIcon = <Sparkles className="w-6 h-6 text-emerald-600" />;
-            }
-
-            boxes.push(
-              <div key="puan" className={`p-4 rounded-2xl border ${pBg} ${pBorder} shadow-sm flex items-start gap-4 mb-3 w-full`}>
-                 <div className="bg-white p-3 rounded-full shadow-sm shrink-0 border border-white/50">{pIcon}</div>
-                 <div>
-                    <h3 className={`font-black text-base md:text-lg ${pTextCol} mb-0.5`}>{pTitle}</h3>
-                    <p className={`text-xs md:text-sm font-medium ${pTextCol} opacity-90`}>{pMsg}</p>
-                 </div>
-              </div>
-           );
-       }
-
-       if (data.mesai) {
-          let bg = '', textCol = '', border = '', icon = null, title = '', msg = '';
-          switch (data.mesai) {
-             case 'G': bg = 'bg-green-50'; border = 'border-green-200'; textCol = 'text-green-800'; title = `${dayLabel} Mesain Onaylandı`; msg = 'Mesain sisteme eksiksiz olarak işlendi. Harika!'; icon = <CheckCircle className="w-6 h-6 text-green-600" />; break;
-             case 'FM': bg = 'bg-blue-50'; border = 'border-blue-200'; textCol = 'text-blue-800'; title = `${dayLabel} Fazla Mesai`; msg = 'Harika efor! Emeklerinin karşılığını göreceksin, aynen devam! 💪'; icon = <Clock className="w-6 h-6 text-blue-600" />; break;
-             case 'EM': bg = 'bg-yellow-50'; border = 'border-yellow-200'; textCol = 'text-yellow-800'; title = `${dayLabel} Eksik Mesai`; msg = 'Biraz eksik çalıştın gibi görünüyor. Bir dahaki sefere telafi edeceğinden eminiz!'; icon = <Clock className="w-6 h-6 text-yellow-600" />; break;
-             case 'D': bg = 'bg-red-50'; border = 'border-red-200'; textCol = 'text-red-800'; title = `${dayLabel} İşe Gelmedin`; msg = 'Aramızda değildin. Umarım her şey yolundadır, seni dinlenmiş olarak bekliyoruz.'; icon = <AlertTriangle className="w-6 h-6 text-red-600" />; break;
-             case 'Hİ': bg = 'bg-blue-50'; border = 'border-blue-200'; textCol = 'text-blue-800'; title = `${dayLabel} İzinlisin`; msg = 'Haftalık iznini iyi değerlendir, dinlenmek en doğal hakkın. İyi tatiller! 🌴'; icon = <Clock className="w-6 h-6 text-blue-600" />; break;
-             case 'Yİ': bg = 'bg-purple-50'; border = 'border-purple-200'; textCol = 'text-purple-800'; title = `${dayLabel} Yıllık İzindesin`; msg = 'Uzun bir tatil zamanı! Kendine bolca vakit ayır ve iyice dinlen. 🏖️'; icon = <CalendarDays className="w-6 h-6 text-purple-600" />; break;
-             case 'Bİ': bg = 'bg-pink-50'; border = 'border-pink-200'; textCol = 'text-pink-800'; title = `${dayLabel} Bayram İznindesin`; msg = 'İyi bayramlar! Sevdiklerinle birlikte güzel vakit geçir. 🍬'; icon = <Star className="w-6 h-6 text-pink-600" />; break;
-             case 'FG': bg = 'bg-teal-50'; border = 'border-teal-200'; textCol = 'text-teal-800'; title = `${dayLabel} Fazla Gün`; msg = 'Ekstra bir gün çalışarak gücünü gösterdin! Harikasın! 🚀'; icon = <Activity className="w-6 h-6 text-teal-600" />; break;
-             case 'FGM': bg = 'bg-cyan-50'; border = 'border-cyan-200'; textCol = 'text-cyan-800'; title = `${dayLabel} Fazla Gün + Mesai`; msg = 'İzin gününde hem çalışıp hem de mesaiye kaldın! Harika bir efor! 🚀💪'; icon = <Activity className="w-6 h-6 text-cyan-600" />; break;
-             case 'Üİ': bg = 'bg-neutral-100'; border = 'border-neutral-300'; textCol = 'text-neutral-700'; title = `${dayLabel} Ücretsiz İzin`; msg = 'İzindesin, dinlenmene bak. Tekrar aramızda görmek için sabırsızlanıyoruz.'; icon = <Ban className="w-6 h-6 text-neutral-500" />; break;
-             case 'R': bg = 'bg-orange-50'; border = 'border-orange-200'; textCol = 'text-orange-800'; title = `${dayLabel} Raporlusun`; msg = 'Geçmiş olsun! Lütfen sağlığına dikkat et, seni sağlıklı olarak tekrar görmek istiyoruz. 🏥'; icon = <Activity className="w-6 h-6 text-orange-600" />; break;
-             default: break;
-          }
-          if (title) {
-              boxes.push(
-                  <div key="mesai" className={`p-4 rounded-2xl border ${bg} ${border} shadow-sm flex items-start gap-4 mb-3 w-full`}>
-                     <div className="bg-white p-3 rounded-full shadow-sm shrink-0 border border-white/50">{icon}</div>
-                     <div>
-                        <h3 className={`font-black text-base md:text-lg ${textCol} mb-0.5`}>{title}</h3>
-                        <p className={`text-xs md:text-sm font-medium ${textCol} opacity-90`}>{msg}</p>
-                     </div>
-                  </div>
-              );
-          }
-       }
-
-       return (
-           <div className="flex-1 animate-in fade-in slide-in-from-top-4 flex flex-col">
-               <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider mb-3 pl-1 border-b border-neutral-200 pb-2">{dayLabel} Özeti</h3>
-               <div className="flex flex-col flex-1">
-                   {boxes}
-               </div>
-           </div>
-       );
-    };
-
     return (
       <div className="space-y-6 animate-in fade-in">
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
-          <div className="flex items-start lg:items-center gap-4 w-full lg:w-auto">
-            <div>
-              <h2 className="text-2xl font-black text-black">Hoş Geldiniz, {currentUser?.fullName}</h2>
-              <p className="text-neutral-500 font-medium">Sistemdeki genel operasyon özetini aşağıdan takip edebilirsiniz.</p>
-            </div>
-            {isMaviYaka && (
-              <button 
-                onClick={handleRefresh} 
-                disabled={isRefreshing}
-                className="ml-auto p-2.5 bg-neutral-100 text-neutral-600 rounded-full hover:bg-neutral-200 transition shrink-0 shadow-sm border border-neutral-200"
-                title="Günlük Özeti Yenile"
-              >
-                 <Loader2 className={`w-5 h-5 ${isRefreshing ? 'animate-spin text-red-600' : ''}`} />
-              </button>
-            )}
-          </div>
-          
-          {isMaviYaka && (
-            <div className={`flex items-center gap-4 p-3 pr-5 rounded-2xl border ${scoreColor} shadow-sm shrink-0 w-full lg:w-auto animate-in slide-in-from-right-4`}>
-              <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shrink-0 shadow-sm border border-white/50">
-                {scoreIcon}
-              </div>
-              <div>
-                <div className="flex items-end gap-2 mb-0.5">
-                  <span className={`text-2xl font-black leading-none ${scoreTextColor}`}>{myScore.toString().replace('.', ',')}</span>
-                  <span className="text-xs font-bold text-neutral-600 mb-0.5 uppercase tracking-wider">Aylık Puan</span>
-                </div>
-                <p className={`text-xs font-bold ${scoreTextColor} opacity-90`}>{scoreMessage}</p>
-              </div>
-            </div>
-          )}
+        <div className="flex justify-between items-end">
+          <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">İş İstatistikleri</h3>
+          <select
+            value={filterPeriod}
+            onChange={(e) => setFilterPeriod(e.target.value)}
+            className="px-3 py-1.5 text-sm font-bold bg-white border border-neutral-200 rounded-xl outline-none focus:ring-2 focus:ring-red-600 transition shadow-sm cursor-pointer"
+          >
+            <option value="today">Bugün</option>
+            <option value="month">Aylık</option>
+            <option value="year">Bu Yıl</option>
+            <option value="all">Tüm Zamanlar</option>
+          </select>
         </div>
 
-        {/* --- YENİ EKLENEN BİLGİLENDİRME PANOSU (DUYURU, PAYLAŞIM, EN İYİLER) --- */}
-        {(latestInfo.announcements.length > 0 || latestInfo.posts.length > 0 || latestInfo.bestEmps.length > 0) && (
-          <div className="flex flex-col gap-6 mb-2">
-            
-            {/* DUYURULAR (İkiden fazlası için kaydırma) */}
-            {latestInfo.announcements.length > 0 && (
-               <div className="flex flex-col gap-4 max-h-[340px] overflow-y-auto custom-scrollbar pr-2">
-                 {latestInfo.announcements.map((ann) => (
-                   <div key={ann.id} className="bg-red-50 border border-red-200 p-4 md:p-5 rounded-2xl shadow-sm flex items-start gap-4 shrink-0 relative animate-in slide-in-from-top-4">
-                      {isAdmin && <button onClick={() => handleDeleteInfo('announcements', ann.id)} className="absolute top-3 right-3 p-1.5 text-red-400 hover:text-red-700 bg-white rounded-lg shadow-sm border border-red-100 transition"><X className="w-4 h-4"/></button>}
-                      <div className="bg-white p-3 rounded-full shrink-0 shadow-sm border border-red-100"><Bell className="w-6 h-6 text-red-600" /></div>
-                      <div className="flex-1 pr-8">
-                         <h3 className="text-red-800 font-black text-lg flex flex-wrap items-center gap-2">
-                            {ann.title} 
-                            <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded-full shadow-sm">DUYURU</span>
-                         </h3>
-                         <p className="text-red-700 text-sm font-medium mt-2 whitespace-pre-wrap leading-relaxed">{ann.content}</p>
-                         <p className="text-red-500/80 text-[10px] mt-3 font-bold flex items-center gap-1"><Clock className="w-3 h-3" /> {ann.dateStr} • {ann.author}</p>
-                      </div>
-                   </div>
-                 ))}
-               </div>
-            )}
-
-            {/* PAYLAŞIMLAR (İkiden fazlası için kaydırma) */}
-            {latestInfo.posts.length > 0 && (
-               <div className="flex flex-col gap-4 max-h-[640px] overflow-y-auto custom-scrollbar pr-2">
-                 {latestInfo.posts.map((post) => (
-                   <div key={post.id} className="bg-blue-50 border border-blue-200 p-4 md:p-5 rounded-2xl shadow-sm flex flex-col md:flex-row items-center md:items-start gap-4 shrink-0 relative animate-in slide-in-from-top-4 delay-75">
-                      {isAdmin && <button onClick={() => handleDeleteInfo('posts', post.id)} className="absolute top-3 right-3 p-1.5 text-blue-400 hover:text-blue-700 bg-white rounded-lg shadow-sm border border-blue-100 transition"><X className="w-4 h-4"/></button>}
-                      <div className="bg-white p-3 rounded-full shrink-0 shadow-sm border border-blue-100 hidden md:block"><Sparkles className="w-6 h-6 text-blue-600" /></div>
-                      <div className="flex-1 w-full pr-8">
-                         <h3 className="text-blue-800 font-black text-lg flex flex-wrap items-center gap-2 mb-2">
-                            {post.title} 
-                            <span className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-sm">SAHADAN KARELER</span>
-                         </h3>
-                         {post.imageUrl && (
-                            <div className="w-full max-w-sm h-48 md:h-64 rounded-xl overflow-hidden shadow-sm border border-blue-100 cursor-pointer group relative" onClick={() => setViewingImage && setViewingImage({title: post.title, name: post.imageUrl})}>
-                               {isVideoUrl(post.imageUrl) ? (
-                                 <video src={post.imageUrl} className="w-full h-full object-cover bg-black" muted />
-                               ) : (
-                                 <img src={post.imageUrl} alt="Paylaşım" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
-                               )}
-                            </div>
-                         )}
-                         <p className="text-blue-500/80 text-[10px] mt-3 font-bold flex items-center gap-1"><Clock className="w-3 h-3" /> {post.dateStr} • {post.author}</p>
-                      </div>
-                   </div>
-                 ))}
-               </div>
-            )}
-
-            {/* EN İYİLER (İkiden fazlası için kaydırma) — sadece Mavi Yaka görür */}
-            {isMaviYaka && latestInfo.bestEmps.length > 0 && (
-               <div className="flex flex-col gap-4 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
-                 {latestInfo.bestEmps.map((bestEmp) => {
-                   const bestEmpPerson = personnelList?.find(p => p.fullName === bestEmp.employeeName);
-                   return (
-                     <div key={bestEmp.id} className="bg-yellow-50 border border-yellow-200 p-4 md:p-5 rounded-2xl shadow-sm flex items-center gap-4 shrink-0 relative animate-in slide-in-from-top-4 delay-150">
-                        {isAdmin && <button onClick={() => handleDeleteInfo('bestEmployees', bestEmp.id)} className="absolute top-3 right-3 p-1.5 text-yellow-500 hover:text-yellow-700 bg-white rounded-lg shadow-sm border border-yellow-200 transition"><X className="w-4 h-4"/></button>}
-                        <div className="w-14 h-14 bg-white rounded-full shrink-0 shadow-sm border border-yellow-300 flex items-center justify-center overflow-hidden relative">
-                          {bestEmpPerson?.profileImage ? (
-                              <img src={bestEmpPerson.profileImage} alt={bestEmpPerson.fullName} className="w-full h-full object-cover" />
-                          ) : (
-                              <Star className="w-8 h-8 text-yellow-500 fill-yellow-500" />
-                          )}
-                          <div className="absolute -bottom-1 -right-1 bg-yellow-400 rounded-full p-1 border-2 border-white"><Star className="w-3 h-3 text-white fill-white"/></div>
-                        </div>
-                        <div className="flex-1 pr-8">
-                           <h3 className="text-yellow-800 font-black text-lg flex flex-wrap items-center gap-2">
-                              {bestEmp.title} 
-                              <span className="text-[10px] bg-yellow-500 text-white px-2 py-0.5 rounded-full shadow-sm">EN İYİLER</span>
-                           </h3>
-                           <p className="text-yellow-700 text-sm font-bold mt-1.5">
-                              Tebrikler <span className="text-black font-black bg-yellow-200 px-1.5 py-0.5 rounded">{bestEmp.employeeName}</span>! Başarılarının devamını dileriz. 👏
-                           </p>
-                           <p className="text-yellow-600/80 text-[10px] mt-3 font-bold flex items-center gap-1"><Clock className="w-3 h-3" /> {bestEmp.dateStr} • {bestEmp.author}</p>
-                        </div>
-                     </div>
-                   );
-                 })}
-               </div>
-            )}
-          </div>
-        )}
-
-        {/* Günlük Mesai Durumu Bildirimi */}
-        {isMaviYaka && (dailyData.today || dailyData.yesterday) && (
-          <div className="flex flex-col md:flex-row gap-4 mb-6">
-            {dailyData.today && <div className="flex-1">{renderDailySummary(dailyData.today, 'Bugün')}</div>}
-            {dailyData.yesterday && <div className="flex-1">{renderDailySummary(dailyData.yesterday, 'Dün')}</div>}
-          </div>
-        )}
-
-        {/* --- ALINAN YORUMLAR --- sadece Mavi Yaka görür */}
-        {isMaviYaka && (allJobs || jobs).filter(j => j.pointsApproved && j.reviewImage).length > 0 && (
-          <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl shadow-sm relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-1 h-full bg-emerald-600"></div>
-            <h3 className="text-emerald-800 font-black flex items-center gap-2 mb-3">
-              <Star className="w-5 h-5 fill-emerald-600 text-emerald-600" /> Alınan Yorumlar
-            </h3>
-            <div className="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
-              {(allJobs || jobs).filter(j => j.pointsApproved && j.reviewImage).sort((a,b) => new Date(b.date) - new Date(a.date)).map(rev => {
-                // Sadece sistemdeki personelleri bul (dışarıdan manuel yazılanları yoksay)
-                const systemPersonnelNames = personnelList
-                  .filter(p => rev.assignedPersonnelIds?.includes(p.id) || rev.assignedPersonnelId === p.id)
-                  .map(p => p.fullName);
-                
-                const uniqueNames = [...new Set(systemPersonnelNames)];
-
-                return (
-                  <div key={rev.id} className="bg-white rounded-xl shadow-sm border border-emerald-100 overflow-hidden relative group min-w-[280px] max-w-[320px] shrink-0 flex flex-col">
-                    <div className="w-full h-40 bg-neutral-100 cursor-pointer relative" onClick={() => setViewingImage && setViewingImage({title: 'Müşteri Yorumu', name: rev.reviewImage})}>
-                      {isVideoUrl(rev.reviewImage) ? (
-                        <video src={rev.reviewImage} className="w-full h-full object-cover bg-black" muted />
-                      ) : (
-                        <img src={rev.reviewImage} alt="Müşteri Yorumu" className="w-full h-full object-cover hover:scale-105 transition duration-300" />
-                      )}
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent pointer-events-none"></div>
-                      <div className="absolute bottom-2 left-2 right-2 text-white">
-                        <h4 className="font-bold text-sm truncate">{rev.customerName}</h4>
-                        <span className="text-[10px] font-medium opacity-90">{rev.date}</span>
-                      </div>
-                    </div>
-                    <div className="p-3 flex-1 flex flex-col gap-2">
-                      <div className="bg-emerald-50 text-emerald-700 text-xs font-bold p-2 rounded-lg text-center flex items-center justify-center gap-1 border border-emerald-100 shadow-sm">
-                        👏 Güzel Tebrikler! 👏
-                      </div>
-                      <div className="flex flex-col gap-1.5 text-xs text-neutral-600 mt-1">
-                        {uniqueNames.length > 0 && (
-                          <div className="flex items-start gap-1.5">
-                            <Users className="w-4 h-4 shrink-0 text-emerald-600 mt-0.5" /> 
-                            <span className="font-medium leading-tight">
-                              <b className="text-black block mb-0.5">Yorum Alan Ekip:</b>
-                              {uniqueNames.join(', ')}
-                            </span>
-                          </div>
-                        )}
-                        {rev.assignedVehiclePlate && (
-                          <div className="flex items-center gap-1.5">
-                            <Truck className="w-4 h-4 shrink-0 text-purple-600" /> 
-                            <span className="font-medium">
-                              <b className="text-black">Araç:</b> {rev.assignedVehiclePlate}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
+            <p className="text-neutral-500 text-sm font-medium mb-1">Toplam İş</p>
+            <p className="text-2xl font-black text-black mb-2">{dashboardJobs.length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.type === 'Nakliye' || !j.type).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.type === 'Asansör').length} Asansör</span>
             </div>
           </div>
-        )}
-
-        {/* --- DESTEK YAPANLARA TEŞEKKÜRLER --- sadece Mavi Yaka görür */}
-        {isMaviYaka && (allJobs || jobs).filter(j => j.pointsApproved && j.supportPersonnelIds && j.supportPersonnelIds.length > 0).length > 0 && (
-          <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl shadow-sm relative overflow-hidden mt-6">
-            <div className="absolute top-0 left-0 w-1 h-full bg-blue-600"></div>
-            <h3 className="text-blue-800 font-black flex items-center gap-2 mb-3">
-              <Sparkles className="w-5 h-5 text-blue-600" /> Takım Çalışması & Destek Panosu
-            </h3>
-            <div className="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
-              {(allJobs || jobs).filter(j => j.pointsApproved && j.supportPersonnelIds && j.supportPersonnelIds.length > 0).sort((a,b) => new Date(b.date) - new Date(a.date)).map(job => {
-                const supportNames = personnelList
-                  .filter(p => job.supportPersonnelIds.includes(p.id))
-                  .map(p => p.fullName);
-
-                return (
-                  <div key={'sup-'+job.id} className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden relative min-w-[280px] max-w-[320px] shrink-0 flex flex-col p-4">
-                    <div className="flex items-center gap-3 mb-3 border-b border-neutral-100 pb-3">
-                      <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center shrink-0">
-                        <Users className="w-5 h-5" />
-                      </div>
-                      <div className="overflow-hidden">
-                        <p className="text-xs text-neutral-500 font-bold">{job.date}</p>
-                        <p className="text-sm font-black text-black truncate">{job.customerName}</p>
-                      </div>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-xs text-neutral-600 font-medium mb-3 leading-relaxed">
-                        Zorlu anlarda takım arkadaşlarını yalnız bırakmayıp destek olan kahramanlarımız! Diğer takım arkadaşlarına yardımcı olduğunuz için teşekkür eder, tebrik ederiz. Harika bir iş çıkardınız! 🏆💪
-                      </p>
-                      <div className="flex flex-wrap gap-1.5 mt-auto">
-                        {supportNames.map((name, i) => (
-                          <span key={i} className="text-[10px] bg-blue-50 text-blue-700 font-bold px-2 py-1 rounded border border-blue-100 flex items-center gap-1">
-                            <CheckCircle className="w-3 h-3" /> {name}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
+            <p className="text-neutral-500 text-sm font-medium mb-1">Bekleyen</p>
+            <p className="text-2xl font-black text-neutral-600 mb-2">{dashboardJobs.filter(j => j.status === 'pending').length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.status === 'pending' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.status === 'pending' && j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.status === 'pending' && j.type === 'Asansör').length} Asansör</span>
             </div>
           </div>
-        )}
-
-        {!isMaviYaka && (
-          <>
-            <div className="flex justify-between items-end mt-6 mb-[-8px]">
-              <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">İş İstatistikleri</h3>
-              <select 
-                value={filterPeriod} 
-                onChange={(e) => setFilterPeriod(e.target.value)}
-                className="px-3 py-1.5 text-sm font-bold bg-white border border-neutral-200 rounded-xl outline-none focus:ring-2 focus:ring-red-600 transition shadow-sm cursor-pointer"
-              >
-                <option value="today">Bugün</option>
-                <option value="month">Aylık</option>
-                <option value="year">Bu Yıl</option>
-                <option value="all">Tüm Zamanlar</option>
-              </select>
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 border-l-4 border-l-red-600 flex flex-col justify-between">
+            <p className="text-neutral-500 text-sm font-medium mb-1">Sahada (Devam)</p>
+            <p className="text-2xl font-black text-red-600 mb-2">{dashboardJobs.filter(j => j.status === 'in-progress').length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.status === 'in-progress' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.status === 'in-progress' && j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.status === 'in-progress' && j.type === 'Asansör').length} Asansör</span>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
-              <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
-                <p className="text-neutral-500 text-sm font-medium mb-1">Toplam İş</p>
-                <p className="text-2xl font-black text-black mb-2">{dashboardJobs.length}</p>
-                <div className="flex flex-wrap gap-1 mt-auto">
-                  <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.type === 'Nakliye' || !j.type).length} Nakliye</span>
-                  <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.type === 'Depo').length} Depo</span>
-                  <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.type === 'Asansör').length} Asansör</span>
-                </div>
-              </div>
-              <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
-                <p className="text-neutral-500 text-sm font-medium mb-1">Bekleyen</p>
-                <p className="text-2xl font-black text-neutral-600 mb-2">{dashboardJobs.filter(j => j.status === 'pending').length}</p>
-                <div className="flex flex-wrap gap-1 mt-auto">
-                  <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.status === 'pending' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
-                  <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.status === 'pending' && j.type === 'Depo').length} Depo</span>
-                  <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.status === 'pending' && j.type === 'Asansör').length} Asansör</span>
-                </div>
-              </div>
-              <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 border-l-4 border-l-red-600 flex flex-col justify-between">
-                <p className="text-neutral-500 text-sm font-medium mb-1">Sahada (Devam)</p>
-                <p className="text-2xl font-black text-red-600 mb-2">{dashboardJobs.filter(j => j.status === 'in-progress').length}</p>
-                <div className="flex flex-wrap gap-1 mt-auto">
-                  <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.status === 'in-progress' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
-                  <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.status === 'in-progress' && j.type === 'Depo').length} Depo</span>
-                  <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.status === 'in-progress' && j.type === 'Asansör').length} Asansör</span>
-                </div>
-              </div>
-              <div className="bg-black p-4 rounded-2xl shadow-sm border border-black flex flex-col justify-between">
-                <p className="text-neutral-400 text-sm font-medium mb-1">Tamamlanan</p>
-                <p className="text-2xl font-black text-white mb-2">{dashboardJobs.filter(j => j.status === 'completed').length}</p>
-                <div className="flex flex-wrap gap-1 mt-auto">
-                  <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{dashboardJobs.filter(j => j.status === 'completed' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
-                  <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{dashboardJobs.filter(j => j.status === 'completed' && j.type === 'Depo').length} Depo</span>
-                  <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{dashboardJobs.filter(j => j.status === 'completed' && j.type === 'Asansör').length} Asansör</span>
-                </div>
-              </div>
+          </div>
+          <div className="bg-black p-4 rounded-2xl shadow-sm border border-black flex flex-col justify-between">
+            <p className="text-neutral-400 text-sm font-medium mb-1">Tamamlanan</p>
+            <p className="text-2xl font-black text-white mb-2">{dashboardJobs.filter(j => j.status === 'completed').length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{dashboardJobs.filter(j => j.status === 'completed' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{dashboardJobs.filter(j => j.status === 'completed' && j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{dashboardJobs.filter(j => j.status === 'completed' && j.type === 'Asansör').length} Asansör</span>
             </div>
-          </>
-        )}
+          </div>
+        </div>
       </div>
     );
   };
