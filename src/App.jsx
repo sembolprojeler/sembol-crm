@@ -252,59 +252,6 @@ useEffect(() => {
        );
     };
 
-    // --- YENİ: BEYAZ YAKA İÇİN POZİSYONA GÖRE GÜNLÜK MOTİVE EDİCİ MESAJ ---
-    // Her gün farklı bir mesaj gösterilir (yılın gününe göre rotasyon). Pozisyona
-    // özel mesaj havuzu yoksa genel havuz kullanılır. Çerçevesi renkli olur.
-    const getDailyMotivation = () => {
-      const pos = currentUser?.position || '';
-      const messagePools = {
-        'Firma Sahibi': [
-          'Kurduğun bu düzen, her gün büyüyen bir başarı hikayesi. Bugün de vizyonunla fark yarat!',
-          'Bir liderin gücü, ekibine ilham vermesindedir. Bugün harika işlere imza atacaksın!',
-          'Her karar, şirketini bir adım öteye taşıyor. Bugün de doğru yoldasın!',
-          'Başarı tesadüf değil, senin emeğinin sonucudur. Gününe güçlü başla!'
-        ],
-        'Muhasebe': [
-          'Her rakam senin titizliğinle anlam kazanıyor. Bugün de kusursuz bir gün olacak!',
-          'Düzenin ve dikkatin, şirketin sağlam temeli. İyi çalışmalar!',
-          'Detaylara verdiğin önem fark yaratıyor. Bugün de her şey yerli yerinde!'
-        ],
-        'Satış Sorumlusu': [
-          'Her görüşme yeni bir fırsat! Bugün gülümsemenle kazandır.',
-          'Bir "evet" için attığın her adım değerli. Bugün rekor kırma günü!',
-          'Müşterinin güveni senin en büyük sermayen. Bugün de kazandıracaksın!'
-        ],
-        'Operatör': [
-          'Sahadaki gözün, kulağın sensin. Bugün de her operasyon senin sayende sorunsuz!',
-          'Koordinasyon senin işin, başarı ise sonucu. Harika bir gün olsun!'
-        ]
-      };
-      const generalPool = [
-        'Bugün, dün yapamadığını başarmak için yeni bir fırsat. Haydi başla!',
-        'Küçük adımlar büyük başarılar getirir. Bugün de bir adım daha at!',
-        'Emeğin asla boşa gitmez. Bugün de elinden gelenin en iyisini yap!',
-        'Gülümse, çünkü bugün senin günün. Enerjinle etrafına ilham ver!',
-        'Her yeni gün, yeni bir başlangıçtır. Bugünü değerlendir!',
-        'Başarı, pes etmeyenlerin ödülüdür. Bugün de kararlılıkla ilerle!',
-        'Takımın bir parçası olman, onu güçlü kılıyor. İyi çalışmalar!'
-      ];
-      const pool = messagePools[pos] && messagePools[pos].length > 0 ? messagePools[pos] : generalPool;
-      // Yılın gününe göre her gün farklı mesaj seç
-      const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
-      return pool[dayOfYear % pool.length];
-    };
-    // Her gün çerçeve rengi de değişsin (renk paletinden rotasyon)
-    const motivationColors = [
-      'from-red-50 to-orange-50 border-red-300 text-red-800',
-      'from-blue-50 to-cyan-50 border-blue-300 text-blue-800',
-      'from-green-50 to-emerald-50 border-green-300 text-green-800',
-      'from-purple-50 to-fuchsia-50 border-purple-300 text-purple-800',
-      'from-orange-50 to-amber-50 border-orange-300 text-orange-800',
-      'from-teal-50 to-cyan-50 border-teal-300 text-teal-800'
-    ];
-    const dayOfYearForColor = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
-    const motivationColor = motivationColors[dayOfYearForColor % motivationColors.length];
-
     return (
       <div className="space-y-6 animate-in fade-in">
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
@@ -340,19 +287,6 @@ useEffect(() => {
             </div>
           )}
         </div>
-
-        {/* YENİ: Beyaz Yaka için pozisyona göre günlük motive edici mesaj (renkli çerçeve) */}
-        {!isMaviYaka && (
-          <div className={`bg-gradient-to-r ${motivationColor} border-2 p-5 rounded-2xl shadow-sm flex items-center gap-4 animate-in fade-in slide-in-from-top-2`}>
-            <div className="w-12 h-12 bg-white/70 rounded-full flex items-center justify-center shrink-0 shadow-sm">
-              <Sparkles className="w-6 h-6" />
-            </div>
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-wider opacity-70 mb-1">Günün Motivasyonu • {currentUser?.position || 'Ekip'}</p>
-              <p className="font-bold text-base leading-snug">{getDailyMotivation()}</p>
-            </div>
-          </div>
-        )}
 
         {/* --- YENİ EKLENEN BİLGİLENDİRME PANOSU (DUYURU, PAYLAŞIM, EN İYİLER) --- */}
         {(latestInfo.announcements.length > 0 || latestInfo.posts.length > 0 || latestInfo.bestEmps.length > 0) && (
@@ -606,75 +540,7 @@ useEffect(() => {
                 </div>
               </div>
             </div>
-            
-            <div className="grid grid-cols-1 gap-6 mt-6">
-              <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-80 flex flex-col">
-                  <h3 className="text-lg font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-100 pb-2">
-                    <ClipboardList className="w-5 h-5 text-red-600" /> Son Eklenen Operasyonlar
-                  </h3>
-                  <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
-                    {jobs.slice().sort((a,b) => new Date(b.id) - new Date(a.id)).slice(0, 5).map(job => (
-                        <div key={job.id} className="p-3 bg-neutral-50 rounded-xl border border-neutral-100 flex justify-between items-center text-sm">
-                          <div>
-                            <p className="font-bold text-black">{job.customerName}</p>
-                            <p className="text-[10px] text-neutral-500">{job.date} - {job.time}</p>
-                          </div>
-                          <span className={`text-[9px] px-2 py-1 rounded font-bold text-white uppercase ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
-                            {job.type || 'Nakliye'}
-                          </span>
-                        </div>
-                    ))}
-                    {jobs.length === 0 && <p className="text-center text-neutral-400 text-xs py-4">Kayıtlı operasyon yok.</p>}
-                  </div>
-              </div>
-            </div>
           </>
-        )}
-
-        {isAdmin && (
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 animate-in slide-in-from-bottom-4">
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-64 flex flex-col">
-              <h3 className="text-sm font-bold text-black mb-3 flex items-center gap-2 border-b border-neutral-100 pb-2"><Briefcase className="w-4 h-4 text-red-600"/> Sistemdeki Personeller</h3>
-              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
-                {personnelList.slice(0, 5).map(p => (
-                  <div key={p.id} className="text-xs flex justify-between items-center p-2 bg-neutral-50 rounded-lg border border-neutral-100">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6 h-6 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0">
-                        {p.profileImage ? (
-                          <img src={p.profileImage} alt={p.fullName} className="w-full h-full object-cover" />
-                        ) : (
-                          p.fullName.charAt(0)
-                        )}
-                      </div>
-                      <span className="font-bold text-black">{p.fullName}</span>
-                    </div>
-                    <span className="text-neutral-500">{p.position}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-64 flex flex-col">
-              <h3 className="text-sm font-bold text-black mb-3 flex items-center gap-2 border-b border-neutral-100 pb-2"><Car className="w-4 h-4 text-red-600"/> Aktif Araçlar</h3>
-              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
-                {vehicles.slice(0, 5).map(v => (
-                  <div key={v.id} className="text-xs flex justify-between p-2 bg-neutral-50 rounded-lg border border-neutral-100">
-                    <span className="font-bold text-black">{v.plate}</span><span className="text-neutral-500">{v.type}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-64 flex flex-col">
-              <h3 className="text-sm font-bold text-black mb-3 flex items-center gap-2 border-b border-neutral-100 pb-2"><Package className="w-4 h-4 text-red-600"/> Stok Durumu (Kritik)</h3>
-              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
-                {materials.sort((a,b)=>a.stock - b.stock).slice(0, 5).map(m => (
-                  <div key={m.id} className="text-xs flex justify-between items-center p-2 bg-neutral-50 rounded-lg border border-neutral-100">
-                    <span className="font-bold text-black">{m.name}</span>
-                    <span className={`font-black px-2 py-0.5 rounded ${m.stock <= 10 ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-700'}`}>{m.stock} {m.unit}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
         )}
       </div>
     );

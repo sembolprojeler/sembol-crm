@@ -4555,10 +4555,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const [tutanakForm, setTutanakForm] = useState({ title: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
     // YENİ: Hazır tutanak şablonu seçimi
     const [tutanakTemplateKey, setTutanakTemplateKey] = useState('');
-    // YENİ: Belgeler / Formlar (İhbar Dilekçesi, İbraname, İzin Formları, İstifa Dilekçesi vb.) modalı
-    const [showBelgeModal, setShowBelgeModal] = useState(false);
-    const [belgeTemplateKey, setBelgeTemplateKey] = useState('');
-    const [belgeForm, setBelgeForm] = useState({ date: new Date().toISOString().split('T')[0], note: '' });
     const [showRaporModal, setShowRaporModal] = useState(false);
     const [raporForm, setRaporForm] = useState({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
     const [actionUploading, setActionUploading] = useState(false);
@@ -5472,16 +5468,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       printPersonnelTemplate(template, tutanakForm);
     };
 
-    // YENİ: BELGELER / FORMLAR — İhbar Dilekçesi, İbraname, İzin Formları, İstifa Dilekçesi vb. hazır İK belgeleri
-    const BELGE_TEMPLATE_KEYS = ['ihbar_dilekcesi', 'ibraname', 'ucretli_izin', 'ucretsiz_izin', 'istifa_dilekcesi'];
-    const BELGE_TEMPLATES = TUTANAK_TEMPLATES.filter(t => BELGE_TEMPLATE_KEYS.includes(t.key));
-
-    const generateBelgePDF = () => {
-      const template = BELGE_TEMPLATES.find(t => t.key === belgeTemplateKey);
-      if (!template) { alert('Lütfen önce bir belge/form seçin.'); return; }
-      printPersonnelTemplate(template, belgeForm);
-    };
-
     const handleTutanakSubmit = async (e) => {
       e.preventDefault();
       if (!tutanakForm.title) return;
@@ -5636,10 +5622,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             </button>
             <button type="button" onClick={() => { setRaporForm({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setShowRaporModal(true); }} className="p-3 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
               <PlusCircle className="w-5 h-5" /> Rapor Ekle
-            </button>
-            {/* YENİ: Belgeler / Formlar — İhbar Dilekçesi, İbraname, İzin Formları, İstifa Dilekçesi gibi hazır İK belgelerini listeleyip PDF olarak yazdırır */}
-            <button type="button" onClick={() => { setBelgeForm({ date: new Date().toISOString().split('T')[0], note: '' }); setBelgeTemplateKey(''); setShowBelgeModal(true); }} className="p-3 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
-              <FolderOpen className="w-5 h-5" /> Belgeler / Formlar
             </button>
             {/* YENİ: Bilgileri Düzenle — personelin kaydedildiği Personel Listesi ekranına gidip düzenleme (giriş bilgileri dahil) modalını otomatik açar */}
             <button type="button" onClick={() => { if (setPendingEditPersonnelId) setPendingEditPersonnelId(person.id); if (setActiveTab) setActiveTab('personnelList'); }} className="p-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
@@ -6469,49 +6451,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
                 <button type="submit" disabled={actionUploading} className="w-full py-4 bg-neutral-800 text-white font-bold rounded-xl hover:bg-black transition disabled:opacity-50">Tutanağı Kaydet</button>
               </form>
-            </div>
-          </div>
-        )}
-
-        {/* YENİ: Belgeler / Formlar Modalı — İhbar Dilekçesi, İbraname, İzin Formları, İstifa Dilekçesi vb. hazır İK belgeleri */}
-        {showBelgeModal && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
-            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[90vh] overflow-y-auto custom-scrollbar">
-              <div className="bg-neutral-800 text-white p-4 flex justify-between items-center sticky top-0 z-10">
-                <h3 className="font-bold text-lg flex items-center gap-2"><FolderOpen className="w-5 h-5" /> Belgeler / Formlar</h3>
-                <button onClick={() => { setShowBelgeModal(false); setBelgeTemplateKey(''); }} className="text-neutral-300 hover:text-white transition"><X className="w-6 h-6" /></button>
-              </div>
-              <div className="p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-bold text-black mb-1">Belge / Form Seç</label>
-                  <select
-                    value={belgeTemplateKey}
-                    onChange={e => setBelgeTemplateKey(e.target.value)}
-                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800 bg-white"
-                  >
-                    <option value="">— Belge Seçin —</option>
-                    {BELGE_TEMPLATES.map(t => (
-                      <option key={t.key} value={t.key}>{t.title}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-black mb-1">Tarih</label>
-                  <input type="date" value={belgeForm.date} onChange={e => setBelgeForm({ ...belgeForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800" />
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-black mb-1">Ek Açıklama / Not (İsteğe Bağlı)</label>
-                  <textarea value={belgeForm.note} onChange={e => setBelgeForm({ ...belgeForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800 h-16 resize-none" />
-                </div>
-                <button
-                  type="button"
-                  onClick={generateBelgePDF}
-                  disabled={!belgeTemplateKey}
-                  className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl transition flex justify-center items-center gap-2 disabled:opacity-40"
-                >
-                  <FileText className="w-4 h-4" /> Belgeyi Hazırla / Yazdır
-                </button>
-              </div>
             </div>
           </div>
         )}
