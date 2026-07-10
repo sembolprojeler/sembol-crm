@@ -4555,6 +4555,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const [tutanakForm, setTutanakForm] = useState({ title: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
     // YENİ: Hazır tutanak şablonu seçimi
     const [tutanakTemplateKey, setTutanakTemplateKey] = useState('');
+    // YENİ: Belgeler / Formlar (İhbar Dilekçesi, İbraname, İzin Formları, İstifa Dilekçesi vb.) modalı
+    const [showBelgeModal, setShowBelgeModal] = useState(false);
+    const [belgeTemplateKey, setBelgeTemplateKey] = useState('');
+    const [belgeForm, setBelgeForm] = useState({ date: new Date().toISOString().split('T')[0], note: '' });
     const [showRaporModal, setShowRaporModal] = useState(false);
     const [raporForm, setRaporForm] = useState({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
     const [actionUploading, setActionUploading] = useState(false);
@@ -5410,10 +5414,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     // (Aşağıdaki useEffect, financeMonth her değiştiğinde ilgili aya ait 'maas' koleksiyon kaydını dinler)
 
     // 3) TUTANAK TUT — belge yüklenir, özlük dosyasına da otomatik eklenir
-    // YENİ: Seçilen tutanak şablonunu personel bilgileriyle doldurup yazdırma penceresinde açar
-    const generateTutanakPDF = () => {
-      const template = TUTANAK_TEMPLATES.find(t => t.key === tutanakTemplateKey);
-      if (!template) { alert('Lütfen önce bir tutanak şablonu seçin.'); return; }
+    // YENİ: Seçilen şablonu (tutanak veya belge/form) personel bilgileriyle doldurup yazdırma penceresinde açan ortak fonksiyon
+    const printPersonnelTemplate = (template, formData) => {
       const printWindow = window.open('', '_blank');
       const html = `
       <!DOCTYPE html>
@@ -5452,7 +5454,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
             <div class="contact-info">Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99</div>
           </div>
-          ${template.body(person, tutanakForm)}
+          ${template.body(person, formData)}
         </div>
         <script>
           window.onload = function() { window.print(); };
@@ -5462,6 +5464,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       `;
       printWindow.document.write(html);
       printWindow.document.close();
+    };
+
+    const generateTutanakPDF = () => {
+      const template = TUTANAK_TEMPLATES.find(t => t.key === tutanakTemplateKey);
+      if (!template) { alert('Lütfen önce bir tutanak şablonu seçin.'); return; }
+      printPersonnelTemplate(template, tutanakForm);
+    };
+
+    // YENİ: BELGELER / FORMLAR — İhbar Dilekçesi, İbraname, İzin Formları, İstifa Dilekçesi vb. hazır İK belgeleri
+    const BELGE_TEMPLATE_KEYS = ['ihbar_dilekcesi', 'ibraname', 'ucretli_izin', 'ucretsiz_izin', 'istifa_dilekcesi'];
+    const BELGE_TEMPLATES = TUTANAK_TEMPLATES.filter(t => BELGE_TEMPLATE_KEYS.includes(t.key));
+
+    const generateBelgePDF = () => {
+      const template = BELGE_TEMPLATES.find(t => t.key === belgeTemplateKey);
+      if (!template) { alert('Lütfen önce bir belge/form seçin.'); return; }
+      printPersonnelTemplate(template, belgeForm);
     };
 
     const handleTutanakSubmit = async (e) => {
@@ -5618,6 +5636,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             </button>
             <button type="button" onClick={() => { setRaporForm({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setShowRaporModal(true); }} className="p-3 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
               <PlusCircle className="w-5 h-5" /> Rapor Ekle
+            </button>
+            {/* YENİ: Belgeler / Formlar — İhbar Dilekçesi, İbraname, İzin Formları, İstifa Dilekçesi gibi hazır İK belgelerini listeleyip PDF olarak yazdırır */}
+            <button type="button" onClick={() => { setBelgeForm({ date: new Date().toISOString().split('T')[0], note: '' }); setBelgeTemplateKey(''); setShowBelgeModal(true); }} className="p-3 bg-purple-50 hover:bg-purple-100 text-purple-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
+              <FolderOpen className="w-5 h-5" /> Belgeler / Formlar
             </button>
             {/* YENİ: Bilgileri Düzenle — personelin kaydedildiği Personel Listesi ekranına gidip düzenleme (giriş bilgileri dahil) modalını otomatik açar */}
             <button type="button" onClick={() => { if (setPendingEditPersonnelId) setPendingEditPersonnelId(person.id); if (setActiveTab) setActiveTab('personnelList'); }} className="p-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
@@ -6447,6 +6469,49 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
                 <button type="submit" disabled={actionUploading} className="w-full py-4 bg-neutral-800 text-white font-bold rounded-xl hover:bg-black transition disabled:opacity-50">Tutanağı Kaydet</button>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: Belgeler / Formlar Modalı — İhbar Dilekçesi, İbraname, İzin Formları, İstifa Dilekçesi vb. hazır İK belgeleri */}
+        {showBelgeModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[90vh] overflow-y-auto custom-scrollbar">
+              <div className="bg-neutral-800 text-white p-4 flex justify-between items-center sticky top-0 z-10">
+                <h3 className="font-bold text-lg flex items-center gap-2"><FolderOpen className="w-5 h-5" /> Belgeler / Formlar</h3>
+                <button onClick={() => { setShowBelgeModal(false); setBelgeTemplateKey(''); }} className="text-neutral-300 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <div className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Belge / Form Seç</label>
+                  <select
+                    value={belgeTemplateKey}
+                    onChange={e => setBelgeTemplateKey(e.target.value)}
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800 bg-white"
+                  >
+                    <option value="">— Belge Seçin —</option>
+                    {BELGE_TEMPLATES.map(t => (
+                      <option key={t.key} value={t.key}>{t.title}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tarih</label>
+                  <input type="date" value={belgeForm.date} onChange={e => setBelgeForm({ ...belgeForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Ek Açıklama / Not (İsteğe Bağlı)</label>
+                  <textarea value={belgeForm.note} onChange={e => setBelgeForm({ ...belgeForm, note: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-neutral-800 h-16 resize-none" />
+                </div>
+                <button
+                  type="button"
+                  onClick={generateBelgePDF}
+                  disabled={!belgeTemplateKey}
+                  className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl transition flex justify-center items-center gap-2 disabled:opacity-40"
+                >
+                  <FileText className="w-4 h-4" /> Belgeyi Hazırla / Yazdır
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -7287,10 +7352,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
   export const BoardJobCard = ({ job, personnelList, vehicles, materials, dragOverTarget, handleDragOver, handleDragLeave, handleDropToJob, handleDragStart, db, appId, calculateMaterials }) => {
     const [note, setNote] = useState(job.notes || '');
     const [manualName, setManualName] = useState('');
-    
+
     // YENİ STATE'LER: Sistem harici malzeme ekleme için
     const [customMaterials, setCustomMaterials] = useState(job.customMaterials || []);
     const [newCustomMaterial, setNewCustomMaterial] = useState({ name: '', amount: 1 });
+
+    // YENİ: "Ekip Onaylandı / Düzenle" butonu için ekip düzenleme modalı
+    const [showEditTeamModal, setShowEditTeamModal] = useState(false);
 
     useEffect(() => { setNote(job.notes || ''); }, [job.notes]);
 
@@ -7405,6 +7473,25 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         });
     };
 
+    // YENİ: Ekibi Düzenle modalından sistem personeli çıkarma
+    const handleRemoveSystemPersonFromJob = async (pIdToRemove) => {
+        const newIds = (job.assignedPersonnelIds || []).filter(id => String(id) !== String(pIdToRemove));
+        const systemNames = newIds.map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
+        const allNames = [...systemNames, ...manualNames];
+
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), {
+            assignedPersonnelIds: newIds,
+            assignedPersonnelId: newIds[0] || null,
+            teamNames: allNames,
+            team: allNames.length > 0 ? allNames.join(', ') : 'Atanmadı'
+        });
+    };
+
+    // YENİ: Ekibi Düzenle modalından aracı çıkarma
+    const handleRemoveVehicleFromJob = async () => {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), { assignedVehiclePlate: '' });
+    };
+
     const handleApproveTeam = async () => {
         const allAssignedIds = job.assignedPersonnelIds || [];
         if (allAssignedIds.length === 0 && manualNames.length === 0) return alert("Önce personel atamalısınız!");
@@ -7459,7 +7546,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     };
 
     return (
-      <div 
+      <>
+      <div
         onDragOver={(e) => handleDragOver(e, job.id)}
         onDragLeave={handleDragLeave}
         onDrop={(e) => handleDropToJob(e, job.id)}
@@ -7666,8 +7754,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
         {/* Onay Butonu */}
         <div className="p-2 border-t border-neutral-200 shrink-0 bg-white">
-          <button 
-            onClick={handleApproveTeam}
+          <button
+            onClick={() => job.isTeamApproved ? setShowEditTeamModal(true) : handleApproveTeam()}
             className={`w-full py-2 text-[11px] font-bold rounded-lg transition flex items-center justify-center gap-1.5 shadow-sm ${job.isTeamApproved ? 'bg-green-50 text-green-700 border border-green-300 hover:bg-green-100' : 'bg-black text-white hover:bg-neutral-800'}`}
           >
             <CheckSquare className="w-3.5 h-3.5" /> {job.isTeamApproved ? 'Ekip Onaylandı / Düzenle' : 'Tüm Ekibi Onayla'}
@@ -7692,6 +7780,76 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
           </button>
         </div>
       </div>
+
+      {/* YENİ: Ekibi Düzenle Modalı */}
+      {showEditTeamModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setShowEditTeamModal(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[85vh] flex flex-col overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="p-4 bg-neutral-900 flex items-center justify-between shrink-0">
+              <h3 className="font-black text-white text-sm truncate">Ekibi Düzenle — {job.customerName}</h3>
+              <button onClick={() => setShowEditTeamModal(false)} className="text-neutral-300 hover:text-white transition"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="p-4 space-y-3 overflow-y-auto custom-scrollbar">
+              <div>
+                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">Atanan Araç</span>
+                {job.assignedVehiclePlate ? (
+                  <div className="bg-white border border-purple-200 rounded-xl p-2 flex items-center gap-2 shadow-sm">
+                    <div className="bg-purple-100 p-1.5 rounded-lg"><Truck className="w-3.5 h-3.5 text-purple-600"/></div>
+                    <div className="flex-1"><h4 className="font-bold text-xs text-black tracking-widest">{job.assignedVehiclePlate}</h4></div>
+                    <button onClick={handleRemoveVehicleFromJob} className="text-red-500 hover:text-red-700 p-0.5"><X className="w-3.5 h-3.5"/></button>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-neutral-400 font-medium">Araç atanmadı.</p>
+                )}
+              </div>
+
+              <div>
+                <span className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider block mb-1.5">Görevli Personeller</span>
+                <div className="space-y-1.5">
+                  {(job.assignedPersonnelIds || []).map(pId => {
+                    const person = personnelList.find(p => String(p.id) === String(pId));
+                    if (!person) return null;
+                    return (
+                      <div key={pId} className="bg-white border border-neutral-200 rounded-xl p-2 flex items-center gap-2 shadow-sm">
+                        <div className="w-7 h-7 rounded-full bg-neutral-100 border border-neutral-200 flex items-center justify-center overflow-hidden shrink-0">
+                          {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover" alt={person.fullName} /> : <User className="w-3.5 h-3.5 text-neutral-400" />}
+                        </div>
+                        <div className="flex-1 overflow-hidden">
+                          <h4 className="font-bold text-[11px] text-black truncate">{person.fullName}</h4>
+                          <p className="text-[9px] font-medium text-neutral-500 truncate">{person.position}</p>
+                        </div>
+                        <button onClick={() => handleRemoveSystemPersonFromJob(pId)} className="text-red-500 hover:text-red-700 p-0.5"><X className="w-3.5 h-3.5"/></button>
+                      </div>
+                    );
+                  })}
+                  {manualNames.map((mName, idx) => (
+                    <div key={'edit-m'+idx} className="bg-orange-50 border border-orange-200 rounded-xl p-2 flex items-center gap-2 shadow-sm">
+                      <div className="w-7 h-7 rounded-full bg-orange-100 border border-orange-200 flex items-center justify-center shrink-0">
+                        <UserPlus className="w-3.5 h-3.5 text-orange-600"/>
+                      </div>
+                      <div className="flex-1 overflow-hidden">
+                        <h4 className="font-bold text-[11px] text-orange-900 truncate">{mName}</h4>
+                        <p className="text-[8px] font-medium text-orange-600/70 truncate">Dış Personel</p>
+                      </div>
+                      <button onClick={() => handleRemoveManualFromJob(mName)} className="text-red-500 hover:text-red-700 p-0.5"><X className="w-3.5 h-3.5"/></button>
+                    </div>
+                  ))}
+                  {(job.assignedPersonnelIds || []).length === 0 && manualNames.length === 0 && (
+                    <p className="text-[11px] text-neutral-400 font-medium">Ekibe henüz kimse atanmadı.</p>
+                  )}
+                </div>
+                <p className="text-[9px] text-neutral-400 font-medium mt-2">Yeni personel/araç eklemek için tahtadan sürükleyip bırakabilirsiniz.</p>
+              </div>
+            </div>
+
+            <div className="p-3 border-t border-neutral-200 shrink-0">
+              <button onClick={() => setShowEditTeamModal(false)} className="w-full py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-bold rounded-xl transition text-xs">Kapat</button>
+            </div>
+          </div>
+        </div>
+      )}
+      </>
     );
   };
 
