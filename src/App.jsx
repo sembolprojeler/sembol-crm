@@ -6,25 +6,110 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
 import { AddJobView, CustomerListView, CustomerProfileView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView } from './Finans.jsx';
-  const DashboardView = ({ jobs, allJobs, personnelList, vehicles, materials, systemLogs, currentUser, setViewingImage, transactions }) => {
+  const DashboardView = ({ jobs, personnelList, currentUser }) => {
     const [filterPeriod, setFilterPeriod] = useState('today');
+    const [viewingDashboardJob, setViewingDashboardJob] = useState(null);
+
+    const isAdmin = ['Müdür', 'Firma Sahibi', 'Operasyon'].some(role => currentUser?.position?.includes(role) || currentUser?.rank === role) || currentUser?.permissions?.canEdit;
 
     const today = new Date();
     const todayStr = today.toISOString().split('T')[0];
     const todayMonth = today.getMonth();
     const todayYear = today.getFullYear();
 
-    const dashboardJobs = jobs.filter(j => {
+    const matchesPeriod = (d) => {
       if (filterPeriod === 'all') return true;
-      const jDate = new Date(j.date);
-      if (filterPeriod === 'today') return j.date === todayStr;
-      if (filterPeriod === 'month') return jDate.getMonth() === todayMonth && jDate.getFullYear() === todayYear;
-      if (filterPeriod === 'year') return jDate.getFullYear() === todayYear;
+      if (filterPeriod === 'today') return d.toISOString().split('T')[0] === todayStr;
+      if (filterPeriod === 'week') {
+        const day = today.getDay();
+        const diffToMonday = day === 0 ? 6 : day - 1;
+        const weekStart = new Date(today); weekStart.setDate(today.getDate() - diffToMonday); weekStart.setHours(0, 0, 0, 0);
+        return d >= weekStart;
+      }
+      if (filterPeriod === 'month') return d.getMonth() === todayMonth && d.getFullYear() === todayYear;
+      if (filterPeriod === 'lastMonth') {
+        const lastMonthDate = new Date(todayYear, todayMonth - 1, 1);
+        const lastMonthEnd = new Date(todayYear, todayMonth, 0, 23, 59, 59, 999);
+        return d >= lastMonthDate && d <= lastMonthEnd;
+      }
+      if (filterPeriod === 'year') return d.getFullYear() === todayYear;
       return true;
-    });
+    };
+
+    // İşin planlanan tarihine (job.date) göre "İş İstatistikleri"
+    const dashboardJobs = jobs.filter(j => matchesPeriod(new Date(j.date)));
+
+    // Sisteme GİRİLDİĞİ tarihe (job.createdAt) göre "Kayıt İstatistiği" — eski kayıtlarda
+    // createdAt olmayabileceği için geriye dönük uyumluluk adına job.date'e düşülür.
+    const registrationJobs = jobs.filter(j => matchesPeriod(new Date(j.createdAt || j.date)));
+
+    // Beyaz Yaka için pozisyona göre günlük motive edici mesaj (renkli çerçeve, her gün rotasyonlu)
+    const getDailyMotivation = () => {
+      const pos = currentUser?.position || '';
+      const messagePools = {
+        'Firma Sahibi': [
+          'Kurduğun bu düzen, her gün büyüyen bir başarı hikayesi. Bugün de vizyonunla fark yarat!',
+          'Bir liderin gücü, ekibine ilham vermesindedir. Bugün harika işlere imza atacaksın!',
+          'Her karar, şirketini bir adım öteye taşıyor. Bugün de doğru yoldasın!',
+          'Başarı tesadüf değil, senin emeğinin sonucudur. Gününe güçlü başla!'
+        ],
+        'Muhasebe': [
+          'Her rakam senin titizliğinle anlam kazanıyor. Bugün de kusursuz bir gün olacak!',
+          'Düzenin ve dikkatin, şirketin sağlam temeli. İyi çalışmalar!',
+          'Detaylara verdiğin önem fark yaratıyor. Bugün de her şey yerli yerinde!'
+        ],
+        'Satış Sorumlusu': [
+          'Her görüşme yeni bir fırsat! Bugün gülümsemenle kazandır.',
+          'Bir "evet" için attığın her adım değerli. Bugün rekor kırma günü!',
+          'Müşterinin güveni senin en büyük sermayen. Bugün de kazandıracaksın!'
+        ],
+        'Operatör': [
+          'Sahadaki gözün, kulağın sensin. Bugün de her operasyon senin sayende sorunsuz!',
+          'Koordinasyon senin işin, başarı ise sonucu. Harika bir gün olsun!'
+        ]
+      };
+      const generalPool = [
+        'Bugün, dün yapamadığını başarmak için yeni bir fırsat. Haydi başla!',
+        'Küçük adımlar büyük başarılar getirir. Bugün de bir adım daha at!',
+        'Emeğin asla boşa gitmez. Bugün de elinden gelenin en iyisini yap!',
+        'Gülümse, çünkü bugün senin günün. Enerjinle etrafına ilham ver!',
+        'Her yeni gün, yeni bir başlangıçtır. Bugünü değerlendir!',
+        'Başarı, pes etmeyenlerin ödülüdür. Bugün de kararlılıkla ilerle!',
+        'Takımın bir parçası olman, onu güçlü kılıyor. İyi çalışmalar!'
+      ];
+      const pool = messagePools[pos] && messagePools[pos].length > 0 ? messagePools[pos] : generalPool;
+      const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+      return pool[dayOfYear % pool.length];
+    };
+    const motivationColors = [
+      'from-red-50 to-orange-50 border-red-300 text-red-800',
+      'from-blue-50 to-cyan-50 border-blue-300 text-blue-800',
+      'from-green-50 to-emerald-50 border-green-300 text-green-800',
+      'from-purple-50 to-fuchsia-50 border-purple-300 text-purple-800',
+      'from-orange-50 to-amber-50 border-orange-300 text-orange-800',
+      'from-teal-50 to-cyan-50 border-teal-300 text-teal-800'
+    ];
+    const dayOfYearForColor = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
+    const motivationColor = motivationColors[dayOfYearForColor % motivationColors.length];
 
     return (
       <div className="space-y-6 animate-in fade-in">
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
+          <h2 className="text-2xl font-black text-black">Hoş Geldiniz, {currentUser?.fullName}</h2>
+          <p className="text-neutral-500 font-medium">Sistemdeki genel operasyon özetini aşağıdan takip edebilirsiniz.</p>
+        </div>
+
+        {/* Günün Motivasyonu — pozisyona göre havuzdan, güne göre rotasyonlu mesaj */}
+        <div className={`bg-gradient-to-r ${motivationColor} border-2 p-5 rounded-2xl shadow-sm flex items-center gap-4 animate-in fade-in slide-in-from-top-2`}>
+          <div className="w-12 h-12 bg-white/70 rounded-full flex items-center justify-center shrink-0 shadow-sm">
+            <Sparkles className="w-6 h-6" />
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-wider opacity-70 mb-1">Günün Motivasyonu • {currentUser?.position || 'Ekip'}</p>
+            <p className="font-bold text-base leading-snug">{getDailyMotivation()}</p>
+          </div>
+        </div>
+
         <div className="flex justify-between items-end">
           <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">İş İstatistikleri</h3>
           <select
@@ -33,7 +118,9 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
             className="px-3 py-1.5 text-sm font-bold bg-white border border-neutral-200 rounded-xl outline-none focus:ring-2 focus:ring-red-600 transition shadow-sm cursor-pointer"
           >
             <option value="today">Bugün</option>
-            <option value="month">Aylık</option>
+            <option value="week">Bu Hafta</option>
+            <option value="month">Bu Ay</option>
+            <option value="lastMonth">Geçen Ay</option>
             <option value="year">Bu Yıl</option>
             <option value="all">Tüm Zamanlar</option>
           </select>
@@ -77,6 +164,125 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
             </div>
           </div>
         </div>
+
+        {/* Kayıt İstatistiği — kayıt ettiğimiz (sisteme girilen) işlerin takibi, İş İstatistikleri ile aynı dönem filtresini kullanır */}
+        <div className="flex justify-between items-end mt-2">
+          <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">Kayıt İstatistiği</h3>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
+            <p className="text-neutral-500 text-sm font-medium mb-1">Toplam Kayıt</p>
+            <p className="text-2xl font-black text-black mb-2">{registrationJobs.length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{registrationJobs.filter(j => j.type === 'Nakliye' || !j.type).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{registrationJobs.filter(j => j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{registrationJobs.filter(j => j.type === 'Asansör').length} Asansör</span>
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
+            <p className="text-neutral-500 text-sm font-medium mb-1">Onay Bekleyen Kayıt</p>
+            <p className="text-2xl font-black text-neutral-600 mb-2">{registrationJobs.filter(j => j.status === 'pending').length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{registrationJobs.filter(j => j.status === 'pending' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{registrationJobs.filter(j => j.status === 'pending' && j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{registrationJobs.filter(j => j.status === 'pending' && j.type === 'Asansör').length} Asansör</span>
+            </div>
+          </div>
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 border-l-4 border-l-neutral-400 flex flex-col justify-between">
+            <p className="text-neutral-500 text-sm font-medium mb-1">İptal Edilen Kayıt</p>
+            <p className="text-2xl font-black text-neutral-500 mb-2">{registrationJobs.filter(j => j.status === 'cancelled').length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{registrationJobs.filter(j => j.status === 'cancelled' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{registrationJobs.filter(j => j.status === 'cancelled' && j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{registrationJobs.filter(j => j.status === 'cancelled' && j.type === 'Asansör').length} Asansör</span>
+            </div>
+          </div>
+          <div className="bg-black p-4 rounded-2xl shadow-sm border border-black flex flex-col justify-between">
+            <p className="text-neutral-400 text-sm font-medium mb-1">Onaylanan Kayıt</p>
+            <p className="text-2xl font-black text-white mb-2">{registrationJobs.filter(j => j.status !== 'cancelled' && j.status !== 'pending').length}</p>
+            <div className="flex flex-wrap gap-1 mt-auto">
+              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{registrationJobs.filter(j => j.status !== 'cancelled' && j.status !== 'pending' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{registrationJobs.filter(j => j.status !== 'cancelled' && j.status !== 'pending' && j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{registrationJobs.filter(j => j.status !== 'cancelled' && j.status !== 'pending' && j.type === 'Asansör').length} Asansör</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Son Kaydedilen İşler Listesi — sisteme en son girilen (createdAt) 5 iş */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-80 flex flex-col">
+          <h3 className="text-lg font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-100 pb-2">
+            <ClipboardList className="w-5 h-5 text-red-600" /> Son Kaydedilen İşler
+          </h3>
+          <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
+            {jobs.slice().sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date)).slice(0, 5).map(job => (
+              <div key={job.id} onClick={() => setViewingDashboardJob(job)} className="p-3 bg-neutral-50 hover:bg-neutral-100 cursor-pointer rounded-xl border border-neutral-100 flex justify-between items-center text-sm transition">
+                <div>
+                  <p className="font-bold text-black">{job.customerName}</p>
+                  <p className="text-[10px] text-neutral-500">{job.date} - {job.time}</p>
+                  <p className="text-[10px] text-neutral-400 font-medium">Kaydeden: <span className="font-bold text-neutral-600">{job.createdBy || 'Bilinmiyor'}</span></p>
+                </div>
+                <span className={`text-[9px] px-2 py-1 rounded font-bold text-white uppercase shrink-0 ml-2 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                  {job.type || 'Nakliye'}
+                </span>
+              </div>
+            ))}
+            {jobs.length === 0 && <p className="text-center text-neutral-400 text-xs py-4">Kayıtlı operasyon yok.</p>}
+          </div>
+        </div>
+
+        {/* Son Kaydedilen İşler'de tıklanan işin detayını gösteren modal */}
+        {viewingDashboardJob && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4" onClick={() => setViewingDashboardJob(null)}>
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+              <div className={`p-4 flex justify-between items-center text-white ${viewingDashboardJob.type === 'Depo' ? 'bg-blue-600' : viewingDashboardJob.type === 'Asansör' ? 'bg-green-600' : 'bg-red-600'}`}>
+                <h3 className="font-bold text-lg flex items-center gap-2"><ClipboardList className="w-5 h-5" /> İş Bilgisi</h3>
+                <button onClick={() => setViewingDashboardJob(null)} className="text-white/80 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <div className="p-6 space-y-3 text-sm max-h-[70vh] overflow-y-auto">
+                <div className="flex justify-between"><span className="text-neutral-500 font-bold">Müşteri</span><span className="font-black text-black">{viewingDashboardJob.customerName}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500 font-bold">Tip</span><span className="font-black text-black">{viewingDashboardJob.type || 'Nakliye'}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500 font-bold">Tarih / Saat</span><span className="font-black text-black">{viewingDashboardJob.date} - {viewingDashboardJob.time}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500 font-bold">Durum</span><span className="font-black text-black">{viewingDashboardJob.status || 'pending'}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500 font-bold">Kaydeden</span><span className="font-black text-black">{viewingDashboardJob.createdBy || 'Bilinmiyor'}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500 font-bold">Alış Adresi</span><span className="font-black text-black text-right">{viewingDashboardJob.fromProvince}/{viewingDashboardJob.fromDistrict}</span></div>
+                {viewingDashboardJob.toProvince && (
+                  <div className="flex justify-between"><span className="text-neutral-500 font-bold">Teslim Adresi</span><span className="font-black text-black text-right">{viewingDashboardJob.toProvince}/{viewingDashboardJob.toDistrict}</span></div>
+                )}
+                <div className="flex justify-between"><span className="text-neutral-500 font-bold">Ekip</span><span className="font-black text-black text-right">{viewingDashboardJob.team || 'Atanmadı'}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500 font-bold">Araç</span><span className="font-black text-black">{viewingDashboardJob.assignedVehiclePlate || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-neutral-500 font-bold">Fiyat</span><span className="font-black text-emerald-600">₺{(parseFloat(viewingDashboardJob.price) || 0).toLocaleString('tr-TR')}</span></div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Yeni Gelen Kayıt Olan Personel — sisteme en son eklenen (createdAt) personel */}
+        {isAdmin && (
+          <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-64 flex flex-col">
+            <h3 className="text-sm font-bold text-black mb-3 flex items-center gap-2 border-b border-neutral-100 pb-2"><Briefcase className="w-4 h-4 text-red-600" /> Yeni Gelen Kayıt Olan Personel</h3>
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
+              {personnelList.slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)).slice(0, 8).map(p => (
+                <div key={p.id} className="text-xs flex justify-between items-center p-2 bg-neutral-50 rounded-lg border border-neutral-100">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-6 h-6 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0">
+                      {p.profileImage ? (
+                        <img src={p.profileImage} alt={p.fullName} className="w-full h-full object-cover" />
+                      ) : (
+                        p.fullName.charAt(0)
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <span className="font-bold text-black block truncate">{p.fullName}</span>
+                      <span className="text-[9px] font-bold text-neutral-400 block truncate">{p.collarType || '-'}</span>
+                    </div>
+                  </div>
+                  <span className="text-neutral-500 shrink-0 ml-2">{p.position}</span>
+                </div>
+              ))}
+              {personnelList.length === 0 && <p className="text-center text-neutral-400 text-xs py-4">Kayıtlı personel yok.</p>}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -2027,7 +2233,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const handleAddPersonnel = async (newPersonnel) => {
       if (!firebaseUser) return;
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelList'), {
-        ...newPersonnel, permissions: { canView: true, canEdit: false }
+        ...newPersonnel, permissions: { canView: true, canEdit: false }, createdAt: new Date().toISOString() // Anasayfa'da "Yeni Gelen Kayıt" sıralaması için
       });
       addSystemLog('Personel Eklendi', `${newPersonnel.fullName} sisteme eklendi.`);
     };
@@ -2704,9 +2910,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               assignedPersonnelIds: [], 
               teamNames: [], 
               status: 'pending', 
-              endJobDetails: null, 
-              deliveryCode: newDeliveryCode, 
-              createdBy: currentUser?.fullName || 'Sistem' 
+              endJobDetails: null,
+              deliveryCode: newDeliveryCode,
+              createdBy: currentUser?.fullName || 'Sistem',
+              createdAt: new Date().toISOString() // Kayıt İstatistiği bu alana göre hesaplanır
             };
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), primaryJob);
             
@@ -2718,7 +2925,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             if (recordType !== 'Asansör' && i === 0) {
               const createAsansor = async (sourceAddr, installType) => {
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), {
-                  type: 'Asansör', customerType: formData.customerType, tcNo: formData.tcNo, taxNo: formData.taxNo, customerName: formData.customerName, customerPhone: formData.customerPhone, altPhone: formData.altPhone, date: dateStr, time: formData.time, price: '0', deposit: '0', deliveryCode: newDeliveryCode, contractDetails: 'Otomatik Oluşturulan Asansör Kurulum Kaydı', notes: '', team: 'Atanmadı', assignedPersonnelId: null, assignedPersonnelIds: [], teamNames: [], status: 'pending', endJobDetails: null, createdBy: currentUser?.fullName || 'Sistem', fromFloor: sourceAddr.floor, fromDistance: sourceAddr.distance, fromDistanceUnit: sourceAddr.distanceUnit, fromPacking: 'Kendi İşimiz', fromRoomCount: installType, fromProvince: sourceAddr.province || '', fromDistrict: sourceAddr.district || '', fromAddress: sourceAddr.address || '', toProvince: '', toDistrict: '', toAddress: '', toFloor: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', extraLoadingAddresses: [], extraUnloadingAddresses: []
+                  type: 'Asansör', customerType: formData.customerType, tcNo: formData.tcNo, taxNo: formData.taxNo, customerName: formData.customerName, customerPhone: formData.customerPhone, altPhone: formData.altPhone, date: dateStr, time: formData.time, price: '0', deposit: '0', deliveryCode: newDeliveryCode, contractDetails: 'Otomatik Oluşturulan Asansör Kurulum Kaydı', notes: '', team: 'Atanmadı', assignedPersonnelId: null, assignedPersonnelIds: [], teamNames: [], status: 'pending', endJobDetails: null, createdBy: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(), fromFloor: sourceAddr.floor, fromDistance: sourceAddr.distance, fromDistanceUnit: sourceAddr.distanceUnit, fromPacking: 'Kendi İşimiz', fromRoomCount: installType, fromProvince: sourceAddr.province || '', fromDistrict: sourceAddr.district || '', fromAddress: sourceAddr.address || '', toProvince: '', toDistrict: '', toAddress: '', toFloor: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', extraLoadingAddresses: [], extraUnloadingAddresses: []
                 });
               };
 
