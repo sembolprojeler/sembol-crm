@@ -6,7 +6,10 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
 import { AddJobView, CustomerListView, CustomerProfileView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView } from './Finans.jsx';
-  const DashboardView = ({ jobs, personnelList, currentUser }) => {
+  // YENİ: DashboardView — Mavi Yaka için Aylık Puan, pozisyona/rütbeye göre günlük motivasyon,
+  // bugün/dün mesai ve yorum durumu, Duyuru/Paylaşım/En İyiler, Alınan Yorumlar ve
+  // Takım Çalışması & Destek Panosu eklendi.
+  const DashboardView = ({ jobs, allJobs, personnelList, currentUser, setViewingImage, transactions }) => {
     const [filterPeriod, setFilterPeriod] = useState('today');
     const [viewingDashboardJob, setViewingDashboardJob] = useState(null);
 
@@ -36,16 +39,208 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
       return true;
     };
 
-    // İşin planlanan tarihine (job.date) göre "İş İstatistikleri"
     const dashboardJobs = jobs.filter(j => matchesPeriod(new Date(j.date)));
-
-    // Sisteme GİRİLDİĞİ tarihe (job.createdAt) göre "Kayıt İstatistiği" — eski kayıtlarda
-    // createdAt olmayabileceği için geriye dönük uyumluluk adına job.date'e düşülür.
     const registrationJobs = jobs.filter(j => matchesPeriod(new Date(j.createdAt || j.date)));
 
-    // Beyaz Yaka için pozisyona göre günlük motive edici mesaj (renkli çerçeve, her gün rotasyonlu)
+    // YENİ: Mavi Yaka mı, Beyaz Yaka mı olduğunu belirle
+    const isMaviYaka = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
+
+    // YENİ: Duyuru / Paylaşım / En İyiler bilgilendirmeleri
+    const [latestInfo, setLatestInfo] = useState({ announcements: [], posts: [], bestEmps: [] });
+    useEffect(() => {
+      const annRef = collection(db, 'artifacts', appId, 'public', 'data', 'announcements');
+      const postRef = collection(db, 'artifacts', appId, 'public', 'data', 'posts');
+      const bestRef = collection(db, 'artifacts', appId, 'public', 'data', 'bestEmployees');
+
+      const qAnn = query(annRef, orderBy('timestamp', 'desc'), limit(15));
+      const qPost = query(postRef, orderBy('timestamp', 'desc'), limit(15));
+      const qBest = query(bestRef, orderBy('timestamp', 'desc'), limit(15));
+
+      const filterAndSort = (docs) => docs
+        .map(d => ({ ...d.data(), id: d.id }))
+        .filter(item => !item.hidden)
+        .sort((a, b) => (a.sortOrder ?? a.timestamp ?? 0) - (b.sortOrder ?? b.timestamp ?? 0));
+
+      const unsubs = [];
+      unsubs.push(onSnapshot(qAnn, snap => setLatestInfo(prev => ({ ...prev, announcements: filterAndSort(snap.docs) }))));
+      unsubs.push(onSnapshot(qPost, snap => setLatestInfo(prev => ({ ...prev, posts: filterAndSort(snap.docs) }))));
+      unsubs.push(onSnapshot(qBest, snap => setLatestInfo(prev => ({ ...prev, bestEmps: filterAndSort(snap.docs) }))));
+      return () => unsubs.forEach(u => u());
+    }, []);
+
+    const handleDeleteInfo = async (colName, id) => {
+      try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', colName, id)); } catch (err) { console.error('Silme hatası:', err); }
+    };
+
+    // YENİ: Aylık puan + Bugün/Dün mesai ve yorum(puan) durumu
+    const [myScore, setMyScore] = useState(0);
+    const [dailyData, setDailyData] = useState({ today: null, yesterday: null });
+    const [isRefreshing, setIsRefreshing] = useState(false);
+
+    const fetchMyScoreAndStatus = async () => {
+      if (!currentUser?.id) return;
+      try {
+        const currentYear = today.getFullYear();
+        const currentMonth = today.getMonth() + 1;
+        const currentDay = today.getDate();
+
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yYear = yesterday.getFullYear();
+        const yMonth = yesterday.getMonth() + 1;
+        const yDay = yesterday.getDate();
+
+        const docRefPuantaj = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${currentYear}_${currentMonth}`);
+        const snapPuantaj = await getDoc(docRefPuantaj);
+        let currentMonthPuantajRecords = {};
+        if (snapPuantaj.exists()) {
+          currentMonthPuantajRecords = snapPuantaj.data().records || {};
+          const myRecord = currentMonthPuantajRecords[currentUser.id] || {};
+          const total = Object.values(myRecord).reduce((sum, val) => sum + (parseFloat(val) || 0), 0);
+          setMyScore(total);
+        }
+
+        let todayPuan = parseFloat(currentMonthPuantajRecords[currentUser.id]?.[currentDay]) || 0;
+        let yesterdayPuan = 0;
+
+        if (currentMonth === yMonth && currentYear === yYear) {
+          yesterdayPuan = parseFloat(currentMonthPuantajRecords[currentUser.id]?.[yDay]) || 0;
+        } else {
+          const docRefPuantajYest = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${yYear}_${yMonth}`);
+          const snapPuantajYest = await getDoc(docRefPuantajYest);
+          if (snapPuantajYest.exists()) {
+            const yRecords = snapPuantajYest.data().records || {};
+            yesterdayPuan = parseFloat(yRecords[currentUser.id]?.[yDay]) || 0;
+          }
+        }
+
+        const docRefMesaiToday = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${currentYear}_${currentMonth}`);
+        const snapMesaiToday = await getDoc(docRefMesaiToday);
+        let todayStatus = null;
+        let currentMonthMesaiRecords = {};
+        if (snapMesaiToday.exists()) {
+          currentMonthMesaiRecords = snapMesaiToday.data().records || {};
+          const myRecord = currentMonthMesaiRecords[currentUser.id] || {};
+          const tData = myRecord[currentDay];
+          if (tData) todayStatus = typeof tData === 'object' ? tData.status : tData;
+        }
+
+        let yesterdayStatus = null;
+        if (currentMonth === yMonth && currentYear === yYear) {
+          const myRecord = currentMonthMesaiRecords[currentUser.id] || {};
+          const yData = myRecord[yDay];
+          if (yData) yesterdayStatus = typeof yData === 'object' ? yData.status : yData;
+        } else {
+          const docRefMesaiYesterday = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${yYear}_${yMonth}`);
+          const snapMesaiYesterday = await getDoc(docRefMesaiYesterday);
+          if (snapMesaiYesterday.exists()) {
+            const records = snapMesaiYesterday.data().records || {};
+            const myRecord = records[currentUser.id] || {};
+            const yData = myRecord[yDay];
+            if (yData) yesterdayStatus = typeof yData === 'object' ? yData.status : yData;
+          }
+        }
+
+        setDailyData({
+          today: { mesai: todayStatus, puan: todayPuan },
+          yesterday: { mesai: yesterdayStatus, puan: yesterdayPuan }
+        });
+      } catch (error) {
+        console.error('Veriler yüklenemedi', error);
+      }
+    };
+
+    useEffect(() => {
+      if (!isMaviYaka || !currentUser) return;
+      fetchMyScoreAndStatus();
+    }, [currentUser, isMaviYaka]);
+
+    const handleRefresh = async () => {
+      setIsRefreshing(true);
+      await fetchMyScoreAndStatus();
+      setTimeout(() => setIsRefreshing(false), 800);
+    };
+
+    let scoreColor = '', scoreTextColor = '', scoreMessage = '', scoreIcon = null;
+    if (myScore < 10) {
+      scoreColor = 'bg-red-50 border-red-200'; scoreTextColor = 'text-red-600';
+      scoreMessage = 'Daha iyi! Azimlen, başarabilirsin! 💪'; scoreIcon = <AlertTriangle className="w-6 h-6 text-red-600" />;
+    } else if (myScore < 25) {
+      scoreColor = 'bg-yellow-50 border-yellow-200'; scoreTextColor = 'text-yellow-600';
+      scoreMessage = 'Gayret! Potaya girmeye az kaldı! 🏃‍♂️'; scoreIcon = <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />;
+    } else {
+      scoreColor = 'bg-green-50 border-green-200'; scoreTextColor = 'text-green-600';
+      scoreMessage = 'Birinciliğe göz dikmişsin! Çok iyisin, en iyisi olacaksın! 🏆'; scoreIcon = <CheckCircle className="w-6 h-6 text-green-600" />;
+    }
+
+    const renderDailySummary = (data, dayLabel) => {
+      if (!data || (!data.mesai && data.puan === 0)) return null;
+      const boxes = [];
+
+      if (data.puan > 0) {
+        let pTitle = '', pMsg = '', pBg = 'bg-yellow-50', pBorder = 'border-yellow-200', pTextCol = 'text-yellow-800';
+        let pIcon = <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />;
+        if (data.puan === 0.5) {
+          pTitle = `${dayLabel} Destek Puanı!`; pMsg = 'Takım arkadaşlarına yardımcı olduğun için 0.5 puan kazandın. Harika bir takım oyuncususun!';
+          pBg = 'bg-blue-50'; pBorder = 'border-blue-200'; pTextCol = 'text-blue-800'; pIcon = <Users className="w-6 h-6 text-blue-600" />;
+        } else if (data.puan === 1) {
+          pTitle = `${dayLabel} Müşteri Puanı!`; pMsg = 'Müşteri memnuniyetini sağladığın için 1 tam puan kazandın. Tebrikler!';
+        } else if (data.puan > 1) {
+          pTitle = `${dayLabel} Harika Performans!`; pMsg = `Hem müşteri memnuniyeti hem de takım desteği ile toplam ${data.puan} puan kazandın!`;
+          pBg = 'bg-emerald-50'; pBorder = 'border-emerald-200'; pTextCol = 'text-emerald-800'; pIcon = <Sparkles className="w-6 h-6 text-emerald-600" />;
+        }
+        boxes.push(
+          <div key="puan" className={`p-4 rounded-2xl border ${pBg} ${pBorder} shadow-sm flex items-start gap-4 mb-3 w-full`}>
+            <div className="bg-white p-3 rounded-full shadow-sm shrink-0 border border-white/50">{pIcon}</div>
+            <div>
+              <h3 className={`font-black text-base md:text-lg ${pTextCol} mb-0.5`}>{pTitle}</h3>
+              <p className={`text-xs md:text-sm font-medium ${pTextCol} opacity-90`}>{pMsg}</p>
+            </div>
+          </div>
+        );
+      }
+
+      if (data.mesai) {
+        let bg = '', textCol = '', border = '', icon = null, title = '', msg = '';
+        switch (data.mesai) {
+          case 'G': bg = 'bg-green-50'; border = 'border-green-200'; textCol = 'text-green-800'; title = `${dayLabel} Mesain Onaylandı`; msg = 'Mesain sisteme eksiksiz olarak işlendi. Harika!'; icon = <CheckCircle className="w-6 h-6 text-green-600" />; break;
+          case 'FM': bg = 'bg-blue-50'; border = 'border-blue-200'; textCol = 'text-blue-800'; title = `${dayLabel} Fazla Mesai`; msg = 'Harika efor! Emeklerinin karşılığını göreceksin, aynen devam! 💪'; icon = <Clock className="w-6 h-6 text-blue-600" />; break;
+          case 'EM': bg = 'bg-yellow-50'; border = 'border-yellow-200'; textCol = 'text-yellow-800'; title = `${dayLabel} Eksik Mesai`; msg = 'Biraz eksik çalıştın gibi görünüyor. Bir dahaki sefere telafi edeceğinden eminiz!'; icon = <Clock className="w-6 h-6 text-yellow-600" />; break;
+          case 'D': bg = 'bg-red-50'; border = 'border-red-200'; textCol = 'text-red-800'; title = `${dayLabel} İşe Gelmedin`; msg = 'Aramızda değildin. Umarım her şey yolundadır, seni dinlenmiş olarak bekliyoruz.'; icon = <AlertTriangle className="w-6 h-6 text-red-600" />; break;
+          case 'Hİ': bg = 'bg-blue-50'; border = 'border-blue-200'; textCol = 'text-blue-800'; title = `${dayLabel} İzinlisin`; msg = 'Haftalık iznini iyi değerlendir, dinlenmek en doğal hakkın. İyi tatiller! 🌴'; icon = <Clock className="w-6 h-6 text-blue-600" />; break;
+          case 'Yİ': bg = 'bg-purple-50'; border = 'border-purple-200'; textCol = 'text-purple-800'; title = `${dayLabel} Yıllık İzindesin`; msg = 'Uzun bir tatil zamanı! Kendine bolca vakit ayır ve iyice dinlen. 🏖️'; icon = <CalendarDays className="w-6 h-6 text-purple-600" />; break;
+          case 'Bİ': bg = 'bg-pink-50'; border = 'border-pink-200'; textCol = 'text-pink-800'; title = `${dayLabel} Bayram İznindesin`; msg = 'İyi bayramlar! Sevdiklerinle birlikte güzel vakit geçir. 🍬'; icon = <Star className="w-6 h-6 text-pink-600" />; break;
+          case 'FG': bg = 'bg-teal-50'; border = 'border-teal-200'; textCol = 'text-teal-800'; title = `${dayLabel} Fazla Gün`; msg = 'Ekstra bir gün çalışarak gücünü gösterdin! Harikasın! 🚀'; icon = <Activity className="w-6 h-6 text-teal-600" />; break;
+          case 'FGM': bg = 'bg-cyan-50'; border = 'border-cyan-200'; textCol = 'text-cyan-800'; title = `${dayLabel} Fazla Gün + Mesai`; msg = 'İzin gününde hem çalışıp hem de mesaiye kaldın! Harika bir efor! 🚀💪'; icon = <Activity className="w-6 h-6 text-cyan-600" />; break;
+          case 'Üİ': bg = 'bg-neutral-100'; border = 'border-neutral-300'; textCol = 'text-neutral-700'; title = `${dayLabel} Ücretsiz İzin`; msg = 'İzindesin, dinlenmene bak. Tekrar aramızda görmek için sabırsızlanıyoruz.'; icon = <Ban className="w-6 h-6 text-neutral-500" />; break;
+          case 'R': bg = 'bg-orange-50'; border = 'border-orange-200'; textCol = 'text-orange-800'; title = `${dayLabel} Raporlusun`; msg = 'Geçmiş olsun! Lütfen sağlığına dikkat et, seni sağlıklı olarak tekrar görmek istiyoruz. 🏥'; icon = <Activity className="w-6 h-6 text-orange-600" />; break;
+          default: break;
+        }
+        if (title) {
+          boxes.push(
+            <div key="mesai" className={`p-4 rounded-2xl border ${bg} ${border} shadow-sm flex items-start gap-4 mb-3 w-full`}>
+              <div className="bg-white p-3 rounded-full shadow-sm shrink-0 border border-white/50">{icon}</div>
+              <div>
+                <h3 className={`font-black text-base md:text-lg ${textCol} mb-0.5`}>{title}</h3>
+                <p className={`text-xs md:text-sm font-medium ${textCol} opacity-90`}>{msg}</p>
+              </div>
+            </div>
+          );
+        }
+      }
+
+      return (
+        <div className="flex-1 animate-in fade-in slide-in-from-top-4 flex flex-col">
+          <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider mb-3 pl-1 border-b border-neutral-200 pb-2">{dayLabel} Özeti</h3>
+          <div className="flex flex-col flex-1">{boxes}</div>
+        </div>
+      );
+    };
+
+    // GÜNCELLENDİ: Pozisyona/rütbeye göre günlük motive edici mesaj — hem Beyaz Yaka hem Mavi Yaka için
     const getDailyMotivation = () => {
       const pos = currentUser?.position || '';
+      const rank = currentUser?.rank || '';
       const messagePools = {
         'Firma Sahibi': [
           'Kurduğun bu düzen, her gün büyüyen bir başarı hikayesi. Bugün de vizyonunla fark yarat!',
@@ -66,6 +261,45 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
         'Operatör': [
           'Sahadaki gözün, kulağın sensin. Bugün de her operasyon senin sayende sorunsuz!',
           'Koordinasyon senin işin, başarı ise sonucu. Harika bir gün olsun!'
+        ],
+        'Ekip Şefi': [
+          'Ekibinin pusulası sensin. Bugün de onlara güvenle yol göster, hepiniz birlikte kazanın!',
+          'İyi bir ekip şefi, işi değil insanı yönetir. Bugün ekibine değer kattığın bir gün olsun!',
+          'Senin liderliğin, sahadaki her işin kalitesini belirliyor. Gururla ve dikkatle devam et!',
+          'Zor işleri kolay hale getiren tecrüben. Bugün de ekibine örnek ol!'
+        ],
+        'Heryerden Usta': [
+          'Ustalığın, ekibin en büyük güvencesi. Bugün de işini titizlikle tamamla!',
+          'Deneyimin, her operasyonda fark yaratıyor. Ekibine yol gösterirken kendine de güven!',
+          'Emeğinle şekillenen her iş, senin imzanı taşıyor. Bugün de iyi bir gün olsun!'
+        ],
+        'Kalfa': [
+          'Ustalığın, ekibin en büyük güvencesi. Bugün de işini titizlikle tamamla!',
+          'Deneyimin, her operasyonda fark yaratıyor. Ekibine yol gösterirken kendine de güven!',
+          'Emeğinle şekillenen her iş, senin imzanı taşıyor. Bugün de iyi bir gün olsun!'
+        ],
+        'Şoför': [
+          'Direksiyondaki güvenin, tüm ekibin güvenliği demek. Yolun açık, işin bereketli olsun!',
+          'Her sefer bir sorumluluk, her varış bir başarı. Bugün de dikkatli ve güvenli sür!',
+          'Zamanında ve güvenle taşıdığın her yük, güveninin bir kanıtı. İyi yolculuklar!'
+        ],
+        'Taşıma Elemanı': [
+          'Alın terinle taşıdığın her eşya, bir ailenin anısını taşıyor. Bugün de özenle çalış!',
+          'Gücün kadar özenin de değerli. Bugün de sağlam ve dikkatli bir gün geçir!',
+          'Her kutuda, her eşyada emeğin var. Bugün de gururla çalış!',
+          'Zorluklar seni yıldırmaz, çünkü sen bu işin ustasısın. İyi çalışmalar!'
+        ],
+        'Mobilya Ustası': [
+          'Ellerinin değdiği her mobilya, ustalığınla yeniden hayat buluyor. Bugün de titizlikle çalış!',
+          'Sökülen, kurulan her eşya senin becerinle güvenceye alınıyor. Harika bir gün olsun!'
+        ],
+        'Depo Sorumlusu': [
+          'Düzenin ve dikkatin, deponun güvencesi. Bugün de her şey yerli yerinde olsun!',
+          'Emanet edilen her eşya senin sorumluluğunda güvende. İyi çalışmalar!'
+        ],
+        'Temizlik Görevlisi': [
+          'Her temiz köşe, senin emeğinin bir kanıtı. Bugün de işini gururla yap!',
+          'Düzen ve temizlik, senin elinden çıkan bir sanat. İyi çalışmalar!'
         ]
       };
       const generalPool = [
@@ -77,7 +311,9 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
         'Başarı, pes etmeyenlerin ödülüdür. Bugün de kararlılıkla ilerle!',
         'Takımın bir parçası olman, onu güçlü kılıyor. İyi çalışmalar!'
       ];
-      const pool = messagePools[pos] && messagePools[pos].length > 0 ? messagePools[pos] : generalPool;
+      const pool = (messagePools[rank] && messagePools[rank].length > 0) ? messagePools[rank]
+        : (messagePools[pos] && messagePools[pos].length > 0) ? messagePools[pos]
+        : generalPool;
       const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / 86400000);
       return pool[dayOfYear % pool.length];
     };
@@ -94,29 +330,188 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
 
     return (
       <div className="space-y-6 animate-in fade-in">
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
-          <h2 className="text-2xl font-black text-black">Hoş Geldiniz, {currentUser?.fullName}</h2>
-          <p className="text-neutral-500 font-medium">Sistemdeki genel operasyon özetini aşağıdan takip edebilirsiniz.</p>
+        {/* HOŞ GELDİNİZ + (Mavi Yaka için) AYLIK PUAN */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
+          <div className="flex items-start lg:items-center gap-4 w-full lg:w-auto">
+            <div>
+              <h2 className="text-2xl font-black text-black">Hoş Geldiniz, {currentUser?.fullName}</h2>
+              <p className="text-neutral-500 font-medium">Sistemdeki genel operasyon özetini aşağıdan takip edebilirsiniz.</p>
+            </div>
+            {isMaviYaka && (
+              <button onClick={handleRefresh} disabled={isRefreshing} className="ml-auto p-2.5 bg-neutral-100 text-neutral-600 rounded-full hover:bg-neutral-200 transition shrink-0 shadow-sm border border-neutral-200" title="Günlük Özeti Yenile">
+                <Loader2 className={`w-5 h-5 ${isRefreshing ? 'animate-spin text-red-600' : ''}`} />
+              </button>
+            )}
+          </div>
+          {isMaviYaka && (
+            <div className={`flex items-center gap-4 p-3 pr-5 rounded-2xl border ${scoreColor} shadow-sm shrink-0 w-full lg:w-auto animate-in slide-in-from-right-4`}>
+              <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shrink-0 shadow-sm border border-white/50">{scoreIcon}</div>
+              <div>
+                <div className="flex items-end gap-2 mb-0.5">
+                  <span className={`text-2xl font-black leading-none ${scoreTextColor}`}>{myScore.toString().replace('.', ',')}</span>
+                  <span className="text-xs font-bold text-neutral-600 mb-0.5 uppercase tracking-wider">Aylık Puan</span>
+                </div>
+                <p className={`text-xs font-bold ${scoreTextColor} opacity-90`}>{scoreMessage}</p>
+              </div>
+            </div>
+          )}
         </div>
 
-        {/* Günün Motivasyonu — pozisyona göre havuzdan, güne göre rotasyonlu mesaj */}
+        {/* GÜNLÜK MOTİVASYON — artık hem Beyaz Yaka hem Mavi Yaka'da (pozisyona/rütbeye göre) */}
         <div className={`bg-gradient-to-r ${motivationColor} border-2 p-5 rounded-2xl shadow-sm flex items-center gap-4 animate-in fade-in slide-in-from-top-2`}>
-          <div className="w-12 h-12 bg-white/70 rounded-full flex items-center justify-center shrink-0 shadow-sm">
-            <Sparkles className="w-6 h-6" />
-          </div>
+          <div className="w-12 h-12 bg-white/70 rounded-full flex items-center justify-center shrink-0 shadow-sm"><Sparkles className="w-6 h-6" /></div>
           <div>
-            <p className="text-[10px] font-black uppercase tracking-wider opacity-70 mb-1">Günün Motivasyonu • {currentUser?.position || 'Ekip'}</p>
+            <p className="text-[10px] font-black uppercase tracking-wider opacity-70 mb-1">Günün Motivasyonu • {currentUser?.rank || currentUser?.position || 'Ekip'}</p>
             <p className="font-bold text-base leading-snug">{getDailyMotivation()}</p>
           </div>
         </div>
 
+        {/* BİLGİLENDİRME: DUYURU / PAYLAŞIM / EN İYİLER */}
+        {(latestInfo.announcements.length > 0 || latestInfo.posts.length > 0 || latestInfo.bestEmps.length > 0) && (
+          <div className="flex flex-col gap-6 mb-2">
+            {latestInfo.announcements.length > 0 && (
+              <div className="flex flex-col gap-4 max-h-[340px] overflow-y-auto custom-scrollbar pr-2">
+                {latestInfo.announcements.map((ann) => (
+                  <div key={ann.id} className="bg-red-50 border border-red-200 p-4 md:p-5 rounded-2xl shadow-sm flex items-start gap-4 shrink-0 relative animate-in slide-in-from-top-4">
+                    {isAdmin && <button onClick={() => handleDeleteInfo('announcements', ann.id)} className="absolute top-3 right-3 p-1.5 text-red-400 hover:text-red-700 bg-white rounded-lg shadow-sm border border-red-100 transition"><X className="w-4 h-4"/></button>}
+                    <div className="bg-white p-3 rounded-full shrink-0 shadow-sm border border-red-100"><Bell className="w-6 h-6 text-red-600" /></div>
+                    <div className="flex-1 pr-8">
+                      <h3 className="text-red-800 font-black text-lg flex flex-wrap items-center gap-2">{ann.title} <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded-full shadow-sm">DUYURU</span></h3>
+                      <p className="text-red-700 text-sm font-medium mt-2 whitespace-pre-wrap leading-relaxed">{ann.content}</p>
+                      <p className="text-red-500/80 text-[10px] mt-3 font-bold flex items-center gap-1"><Clock className="w-3 h-3" /> {ann.dateStr} • {ann.author}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {latestInfo.posts.length > 0 && (
+              <div className="flex flex-col gap-4 max-h-[640px] overflow-y-auto custom-scrollbar pr-2">
+                {latestInfo.posts.map((post) => (
+                  <div key={post.id} className="bg-blue-50 border border-blue-200 p-4 md:p-5 rounded-2xl shadow-sm flex flex-col md:flex-row items-center md:items-start gap-4 shrink-0 relative animate-in slide-in-from-top-4 delay-75">
+                    {isAdmin && <button onClick={() => handleDeleteInfo('posts', post.id)} className="absolute top-3 right-3 p-1.5 text-blue-400 hover:text-blue-700 bg-white rounded-lg shadow-sm border border-blue-100 transition"><X className="w-4 h-4"/></button>}
+                    <div className="bg-white p-3 rounded-full shrink-0 shadow-sm border border-blue-100 hidden md:block"><Sparkles className="w-6 h-6 text-blue-600" /></div>
+                    <div className="flex-1 w-full pr-8">
+                      <h3 className="text-blue-800 font-black text-lg flex flex-wrap items-center gap-2 mb-2">{post.title} <span className="text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded-full shadow-sm">SAHADAN KARELER</span></h3>
+                      {post.imageUrl && (
+                        <div className="w-full max-w-sm h-48 md:h-64 rounded-xl overflow-hidden shadow-sm border border-blue-100 cursor-pointer group relative" onClick={() => setViewingImage && setViewingImage({ title: post.title, name: post.imageUrl })}>
+                          {isVideoUrl(post.imageUrl) ? (
+                            <video src={post.imageUrl} className="w-full h-full object-cover bg-black" muted />
+                          ) : (
+                            <img src={post.imageUrl} alt="Paylaşım" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                          )}
+                        </div>
+                      )}
+                      <p className="text-blue-500/80 text-[10px] mt-3 font-bold flex items-center gap-1"><Clock className="w-3 h-3" /> {post.dateStr} • {post.author}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* EN İYİLER — ilk 3 kart direkt görünür, fazlası kaydırmalı. Sadece Mavi Yaka görür */}
+            {isMaviYaka && latestInfo.bestEmps.length > 0 && (
+              <div className="flex flex-col gap-4 max-h-[430px] overflow-y-auto custom-scrollbar pr-2">
+                {latestInfo.bestEmps.map((bestEmp) => {
+                  const bestEmpPerson = personnelList?.find(p => p.fullName === bestEmp.employeeName);
+                  return (
+                    <div key={bestEmp.id} className="bg-yellow-50 border border-yellow-200 p-4 md:p-5 rounded-2xl shadow-sm flex items-center gap-4 shrink-0 relative animate-in slide-in-from-top-4 delay-150">
+                      {isAdmin && <button onClick={() => handleDeleteInfo('bestEmployees', bestEmp.id)} className="absolute top-3 right-3 p-1.5 text-yellow-500 hover:text-yellow-700 bg-white rounded-lg shadow-sm border border-yellow-200 transition"><X className="w-4 h-4"/></button>}
+                      <div className="w-14 h-14 bg-white rounded-full shrink-0 shadow-sm border border-yellow-300 flex items-center justify-center overflow-hidden relative">
+                        {bestEmpPerson?.profileImage ? (
+                          <img src={bestEmpPerson.profileImage} alt={bestEmpPerson.fullName} className="w-full h-full object-cover" />
+                        ) : (
+                          <Star className="w-8 h-8 text-yellow-500 fill-yellow-500" />
+                        )}
+                        <div className="absolute -bottom-1 -right-1 bg-yellow-400 rounded-full p-1 border-2 border-white"><Star className="w-3 h-3 text-white fill-white"/></div>
+                      </div>
+                      <div className="flex-1 pr-8">
+                        <h3 className="text-yellow-800 font-black text-lg flex flex-wrap items-center gap-2">{bestEmp.title} <span className="text-[10px] bg-yellow-500 text-white px-2 py-0.5 rounded-full shadow-sm">EN İYİLER</span></h3>
+                        <p className="text-yellow-700 text-sm font-bold mt-1.5">Tebrikler <span className="text-black font-black bg-yellow-200 px-1.5 py-0.5 rounded">{bestEmp.employeeName}</span>! Başarılarının devamını dileriz. 👏</p>
+                        <p className="text-yellow-600/80 text-[10px] mt-3 font-bold flex items-center gap-1"><Clock className="w-3 h-3" /> {bestEmp.dateStr} • {bestEmp.author}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* BUGÜN / DÜN MESAİ VE YORUM(PUAN) DURUMU — sadece Mavi Yaka */}
+        {isMaviYaka && (dailyData.today || dailyData.yesterday) && (
+          <div className="flex flex-col md:flex-row gap-4 mb-6">
+            {dailyData.today && <div className="flex-1">{renderDailySummary(dailyData.today, 'Bugün')}</div>}
+            {dailyData.yesterday && <div className="flex-1">{renderDailySummary(dailyData.yesterday, 'Dün')}</div>}
+          </div>
+        )}
+
+        {/* ALINAN YORUMLAR — sadece Mavi Yaka */}
+        {isMaviYaka && (allJobs || jobs).filter(j => j.pointsApproved && j.reviewImage).length > 0 && (
+          <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl shadow-sm relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-emerald-600"></div>
+            <h3 className="text-emerald-800 font-black flex items-center gap-2 mb-3"><Star className="w-5 h-5 fill-emerald-600 text-emerald-600" /> Alınan Yorumlar</h3>
+            <div className="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
+              {(allJobs || jobs).filter(j => j.pointsApproved && j.reviewImage).slice(0, 10).map(j => (
+                <div key={j.id} className="bg-white rounded-2xl shadow-sm border border-emerald-100 overflow-hidden shrink-0 w-64 cursor-pointer group" onClick={() => setViewingImage && setViewingImage({ title: j.customerName, name: j.reviewImage })}>
+                  <div className="h-36 bg-neutral-100 overflow-hidden relative">
+                    {isVideoUrl(j.reviewImage) ? (
+                      <video src={j.reviewImage} className="w-full h-full object-cover bg-black" muted />
+                    ) : (
+                      <img src={j.reviewImage} alt="Müşteri Yorumu" className="w-full h-full object-cover group-hover:scale-105 transition duration-500" />
+                    )}
+                  </div>
+                  <div className="p-3">
+                    <p className="text-[10px] font-black text-emerald-700 uppercase tracking-wider mb-1">Müşteri Yorumu</p>
+                    <p className="font-bold text-black text-sm truncate">{j.customerName}</p>
+                    <p className="text-[10px] text-neutral-400 mt-1">{j.date}</p>
+                    <div className="mt-2 bg-emerald-50 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-lg inline-block">👏 Güzel Tebrikler!</div>
+                    <p className="text-[10px] text-neutral-500 mt-2 flex items-center gap-1"><Users className="w-3 h-3" /><b>Yorum Alan Ekip:</b></p>
+                    <p className="text-[10px] text-neutral-600">{j.team}</p>
+                    {j.assignedVehiclePlate && (
+                      <p className="text-[10px] text-purple-600 mt-1 flex items-center gap-1"><Truck className="w-3 h-3" /><b>Araç:</b> {j.assignedVehiclePlate}</p>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* TAKIM ÇALIŞMASI & DESTEK PANOSU — sadece Mavi Yaka */}
+        {isMaviYaka && (allJobs || jobs).filter(j => j.pointsApproved && j.supportPersonnelIds && j.supportPersonnelIds.length > 0).length > 0 && (
+          <div className="bg-blue-50 border-l-4 border-blue-600 border border-blue-200 p-4 rounded-2xl shadow-sm">
+            <h3 className="text-blue-800 font-black flex items-center gap-2 mb-3"><Sparkles className="w-5 h-5 text-blue-600" /> Takım Çalışması & Destek Panosu</h3>
+            <div className="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
+              {(allJobs || jobs).filter(j => j.pointsApproved && j.supportPersonnelIds && j.supportPersonnelIds.length > 0).slice(0, 10).map(j => (
+                <div key={j.id} className="bg-white rounded-2xl shadow-sm border border-blue-100 p-4 shrink-0 w-72">
+                  <div className="flex items-center gap-2 mb-2">
+                    <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center shrink-0"><Users className="w-4 h-4 text-blue-600" /></div>
+                    <div>
+                      <p className="text-[10px] text-neutral-400 font-bold">{j.date}</p>
+                      <p className="font-bold text-black text-sm">{j.customerName}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-neutral-600 mb-3 leading-relaxed">Zorlu anlarda takım arkadaşlarını yalnız bırakmayıp destek olan kahramanlarımız! Diğer takım arkadaşlarına yardımcı olduğunuz için teşekkür eder, tebrik ederiz. Harika bir iş çıkardınız! 🏆💪</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {(j.supportPersonnelIds || []).map(pid => {
+                      const p = personnelList?.find(pp => String(pp.id) === String(pid));
+                      return (
+                        <span key={pid} className="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-lg font-bold flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3" /> {p ? p.fullName : 'Personel'}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="flex justify-between items-end">
           <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">İş İstatistikleri</h3>
-          <select
-            value={filterPeriod}
-            onChange={(e) => setFilterPeriod(e.target.value)}
-            className="px-3 py-1.5 text-sm font-bold bg-white border border-neutral-200 rounded-xl outline-none focus:ring-2 focus:ring-red-600 transition shadow-sm cursor-pointer"
-          >
+          <select value={filterPeriod} onChange={(e) => setFilterPeriod(e.target.value)} className="px-3 py-1.5 text-sm font-bold bg-white border border-neutral-200 rounded-xl outline-none focus:ring-2 focus:ring-red-600 transition shadow-sm cursor-pointer">
             <option value="today">Bugün</option>
             <option value="week">Bu Hafta</option>
             <option value="month">Bu Ay</option>
@@ -165,7 +560,6 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           </div>
         </div>
 
-        {/* Kayıt İstatistiği — kayıt ettiğimiz (sisteme girilen) işlerin takibi, İş İstatistikleri ile aynı dönem filtresini kullanır */}
         <div className="flex justify-between items-end mt-2">
           <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">Kayıt İstatistiği</h3>
         </div>
@@ -208,11 +602,8 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           </div>
         </div>
 
-        {/* Son Kaydedilen İşler Listesi — sisteme en son girilen (createdAt) 5 iş */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-80 flex flex-col">
-          <h3 className="text-lg font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-100 pb-2">
-            <ClipboardList className="w-5 h-5 text-red-600" /> Son Kaydedilen İşler
-          </h3>
+          <h3 className="text-lg font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-100 pb-2"><ClipboardList className="w-5 h-5 text-red-600" /> Son Kaydedilen İşler</h3>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
             {jobs.slice().sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date)).slice(0, 5).map(job => (
               <div key={job.id} onClick={() => setViewingDashboardJob(job)} className="p-3 bg-neutral-50 hover:bg-neutral-100 cursor-pointer rounded-xl border border-neutral-100 flex justify-between items-center text-sm transition">
@@ -221,16 +612,13 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
                   <p className="text-[10px] text-neutral-500">{job.date} - {job.time}</p>
                   <p className="text-[10px] text-neutral-400 font-medium">Kaydeden: <span className="font-bold text-neutral-600">{job.createdBy || 'Bilinmiyor'}</span></p>
                 </div>
-                <span className={`text-[9px] px-2 py-1 rounded font-bold text-white uppercase shrink-0 ml-2 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
-                  {job.type || 'Nakliye'}
-                </span>
+                <span className={`text-[9px] px-2 py-1 rounded font-bold text-white uppercase shrink-0 ml-2 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>{job.type || 'Nakliye'}</span>
               </div>
             ))}
             {jobs.length === 0 && <p className="text-center text-neutral-400 text-xs py-4">Kayıtlı operasyon yok.</p>}
           </div>
         </div>
 
-        {/* Son Kaydedilen İşler'de tıklanan işin detayını gösteren modal */}
         {viewingDashboardJob && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4" onClick={() => setViewingDashboardJob(null)}>
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
@@ -256,7 +644,6 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           </div>
         )}
 
-        {/* Yeni Gelen Kayıt Olan Personel — sisteme en son eklenen (createdAt) personel */}
         {isAdmin && (
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-64 flex flex-col">
             <h3 className="text-sm font-bold text-black mb-3 flex items-center gap-2 border-b border-neutral-100 pb-2"><Briefcase className="w-4 h-4 text-red-600" /> Yeni Gelen Kayıt Olan Personel</h3>
@@ -265,11 +652,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
                 <div key={p.id} className="text-xs flex justify-between items-center p-2 bg-neutral-50 rounded-lg border border-neutral-100">
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="w-6 h-6 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0">
-                      {p.profileImage ? (
-                        <img src={p.profileImage} alt={p.fullName} className="w-full h-full object-cover" />
-                      ) : (
-                        p.fullName.charAt(0)
-                      )}
+                      {p.profileImage ? <img src={p.profileImage} alt={p.fullName} className="w-full h-full object-cover" /> : p.fullName.charAt(0)}
                     </div>
                     <div className="min-w-0">
                       <span className="font-bold text-black block truncate">{p.fullName}</span>
@@ -286,6 +669,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
       </div>
     );
   };
+
 
   const AddTaskFormView = ({ newTask, setNewTask, handleAddTask, personnelList }) => (
     <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
@@ -563,7 +947,6 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
       { id: 'auth', label: 'Yetkilendirme' },
       { id: 'systemFiles', label: 'Sistem Dosyaları' },
       { id: 'myComplaint', label: 'Şikayet Bildirim' },
-      // YENİ: Üst arama barı ve alt kategori yetkileri
       { id: 'globalSearch', label: 'Arama Barı' },
       { id: 'globalSearchCustomer', label: 'Arama: Müşteri' },
       { id: 'globalSearchVehicle', label: 'Arama: Araç' },
@@ -576,7 +959,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
             ...editingUser.permissions,
             modules: {
                 ...currentModules,
-                [moduleId]: !currentMergedState // Mevcut birleşik yetkinin tam tersini "istisna" olarak kaydet
+                [moduleId]: !currentMergedState
             }
         };
         setEditingUser({...editingUser, permissions: updatedPermissions});
@@ -686,13 +1069,8 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
                       </h4>
                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                           {modules.map(mod => {
-                          // Rol bazlı varsayılan yetki kontrolü
                           const isRoleAccess = positionModules?.[editingUser.position]?.[mod.id] || positionModules?.[editingUser.rank]?.[mod.id] || false;
-                          
-                          // Kişiye özel override var mı?
                           const personalAccess = editingUser.permissions?.modules?.[mod.id];
-                          
-                          // Eğer kişisel ayar varsa onu ezici olarak al, yoksa rol bazlı olanı göster
                           const currentMergedState = typeof personalAccess === 'boolean' ? personalAccess : isRoleAccess;
                           const displayAccess = currentMergedState;
 
@@ -827,7 +1205,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       { id: 'auth', label: 'Yetkilendirme' },
       { id: 'systemFiles', label: 'Sistem Dosyaları' },
       { id: 'myComplaint', label: 'Şikayet Bildirim' },
-      // YENİ: Üst arama barı ve alt kategori yetkileri
       { id: 'globalSearch', label: 'Arama Barı' },
       { id: 'globalSearchCustomer', label: 'Arama: Müşteri' },
       { id: 'globalSearchVehicle', label: 'Arama: Araç' },
@@ -891,7 +1268,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [visiblePasswords, setVisiblePasswords] = useState({});
     const [copiedField, setCopiedField] = useState(null);
 
-    // Kategori State'leri
     const [categories, setCategories] = useState(['Genel']);
     const [newCategory, setNewCategory] = useState('');
     const [showCategoryManager, setShowCategoryManager] = useState(false);
@@ -903,7 +1279,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         if (snap.exists()) {
           setCategories(snap.data().list || ['Genel']);
         } else {
-          // İlk açılışta varsayılan kategori oluştur
           setDoc(catRef, { list: ['Genel'] });
           setCategories(['Genel']);
         }
@@ -931,7 +1306,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         const updated = categories.filter(c => c !== catToDelete);
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'passwordCategories'), { list: updated });
         
-        // Bu kategorideki şifreleri Genel'e taşı
         const affectedPwds = passwords.filter(p => p.category === catToDelete);
         for (const pwd of affectedPwds) {
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'companyPasswords', pwd.id), { category: 'Genel' });
@@ -1005,7 +1379,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         </div>
 
-        {/* Kategori Yöneticisi */}
         {showCategoryManager && (
           <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 mb-6 animate-in slide-in-from-top-2">
             <h3 className="font-bold text-black mb-3 text-sm flex items-center gap-2">
@@ -1151,12 +1524,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     );
   };
 
-  // --- YENİ: UYGULAMA AYARLARI (LOGO DEĞİŞTİR) SAYFASI ---
-  // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir. Yüklenen logo ve boyut
-  // ayarı 'settings/appBranding' dokümanında saklanır; App bileşeni bu veriyi
-  // dinleyip giriş ekranı, yükleniyor ekranı, mobil header ve sol menüdeki
-  // logoyu buna göre günceller (varsayılan logo dosyasına hiç dokunulmadı,
-  // sadece yeni bir logo yüklenmişse onun yerine gösteriliyor).
   const AppSettingsView = ({ db, appId, addSystemLog, appBranding }) => {
     const [logoPreview, setLogoPreview] = useState(appBranding?.logoUrl || '');
     const [logoSize, setLogoSize] = useState(appBranding?.logoSize || 100);
@@ -1229,7 +1596,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             </div>
           )}
 
-          {/* Önizleme */}
           <div className="bg-black rounded-2xl p-8 flex justify-center items-center mb-5 border border-neutral-800">
             <img
               src={logoPreview || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"}
@@ -1240,7 +1606,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             />
           </div>
 
-          {/* Logo Yükleme */}
           <div className="mb-6">
             <label className="block text-sm font-bold text-black mb-2">Yeni Logo Yükle</label>
             <input
@@ -1253,7 +1618,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {isUploading && <p className="text-xs text-neutral-400 mt-1.5 animate-pulse">Yükleniyor...</p>}
           </div>
 
-          {/* Logo Boyutu Ayarı */}
           <div className="mb-6">
             <div className="flex justify-between items-center mb-2">
               <label className="block text-sm font-bold text-black">Logo Boyutu</label>
@@ -1443,12 +1807,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       if (currentUser?.id) {
         markNotificationsAsRead(currentUser.id);
       }
-    }, [currentUser?.id]); // Sonsuz döngüyü kırmak için obje bağımlılığı kaldırıldı, sadece ID dinleniyor
+    }, [currentUser?.id]);
 
     const myNotifications = notifications
       .filter(n => n.userId === currentUser?.id)
       .sort((a, b) => {
-         // Tarih formatını (GG.AA.YYYY HH:MM) çözümleyip sıralama
          const parseDate = (str) => {
             if (!str) return 0;
             const parts = str.split(' ');
@@ -1495,7 +1858,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     );
   };
 
-  // --- YENİ EKLENEN: PERSONEL TAHTASI BİLEŞENİ ---
   const ProfileSettingsView = ({ currentUser, handleUpdatePersonnel }) => {
     const [editForm, setEditForm] = useState({ 
       personalPhone: currentUser?.personalPhone || '', 
@@ -1737,10 +2099,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [currentUser, setCurrentUser] = useState(null);
     const [loginError, setLoginError] = useState('');
 
-    // Arayüz State'leri
     const [activeTab, setActiveTab] = useState('dashboard'); 
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-    // YENİ: Uygulamanın en üstündeki genel arama barı (Araç / Personel / Müşteri) için state
     const [globalSearchQuery, setGlobalSearchQuery] = useState('');
     const [isSubMenuOpen, setIsSubMenuOpen] = useState(false);
     const [isAddJobSubMenuOpen, setIsAddJobSubMenuOpen] = useState(false);
@@ -1772,27 +2132,24 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [showSecondFromAddress, setShowSecondFromAddress] = useState(false);
     const [showSecondToAddress, setShowSecondToAddress] = useState(false);
 
-    // Modal State'leri
     const [showAssignModal, setShowAssignModal] = useState(false);
     const [jobToAssign, setJobToAssign] = useState(null);
     const [assigneeId, setAssigneeId] = useState('');
     const [additionalAssignees, setAdditionalAssignees] = useState([]);
     const [manualExtraAssignees, setManualExtraAssignees] = useState([]);
     const [assignedVehiclePlate, setAssignedVehiclePlate] = useState('');
-    const [showBusyPersonnel, setShowBusyPersonnel] = useState(false); // Yeni State
-    const [assignOperationNote, setAssignOperationNote] = useState(''); // Yeni: Operasyon Notu State'i
+    const [showBusyPersonnel, setShowBusyPersonnel] = useState(false);
+    const [assignOperationNote, setAssignOperationNote] = useState('');
     
-    // Görev Atama Sırasında Malzeme Yönetimi State'leri
     const [assignedMaterials, setAssignedMaterials] = useState({ strec: 0, bant: 0, poset: 0, kagit: 0, koli: 0 });
     const [customMaterials, setCustomMaterials] = useState([]);
     const [newCustomMaterial, setNewCustomMaterial] = useState({ name: '', amount: 1 });
     
-    // Asansör Özel Görev Atama State'leri
     const [assignedTargetVehiclePlate, setAssignedTargetVehiclePlate] = useState('');
     const [isTargetVehicleExternal, setIsTargetVehicleExternal] = useState(false);
     const [assignedJobTime, setAssignedJobTime] = useState('');
 
-    const [teamSuggestion, setTeamSuggestion] = useState(null); // YENİ: Yapay zeka tahmini ekip state'i
+    const [teamSuggestion, setTeamSuggestion] = useState(null);
 
     const [showEndJobModal, setShowEndJobModal] = useState(false);
     const [jobToEnd, setJobToEnd] = useState(null);
@@ -1816,12 +2173,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       vehicleIssueReason: ''
     });
 
-    // Puan Onay Modal State
     const [showApproveModal, setShowApproveModal] = useState(false);
     const [jobToApprove, setJobToApprove] = useState(null);
     const [approveData, setApproveData] = useState({ addPoints: 'Evet', reviewImage: '' });
 
-    // Mesai Onay Modal State
     const [showMesaiModal, setShowMesaiModal] = useState(false);
     const [jobForMesai, setJobForMesai] = useState(null);
     const [mesaiModalData, setMesaiModalData] = useState({});
@@ -1829,7 +2184,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [aiModal, setAiModal] = useState({ isOpen: false, loading: false, content: '', title: '', type: '' });
     const [viewingImage, setViewingImage] = useState(null);
 
-    // --- FİREBASE VERİ STATE'LERİ ---
     const [dataLoadStatus, setDataLoadStatus] = useState({
       jobs: false, trans: false, tasks: false, notif: false, msg: false, logs: false, veh: false, mat: false, pers: false, settings: false, contacts: false, todos: false
     });
@@ -1842,24 +2196,19 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [systemLogs, setSystemLogs] = useState([]);
     const [vehicles, setVehicles] = useState([]);
     const [materials, setMaterials] = useState([]);
-    // YENİ: Malzeme seed/temizleme işleminin aynı anda birden çok kez çalışıp kopya üretmesini engelleyen kilit
     const materialSeedRunning = React.useRef(false);
     const [personnelList, setPersonnelList] = useState([]);
-    // YENİ: Otomatik özellik puanı hesaplaması için TÜM personelin hareket kayıtları (tutanak/rapor)
     const [allPersonnelActions, setAllPersonnelActions] = useState([]);
-    // YENİ: Otomatik özellik puanı hesaplaması için TÜM ayların mesai (devamsızlık/rapor/fazla mesai) kayıtları
     const [allMesaiRecords, setAllMesaiRecords] = useState([]);
     const [positions, setPositions] = useState([]);
     const [ranks, setRanks] = useState([]);
-    const [positionModules, setPositionModules] = useState({}); // YENİ EKLENDİ
-    // YENİ: Uygulama Ayarları - Logo Değiştir için state
+    const [positionModules, setPositionModules] = useState({});
     const [appBranding, setAppBranding] = useState({ logoUrl: '', logoSize: 100 });
-    const [complaints, setComplaints] = useState([]); // Yeni: Şikayetler State
-    const [companyContacts, setCompanyContacts] = useState([]); // Yeni: Şirket İletişim Hattı
-    const [todos, setTodos] = useState([]); // Yapılacak Listesi
-    const [companyPasswords, setCompanyPasswords] = useState([]); // Kurumsal Şifreler
+    const [complaints, setComplaints] = useState([]);
+    const [companyContacts, setCompanyContacts] = useState([]);
+    const [todos, setTodos] = useState([]);
+    const [companyPasswords, setCompanyPasswords] = useState([]);
     
-    // Form State'leri
     const [newTransaction, setNewTransaction] = useState({ amount: '', category: 'Nakliye Tahsilatı', account: 'cash', date: new Date().toISOString().split('T')[0], description: '' });
     const [showTaskModal, setShowTaskModal] = useState(false);
     const [editingTask, setEditingTask] = useState(null);
@@ -1867,26 +2216,18 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [newTask, setNewTask] = useState({ title: '', description: '', assignee: 'Tüm Personeller', date: new Date().toISOString().split('T')[0] });
     const [newTodo, setNewTodo] = useState({ title: '', details: '', reminderDate: new Date().toISOString().split('T')[0], priority: 'Normal', status: 'todo' });
 
-    // İletişim Hattı Modal
     const [showContactModal, setShowContactModal] = useState(false);
     const [contactForm, setContactForm] = useState({ name: '', phone: '', position: '' });
     const [isContactsOpen, setIsContactsOpen] = useState(false);
     const [editingContact, setEditingContact] = useState(null);
-    // Araç Düzenleme State'leri
     const [editingVehicle, setEditingVehicle] = useState(null);
-    // YENİ: Görüntülenen Cari Profili'nin telefon anahtarı
     const [viewingCariKey, setViewingCariKey] = useState(null);
-    // YENİ: Görüntülenen Personel Profili'nin ID'si
     const [viewingPersonnelProfileId, setViewingPersonnelProfileId] = useState(null);
-    // YENİ: Personel Profili'nden "Bilgileri Düzenle" ile Personel Listesi'ne geçişte otomatik açılacak düzenleme ID'si
     const [pendingEditPersonnelId, setPendingEditPersonnelId] = useState(null);
-    // YENİ: Görüntülenen Araç Profili'nin ID'si
     const [viewingVehicleProfileId, setViewingVehicleProfileId] = useState(null);
     const [vehicleEditForm, setVehicleEditForm] = useState({});
-    // YENİ: Araç ruhsatı fotoğrafını büyük önizlemede göstermek için state
     const [viewingRuhsatUrl, setViewingRuhsatUrl] = useState(null);
 
-    // Eski veri aktarımı kontrolü
     const [isDataMigrated, setIsDataMigrated] = useState(() => localStorage.getItem('sembol_data_migrated') === 'true');
 
     const [formData, setFormData] = useState({
@@ -1900,7 +2241,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     const isAddingCengizRef = React.useRef(false);
 
-    // --- FIREBASE BAĞLANTI EFEKTLERİ ---
     useEffect(() => {
       const initAuth = async () => {
         try {
@@ -1920,13 +2260,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       return () => unsubscribe();
     }, []);
 
-    // Kayıt ekranında aynı isim veya numara girildiğinde uyarı/eşleştirme için
     const [existingCustomerMatch, setExistingCustomerMatch] = useState(null);
-    // YENİ: "Kayıtlı Müşteriden Seç" arama kutusu için state'ler
     const [showCustomerSearchBox, setShowCustomerSearchBox] = useState(false);
     const [customerSearchQuery, setCustomerSearchQuery] = useState('');
 
-    // Telefon numarası veya isim değiştiğinde mevcut müşterileri kontrol et
     useEffect(() => {
       if (activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') {
         if (formData.customerPhone && formData.customerPhone.length > 5) {
@@ -1968,9 +2305,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
       const unsubs = [];
 
-// YENİ: Geçmişe dönük 8 yıla kadar müşteri/iş kaydı açılabilmesi için tarih sınırı genişletildi
-      // (Önceden sadece son 60 günün kayıtları çekiliyordu; bu yüzden 8 yıl önceki tarihli
-      // açılan kayıtlar Firestore'a yazılsa bile ekranda hiç görünmüyordu.)
       const historyStartDate = new Date();
       historyStartDate.setFullYear(historyStartDate.getFullYear() - 8);
       const startDateStr = historyStartDate.toISOString().split('T')[0];
@@ -1983,7 +2317,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       unsubs.push(onSnapshot(qTrans, snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
       unsubs.push(onSnapshot(qTasks, snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
             
-      // KARA DELİKLER - Sürekli şişen ve geçmişe dönük gereksiz okuma yapan verilere limit eklendi
       const qNotifs = query(getCol('notifications'), limit(100));
       const qMsgs = query(getCol('messages'), limit(50));
       const qLogs = query(getCol('systemLogs'), limit(100));
@@ -2001,13 +2334,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         setMaterials(list); 
         setDataLoadStatus(p => ({...p, mat: true})); 
 
-        // MALZEME LİSTESİ: Sadece ekip kurma tahtasındaki 5 ana malzeme (Streç, Bant, Poşet, Kağıt, Koli) tutulur.
-        // Bu blok hem eksik olan varsayılan malzemeleri OLUŞTURUR hem de yanlışlıkla oluşmuş
-        // KOPYA (duplike) kayıtları TEMİZLER — böylece stok tablosu ve otomatik düşüm şişmez.
         if (firebaseUser && !snap.metadata.hasPendingWrites && !materialSeedRunning.current) {
-            materialSeedRunning.current = true; // Yarış koşulunu (aynı anda tekrar tekrar ekleme) engelle
+            materialSeedRunning.current = true;
             try {
-              // 5 ana malzemenin tanımı ve hangi kelimeyle eşleşeceği
               const defaultMats = [
                   { name: 'Streç', category: 'Ambalaj Malzemesi', unit: 'Rulo', checkKey: 'streç' },
                   { name: 'Bant', category: 'Ambalaj Malzemesi', unit: 'Adet', checkKey: 'bant' },
@@ -2019,14 +2348,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               const norm = (s) => (s || '').toLocaleLowerCase('tr-TR');
 
               for (const mat of defaultMats) {
-                  // Bu ana malzemeye ait TÜM kayıtları bul (kopyalar dahil)
                   const matches = list.filter(m => norm(m.name).includes(mat.checkKey));
 
                   if (matches.length === 0) {
-                      // Hiç yoksa: sıfır stokla tek kayıt oluştur
                       await addDoc(getCol('materials'), { name: mat.name, category: mat.category, unit: mat.unit, stock: '0' });
                   } else if (matches.length > 1) {
-                      // KOPYA VARSA: stokları topla, ilkini güncelle, diğerlerini sil
                       const totalStock = matches.reduce((sum, m) => sum + (parseFloat(m.stock) || 0), 0);
                       const keep = matches[0];
                       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', keep.id), {
@@ -2037,10 +2363,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       }
                   }
               }
-
-              // 5 ana malzeme dışında kalan (yanlış eklenmiş) hiçbir malzeme kalmasın diye:
-              // Not: kullanıcı isterse ileride ekstra malzeme ekleyebilir; burada sadece
-              // ana 5 malzemenin kopyaları temizlenir, başka isimli kayıtlara dokunulmaz.
             } catch (err) {
               console.error('Malzeme senkronizasyon/temizleme hatası:', err);
             } finally {
@@ -2071,13 +2393,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         setIsAuthChecking(false);
       }, console.error));
 
-      // YENİ: Otomatik özellik puanı hesaplaması için TÜM personelin hareket kayıtlarını (tutanak/rapor) dinle
       unsubs.push(onSnapshot(getCol('personnelActions'), snap => {
         setAllPersonnelActions(snap.docs.map(d => ({ ...d.data(), id: d.id })));
       }, console.error));
 
-      // YENİ: Otomatik özellik puanı hesaplaması için TÜM ayların mesai (puantaj) kayıtlarını dinle ve
-      // { personId, year, month, day, code } şeklinde düz (flat) bir diziye dönüştür.
       unsubs.push(onSnapshot(getCol('mesai'), snap => {
         const flat = [];
         snap.docs.forEach(d => {
@@ -2101,19 +2420,18 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           const data = docSnap.data();
           setPositions(data.positions || []);
           setRanks(data.ranks || []);
-          setPositionModules(data.positionModules || {}); // YENİ EKLENDİ
+          setPositionModules(data.positionModules || {});
         } else {
           const defaultPos = ['Şoför', 'Taşıma Elemanı', 'Muhasebe', 'Mobilya Ustası', 'Satış Personeli', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operasyon', 'Operatör', 'Firma Sahibi'];
           const defaultRanks = ['Müdür', 'Ekip Şefi', 'Asistan', 'Standart', 'Heryerden Usta', 'Kalfa'];
           await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { positions: defaultPos, ranks: defaultRanks, positionModules: {} });
           setPositions(defaultPos);
           setRanks(defaultRanks);
-          setPositionModules({}); // YENİ EKLENDİ
+          setPositionModules({});
         }
         setDataLoadStatus(p => ({...p, settings: true}));
       }, console.error));
 
-      // YENİ: Uygulama Ayarları (Logo Değiştir) dinleyicisi
       unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'appBranding'), docSnap => {
         if (docSnap.exists()) {
           const data = docSnap.data();
@@ -2161,8 +2479,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         }
       }
     }, [personnelList]);
-
-    // --- FIREBASE CRUD İŞLEMLERİ ---
 
     const handleAddContact = async (e) => {
       e.preventDefault();
@@ -2233,7 +2549,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const handleAddPersonnel = async (newPersonnel) => {
       if (!firebaseUser) return;
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelList'), {
-        ...newPersonnel, permissions: { canView: true, canEdit: false }, createdAt: new Date().toISOString() // Anasayfa'da "Yeni Gelen Kayıt" sıralaması için
+        ...newPersonnel, permissions: { canView: true, canEdit: false }, createdAt: new Date().toISOString()
       });
       addSystemLog('Personel Eklendi', `${newPersonnel.fullName} sisteme eklendi.`);
     };
@@ -2286,14 +2602,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       if (!firebaseUser) return;
       
       try {
-        // KÖKTEN ÇÖZÜM: Dot notation (Nokta Notasyonu) kullanarak Race Condition (Hızlı tıklama çakışmaları) önlenir.
-        // Bu sayede Firebase objeyi merge etmeye çalışmaz, sadece hedefteki tekil boolean değeri anında değiştirir.
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), {
           [`positionModules.${position}.${moduleId}`]: newValue
         });
       } catch (error) {
-        // Güvenlik Ağı: Eğer çok eski bir veritabanıysa ve 'positionModules' ana objesi henüz hiç oluşmamışsa,
-        // updateDoc hata fırlatır. Bu durumda objeyi baştan güvenli bir şekilde setDoc ile ilk kez kurarız.
         await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), {
           positionModules: {
             [position]: {
@@ -2377,7 +2689,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
       addSystemLog(actionText, detailsText);
 
-      // Finans Eklemesi
       if (cost && parseFloat(cost) > 0 && changeNum > 0) {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'transactions'), {
           type: 'expense',
@@ -2456,7 +2767,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
           let addedMainPoints = false;
           
-          // Asıl ekibin özel puanlarını kaydet
           Object.keys(individualPoints).forEach(pId => {
             const pts = parseFloat(individualPoints[pId]) || 0;
             if (pts > 0) {
@@ -2466,7 +2776,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             }
           });
 
-          // Günlük yorum/puan sayısını +1 artır (Eğer asıl ekibe bir puan girildiyse)
           if (addedMainPoints) {
             if (!records['daily_comments']) records['daily_comments'] = {};
             records['daily_comments'][day] = (parseFloat(records['daily_comments'][day]) || 0) + 1;
@@ -2513,7 +2822,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       }
       const initialPoints = {};
       teamIds.forEach(id => {
-         initialPoints[id] = 1; // Varsayılan olarak herkese 1 puan ayarla
+         initialPoints[id] = 1;
       });
       setApproveData({ individualPoints: initialPoints, reviewImage: '', supportPersonnelIds: [] });
       setShowApproveModal(true);
@@ -2633,7 +2942,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       }
     };
 
-    // Şikayet İşlemleri
     const handleUpdateComplaintStatus = async (id, status, isRead = false) => {
       if (!firebaseUser) return;
       const updateData = { status };
@@ -2669,12 +2977,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
       const amount = parseFloat(newTransaction.amount);
 
-      // Negatif kasa kontrolü için net kasanın hesaplanması
       let allIncome = jobs.filter(j => j.status === 'completed').reduce((sum, j) => sum + (parseFloat(j.price) || 0), 0) + transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
       let allExpense = transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
       let netBalance = allIncome - allExpense;
 
-      // Negatif kasa kontrolü
       if (transactionType === 'expense' && netBalance - amount < 0) {
         alert(`Kasadaki net durumunuz: ₺${netBalance.toLocaleString('tr-TR')}. Lütfen işlem yapmadan önce kasanıza gelir/para ekleyin veya mevcut giderlerinizi düzenleyin.`);
         return;
@@ -2704,8 +3010,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notifications', n.id), { read: true });
       }
     };
-
-    // --- ARAYÜZ YARDIMCI FONKSİYONLARI ---
 
     const handleInputChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
 
@@ -2768,8 +3072,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       const jobToCancel = jobs.find(j => j.id === id);
       const updateData = { status: 'cancelled' };
 
-      // YENİ: İptal edilen işe ekip/personel atanmışsa, o personellerin bu işteki
-      // görevini de otomatik olarak iptal et (atamayı kaldır). Mevcut iptal mantığına dokunulmadı.
       if (jobToCancel && (
         (jobToCancel.assignedPersonnelIds && jobToCancel.assignedPersonnelIds.length > 0) ||
         jobToCancel.assignedPersonnelId ||
@@ -2891,7 +3193,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         } else {
           const newDeliveryCode = Math.random().toString(36).substring(2, 8).toUpperCase();
           
-          // İşlem Süresi (Gün) mantığı ile döngü
           for (let i = 0; i < duration; i++) {
             const jobDate = new Date(formData.date);
             jobDate.setDate(jobDate.getDate() + i);
@@ -2913,7 +3214,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               endJobDetails: null,
               deliveryCode: newDeliveryCode,
               createdBy: currentUser?.fullName || 'Sistem',
-              createdAt: new Date().toISOString() // Kayıt İstatistiği bu alana göre hesaplanır
+              createdAt: new Date().toISOString()
             };
             await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), primaryJob);
             
@@ -2921,7 +3222,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               addSystemLog('Yeni İş Kaydı', `${formData.customerName} için ${duration} günlük yeni bir ${recordType} kaydı oluşturuldu.`);
             }
 
-            // Otomatik Asansör (Yalnızca ilk gün için asansör oluşturulsun)
             if (recordType !== 'Asansör' && i === 0) {
               const createAsansor = async (sourceAddr, installType) => {
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), {
@@ -2953,7 +3253,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     };
 
     const generateTeamSuggestion = (job) => {
-      let base = 4; // default
+      let base = 4;
       const room = job.fromRoomCount || '';
       const isDepo = job.type === 'Depo';
 
@@ -2996,11 +3296,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         notes.push("Yüksek bütçeli iş: Daha çok yorum alan tecrübeli ekiplere öncelik verildi.");
       }
 
-      // O gün başka işte olanları bul (Müsaitlik kontrolü)
       const busyIds = jobs.filter(j => j.date === job.date && j.id !== job.id && j.status !== 'cancelled')
                           .flatMap(j => j.assignedPersonnelIds || []);
 
-      // Müşteri Memnuniyeti / Yorum Skoru Hesaplama
       const personnelScores = {};
       personnelList.forEach(p => personnelScores[p.id] = 0);
       
@@ -3012,13 +3310,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       
       let available = personnelList.filter(p => !busyIds.includes(p.id) && ['Şoför', 'Mobilya Ustası', 'Taşıma Elemanı'].includes(p.position));
 
-      // Puan/Rank sıralaması (Önceliklendirme)
       available.sort((a, b) => {
          const rankWeight = { 'Müdür': 5, 'Ekip Şefi': 4, 'Heryerden Usta': 3, 'Kalfa': 3, 'Asistan': 2, 'Standart': 1 };
          let scoreA = rankWeight[a.rank] || 0;
          let scoreB = rankWeight[b.rank] || 0;
          
-         // Yüksek fiyatlı işlerde yorum ve müşteri memnuniyeti puanını (x2 çarpanla) baz al
          if (isHighValue) {
              scoreA += (personnelScores[a.id] || 0) * 2;
              scoreB += (personnelScores[b.id] || 0) * 2;
@@ -3029,15 +3325,12 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
       const suggested = [];
       
-      // 1. En az 1 Şoför ata
       const soforIdx = available.findIndex(p => p.position === 'Şoför');
       if (soforIdx > -1) suggested.push(available.splice(soforIdx, 1)[0]);
 
-      // 2. En az 1 Mobilyacı ata
       const ustaIdx = available.findIndex(p => p.position === 'Mobilya Ustası');
       if (ustaIdx > -1) suggested.push(available.splice(ustaIdx, 1)[0]);
 
-      // Daha önceki tamamlanmış işlerdeki "Birlikte Çalışma (Sinerji)" durumunu hesapla
       if (suggested.length > 0) {
           const anchorId = suggested[0].id;
           const synergyScores = {};
@@ -3049,7 +3342,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               });
           });
 
-          // Kalan personeli Sinerji (birlikte çalışmış olma sıklığına) göre tekrar ağırlıklandır
           available.sort((a, b) => {
               const synA = synergyScores[a.id] || 0;
               const synB = synergyScores[b.id] || 0;
@@ -3057,17 +3349,15 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           });
       }
 
-      // 3. Kalanı tamamlama (Sırasıyla: Şoför > Mobilyacı > Taşımacı)
       while (suggested.length < targetCount && available.length > 0) {
          let nextIdx = available.findIndex(p => p.position === 'Şoför');
          if (nextIdx === -1) nextIdx = available.findIndex(p => p.position === 'Mobilya Ustası');
          if (nextIdx === -1) nextIdx = available.findIndex(p => p.position === 'Taşıma Elemanı');
-         if (nextIdx === -1) nextIdx = 0; // Güvenlik ağı
+         if (nextIdx === -1) nextIdx = 0;
 
          suggested.push(available.splice(nextIdx, 1)[0]);
       }
 
-      // 4. Sistemdeki uygun kadro yetmezse dışarıdan "Yevmiyeci" ekle
       let yevmiyeciCount = 1;
       while (suggested.length < targetCount) {
          suggested.push({ fullName: `Yevmiyeci ${yevmiyeciCount}`, position: 'Taşıma Elemanı', isExternal: true });
@@ -3085,10 +3375,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       setJobToAssign(job);
       setAssigneeId(job.assignedPersonnelId || '');
       setAssignedVehiclePlate(job.assignedVehiclePlate || '');
-      setAssignOperationNote(job.notes || ''); // Mevcut notu state'e aktar
+      setAssignOperationNote(job.notes || '');
       setAdditionalAssignees(job.assignedPersonnelIds ? job.assignedPersonnelIds.filter(id => id !== job.assignedPersonnelId) : []);
       
-      // Asansör için yeni stateleri başlat
       setAssignedTargetVehiclePlate(job.assignedTargetVehiclePlate || '');
       setIsTargetVehicleExternal(job.isTargetVehicleExternal || false);
       setAssignedJobTime(job.assignedJobTime || job.time || '');
@@ -3100,7 +3389,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       }
       setManualExtraAssignees(manual);
 
-      // Malzeme Tahmini Aktarımı ve Atama Listesi
       const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking);
       setAssignedMaterials({
         strec: est.strec || 0,
@@ -3111,8 +3399,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       });
       setCustomMaterials(job.customMaterials || []);
       setNewCustomMaterial({ name: '', amount: 1 });
-      setShowBusyPersonnel(false); // Her açılışta sıfırla
-      setTeamSuggestion(null); // Modalı açarken öneriyi sıfırla
+      setShowBusyPersonnel(false);
+      setTeamSuggestion(null);
 
       setShowAssignModal(true);
     };
@@ -3138,7 +3426,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         assignedDate: jobToAssign.assignedDate || new Date().toISOString().split('T')[0],
         assignedMaterials: assignedMaterials,
         customMaterials: customMaterials,
-        notes: assignOperationNote, // Düzenlenmiş notu veritabanına kaydet
+        notes: assignOperationNote,
         assignedTargetVehiclePlate: jobToAssign.type === 'Asansör' ? assignedTargetVehiclePlate : null,
         isTargetVehicleExternal: jobToAssign.type === 'Asansör' ? isTargetVehicleExternal : null,
         assignedJobTime: jobToAssign.type === 'Asansör' ? assignedJobTime : null
@@ -3272,11 +3560,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       if (!firebaseUser) return;
       
       if (jobToEnd.type !== 'Asansör') {
-        // Güvenli eşleşme: Sadece alfanümerik karakterleri al ve büyük harfe çevir
         const userCode = (endJobData.enteredCode || '').toString().trim().toUpperCase();
         const realCode = (jobToEnd.deliveryCode || '').toString().trim().toUpperCase();
 
-        // Hata Kontrolü:
         if (realCode && userCode !== realCode) {
           setEndJobError(`Girdiğiniz kod hatalı. Müşteriden "${realCode}" kodunu istemelisiniz.`); 
           return;
@@ -3288,11 +3574,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       if (!jobToEnd.materialsDeducted && jobToEnd.type !== 'Asansör') {
         const estData = jobToEnd.assignedMaterials || calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking);
         const customMats = jobToEnd.customMaterials || [];
-        let deductedList = []; // Log için düşülen malzemeleri tutar
+        let deductedList = [];
 
         const norm = (s) => (s || '').toLocaleLowerCase('tr-TR');
-        // Her ana malzeme tipi için, listedeki SADECE İLK eşleşen kayda bir kez düşülür.
-        // (Kopya kayıtlar temizlense de, olası bir yarış anında tekrar düşmeyi önler.)
         const materialTypes = [
           { key: 'streç', amount: estData.strec || 0 },
           { key: 'bant', amount: estData.bant || 0 },
@@ -3306,7 +3590,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           if (!target) continue;
 
           let deductAmount = mt.amount;
-          // Bu tipe ait özel (sistem harici) eklenen malzemeleri de ekle
           const cMat = customMats.find(cm => norm(cm.name).includes(mt.key));
           if (cMat) deductAmount += parseFloat(cMat.amount) || 0;
 
@@ -3316,7 +3599,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           }
         }
         
-        // Log kaydını detaylandır (Malzeme Hareketlerinde listelenecek)
         if (deductedList.length > 0) {
            addSystemLog('Stok Çıkışı (Oto)', `${jobToEnd.customerName} operasyonu sonlandırıldığı için malzemeler düşüldü: ${deductedList.join(', ')}`);
         } else {
@@ -3354,7 +3636,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       let deductedList = [];
 
       const norm = (s) => (s || '').toLocaleLowerCase('tr-TR');
-      // Her ana malzeme tipi için listedeki SADECE İLK eşleşen kayda bir kez düşülür
       const materialTypes = [
         { key: 'streç', amount: actualEst.strec || 0 },
         { key: 'bant', amount: actualEst.bant || 0 },
@@ -3380,7 +3661,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobId), { materialsDeducted: true });
       setAiModal({ ...aiModal, alreadyDeducted: true, content: aiModal.content + '\n\n✅ Malzemeler stoktan başarılı bir şekilde düşüldü.' });
       
-      // Log kaydını detaylandır
       if (deductedList.length > 0) {
          addSystemLog('Stok Çıkışı', `${job?.customerName || 'Manuel'} operasyonu için malzeme düşüldü: ${deductedList.join(', ')}`);
       } else {
@@ -3487,39 +3767,29 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const isMuhasebe = userPos.includes('Muhasebe');
     const isDepo = userPos.includes('Depo Sorumlusu') || userPos.includes('Depo');
     
-    // Düzenleme yetkisi (canEdit) olan personel girdiği modüllerde yönetici gibi davranabilmeli:
     const isManager = userPos.includes('Yönetici') || userPos.includes('Firma Sahibi') || currentUser?.rank === 'Müdür' || canEdit;
 
-    // Sadece "Operasyon", "Firma Sahibi" veya "Düzenleme Yetkisi" olanlar bu işlemi yapabilir
     const canApprovePoints = userPos.includes('Operasyon') || userPos === 'Firma Sahibi' || canEdit;
 
-    // Geriye dönük uyumluluk (Legacy Fallback)
     const hasJobAccess = canEdit || isManager || isMuhasebe || isDepo;
-    const hasResourceAccess = isManager || isMuhasebe || canEdit; // Personel, Araç, Malzeme
-    const hasTaskAccess = isManager || canEdit; // Görev Listesi
+    const hasResourceAccess = isManager || isMuhasebe || canEdit;
+    const hasTaskAccess = isManager || canEdit;
     const hasOperasyonAccess = isManager || currentUser?.position?.includes('Operasyon') || canEdit;
     
     const checkAccess = (key) => {
-      // 1. Kullanıcı aktif değilse yetkisi kapalı
       if (currentUser?.employmentStatus === 'Pasif') return false;
-
-      // SÜPER ADMİN KONTROLÜ: Firma Sahibi veya Sistem Yöneticisi her şeyi görür
       if (isSuperAdmin) return true;
 
-      // 2. Kişiye özel atanmış modül yetkisi varsa rolü ezer
       if (currentUser?.permissions?.modules && typeof currentUser.permissions.modules[key] === 'boolean') {
         return currentUser.permissions.modules[key];
       }
 
-      // 3. Pozisyona göre rol kontrolü
       const posAccess = positionModules?.[currentUser?.position];
       if (posAccess && typeof posAccess[key] === 'boolean') return posAccess[key];
       
-      // 4. Rütbeye göre rol kontrolü
       const rankAccess = positionModules?.[currentUser?.rank];
       if (rankAccess && typeof rankAccess[key] === 'boolean') return rankAccess[key];
       
-      // 5. Hiçbir yerde belirtilmemişse varsayılan olarak kapalı (Default-Deny)
       return false;
     };
 
@@ -3538,7 +3808,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const showAuth = checkAccess('auth');
     const showSystemFiles = checkAccess('systemFiles');
     const showMyComplaint = checkAccess('myComplaint');
-    // YENİ: Üst arama barı ve alt kategori (Müşteri/Araç/Personel) görüntüleme yetkileri
     const showGlobalSearch = checkAccess('globalSearch');
     const showGlobalSearchCustomer = checkAccess('globalSearchCustomer');
     const showGlobalSearchVehicle = checkAccess('globalSearchVehicle');
@@ -3569,10 +3838,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       if (!isMyJob) return false;
       if (j.isHiddenFromTeam) return false;
       
-      // Standart mavi yakalı personeller gelecekteki işleri göremez, Ekip Şefi ve Üzeri görür
       if (isStandardBlueCollarApp && j.date > todayStrApp) return false;
 
-      // Personel için: İş tamamlanmışsa ve üzerinden 1 gün geçmişse gizle
       if (j.status === 'completed') {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
@@ -3588,7 +3855,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     
     const visibleNotifications = notifications.filter(n => {
       if (n.userId !== currentUser?.id) return false;
-      // Görev atama bildirimiyse ve işin tarihi bugünden sonraysa (gelecekteyse), gizle! Sadece iş günü geldiğinde göster. (Ekip Şefi hariç)
       if (isStandardBlueCollarApp && n.type === 'assignment' && n.jobDate && n.jobDate > todayStrApp) {
         return false;
       }
@@ -3619,7 +3885,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     return (
       <div className="flex h-screen bg-neutral-50 font-sans text-neutral-900 overflow-hidden">
         
-        {/* Mobil Header & Menü Butonu */}
         <div className="md:hidden absolute top-0 left-0 right-0 h-16 bg-black text-white flex items-center gap-2 px-3 z-30 shadow-md border-b border-red-600">
           <div className="flex items-center gap-2 shrink-0">
             <img 
@@ -3631,7 +3896,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             />
           </div>
 
-          {/* YENİ: Logo ile menü butonu arasına ortalanmış genel arama barı (yetkiye bağlı) */}
           {showGlobalSearch && (
           <div className="relative flex-1">
             <div className="relative">
@@ -3740,7 +4004,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           />
         )}
 
-        {/* Sol Menü (Dikey Sidebar) */}
         <aside className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative top-0 left-0 z-40 w-64 md:min-w-[256px] bg-black text-white flex flex-col shadow-2xl shrink-0 h-full transition-transform duration-300 ease-in-out border-r border-neutral-800`}>
           <div className="p-6 flex flex-col items-center gap-2 border-b border-neutral-800 text-center">
             <img 
@@ -3854,8 +4117,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   )}
                 </button>
             )}
-
-            {/* İş Listesi & Kayıt Aç */}
 
             {showAddJob && (
               <div className="flex flex-col gap-1">
@@ -3990,7 +4251,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {/* YENİ: Finans Bölümü — Operasyon Bölümü'nün hemen altına taşındı, mavi gradyanlı dikkat çekici başlık */}
             {showFinance && (
               <div className="flex flex-col gap-1 mt-2 mb-2">
                 <button 
@@ -4040,7 +4300,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {/* İş Listesi */}
             {showJobList && (
               <div className="flex flex-col gap-1">
                 <button 
@@ -4090,7 +4349,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {/* Müşteri Listesi */}
             {showCustomers && (
               <div className="flex flex-col gap-1">
                 <button 
@@ -4128,7 +4386,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {/* Personel Listesi */}
             {showPersonnel && (
               <div className="flex flex-col gap-1">
                 <button 
@@ -4176,7 +4433,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {/* Yapılacak Listesi */}
             {showTodos && (
               <div className="flex flex-col gap-1">
                 <button 
@@ -4217,9 +4473,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {/* Finans Bölümü buradan Operasyon Bölümü'nün altına taşındı */}
-
-            {/* Yetkilendirme */}
             {showAuth && (
               <div className="flex flex-col gap-1">
                 <button 
@@ -4269,7 +4522,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {/* Sistem Dosyaları */}
             {showSystemFiles && (
               <div className="flex flex-col gap-1">
                 <button 
@@ -4313,7 +4565,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {/* YENİ: Uygulama Ayarları (Sistem Dosyaları'nın hemen altında) */}
             {showSystemFiles && (
               <button 
                 onClick={() => { setActiveTab('appSettings'); setIsSidebarOpen(false); setIsSystemFilesSubMenuOpen(false); }}
@@ -4336,7 +4587,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
           </nav>
 
-          {/* ŞİRKET İLETİŞİM HATTI */}
           <div className="px-4 pb-4">
             <div className="bg-emerald-900/30 border border-emerald-800/50 rounded-xl p-3 flex flex-col gap-2 shadow-inner">
                <div className="flex items-center justify-between border-b border-emerald-800/50 pb-2">
@@ -4384,10 +4634,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         </aside>
 
-        {/* Main Content Area */}
         <main className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
           <div className="max-w-6xl mx-auto">
-            {/* YENİ: Masaüstü Görünümde Genel Arama Barı (mobildeki ile aynı mantık, sadece md ve üstünde görünür) */}
             {showGlobalSearch && (
               <div className="hidden md:block relative mb-6">
                 <div className="relative">
@@ -4481,7 +4729,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {activeTab === 'dashboard' && showDashboard && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} systemLogs={systemLogs} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions} />}
+            {activeTab === 'dashboard' && showDashboard && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions} />}
             {activeTab === 'notifications' && <NotificationsView notifications={visibleNotifications} markNotificationsAsRead={markNotificationsAsRead} currentUser={currentUser} />}
             {activeTab === 'calendar' && showCalendar && <CalendarView jobs={currentUser?.position === 'Operatör' ? jobs : visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} setJobToChangeDate={setJobToChangeDate} setNewJobDate={setNewJobDate} setShowChangeDateModal={setShowChangeDateModal} setCancelJobId={setCancelJobId} />}
             {activeTab === 'profileSettings' && showProfileSettings && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} />}
@@ -4500,7 +4748,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
               <div className="space-y-4">
-                {/* YENİ: Kayıtlı Müşteriden Seç */}
                 <div className="max-w-4xl mx-auto">
                   <button
                     type="button"
@@ -4511,11 +4758,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </button>
 
                   {showCustomerSearchBox && (() => {
-                    // DÜZELTME: Aynı telefon numarasına ait BİRDEN FAZLA iş kaydı olabilir ve
-                    // bunlardan bazılarında isim boş/eksik girilmiş olabilir. Eskiden sadece o
-                    // telefona ait İLK rastlanan kayıt temsilci seçiliyordu; bu kayıtta isim
-                    // boşsa müşteri aramada hiç bulunamıyordu. Şimdi aynı telefona ait TÜM
-                    // kayıtlar taranıp en eksiksiz (dolu) isim/bilgiler birleştiriliyor.
                     const uniqueCustomers = new Map();
                     jobs.forEach(j => {
                       if (!j.customerPhone) return;
@@ -4525,13 +4767,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       if (!existing) {
                         uniqueCustomers.set(key, { ...j });
                       } else {
-                        // Boş kalan alanları, bu telefona ait diğer kayıtlardan doldur
                         if (!existing.customerName && j.customerName) existing.customerName = j.customerName;
                         if (!existing.altPhone && j.altPhone) existing.altPhone = j.altPhone;
                         if (!existing.tcNo && j.tcNo) existing.tcNo = j.tcNo;
                         if (!existing.taxNo && j.taxNo) existing.taxNo = j.taxNo;
                         if (!existing.customerType && j.customerType) existing.customerType = j.customerType;
-                        // Daha yeni tarihli kayıt varsa ismi/tipini onunla güncelle (en güncel bilgi öne çıksın)
                         if (j.date && existing.date && new Date(j.date) > new Date(existing.date)) {
                           if (j.customerName) existing.customerName = j.customerName;
                           if (j.customerType) existing.customerType = j.customerType;
@@ -4587,7 +4827,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   })()}
                 </div>
 
-                {/* YENİ: Aynı ad soyad + telefon ile eşleşen mevcut cari profili uyarısı */}
                 {formData.customerName && formData.customerPhone && (() => {
                   const cariMatchJob = jobs.find(j =>
                     normalizeCariName(j.customerName) === normalizeCariName(formData.customerName) &&
@@ -4651,10 +4890,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
             {activeTab === 'specialCustomers' && showCustomers && <CustomerListView jobs={jobs} title="Özel Müşteriler" handleEditJob={handleEditJob} onViewCari={(key) => { setViewingCariKey(key); setActiveTab('customerProfile'); }} />}
-            {/* YENİ: Cari Profili Sayfası */}
             {activeTab === 'customerProfile' && showCustomers && <CustomerProfileView jobs={jobs} cariKey={viewingCariKey} handleEditJob={handleEditJob} onBack={() => setActiveTab('allCustomers')} db={db} appId={appId} addSystemLog={addSystemLog} personnelList={personnelList} vehicles={vehicles} />}
 
-            {/* İş Listesi Modülleri */}
             {activeTab === 'currentJobs' && showJobList && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
             {activeTab === 'completedJobs' && showJobList && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} handleOpenResolveDamageModal={handleOpenResolveDamageModal} />}
             {activeTab === 'allJobs' && showJobList && <AllJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} />}
@@ -4663,10 +4900,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
             {activeTab === 'customerBlacklist' && showCustomers && <PlaceholderView title="Müşteri Kara Listesi" icon={AlertTriangle} />}
             
-            {/* Personel ve Araç Modülleri */}
             {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
             {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} />}
-            {/* YENİ: Personel Profili Sayfası */}
             {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} allPersonnelActions={allPersonnelActions} vehicles={vehicles} currentUser={currentUser} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
@@ -4736,7 +4971,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                                 <span className="col-span-2"><b className="text-black">Vites:</b> {vehicle.transmission}</span>
                               </div>
                             </td>
-                            {/* YENİ: Ruhsat sütunu */}
                             <td className="p-4">
                               {vehicle.ruhsatFoto && vehicle.ruhsatFoto !== 'Yükleniyor...' ? (
                                 <button
@@ -4750,7 +4984,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                                 <span className="text-xs text-neutral-400 font-medium">Yüklenmedi</span>
                               )}
                             </td>
-                            {/* YENİ: Araç Profili sütunu */}
                             <td className="p-4">
                               <button
                                 type="button"
@@ -4789,7 +5022,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
                 </div>
 
-                {/* Araç Düzenleme Modalı */}
                 {editingVehicle && (
                   <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
                     <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
@@ -4882,7 +5114,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                           </select>
                         </div>
 
-                        {/* YENİ: Araç Fotoğrafı */}
                         <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
                           <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
                             <Camera className="w-4 h-4 text-red-600" /> Araç Fotoğrafı
@@ -4913,7 +5144,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                           {vehicleEditForm.vehiclePhoto === 'Yükleniyor...' && <p className="text-xs text-neutral-400 mt-1">Yükleniyor...</p>}
                         </div>
 
-                        {/* YENİ: Araç Ruhsat Fotoğrafı Ekleme */}
                         <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
                           <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
                             <FileText className="w-4 h-4 text-red-600" /> Araç Ruhsat Fotoğrafı
@@ -4959,7 +5189,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </>
             )}
 
-            {/* YENİ: Araç Ruhsatı Büyük Önizleme Modalı */}
             {viewingRuhsatUrl && (
               <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4" onClick={() => setViewingRuhsatUrl(null)}>
                 <div className="bg-white rounded-2xl shadow-2xl overflow-hidden max-w-2xl w-full animate-in zoom-in-95" onClick={(e) => e.stopPropagation()}>
@@ -4978,17 +5207,13 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
             {activeTab === 'vehicleMaintenance' && showOperasyon && <VehicleMaintenanceView vehicles={vehicles} onUpdateVehicle={handleUpdateVehicle} addSystemLog={addSystemLog} />}
-            {/* YENİ: Araç Profili Sayfası */}
             {activeTab === 'vehicleProfile' && showOperasyon && <VehicleProfileView vehicleId={viewingVehicleProfileId} vehicles={vehicles} jobs={jobs} handleEditJob={handleEditJob} setViewingRuhsatUrl={setViewingRuhsatUrl} onBack={() => setActiveTab('vehicleList')} />}
 
-            {/* Yapılacak Listesi Modülleri */}
             {activeTab === 'addTodo' && showTodos && <AddTodoView newTodo={newTodo} setNewTodo={setNewTodo} handleAddTodo={handleAddTodo} />}
             {activeTab === 'todoList' && showTodos && <TodoListView todos={todos} handleUpdateTodoStatus={handleUpdateTodoStatus} handleDeleteTodo={handleDeleteTodo} />}
 
-            {/* Malzeme Modülleri */}
             {activeTab === 'materialList' && showOperasyon && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} onUpdateStock={handleUpdateMaterialStock} onAdd={handleAddMaterial} systemLogs={systemLogs} />}
             
-            {/* Finans Yönetimi Modülleri */}
             {activeTab === 'financeDashboard' && showFinance && <FinanceDashboardView jobs={jobs} transactions={transactions} transactionType={transactionType} setTransactionType={setTransactionType} newTransaction={newTransaction} setNewTransaction={setNewTransaction} handleAddTransaction={handleAddTransaction} personnelList={personnelList} handleEditJob={handleEditJob} db={db} appId={appId} />}
             {activeTab === 'reporting' && showFinance && <ReportingView jobs={jobs} personnelList={personnelList} />}
             {activeTab === 'advancedReporting' && showFinance && <AdvancedReportingView jobs={jobs} />}
@@ -5015,23 +5240,19 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               />
             }
             
-{/* Yetkilendirme Modülleri */}
             {activeTab === 'userList' && showAuth && <UserListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} onDelete={handleDeletePersonnel} positions={positions} ranks={ranks} positionModules={positionModules} />}            {activeTab === 'positions' && showAuth && <PositionsView positions={positions} onAddPosition={handleAddPosition} onDeletePosition={handleDeletePosition} />}
             {activeTab === 'ranks' && showAuth && <RanksView ranks={ranks} onAddRank={handleAddRank} onDeleteRank={handleDeleteRank} />}
             {activeTab === 'permissions' && showAuth && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} />}
             {activeTab === 'moduleAccess' && showAuth && <ModuleAccessView positions={positions} ranks={ranks} positionModules={positionModules} handleUpdatePositionModuleAccess={handleUpdatePositionModuleAccess} />}
             
-            {/* Sistem Dosyaları Modülü */}
             {activeTab === 'backupSystem' && showSystemFiles && <SystemFilesView jobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'systemLogs' && showSystemFiles && <SystemLogsView logs={systemLogs} />}
             {activeTab === 'userActivities' && showSystemFiles && <UserActivitiesView personnelList={personnelList} />}
             {activeTab === 'companyPasswords' && showSystemFiles && <CompanyPasswordsView passwords={companyPasswords} db={db} appId={appId} addSystemLog={addSystemLog} />}
-            {/* YENİ: Uygulama Ayarları (Logo Değiştir) */}
             {activeTab === 'appSettings' && showSystemFiles && <AppSettingsView db={db} appId={appId} addSystemLog={addSystemLog} appBranding={appBranding} />}
           </div>
         </main>
 
-        {/* İPTAL ONAY MODALI */}
         {cancelJobId && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center animate-in zoom-in-95 shadow-2xl">
@@ -5046,7 +5267,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* KALICI SİLME ONAY MODALI */}
         {deleteJobId && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center animate-in zoom-in-95 shadow-2xl">
@@ -5061,7 +5281,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* TARİH DEĞİŞTİRME MODALI */}
         {showChangeDateModal && jobToChangeDate && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center animate-in zoom-in-95 shadow-2xl">
@@ -5087,7 +5306,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* HASAR BİLDİRİMİ ONAY MODALI */}
         {markDamageJobId && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center animate-in zoom-in-95 shadow-2xl">
@@ -5102,7 +5320,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* İŞ ATAMA MODALI */}
         {showAssignModal && jobToAssign && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[95vh] flex flex-col">
@@ -5176,7 +5393,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
                   {assigneeId && jobToAssign.type === 'Asansör' && (
                     <div className="animate-in fade-in slide-in-from-top-2 border-t border-neutral-100 pt-4 mb-2 space-y-4">
-                      {/* Hangi Araçla İşe Gidecek */}
                       <div>
                         <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
                           <Truck className="w-4 h-4 text-red-600" /> Hangi Araçla İşe Gidecek?
@@ -5189,7 +5405,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         </select>
                       </div>
 
-                      {/* Hangi Araca Asansör Kuracak */}
                       <div>
                         <div className="flex justify-between items-center mb-2">
                           <label className="block text-sm font-bold text-black flex items-center gap-2">
@@ -5211,7 +5426,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         )}
                       </div>
 
-                      {/* Saat Kaçta İşe Gidecek */}
                       <div>
                         <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
                           <Clock className="w-4 h-4 text-red-600" /> Saat Kaçta İşe Gidecek?
@@ -5418,7 +5632,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* GENEL YAPAY ZEKA MODALI (MESAJ / MALZEME TAHMİNİ / ÖZET) */}
         {aiModal.isOpen && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
@@ -5453,7 +5666,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* GÖRSEL ÖNİZLEME MODALI */}
         {viewingImage && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
             <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95">
@@ -5491,7 +5703,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* Görev Ekleme Modalı */}
         {showTaskModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
@@ -5535,7 +5746,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* Görev Düzenleme Modalı (Kanban Panosu İçin) */}
         {editingTask && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
@@ -5579,7 +5789,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* İŞ SONLANDIRMA MODALI (TESLİM KODU ONAYI İLE) */}
         {showEndJobModal && jobToEnd && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[95vh] flex flex-col">
@@ -5849,7 +6058,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* PUAN ONAYLAMA VE YORUM EKLEME MODALI */}
         {showApproveModal && jobToApprove && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[95vh]">
@@ -5869,7 +6077,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {/* Sol Taraf: Puanlar */}
                       <div className="space-y-4">
                         <div>
                           <label className="block text-xs font-bold text-black mb-1.5">Ekip Puan Girişi</label>
@@ -5928,7 +6135,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         </div>
                       </div>
 
-                      {/* Sağ Taraf: Resim */}
                       <div className="flex flex-col h-full">
                         <label className="block text-xs font-bold text-black mb-1.5 flex items-center gap-1.5">
                           <Camera className="w-3.5 h-3.5 text-neutral-500" /> Müşteri Yorumu Görseli
@@ -5967,7 +6173,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* MESAİ ONAY MODALI */}
         {showMesaiModal && jobForMesai && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
@@ -6031,7 +6236,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* HASAR ÇÖZÜM MODALI */}
         {resolveDamageModal.isOpen && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
@@ -6055,7 +6259,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {/* İLETİŞİM NUMARASI EKLEME MODALI */}
         {showContactModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
