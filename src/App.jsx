@@ -6,9 +6,12 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
 import { AddJobView, CustomerListView, CustomerProfileView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView } from './Finans.jsx';
-  // YENİ: DashboardView — Mavi Yaka için Aylık Puan, pozisyona/rütbeye göre günlük motivasyon,
-  // bugün/dün mesai ve yorum durumu, Duyuru/Paylaşım/En İyiler, Alınan Yorumlar ve
-  // Takım Çalışması & Destek Panosu eklendi.
+  // ============================================================================
+  // GÜNCELLENMİŞ DashboardView — Kendi App.jsx dosyanızdaki eski DashboardView
+  // bileşeninin TAMAMININ yerine bunu koyun. Diğer hiçbir dosyaya/bileşene
+  // dokunmanıza gerek yok. db ve appId zaten './shared.jsx' üzerinden modül
+  // seviyesinde import edildiği için ekstra prop göndermenize gerek kalmadı.
+  // ============================================================================
   const DashboardView = ({ jobs, allJobs, personnelList, currentUser, setViewingImage, transactions }) => {
     const [filterPeriod, setFilterPeriod] = useState('today');
     const [viewingDashboardJob, setViewingDashboardJob] = useState(null);
@@ -509,6 +512,9 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           </div>
         )}
 
+        {/* YENİ: İş İstatistikleri, Kayıt İstatistiği ve Son Kaydedilen İşler — sadece Beyaz Yaka'da gösterilir */}
+        {!isMaviYaka && (
+        <>
         <div className="flex justify-between items-end">
           <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">İş İstatistikleri</h3>
           <select value={filterPeriod} onChange={(e) => setFilterPeriod(e.target.value)} className="px-3 py-1.5 text-sm font-bold bg-white border border-neutral-200 rounded-xl outline-none focus:ring-2 focus:ring-red-600 transition shadow-sm cursor-pointer">
@@ -618,6 +624,8 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
             {jobs.length === 0 && <p className="text-center text-neutral-400 text-xs py-4">Kayıtlı operasyon yok.</p>}
           </div>
         </div>
+        </>
+        )}
 
         {viewingDashboardJob && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4" onClick={() => setViewingDashboardJob(null)}>
@@ -644,7 +652,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           </div>
         )}
 
-        {isAdmin && (
+        {isAdmin && !isMaviYaka && (
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-64 flex flex-col">
             <h3 className="text-sm font-bold text-black mb-3 flex items-center gap-2 border-b border-neutral-100 pb-2"><Briefcase className="w-4 h-4 text-red-600" /> Yeni Gelen Kayıt Olan Personel</h3>
             <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2">
@@ -2383,10 +2391,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       unsubs.push(onSnapshot(getCol('personnelList'), async snap => {
         const list = snap.docs.map(d => ({...d.data(), id: d.id})); 
         setPersonnelList(list);
-        if (snap.empty) {
-          await addDoc(getCol('personnelList'), {
-            fullName: 'Sistem Yöneticisi', email: 'admin', password: 'admin', position: 'Firma Sahibi', rank: 'Müdür', employmentStatus: 'Aktif', permissions: { canView: true, canEdit: true }
-          });
+
+        // YENİ: Varsayılan "admin / admin" (Sistem Yöneticisi) hesabı artık hiç oluşturulmaz.
+        // Sistemde hâlâ eski "admin/admin" hesabı varsa (email==='admin' && password==='admin'),
+        // güvenlik amacıyla otomatik olarak kalıcı şekilde silinir.
+        const legacyAdminDocs = snap.docs.filter(d => {
+          const data = d.data();
+          return data.email === 'admin' && data.password === 'admin';
+        });
+        for (const legacyDoc of legacyAdminDocs) {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', legacyDoc.id));
         }
 
         setDataLoadStatus(p => ({...p, pers: true}));
