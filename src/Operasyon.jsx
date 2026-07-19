@@ -1412,6 +1412,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                       {job.price && (
                         <div className="text-right shrink-0 leading-none">
                           <span className="block text-sm font-black text-green-600">₺{parseInt(job.price).toLocaleString('tr-TR')}</span>
+                          {/* YENİ: Kapora girilmişse Takvim kartında da gösterilsin */}
+                          {job.deposit && (
+                            <span className="block text-[10px] font-bold text-green-500 mt-1">Kapora: ₺{parseInt(job.deposit).toLocaleString('tr-TR')}</span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -4540,6 +4544,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     // (Yemek/Yol iadesi, İcra, çalışılan gün, kalan banka/nakit tablosu + onay + imzalı belge)
     const [showSettlementModal, setShowSettlementModal] = useState(false); // hesap dökümü tablosu penceresi
     const [settlementData, setSettlementData] = useState(null); // hesaplanan döküm
+    // YENİ: Ayrılan personelin çıkış anındaki hakediş/maaş dökümünü SALT-OKUNUR gösteren pencere
+    const [showExitSettlementView, setShowExitSettlementView] = useState(false);
     const [settlementConfirm, setSettlementConfirm] = useState({ nakitVerildi: false, bankaVerildi: false, belgeUrl: '' });
     const [settlementUploading, setSettlementUploading] = useState(false);
 
@@ -5227,6 +5233,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const financeYolTutar = parseFloat(financeMonthRow.yolOdenenTutar) || 0;
     const financeToplamOdenenTutar = financeMaasOdenenTutar + (financeMonthRow.yolOdendi ? financeYolTutar : 0) + (financeMonthRow.yemekOdendi ? financeYemekTutar : 0) + (financePrimOdendi ? financePrimTutar : 0);
 
+    // YENİ: Personelin tanımlı maaşı ve o aya ait KALAN NAKİT hesabı (Maaş Tablosu ile aynı mantık).
+    // Kalan Nakit = Hak edilen net maaş − bankadan ödenen kısım − nakit avans + mesai ücreti
+    const financeTanimliMaas = parseFloat(person.maas) || 0;                 // Personelin tanımlı aylık maaşı
+    const financeBankaParasi = parseFloat(person.bankaParasi) || 0;          // Sabit banka ödemesi tutarı
+    const financeRaporGunSayisi = financePersonMesai.filter(m => m.code === 'R').length;      // Raporlu gün
+    const financeUcretsizGunSayisi = financePersonMesai.filter(m => ['Üİ', 'İB'].includes(m.code)).length; // Ücretsiz izin / işi bıraktı
+    // Çalışılan (ödenecek) gün sayısı: 30 günden rapor + devamsızlık + ücretsiz izin düşülür
+    const financeMesaiGunSayisi = Math.max(0, 30 - financeRaporGunSayisi - financeDevamsizGunSayisi - financeUcretsizGunSayisi);
+    const financeNetMaas = (financeTanimliMaas / 30) * financeMesaiGunSayisi;         // Hak edilen net maaş
+    const financeHesaplananBanka = (financeBankaParasi / 30) * financeMesaiGunSayisi; // Bankadan ödenen kısım
+    const financeNakitAvansTutar = parseFloat(financeMonthRow.nakitAvans) || 0;       // Bu ay çekilen nakit avans
+    const financeKalanNakit = financeNetMaas - financeHesaplananBanka - financeNakitAvansTutar + financeMesaiTutar;
+
     // YENİ: Personelin ne zamandır çalıştığını gösteren kıdem metni (örn. "9 aydır", "1 sene 3 aydır")
     const getTenureText = (startDateStr) => {
       if (!startDateStr) return null;
@@ -5584,7 +5603,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <p className="text-xs text-neutral-300 mt-1">Tarih: <b className="text-white">{person.resignationDate}</b></p>
                 <p className="text-xs text-neutral-300 mt-0.5">Neden: <b className="text-white">{person.resignationReason || 'Belirtilmedi'}</b></p>
                 {person.cikisOnaylandi ? (
-                  <p className="mt-2 text-[11px] font-bold text-green-300 bg-green-900/40 border border-green-700 rounded-lg px-2 py-1.5 inline-block">✓ Tüm maaş ödemesi ve sözleşmeler imzalandı. Çıkış tamamlandı.</p>
+                  <div className="mt-2 flex flex-col gap-2">
+                    <p className="text-[11px] font-bold text-green-300 bg-green-900/40 border border-green-700 rounded-lg px-2 py-1.5 inline-block w-fit">✓ Tüm maaş ödemesi ve sözleşmeler imzalandı. Çıkış tamamlandı.</p>
+                    {/* YENİ: Çıkış anındaki hakediş/maaş dökümünü salt-okunur görüntüle */}
+                    {person.cikisHesapDetay && (
+                      <button type="button" onClick={() => setShowExitSettlementView(true)} className="px-3 py-2 bg-white text-neutral-900 text-xs font-black rounded-lg hover:bg-neutral-100 transition flex items-center gap-1.5 w-fit">
+                        <Wallet className="w-3.5 h-3.5" /> Ayrılırken Hakedişini Gör
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <button type="button" onClick={() => computeSettlement(person.resignationDate)} className="mt-2 px-3 py-2 bg-white text-neutral-900 text-xs font-black rounded-lg hover:bg-neutral-100 transition flex items-center gap-1.5">
                     <Wallet className="w-3.5 h-3.5" /> Çıkış Hesap Dökümünü Aç / Tamamla
@@ -5688,12 +5715,78 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <span className="block font-black text-sm leading-snug">{financeMesaiSaat.toFixed(1)} Saat (₺{financeMesaiTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})})</span>
               </div>
             </div>
+            {/* YENİ: Personelin tanımlı maaşı */}
+            <div className="p-4 rounded-xl border-2 bg-neutral-50 border-neutral-200 text-neutral-700 flex items-center gap-3">
+              <Wallet className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Maaş</span>
+                <span className="block font-black text-sm leading-snug">₺{financeTanimliMaas.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
+              </div>
+            </div>
+            {/* YENİ: O aya ait kalan nakit (nakit olarak ödenecek tutar) */}
+            <div className="p-4 rounded-xl border-2 bg-orange-50 border-orange-200 text-orange-700 flex items-center gap-3">
+              <DollarSign className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Kalan Nakit ({financeMonthLabel})</span>
+                <span className="block font-black text-sm leading-snug">₺{financeKalanNakit.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
+              </div>
+            </div>
           </div>
           <div className="mt-3 pt-3 border-t border-neutral-100 flex justify-between items-center">
             <span className="text-sm font-bold text-neutral-500">Toplam Ödenen ({financeMonthLabel})</span>
             <span className="text-lg font-black text-black">₺{financeToplamOdenenTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
           </div>
         </div>
+        {/* Dönem Filtresi ve Özet */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><BarChart className="w-6 h-6 text-blue-600" /> Performans Özeti</h3>
+            <div className="flex bg-neutral-100 p-1 rounded-xl flex-wrap">
+              {[{ k: 'week', l: 'Bu Hafta' }, { k: 'month', l: 'Bu Ay' }, { k: 'lastMonth', l: 'Geçen Ay' }, { k: 'year', l: 'Bu Sene' }, { k: 'all', l: 'Tüm Zamanlar' }].map(opt => (
+                <button key={opt.k} type="button" onClick={() => setPeriodFilter(opt.k)} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition ${periodFilter === opt.k ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+                  {opt.l}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
+              <span className="text-3xl font-black text-black block">{periodJobsCount}</span>
+              <span className="text-xs font-bold text-neutral-500">Yapılan İş</span>
+            </div>
+            <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-center">
+              <span className="text-3xl font-black text-yellow-600 block">{periodReviewsCount}</span>
+              <span className="text-xs font-bold text-yellow-700">Alınan Yorum</span>
+            </div>
+            {/* YENİ: Ekibine hasar kaydı yazılmış iş sayısı */}
+            <div className="bg-red-50 p-4 rounded-xl border border-red-200 text-center col-span-2 md:col-span-1">
+              <span className="text-3xl font-black text-red-600 block">{periodDamagesCount}</span>
+              <span className="text-xs font-bold text-red-700">Hasarlı İş</span>
+            </div>
+            {/* YENİ: Mesai/puantaj tabanlı sayaçlar */}
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-center">
+              <span className="text-3xl font-black text-blue-600 block">{periodFazlaMesaiSayisi}</span>
+              <span className="text-xs font-bold text-blue-700">Fazla Mesai</span>
+            </div>
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
+              <span className="text-3xl font-black text-neutral-600 block">{periodDevamsizlikSayisi}</span>
+              <span className="text-xs font-bold text-neutral-500">Devamsızlık</span>
+            </div>
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
+              <span className="text-3xl font-black text-neutral-600 block">{periodRaporGunSayisi}</span>
+              <span className="text-xs font-bold text-neutral-500">Raporlu Gün</span>
+            </div>
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
+              <span className="text-3xl font-black text-neutral-600 block">{periodUcretliIzinSayisi}</span>
+              <span className="text-xs font-bold text-neutral-500">Ücretli İzin</span>
+            </div>
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
+              <span className="text-3xl font-black text-neutral-600 block">{periodUcretsizIzinSayisi}</span>
+              <span className="text-xs font-bold text-neutral-500">Ücretsiz İzin</span>
+            </div>
+          </div>
+        </div>
+
 
         {/* YENİ: Personel Hareket İşlemleri (geçmiş) */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
@@ -5878,56 +5971,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
           )}
         </div>
 
-        {/* Dönem Filtresi ve Özet */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
-            <h3 className="font-bold text-lg text-black flex items-center gap-2"><BarChart className="w-6 h-6 text-blue-600" /> Performans Özeti</h3>
-            <div className="flex bg-neutral-100 p-1 rounded-xl flex-wrap">
-              {[{ k: 'week', l: 'Bu Hafta' }, { k: 'month', l: 'Bu Ay' }, { k: 'lastMonth', l: 'Geçen Ay' }, { k: 'year', l: 'Bu Sene' }, { k: 'all', l: 'Tüm Zamanlar' }].map(opt => (
-                <button key={opt.k} type="button" onClick={() => setPeriodFilter(opt.k)} className={`px-3 py-1.5 text-xs font-bold rounded-lg transition ${periodFilter === opt.k ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
-                  {opt.l}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
-              <span className="text-3xl font-black text-black block">{periodJobsCount}</span>
-              <span className="text-xs font-bold text-neutral-500">Yapılan İş</span>
-            </div>
-            <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-center">
-              <span className="text-3xl font-black text-yellow-600 block">{periodReviewsCount}</span>
-              <span className="text-xs font-bold text-yellow-700">Alınan Yorum</span>
-            </div>
-            {/* YENİ: Ekibine hasar kaydı yazılmış iş sayısı */}
-            <div className="bg-red-50 p-4 rounded-xl border border-red-200 text-center col-span-2 md:col-span-1">
-              <span className="text-3xl font-black text-red-600 block">{periodDamagesCount}</span>
-              <span className="text-xs font-bold text-red-700">Hasarlı İş</span>
-            </div>
-            {/* YENİ: Mesai/puantaj tabanlı sayaçlar */}
-            <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-center">
-              <span className="text-3xl font-black text-blue-600 block">{periodFazlaMesaiSayisi}</span>
-              <span className="text-xs font-bold text-blue-700">Fazla Mesai</span>
-            </div>
-            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
-              <span className="text-3xl font-black text-neutral-600 block">{periodDevamsizlikSayisi}</span>
-              <span className="text-xs font-bold text-neutral-500">Devamsızlık</span>
-            </div>
-            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
-              <span className="text-3xl font-black text-neutral-600 block">{periodRaporGunSayisi}</span>
-              <span className="text-xs font-bold text-neutral-500">Raporlu Gün</span>
-            </div>
-            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
-              <span className="text-3xl font-black text-neutral-600 block">{periodUcretliIzinSayisi}</span>
-              <span className="text-xs font-bold text-neutral-500">Ücretli İzin</span>
-            </div>
-            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
-              <span className="text-3xl font-black text-neutral-600 block">{periodUcretsizIzinSayisi}</span>
-              <span className="text-xs font-bold text-neutral-500">Ücretsiz İzin</span>
-            </div>
-          </div>
-        </div>
-
         {/* Özellikler / Yetenek Kartı — sadece uygun mavi yaka personelde gösterilir */}
         {showSkillsSection && (
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
@@ -6076,9 +6119,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
           <h3 className="font-bold text-lg text-black mb-3 flex items-center gap-2"><FolderOpen className="w-6 h-6 text-red-600" /> Özlük Dosyaları</h3>
           <p className="text-sm text-neutral-500 mb-3">Bu personele ait kimlik, ehliyet, sözleşme gibi belgeleri Özlük Dosyaları modülünden görüntüleyip yükleyebilirsiniz.</p>
-          <span className="inline-flex items-center gap-1.5 px-3 py-2 bg-neutral-100 text-neutral-600 text-xs font-bold rounded-lg">
-            <FolderOpen className="w-3.5 h-3.5" /> {Object.keys(person.ozlukDosyalari || {}).length} belge yüklü
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 px-3 py-2 bg-neutral-100 text-neutral-600 text-xs font-bold rounded-lg">
+              <FolderOpen className="w-3.5 h-3.5" /> {Object.keys(person.ozlukDosyalari || {}).length} belge yüklü
+            </span>
+            {/* YENİ: Özlük Dosyaları modülüne yönlendiren buton */}
+            {setActiveTab && (
+              <button
+                type="button"
+                onClick={() => setActiveTab('ozlukDosyalari')}
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg transition shadow-sm"
+              >
+                <FolderOpen className="w-3.5 h-3.5" /> Özlük Dosyalarına Git
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Kıyafet Ekleme Modalı */}
@@ -6346,6 +6401,77 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             </div>
           </div>
         )}
+
+        {/* YENİ: AYRILIŞ HAKEDİŞ DÖKÜMÜ (SALT-OKUNUR) — çıkış anında kaydedilen hesap detayını gösterir */}
+        {showExitSettlementView && person.cikisHesapDetay && (() => {
+          const sd = person.cikisHesapDetay; // Çıkış anındaki kayıtlı hesap dökümü
+          return (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-start md:items-center p-4 overflow-y-auto">
+              <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 my-4">
+                <div className="bg-gradient-to-r from-neutral-900 to-neutral-700 text-white p-4 flex justify-between items-center sticky top-0 z-10">
+                  <h3 className="font-bold text-lg flex items-center gap-2"><Wallet className="w-5 h-5 text-green-400" /> Ayrılış Hakediş Dökümü</h3>
+                  <button onClick={() => setShowExitSettlementView(false)} className="text-neutral-300 hover:text-white transition"><X className="w-6 h-6" /></button>
+                </div>
+                <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+                  {/* Personel & çıkış tarihi */}
+                  <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-sm">
+                    <p className="font-black text-black">{person.fullName}</p>
+                    <p className="text-neutral-500 text-xs mt-0.5">{person.position || person.rank || '-'} • Çıkış Tarihi: <span className="font-bold text-black">{sd.dateStr}</span></p>
+                  </div>
+
+                  {/* Hesap detay tablosu (salt-okunur) */}
+                  <div className="border border-neutral-200 rounded-xl overflow-hidden">
+                    <div className="bg-neutral-800 text-white px-3 py-2 text-xs font-black uppercase tracking-wide">Hesap Detayı</div>
+                    <table className="w-full text-sm">
+                      <tbody className="divide-y divide-neutral-100">
+                        <tr><td className="p-2.5 text-neutral-600">Bu Ay Çalışılan Gün</td><td className="p-2.5 text-right font-bold text-black">{sd.calışılanGun} / {sd.daysInMonth} gün</td></tr>
+                        <tr><td className="p-2.5 text-neutral-600">Çalışılmayan Gün (İade Bazı)</td><td className="p-2.5 text-right font-bold text-black">{sd.calışılmayanGun} gün</td></tr>
+                        {(sd.devamsizGun > 0 || sd.raporGun > 0 || sd.ucretsizIzinGun > 0 || sd.fazlaGunSayisi > 0) && (
+                          <>
+                            <tr className="bg-neutral-50"><td className="p-2.5 text-neutral-500 text-xs">Devamsız / Raporlu / Ücretsiz İzin Günü</td><td className="p-2.5 text-right text-xs text-neutral-500">{sd.devamsizGun} / {sd.raporGun} / {sd.ucretsizIzinGun} gün</td></tr>
+                            <tr className="bg-neutral-50"><td className="p-2.5 text-neutral-500 text-xs">Fazla Mesai / Gün Sayısı</td><td className="p-2.5 text-right text-xs text-neutral-500">{sd.fazlaGunSayisi} gün</td></tr>
+                          </>
+                        )}
+                        <tr><td className="p-2.5 text-neutral-600">Ödenecek Gün (Puantaj Kırılımlı)</td><td className="p-2.5 text-right font-bold text-black">{sd.odenecekGun} gün</td></tr>
+                        {sd.fazlaMesaiUcreti !== 0 && (
+                          <tr className={sd.fazlaMesaiUcreti > 0 ? 'bg-green-50' : 'bg-red-50'}>
+                            <td className={`p-2.5 ${sd.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>Fazla Mesai / Devamsızlık Ücret Etkisi</td>
+                            <td className={`p-2.5 text-right font-bold ${sd.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>{sd.fazlaMesaiUcreti > 0 ? '+' : ''}₺{sd.fazlaMesaiUcreti.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td>
+                          </tr>
+                        )}
+                        <tr><td className="p-2.5 text-neutral-600">Hak Edilen Net Maaş</td><td className="p-2.5 text-right font-bold text-black">₺{sd.netMaas.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                        <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yemek Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− ₺{sd.yemekIade.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                        <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yol Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− ₺{sd.yolIade.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                        {sd.icraKesintisi > 0 && (
+                          <tr className="bg-orange-50"><td className="p-2.5 text-orange-700">İcra Kesintisi</td><td className="p-2.5 text-right font-bold text-orange-700">₺{sd.icraKesintisi.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                        )}
+                        <tr><td className="p-2.5 text-neutral-500 text-xs">İadenin Nakitten Düşülen Kısmı</td><td className="p-2.5 text-right text-xs text-neutral-500">₺{sd.nakittenDusulen.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                        <tr><td className="p-2.5 text-neutral-500 text-xs">İadenin Bankadan Düşülen Kısmı</td><td className="p-2.5 text-right text-xs text-neutral-500">₺{sd.bankadanDusulen.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Final tutarlar */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-3 text-center">
+                      <p className="text-[10px] font-black uppercase text-yellow-700 mb-1">Kalan Banka Parası</p>
+                      <p className="text-xl font-black text-yellow-800">₺{sd.finalKalanBanka.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</p>
+                    </div>
+                    <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-3 text-center">
+                      <p className="text-[10px] font-black uppercase text-orange-700 mb-1">Kalan Nakit Parası</p>
+                      <p className="text-xl font-black text-orange-800">₺{sd.finalKalanNakit.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</p>
+                    </div>
+                  </div>
+
+                  {/* Bilgi notu: bu döküm çıkış anında dondurulmuştur */}
+                  <p className="text-center text-[11px] font-bold text-green-700 bg-green-50 border border-green-200 rounded-xl p-2">✓ Bu döküm, personelin işten ayrıldığı gün ({sd.dateStr}) hesaplanıp kaydedilmiştir.</p>
+
+                  <button type="button" onClick={() => setShowExitSettlementView(false)} className="w-full py-3 bg-neutral-800 text-white font-bold rounded-xl hover:bg-black transition">Kapat</button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* YENİ: Avans Girişi Modalı */}
         {showAvansModal && (
@@ -7125,6 +7251,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                   <div className="p-3 flex flex-col gap-2 flex-1 bg-neutral-50/30">
                      {job.endJobDetails ? (
                        <div className="text-xs flex flex-col gap-2 bg-white p-2.5 rounded-lg border border-neutral-200 shadow-sm">
+                          {/* YENİ: Ekip şefinin işi sonlandırdığı saat (completedAt varsa gösterilir) */}
+                          {job.completedAt && (
+                            <span className="flex items-center gap-1.5 bg-green-50 text-green-700 border border-green-200 px-2 py-1 rounded-md font-bold w-fit">
+                               <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                               Tamamlandı: {new Date(job.completedAt).toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' })}
+                            </span>
+                          )}
                           <span className="flex items-start gap-1">
                              <span className="font-bold text-neutral-500 w-16 shrink-0">Hasar:</span> 
                              <span className={`font-bold ${job.endJobDetails.damageStatus === 'Hasar var' ? 'text-red-600' : 'text-green-600'}`}>{job.endJobDetails.damageStatus}</span>
@@ -8571,6 +8704,42 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                      </button>
                    </div>
                  )}
+
+                 {/* YENİ: SONLANDIRMA SONRASI 3 SAATLİK DÜZENLEME PENCERESİ (SADECE ASIL GÖREVLİ) */}
+                 {/* İş tamamlandıktan sonra ekip şefi 3 saat içinde unuttuğu/yanlış girdiği bilgileri düzeltebilir. */}
+                 {(() => {
+                    const DUZENLEME_SAAT = 3; // Düzenleme penceresi süresi (saat)
+                    if (!(job.status === 'completed' && isMainAssignee)) return null;
+                    // completedAt yoksa (eski kayıtlar) pencere doğrulanamaz, buton gösterilmez.
+                    const completedAt = job.completedAt ? new Date(job.completedAt) : null;
+                    if (!completedAt || isNaN(completedAt.getTime())) return null;
+                    const gecenSaat = (Date.now() - completedAt.getTime()) / 3600000; // ms -> saat
+                    if (gecenSaat > DUZENLEME_SAAT) return null; // Süre dolduysa düzenlenemez
+                    const kalanSaat = Math.max(0, Math.ceil(DUZENLEME_SAAT - gecenSaat));
+
+                    // Kasa/İş fotoğrafı eklenmiş mi? ('Yükleniyor...' geçici değerini saymıyoruz.)
+                    const kasaFotoVar = (job.endJobDetails?.truckImages || []).filter(img => img && img !== 'Yükleniyor...').length > 0;
+
+                    return (
+                      <div className="mt-4 flex flex-col gap-2 border-t border-neutral-100 pt-4">
+                        {/* Kasa/İş fotoğrafı eksikse uyarı bildirimi */}
+                        {!kasaFotoVar && (
+                          <div className="flex items-start gap-2 bg-amber-50 border border-amber-300 text-amber-800 p-3 rounded-xl text-sm font-medium">
+                            <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600" />
+                            <span>Bu işe <b>Kasa / İş fotoğrafı</b> eklemeyi unutmuşsunuz. Süre dolmadan aşağıdaki butondan düzenleyip fotoğrafı ekleyebilirsiniz.</span>
+                          </div>
+                        )}
+                        {/* Kalan süre bilgisi */}
+                        <div className="text-[11px] font-bold text-neutral-500 text-center">
+                          Sonlandırmayı düzenlemek için kalan süre: ~{kalanSaat} saat
+                        </div>
+                        {/* Düzenleme butonu — sonlandırma modalını mevcut bilgilerle açar */}
+                        <button onClick={() => handleOpenEndJobModal(job)} className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-black rounded-xl transition flex justify-center items-center gap-2 shadow-md text-sm">
+                          <Edit className="w-5 h-5" /> Sonlandırmayı Düzenle (3 saat içinde)
+                        </button>
+                      </div>
+                    );
+                 })()}
               </div>
            )})}
         </div>
