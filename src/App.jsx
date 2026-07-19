@@ -3520,7 +3520,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       setEndJobError('');
       setEndJobData({ 
         paymentMethod: 'Nakit', damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '',
-        elevatorSetup: 'Evet', elevatorSetupReason: '', elevatorImages: [], elevatorIssue: 'Hayır', elevatorIssueReason: '', vehicleIssue: 'Hayır', vehicleIssueReason: ''
+        elevatorSetup: 'Evet', elevatorSetupReason: '', elevatorImages: [], elevatorIssue: 'Hayır', elevatorIssueReason: '', vehicleIssue: 'Hayır', vehicleIssueReason: '',
+        // YENİ: İş zaten sonlandırılmışsa (düzenleme modu) önceki sonlandırma bilgilerini forma doldur.
+        // Yeni/devam eden işlerde job.endJobDetails boş olduğu için varsayılanlar aynen kalır.
+        ...(job.endJobDetails || {})
       });
       setShowEndJobModal(true);
     };
@@ -3620,7 +3623,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         }
       }
 
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobToEnd.id), { status: 'completed', endJobDetails: endJobData, materialsDeducted: true });
+      // YENİ: İlk tamamlanma zamanını kaydediyoruz. 3 saatlik düzenleme penceresi bu zamandan
+      // itibaren ölçülür. Sonradan düzenleyip tekrar kaydedildiğinde eski zaman korunur (süre uzamaz).
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobToEnd.id), { status: 'completed', endJobDetails: endJobData, materialsDeducted: true, completedAt: jobToEnd.completedAt || new Date().toISOString() });
       setShowEndJobModal(false); 
       setJobToEnd(null);
     };
@@ -3918,6 +3923,22 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 type="text"
                 value={globalSearchQuery}
                 onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                // YENİ: Enter'a basınca, girilen metinle eşleşen ilk aracın profiline direkt git
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter' || !showGlobalSearchVehicle) return;
+                  // Arama metnini normalize et (küçük harf + boşlukları kaldır)
+                  const norm = (s) => (s || '').toString().toLocaleLowerCase('tr-TR').replace(/\s+/g, '');
+                  const q = norm(globalSearchQuery);
+                  if (!q) return;
+                  // Önce tam plaka eşleşmesi ara, yoksa plakası aramayı içeren ilk aracı al
+                  const match = vehicles.find(v => norm(v.plate) === q) || vehicles.find(v => norm(v.plate).includes(q));
+                  if (match) {
+                    setViewingVehicleProfileId(match.id);
+                    setActiveTab('vehicleProfile');
+                    setGlobalSearchQuery('');
+                    setIsSidebarOpen(false);
+                  }
+                }}
                 placeholder="Araç, personel, müşteri ara..."
                 className="w-full pl-9 pr-8 py-2 bg-white text-black border-2 border-red-500 ring-2 ring-red-500/30 rounded-xl text-xs font-medium focus:outline-none focus:ring-2 focus:ring-red-600 transition"
               />
@@ -4658,6 +4679,21 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     type="text"
                     value={globalSearchQuery}
                     onChange={(e) => setGlobalSearchQuery(e.target.value)}
+                    // YENİ: Enter'a basınca, girilen metinle eşleşen ilk aracın profiline direkt git
+                    onKeyDown={(e) => {
+                      if (e.key !== 'Enter' || !showGlobalSearchVehicle) return;
+                      // Arama metnini normalize et (küçük harf + boşlukları kaldır)
+                      const norm = (s) => (s || '').toString().toLocaleLowerCase('tr-TR').replace(/\s+/g, '');
+                      const q = norm(globalSearchQuery);
+                      if (!q) return;
+                      // Önce tam plaka eşleşmesi ara, yoksa plakası aramayı içeren ilk aracı al
+                      const match = vehicles.find(v => norm(v.plate) === q) || vehicles.find(v => norm(v.plate).includes(q));
+                      if (match) {
+                        setViewingVehicleProfileId(match.id);
+                        setActiveTab('vehicleProfile');
+                        setGlobalSearchQuery('');
+                      }
+                    }}
                     placeholder="Araç plakası, personel adı veya müşteri adı/telefon numarası ara..."
                     className="w-full pl-12 pr-4 py-3.5 bg-white text-black border-2 border-red-500 ring-4 ring-red-100 rounded-2xl text-sm font-medium focus:outline-none focus:ring-2 focus:ring-red-600 transition shadow-sm"
                   />
