@@ -1926,6 +1926,29 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                                    <span className={`text-[9px] font-black text-center px-1.5 py-0.5 rounded text-white ${badgeBg}`}>
                                       {badgeText}
                                    </span>
+                                   {/* YENİ: WhatsApp ile izin bildirme butonu (sadece gerçek izin türlerinde ve telefon varsa) */}
+                                   {['Hİ', 'Yİ', 'Bİ', 'Üİ'].includes(st) && (p.personalPhone || p.companyPhone) && (
+                                     <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          // Telefonu WhatsApp formatına çevir (başındaki 0 -> 90)
+                                          let phone = (p.personalPhone || p.companyPhone || '').replace(/\D/g, '');
+                                          if (!phone) { alert('Bu personelin telefon numarası kayıtlı değil.'); return; }
+                                          if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+                                          else if (!phone.startsWith('90')) phone = '90' + phone;
+                                          // İzin gününü ve türünü mesaja yerleştir
+                                          const aylar = ["Ocak","Şubat","Mart","Nisan","Mayıs","Haziran","Temmuz","Ağustos","Eylül","Ekim","Kasım","Aralık"];
+                                          const gun = `${wd.dayNum} ${aylar[wd.monthNum - 1]} ${wd.dayName}`;
+                                          const izinAdi = st === 'Üİ' ? 'ücretsiz izinli' : st === 'Yİ' ? 'yıllık izinli' : st === 'Bİ' ? 'bayram izinli' : 'izinli';
+                                          const msg = `Merhaba *${p.fullName}* 👋\n\n*Sembol Nakliyat* ailesi olarak bilgilendirmek isteriz: *${gun}* günü *${izinAdi}siniz*. 🌿\nBu tarihte işe gelmenize gerek yoktur, keyifli ve dinlendirici bir gün geçirmenizi dileriz.\n\nHerhangi bir sorunuz olursa bu numaradan bize ulaşabilirsiniz. İyi günler! 🤝`;
+                                          window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+                                        }}
+                                        title="WhatsApp'tan izin mesajı gönder"
+                                        className="flex items-center justify-center gap-1 text-[9px] font-black text-white bg-[#25D366] hover:bg-[#128C7E] px-1.5 py-1 rounded transition"
+                                     >
+                                        <MessageCircle className="w-3 h-3" /> İzni Bildir
+                                     </button>
+                                   )}
                                    <button 
                                       onClick={() => handleRemoveLeave(p.id, wd)}
                                       className="absolute top-1 right-1 p-0.5 bg-white rounded-md text-red-500 opacity-0 group-hover:opacity-100 transition shadow-sm border border-neutral-200 hover:bg-red-50"
@@ -4552,6 +4575,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     // YENİ: Personel Hareket İşlemleri (Avans, Maaş/Yol/Yemek Onayı, Tutanak, Rapor)
     const [personnelActions, setPersonnelActions] = useState([]);
     const nowMonth = new Date().toISOString().split('T')[0].substring(0, 7); // YYYY-MM
+    // YENİ: Hareket akışı için aylık filtre ve "tümünü gör" durumu
+    const [hareketMonth, setHareketMonth] = useState(nowMonth);
+    const [showAllHareket, setShowAllHareket] = useState(false);
     const [showAvansModal, setShowAvansModal] = useState(false);
     const [avansForm, setAvansForm] = useState({ type: 'nakit', amount: '', month: nowMonth, note: '' });
     // YENİ: Maaş / Yol / Yemek durumu artık Mavi/Beyaz Maaş Tablosu'ndaki tiklerden otomatik okunur (bildirim mantığı)
@@ -4710,6 +4736,66 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       return true;
     });
     const periodFazlaMesaiSayisi = personMesaiForPeriod.filter(m => ['FG', 'FGM', 'FM'].includes(m.code)).length;
+    // YENİ: Sadece "Fazla Gün" (FG) sayısı
+    const periodFazlaGunSayisi = personMesaiForPeriod.filter(m => m.code === 'FG').length;
+
+    // YENİ: PERSONEL HAREKET AKIŞI — Maaş hareketleri + Mesai/Devamsızlık/İzin + Yorum/Puan kayıtlarını tek listede birleştir.
+    // Aylık filtrelenir (hareketMonth), tarihe göre yeniden eskiye sıralanır, ilk 5 gösterilir (tümünü gör ile hepsi).
+    const mesaiKodEtiket = {
+      FG: { label: 'Fazla Gün', bg: 'bg-indigo-50 border-indigo-200', badge: 'bg-indigo-600', icon: <Clock className="w-4 h-4 text-white" /> },
+      FGM: { label: 'Fazla Gün (Mesai)', bg: 'bg-indigo-50 border-indigo-200', badge: 'bg-indigo-600', icon: <Clock className="w-4 h-4 text-white" /> },
+      FM: { label: 'Fazla Mesai', bg: 'bg-blue-50 border-blue-200', badge: 'bg-blue-600', icon: <Clock className="w-4 h-4 text-white" /> },
+      D: { label: 'Devamsızlık', bg: 'bg-red-50 border-red-200', badge: 'bg-red-600', icon: <Ban className="w-4 h-4 text-white" /> },
+      R: { label: 'Raporlu', bg: 'bg-orange-50 border-orange-200', badge: 'bg-orange-500', icon: <PlusCircle className="w-4 h-4 text-white" /> },
+      'Üİ': { label: 'Ücretsiz İzin', bg: 'bg-neutral-100 border-neutral-300', badge: 'bg-neutral-700', icon: <CalendarDays className="w-4 h-4 text-white" /> },
+      'Yİ': { label: 'Yıllık İzin', bg: 'bg-purple-50 border-purple-200', badge: 'bg-purple-600', icon: <CalendarDays className="w-4 h-4 text-white" /> },
+      'Bİ': { label: 'Bayram İzni', bg: 'bg-pink-50 border-pink-200', badge: 'bg-pink-600', icon: <CalendarDays className="w-4 h-4 text-white" /> },
+      'Hİ': { label: 'Haftalık İzin', bg: 'bg-blue-50 border-blue-200', badge: 'bg-blue-600', icon: <CalendarDays className="w-4 h-4 text-white" /> },
+    };
+    const pad2 = n => String(n).padStart(2, '0');
+    const birlesikHareketler = [
+      // 1) Maaş hareketleri (avans, onay, tutanak, rapor, borç) — silme/görüntüleme düğmeleri korunur
+      ...personnelActions.map(a => {
+        const dstr = a.date || (a.month ? `${a.month}-01` : null);
+        return {
+          key: 'act-' + a.id, kaynak: 'action', raw: a,
+          dateObj: dstr ? new Date(dstr) : null,
+          monthStr: a.month || (a.date ? a.date.substring(0, 7) : ''),
+          dateStr: a.date || (a.month ? `Dönem: ${a.month}` : ''),
+          title: a.title, amount: a.amount, note: a.note, endDate: a.endDate, month: a.month,
+          type: a.type, fileUrl: a.fileUrl,
+        };
+      }),
+      // 2) Mesai / Devamsızlık / İzin kayıtları (allMesaiRecords)
+      ...(allMesaiRecords || []).filter(m => String(m.personId) === String(person.id) && mesaiKodEtiket[m.code]).map(m => {
+        const et = mesaiKodEtiket[m.code];
+        return {
+          key: 'mes-' + (m.id || `${m.year}-${m.month}-${m.day}-${m.code}`), kaynak: 'mesai',
+          dateObj: new Date(m.year, m.month - 1, m.day),
+          monthStr: `${m.year}-${pad2(m.month)}`,
+          dateStr: `${pad2(m.day)}.${pad2(m.month)}.${m.year}`,
+          title: et.label, styleBg: et.bg, styleBadge: et.badge, icon: et.icon,
+        };
+      }),
+      // 3) Yorum / Puan alınan işler (puanı onaylı + yorum görseli olan işler)
+      ...personJobs.filter(j => j.pointsApproved && j.reviewImage && j.date).map(j => ({
+        key: 'yor-' + j.id, kaynak: 'yorum',
+        dateObj: new Date(j.date),
+        monthStr: (j.date || '').substring(0, 7),
+        dateStr: j.date,
+        title: `Yorum / Puan Alındı — ${j.customerName || 'Müşteri'}`,
+      })),
+    ]
+      .filter(h => h.monthStr === hareketMonth)          // Seçili aya göre filtrele
+      .sort((a, b) => (b.dateObj?.getTime() || 0) - (a.dateObj?.getTime() || 0)); // Yeniden eskiye
+
+    const gorunenHareketler = showAllHareket ? birlesikHareketler : birlesikHareketler.slice(0, 5);
+    // Seçili ay etiketi (örn. "Temmuz 2026")
+    const hareketAyEtiketi = (() => {
+      const aylarTR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+      const [hy, hm] = hareketMonth.split('-');
+      return `${aylarTR[parseInt(hm) - 1]} ${hy}`;
+    })();
     const periodRaporGunSayisi = personMesaiForPeriod.filter(m => m.code === 'R').length;
     const periodDevamsizlikSayisi = personMesaiForPeriod.filter(m => m.code === 'D').length;
     const periodUcretsizIzinSayisi = personMesaiForPeriod.filter(m => m.code === 'Üİ').length;
@@ -5245,6 +5331,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const financeHesaplananBanka = (financeBankaParasi / 30) * financeMesaiGunSayisi; // Bankadan ödenen kısım
     const financeNakitAvansTutar = parseFloat(financeMonthRow.nakitAvans) || 0;       // Bu ay çekilen nakit avans
     const financeKalanNakit = financeNetMaas - financeHesaplananBanka - financeNakitAvansTutar + financeMesaiTutar;
+    // YENİ: Bankadan (resmi) çekilen avans ve o aya ait KALAN BANKA parası
+    const financeResmiAvansTutar = parseFloat(financeMonthRow.resmiAvans) || 0;        // Bu ay çekilen banka/resmi avans
+    const financeKalanBanka = financeHesaplananBanka - financeResmiAvansTutar;         // Bankadan ödenecek kalan tutar
 
     // YENİ: Personelin ne zamandır çalıştığını gösteren kıdem metni (örn. "9 aydır", "1 sene 3 aydır")
     const getTenureText = (startDateStr) => {
@@ -5731,6 +5820,30 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <span className="block font-black text-sm leading-snug">₺{financeKalanNakit.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
               </div>
             </div>
+            {/* YENİ: O aya ait kalan banka parası (bankadan ödenecek tutar) */}
+            <div className="p-4 rounded-xl border-2 bg-yellow-50 border-yellow-200 text-yellow-700 flex items-center gap-3">
+              <Landmark className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Kalan Banka ({financeMonthLabel})</span>
+                <span className="block font-black text-sm leading-snug">₺{financeKalanBanka.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
+              </div>
+            </div>
+            {/* YENİ: Bu ay kullanılan nakit avans */}
+            <div className="p-4 rounded-xl border-2 bg-red-50 border-red-200 text-red-700 flex items-center gap-3">
+              <DollarSign className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Kullanılan Nakit Avans ({financeMonthLabel})</span>
+                <span className="block font-black text-sm leading-snug">₺{financeNakitAvansTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
+              </div>
+            </div>
+            {/* YENİ: Bu ay kullanılan banka (resmi) avans */}
+            <div className="p-4 rounded-xl border-2 bg-red-50 border-red-200 text-red-700 flex items-center gap-3">
+              <Landmark className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Kullanılan Banka Avansı ({financeMonthLabel})</span>
+                <span className="block font-black text-sm leading-snug">₺{financeResmiAvansTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
+              </div>
+            </div>
           </div>
           <div className="mt-3 pt-3 border-t border-neutral-100 flex justify-between items-center">
             <span className="text-sm font-bold text-neutral-500">Toplam Ödenen ({financeMonthLabel})</span>
@@ -5768,6 +5881,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <span className="text-3xl font-black text-blue-600 block">{periodFazlaMesaiSayisi}</span>
               <span className="text-xs font-bold text-blue-700">Fazla Mesai</span>
             </div>
+            {/* YENİ: Fazla Gün (FG) sayısı */}
+            <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 text-center">
+              <span className="text-3xl font-black text-indigo-600 block">{periodFazlaGunSayisi}</span>
+              <span className="text-xs font-bold text-indigo-700">Fazla Gün</span>
+            </div>
             <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
               <span className="text-3xl font-black text-neutral-600 block">{periodDevamsizlikSayisi}</span>
               <span className="text-xs font-bold text-neutral-500">Devamsızlık</span>
@@ -5788,50 +5906,100 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         </div>
 
 
-        {/* YENİ: Personel Hareket İşlemleri (geçmiş) */}
+        {/* YENİ: Personel Hareket İşlemleri (Maaş + Mesai + Yorum birleşik akış, aylık filtreli) */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2"><History className="w-6 h-6 text-purple-600" /> Personel Hareket İşlemleri</h3>
-          {personnelActions.length === 0 ? (
-            <p className="text-sm text-neutral-500 italic">Henüz bir hareket kaydı yok.</p>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2"><History className="w-6 h-6 text-purple-600" /> Personel Hareket İşlemleri</h3>
+            {/* Aylık filtre */}
+            <div className="flex items-center gap-2 bg-neutral-100 p-2 rounded-xl border border-neutral-200 w-full md:w-auto">
+              <CalendarDays className="w-4 h-4 text-neutral-500 ml-1" />
+              <input
+                type="month"
+                value={hareketMonth}
+                onChange={e => { setHareketMonth(e.target.value); setShowAllHareket(false); }}
+                className="bg-transparent border-none outline-none font-bold text-black cursor-pointer px-1 text-sm"
+              />
+            </div>
+          </div>
+
+          {gorunenHareketler.length === 0 ? (
+            <p className="text-sm text-neutral-500 italic">{hareketAyEtiketi} için bir hareket kaydı yok.</p>
           ) : (
-            <div className="space-y-2.5">
-              {personnelActions.map(a => {
-                const typeStyles = {
-                  avans: { bg: 'bg-blue-50 border-blue-200', badge: 'bg-blue-600', icon: <DollarSign className="w-4 h-4 text-white" /> },
-                  onay: { bg: 'bg-green-50 border-green-200', badge: 'bg-green-600', icon: <CheckCircle className="w-4 h-4 text-white" /> },
-                  tutanak: { bg: 'bg-neutral-50 border-neutral-200', badge: 'bg-neutral-700', icon: <FileText className="w-4 h-4 text-white" /> },
-                  rapor: { bg: 'bg-red-50 border-red-200', badge: 'bg-red-600', icon: <PlusCircle className="w-4 h-4 text-white" /> },
-                  borcOdeme: { bg: 'bg-rose-50 border-rose-200', badge: 'bg-rose-600', icon: <Landmark className="w-4 h-4 text-white" /> }
-                };
-                const st = typeStyles[a.type] || typeStyles.tutanak;
-                return (
-                  <div key={a.id} className={`border p-3 rounded-xl flex items-center justify-between gap-3 ${st.bg}`}>
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${st.badge}`}>{st.icon}</div>
+            <>
+              <div className="space-y-2.5">
+                {gorunenHareketler.map(h => {
+                  // Maaş hareketleri (avans/onay/tutanak/rapor/borç) — silme/görüntüleme düğmeleri korunur
+                  if (h.kaynak === 'action') {
+                    const typeStyles = {
+                      avans: { bg: 'bg-blue-50 border-blue-200', badge: 'bg-blue-600', icon: <DollarSign className="w-4 h-4 text-white" /> },
+                      onay: { bg: 'bg-green-50 border-green-200', badge: 'bg-green-600', icon: <CheckCircle className="w-4 h-4 text-white" /> },
+                      tutanak: { bg: 'bg-neutral-50 border-neutral-200', badge: 'bg-neutral-700', icon: <FileText className="w-4 h-4 text-white" /> },
+                      rapor: { bg: 'bg-red-50 border-red-200', badge: 'bg-red-600', icon: <PlusCircle className="w-4 h-4 text-white" /> },
+                      borcOdeme: { bg: 'bg-rose-50 border-rose-200', badge: 'bg-rose-600', icon: <Landmark className="w-4 h-4 text-white" /> }
+                    };
+                    const st = typeStyles[h.type] || typeStyles.tutanak;
+                    return (
+                      <div key={h.key} className={`border p-3 rounded-xl flex items-center justify-between gap-3 ${st.bg}`}>
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${st.badge}`}>{st.icon}</div>
+                          <div className="min-w-0">
+                            <span className="font-bold text-black text-sm block truncate">
+                              {h.title}
+                              {h.amount > 0 && <span className="text-green-700"> — ₺{parseFloat(h.amount).toLocaleString('tr-TR')}</span>}
+                            </span>
+                            <span className="text-[10px] text-neutral-500 font-medium">
+                              {h.month ? `Dönem: ${h.month}` : ''} {h.raw?.date ? `• ${h.raw.date}` : ''} {h.endDate ? `→ ${h.endDate}` : ''} {h.note ? `• ${h.note}` : ''}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {h.fileUrl && (
+                            <button onClick={() => setViewingImage && setViewingImage({ title: h.title, name: h.fileUrl })} className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:bg-neutral-100 transition" title="Belgeyi Gör">
+                              <Eye className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button onClick={() => handleDeleteAction(h.raw.id)} className="p-1.5 bg-white border border-red-200 text-red-500 rounded-lg hover:bg-red-50 transition" title="Sil">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+                  // Yorum / Puan kaydı (salt-okunur)
+                  if (h.kaynak === 'yorum') {
+                    return (
+                      <div key={h.key} className="border p-3 rounded-xl flex items-center gap-3 bg-yellow-50 border-yellow-200">
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 bg-yellow-500"><Star className="w-4 h-4 text-white" /></div>
+                        <div className="min-w-0">
+                          <span className="font-bold text-black text-sm block truncate">{h.title}</span>
+                          <span className="text-[10px] text-neutral-500 font-medium">{h.dateStr}</span>
+                        </div>
+                      </div>
+                    );
+                  }
+                  // Mesai / Devamsızlık / İzin kaydı (salt-okunur)
+                  return (
+                    <div key={h.key} className={`border p-3 rounded-xl flex items-center gap-3 ${h.styleBg}`}>
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${h.styleBadge}`}>{h.icon}</div>
                       <div className="min-w-0">
-                        <span className="font-bold text-black text-sm block truncate">
-                          {a.title}
-                          {a.amount > 0 && <span className="text-green-700"> — ₺{parseFloat(a.amount).toLocaleString('tr-TR')}</span>}
-                        </span>
-                        <span className="text-[10px] text-neutral-500 font-medium">
-                          {a.month ? `Dönem: ${a.month}` : ''} {a.date ? `• ${a.date}` : ''} {a.endDate ? `→ ${a.endDate}` : ''} {a.note ? `• ${a.note}` : ''}
-                        </span>
+                        <span className="font-bold text-black text-sm block truncate">{h.title}</span>
+                        <span className="text-[10px] text-neutral-500 font-medium">{h.dateStr}</span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {a.fileUrl && (
-                        <button onClick={() => setViewingImage && setViewingImage({ title: a.title, name: a.fileUrl })} className="p-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg hover:bg-neutral-100 transition" title="Belgeyi Gör">
-                          <Eye className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      <button onClick={() => handleDeleteAction(a.id)} className="p-1.5 bg-white border border-red-200 text-red-500 rounded-lg hover:bg-red-50 transition" title="Sil">
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+
+              {/* Tümünü Gör / Daha Az Göster (5'ten fazla hareket varsa) */}
+              {birlesikHareketler.length > 5 && (
+                <button
+                  onClick={() => setShowAllHareket(!showAllHareket)}
+                  className="mt-3 w-full py-2.5 text-sm font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl transition"
+                >
+                  {showAllHareket ? 'Daha Az Göster' : `Tümünü Gör (${birlesikHareketler.length} hareket)`}
+                </button>
+              )}
+            </>
           )}
         </div>
 
@@ -7058,6 +7226,23 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                                   {person.fullName}
                                </h4>
                                <div className="flex items-center gap-1 shrink-0">
+                                 {/* YENİ: İsmin yanına WhatsApp butonu — tıklayınca sadece WhatsApp sohbeti açılır (mesaj yok) */}
+                                 {(person.personalPhone || person.companyPhone) && (
+                                   <button
+                                     onClick={(e) => {
+                                       e.stopPropagation();
+                                       let phone = (person.personalPhone || person.companyPhone || '').replace(/\D/g, '');
+                                       if (!phone) return;
+                                       if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+                                       else if (!phone.startsWith('90')) phone = '90' + phone;
+                                       window.open(`https://wa.me/${phone}`, '_blank');
+                                     }}
+                                     title="WhatsApp ile mesaj gönder"
+                                     className="p-1 rounded-lg bg-[#25D366] hover:bg-[#128C7E] text-white transition shrink-0"
+                                   >
+                                     <MessageCircle className="w-3.5 h-3.5" />
+                                   </button>
+                                 )}
                                  <PersonPositionRankIcons person={person} />
                                  <SkillScoreBadge person={person} skillsMap={skillsMap} />
                                </div>
@@ -7193,6 +7378,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       return new Date(a.date + 'T' + a.time) - new Date(b.date + 'T' + b.time);
     });
 
+    // YENİ: Seçili tarihi gün bazında ileri/geri kaydırır (saat dilimi kaymasını önlemek için yerel tarih parçalarıyla biçimlendirilir)
+    const shiftSelectedDate = (days) => {
+      const d = new Date(selectedDate + 'T12:00:00'); // öğlen alınır ki saat dilimi gün atlatmasın
+      d.setDate(d.getDate() + days);
+      const pad = n => String(n).padStart(2, '0');
+      setSelectedDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+    };
+
     return (
       <>
       <div className="flex flex-col h-[calc(100vh-120px)] md:h-[calc(100vh-140px)] animate-in fade-in pb-4">
@@ -7204,13 +7397,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <p className="text-sm font-medium text-neutral-500 mt-1">Günü seçin, tamamlanan operasyonların puan, mesai ve hasar bildirimlerini buradan yönetin.</p>
           </div>
           <div className="flex items-center gap-2 bg-neutral-100 p-2 rounded-xl border border-neutral-200 w-full md:w-auto">
-            <CalendarDays className="w-5 h-5 text-neutral-500 ml-1" />
+            {/* YENİ: Önceki gün oku */}
+            <button type="button" onClick={() => shiftSelectedDate(-1)} title="Önceki gün" className="p-1.5 rounded-lg hover:bg-neutral-200 text-neutral-600 hover:text-black transition shrink-0">
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <CalendarDays className="w-5 h-5 text-neutral-500" />
             <input 
               type="date" 
               value={selectedDate} 
               onChange={e => setSelectedDate(e.target.value)}
               className="bg-transparent border-none outline-none font-bold text-black cursor-pointer px-2"
             />
+            {/* YENİ: Sonraki gün oku */}
+            <button type="button" onClick={() => shiftSelectedDate(1)} title="Sonraki gün" className="p-1.5 rounded-lg hover:bg-neutral-200 text-neutral-600 hover:text-black transition shrink-0">
+              <ChevronRight className="w-5 h-5" />
+            </button>
           </div>
         </div>
 
@@ -7237,6 +7438,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     {job.assignedVehiclePlate && (
                       <div className="flex items-center gap-1 text-[10px] font-bold text-purple-700 bg-purple-50 border border-purple-100 px-1.5 py-0.5 rounded w-fit mb-1.5">
                         <Truck className="w-3 h-3 shrink-0" /> {job.assignedVehiclePlate}
+                      </div>
+                    )}
+                    {/* YENİ: Müşterinin teslim kodu — her kartta görünür */}
+                    {job.deliveryCode && (
+                      <div className="flex items-center gap-1 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded w-fit mb-1.5 tracking-widest">
+                        <Key className="w-3 h-3 shrink-0" /> Teslim Kodu: {job.deliveryCode}
                       </div>
                     )}
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-700 mb-2">
@@ -7421,7 +7628,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
   };
 
   // --- YENİ EKLENEN: EKİP KURMA TAHTASI KART BİLEŞENİ ---
-  export const BoardJobCard = ({ job, personnelList, vehicles, materials, dragOverTarget, handleDragOver, handleDragLeave, handleDropToJob, handleDragStart, db, appId, calculateMaterials }) => {
+  export const BoardJobCard = ({ job, personnelList, vehicles, materials, dragOverTarget, handleDragOver, handleDragLeave, handleDropToJob, handleDragStart, db, appId, calculateMaterials, skillsMap = {} }) => {
     const [note, setNote] = useState(job.notes || '');
     const [manualName, setManualName] = useState('');
 
@@ -7740,6 +7947,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         {person.position}
                       </p>
                     </div>
+                    {/* YENİ: Rütbe/pozisyon simgeleri ve özellik puanı — artık burada (iş kartına atanınca) gösteriliyor */}
+                    <PersonPositionRankIcons person={person} />
+                    <SkillScoreBadge person={person} skillsMap={skillsMap} />
                     <GripVertical className="w-3.5 h-3.5 text-neutral-300 shrink-0 opacity-0 group-hover:opacity-100 transition" />
                   </div>
                 );
@@ -7934,6 +8144,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     // --- YENİ: "FAZLA İŞ ATA" ÖZELLİĞİ İÇİN EKLENEN STATE'LER ---
     // Not: Mevcut kodların hiçbiri değiştirilmedi, sadece ek özellik için yeni state'ler eklendi.
     const [showFazlaIsAtaModal, setShowFazlaIsAtaModal] = useState(false); // Modal açık/kapalı
+    // YENİ: "Fazla İş Ata" MODU (aç/kapa). Açıkken Ekipler ve Araç listesinde TÜM personel/araç görünür;
+    // böylece zaten atanmış olanlar bile ikinci/üçüncü bir işe fazladan sürüklenebilir. Kapalıyken sadece boştakiler görünür.
+    const [fazlaIsAtaMode, setFazlaIsAtaMode] = useState(false);
     const [fazlaIsAtaPersonId, setFazlaIsAtaPersonId] = useState('');      // Seçilen (meşgul) personel
     const [fazlaIsAtaJobId, setFazlaIsAtaJobId] = useState('');            // Eklenecek hedef iş
     const [fazlaIsAtaVehiclePlate, setFazlaIsAtaVehiclePlate] = useState(''); // YENİ: Fazladan atanacak araç (boşta olsun olmasın, tüm liste)
@@ -7990,10 +8203,20 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
     const selectedDay = parseInt(selectedDate.split('-')[2], 10);
 
+    // YENİ: Seçili tarihi gün bazında ileri/geri kaydırır (saat dilimi kaymasını önlemek için yerel tarih parçalarıyla)
+    const shiftSelectedDate = (days) => {
+      const d = new Date(selectedDate + 'T12:00:00');
+      d.setDate(d.getDate() + days);
+      const pad = n => String(n).padStart(2, '0');
+      setSelectedDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+    };
+
     let displayPersonnel = maviYakaList.filter(p => {
        const d = mesaiData[p.id]?.[selectedDay];
        const st = typeof d === 'object' && d !== null ? d.status : d;
-       if (['R', 'Hİ', 'Yİ', 'Bİ', 'Üİ', 'D'].includes(st)) return false; 
+       if (['R', 'Hİ', 'Yİ', 'Bİ', 'Üİ', 'D'].includes(st)) return false;  // İzinli/raporlu/devamsız her zaman gizli
+       // Fazla İş Ata modu KAPALIYSA: işe atanmış (meşgul) personel de gizlensin
+       if (!fazlaIsAtaMode && busyPersonnelIdsThisDay.includes(p.id)) return false;
        return true;
     });
 
@@ -8009,7 +8232,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         return a.fullName.localeCompare(b.fullName);
     });
     
-    let availableVehicles = vehicles.filter(v => !busyVehiclesThisDay.includes(v.plate));
+    // Fazla İş Ata modu AÇIKSA tüm araçlar (atanmış olanlar dahil), KAPALIYSA sadece boştaki araçlar
+    let availableVehicles = fazlaIsAtaMode ? [...vehicles] : vehicles.filter(v => !busyVehiclesThisDay.includes(v.plate));
     availableVehicles.sort((a, b) => {
       const getMaxCap = (caps) => Math.max(0, ...(caps || []).map(c => parseInt(c.split('+')[0]) || 0));
       return getMaxCap(b.capacity) - getMaxCap(a.capacity);
@@ -8227,13 +8451,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <p className="text-sm font-medium text-neutral-500 mt-1">Günü seçin, boştaki araç ve personelleri ilgili işlerin içine sürükleyerek ekipleri kurun.</p>
           </div>
           <div className="flex items-center gap-2 bg-neutral-100 p-2 rounded-xl border border-neutral-200 w-full md:w-auto">
-            <CalendarDays className="w-5 h-5 text-neutral-500 ml-1" />
+            {/* YENİ: Önceki gün oku */}
+            <button type="button" onClick={() => shiftSelectedDate(-1)} title="Önceki gün" className="p-1.5 rounded-lg hover:bg-neutral-200 text-neutral-600 hover:text-black transition shrink-0">
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <CalendarDays className="w-5 h-5 text-neutral-500" />
             <input 
               type="date" 
               value={selectedDate} 
               onChange={e => setSelectedDate(e.target.value)}
               className="bg-transparent border-none outline-none font-bold text-black cursor-pointer px-2"
             />
+            {/* YENİ: Sonraki gün oku */}
+            <button type="button" onClick={() => shiftSelectedDate(1)} title="Sonraki gün" className="p-1.5 rounded-lg hover:bg-neutral-200 text-neutral-600 hover:text-black transition shrink-0">
+              <ChevronRight className="w-5 h-5" />
+            </button>
           </div>
         </div>
 
@@ -8263,6 +8495,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     db={db} 
                     appId={appId}
                     calculateMaterials={calculateMaterials}
+                    skillsMap={skillsMap}
                   />
                 ))}
               </div>
@@ -8288,21 +8521,27 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 {availableVehicles.length === 0 ? (
                   <div className="text-center text-neutral-400 py-4 text-[10px] font-medium">Boşta araç bulunmuyor.</div>
                 ) : (
-                  availableVehicles.map(vehicle => (
+                  availableVehicles.map(vehicle => {
+                    const vBusy = busyVehiclesThisDay.includes(vehicle.plate); // Bu araç o gün başka işe atanmış mı?
+                    return (
                     <div 
                       key={vehicle.id}
                       draggable
                       onDragStart={(e) => handleDragStart(e, 'vehicle', vehicle.plate, 'unassigned')}
-                      className="bg-white border border-neutral-200 rounded-xl p-2 flex items-center gap-2.5 shadow-sm cursor-grab active:cursor-grabbing hover:border-purple-400 transition group"
+                      className={`bg-white border rounded-xl p-2 flex items-center gap-2.5 shadow-sm cursor-grab active:cursor-grabbing hover:border-purple-400 transition group ${vBusy ? 'border-orange-300 opacity-90' : 'border-neutral-200'}`}
                     >
                       <div className="bg-purple-100 p-1.5 rounded-lg shrink-0"><Truck className="w-3.5 h-3.5 text-purple-600"/></div>
                       <div className="flex-1 overflow-hidden">
-                        <h4 className="font-bold text-[11px] text-black tracking-widest">{vehicle.plate}</h4>
+                        <div className="flex items-center gap-1">
+                          <h4 className="font-bold text-[11px] text-black tracking-widest">{vehicle.plate}</h4>
+                          {vBusy && <span className="text-[8px] bg-orange-100 text-orange-700 px-1 py-0.5 rounded font-black border border-orange-200 shrink-0">MEŞGUL</span>}
+                        </div>
                         <p className="text-[9px] font-medium text-neutral-500">{vehicle.type} • {vehicle.capacity[0] || '?'} Ev</p>
                       </div>
                       <GripVertical className="w-3.5 h-3.5 text-neutral-300 shrink-0 opacity-0 group-hover:opacity-100 transition" />
                     </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -8313,13 +8552,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <h3 className="font-black text-xs text-black flex items-center gap-1.5">
                   <UserPlus className="w-3.5 h-3.5 text-orange-500" /> Ekipler
                 </h3>
-                {/* YENİ: Fazla İş Ata Butonu - mevcut başlık/yapı değiştirilmeden eklendi */}
+                {/* YENİ: Fazla İş Ata — modal açmaz; modu aç/kapatır. Açıkken tüm personel/araç görünür ve ikinci işe fazladan atanabilir. */}
                 <button
                   type="button"
-                  onClick={() => { setFazlaIsAtaError(''); setFazlaIsAtaPersonId(''); setFazlaIsAtaJobId(''); setFazlaIsAtaVehiclePlate(''); setShowFazlaIsAtaModal(true); }}
-                  className="bg-orange-500 hover:bg-orange-600 text-white text-[9px] font-black px-2 py-1 rounded-lg shadow-sm transition flex items-center gap-1"
+                  onClick={() => setFazlaIsAtaMode(m => !m)}
+                  title={fazlaIsAtaMode ? 'Fazla İş Ata modu açık — kapatmak için tıklayın' : 'Fazla İş Ata modunu aç (tüm personel/araç görünür)'}
+                  className={`text-[9px] font-black px-2 py-1 rounded-lg shadow-sm transition flex items-center gap-1 ${fazlaIsAtaMode ? 'bg-green-600 hover:bg-green-700 text-white ring-2 ring-green-300' : 'bg-orange-500 hover:bg-orange-600 text-white'}`}
                 >
-                  <UserPlus className="w-3 h-3" /> Fazla İş Ata
+                  <UserPlus className="w-3 h-3" /> {fazlaIsAtaMode ? 'Fazla İş: AÇIK' : 'Fazla İş Ata'}
                 </button>
               </div>
               <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1.5 bg-neutral-50/30">
@@ -8345,8 +8585,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                           </div>
                           <p className="text-[9px] font-bold text-neutral-500 uppercase tracking-wider">{person.position}</p>
                         </div>
-                        <PersonPositionRankIcons person={person} />
-                        <SkillScoreBadge person={person} skillsMap={skillsMap} />
+                        {/* Rütbe/puan simgeleri buradan kaldırıldı; sadece iş kartına atanınca gösteriliyor. */}
                         <GripVertical className="w-3.5 h-3.5 text-neutral-300 shrink-0 opacity-0 group-hover:opacity-100 transition" />
                       </div>
                     );
