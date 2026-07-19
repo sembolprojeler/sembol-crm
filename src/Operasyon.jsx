@@ -8484,6 +8484,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               </div>
            ) : myJobs.sort((a,b)=>new Date(b.date)-new Date(a.date)).map(job => {
               const isMainAssignee = job.assignedPersonnelId === currentUser.id;
+              // YENİ: Kullanıcı Ekip Şefi veya Usta (Heryerden Usta/Kalfa) rütbesinde mi?
+              const isSefOrUsta = ['Ekip Şefi', 'Heryerden Usta', 'Kalfa'].includes(currentUser?.rank);
+              // YENİ: İşi Sonlandır butonu ne zaman görünsün?
+              // - Şef/Usta ise: iş atandığında (tamamlanmadıysa) HER ZAMAN görünür.
+              // - Diğerleri (standart mavi yaka): eskisi gibi sadece iş "sürüyor" ve asıl görevliyse.
+              const canEndJob = job.status !== 'completed' && (isSefOrUsta || (job.status === 'in-progress' && isMainAssignee));
 
               return (
               <div key={job.id} className="p-5 border border-neutral-200 rounded-xl bg-white shadow-sm flex flex-col gap-3">
@@ -8493,7 +8499,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                          {isStandardBlueCollar ? 'Operasyon Görevi' : job.customerName}
                       </h3>
                       <p className="text-sm font-medium text-neutral-500 flex items-center gap-1.5 mt-1">
-                        <CalendarDays className="w-4 h-4" /> {job.date} - {job.time}
+                        <CalendarDays className="w-4 h-4" /> {job.date}
                       </p>
                       {!isStandardBlueCollar && (
                         <a href={`tel:${(job.customerPhone || '').replace(/\D/g, '')}`} className="text-sm font-bold text-neutral-700 flex items-center gap-1.5 mt-1 hover:text-red-600 transition w-max bg-neutral-100 px-2 py-1 rounded-lg">
@@ -8684,8 +8690,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     </div>
                  )}
 
-                 {/* SADECE ASIL GÖREVLİ SONLANDIRABİLİR */}
-                 {job.status === 'in-progress' && isMainAssignee && (
+                 {/* İŞİ SONLANDIR — Şef/Usta için her zaman, diğerleri için iş sürüyorsa (asıl görevli) */}
+                 {canEndJob && (
                    <div className="mt-4 flex flex-col gap-2">
                      <button 
                        onClick={() => {
@@ -8705,18 +8711,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                    </div>
                  )}
 
-                 {/* YENİ: SONLANDIRMA SONRASI 3 SAATLİK DÜZENLEME PENCERESİ (SADECE ASIL GÖREVLİ) */}
-                 {/* İş tamamlandıktan sonra ekip şefi 3 saat içinde unuttuğu/yanlış girdiği bilgileri düzeltebilir. */}
-                 {(() => {
-                    const DUZENLEME_SAAT = 3; // Düzenleme penceresi süresi (saat)
-                    if (!(job.status === 'completed' && isMainAssignee)) return null;
-                    // completedAt yoksa (eski kayıtlar) pencere doğrulanamaz, buton gösterilmez.
-                    const completedAt = job.completedAt ? new Date(job.completedAt) : null;
-                    if (!completedAt || isNaN(completedAt.getTime())) return null;
-                    const gecenSaat = (Date.now() - completedAt.getTime()) / 3600000; // ms -> saat
-                    if (gecenSaat > DUZENLEME_SAAT) return null; // Süre dolduysa düzenlenemez
-                    const kalanSaat = Math.max(0, Math.ceil(DUZENLEME_SAAT - gecenSaat));
-
+                 {/* SONLANDIRMA SONRASI DÜZENLEME (SADECE ASIL GÖREVLİ) — süre sınırı yok, her zaman aktif */}
+                 {job.status === 'completed' && isMainAssignee && (() => {
                     // Kasa/İş fotoğrafı eklenmiş mi? ('Yükleniyor...' geçici değerini saymıyoruz.)
                     const kasaFotoVar = (job.endJobDetails?.truckImages || []).filter(img => img && img !== 'Yükleniyor...').length > 0;
 
@@ -8726,16 +8722,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         {!kasaFotoVar && (
                           <div className="flex items-start gap-2 bg-amber-50 border border-amber-300 text-amber-800 p-3 rounded-xl text-sm font-medium">
                             <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600" />
-                            <span>Bu işe <b>Kasa / İş fotoğrafı</b> eklemeyi unutmuşsunuz. Süre dolmadan aşağıdaki butondan düzenleyip fotoğrafı ekleyebilirsiniz.</span>
+                            <span>Bu işe <b>Kasa / İş fotoğrafı</b> eklemeyi unutmuşsunuz. Aşağıdaki butondan düzenleyip fotoğrafı ekleyebilirsiniz.</span>
                           </div>
                         )}
-                        {/* Kalan süre bilgisi */}
-                        <div className="text-[11px] font-bold text-neutral-500 text-center">
-                          Sonlandırmayı düzenlemek için kalan süre: ~{kalanSaat} saat
-                        </div>
-                        {/* Düzenleme butonu — sonlandırma modalını mevcut bilgilerle açar */}
+                        {/* Düzenleme butonu — sonlandırma modalını mevcut bilgilerle açar (her zaman aktif) */}
                         <button onClick={() => handleOpenEndJobModal(job)} className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-black rounded-xl transition flex justify-center items-center gap-2 shadow-md text-sm">
-                          <Edit className="w-5 h-5" /> Sonlandırmayı Düzenle (3 saat içinde)
+                          <Edit className="w-5 h-5" /> Sonlandırmayı Düzenle
                         </button>
                       </div>
                     );
