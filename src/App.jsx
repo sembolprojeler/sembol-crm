@@ -4,7 +4,7 @@ import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'fi
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView } from './Satis.jsx';
-import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView } from './Operasyon.jsx';
+import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView } from './Finans.jsx';
   // ============================================================================
   // GÜNCELLENMİŞ DashboardView — Kendi App.jsx dosyanızdaki eski DashboardView
@@ -486,12 +486,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           <div className="bg-blue-50 border-l-4 border-blue-600 border border-blue-200 p-4 rounded-2xl shadow-sm">
             <h3 className="text-blue-800 font-black flex items-center gap-2 mb-3"><Sparkles className="w-5 h-5 text-blue-600" /> Takım Çalışması & Destek Panosu</h3>
             <div className="flex gap-4 overflow-x-auto custom-scrollbar pb-2">
-              {(allJobs || jobs).filter(j => j.pointsApproved && j.supportPersonnelIds && j.supportPersonnelIds.length > 0).sort((a, b) => {
-                  // En son yapılan destek en başta: önce tamamlanma zamanı, yoksa iş tarihi baz alınır (yeniden eskiye)
-                  const ta = new Date(a.completedAt || a.date || 0).getTime();
-                  const tb = new Date(b.completedAt || b.date || 0).getTime();
-                  return tb - ta;
-                }).slice(0, 10).map(j => (
+              {(allJobs || jobs).filter(j => j.pointsApproved && j.supportPersonnelIds && j.supportPersonnelIds.length > 0).slice(0, 10).map(j => (
                 <div key={j.id} className="bg-white rounded-2xl shadow-sm border border-blue-100 p-4 shrink-0 w-72">
                   <div className="flex items-center gap-2 mb-2">
                     <div className="w-9 h-9 bg-blue-100 rounded-full flex items-center justify-center shrink-0"><Users className="w-4 h-4 text-blue-600" /></div>
@@ -954,7 +949,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
       { id: 'operasyon', label: 'Operasyon Bölümü' },
       { id: 'jobList', label: 'İş Listesi' },
       { id: 'customers', label: 'Müşteri Listesi' },
-      { id: 'personnel', label: 'İnsan Kaynakları' },
+      { id: 'personnel', label: 'Personel Listesi' },
       { id: 'todos', label: 'Yapılacak Listesi' },
       { id: 'finance', label: 'Finans Yönetimi' },
       { id: 'auth', label: 'Yetkilendirme' },
@@ -1212,7 +1207,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       { id: 'operasyon', label: 'Operasyon Bölümü' },
       { id: 'jobList', label: 'İş Listesi' },
       { id: 'customers', label: 'Müşteri Listesi' },
-      { id: 'personnel', label: 'İnsan Kaynakları' },
+      { id: 'personnel', label: 'Personel Listesi' },
       { id: 'todos', label: 'Yapılacak Listesi' },
       { id: 'finance', label: 'Finans Yönetimi' },
       { id: 'auth', label: 'Yetkilendirme' },
@@ -2123,8 +2118,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [isTaskSubMenuOpen, setIsTaskSubMenuOpen] = useState(false);
     const [isCustomerSubMenuOpen, setIsCustomerSubMenuOpen] = useState(false);
     const [isJobSubMenuOpen, setIsJobSubMenuOpen] = useState(false);
-    // YENİ: Müşteri Portföyü üst menüsü (İş Listesi + Müşteri Listesi'ni kapsar)
-    const [isPortfoyOpen, setIsPortfoyOpen] = useState(false);
     const [isAuthSubMenuOpen, setIsAuthSubMenuOpen] = useState(false);
     const [isFinanceSubMenuOpen, setIsFinanceSubMenuOpen] = useState(false);
     const [isSystemFilesSubMenuOpen, setIsSystemFilesSubMenuOpen] = useState(false);
@@ -2277,6 +2270,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     const [existingCustomerMatch, setExistingCustomerMatch] = useState(null);
     const [showCustomerSearchBox, setShowCustomerSearchBox] = useState(false);
+    // YENİ: Kayıt oluşturuldu/güncellendi bildirimini (toast) kontrol eden state
+    const [showJobSavedNotice, setShowJobSavedNotice] = useState(null);
     const [customerSearchQuery, setCustomerSearchQuery] = useState('');
 
     useEffect(() => {
@@ -2771,8 +2766,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), {
           pointsApproved: true,
           reviewImage: reviewImageUrl || null,
-          supportPersonnelIds: supportPersonnelIds,
-          pointsEdited: !!job.pointsApproved
+          supportPersonnelIds: supportPersonnelIds
         });
 
         const hasAnyPoints = Object.values(individualPoints).some(v => parseFloat(v) > 0) || (supportPersonnelIds && supportPersonnelIds.length > 0);
@@ -2953,7 +2947,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
         await setDoc(mesaiRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
 
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobForMesai.id), { mesaiApproved: true, mesaiEdited: !!jobForMesai.mesaiApproved });
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobForMesai.id), { mesaiApproved: true });
 
         addSystemLog('Mesai Onaylandı', `${jobForMesai.customerName} operasyonundaki personellerin mesai durumları güncellendi.`);
         setShowMesaiModal(false);
@@ -3202,9 +3196,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const handleAddJob = async (e) => {
       e.preventDefault();
       if (!firebaseUser) return;
-      // YENİ: Bildirim için, form sıfırlanmadan önce bilgileri yakala
-      const wasEditing = !!editingJobId;
-      const savedCustomerName = formData.customerName;
+      // YENİ: Zorunlu alan kontrolü (güvenlik amaçlı ikinci katman)
+      // İsim veya telefon boşsa kayıt oluşturulmaz. Asıl uyarı penceresi AddJobView içindedir.
+      if (!formData.customerName?.trim() || !formData.customerPhone?.trim()) return;
+      const wasEditing = !!editingJobId; // Bildirim metni için düzenleme mi, yeni kayıt mı olduğunu başta yakala
       try {
         const jobData = { type: recordType, ...formData };
         Object.keys(jobData).forEach(key => jobData[key] === undefined && delete jobData[key]);
@@ -3273,9 +3268,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         setFormData({
           isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo', fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', extraLoadingAddresses: [], selectedDepo: '', toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', extraUnloadingAddresses: [], date: new Date().toISOString().split('T')[0], time: '08:00', durationDays: '1', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
         });
-        setActiveTab('dashboard');
-        // YENİ: Başarılı kayıt/güncelleme bildirimi
-        alert(wasEditing ? 'Kayıt başarıyla güncellendi!' : `✅ ${savedCustomerName || 'Müşteri'} kaydı başarıyla oluşturuldu!`);
+        // YENİ: Kayıt tamamlandığında takvim ekranına yönlendir ve bildirim (toast) göster
+        setActiveTab('calendar');
+        setShowJobSavedNotice(wasEditing ? 'updated' : 'created');
+        setTimeout(() => setShowJobSavedNotice(null), 3000); // Bildirim 3 saniye sonra otomatik kapanır
       } catch (err) { console.error(err); }
     };
 
@@ -3594,8 +3590,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         const realCode = (jobToEnd.deliveryCode || '').toString().trim().toUpperCase();
 
         if (realCode && userCode !== realCode) {
-          // Güvenlik: doğru kodu ekranda göstermiyoruz; personeli müşteriden/sorumludan destek almaya yönlendiriyoruz.
-          setEndJobError('Şifre hatalı girilmiştir. Lütfen müşteriden tekrar isteyin ya da sorumlu kişiden destek isteyin.'); 
+          setEndJobError(`Girdiğiniz kod hatalı. Müşteriden "${realCode}" kodunu istemelisiniz.`); 
           return;
         }
       }
@@ -3854,8 +3849,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     const generalTodoTasksCount = tasks.filter(t => t.status !== 'completed').length;
     const generalTodosCount = todos.filter(t => t.status !== 'completed').length;
-    // YENİ: Çözülmemiş (tamamlanmamış) hasarlı iş sayısı — Operasyon menüsünde yanıp sönen bildirim için
-    const unresolvedDamagedCount = jobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var' && !j.endJobDetails?.damageResolved).length;
 
     const todayStrApp = new Date().toISOString().split('T')[0];
 
@@ -4184,19 +4177,19 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 {isAddJobSubMenuOpen && (
                   <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
                     <button 
-                      onClick={() => { setActiveTab('addNakliye'); setRecordType('Nakliye'); setEditingJobId(null); setFormData({...formData, price: '', deposit: '', durationDays: '1', extraLoadingAddresses: [], extraUnloadingAddresses: [], date: new Date().toISOString().split('T')[0], time: '08:00', team: 'Atanmadı', selectedDepo: '', isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
+                      onClick={() => { setActiveTab('addNakliye'); setRecordType('Nakliye'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addNakliye' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addNakliye' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Nakliye Kayıt
                     </button>
                     <button 
-                      onClick={() => { setActiveTab('addDepo'); setRecordType('Depo'); setEditingJobId(null); setFormData({...formData, price: '', deposit: '', durationDays: '1', extraLoadingAddresses: [], extraUnloadingAddresses: [], date: new Date().toISOString().split('T')[0], time: '08:00', team: 'Atanmadı', isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: '', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', contractDetails: '', notes: '', selectedDepo: '', depoDirection: 'toDepo'}); setIsSidebarOpen(false); }}
+                      onClick={() => { setActiveTab('addDepo'); setRecordType('Depo'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: '', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', contractDetails: '', notes: '', selectedDepo: '', depoDirection: 'toDepo'}); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addDepo' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addDepo' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Depo Kayıt
                     </button>
                     <button 
-                      onClick={() => { setActiveTab('addAsansor'); setRecordType('Asansör'); setEditingJobId(null); setFormData({...formData, price: '', deposit: '', durationDays: '1', extraLoadingAddresses: [], extraUnloadingAddresses: [], date: new Date().toISOString().split('T')[0], time: '08:00', team: 'Atanmadı', selectedDepo: '', isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '', contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
+                      onClick={() => { setActiveTab('addAsansor'); setRecordType('Asansör'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '', contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addAsansor' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addAsansor' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Asansör Kayıt
@@ -4233,25 +4226,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'isOnaylamaTahtasi' ? 'bg-white' : 'bg-orange-500'}`}></div> İş Onaylama Tahtası
                     </button>
                     )}
-                    {/* YENİ: Hasarlı İşler (İş Listesi'nden buraya taşındı) — çözülmemiş hasar sayısı kadar yanıp sönen bildirim */}
-                    <button 
-                      onClick={() => { setActiveTab('damagedJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'damagedJobs' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'damagedJobs' ? 'bg-white' : 'bg-orange-500'}`}></div>
-                        <span className="whitespace-nowrap">Hasarlı İşler</span>
-                        {unresolvedDamagedCount > 0 && (
-                          <span className="relative flex h-2.5 w-2.5">
-                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
-                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-600"></span>
-                          </span>
-                        )}
-                      </div>
-                      {unresolvedDamagedCount > 0 && (
-                        <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{unresolvedDamagedCount}</span>
-                      )}
-                    </button>
                     <button 
                       onClick={() => { setActiveTab('ekipKurmaTahtasi'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'ekipKurmaTahtasi' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -4263,6 +4237,13 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'izinTahtasi' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'izinTahtasi' ? 'bg-white' : 'bg-orange-500'}`}></div> İzin Tahtası
+                    </button>
+                    {/* TAŞINDI: Hasarlı İşler butonu, kullanıcı isteğiyle İzin Tahtası'nın altına alındı (kod birebir aynı) */}
+                    <button 
+                      onClick={() => { setActiveTab('damagedJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'damagedJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'damagedJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Hasarlı İşler
                     </button>
                     <button 
                       onClick={() => { setActiveTab('personelTahtasi'); setIsSidebarOpen(false); }}
@@ -4321,54 +4302,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {showPersonnel && (
-              <div className="flex flex-col gap-1 mt-2 mb-2">
-                <button 
-                  onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-emerald-500 to-green-700 text-white shadow-lg shadow-green-600/30 hover:scale-[1.02]`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Briefcase className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">İnsan Kaynakları</span>
-                  </div>
-                  {isPersonnelSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-                
-                {isPersonnelSubMenuOpen && (
-                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
-                    <button 
-                      onClick={() => { setActiveTab('personnelList'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personnelList' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personnelList' ? 'bg-white' : 'bg-green-600'}`}></div> Tüm Personel
-                    </button>
-                    {/* YENİ: Personel Başvuru & Aday Havuzu */}
-                    <button 
-                      onClick={() => { setActiveTab('basvuru'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'basvuru' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'basvuru' ? 'bg-white' : 'bg-green-600'}`}></div> Personel Başvuru
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('ozlukDosyalari'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'ozlukDosyalari' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'ozlukDosyalari' ? 'bg-white' : 'bg-green-600'}`}></div> Özlük Dosyaları
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('complaints'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'complaints' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'} relative`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'complaints' ? 'bg-white' : 'bg-green-600'}`}></div> 
-                      Şikayet Bildirimleri
-                      {complaints.filter(c => !c.read).length > 0 && (
-                        <span className="absolute right-4 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{complaints.filter(c => !c.read).length}</span>
-                      )}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
             {showFinance && (
               <div className="flex flex-col gap-1 mt-2 mb-2">
                 <button 
@@ -4418,72 +4351,128 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {(showJobList || showCustomers) && (
-              <div className="flex flex-col gap-1 mt-2 mb-2">
-                {/* YENİ: Müşteri Portföyü üst menüsü — İş Listesi + Müşteri Listesi bir arada (beyaz renk geçişli, Satış Bölümü tarzı) */}
+            {showJobList && (
+              <div className="flex flex-col gap-1">
                 <button 
-                  onClick={() => { setIsPortfoyOpen(!isPortfoyOpen); setIsSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-white to-neutral-200 text-black shadow-lg shadow-neutral-400/30 border border-neutral-300 hover:scale-[1.02]`}
+                  onClick={() => { setIsJobSubMenuOpen(!isJobSubMenuOpen); setIsAddJobSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'currentJobs' || activeTab === 'completedJobs' || activeTab === 'allJobs' || activeTab === 'damagedJobs' || activeTab === 'cancelledJobs') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                 >
                   <div className="flex items-center gap-3">
-                    <Users className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Müşteri Portföyü</span>
+                    <ClipboardList className={`w-5 h-5 shrink-0 ${(activeTab === 'currentJobs' || activeTab === 'completedJobs' || activeTab === 'allJobs' || activeTab === 'damagedJobs' || activeTab === 'cancelledJobs') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">İş Listesi</span>
                   </div>
-                  {isPortfoyOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  {isJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
-                {isPortfoyOpen && (
-                  <div className="flex flex-col gap-1 pl-2 mt-1 animate-in slide-in-from-top-2">
-
-            {showJobList && (
-              <>
-                <button 
-                  onClick={() => { setActiveTab('currentJobs'); setIsSidebarOpen(false); }}
-                  className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'currentJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                >
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'currentJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Mevcut İşler
-                </button>
-                <button 
-                  onClick={() => { setActiveTab('completedJobs'); setIsSidebarOpen(false); }}
-                  className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'completedJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                >
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'completedJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Tamamlanan İşler
-                </button>
-                <button 
-                  onClick={() => { setActiveTab('allJobs'); setIsSidebarOpen(false); }}
-                  className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                >
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm İşler
-                </button>
-                <button 
-                  onClick={() => { setActiveTab('cancelledJobs'); setIsSidebarOpen(false); }}
-                  className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'cancelledJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                >
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'cancelledJobs' ? 'bg-white' : 'bg-red-600'}`}></div> İptal Edilen İşler
-                </button>
-              </>
+                
+                {isJobSubMenuOpen && (
+                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    <button 
+                      onClick={() => { setActiveTab('currentJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'currentJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'currentJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Mevcut İşler
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('completedJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'completedJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'completedJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Tamamlanan İşler
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('allJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm İşler
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('cancelledJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'cancelledJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'cancelledJobs' ? 'bg-white' : 'bg-red-600'}`}></div> İptal Edilen İşler
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
 
             {showCustomers && (
-              <>
+              <div className="flex flex-col gap-1">
                 <button 
-                  onClick={() => { setActiveTab('allCustomers'); setIsSidebarOpen(false); }}
-                  className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allCustomers' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  onClick={() => { setIsCustomerSubMenuOpen(!isCustomerSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'specialCustomers' || activeTab === 'allCustomers' || activeTab === 'customerBlacklist') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                 >
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allCustomers' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm Müşteriler
+                  <div className="flex items-center gap-3">
+                    <Users className={`w-5 h-5 shrink-0 ${(activeTab === 'specialCustomers' || activeTab === 'allCustomers' || activeTab === 'customerBlacklist') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Müşteri Listesi</span>
+                  </div>
+                  {isCustomerSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
-                <button 
-                  onClick={() => { setActiveTab('specialCustomers'); setIsSidebarOpen(false); }}
-                  className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'specialCustomers' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                >
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'specialCustomers' ? 'bg-white' : 'bg-red-600'}`}></div> Özel Müşteriler
-                </button>
-                <button 
-                  onClick={() => { setActiveTab('customerBlacklist'); setIsSidebarOpen(false); }}
-                  className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'customerBlacklist' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                >
-                  <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'customerBlacklist' ? 'bg-white' : 'bg-red-600'}`}></div> Kara Liste
-                </button>
-              </>
+                
+                {isCustomerSubMenuOpen && (
+                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    <button 
+                      onClick={() => { setActiveTab('allCustomers'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allCustomers' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allCustomers' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm Müşteriler
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('specialCustomers'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'specialCustomers' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'specialCustomers' ? 'bg-white' : 'bg-red-600'}`}></div> Özel Müşteriler
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('customerBlacklist'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'customerBlacklist' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'customerBlacklist' ? 'bg-white' : 'bg-red-600'}`}></div> Kara Liste
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
+
+            {showPersonnel && (
+              <div className="flex flex-col gap-1">
+                <button 
+                  onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'ozlukDosyalari' || activeTab === 'complaints') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Briefcase className={`w-5 h-5 shrink-0 ${(activeTab === 'addPersonnel' || activeTab === 'personnelList' || activeTab === 'ozlukDosyalari' || activeTab === 'complaints') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Personel Listesi</span>
+                  </div>
+                  {isPersonnelSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+                
+                {isPersonnelSubMenuOpen && (
+                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    <button 
+                      onClick={() => { setActiveTab('addPersonnel'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addPersonnel' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addPersonnel' ? 'bg-white' : 'bg-red-600'}`}></div> Personel Ekle
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('personnelList'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personnelList' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personnelList' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm Personel
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('ozlukDosyalari'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'ozlukDosyalari' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'ozlukDosyalari' ? 'bg-white' : 'bg-red-600'}`}></div> Özlük Dosyaları
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('complaints'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'complaints' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'} relative`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'complaints' ? 'bg-white' : 'bg-red-600'}`}></div> 
+                      Şikayet Bildirimleri
+                      {complaints.filter(c => !c.read).length > 0 && (
+                        <span className="absolute right-4 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{complaints.filter(c => !c.read).length}</span>
+                      )}
+                    </button>
                   </div>
                 )}
               </div>
@@ -4814,90 +4803,20 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'puantajTahtasi' && showOperasyon && <PuantajTahtasiView personnelList={personnelList} db={db} appId={appId} />}
             {activeTab === 'maviMesaiTahtasi' && showOperasyon && <MaviMesaiTahtasiView personnelList={personnelList} db={db} appId={appId} />}
             
+            {/* YENİ: Kayıt oluşturuldu/güncellendi bildirimi (toast). Takvim ekranına geçildiğinde de görünür kalır */}
+            {showJobSavedNotice && (
+              <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[9999] bg-green-600 text-white px-6 py-3.5 rounded-2xl shadow-2xl flex items-center gap-2.5 font-bold text-sm md:text-base animate-in fade-in slide-in-from-top-4 whitespace-nowrap">
+                <CheckCircle className="w-5 h-5 shrink-0" />
+                {showJobSavedNotice === 'updated' ? 'Kayıt başarıyla güncellendi!' : 'Kayıt başarıyla oluşturuldu!'}
+              </div>
+            )}
+
             {activeTab === 'myComplaint' && showMyComplaint && <MyComplaintSubmitView currentUser={currentUser} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'addInfo' && showAddInfo && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
             
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
               <div className="space-y-4">
-                <div className="max-w-4xl mx-auto">
-                  <button
-                    type="button"
-                    onClick={() => setShowCustomerSearchBox(o => !o)}
-                    className="px-4 py-2.5 bg-neutral-800 hover:bg-black text-white text-sm font-bold rounded-xl transition flex items-center gap-2 shadow-sm"
-                  >
-                    <Search className="w-4 h-4" /> Kayıtlı Müşteriden Seç
-                  </button>
-
-                  {showCustomerSearchBox && (() => {
-                    const uniqueCustomers = new Map();
-                    jobs.forEach(j => {
-                      if (!j.customerPhone) return;
-                      const key = normalizeCariPhone(j.customerPhone);
-                      if (!key) return;
-                      const existing = uniqueCustomers.get(key);
-                      if (!existing) {
-                        uniqueCustomers.set(key, { ...j });
-                      } else {
-                        if (!existing.customerName && j.customerName) existing.customerName = j.customerName;
-                        if (!existing.altPhone && j.altPhone) existing.altPhone = j.altPhone;
-                        if (!existing.tcNo && j.tcNo) existing.tcNo = j.tcNo;
-                        if (!existing.taxNo && j.taxNo) existing.taxNo = j.taxNo;
-                        if (!existing.customerType && j.customerType) existing.customerType = j.customerType;
-                        if (j.date && existing.date && new Date(j.date) > new Date(existing.date)) {
-                          if (j.customerName) existing.customerName = j.customerName;
-                          if (j.customerType) existing.customerType = j.customerType;
-                          existing.date = j.date;
-                        }
-                      }
-                    });
-                    const q = customerSearchQuery.trim().toLocaleLowerCase('tr-TR');
-                    const results = Array.from(uniqueCustomers.values()).filter(j =>
-                      q === '' ? true : (normalizeCariName(j.customerName).includes(q) || normalizeCariPhone(j.customerPhone).includes(q.replace(/\D/g, '')))
-                    ).slice(0, 20);
-
-                    return (
-                      <div className="mt-2 bg-white border border-neutral-200 rounded-xl shadow-lg p-3 animate-in fade-in slide-in-from-top-2">
-                        <input
-                          type="text"
-                          autoFocus
-                          value={customerSearchQuery}
-                          onChange={(e) => setCustomerSearchQuery(e.target.value)}
-                          placeholder="Müşteri adı veya telefon numarası yazın..."
-                          className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition mb-2"
-                        />
-                        <div className="max-h-56 overflow-y-auto custom-scrollbar space-y-1.5">
-                          {results.map((j, idx) => (
-                            <button
-                              key={idx}
-                              type="button"
-                              onClick={() => {
-                                setFormData(prev => ({
-                                  ...prev,
-                                  customerName: j.customerName,
-                                  customerPhone: j.customerPhone,
-                                  altPhone: j.altPhone || '',
-                                  customerType: j.customerType || 'Bireysel',
-                                  tcNo: j.tcNo || '',
-                                  taxNo: j.taxNo || ''
-                                }));
-                                setShowCustomerSearchBox(false);
-                                setCustomerSearchQuery('');
-                              }}
-                              className="w-full text-left p-3 bg-neutral-50 hover:bg-red-50 border border-neutral-200 hover:border-red-200 rounded-xl transition flex items-center justify-between gap-2"
-                            >
-                              <span className="font-bold text-black text-sm">{j.customerName}</span>
-                              <span className="text-xs text-neutral-500">{j.customerPhone}</span>
-                            </button>
-                          ))}
-                          {q !== '' && results.length === 0 && (
-                            <p className="text-xs text-neutral-500 italic p-2">Eşleşen kayıtlı müşteri bulunamadı.</p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })()}
-                </div>
-
+                {/* NOT: "Kayıtlı Müşteriden Seç" butonu kullanıcı isteğiyle kaldırıldı */}
                 {formData.customerName && formData.customerPhone && (() => {
                   const cariMatchJob = jobs.find(j =>
                     normalizeCariName(j.customerName) === normalizeCariName(formData.customerName) &&
@@ -4966,14 +4885,13 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'currentJobs' && showJobList && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
             {activeTab === 'completedJobs' && showJobList && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} handleOpenResolveDamageModal={handleOpenResolveDamageModal} />}
             {activeTab === 'allJobs' && showJobList && <AllJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} />}
-            {activeTab === 'damagedJobs' && (showOperasyon || showJobList) && <DamagedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} handleOpenResolveDamageModal={handleOpenResolveDamageModal} />}
+            {activeTab === 'damagedJobs' && showJobList && <DamagedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} handleOpenResolveDamageModal={handleOpenResolveDamageModal} />}
             {activeTab === 'cancelledJobs' && showJobList && <CancelledJobsView jobs={jobs} handleEditJob={handleEditJob} handleRestoreJob={handleRestoreJob} setDeleteJobId={setDeleteJobId} />}
 
             {activeTab === 'customerBlacklist' && showCustomers && <PlaceholderView title="Müşteri Kara Listesi" icon={AlertTriangle} />}
             
             {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
-            {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} onAddNew={() => setActiveTab('addPersonnel')} />}
-            {activeTab === 'basvuru' && showPersonnel && <PersonelBasvuruView db={db} appId={appId} positions={positions} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
+            {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} />}
             {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} allPersonnelActions={allPersonnelActions} vehicles={vehicles} currentUser={currentUser} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}

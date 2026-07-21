@@ -846,7 +846,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
         ? (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
         : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
     });
-    targetPersonnelList.sort((a, b) => (a.fullName || '').toLocaleLowerCase('tr').localeCompare((b.fullName || '').toLocaleLowerCase('tr'), 'tr')); // YENI: Muhasebe listelerini alfabetik sirala
 
     const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
@@ -1384,7 +1383,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
         ? (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
         : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
     });
-    targetPersonnelList.sort((a, b) => (a.fullName || '').toLocaleLowerCase('tr').localeCompare((b.fullName || '').toLocaleLowerCase('tr'), 'tr')); // YENI: Muhasebe listelerini alfabetik sirala
 
     const daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
     const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
@@ -1898,7 +1896,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
         ? (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
         : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
     });
-    targetPersonnelList.sort((a, b) => (a.fullName || '').toLocaleLowerCase('tr').localeCompare((b.fullName || '').toLocaleLowerCase('tr'), 'tr')); // YENI: Muhasebe listelerini alfabetik sirala
 
     useEffect(() => {
       const fetchData = async () => {
@@ -2440,7 +2437,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
         ? (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)))
         : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
     });
-    targetPersonnelList.sort((a, b) => (a.fullName || '').toLocaleLowerCase('tr').localeCompare((b.fullName || '').toLocaleLowerCase('tr'), 'tr')); // YENI: Muhasebe listelerini alfabetik sirala
 
     const calcRow = (personId) => {
       const person = targetPersonnelList.find(p => p.id === personId) || {};

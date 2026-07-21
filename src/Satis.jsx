@@ -2,14 +2,56 @@ import React, { useState, useEffect } from 'react';
 import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, setDoc, query, where } from 'firebase/firestore';
 import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF } from './shared.jsx';
+
+  // ============================================================================
+  // YENİ: Ortak Bölüm Başlığı Bileşeni (SectionHeader)
+  // 4 ana başlık (Müşteri, Finans, Yükleme, Boşaltma) için tek tip, şık tasarım.
+  // Punto, eski başlıklara göre ~%5 küçültülmüştür (16px -> 15px, 18px -> 17px).
+  // ============================================================================
+  const SectionHeader = ({ icon: Icon, title, rightSlot }) => (
+    <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 -mx-4 md:-mx-5 -mt-4 md:-mt-5 mb-5 px-4 md:px-5 py-3 rounded-t-2xl bg-gradient-to-r from-red-600/10 via-neutral-100 to-transparent border-b-2 border-red-600/20">
+      <div className="flex items-center gap-3">
+        {/* İkon rozeti: kırmızı zemin üzerinde beyaz ikon */}
+        <span className="w-8 h-8 shrink-0 rounded-xl bg-red-600 text-white flex items-center justify-center shadow-md shadow-red-600/30">
+          <Icon className="w-4 h-4" />
+        </span>
+        {/* Başlık yazısı: %5 küçültülmüş punto */}
+        <h3 className="font-black text-neutral-900 uppercase tracking-wide text-[15px] md:text-[17px] leading-tight">
+          {title}
+        </h3>
+      </div>
+      {/* Başlığın sağına eklenebilecek opsiyonel alan (örn. depo seçimi) */}
+      {rightSlot}
+    </div>
+  );
+
   export const AddJobView = ({
     type, formData, setFormData, handleInputChange, handleProvinceChange,
     handleDepoChange, toggleDepoDirection, handleAddJob, editingJobId, handleSwapAddresses
   }) => {
+    // YENİ: İsim / telefon boş bırakılırsa gösterilecek uyarı penceresi state'i
+    const [showValidationModal, setShowValidationModal] = useState(false);
+
+    // YENİ: Kayıt öncesi zorunlu alan kontrolü.
+    // İsim veya telefon boşsa kayıt YAPILMAZ, uyarı penceresi açılır.
+    const handleSaveClick = (e) => {
+      if (!formData.customerName?.trim() || !formData.customerPhone?.trim()) {
+        setShowValidationModal(true);
+        return;
+      }
+      handleAddJob(e); // Alanlar doluysa App.jsx içindeki asıl kayıt fonksiyonu çalışır
+    };
+
+    // Ortak input stili (tekrarı azaltmak için değişkende tutuyoruz)
+    const inputCls = "w-full min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition";
+    const selectCls = "w-full min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition";
+    const labelCls = "block text-xs md:text-sm font-bold text-neutral-700 mb-1";
+
     return (
-      <div className="max-w-7xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in" style={{ zoom: 0.9 }}>
+      <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in">
         <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
-          <h2 className="text-2xl font-black text-black flex items-center gap-2">
+          {/* Sayfa ana başlığı: %5 küçültülmüş punto (24px -> ~22.8px) */}
+          <h2 className="text-[22px] md:text-[22.8px] font-black text-black flex items-center gap-2">
             <PlusCircle className="w-7 h-7 text-red-600" /> 
             {editingJobId ? `Detaylı ${type} Kaydını Güncelle` : `Detaylı ${type} Kaydı Oluştur`}
           </h2>
@@ -24,124 +66,117 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
           </button>
         </div>
 
-        <div  className="space-y-6">
-          {/* YENİ DÜZEN: Müşteri + Finans masaüstünde yan yana, mobilde alt alta */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-stretch">
-          {/* MÜŞTERİ VE GENEL BİLGİLER */}
-          <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 border-t-4 border-t-neutral-800 h-full">
-            <h3 className="font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-2">
-              <Users className="w-5 h-5 text-red-600" /> Müşteri ve Randevu Bilgileri
-            </h3>
+        <div className="space-y-6">
+          {/* ==================== MÜŞTERİ VE RANDEVU BİLGİLERİ ==================== */}
+          <div className="bg-neutral-50 p-4 md:p-5 rounded-2xl border border-neutral-200 shadow-sm">
+            <SectionHeader icon={Users} title="Müşteri ve Randevu Bilgileri" />
             
-            <div className="flex bg-neutral-200/60 p-1 rounded-xl mb-6 w-fit border border-neutral-300">
+            <div className="flex bg-neutral-200/60 p-1 rounded-xl mb-5 w-full md:w-fit border border-neutral-300">
               <button 
                 type="button"
                 onClick={() => setFormData({...formData, customerType: 'Bireysel'})}
-                className={`px-5 py-2 text-sm font-bold rounded-lg transition flex items-center gap-2 ${formData.customerType === 'Bireysel' ? 'bg-white text-red-600 shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+                className={`flex-1 md:flex-none px-4 md:px-5 py-2 text-xs md:text-sm font-bold rounded-lg transition flex items-center justify-center gap-2 ${formData.customerType === 'Bireysel' ? 'bg-white text-red-600 shadow-sm' : 'text-neutral-500 hover:text-black'}`}
               >
                 <User className="w-4 h-4" /> Bireysel Müşteri
               </button>
               <button 
                 type="button"
                 onClick={() => setFormData({...formData, customerType: 'Kurumsal'})}
-                className={`px-5 py-2 text-sm font-bold rounded-lg transition flex items-center gap-2 ${formData.customerType === 'Kurumsal' ? 'bg-white text-red-600 shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+                className={`flex-1 md:flex-none px-4 md:px-5 py-2 text-xs md:text-sm font-bold rounded-lg transition flex items-center justify-center gap-2 ${formData.customerType === 'Kurumsal' ? 'bg-white text-red-600 shadow-sm' : 'text-neutral-500 hover:text-black'}`}
               >
                 <Briefcase className="w-4 h-4" /> Kurumsal Müşteri
               </button>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">
-                  {formData.customerType === 'Kurumsal' ? 'Şirket Ünvanı *' : 'Ad Soyad *'}
-                </label>
-                <input required type="text" name="customerName" value={formData.customerName} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder={formData.customerType === 'Kurumsal' ? 'Örn: Sembol Nakliyat A.Ş.' : 'Örn: Mehmet Şen'} />
+            <div className="space-y-4">
+              {/* SATIR 1: Ad Soyad + TC Kimlik No (mobilde de yan yana) */}
+              <div className="grid grid-cols-2 gap-3 md:gap-4">
+                <div>
+                  <label className={labelCls}>
+                    {formData.customerType === 'Kurumsal' ? 'Şirket Ünvanı *' : 'Ad Soyad *'}
+                  </label>
+                  <input required type="text" name="customerName" value={formData.customerName} onChange={handleInputChange} className={inputCls} placeholder={formData.customerType === 'Kurumsal' ? 'Örn: Sembol Nakliyat A.Ş.' : 'Örn: Mehmet Şen'} />
+                </div>
+                <div>
+                  <label className={labelCls}>
+                    {formData.customerType === 'Kurumsal' ? 'Vergi No' : 'TC Kimlik Numarası'}
+                  </label>
+                  {formData.customerType === 'Kurumsal' ? (
+                    <input type="text" name="taxNo" value={formData.taxNo} onChange={handleInputChange} className={inputCls} placeholder="Vergi numarası" />
+                  ) : (
+                    <input type="text" name="tcNo" value={formData.tcNo} onChange={handleInputChange} className={inputCls} placeholder="İsteğe bağlı" />
+                  )}
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Telefon Numarası *</label>
-                <input required type="tel" name="customerPhone" value={formData.customerPhone} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: 05551234567" />
+
+              {/* SATIR 2: Telefon + Yedek Telefon (mobilde de yan yana) */}
+              <div className="grid grid-cols-2 gap-3 md:gap-4">
+                <div>
+                  <label className={labelCls}>Telefon Numarası *</label>
+                  <input required type="tel" name="customerPhone" value={formData.customerPhone} onChange={handleInputChange} className={inputCls} placeholder="Örn: 05551234567" />
+                </div>
+                <div>
+                  <label className={labelCls}>Yedek Telefon Numarası</label>
+                  <input type="tel" name="altPhone" value={formData.altPhone || ''} onChange={handleInputChange} className={inputCls} placeholder="İsteğe Bağlı" />
+                </div>
               </div>
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Yedek Telefon Numarası</label>
-                <input type="tel" name="altPhone" value={formData.altPhone || ''} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="İsteğe Bağlı" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">
-                  {formData.customerType === 'Kurumsal' ? 'Vergi No' : 'TC Kimlik Numarası'}
-                </label>
-                {formData.customerType === 'Kurumsal' ? (
-                  <input type="text" name="taxNo" value={formData.taxNo} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Vergi numarası giriniz" />
-                ) : (
-                  <input type="text" name="tcNo" value={formData.tcNo} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="İsteğe bağlı" />
-                )}
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Tarih *</label>
-                <input required type="date" name="date" value={formData.date} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Saat *</label>
-                <input required type="time" name="time" value={formData.time} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">İşlem Süresi (Gün) *</label>
-                <select name="durationDays" value={formData.durationDays || '1'} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold transition">
-                  {[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>{d} Gün</option>)}
-                </select>
-              </div>
-            </div>
-          </div>
-          {/* FİNANS & NOTLAR */}
-          <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 border-t-4 border-t-green-600 h-full">
-            <h3 className="font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-2">
-              <Wallet className="w-5 h-5 text-red-600" /> Finans ve Operasyon Notları
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Anlaşılan Fiyat (TL)</label>
-                <input type="number" name="price" value={formData.price} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Alınan Kapora (TL)</label>
-                <input type="number" name="deposit" value={formData.deposit} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-green-600" />
+
+              {/* SATIR 3: Tarih + Saat + İşlem Süresi (mobilde de yan yana, 3 sütun) */}
+              <div className="grid grid-cols-3 gap-2 md:gap-4">
+                <div>
+                  <label className={labelCls}>Tarih *</label>
+                  <input required type="date" name="date" value={formData.date} onChange={handleInputChange} className={`${inputCls} font-bold`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Saat *</label>
+                  <input required type="time" name="time" value={formData.time} onChange={handleInputChange} className={`${inputCls} font-bold`} />
+                </div>
+                <div>
+                  <label className={labelCls}>İşlem Süresi *</label>
+                  <select name="durationDays" value={formData.durationDays || '1'} onChange={handleInputChange} className={`${selectCls} font-bold`}>
+                    {[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>{d} Gün</option>)}
+                  </select>
+                </div>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Sözleşme Detayı</label>
-                <textarea name="contractDetails" value={formData.contractDetails || ''} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none transition" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Operasyon Notları</label>
-                <textarea name="notes" value={formData.notes || ''} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none transition" />
-              </div>
-            </div>
-          </div>
           </div>
 
-          {/* ORTADAKİ YER DEĞİŞTİRME BUTONU (normal akışta, iki satırın arasında) */}
-          {type !== 'Asansör' && (
-            <div className="flex justify-center -my-1">
-                <button 
-                  type="button" 
-                  onClick={handleSwapAddresses}
-                  className="bg-black text-white px-6 py-2.5 rounded-full shadow-2xl border-4 border-white hover:bg-neutral-800 transition flex items-center gap-2 font-bold text-sm"
-                  title="Yükleme ve Boşaltma Bilgilerini Yer Değiştir"
-                >
-                  <ArrowUpDown className="w-5 h-5" /> Yönleri Değiştir
-                </button>
+          {/* ==================== FİNANS VE OPERASYON NOTLARI ==================== */}
+          {/* NOT: Bu bölüm, ekran görüntülerindeki akışa uygun şekilde müşteri bilgilerinin hemen altına taşındı */}
+          <div className="bg-neutral-50 p-4 md:p-5 rounded-2xl border border-neutral-200 shadow-sm">
+            <SectionHeader icon={Wallet} title="Finans ve Operasyon Notları" />
+            <div className="space-y-4">
+              {/* SATIR 1: Anlaşılan Fiyat + Alınan Kapora (mobilde de yan yana) */}
+              <div className="grid grid-cols-2 gap-3 md:gap-4">
+                <div>
+                  <label className={labelCls}>Anlaşılan Fiyat (TL)</label>
+                  <input type="number" name="price" value={formData.price} onChange={handleInputChange} className={`${inputCls} font-bold`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Alınan Kapora (TL)</label>
+                  <input type="number" name="deposit" value={formData.deposit} onChange={handleInputChange} className={`${inputCls} font-bold text-green-600`} />
+                </div>
+              </div>
+              {/* SATIR 2: Sözleşme Detayı + Operasyon Notları (mobilde de yan yana) */}
+              <div className="grid grid-cols-2 gap-3 md:gap-4">
+                <div>
+                  <label className={labelCls}>Sözleşme Detayı</label>
+                  <textarea name="contractDetails" value={formData.contractDetails || ''} onChange={handleInputChange} className={`${inputCls} h-20 resize-none`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Operasyon Notları</label>
+                  <textarea name="notes" value={formData.notes || ''} onChange={handleInputChange} className={`${inputCls} h-20 resize-none`} />
+                </div>
+              </div>
             </div>
-          )}
+          </div>
 
-          {/* YENİ DÜZEN: Yükleme + Boşaltma masaüstünde yan yana, mobilde alt alta */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-stretch">
-          {/* YÜKLEME BİLGİLERİ */}
-          <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 border-t-4 border-t-orange-500 h-full">
-            <div className="flex flex-col md:flex-row justify-between md:items-center mb-4 border-b border-neutral-200 pb-2 gap-2">
-              <h3 className="font-black text-red-600 flex items-center gap-2 text-lg uppercase tracking-wide">
-                {type === 'Asansör' ? 'Kurulum Adresi' : 'Yükleme Bilgileri (1. Adres)'}
-              </h3>
-              {type === 'Depo' && formData.depoDirection === 'fromDepo' && (
+          {/* ==================== YÜKLEME BİLGİLERİ (1. ADRES) ==================== */}
+          <div className="bg-neutral-50 p-4 md:p-5 rounded-2xl border border-neutral-200 shadow-sm">
+            <SectionHeader 
+              icon={ArrowUpRight} 
+              title={type === 'Asansör' ? 'Kurulum Adresi' : 'Yükleme Bilgileri (1. Adres)'}
+              rightSlot={type === 'Depo' && formData.depoDirection === 'fromDepo' ? (
                 <div className="flex items-center gap-2 bg-red-50 p-2 rounded-xl border border-red-100">
                   <Database className="w-4 h-4 text-red-600" />
                   <label className="text-xs font-bold text-red-700 whitespace-nowrap">Kendi Depomuzdan Çıkacak:</label>
@@ -158,122 +193,14 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                     <option value="Ümraniye Depoevim">Ümraniye Depoevim</option>
                   </select>
                 </div>
-              )}
-            </div>
-            <div className={`grid grid-cols-1 md:grid-cols-2 ${type === 'Asansör' ? 'lg:grid-cols-3' : 'lg:grid-cols-4'} gap-4 mb-6`}>
-                <div>
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">{type === 'Asansör' ? 'Kurulum Tipi' : 'Daire Tipi'}</label>
-                  <select name="fromRoomCount" value={formData.fromRoomCount} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
-                    {type === 'Asansör' ? (
-                      <>
-                        <option value="Yükleme Kurulum">Yükleme Kurulum</option>
-                        <option value="Boşaltma Kurulum">Boşaltma Kurulum</option>
-                        <option value="İnşaat Kurulum">İnşaat Kurulum</option>
-                        <option value="Parça Eşya Kurulum">Parça Eşya Kurulum</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="1+0">1+0</option>
-                        <option value="1+1">1+1</option>
-                        <option value="2+1">2+1</option>
-                        <option value="3+1">3+1</option>
-                        <option value="4+1">4+1</option>
-                        <option value="Ofis">Ofis</option>
-                        <option value="Villa">Villa</option>
-                        <option value="Parça Eşya">Parça Eşya</option>
-                        <option value="Depoevim Tesisleri">Depoevim Tesisleri</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">Kat</label>
-                  <select name="fromFloor" value={formData.fromFloor} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
-                    {type === 'Asansör' 
-                      ? Array.from({ length: 20 }, (_, i) => `${i + 1}. Kat`).map(f => <option key={`from-${f}`} value={f}>{f}</option>)
-                      : FLOORS.map(f => <option key={`from-${f}`} value={f}>{f}</option>)
-                    }
-                  </select>
-                </div>
-                {type !== 'Asansör' && (
+              ) : null}
+            />
+            <div className="space-y-4 mb-5">
+                {/* SATIR 1: Daire Tipi + Kat (mobilde de yan yana) */}
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
                   <div>
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">Taşıma Şekli</label>
-                    <select name="fromTransportMethod" value={formData.fromTransportMethod || 'Merdiven'} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-red-600">
-                      <option value="Bina Asansörü">Bina Asansörü</option>
-                      <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
-                      <option value="Merdiven">Merdiven</option>
-                    </select>
-                  </div>
-                )}
-                <div>
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">{type === 'Asansör' ? 'Kurulum Açısı' : 'Yükleme Mesafesi'}</label>
-                  <div className="flex gap-2">
-                    <input type="number" name="fromDistance" value={formData.fromDistance} onChange={handleInputChange} placeholder="Örn: 20" className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" />
-                    <select name="fromDistanceUnit" value={formData.fromDistanceUnit} onChange={handleInputChange} className="w-24 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
-                      <option value="Metre">Metre</option>
-                      <option value="Adım">Adım</option>
-                    </select>
-                  </div>
-                </div>
-                <div className={type === 'Asansör' ? "lg:col-span-3" : "lg:col-span-4"}>
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">{type === 'Asansör' ? 'Kime Kurulacak' : 'Küçük Eşyaların Durumu'}</label>
-                  <select name="fromPacking" value={formData.fromPacking || (type === 'Asansör' ? 'Kendi İşimiz' : 'Kendisi Topladı')} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
-                    {type === 'Asansör' ? (
-                      <>
-                        <option value="Kendi İşimiz">Kendi İşimiz</option>
-                        <option value="Dışarıya Kiralama">Dışarıya Kiralama</option>
-                      </>
-                    ) : (
-                      <>
-                        <option value="Kendisi Topladı">Kendisi Topladı</option>
-                        <option value="Toplama Yapılacak">Toplama Yapılacak</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="col-span-1">
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">İl *</label>
-                  <select required name="fromProvince" value={formData.fromProvince} onChange={(e) => handleProvinceChange(e, 'from')} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
-                    <option value="">İl Seçiniz</option>
-                    {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                </div>
-                <div className="col-span-1">
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">İlçe *</label>
-                  <input required type="text" name="fromDistrict" value={formData.fromDistrict} onChange={handleInputChange} placeholder="İlçe giriniz" className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
-                </div>
-            </div>
-            <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Açık Adres Bilgileri</label>
-                <textarea name="fromAddress" value={formData.fromAddress} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-16 resize-none" placeholder="Mahalle, sokak, bina no vb." />
-            </div>
-
-            {/* EKSTRA YÜKLEME ADRESLERİ */}
-            {formData.extraLoadingAddresses?.map((addr, index) => (
-              <div key={addr.id} className="mt-8 pt-6 border-t-2 border-neutral-200 border-dashed relative">
-                <button 
-                  type="button" 
-                  onClick={() => {
-                    setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.filter(a => a.id !== addr.id) }));
-                  }} 
-                  className="absolute -top-4 right-0 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition text-xs font-bold flex items-center gap-1 border border-red-100 shadow-sm"
-                >
-                  <X className="w-3.5 h-3.5"/> Adresi Kaldır
-                </button>
-                <h4 className="font-black text-neutral-700 mb-4 flex items-center gap-2 text-md uppercase tracking-wide">
-                  {index + 2}. {type === 'Asansör' ? 'Kurulum Adresi' : 'Yükleme Adresi'}
-                </h4>
-                <div className={`grid grid-cols-1 md:grid-cols-2 ${type === 'Asansör' ? 'lg:grid-cols-3' : 'lg:grid-cols-4'} gap-4 mb-6`}>
-                  <div>
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">{type === 'Asansör' ? 'Kurulum Tipi' : 'Daire Tipi'}</label>
-                    <select 
-                      value={addr.roomCount} 
-                      onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, roomCount: e.target.value } : a) }))} 
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
-                    >
+                    <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Tipi' : 'Daire Tipi'}</label>
+                    <select name="fromRoomCount" value={formData.fromRoomCount} onChange={handleInputChange} className={selectCls}>
                       {type === 'Asansör' ? (
                         <>
                           <option value="Yükleme Kurulum">Yükleme Kurulum</option>
@@ -297,26 +224,22 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">Kat</label>
-                    <select 
-                      value={addr.floor} 
-                      onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, floor: e.target.value } : a) }))} 
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
-                    >
+                    <label className={labelCls}>Kat</label>
+                    <select name="fromFloor" value={formData.fromFloor} onChange={handleInputChange} className={selectCls}>
                       {type === 'Asansör' 
-                        ? Array.from({ length: 20 }, (_, i) => `${i + 1}. Kat`).map(f => <option key={`ext-from-${f}`} value={f}>{f}</option>)
-                        : FLOORS.map(f => <option key={`ext-from-${f}`} value={f}>{f}</option>)
+                        ? Array.from({ length: 20 }, (_, i) => `${i + 1}. Kat`).map(f => <option key={`from-${f}`} value={f}>{f}</option>)
+                        : FLOORS.map(f => <option key={`from-${f}`} value={f}>{f}</option>)
                       }
                     </select>
                   </div>
+                </div>
+
+                {/* SATIR 2: Taşıma Şekli + Yükleme Mesafesi + Küçük Eşyaların Durumu (mobilde de yan yana) */}
+                <div className={`grid ${type === 'Asansör' ? 'grid-cols-2' : 'grid-cols-3'} gap-2 md:gap-4`}>
                   {type !== 'Asansör' && (
                     <div>
-                      <label className="block text-sm font-bold text-neutral-700 mb-1">Taşıma Şekli</label>
-                      <select 
-                        value={addr.transportMethod} 
-                        onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, transportMethod: e.target.value } : a) }))} 
-                        className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-red-600"
-                      >
+                      <label className={labelCls}>Taşıma Şekli</label>
+                      <select name="fromTransportMethod" value={formData.fromTransportMethod || 'Merdiven'} onChange={handleInputChange} className={`${selectCls} font-bold text-red-600`}>
                         <option value="Bina Asansörü">Bina Asansörü</option>
                         <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
                         <option value="Merdiven">Merdiven</option>
@@ -324,32 +247,18 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                     </div>
                   )}
                   <div>
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">{type === 'Asansör' ? 'Kurulum Açısı' : 'Yükleme Mesafesi'}</label>
-                    <div className="flex gap-2">
-                      <input 
-                        type="number" 
-                        value={addr.distance} 
-                        onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, distance: e.target.value } : a) }))} 
-                        placeholder="Örn: 20" 
-                        className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" 
-                      />
-                      <select 
-                        value={addr.distanceUnit} 
-                        onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, distanceUnit: e.target.value } : a) }))} 
-                        className="w-24 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
-                      >
+                    <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Açısı' : 'Yükleme Mesafesi'}</label>
+                    <div className="flex gap-1.5 md:gap-2">
+                      <input type="number" name="fromDistance" value={formData.fromDistance} onChange={handleInputChange} placeholder="20" className={`flex-1 min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none`} />
+                      <select name="fromDistanceUnit" value={formData.fromDistanceUnit} onChange={handleInputChange} className="w-16 md:w-24 p-1 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-base">
                         <option value="Metre">Metre</option>
                         <option value="Adım">Adım</option>
                       </select>
                     </div>
                   </div>
-                  <div className={type === 'Asansör' ? "lg:col-span-3" : "lg:col-span-4"}>
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">{type === 'Asansör' ? 'Kime Kurulacak' : 'Küçük Eşyaların Durumu'}</label>
-                    <select 
-                      value={addr.packing} 
-                      onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, packing: e.target.value } : a) }))} 
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
-                    >
+                  <div>
+                    <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Küçük Eşyaların Durumu'}</label>
+                    <select name="fromPacking" value={formData.fromPacking || (type === 'Asansör' ? 'Kendi İşimiz' : 'Kendisi Topladı')} onChange={handleInputChange} className={selectCls}>
                       {type === 'Asansör' ? (
                         <>
                           <option value="Kendi İşimiz">Kendi İşimiz</option>
@@ -364,35 +273,174 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                     </select>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mb-4">
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 md:gap-4 mb-4">
+                <div className="col-span-1">
+                  <label className={labelCls}>İl *</label>
+                  <select required name="fromProvince" value={formData.fromProvince} onChange={(e) => handleProvinceChange(e, 'from')} className={selectCls}>
+                    <option value="">İl Seçiniz</option>
+                    {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div className="col-span-1">
+                  <label className={labelCls}>İlçe *</label>
+                  <input required type="text" name="fromDistrict" value={formData.fromDistrict} onChange={handleInputChange} placeholder="İlçe giriniz" className={inputCls} />
+                </div>
+            </div>
+            <div>
+                <label className={labelCls}>Açık Adres Bilgileri</label>
+                <textarea name="fromAddress" value={formData.fromAddress} onChange={handleInputChange} className={`${inputCls} h-16 resize-none`} placeholder="Mahalle, sokak, bina no vb." />
+            </div>
+
+            {/* EKSTRA YÜKLEME ADRESLERİ */}
+            {formData.extraLoadingAddresses?.map((addr, index) => (
+              <div key={addr.id} className="mt-8 pt-6 border-t-2 border-neutral-200 border-dashed relative">
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.filter(a => a.id !== addr.id) }));
+                  }} 
+                  className="absolute -top-4 right-0 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition text-xs font-bold flex items-center gap-1 border border-red-100 shadow-sm"
+                >
+                  <X className="w-3.5 h-3.5"/> Adresi Kaldır
+                </button>
+                <h4 className="font-black text-neutral-700 mb-4 flex items-center gap-2 text-md uppercase tracking-wide">
+                  {index + 2}. {type === 'Asansör' ? 'Kurulum Adresi' : 'Yükleme Adresi'}
+                </h4>
+                <div className="space-y-4 mb-5">
+                  {/* SATIR 1: Daire Tipi + Kat */}
+                  <div className="grid grid-cols-2 gap-3 md:gap-4">
+                    <div>
+                      <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Tipi' : 'Daire Tipi'}</label>
+                      <select 
+                        value={addr.roomCount} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, roomCount: e.target.value } : a) }))} 
+                        className={selectCls}
+                      >
+                        {type === 'Asansör' ? (
+                          <>
+                            <option value="Yükleme Kurulum">Yükleme Kurulum</option>
+                            <option value="Boşaltma Kurulum">Boşaltma Kurulum</option>
+                            <option value="İnşaat Kurulum">İnşaat Kurulum</option>
+                            <option value="Parça Eşya Kurulum">Parça Eşya Kurulum</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="1+0">1+0</option>
+                            <option value="1+1">1+1</option>
+                            <option value="2+1">2+1</option>
+                            <option value="3+1">3+1</option>
+                            <option value="4+1">4+1</option>
+                            <option value="Ofis">Ofis</option>
+                            <option value="Villa">Villa</option>
+                            <option value="Parça Eşya">Parça Eşya</option>
+                            <option value="Depoevim Tesisleri">Depoevim Tesisleri</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Kat</label>
+                      <select 
+                        value={addr.floor} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, floor: e.target.value } : a) }))} 
+                        className={selectCls}
+                      >
+                        {type === 'Asansör' 
+                          ? Array.from({ length: 20 }, (_, i) => `${i + 1}. Kat`).map(f => <option key={`ext-from-${f}`} value={f}>{f}</option>)
+                          : FLOORS.map(f => <option key={`ext-from-${f}`} value={f}>{f}</option>)
+                        }
+                      </select>
+                    </div>
+                  </div>
+                  {/* SATIR 2: Taşıma Şekli + Mesafe + Küçük Eşyaların Durumu */}
+                  <div className={`grid ${type === 'Asansör' ? 'grid-cols-2' : 'grid-cols-3'} gap-2 md:gap-4`}>
+                    {type !== 'Asansör' && (
+                      <div>
+                        <label className={labelCls}>Taşıma Şekli</label>
+                        <select 
+                          value={addr.transportMethod} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, transportMethod: e.target.value } : a) }))} 
+                          className={`${selectCls} font-bold text-red-600`}
+                        >
+                          <option value="Bina Asansörü">Bina Asansörü</option>
+                          <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
+                          <option value="Merdiven">Merdiven</option>
+                        </select>
+                      </div>
+                    )}
+                    <div>
+                      <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Açısı' : 'Yükleme Mesafesi'}</label>
+                      <div className="flex gap-1.5 md:gap-2">
+                        <input 
+                          type="number" 
+                          value={addr.distance} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, distance: e.target.value } : a) }))} 
+                          placeholder="20" 
+                          className="flex-1 min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" 
+                        />
+                        <select 
+                          value={addr.distanceUnit} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, distanceUnit: e.target.value } : a) }))} 
+                          className="w-16 md:w-24 p-1 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-base"
+                        >
+                          <option value="Metre">Metre</option>
+                          <option value="Adım">Adım</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div>
+                      <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Küçük Eşyaların Durumu'}</label>
+                      <select 
+                        value={addr.packing} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, packing: e.target.value } : a) }))} 
+                        className={selectCls}
+                      >
+                        {type === 'Asansör' ? (
+                          <>
+                            <option value="Kendi İşimiz">Kendi İşimiz</option>
+                            <option value="Dışarıya Kiralama">Dışarıya Kiralama</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="Kendisi Topladı">Kendisi Topladı</option>
+                            <option value="Toplama Yapılacak">Toplama Yapılacak</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 md:gap-4 mb-4">
                   <div className="col-span-1">
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">İl</label>
+                    <label className={labelCls}>İl</label>
                     <select 
                       value={addr.province} 
                       onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, province: e.target.value, district: '' } : a) }))} 
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
+                      className={selectCls}
                     >
                       <option value="">İl Seçiniz</option>
                       {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </div>
                   <div className="col-span-1">
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">İlçe</label>
+                    <label className={labelCls}>İlçe</label>
                     <input 
                       type="text"
                       value={addr.district} 
                       onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, district: e.target.value } : a) }))} 
                       placeholder="İlçe giriniz"
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition"
+                      className={inputCls}
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">Açık Adres Bilgileri</label>
+                  <label className={labelCls}>Açık Adres Bilgileri</label>
                   <textarea 
                     value={addr.address} 
                     onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, address: e.target.value } : a) }))} 
-                    className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-16 resize-none" 
+                    className={`${inputCls} h-16 resize-none`}
                     placeholder="Mahalle, sokak, bina no vb." 
                   />
                 </div>
@@ -415,15 +463,28 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
               <PlusCircle className="w-5 h-5" /> Yeni {type === 'Asansör' ? 'Kurulum' : 'Yükleme'} Adresi Ekle
             </button>
           </div>
+
           {type !== 'Asansör' && (
             <>
-              {/* BOŞALTMA BİLGİLERİ */}
-              <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 border-t-4 border-t-red-600 h-full">
-                <div className="flex flex-col md:flex-row justify-between md:items-center mb-4 border-b border-neutral-200 pb-2 gap-2">
-                  <h3 className="font-black text-red-600 flex items-center gap-2 text-lg uppercase tracking-wide">
-                    Boşaltma Bilgileri (1. Adres)
-                  </h3>
-                  {type === 'Depo' && formData.depoDirection === 'toDepo' && (
+              {/* ORTADAKİ YER DEĞİŞTİRME BUTONU */}
+              {/* NOT: Bu buton, tam olarak YÜKLEME ve BOŞALTMA bölümlerinin ORTASINDA konumlanır */}
+              <div className="flex justify-center items-center h-0 relative z-10">
+                <button 
+                  type="button" 
+                  onClick={handleSwapAddresses}
+                  className="bg-black text-white px-6 py-2.5 rounded-full shadow-2xl border-4 border-white hover:bg-neutral-800 transition flex items-center gap-2 font-bold text-sm absolute"
+                  title="Yükleme ve Boşaltma Bilgilerini Yer Değiştir"
+                >
+                  <ArrowUpDown className="w-5 h-5" /> Yönleri Değiştir
+                </button>
+              </div>
+
+              {/* ==================== BOŞALTMA BİLGİLERİ (1. ADRES) ==================== */}
+              <div className="bg-neutral-50 p-4 md:p-5 rounded-2xl border border-neutral-200 shadow-sm">
+                <SectionHeader 
+                  icon={MapPin} 
+                  title="Boşaltma Bilgileri (1. Adres)"
+                  rightSlot={type === 'Depo' && formData.depoDirection === 'toDepo' ? (
                     <div className="flex items-center gap-2 bg-red-50 p-2 rounded-xl border border-red-100">
                       <Database className="w-4 h-4 text-red-600" />
                       <label className="text-xs font-bold text-red-700 whitespace-nowrap">Kendi Depomuza İndir:</label>
@@ -440,65 +501,71 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                         <option value="Ümraniye Depoevim">Ümraniye Depoevim</option>
                       </select>
                     </div>
-                  )}
-                </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                <div>
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">Daire Tipi</label>
-                  <select name="toRoomCount" value={formData.toRoomCount} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
-                    <option value="1+0">1+0</option>
-                    <option value="1+1">1+1</option>
-                    <option value="2+1">2+1</option>
-                    <option value="3+1">3+1</option>
-                    <option value="4+1">4+1</option>
-                    <option value="Ofis">Ofis</option>
-                    <option value="Villa">Villa</option>
-                    <option value="Parça Eşya">Parça Eşya</option>
-                    <option value="Depoevim Tesisleri">Depoevim Tesisleri</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">Kat</label>
-                  <select name="toFloor" value={formData.toFloor} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
-                    {FLOORS.map(f => <option key={`to-${f}`} value={f}>{f}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">Taşıma Şekli</label>
-                  <select name="toTransportMethod" value={formData.toTransportMethod || 'Merdiven'} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-red-600">
-                    <option value="Bina Asansörü">Bina Asansörü</option>
-                    <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
-                    <option value="Merdiven">Merdiven</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">Boşaltma Mesafesi</label>
-                  <div className="flex gap-2">
-                    <input type="number" name="toDistance" value={formData.toDistance} onChange={handleInputChange} placeholder="Örn: 15" className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" />
-                    <select name="toDistanceUnit" value={formData.toDistanceUnit} onChange={handleInputChange} className="w-24 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
-                      <option value="Metre">Metre</option>
-                      <option value="Adım">Adım</option>
+                  ) : null}
+                />
+            <div className="space-y-4 mb-5">
+                {/* SATIR 1: Daire Tipi + Kat (mobilde de yan yana) */}
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div>
+                    <label className={labelCls}>Daire Tipi</label>
+                    <select name="toRoomCount" value={formData.toRoomCount} onChange={handleInputChange} className={selectCls}>
+                      <option value="1+0">1+0</option>
+                      <option value="1+1">1+1</option>
+                      <option value="2+1">2+1</option>
+                      <option value="3+1">3+1</option>
+                      <option value="4+1">4+1</option>
+                      <option value="Ofis">Ofis</option>
+                      <option value="Villa">Villa</option>
+                      <option value="Parça Eşya">Parça Eşya</option>
+                      <option value="Depoevim Tesisleri">Depoevim Tesisleri</option>
                     </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Kat</label>
+                    <select name="toFloor" value={formData.toFloor} onChange={handleInputChange} className={selectCls}>
+                      {FLOORS.map(f => <option key={`to-${f}`} value={f}>{f}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {/* SATIR 2: Taşıma Şekli + Boşaltma Mesafesi (mobilde de yan yana) */}
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div>
+                    <label className={labelCls}>Taşıma Şekli</label>
+                    <select name="toTransportMethod" value={formData.toTransportMethod || 'Merdiven'} onChange={handleInputChange} className={`${selectCls} font-bold text-red-600`}>
+                      <option value="Bina Asansörü">Bina Asansörü</option>
+                      <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
+                      <option value="Merdiven">Merdiven</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Boşaltma Mesafesi</label>
+                    <div className="flex gap-1.5 md:gap-2">
+                      <input type="number" name="toDistance" value={formData.toDistance} onChange={handleInputChange} placeholder="15" className="flex-1 min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" />
+                      <select name="toDistanceUnit" value={formData.toDistanceUnit} onChange={handleInputChange} className="w-16 md:w-24 p-1 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-base">
+                        <option value="Metre">Metre</option>
+                        <option value="Adım">Adım</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="grid grid-cols-2 gap-3 md:gap-4 mb-4">
                 <div className="col-span-1">
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">İl *</label>
-                  <select required name="toProvince" value={formData.toProvince} onChange={(e) => handleProvinceChange(e, 'to')} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white">
+                  <label className={labelCls}>İl *</label>
+                  <select required name="toProvince" value={formData.toProvince} onChange={(e) => handleProvinceChange(e, 'to')} className={selectCls}>
                     <option value="">İl Seçiniz</option>
                     {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
                   </select>
                 </div>
                 <div className="col-span-1">
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">İlçe *</label>
-                  <input required type="text" name="toDistrict" value={formData.toDistrict} onChange={handleInputChange} placeholder="İlçe giriniz" className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  <label className={labelCls}>İlçe *</label>
+                  <input required type="text" name="toDistrict" value={formData.toDistrict} onChange={handleInputChange} placeholder="İlçe giriniz" className={inputCls} />
                 </div>
             </div>
             <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Açık Adres Bilgileri</label>
-                <textarea name="toAddress" value={formData.toAddress} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-16 resize-none" placeholder="Mahalle, sokak, bina no vb." />
+                <label className={labelCls}>Açık Adres Bilgileri</label>
+                <textarea name="toAddress" value={formData.toAddress} onChange={handleInputChange} className={`${inputCls} h-16 resize-none`} placeholder="Mahalle, sokak, bina no vb." />
             </div>
 
             {/* EKSTRA BOŞALTMA ADRESLERİ */}
@@ -516,97 +583,103 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                 <h4 className="font-black text-neutral-700 mb-4 flex items-center gap-2 text-md uppercase tracking-wide">
                   {index + 2}. Boşaltma Adresi
                 </h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">Daire Tipi</label>
-                    <select 
-                      value={addr.roomCount} 
-                      onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, roomCount: e.target.value } : a) }))} 
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
-                    >
-                      <option value="1+0">1+0</option>
-                      <option value="1+1">1+1</option>
-                      <option value="2+1">2+1</option>
-                      <option value="3+1">3+1</option>
-                      <option value="4+1">4+1</option>
-                      <option value="Ofis">Ofis</option>
-                      <option value="Villa">Villa</option>
-                      <option value="Parça Eşya">Parça Eşya</option>
-                      <option value="Depoevim Tesisleri">Depoevim Tesisleri</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">Kat</label>
-                    <select 
-                      value={addr.floor} 
-                      onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, floor: e.target.value } : a) }))} 
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
-                    >
-                      {FLOORS.map(f => <option key={`ext-to-${f}`} value={f}>{f}</option>)}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">Taşıma Şekli</label>
-                    <select 
-                      value={addr.transportMethod} 
-                      onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, transportMethod: e.target.value } : a) }))} 
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-red-600"
-                    >
-                      <option value="Bina Asansörü">Bina Asansörü</option>
-                      <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
-                      <option value="Merdiven">Merdiven</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">Boşaltma Mesafesi</label>
-                    <div className="flex gap-2">
-                      <input 
-                        type="number" 
-                        value={addr.distance} 
-                        onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distance: e.target.value } : a) }))} 
-                        placeholder="Örn: 15" 
-                        className="flex-1 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" 
-                      />
+                <div className="space-y-4 mb-5">
+                  {/* SATIR 1: Daire Tipi + Kat */}
+                  <div className="grid grid-cols-2 gap-3 md:gap-4">
+                    <div>
+                      <label className={labelCls}>Daire Tipi</label>
                       <select 
-                        value={addr.distanceUnit} 
-                        onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distanceUnit: e.target.value } : a) }))} 
-                        className="w-24 p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
+                        value={addr.roomCount} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, roomCount: e.target.value } : a) }))} 
+                        className={selectCls}
                       >
-                        <option value="Metre">Metre</option>
-                        <option value="Adım">Adım</option>
+                        <option value="1+0">1+0</option>
+                        <option value="1+1">1+1</option>
+                        <option value="2+1">2+1</option>
+                        <option value="3+1">3+1</option>
+                        <option value="4+1">4+1</option>
+                        <option value="Ofis">Ofis</option>
+                        <option value="Villa">Villa</option>
+                        <option value="Parça Eşya">Parça Eşya</option>
+                        <option value="Depoevim Tesisleri">Depoevim Tesisleri</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Kat</label>
+                      <select 
+                        value={addr.floor} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, floor: e.target.value } : a) }))} 
+                        className={selectCls}
+                      >
+                        {FLOORS.map(f => <option key={`ext-to-${f}`} value={f}>{f}</option>)}
                       </select>
                     </div>
                   </div>
+                  {/* SATIR 2: Taşıma Şekli + Boşaltma Mesafesi */}
+                  <div className="grid grid-cols-2 gap-3 md:gap-4">
+                    <div>
+                      <label className={labelCls}>Taşıma Şekli</label>
+                      <select 
+                        value={addr.transportMethod} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, transportMethod: e.target.value } : a) }))} 
+                        className={`${selectCls} font-bold text-red-600`}
+                      >
+                        <option value="Bina Asansörü">Bina Asansörü</option>
+                        <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
+                        <option value="Merdiven">Merdiven</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Boşaltma Mesafesi</label>
+                      <div className="flex gap-1.5 md:gap-2">
+                        <input 
+                          type="number" 
+                          value={addr.distance} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distance: e.target.value } : a) }))} 
+                          placeholder="15" 
+                          className="flex-1 min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" 
+                        />
+                        <select 
+                          value={addr.distanceUnit} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distanceUnit: e.target.value } : a) }))} 
+                          className="w-16 md:w-24 p-1 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-base"
+                        >
+                          <option value="Metre">Metre</option>
+                          <option value="Adım">Adım</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="grid grid-cols-2 gap-3 md:gap-4 mb-4">
                   <div className="col-span-1">
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">İl</label>
+                    <label className={labelCls}>İl</label>
                     <select 
                       value={addr.province} 
                       onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, province: e.target.value, district: '' } : a) }))} 
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white"
+                      className={selectCls}
                     >
                       <option value="">İl Seçiniz</option>
                       {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
                     </select>
                   </div>
                   <div className="col-span-1">
-                    <label className="block text-sm font-bold text-neutral-700 mb-1">İlçe</label>
+                    <label className={labelCls}>İlçe</label>
                     <input 
                       type="text"
                       value={addr.district} 
                       onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, district: e.target.value } : a) }))} 
                       placeholder="İlçe giriniz"
-                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition"
+                      className={inputCls}
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-neutral-700 mb-1">Açık Adres Bilgileri</label>
+                  <label className={labelCls}>Açık Adres Bilgileri</label>
                   <textarea 
                     value={addr.address} 
                     onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, address: e.target.value } : a) }))} 
-                    className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-16 resize-none" 
+                    className={`${inputCls} h-16 resize-none`}
                     placeholder="Mahalle, sokak, bina no vb." 
                   />
                 </div>
@@ -631,16 +704,41 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
           </div>
             </>
           )}
-          </div>
 
-          <button type="button" onClick={handleAddJob} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl hover:bg-red-700 transition flex justify-center items-center gap-2 text-xl shadow-xl shadow-red-600/30">
+          <button type="button" onClick={handleSaveClick} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl hover:bg-red-700 transition flex justify-center items-center gap-2 text-xl shadow-xl shadow-red-600/30">
             <PlusCircle className="w-6 h-6" /> 
             {editingJobId ? 'Kaydı Güncelle' : 'Kaydı Oluştur'}
           </button>
         </div>
+
+        {/* ==================== YENİ: ZORUNLU ALAN UYARI PENCERESİ ==================== */}
+        {/* İsim veya telefon boş bırakılıp "Kaydı Oluştur"a basılırsa bu pencere açılır ve kayıt YAPILMAZ */}
+        {showValidationModal && (
+          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-in zoom-in-95">
+              <div className="flex flex-col items-center text-center">
+                <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mb-4">
+                  <AlertTriangle className="w-7 h-7 text-red-600" />
+                </div>
+                <h3 className="text-lg font-black text-black mb-2">Eksik Bilgi!</h3>
+                <p className="text-sm text-neutral-600 mb-5">
+                  Müşteri kaydı oluşturabilmek için <b>{formData.customerType === 'Kurumsal' ? 'Şirket Ünvanı' : 'Ad Soyad'}</b> ve <b>Telefon Numarası</b> alanları zorunludur. Lütfen bu alanları doldurun.
+                </p>
+                <button 
+                  type="button" 
+                  onClick={() => setShowValidationModal(false)}
+                  className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition"
+                >
+                  Tamam, Anladım
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
+
 
   export const CustomerListView = ({ jobs, title, handleEditJob, onViewCari }) => {
     const [searchQuery, setSearchQuery] = useState('');
