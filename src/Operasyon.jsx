@@ -1877,7 +1877,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 lg:overflow-hidden">
            
            {/* SOL: GÜNLER (7 KOLON) */}
-           <div className="flex-1 flex gap-3 overflow-x-auto custom-scrollbar bg-neutral-100/50 p-3 rounded-2xl border border-neutral-200 h-[420px] lg:h-full shrink-0">
+           <div className="flex-1 flex gap-3 overflow-x-auto custom-scrollbar bg-neutral-100/50 p-3 rounded-2xl border border-neutral-200 h-[70vh] lg:h-full shrink-0">
               {weekDays.map((wd, i) => {
                  const isToday = wd.dateStr === new Date().toISOString().split('T')[0];
                  const isWeekendDay = i === 6; // Sunday
@@ -1892,13 +1892,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                  return (
                     <div 
                        key={i} 
-                       className={`flex-1 min-w-[140px] max-w-[200px] flex flex-col bg-white rounded-xl shadow-sm border ${isToday ? 'border-blue-500 ring-1 ring-blue-500' : 'border-neutral-200'} overflow-hidden shrink-0`}
+                       className={`flex-1 min-w-[140px] max-w-[200px] min-h-0 flex flex-col bg-white rounded-xl shadow-sm border ${isToday ? 'border-blue-500 ring-1 ring-blue-500' : 'border-neutral-200'} overflow-hidden shrink-0`}
                        onDragOver={handleDragOver}
                        onDrop={(e) => handleDrop(e, wd)}
                     >
                        <div className={`p-2 border-b ${isToday ? 'bg-blue-50 border-blue-200' : isWeekendDay ? 'bg-red-50 border-red-200' : 'bg-neutral-50 border-neutral-200'} text-center shrink-0`}>
                           <p className={`text-xs font-bold uppercase tracking-wider ${isToday ? 'text-blue-700' : isWeekendDay ? 'text-red-700' : 'text-neutral-500'}`}>{wd.dayName}</p>
                           <p className={`text-xl font-black ${isToday ? 'text-blue-600' : isWeekendDay ? 'text-red-600' : 'text-black'}`}>{wd.dayNum}</p>
+                          {/* YENİ: O gün toplam kaç kişiye izin yazıldığı */}
+                          <span className={`inline-flex items-center gap-1 mt-1 px-2 py-0.5 rounded-full text-[10px] font-black ${assignedPersons.length > 0 ? 'bg-blue-600 text-white' : 'bg-neutral-200 text-neutral-500'}`}>
+                             <Users className="w-3 h-3" /> {assignedPersons.length} izinli
+                          </span>
                        </div>
                        
                        <div className="flex-1 p-2 overflow-y-auto custom-scrollbar space-y-2 bg-neutral-50/50">
@@ -3895,7 +3899,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       </div>
     );
   };
-  export const PersonnelListView = ({ personnelList, onUpdate, positions = [], ranks = [], onViewProfile, pendingEditPersonnelId, setPendingEditPersonnelId }) => {
+  export const PersonnelListView = ({ personnelList, onUpdate, positions = [], ranks = [], onViewProfile, pendingEditPersonnelId, setPendingEditPersonnelId, onAddNew }) => {
     const [filterYaka, setFilterYaka] = useState('');
     const [filterPozisyon, setFilterPozisyon] = useState('');
     const [filterRutbe, setFilterRutbe] = useState('');
@@ -3949,6 +3953,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <Briefcase className="w-6 h-6 text-red-600" /> {filterDurum === 'Aktif' ? 'Çalışan Personel' : filterDurum === 'Pasif' ? 'İşten Ayrılan Personel' : 'Tüm Personel'}
           </h2>
           <div className="flex flex-wrap items-center gap-2">
+            {/* YENİ: Personel ekleme artık bu sayfanın sağ üstündeki butondan yapılır */}
+            {onAddNew && (
+              <button
+                onClick={() => onAddNew()}
+                className="flex items-center gap-1.5 bg-gradient-to-r from-emerald-500 to-green-700 text-white text-sm font-black px-4 py-2 rounded-lg shadow-md shadow-green-600/30 hover:scale-[1.02] transition whitespace-nowrap"
+              >
+                <UserPlus className="w-4 h-4" /> Personel Ekle
+              </button>
+            )}
             <select value={filterDurum} onChange={e=>setFilterDurum(e.target.value)} className="p-2 border border-neutral-200 rounded-lg text-sm outline-none focus:ring-1 focus:ring-red-500 bg-neutral-50 text-neutral-700 font-bold cursor-pointer transition hover:border-neutral-300">
               <option value="Aktif">Çalışan Personel</option>
               <option value="Pasif">İşten Ayrılanlar</option>
@@ -5363,16 +5376,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       return uploadedUrl;
     };
 
-    // Maaş tablosundaki (personnelMaas) ilgili aya avans/onay verisini işleyen ortak fonksiyon
+    // Maaş tablosundaki (maas koleksiyonu) ilgili aya avans/onay verisini işleyen ortak fonksiyon
+    // DÜZELTME: Personel Muhasebe Maaş Tablosu 'maas' koleksiyonundaki records[personId] alanını okur.
+    // Önceden yanlışlıkla 'personnelMaas'/'rows' yazılıyordu; bu yüzden avans tabloya yansımıyordu.
+    // Artık doğru yere yazılıyor ve mevcut avansın ÜZERİNE ekleniyor (patch fonksiyonu topluyor).
     const applyToMaasRow = async (monthStr, patch) => {
       const [y, m] = monthStr.split('-');
-      const maasRef = doc(db, 'artifacts', appId, 'public', 'data', 'personnelMaas', `${maasDocPrefix}${parseInt(y)}_${parseInt(m)}`);
+      const maasRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${maasDocPrefix}${parseInt(y)}_${parseInt(m)}`);
       const snap = await getDoc(maasRef);
-      const data = snap.exists() ? snap.data() : { rows: {} };
-      const rows = data.rows || {};
-      const existingRow = rows[personId] || {};
-      rows[personId] = { ...existingRow, ...patch(existingRow) };
-      await setDoc(maasRef, { rows, updatedAt: new Date().toISOString() }, { merge: true });
+      const data = snap.exists() ? snap.data() : { records: {} };
+      const records = data.records || {};
+      const existingRow = records[personId] || {};
+      records[personId] = { ...existingRow, ...patch(existingRow) };
+      await setDoc(maasRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
     };
 
     const logAction = async (actionData) => {
@@ -5797,6 +5813,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <span className="block font-black text-sm leading-snug">{primStatusText}</span>
               </div>
             </div>
+            {/* YENİ: Bu ay kullanılan nakit avans — Mesai Durumu'nun ÜSTÜNDE */}
+            <div className="p-4 rounded-xl border-2 bg-red-50 border-red-200 text-red-700 flex items-center gap-3">
+              <DollarSign className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Kullanılan Nakit Avans ({financeMonthLabel})</span>
+                <span className="block font-black text-sm leading-snug">₺{financeNakitAvansTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
+              </div>
+            </div>
+            {/* YENİ: Bu ay kullanılan banka (resmi) avans — Mesai Durumu'nun ÜSTÜNDE */}
+            <div className="p-4 rounded-xl border-2 bg-red-50 border-red-200 text-red-700 flex items-center gap-3">
+              <Landmark className="w-6 h-6 shrink-0" />
+              <div>
+                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Kullanılan Banka Avansı ({financeMonthLabel})</span>
+                <span className="block font-black text-sm leading-snug">₺{financeResmiAvansTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
+              </div>
+            </div>
             <div className="p-4 rounded-xl border-2 bg-blue-50 border-blue-200 text-blue-700 flex items-center gap-3 md:col-span-2">
               <Clock className="w-6 h-6 shrink-0" />
               <div>
@@ -5826,22 +5858,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <div>
                 <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Kalan Banka ({financeMonthLabel})</span>
                 <span className="block font-black text-sm leading-snug">₺{financeKalanBanka.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
-              </div>
-            </div>
-            {/* YENİ: Bu ay kullanılan nakit avans */}
-            <div className="p-4 rounded-xl border-2 bg-red-50 border-red-200 text-red-700 flex items-center gap-3">
-              <DollarSign className="w-6 h-6 shrink-0" />
-              <div>
-                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Kullanılan Nakit Avans ({financeMonthLabel})</span>
-                <span className="block font-black text-sm leading-snug">₺{financeNakitAvansTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
-              </div>
-            </div>
-            {/* YENİ: Bu ay kullanılan banka (resmi) avans */}
-            <div className="p-4 rounded-xl border-2 bg-red-50 border-red-200 text-red-700 flex items-center gap-3">
-              <Landmark className="w-6 h-6 shrink-0" />
-              <div>
-                <span className="block text-[10px] font-bold uppercase tracking-wider opacity-70 mb-0.5">Kullanılan Banka Avansı ({financeMonthLabel})</span>
-                <span className="block font-black text-sm leading-snug">₺{financeResmiAvansTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</span>
               </div>
             </div>
           </div>
@@ -7446,6 +7462,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         <Key className="w-3 h-3 shrink-0" /> Teslim Kodu: {job.deliveryCode}
                       </div>
                     )}
+                    {/* YENİ: İşin fiyatı ve (varsa) kaporası */}
+                    {(job.price || job.deposit) && (
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                        {job.price && (
+                          <span className="flex items-center gap-1 text-[10px] font-black text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded w-fit">
+                            <DollarSign className="w-3 h-3 shrink-0" /> Fiyat: ₺{parseInt(job.price).toLocaleString('tr-TR')}
+                          </span>
+                        )}
+                        {job.deposit && (
+                          <span className="flex items-center gap-1 text-[10px] font-black text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded w-fit">
+                            <Wallet className="w-3 h-3 shrink-0" /> Kapora: ₺{parseInt(job.deposit).toLocaleString('tr-TR')}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-700 mb-2">
                       <span className="truncate flex-1"><MapPin className="w-3 h-3 inline mr-0.5 text-neutral-400"/>{job.fromDistrict} ➔ {job.toDistrict || '?'}</span>
                     </div>
@@ -7526,9 +7557,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         <Star className="w-4 h-4" /> Puan Onayla
                       </button>
                     ) : (
-                      <div className="w-full py-2 bg-yellow-100 text-yellow-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1.5 border border-yellow-200 opacity-60 cursor-not-allowed">
-                        <CheckCircle className="w-4 h-4" /> Puan Onaylandı
-                      </div>
+                      <>
+                        <div className="w-full py-2 bg-yellow-100 text-yellow-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1.5 border border-yellow-200">
+                          <CheckCircle className="w-4 h-4" /> {job.pointsEdited ? 'Puan Düzeltilip Onaylandı' : 'Puan Onaylandı'}
+                        </div>
+                        {/* YENİ: Onaylı puanı yeniden düzenle */}
+                        <button onClick={() => handleOpenApproveModal(job)} className="w-full py-1.5 bg-white text-yellow-700 font-bold text-[11px] rounded-lg hover:bg-yellow-50 transition flex justify-center items-center gap-1.5 border border-yellow-200">
+                          <Edit className="w-3.5 h-3.5" /> Puanı Düzenle
+                        </button>
+                      </>
                     )}
 
                     {!job.mesaiApproved ? (
@@ -7536,9 +7573,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         <Clock className="w-4 h-4" /> Mesai Onayla
                       </button>
                     ) : (
-                      <div className="w-full py-2 bg-blue-100 text-blue-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1.5 border border-blue-200 opacity-60 cursor-not-allowed">
-                        <CheckCircle className="w-4 h-4" /> Mesai Onaylandı
-                      </div>
+                      <>
+                        <div className="w-full py-2 bg-blue-100 text-blue-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1.5 border border-blue-200">
+                          <CheckCircle className="w-4 h-4" /> {job.mesaiEdited ? 'Mesai Düzenlenip Onaylandı' : 'Mesai Onaylandı'}
+                        </div>
+                        {/* YENİ: Onaylı mesaiyi yeniden düzenle */}
+                        <button onClick={() => handleOpenMesaiModal(job)} className="w-full py-1.5 bg-white text-blue-700 font-bold text-[11px] rounded-lg hover:bg-blue-50 transition flex justify-center items-center gap-1.5 border border-blue-200">
+                          <Edit className="w-3.5 h-3.5" /> Mesaiyi Düzenle
+                        </button>
+                      </>
                     )}
 
                     {job.endJobDetails?.damageStatus !== 'Hasar var' && (
@@ -7771,6 +7814,23 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), { assignedVehiclePlate: '' });
     };
 
+    // YENİ: Görevli personelin sırasını yukarı/aşağı değiştir (lider = ilk kişi)
+    const handleReorderAssigned = async (index, direction) => {
+        const ids = [...(job.assignedPersonnelIds || [])];
+        const target = index + direction;
+        if (target < 0 || target >= ids.length) return; // Sınır dışına çıkma
+        [ids[index], ids[target]] = [ids[target], ids[index]]; // Yer değiştir
+        // teamNames'i yeni sıraya göre yeniden oluştur (sistem personelleri + manuel isimler)
+        const sysNames = ids.map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
+        const allNames = [...sysNames, ...manualNames];
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), {
+            assignedPersonnelIds: ids,
+            assignedPersonnelId: ids[0] || null, // İlk kişi lider olur
+            teamNames: allNames,
+            team: allNames.length > 0 ? allNames.join(', ') : 'Atanmadı'
+        });
+    };
+
     const handleApproveTeam = async () => {
         const allAssignedIds = job.assignedPersonnelIds || [];
         if (allAssignedIds.length === 0 && manualNames.length === 0) return alert("Önce personel atamalısınız!");
@@ -7950,6 +8010,25 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     {/* YENİ: Rütbe/pozisyon simgeleri ve özellik puanı — artık burada (iş kartına atanınca) gösteriliyor */}
                     <PersonPositionRankIcons person={person} />
                     <SkillScoreBadge person={person} skillsMap={skillsMap} />
+                    {/* YENİ: Sıralama değiştirme (yukarı/aşağı) — eklenen personeller kendi arasında yer değiştirebilir */}
+                    <div className="flex flex-col shrink-0">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleReorderAssigned(idx, -1); }}
+                        disabled={idx === 0}
+                        title="Yukarı taşı"
+                        className={`p-0.5 rounded leading-none ${idx === 0 ? 'text-neutral-200 cursor-not-allowed' : 'text-neutral-500 hover:text-black hover:bg-neutral-100'}`}
+                      >
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleReorderAssigned(idx, 1); }}
+                        disabled={idx === (job.assignedPersonnelIds || []).length - 1}
+                        title="Aşağı taşı"
+                        className={`p-0.5 rounded leading-none ${idx === (job.assignedPersonnelIds || []).length - 1 ? 'text-neutral-200 cursor-not-allowed' : 'text-neutral-500 hover:text-black hover:bg-neutral-100'}`}
+                      >
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                     <GripVertical className="w-3.5 h-3.5 text-neutral-300 shrink-0 opacity-0 group-hover:opacity-100 transition" />
                   </div>
                 );
@@ -9038,3 +9117,346 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
   };
 
   // --- PUANTAJ VIEW (Aylık Tablo) ---
+
+  // --- PERSONEL BAŞVURU & ADAY HAVUZU (İnsan Kaynakları) ---
+  export const PersonelBasvuruView = ({ db, appId, positions = [], addSystemLog, setViewingImage }) => {
+    const [basvurular, setBasvurular] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [showForm, setShowForm] = useState(false);
+    const [editId, setEditId] = useState(null);
+    const [search, setSearch] = useState('');
+    const [filterCollar, setFilterCollar] = useState('');
+    const [filterPosition, setFilterPosition] = useState('');
+    const [filterStatus, setFilterStatus] = useState('');
+    const [activeSub, setActiveSub] = useState('all'); // 'all' | 'pool'
+    const [uploading, setUploading] = useState(false);
+    const [lightbox, setLightbox] = useState(null); // {photos:[], index}
+
+    const bugun = new Date().toISOString().split('T')[0];
+    const emptyForm = { fullName: '', phone: '', collarType: 'Mavi Yaka', position: (positions && positions[0]) || '', applicationDate: bugun, notes: '', status: 'Yeni', isPool: false, photos: [] };
+    const [form, setForm] = useState(emptyForm);
+
+    // Başvuru durumları (renk kodlu)
+    const STATUSES = [
+      { key: 'Yeni', label: 'Yeni', badge: 'bg-blue-100 text-blue-700 border-blue-200', dot: 'bg-blue-500' },
+      { key: 'Değerlendiriliyor', label: 'Değerlendiriliyor', badge: 'bg-amber-100 text-amber-700 border-amber-200', dot: 'bg-amber-500' },
+      { key: 'İşe Çağrıldı', label: 'İşe Çağrıldı', badge: 'bg-purple-100 text-purple-700 border-purple-200', dot: 'bg-purple-500' },
+      { key: 'Olumlu', label: 'Olumlu (İşe Alındı)', badge: 'bg-green-100 text-green-700 border-green-200', dot: 'bg-green-500' },
+      { key: 'Olumsuz', label: 'Olumsuz', badge: 'bg-red-100 text-red-700 border-red-200', dot: 'bg-red-500' },
+    ];
+    const statusMeta = (s) => STATUSES.find(x => x.key === s) || STATUSES[0];
+
+    // Firestore: başvuru kayıtlarını canlı dinle
+    useEffect(() => {
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'basvurular'), snap => {
+        setBasvurular(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setLoading(false);
+      }, err => { console.error(err); setLoading(false); });
+      return () => unsub();
+    }, [db, appId]);
+
+    const openNew = () => { setEditId(null); setForm({ ...emptyForm, position: (positions && positions[0]) || '' }); setShowForm(true); };
+    const openEdit = (b) => {
+      setEditId(b.id);
+      setForm({ fullName: b.fullName || '', phone: b.phone || '', collarType: b.collarType || 'Mavi Yaka', position: b.position || '', applicationDate: b.applicationDate || bugun, notes: b.notes || '', status: b.status || 'Yeni', isPool: !!b.isPool, photos: b.photos || [] });
+      setShowForm(true);
+    };
+
+    // Çoklu fotoğraf yükleme (mevcut upload.php kalıbıyla aynı)
+    const handlePhotoUpload = async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (!files.length) return;
+      setUploading(true);
+      for (const file of files) {
+        const uploadData = new FormData();
+        uploadData.append('file', file);
+        try {
+          const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: uploadData });
+          const text = await res.text();
+          let url = file.name;
+          try { const json = JSON.parse(text); url = json.url || json.fileName || json.file || text; } catch (err) { url = text.trim(); }
+          setForm(prev => ({ ...prev, photos: [...prev.photos, url] }));
+        } catch (err) { console.error('Yükleme hatası:', err); }
+      }
+      setUploading(false);
+      e.target.value = '';
+    };
+    const removePhoto = (idx) => setForm(prev => ({ ...prev, photos: prev.photos.filter((_, i) => i !== idx) }));
+
+    const saveForm = async () => {
+      if (!form.fullName.trim()) return alert('Lütfen aday adını girin.');
+      const data = { ...form, updatedAt: new Date().toISOString() };
+      try {
+        if (editId) {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'basvurular', editId), data);
+          if (addSystemLog) addSystemLog('Başvuru Güncellendi', `${form.fullName} başvurusu güncellendi.`);
+        } else {
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'basvurular'), { ...data, createdAt: new Date().toISOString() });
+          if (addSystemLog) addSystemLog('Yeni Başvuru', `${form.fullName} (${form.position || '-'}) başvurusu eklendi.`);
+        }
+        setShowForm(false); setEditId(null); setForm(emptyForm);
+      } catch (err) { console.error(err); alert('Kaydedilirken bir hata oluştu.'); }
+    };
+
+    const deleteBasvuru = async (b) => {
+      if (!window.confirm(`${b.fullName} adlı adayın başvurusu silinsin mi? Bu işlem geri alınamaz.`)) return;
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'basvurular', b.id));
+    };
+    const togglePool = async (b) => { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'basvurular', b.id), { isPool: !b.isPool }); };
+    const changeStatus = async (b, status) => { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'basvurular', b.id), { status }); };
+
+    // Telefonu WhatsApp formatına çevir
+    const waLink = (phone) => { let p = (phone || '').replace(/\D/g, ''); if (!p) return null; if (p.startsWith('0')) p = '90' + p.substring(1); else if (!p.startsWith('90')) p = '90' + p; return `https://wa.me/${p}`; };
+
+    // Filtrele + ara + tarihe göre (yeniden eskiye) sırala
+    const filtered = basvurular
+      .filter(b => activeSub === 'pool' ? b.isPool : true)
+      .filter(b => filterCollar ? b.collarType === filterCollar : true)
+      .filter(b => filterPosition ? b.position === filterPosition : true)
+      .filter(b => filterStatus ? b.status === filterStatus : true)
+      .filter(b => { const q = search.trim().toLowerCase(); if (!q) return true; return (b.fullName || '').toLowerCase().includes(q) || (b.phone || '').includes(q) || (b.position || '').toLowerCase().includes(q); })
+      .sort((a, b) => (b.applicationDate || '').localeCompare(a.applicationDate || ''));
+
+    const stats = {
+      toplam: basvurular.length,
+      havuz: basvurular.filter(b => b.isPool).length,
+      cagrildi: basvurular.filter(b => b.status === 'İşe Çağrıldı').length,
+      yeni: basvurular.filter(b => b.status === 'Yeni').length,
+    };
+
+    const fmtDate = (d) => { if (!d) return '-'; try { return new Date(d + 'T12:00:00').toLocaleDateString('tr-TR', { day: '2-digit', month: 'short', year: 'numeric' }); } catch (e) { return d; } };
+
+    return (
+      <div className="max-w-7xl mx-auto space-y-5 animate-in fade-in pb-8">
+        {/* BAŞLIK */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 border-t-4 border-t-emerald-500">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h2 className="text-2xl font-black text-black flex items-center gap-2">
+                <UserPlus className="w-7 h-7 text-emerald-600" /> Personel Başvuru & Aday Havuzu
+              </h2>
+              <p className="text-sm font-medium text-neutral-500 mt-1">Adayları ekleyin, filtreleyin, işe çağırın ve tüm başvuru sürecini tek yerden yönetin.</p>
+            </div>
+            <button onClick={openNew} className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-green-700 text-white text-sm font-black px-5 py-3 rounded-xl shadow-md shadow-green-600/30 hover:scale-[1.02] transition whitespace-nowrap">
+              <PlusCircle className="w-5 h-5" /> Yeni Başvuru Ekle
+            </button>
+          </div>
+
+          {/* İSTATİSTİK ROZETLERİ */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-5">
+            <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-center">
+              <span className="block text-2xl font-black text-black">{stats.toplam}</span>
+              <span className="text-[11px] font-bold text-neutral-500">Toplam Başvuru</span>
+            </div>
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+              <span className="block text-2xl font-black text-blue-600">{stats.yeni}</span>
+              <span className="text-[11px] font-bold text-blue-700">Yeni</span>
+            </div>
+            <div className="bg-purple-50 border border-purple-200 rounded-xl p-3 text-center">
+              <span className="block text-2xl font-black text-purple-600">{stats.cagrildi}</span>
+              <span className="text-[11px] font-bold text-purple-700">İşe Çağrıldı</span>
+            </div>
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+              <span className="block text-2xl font-black text-emerald-600">{stats.havuz}</span>
+              <span className="text-[11px] font-bold text-emerald-700">Aday Havuzu</span>
+            </div>
+          </div>
+        </div>
+
+        {/* SEKME + FİLTRELER */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
+          <div className="flex bg-neutral-100 p-1 rounded-xl w-full sm:w-fit border border-neutral-200 mb-4">
+            <button onClick={() => setActiveSub('all')} className={`flex-1 sm:flex-none px-5 py-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2 ${activeSub === 'all' ? 'bg-white text-emerald-700 shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+              <Users className="w-4 h-4" /> Tüm Başvurular
+            </button>
+            <button onClick={() => setActiveSub('pool')} className={`flex-1 sm:flex-none px-5 py-2 text-sm font-bold rounded-lg transition flex items-center justify-center gap-2 ${activeSub === 'pool' ? 'bg-white text-emerald-700 shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+              <Star className="w-4 h-4" /> Aday Havuzu
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+            <div className="relative md:col-span-2">
+              <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="İsim, telefon veya pozisyon ara..." className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm font-medium" />
+            </div>
+            <select value={filterCollar} onChange={e => setFilterCollar(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-sm font-bold bg-white outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer">
+              <option value="">Tüm Yakalar</option>
+              <option value="Mavi Yaka">Mavi Yaka</option>
+              <option value="Beyaz Yaka">Beyaz Yaka</option>
+            </select>
+            <select value={filterPosition} onChange={e => setFilterPosition(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-sm font-bold bg-white outline-none focus:ring-2 focus:ring-emerald-500 cursor-pointer">
+              <option value="">Tüm Pozisyonlar</option>
+              {positions.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </div>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <button onClick={() => setFilterStatus('')} className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${filterStatus === '' ? 'bg-neutral-800 text-white border-neutral-800' : 'bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50'}`}>Tümü</button>
+            {STATUSES.map(s => (
+              <button key={s.key} onClick={() => setFilterStatus(s.key)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${filterStatus === s.key ? s.badge + ' ring-1 ring-offset-1' : 'bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50'}`}>{s.label}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* LİSTE */}
+        {loading ? (
+          <div className="text-center py-16 text-neutral-400 font-bold flex flex-col items-center gap-3"><Loader2 className="w-8 h-8 animate-spin" /> Başvurular yükleniyor...</div>
+        ) : filtered.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-dashed border-neutral-300 p-12 text-center">
+            <UserPlus className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
+            <p className="font-bold text-neutral-600">{activeSub === 'pool' ? 'Aday havuzunda kayıt yok.' : 'Henüz başvuru eklenmemiş.'}</p>
+            <p className="text-sm text-neutral-400 mt-1">Yeni bir aday eklemek için "Yeni Başvuru Ekle" butonunu kullanın.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filtered.map(b => {
+              const sm = statusMeta(b.status);
+              const wa = waLink(b.phone);
+              return (
+                <div key={b.id} className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden flex flex-col hover:shadow-md transition">
+                  {/* Üst şerit: yaka + durum + havuz */}
+                  <div className="flex items-center justify-between px-4 pt-4">
+                    <span className={`text-[10px] font-black px-2 py-1 rounded-md ${b.collarType === 'Beyaz Yaka' ? 'bg-neutral-800 text-white' : 'bg-blue-600 text-white'}`}>{b.collarType || 'Mavi Yaka'}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] font-black px-2 py-1 rounded-md border ${sm.badge}`}>{b.status || 'Yeni'}</span>
+                      <button onClick={() => togglePool(b)} title={b.isPool ? 'Havuzdan çıkar' : 'Aday havuzuna ekle'} className="p-1 rounded-md hover:bg-neutral-100 transition">
+                        <Star className={`w-4 h-4 ${b.isPool ? 'text-yellow-500 fill-yellow-500' : 'text-neutral-300'}`} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* İsim + pozisyon + tarih */}
+                  <div className="px-4 pt-2 pb-3">
+                    <h3 className="font-black text-lg text-black leading-tight">{b.fullName}</h3>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs font-bold text-neutral-500">
+                      <span className="flex items-center gap-1"><Briefcase className="w-3.5 h-3.5" /> {b.position || 'Belirtilmemiş'}</span>
+                      <span className="flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" /> {fmtDate(b.applicationDate)}</span>
+                    </div>
+                    {b.phone && <p className="flex items-center gap-1 mt-1 text-xs font-bold text-neutral-600"><Phone className="w-3.5 h-3.5" /> {b.phone}</p>}
+                    {b.notes && <p className="mt-2 text-xs text-neutral-500 bg-neutral-50 border border-neutral-100 rounded-lg p-2 line-clamp-3">{b.notes}</p>}
+                  </div>
+
+                  {/* Fotoğraflar (başvuru/test formları) */}
+                  {b.photos && b.photos.length > 0 && (
+                    <div className="px-4 pb-3 flex gap-2 flex-wrap">
+                      {b.photos.slice(0, 4).map((ph, i) => (
+                        <button key={i} onClick={() => (setViewingImage ? setViewingImage({ title: b.fullName, name: ph }) : setLightbox({ photos: b.photos, index: i }))} className="w-14 h-14 rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 relative group">
+                          <img src={ph} alt="" className="w-full h-full object-cover group-hover:scale-105 transition" />
+                          {i === 3 && b.photos.length > 4 && (
+                            <span className="absolute inset-0 bg-black/60 text-white flex items-center justify-center text-xs font-black">+{b.photos.length - 4}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Aksiyonlar */}
+                  <div className="mt-auto border-t border-neutral-100 p-2 flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      {wa && <a href={wa} target="_blank" rel="noreferrer" className="flex-1 flex items-center justify-center gap-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-xs font-bold py-2 rounded-lg transition"><MessageCircle className="w-4 h-4" /> WhatsApp</a>}
+                      {b.phone && <a href={`tel:${b.phone}`} className="flex-1 flex items-center justify-center gap-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold py-2 rounded-lg transition border border-blue-200"><Phone className="w-4 h-4" /> Ara</a>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <select value={b.status || 'Yeni'} onChange={e => changeStatus(b, e.target.value)} className="flex-1 text-xs font-bold p-2 border border-neutral-200 rounded-lg bg-white outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer">
+                        {STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                      </select>
+                      <button onClick={() => openEdit(b)} title="Düzenle" className="p-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 rounded-lg transition"><Edit className="w-4 h-4" /></button>
+                      <button onClick={() => deleteBasvuru(b)} title="Sil" className="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition border border-red-100"><X className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* EKLE / DÜZENLE MODALI */}
+        {showForm && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 animate-in fade-in" onClick={() => setShowForm(false)}>
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="flex justify-between items-center p-5 border-b border-neutral-200 bg-neutral-50 shrink-0">
+                <h3 className="font-black text-lg text-black flex items-center gap-2"><UserPlus className="w-5 h-5 text-emerald-600" /> {editId ? 'Başvuruyu Düzenle' : 'Yeni Aday Başvurusu'}</h3>
+                <button onClick={() => setShowForm(false)} className="p-1.5 hover:bg-neutral-200 rounded-lg transition"><X className="w-5 h-5 text-neutral-500" /></button>
+              </div>
+
+              <div className="p-5 space-y-4 overflow-y-auto">
+                {/* Yaka seçimi */}
+                <div className="flex bg-neutral-100 p-1 rounded-xl w-fit border border-neutral-200">
+                  <button type="button" onClick={() => setForm({ ...form, collarType: 'Mavi Yaka' })} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${form.collarType === 'Mavi Yaka' ? 'bg-blue-600 text-white shadow-sm' : 'text-neutral-500'}`}>Mavi Yaka</button>
+                  <button type="button" onClick={() => setForm({ ...form, collarType: 'Beyaz Yaka' })} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${form.collarType === 'Beyaz Yaka' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-500'}`}>Beyaz Yaka</button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Ad Soyad *</label>
+                    <input value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" placeholder="Örn: Ahmet Yılmaz" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Telefon Numarası</label>
+                    <input value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500" placeholder="Örn: 05551234567" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Başvurulan Pozisyon</label>
+                    <select value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white font-bold cursor-pointer">
+                      <option value="">Seçiniz...</option>
+                      {positions.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Başvuru Tarihi</label>
+                    <input type="date" value={form.applicationDate} onChange={e => setForm({ ...form, applicationDate: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 font-bold" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Durum</label>
+                    <select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 bg-white font-bold cursor-pointer">
+                      {STATUSES.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+                    </select>
+                  </div>
+                  <div className="flex items-end">
+                    <button type="button" onClick={() => setForm({ ...form, isPool: !form.isPool })} className={`w-full p-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 border transition ${form.isPool ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : 'bg-neutral-50 text-neutral-500 border-neutral-200'}`}>
+                      <Star className={`w-4 h-4 ${form.isPool ? 'fill-emerald-500 text-emerald-500' : ''}`} /> {form.isPool ? 'Aday Havuzunda' : 'Aday Havuzuna Ekle'}
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-neutral-700 mb-1">Notlar / Değerlendirme</label>
+                  <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 h-24 resize-none" placeholder="Aday hakkında notlar, tecrübe, mülakat değerlendirmesi..."></textarea>
+                </div>
+
+                {/* Çoklu fotoğraf (başvuru/test formu, CV vb.) */}
+                <div>
+                  <label className="block text-sm font-bold text-neutral-700 mb-2">Başvuru / Test Formu Fotoğrafları (çoklu)</label>
+                  <div className="flex flex-wrap gap-2">
+                    {form.photos.map((ph, i) => (
+                      <div key={i} className="w-20 h-20 rounded-lg overflow-hidden border border-neutral-200 relative group">
+                        <img src={ph} alt="" className="w-full h-full object-cover" />
+                        <button type="button" onClick={() => removePhoto(i)} className="absolute top-1 right-1 bg-red-600 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition"><X className="w-3 h-3" /></button>
+                      </div>
+                    ))}
+                    <label className={`w-20 h-20 rounded-lg border-2 border-dashed flex flex-col items-center justify-center cursor-pointer transition ${uploading ? 'border-emerald-400 bg-emerald-50' : 'border-neutral-300 hover:border-emerald-400 hover:bg-emerald-50'}`}>
+                      {uploading ? <Loader2 className="w-5 h-5 text-emerald-600 animate-spin" /> : <Camera className="w-5 h-5 text-neutral-400" />}
+                      <span className="text-[9px] font-bold text-neutral-500 mt-1">{uploading ? 'Yükleniyor' : 'Fotoğraf Ekle'}</span>
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={handlePhotoUpload} disabled={uploading} />
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 border-t border-neutral-200 bg-neutral-50 shrink-0 flex gap-2">
+                <button onClick={() => setShowForm(false)} className="flex-1 py-3 bg-neutral-200 text-neutral-700 font-bold rounded-xl hover:bg-neutral-300 transition">İptal</button>
+                <button onClick={saveForm} disabled={uploading} className="flex-1 py-3 bg-gradient-to-r from-emerald-500 to-green-700 text-white font-black rounded-xl hover:scale-[1.02] transition flex items-center justify-center gap-2 disabled:opacity-60"><Save className="w-4 h-4" /> {editId ? 'Değişiklikleri Kaydet' : 'Başvuruyu Kaydet'}</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* FOTOĞRAF GÖRÜNTÜLEYİCİ (setViewingImage yoksa yerel) */}
+        {lightbox && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4" onClick={() => setLightbox(null)}>
+            <button onClick={() => setLightbox(null)} className="absolute top-4 right-4 text-white p-2 hover:bg-white/10 rounded-full"><X className="w-6 h-6" /></button>
+            <img src={lightbox.photos[lightbox.index]} alt="" className="max-w-full max-h-[85vh] rounded-lg object-contain" onClick={e => e.stopPropagation()} />
+          </div>
+        )}
+      </div>
+    );
+  };

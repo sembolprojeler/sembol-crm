@@ -7,7 +7,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
     handleDepoChange, toggleDepoDirection, handleAddJob, editingJobId, handleSwapAddresses
   }) => {
     return (
-      <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+      <div className="max-w-7xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in" style={{ zoom: 0.9 }}>
         <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
           <h2 className="text-2xl font-black text-black flex items-center gap-2">
             <PlusCircle className="w-7 h-7 text-red-600" /> 
@@ -25,8 +25,10 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
         </div>
 
         <div  className="space-y-6">
+          {/* YENİ DÜZEN: Müşteri + Finans masaüstünde yan yana, mobilde alt alta */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-stretch">
           {/* MÜŞTERİ VE GENEL BİLGİLER */}
-          <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200">
+          <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 border-t-4 border-t-neutral-800 h-full">
             <h3 className="font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-2">
               <Users className="w-5 h-5 text-red-600" /> Müşteri ve Randevu Bilgileri
             </h3>
@@ -89,9 +91,52 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
               </div>
             </div>
           </div>
+          {/* FİNANS & NOTLAR */}
+          <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 border-t-4 border-t-green-600 h-full">
+            <h3 className="font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-2">
+              <Wallet className="w-5 h-5 text-red-600" /> Finans ve Operasyon Notları
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm font-bold text-neutral-700 mb-1">Anlaşılan Fiyat (TL)</label>
+                <input type="number" name="price" value={formData.price} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-neutral-700 mb-1">Alınan Kapora (TL)</label>
+                <input type="number" name="deposit" value={formData.deposit} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-green-600" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-sm font-bold text-neutral-700 mb-1">Sözleşme Detayı</label>
+                <textarea name="contractDetails" value={formData.contractDetails || ''} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none transition" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-neutral-700 mb-1">Operasyon Notları</label>
+                <textarea name="notes" value={formData.notes || ''} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none transition" />
+              </div>
+            </div>
+          </div>
+          </div>
 
+          {/* ORTADAKİ YER DEĞİŞTİRME BUTONU (normal akışta, iki satırın arasında) */}
+          {type !== 'Asansör' && (
+            <div className="flex justify-center -my-1">
+                <button 
+                  type="button" 
+                  onClick={handleSwapAddresses}
+                  className="bg-black text-white px-6 py-2.5 rounded-full shadow-2xl border-4 border-white hover:bg-neutral-800 transition flex items-center gap-2 font-bold text-sm"
+                  title="Yükleme ve Boşaltma Bilgilerini Yer Değiştir"
+                >
+                  <ArrowUpDown className="w-5 h-5" /> Yönleri Değiştir
+                </button>
+            </div>
+          )}
+
+          {/* YENİ DÜZEN: Yükleme + Boşaltma masaüstünde yan yana, mobilde alt alta */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 items-stretch">
           {/* YÜKLEME BİLGİLERİ */}
-          <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200">
+          <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 border-t-4 border-t-orange-500 h-full">
             <div className="flex flex-col md:flex-row justify-between md:items-center mb-4 border-b border-neutral-200 pb-2 gap-2">
               <h3 className="font-black text-red-600 flex items-center gap-2 text-lg uppercase tracking-wide">
                 {type === 'Asansör' ? 'Kurulum Adresi' : 'Yükleme Bilgileri (1. Adres)'}
@@ -370,23 +415,10 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
               <PlusCircle className="w-5 h-5" /> Yeni {type === 'Asansör' ? 'Kurulum' : 'Yükleme'} Adresi Ekle
             </button>
           </div>
-
           {type !== 'Asansör' && (
             <>
-              {/* ORTADAKİ YER DEĞİŞTİRME BUTONU */}
-              <div className="flex justify-center items-center h-0 relative z-10">
-                <button 
-                  type="button" 
-                  onClick={handleSwapAddresses}
-                  className="bg-black text-white px-6 py-2.5 rounded-full shadow-2xl border-4 border-white hover:bg-neutral-800 transition flex items-center gap-2 font-bold text-sm absolute"
-                  title="Yükleme ve Boşaltma Bilgilerini Yer Değiştir"
-                >
-                  <ArrowUpDown className="w-5 h-5" /> Yönleri Değiştir
-                </button>
-              </div>
-
               {/* BOŞALTMA BİLGİLERİ */}
-              <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200">
+              <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200 border-t-4 border-t-red-600 h-full">
                 <div className="flex flex-col md:flex-row justify-between md:items-center mb-4 border-b border-neutral-200 pb-2 gap-2">
                   <h3 className="font-black text-red-600 flex items-center gap-2 text-lg uppercase tracking-wide">
                     Boşaltma Bilgileri (1. Adres)
@@ -599,32 +631,6 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
           </div>
             </>
           )}
-
-          {/* FİNANS & NOTLAR */}
-          <div className="bg-neutral-50 p-5 rounded-2xl border border-neutral-200">
-            <h3 className="font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-2">
-              <Wallet className="w-5 h-5 text-red-600" /> Finans ve Operasyon Notları
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Anlaşılan Fiyat (TL)</label>
-                <input type="number" name="price" value={formData.price} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Alınan Kapora (TL)</label>
-                <input type="number" name="deposit" value={formData.deposit} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-green-600" />
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Sözleşme Detayı</label>
-                <textarea name="contractDetails" value={formData.contractDetails || ''} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none transition" />
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-neutral-700 mb-1">Operasyon Notları</label>
-                <textarea name="notes" value={formData.notes || ''} onChange={handleInputChange} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-20 resize-none transition" />
-              </div>
-            </div>
           </div>
 
           <button type="button" onClick={handleAddJob} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl hover:bg-red-700 transition flex justify-center items-center gap-2 text-xl shadow-xl shadow-red-600/30">
@@ -1230,4 +1236,3 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
       </div>
     );
   };
-
