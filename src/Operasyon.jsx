@@ -1385,8 +1385,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                             </div>
                             
                             {/* ASANSÖR NOKTALARI: Asansör işi OLMASA BİLE bu satır her zaman render edilir (hiza sabit). */}
-                            {/* En fazla 3 yeşil nokta, TEK SATIRDA yan yana. Ayraç çizgisi SARI. Alan sabit yükseklikte. */}
-                            <div className={`flex flex-nowrap gap-0.5 mt-auto pt-1 w-full items-center h-[12px] overflow-hidden border-t ${asansorJobs.length > 0 ? 'border-yellow-400' : 'border-transparent'}`}>
+                            {/* SARI AYRAÇ ÇİZGİSİ her zaman sabit gösterilir (asansör işi olsa da olmasa da). */}
+                            <div className="flex flex-nowrap gap-0.5 mt-auto pt-1 w-full items-center h-[12px] overflow-hidden border-t border-yellow-400">
                                 {asansorJobs.slice(0, 3).map(job => (
                                   job.isSpecial ?
                                     <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-1.5 h-1.5 shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
