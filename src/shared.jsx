@@ -804,6 +804,74 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
     const isBinaAsansorTo = job.toTransportMethod === 'Bina Asansörü' ? 'Var' : 'Yok';
     const isCepheAsansorTo = job.toTransportMethod === 'Dış Cephe Asansörü' ? 'Var' : 'Yok';
 
+    // ============================================================================
+    // YENİ: Birden fazla yükleme/boşaltma adresini sözleşmede göstermek için yardımcılar.
+    // Her adres, 1. adresteki tabloyla aynı formatta ve "1. ADRES / 2. ADRES ..." başlığıyla basılır.
+    // ============================================================================
+    const escapeHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    // Yükleme adresi tablosu üretir (extra=false: ana adres, packing/toplama satırı gösterilir)
+    const buildLoadTable = (addr, title) => {
+      const binaAsansor = addr.transportMethod === 'Bina Asansörü' ? 'Var' : 'Yok';
+      const cepheAsansor = addr.transportMethod === 'Dış Cephe Asansörü' ? 'Var' : 'Yok';
+      const adres = addr.province ? `${escapeHtml(addr.province)}/${escapeHtml(addr.district)} - ${escapeHtml(addr.address)}` : 'Belirtilmedi';
+      // YENİ: Eşya Durumu — çoklu seçim listesi varsa onu yaz (Teslim Durumu ile aynı mantık),
+      // yoksa eski tekli değeri (addr.packing) göster.
+      const esyaText = (addr.esyaDurumu && addr.esyaDurumu.length > 0)
+        ? escapeHtml(addr.esyaDurumu.join(' • '))
+        : escapeHtml(addr.packing || 'Kendisi Topladı');
+      return `
+        <table>
+          <tr><th colspan="2">${title}</th></tr>
+          <tr><td class="label">Adres:</td><td>${adres}</td></tr>
+          <tr><td class="label">Kat:</td><td>${escapeHtml(addr.floor)}</td></tr>
+          <tr><td class="label">Oda Sayısı:</td><td>${escapeHtml(addr.roomCount)}</td></tr>
+          <tr><td class="label">Bina Asansörü:</td><td>${binaAsansor}</td></tr>
+          <tr><td class="label">Dış Cephe Asansörü:</td><td>${cepheAsansor}</td></tr>
+          <tr><td class="label">Eşya Durumu:</td><td>${esyaText}</td></tr>
+        </table>`;
+    };
+
+    // Boşaltma adresi tablosu üretir. showTeslim=true ise (yalnızca 1. adres) Teslim Durumu satırı eklenir.
+    const buildUnloadTable = (addr, title, showTeslim) => {
+      const binaAsansor = addr.transportMethod === 'Bina Asansörü' ? 'Var' : 'Yok';
+      const cepheAsansor = addr.transportMethod === 'Dış Cephe Asansörü' ? 'Var' : 'Yok';
+      const adres = addr.province ? `${escapeHtml(addr.province)}/${escapeHtml(addr.district)} - ${escapeHtml(addr.address)}` : 'Belirtilmedi';
+      const teslimRow = (showTeslim && job.wallMounting && job.wallMounting.length > 0)
+        ? `<tr><td class="label">Teslim Durumu:</td><td>${escapeHtml(job.wallMounting.join(' • '))}</td></tr>` : '';
+      return `
+        <table>
+          <tr><th colspan="2">${title}</th></tr>
+          <tr><td class="label">Adres:</td><td>${adres}</td></tr>
+          <tr><td class="label">Kat:</td><td>${escapeHtml(addr.floor)}</td></tr>
+          <tr><td class="label">Oda Sayısı:</td><td>${escapeHtml(addr.roomCount)}</td></tr>
+          <tr><td class="label">Bina Asansörü:</td><td>${binaAsansor}</td></tr>
+          <tr><td class="label">Dış Cephe Asansörü:</td><td>${cepheAsansor}</td></tr>
+          ${teslimRow}
+        </table>`;
+    };
+
+    // Ana yükleme adresi + ekstra yükleme adreslerini birleştir
+    const loadingAddresses = [
+      { province: job.fromProvince, district: job.fromDistrict, address: job.fromAddress, floor: job.fromFloor, roomCount: job.fromRoomCount, transportMethod: job.fromTransportMethod, packing: job.fromPacking, esyaDurumu: job.esyaDurumu },
+      ...(job.extraLoadingAddresses || [])
+    ];
+    // Ana boşaltma adresi + ekstra boşaltma adreslerini birleştir
+    const unloadingAddresses = [
+      { province: job.toProvince, district: job.toDistrict, address: job.toAddress, floor: job.toFloor, roomCount: job.toRoomCount, transportMethod: job.toTransportMethod, packing: job.toPacking },
+      ...(job.extraUnloadingAddresses || [])
+    ];
+
+    const totalAddressCount = loadingAddresses.length + unloadingAddresses.length;
+
+    // Tek adres varsa eski başlık ("...(NEREDEN)"), birden fazla varsa "... 1. ADRES / 2. ADRES" başlığı kullanılır
+    const loadingTablesHtml = loadingAddresses.map((a, i) =>
+      buildLoadTable(a, loadingAddresses.length === 1 ? 'YÜKLEME ADRESİ (NEREDEN)' : `YÜKLEME ADRESİ - ${i + 1}. ADRES`)
+    ).join('');
+    const unloadingTablesHtml = unloadingAddresses.map((a, i) =>
+      buildUnloadTable(a, unloadingAddresses.length === 1 ? 'BOŞALTMA ADRESİ (NEREYE)' : `BOŞALTMA ADRESİ - ${i + 1}. ADRES`, i === 0)
+    ).join('');
+
     const html = `
     <!DOCTYPE html>
     <html lang="tr">
@@ -877,24 +945,12 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
         
         <div class="main-title">EVDEN EVE TAŞIMACILIK VE NAKLİYE SÖZLEŞMESİ</div>
         
-        <table>
-          <tr><th colspan="2">YÜKLEME ADRESİ (NEREDEN)</th></tr>
-          <tr><td class="label">Adres:</td><td>${job.fromProvince || ''}/${job.fromDistrict || ''} - ${job.fromAddress || ''}</td></tr>
-          <tr><td class="label">Kat:</td><td>${job.fromFloor || ''}</td></tr>
-          <tr><td class="label">Oda Sayısı:</td><td>${job.fromRoomCount || ''}</td></tr>
-          <tr><td class="label">Bina Asansörü:</td><td>${isBinaAsansorFrom}</td></tr>
-          <tr><td class="label">Dış Cephe Asansörü:</td><td>${isCepheAsansorFrom}</td></tr>
-          <tr><td class="label">Toplama Hizmeti:</td><td>${isToplamaFrom}</td></tr>
-        </table>
+        <!-- YENİ: Tüm sayfa-1 içeriği "fitbox" içine alındı; adres sayısı arttıkça JS ile otomatik küçültülüp
+             her zaman TEK SAYFAYA sığdırılır (2. sayfaya asla taşmaz). -->
+        <div id="fitbox">
+        ${loadingTablesHtml}
 
-        <table>
-          <tr><th colspan="2">BOŞALTMA ADRESİ (NEREYE)</th></tr>
-          <tr><td class="label">Adres:</td><td>${job.toProvince ? job.toProvince + '/' + job.toDistrict + ' - ' + job.toAddress : 'Belirtilmedi'}</td></tr>
-          <tr><td class="label">Kat:</td><td>${job.toFloor || ''}</td></tr>
-          <tr><td class="label">Oda Sayısı:</td><td>${job.toRoomCount || ''}</td></tr>
-          <tr><td class="label">Bina Asansörü:</td><td>${isBinaAsansorTo}</td></tr>
-          <tr><td class="label">Dış Cephe Asansörü:</td><td>${isCepheAsansorTo}</td></tr>
-        </table>
+        ${unloadingTablesHtml}
 
         ${job.contractDetails && job.contractDetails.trim() !== '' ? `
         <div class="section-title">EKSTRA SÖZLEŞME DETAYI</div>
@@ -935,6 +991,7 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
             </div>
           </div>
         </div>
+        </div><!-- /fitbox -->
       </div>
 
       <!-- 2. SAYFA -->
@@ -1017,9 +1074,43 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
         const style = document.createElement('style');
         style.textContent = '@page { margin: 0; } @media print { body { -webkit-print-color-adjust: exact; } }';
         document.head.appendChild(style);
-        setTimeout(() => {
-          window.print();
-        }, 500);
+
+        // ============================================================================
+        // YENİ: OTOMATİK SIĞDIRMA — Ne kadar adres eklenirse eklensin sayfa-1 içeriği
+        // ("fitbox") her zaman ilk sayfaya sığar, ASLA 2. sayfaya taşmaz.
+        // Mantık: fitbox'ın gerçek yüksekliği, sayfanın kullanılabilir yüksekliğini aşarsa
+        // içerik oransal olarak küçültülür (transform: scale). Genişlik korunur (width telafisi).
+        // ============================================================================
+        function fitPageOne() {
+          const box = document.getElementById('fitbox');
+          if (!box) return;
+          const page = box.closest('.page');
+          if (!page) return;
+          // Sayfa iç yüksekliği: 297mm - (üst+alt padding 8mm+8mm). px'e çeviriyoruz (1mm ≈ 3.7795px).
+          const mmToPx = 3.7795275591;
+          const pagePadTop = 8 * mmToPx, pagePadBottom = 8 * mmToPx;
+          // fitbox'ın başladığı dikey konumdan sayfa sonuna kadar kalan alan
+          const boxTop = box.offsetTop; // .page içindeki üst konum (header + title sonrası)
+          const available = (297 * mmToPx) - pagePadBottom - boxTop;
+          const needed = box.scrollHeight;
+          if (needed > available) {
+            let s = available / needed;
+            if (s > 1) s = 1;
+            if (s < 0.4) s = 0.4; // aşırı küçülmeyi sınırla (okunabilirlik)
+            // Genişlik telafisi: önce genişlet, sonra ölçekle -> son genişlik ~%100 kalır
+            box.style.transformOrigin = 'top left';
+            box.style.width = (100 / s) + '%';
+            box.style.transform = 'scale(' + s + ')';
+          }
+        }
+
+        // İçerik (logo/kaşe görselleri dahil) tam yüklendikten sonra ölç, sonra bas.
+        window.addEventListener('load', () => {
+          setTimeout(() => {
+            fitPageOne();
+            setTimeout(() => { window.print(); }, 350);
+          }, 300);
+        });
       </script>
     </body>
     </html>
