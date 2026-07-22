@@ -1117,8 +1117,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     </button>
                   )}
                   {job.pointsApproved && (
-                    <div className="w-full px-4 py-2 bg-green-50 text-green-700 font-bold rounded-xl flex justify-center items-center gap-2 text-sm border border-green-200 opacity-70 cursor-not-allowed">
-                      <CheckCircle className="w-4 h-4" /> Puan Onaylandı
+                    <div className="w-full flex items-center gap-1.5">
+                      <div className="flex-1 px-4 py-2 bg-green-50 text-green-700 font-bold rounded-xl flex justify-center items-center gap-2 text-sm border border-green-200 opacity-70">
+                        <CheckCircle className="w-4 h-4" /> Puan Onaylandı
+                      </div>
+                      {/* YENİ: Yanlış girilen puanları düzeltme butonu (sadece yetkili görür) */}
+                      {canApprovePoints && (
+                        <button onClick={() => handleOpenApproveModal(job)} title="Puanları Düzenle" className="p-2.5 bg-white border border-green-300 text-green-700 rounded-xl hover:bg-green-50 transition shadow-sm shrink-0">
+                          <Edit className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -1129,8 +1137,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     </button>
                   )}
                   {job.mesaiApproved && (
-                    <div className="w-full px-4 py-2 bg-blue-100 text-blue-700 font-bold rounded-xl flex justify-center items-center gap-2 text-sm border border-blue-200 opacity-70 cursor-not-allowed">
-                      <CheckCircle className="w-4 h-4" /> Mesai Onaylandı
+                    <div className="w-full flex items-center gap-1.5">
+                      <div className="flex-1 px-4 py-2 bg-blue-100 text-blue-700 font-bold rounded-xl flex justify-center items-center gap-2 text-sm border border-blue-200 opacity-70">
+                        <CheckCircle className="w-4 h-4" /> Mesai Onaylandı
+                      </div>
+                      {/* YENİ: Yanlış girilen mesaiyi düzeltme butonu (sadece yetkili görür) */}
+                      {canApprovePoints && (
+                        <button onClick={() => handleOpenMesaiModal(job)} title="Mesaiyi Düzenle" className="p-2.5 bg-white border border-blue-300 text-blue-700 rounded-xl hover:bg-blue-50 transition shadow-sm shrink-0">
+                          <Edit className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   )}
 
@@ -1259,6 +1275,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+        {/* YENİ: Bugünün hücresi için hafif dikkat çeken nabız (pulse) çerçeve animasyonu */}
+        <style>{`
+          .today-pulse-ring {
+            border-color: #dc2626 !important;
+            animation: todayPulse 2s ease-in-out infinite;
+          }
+          @keyframes todayPulse {
+            0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55); }
+            70%  { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+          }
+        `}</style>
         <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
           <div className="flex items-center gap-4">
             <button onClick={prevMonth} className="p-2 bg-neutral-100 hover:bg-neutral-200 text-black rounded-lg transition"><ChevronLeft className="w-5 h-5" /></button>
@@ -1316,12 +1344,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <div 
                 key={index} 
                 onClick={() => item && setSelectedDate(item.date)}
-                className={`min-h-[64px] p-1.5 rounded-xl border transition cursor-pointer flex flex-col overflow-hidden ${cellClass} ${item && selectedDate === item.date ? 'ring-2 ring-red-600 ring-offset-1' : ''}`}
+                className={`min-h-[64px] p-1.5 rounded-xl border transition cursor-pointer flex flex-col overflow-hidden ${cellClass} ${item && selectedDate === item.date ? 'ring-2 ring-red-600 ring-offset-1' : ''} ${isToday ? 'today-pulse-ring' : ''}`}
               >
                 {item && (
                   <>
                     <div className="flex justify-between items-center mb-1">
-                      <span className={`text-[11px] font-bold ${isToday ? 'bg-red-600 text-white w-5 h-5 rounded-full flex items-center justify-center' : (isFull && !isMaviYaka ? 'text-white' : 'text-black')}`}>
+                      <span className={`text-[11px] font-black ${isToday ? (isFull && !isMaviYaka ? 'text-red-400' : 'text-red-600') : (isFull && !isMaviYaka ? 'text-white font-bold' : 'text-black font-bold')}`}>
                         {item.day}
                       </span>
                       {coreJobs.length > 0 && !isMaviYaka && (
@@ -1342,27 +1370,26 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                             )
                         ) : (
                           <>
-                            {coreJobs.length > 0 && (
-                              <div className="flex flex-wrap gap-0.5 items-center">
+                            {/* NAKLİYE/DEPO NOKTALARI: min-h ile satır yüksekliği sabitlendi (hizalama bozulmaz) */}
+                            <div className="flex flex-wrap gap-0.5 items-center min-h-[10px]">
                                 {coreJobs.slice(0, 5).map(job => (
                                   job.isSpecial ? 
                                     <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
                                   :
                                     <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className={`w-2 h-2 rounded-full ${job.type === 'Depo' ? 'bg-blue-600' : 'bg-red-600'}`}></div>
                                 ))}
-                              </div>
-                            )}
+                            </div>
                             
-                            {asansorJobs.length > 0 && (
-                              <div className="flex flex-wrap gap-0.5 mt-0.5 pt-0.5 border-t border-black/10 w-full items-center">
+                            {/* ASANSÖR NOKTALARI: Asansör işi OLMASA BİLE bu satır her zaman render edilir. */}
+                            {/* Böylece tüm günlerde noktalar aynı hizada durur (7. gündeki gibi), aşağı kaymaz. */}
+                            <div className={`flex flex-wrap gap-0.5 mt-0.5 pt-0.5 w-full items-center min-h-[9px] border-t ${asansorJobs.length > 0 ? 'border-black/10' : 'border-transparent'}`}>
                                 {asansorJobs.slice(0, 5).map(job => (
                                   job.isSpecial ?
                                     <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-2 h-2 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
                                   :
                                     <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
                                 ))}
-                              </div>
-                            )}
+                            </div>
                           </>
                         )}
                       </div>
@@ -1497,7 +1524,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         {job.assignedVehiclePlate && <span className="flex items-center gap-1 text-[10px] font-bold bg-purple-50 text-purple-700 px-2 py-1 rounded border border-purple-100"><Truck className="w-3 h-3" /> {job.assignedVehiclePlate}</span>}
                         {job.createdBy && <span className="flex items-center gap-1 text-[10px] font-bold bg-indigo-50 text-indigo-700 px-2 py-1 rounded border border-indigo-100"><UserPlus className="w-3 h-3" /> Kaydı Açan: {job.createdBy}</span>}
                       </div>
-                      <div className="flex flex-wrap items-center justify-end gap-1.5 w-full sm:w-auto mt-2 sm:mt-0">
+                      <div className="flex flex-nowrap items-center gap-1 w-full mt-2">
                         {!isOperator && (
                           <>
                             <button 
@@ -1512,15 +1539,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                                 const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %10'u olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Denizbank\nAlıcı: Şenol Beşinci\nIBAN: TR 94 0013 4000 0262 9671 7000 01\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
                               window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
                             }} 
-                            className="px-3 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[10px] font-bold rounded-lg transition flex items-center gap-1 shadow-sm"
+                            className="flex-1 min-w-0 px-1 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 shadow-sm whitespace-nowrap"
                           >
-                            <MessageCircle className="w-3 h-3"/> Bilgilendir (WA)
+                            <MessageCircle className="w-2.5 h-2.5 shrink-0"/> Bilgilendir
                           </button>
-                          <button onClick={() => generateContractPDF(job)} className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-green-200">
-                            <FileText className="w-3 h-3"/> PDF
+                          <button onClick={() => generateContractPDF(job)} className="flex-1 min-w-0 px-1 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-green-200 whitespace-nowrap">
+                            <FileText className="w-2.5 h-2.5 shrink-0"/> PDF
                           </button>
-                          <button onClick={() => handleEditJob(job)} className="px-3 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-neutral-200">
-                            <Edit className="w-3 h-3"/> Düzenle
+                          <button onClick={() => handleEditJob(job)} className="flex-1 min-w-0 px-1 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-neutral-200 whitespace-nowrap">
+                            <Edit className="w-2.5 h-2.5 shrink-0"/> Düzenle
                           </button>
                           {/* YENİ: Tarih değiştirme ve iptal sadece işi açan kişi VEYA Yönetici/Müdür tarafından yapılabilir */}
                           {(() => {
@@ -1530,12 +1557,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                             if (!canManage) return null;
                             return (
                               <>
-                                <button onClick={() => { setJobToChangeDate(job); setNewJobDate(job.date); setShowChangeDateModal(true); }} className="px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-orange-200">
-                                  <CalendarDays className="w-3 h-3"/> Tarih Değiştir
+                                <button onClick={() => { setJobToChangeDate(job); setNewJobDate(job.date); setShowChangeDateModal(true); }} className="flex-1 min-w-0 px-1 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-orange-200 whitespace-nowrap">
+                                  <CalendarDays className="w-2.5 h-2.5 shrink-0"/> Tarih Değiştir
                                 </button>
                                 {job.status !== 'cancelled' && (
-                                  <button onClick={() => setCancelJobId(job.id)} className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-[10px] font-bold rounded-lg transition flex items-center gap-1 border border-red-200">
-                                    <Ban className="w-3 h-3"/> İptal Et
+                                  <button onClick={() => setCancelJobId(job.id)} className="flex-1 min-w-0 px-1 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-red-200 whitespace-nowrap">
+                                    <Ban className="w-2.5 h-2.5 shrink-0"/> İptal Et
                                   </button>
                                 )}
                               </>
@@ -3318,19 +3345,59 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
           <Activity className="w-7 h-7 text-red-600" /> Araç Rapor & Bakım Yönetimi
         </h2>
 
-        {/* İşlem Yapılacak Aracı Seçin */}
+        {/* İşlem Yapılacak Aracı Seçin — YENİ: açılır liste yerine tipine göre simgeli araç kartları */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <h3 className="font-bold text-black mb-3">İşlem Yapılacak Aracı Seçin</h3>
-          <select 
-            value={selectedVehicleId} 
-            onChange={(e) => setSelectedVehicleId(e.target.value)} 
-            className="w-full md:w-[400px] p-4 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-base cursor-pointer shadow-sm transition hover:border-red-400"
-          >
-            <option value="">-- Araç Seçiniz --</option>
-            {vehicles.map(v => (
-              <option key={v.id} value={v.id}>{v.plate} ({v.type})</option>
-            ))}
-          </select>
+          <h3 className="font-bold text-black mb-4 flex items-center gap-2">
+            <Truck className="w-5 h-5 text-red-600" /> Filo — İşlem Yapmak İçin Araca Dokunun
+          </h3>
+          {/* Tüm araçlar plakası ve tip simgesiyle (Kamyon = büyük tır simgesi, Kamyonet = küçük araç simgesi) kart olarak listelenir */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+            {vehicles.map(v => {
+              const isSelected = String(selectedVehicleId) === String(v.id);
+              const isKamyon = (v.type || '').toLowerCase().includes('kamyon') && !(v.type || '').toLowerCase().includes('kamyonet');
+              return (
+                <button
+                  key={v.id}
+                  type="button"
+                  onClick={() => setSelectedVehicleId(isSelected ? '' : v.id)}
+                  title={`${v.plate} — ${v.type || 'Araç'}${v.model ? ' • ' + v.model : ''}`}
+                  className={`group relative flex flex-col items-center gap-2 p-4 rounded-2xl border-2 transition-all duration-200 ${
+                    isSelected
+                      ? 'border-red-600 bg-gradient-to-b from-red-50 to-white shadow-lg shadow-red-600/20 scale-[1.03]'
+                      : 'border-neutral-200 bg-gradient-to-b from-neutral-50 to-white hover:border-red-300 hover:shadow-md hover:-translate-y-0.5'
+                  }`}
+                >
+                  {/* Seçim onay işareti */}
+                  {isSelected && (
+                    <span className="absolute top-2 right-2 w-5 h-5 bg-red-600 text-white rounded-full flex items-center justify-center shadow animate-in zoom-in">
+                      <CheckCircle className="w-3.5 h-3.5" />
+                    </span>
+                  )}
+                  {/* Araç tipi simgesi: Kamyon büyük ve koyu, Kamyonet küçük ve açık tonda */}
+                  <span className={`flex items-center justify-center rounded-2xl transition ${
+                    isKamyon
+                      ? `w-14 h-14 ${isSelected ? 'bg-red-600 text-white shadow-md shadow-red-600/40' : 'bg-neutral-800 text-white group-hover:bg-red-600'}`
+                      : `w-12 h-12 ${isSelected ? 'bg-red-500 text-white shadow-md shadow-red-500/40' : 'bg-neutral-200 text-neutral-600 group-hover:bg-red-100 group-hover:text-red-600'}`
+                  }`}>
+                    <Truck className={isKamyon ? 'w-8 h-8' : 'w-6 h-6'} />
+                  </span>
+                  {/* Plaka: tabela görünümünde */}
+                  <span className={`px-2 py-0.5 rounded-md border font-black tracking-widest text-xs whitespace-nowrap ${isSelected ? 'bg-black text-white border-black' : 'bg-white text-black border-neutral-300 group-hover:border-neutral-500'}`}>
+                    {v.plate}
+                  </span>
+                  {/* Araç tipi etiketi */}
+                  <span className={`text-[10px] font-bold uppercase tracking-wider ${isSelected ? 'text-red-600' : 'text-neutral-400 group-hover:text-neutral-600'}`}>
+                    {v.type || 'Araç'}{v.volume ? ` • ${v.volume} m³` : ''}
+                  </span>
+                </button>
+              );
+            })}
+            {vehicles.length === 0 && (
+              <div className="col-span-full text-center py-8 text-neutral-400 font-medium text-sm">
+                Sisteme kayıtlı araç bulunmuyor.
+              </div>
+            )}
+          </div>
 
           {selectedVehicle && (
             <div className="mt-8 pt-8 border-t border-neutral-200 grid grid-cols-1 lg:grid-cols-2 gap-8 animate-in slide-in-from-top-4">
@@ -7526,8 +7593,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         <Star className="w-4 h-4" /> Puan Onayla
                       </button>
                     ) : (
-                      <div className="w-full py-2 bg-yellow-100 text-yellow-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1.5 border border-yellow-200 opacity-60 cursor-not-allowed">
-                        <CheckCircle className="w-4 h-4" /> Puan Onaylandı
+                      <div className="w-full flex items-center gap-1.5">
+                        <div className="flex-1 py-2 bg-yellow-100 text-yellow-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1.5 border border-yellow-200 opacity-60">
+                          <CheckCircle className="w-4 h-4" /> Puan Onaylandı
+                        </div>
+                        {/* YENİ: Yanlış girilen puanları düzeltmek için küçük düzenleme butonu */}
+                        <button onClick={() => handleOpenApproveModal(job)} title="Puanları Düzenle" className="p-2 bg-white border border-yellow-300 text-yellow-700 rounded-lg hover:bg-yellow-50 transition shadow-sm shrink-0">
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     )}
 
@@ -7536,8 +7609,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         <Clock className="w-4 h-4" /> Mesai Onayla
                       </button>
                     ) : (
-                      <div className="w-full py-2 bg-blue-100 text-blue-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1.5 border border-blue-200 opacity-60 cursor-not-allowed">
-                        <CheckCircle className="w-4 h-4" /> Mesai Onaylandı
+                      <div className="w-full flex items-center gap-1.5">
+                        <div className="flex-1 py-2 bg-blue-100 text-blue-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1.5 border border-blue-200 opacity-60">
+                          <CheckCircle className="w-4 h-4" /> Mesai Onaylandı
+                        </div>
+                        {/* YENİ: Yanlış girilen mesaiyi düzeltmek için küçük düzenleme butonu */}
+                        <button onClick={() => handleOpenMesaiModal(job)} title="Mesaiyi Düzenle" className="p-2 bg-white border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition shadow-sm shrink-0">
+                          <Edit className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     )}
 
@@ -7742,6 +7821,25 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             team: newNames.join(', '),
         });
         setManualName('');
+    };
+
+    // YENİ: Personelin işteki sırasını yukarı/aşağı taşır. Sıra assignedPersonnelIds
+    // dizisinde tutulur; teamNames ve team alanları da yeni sıraya göre yeniden yazılır.
+    // (1. sıradaki kişi şoför/ekip lideri kabul edildiği için sıralama önemlidir.)
+    const handleMovePerson = async (pId, direction) => {
+        const ids = [...(job.assignedPersonnelIds || [])];
+        const index = ids.findIndex(id => String(id) === String(pId));
+        const targetIndex = index + direction; // -1 = yukarı, +1 = aşağı
+        if (index === -1 || targetIndex < 0 || targetIndex >= ids.length) return; // Sınır kontrolü
+        [ids[index], ids[targetIndex]] = [ids[targetIndex], ids[index]]; // Yer değiştir
+        const sysNames = ids.map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
+        const allNames = [...sysNames, ...manualNames];
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), {
+            assignedPersonnelIds: ids,
+            assignedPersonnelId: ids[0] || null, // İlk kişi güncellenir
+            teamNames: allNames,
+            team: allNames.length > 0 ? allNames.join(', ') : 'Atanmadı'
+        });
     };
 
     const handleRemoveManualFromJob = async (nameToRemove) => {
@@ -7950,6 +8048,27 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     {/* YENİ: Rütbe/pozisyon simgeleri ve özellik puanı — artık burada (iş kartına atanınca) gösteriliyor */}
                     <PersonPositionRankIcons person={person} />
                     <SkillScoreBadge person={person} skillsMap={skillsMap} />
+                    {/* YENİ: Personelin işteki sırasını değiştiren yukarı/aşağı butonları */}
+                    <div className="flex flex-col gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleMovePerson(pId, -1); }}
+                        disabled={idx === 0}
+                        title="Sırayı yukarı taşı"
+                        className={`w-4 h-4 flex items-center justify-center rounded border text-[8px] font-black transition ${idx === 0 ? 'border-neutral-100 text-neutral-200 cursor-not-allowed' : 'border-neutral-200 text-neutral-500 hover:bg-orange-50 hover:text-orange-600 hover:border-orange-300'}`}
+                      >
+                        <ChevronUp className="w-3 h-3" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); handleMovePerson(pId, 1); }}
+                        disabled={idx === (job.assignedPersonnelIds || []).length - 1}
+                        title="Sırayı aşağı taşı"
+                        className={`w-4 h-4 flex items-center justify-center rounded border text-[8px] font-black transition ${idx === (job.assignedPersonnelIds || []).length - 1 ? 'border-neutral-100 text-neutral-200 cursor-not-allowed' : 'border-neutral-200 text-neutral-500 hover:bg-orange-50 hover:text-orange-600 hover:border-orange-300'}`}
+                      >
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+                    </div>
                     <GripVertical className="w-3.5 h-3.5 text-neutral-300 shrink-0 opacity-0 group-hover:opacity-100 transition" />
                   </div>
                 );
