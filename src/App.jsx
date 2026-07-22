@@ -2240,10 +2240,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     const [formData, setFormData] = useState({
       isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo',
-      fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Toplu', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '',
+      fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '',
       extraLoadingAddresses: [], selectedDepo: '', 
-      toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Toplu', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '',
-      extraUnloadingAddresses: [],
+      toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '',
+      extraUnloadingAddresses: [], wallMounting: [], esyaDurumu: ['Kendisi Topladı'],
       date: new Date().toISOString().split('T')[0], time: '09:00', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
     });
 
@@ -3086,15 +3086,15 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       const depo = DEPO_LOCATIONS.find(d => d.name === depoName);
       if (depo) {
         if (formData.depoDirection === 'fromDepo') {
-          setFormData({...formData, selectedDepo: depoName, fromProvince: depo.province, fromDistrict: depo.district, fromAddress: depo.address, fromFloor: 'Giriş Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Toplu', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre'});
+          setFormData({...formData, selectedDepo: depoName, fromProvince: depo.province, fromDistrict: depo.district, fromAddress: depo.address, fromFloor: 'Giriş Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre'});
         } else {
-          setFormData({...formData, selectedDepo: depoName, toProvince: depo.province, toDistrict: depo.district, toAddress: depo.address, toFloor: 'Giriş Kat', toTransportMethod: 'Merdiven', toPacking: 'Toplu', toRoomCount: 'Depoevim Tesisleri', toDistance: '0', toDistanceUnit: 'Metre'});
+          setFormData({...formData, selectedDepo: depoName, toProvince: depo.province, toDistrict: depo.district, toAddress: depo.address, toFloor: 'Giriş Kat', toTransportMethod: 'Merdiven', toPacking: 'Kendisi Topladı', toRoomCount: 'Depoevim Tesisleri', toDistance: '0', toDistanceUnit: 'Metre'});
         }
       } else {
         if (formData.depoDirection === 'fromDepo') {
-          setFormData({...formData, selectedDepo: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromAddress: '', fromFloor: '1. Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Toplu', fromRoomCount: '2+1', fromDistance: '', fromDistanceUnit: 'Metre'});
+          setFormData({...formData, selectedDepo: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromAddress: '', fromFloor: '1. Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı', fromRoomCount: '2+1', fromDistance: '', fromDistanceUnit: 'Metre'});
         } else {
-          setFormData({...formData, selectedDepo: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toAddress: '', toFloor: '1. Kat', toTransportMethod: 'Merdiven', toPacking: 'Toplu', toRoomCount: '2+1', toDistance: '', toDistanceUnit: 'Metre'});
+          setFormData({...formData, selectedDepo: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toAddress: '', toFloor: '1. Kat', toTransportMethod: 'Merdiven', toPacking: 'Kendisi Topladı', toRoomCount: '2+1', toDistance: '', toDistanceUnit: 'Metre'});
         }
       }
     };
@@ -3292,7 +3292,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         }
         
         setFormData({
-          isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Toplu', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', extraLoadingAddresses: [], selectedDepo: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Toplu', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', extraUnloadingAddresses: [], date: new Date().toISOString().split('T')[0], time: '09:00', durationDays: '1', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
+          isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', extraLoadingAddresses: [], selectedDepo: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', extraUnloadingAddresses: [], wallMounting: [], esyaDurumu: ['Kendisi Topladı'], date: new Date().toISOString().split('T')[0], time: '09:00', durationDays: '1', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
         });
         // YENİ: Önceki takvim yönlendirmesi iptal edildi. Bunun yerine altta
         // "Müşteri Kaydınız Oluşturuldu" paneli açılır (WA bilgilendirme + sözleşme indirme seçenekli).
@@ -4202,13 +4202,13 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 {isAddJobSubMenuOpen && (
                   <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
                     <button 
-                      onClick={() => { setActiveTab('addNakliye'); setRecordType('Nakliye'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Toplu', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Toplu', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
+                      onClick={() => { setActiveTab('addNakliye'); setRecordType('Nakliye'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', wallMounting: [], esyaDurumu: ['Kendisi Topladı'], contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addNakliye' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addNakliye' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Nakliye Kayıt
                     </button>
                     <button 
-                      onClick={() => { setActiveTab('addDepo'); setRecordType('Depo'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Toplu', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Toplu', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', contractDetails: '', notes: '', selectedDepo: '', depoDirection: 'toDepo'}); setIsSidebarOpen(false); }}
+                      onClick={() => { setActiveTab('addDepo'); setRecordType('Depo'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', wallMounting: [], esyaDurumu: ['Kendisi Topladı'], contractDetails: '', notes: '', selectedDepo: '', depoDirection: 'toDepo'}); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addDepo' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addDepo' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Depo Kayıt
