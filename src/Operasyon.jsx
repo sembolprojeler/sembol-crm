@@ -584,7 +584,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                             <span className="text-[10px] font-bold bg-white px-2 py-0.5 rounded shadow-sm border border-neutral-200 text-neutral-600">{job.fromRoomCount}</span>
                             <span className="text-[10px] font-bold bg-white px-2 py-0.5 rounded shadow-sm border border-neutral-200 text-neutral-600">{job.fromFloor}</span>
                             <span className="text-[10px] font-bold bg-white px-2 py-0.5 rounded shadow-sm border border-neutral-200 text-neutral-600">{job.fromTransportMethod}</span>
-                            <span className="text-[10px] font-bold bg-white px-2 py-0.5 rounded shadow-sm border border-neutral-200 text-neutral-600">{job.fromPacking}</span>
+                            <span className="text-[10px] font-bold bg-white px-2 py-0.5 rounded shadow-sm border border-neutral-200 text-neutral-600">{(job.esyaDurumu && job.esyaDurumu.length > 0) ? job.esyaDurumu.join(' • ') : job.fromPacking}</span>
                           </div>
                         </div>
                         <div className="text-xs mt-1">{job.fromAddress}</div>
@@ -622,7 +622,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                                 <span className="text-[10px] font-bold bg-red-50 px-2 py-0.5 rounded shadow-sm border border-red-100 text-red-700">{job.toRoomCount}</span>
                                 <span className="text-[10px] font-bold bg-red-50 px-2 py-0.5 rounded shadow-sm border border-red-100 text-red-700">{job.toFloor}</span>
                                 <span className="text-[10px] font-bold bg-red-50 px-2 py-0.5 rounded shadow-sm border border-red-100 text-red-700">{job.toTransportMethod}</span>
-                                <span className="text-[10px] font-bold bg-red-50 px-2 py-0.5 rounded shadow-sm border border-red-100 text-red-700">{job.toPacking}</span>
+                                {/* YENİ: Varış bölümünde eski "eşya durumu" yerine seçilen TESLİM ŞEKLİ etiketleri yan yana gösterilir */}
+                                {(job.wallMounting && job.wallMounting.length > 0)
+                                  ? job.wallMounting.map(w => <span key={w} className="text-[10px] font-bold bg-indigo-50 px-2 py-0.5 rounded shadow-sm border border-indigo-200 text-indigo-700">{w}</span>)
+                                  : <span className="text-[10px] font-bold bg-indigo-50 px-2 py-0.5 rounded shadow-sm border border-indigo-200 text-indigo-700">Teslim: Yok</span>}
                               </div>
                             </div>
                             <div className="text-xs mt-1">{job.toAddress}</div>
@@ -869,7 +872,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                       <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" /> 
                       <div className="flex-1 leading-tight">
                         <span className="text-red-900 font-bold block mb-0.5">{job.extraUnloadingAddresses?.length > 0 ? '1. VR:' : 'VR:'} {job.toProvince}/{job.toDistrict}</span>
-                        <span className="text-[9px] font-medium text-red-600/80">{job.toRoomCount} • {job.toFloor} • {job.toTransportMethod}</span>
+                        <span className="text-[9px] font-medium text-red-600/80">{job.toRoomCount} • {job.toFloor} • {job.toTransportMethod} • Teslim: {(job.wallMounting && job.wallMounting.length > 0) ? job.wallMounting.join(' • ') : 'Yok'}</span>
                       </div>
                     </div>
                   )}
@@ -1370,24 +1373,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                             )
                         ) : (
                           <>
-                            {/* NAKLİYE/DEPO NOKTALARI: min-h ile satır yüksekliği sabitlendi (hizalama bozulmaz) */}
-                            <div className="flex flex-wrap gap-0.5 items-center min-h-[10px]">
-                                {coreJobs.slice(0, 5).map(job => (
+                            {/* NAKLİYE/DEPO NOKTALARI: en fazla 6 nokta, tek satırda (taşmaz). min-h ile hiza sabit */}
+                            <div className="flex flex-nowrap gap-0.5 items-center min-h-[10px] overflow-hidden">
+                                {coreJobs.slice(0, 6).map(job => (
                                   job.isSpecial ? 
-                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className="w-2.5 h-2.5 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
+                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className="w-2.5 h-2.5 shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
                                   :
-                                    <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className={`w-2 h-2 rounded-full ${job.type === 'Depo' ? 'bg-blue-600' : 'bg-red-600'}`}></div>
+                                    <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className={`w-2 h-2 shrink-0 rounded-full ${job.type === 'Depo' ? 'bg-blue-600' : 'bg-red-600'}`}></div>
                                 ))}
                             </div>
                             
-                            {/* ASANSÖR NOKTALARI: Asansör işi OLMASA BİLE bu satır her zaman render edilir. */}
-                            {/* Böylece tüm günlerde noktalar aynı hizada durur (7. gündeki gibi), aşağı kaymaz. */}
-                            <div className={`flex flex-wrap gap-0.5 mt-0.5 pt-0.5 w-full items-center min-h-[9px] border-t ${asansorJobs.length > 0 ? 'border-black/10' : 'border-transparent'}`}>
-                                {asansorJobs.slice(0, 5).map(job => (
+                            {/* ASANSÖR NOKTALARI: Asansör işi OLMASA BİLE bu satır her zaman render edilir (hiza sabit). */}
+                            {/* En fazla 6 yeşil nokta, TEK SATIRDA yan yana; sığması için noktalar küçültüldü (w-1.5). */}
+                            <div className={`flex flex-nowrap gap-0.5 mt-0.5 pt-0.5 w-full items-center min-h-[9px] overflow-hidden border-t ${asansorJobs.length > 0 ? 'border-black/10' : 'border-transparent'}`}>
+                                {asansorJobs.slice(0, 6).map(job => (
                                   job.isSpecial ?
-                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-2 h-2 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
+                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-1.5 h-1.5 shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
                                   :
-                                    <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+                                    <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-1.5 h-1.5 shrink-0 rounded-full bg-green-500"></div>
                                 ))}
                             </div>
                           </>
@@ -1453,7 +1456,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         <div className="flex-1 leading-tight">
                           <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
                             <span className="text-black font-bold">{job.extraLoadingAddresses?.length > 0 ? '1. AL:' : 'AL:'} {job.fromProvince}/{job.fromDistrict}</span>
-                            <span className="text-[9px] font-medium text-neutral-500">{job.fromRoomCount} • {job.fromFloor} • {job.fromTransportMethod} • {job.fromPacking}</span>
+                            <span className="text-[9px] font-medium text-neutral-500">{job.fromRoomCount} • {job.fromFloor} • {job.fromTransportMethod} • {(job.esyaDurumu && job.esyaDurumu.length > 0) ? job.esyaDurumu.join(' • ') : job.fromPacking}</span>
                           </div>
                           <div className="text-[10px] text-neutral-500">{job.fromAddress}</div>
                         </div>
@@ -1479,7 +1482,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                             <div className="flex-1 leading-tight">
                               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mb-0.5">
                                 <span className="text-red-900 font-bold">{job.extraUnloadingAddresses?.length > 0 ? '1. Boşaltma:' : 'VR:'} {job.toProvince}/{job.toDistrict}</span>
-                                <span className="text-[9px] font-medium text-red-600/80">{job.toRoomCount} • {job.toFloor} • {job.toTransportMethod} • {job.toPacking}</span>
+                                <span className="text-[9px] font-medium text-red-600/80">{job.toRoomCount} • {job.toFloor} • {job.toTransportMethod} • Teslim: {(job.wallMounting && job.wallMounting.length > 0) ? job.wallMounting.join(' • ') : 'Yok'}</span>
                               </div>
                               <div className="text-[10px] text-neutral-500">{job.toAddress}</div>
                             </div>
@@ -1539,14 +1542,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                                 const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %10'u olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Denizbank\nAlıcı: Şenol Beşinci\nIBAN: TR 94 0013 4000 0262 9671 7000 01\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
                               window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
                             }} 
-                            className="flex-1 min-w-0 px-1 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 shadow-sm whitespace-nowrap"
+                            className="flex-1 min-w-0 px-1 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 shadow-sm whitespace-nowrap overflow-hidden"
                           >
                             <MessageCircle className="w-2.5 h-2.5 shrink-0"/> Bilgilendir
                           </button>
-                          <button onClick={() => generateContractPDF(job)} className="flex-1 min-w-0 px-1 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-green-200 whitespace-nowrap">
+                          <button onClick={() => generateContractPDF(job)} className="flex-1 min-w-0 px-1 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-green-200 whitespace-nowrap overflow-hidden">
                             <FileText className="w-2.5 h-2.5 shrink-0"/> PDF
                           </button>
-                          <button onClick={() => handleEditJob(job)} className="flex-1 min-w-0 px-1 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-neutral-200 whitespace-nowrap">
+                          <button onClick={() => handleEditJob(job)} className="flex-1 min-w-0 px-1 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-neutral-200 whitespace-nowrap overflow-hidden">
                             <Edit className="w-2.5 h-2.5 shrink-0"/> Düzenle
                           </button>
                           {/* YENİ: Tarih değiştirme ve iptal sadece işi açan kişi VEYA Yönetici/Müdür tarafından yapılabilir */}
@@ -1557,11 +1560,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                             if (!canManage) return null;
                             return (
                               <>
-                                <button onClick={() => { setJobToChangeDate(job); setNewJobDate(job.date); setShowChangeDateModal(true); }} className="flex-1 min-w-0 px-1 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-orange-200 whitespace-nowrap">
-                                  <CalendarDays className="w-2.5 h-2.5 shrink-0"/> Tarih Değiştir
+                                <button onClick={() => { setJobToChangeDate(job); setNewJobDate(job.date); setShowChangeDateModal(true); }} className="flex-1 min-w-0 px-1 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-orange-200 whitespace-nowrap overflow-hidden">
+                                  <CalendarDays className="w-2.5 h-2.5 shrink-0"/> Değiştir
                                 </button>
                                 {job.status !== 'cancelled' && (
-                                  <button onClick={() => setCancelJobId(job.id)} className="flex-1 min-w-0 px-1 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-red-200 whitespace-nowrap">
+                                  <button onClick={() => setCancelJobId(job.id)} className="flex-1 min-w-0 px-1 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 border border-red-200 whitespace-nowrap overflow-hidden">
                                     <Ban className="w-2.5 h-2.5 shrink-0"/> İptal Et
                                   </button>
                                 )}
@@ -7516,6 +7519,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-700 mb-2">
                       <span className="truncate flex-1"><MapPin className="w-3 h-3 inline mr-0.5 text-neutral-400"/>{job.fromDistrict} ➔ {job.toDistrict || '?'}</span>
                     </div>
+                    {/* YENİ: Teslim Şekli her zaman gösterilir; seçim yoksa "Yok" etiketi (eski kayıtlar dahil) */}
+                    <div className="flex flex-wrap gap-1 mb-2 items-center">
+                      <span className="text-[9px] font-bold text-neutral-400">Teslim:</span>
+                      {(job.wallMounting && job.wallMounting.length > 0)
+                        ? job.wallMounting.map(w => (
+                            <span key={w} className="text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded">{w}</span>
+                          ))
+                        : <span className="text-[9px] font-bold bg-neutral-100 text-neutral-500 border border-neutral-200 px-1.5 py-0.5 rounded">Yok</span>}
+                    </div>
                     <div className="text-[11px] font-bold text-neutral-700 bg-white p-1.5 rounded border border-neutral-200 shadow-sm flex items-center gap-1">
                       <User className="w-3.5 h-3.5 text-blue-600" /> {job.team}
                     </div>
@@ -7961,7 +7973,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                <span className="truncate"><b>Şekil:</b> {job.fromTransportMethod} {job.toTransportMethod ? `➔ ${job.toTransportMethod}` : ''}</span>
             </div>
             <div className="flex justify-between text-neutral-600">
-               <span className="truncate"><b>Eşya:</b> {job.fromPacking}</span>
+               <span className="truncate"><b>Eşya:</b> {(job.esyaDurumu && job.esyaDurumu.length > 0) ? job.esyaDurumu.join(' • ') : job.fromPacking}</span>
+            </div>
+            {/* YENİ: Teslim Şekli her zaman gösterilir; seçim yoksa "Yok" (eski kayıtlar dahil) */}
+            <div className="flex flex-wrap gap-1 pt-1 mt-0.5 border-t border-neutral-100">
+              <span className="text-neutral-500 font-bold shrink-0">Teslim:</span>
+              {(job.wallMounting && job.wallMounting.length > 0)
+                ? job.wallMounting.map(w => (
+                    <span key={w} className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded font-bold">{w}</span>
+                  ))
+                : <span className="bg-neutral-100 text-neutral-500 border border-neutral-200 px-1.5 py-0.5 rounded font-bold">Yok</span>}
             </div>
           </div>
 
@@ -8945,7 +8966,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     <div>
                       <p className="font-bold text-black flex items-start gap-1"><MapPin className="w-4 h-4 text-neutral-400 mt-0.5 shrink-0"/> AL (Yükleme): {job.fromProvince}/{job.fromDistrict}</p>
                       <p className="text-xs ml-5 mt-0.5">{job.fromAddress}</p>
-                      <p className="text-[10px] ml-5 text-neutral-500 font-bold mt-1">Daire: {job.fromRoomCount} | Kat: {job.fromFloor} | Şekil: {job.fromTransportMethod} | Eşya: {job.fromPacking}</p>
+                      <p className="text-[10px] ml-5 text-neutral-500 font-bold mt-1">Daire: {job.fromRoomCount} | Kat: {job.fromFloor} | Şekil: {job.fromTransportMethod} | Eşya: {(job.esyaDurumu && job.esyaDurumu.length > 0) ? job.esyaDurumu.join(' • ') : job.fromPacking}</p>
                       {isMainAssignee && (
                         <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((job.fromProvince || '') + ' ' + (job.fromDistrict || '') + ' ' + (job.fromAddress || ''))}`} target="_blank" rel="noreferrer" className="text-[10px] font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 px-2.5 py-1.5 rounded-lg border border-blue-200 flex items-center gap-1 transition w-max mt-2 ml-5">
                           <MapPin className="w-3 h-3"/> Yol Tarifi Al
@@ -8972,7 +8993,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         <div>
                           <p className="font-bold text-red-700 flex items-start gap-1"><MapPin className="w-4 h-4 text-red-500 mt-0.5 shrink-0"/> VR (Boşaltma): {job.toProvince}/{job.toDistrict}</p>
                           <p className="text-xs ml-5 mt-0.5 text-neutral-700">{job.toAddress}</p>
-                          <p className="text-[10px] ml-5 text-neutral-500 font-bold mt-1">Daire: {job.toRoomCount} | Kat: {job.toFloor} | Şekil: {job.toTransportMethod} | Eşya: {job.toPacking}</p>
+                          <p className="text-[10px] ml-5 text-neutral-500 font-bold mt-1">Daire: {job.toRoomCount} | Kat: {job.toFloor} | Şekil: {job.toTransportMethod} | Teslim: {(job.wallMounting && job.wallMounting.length > 0) ? job.wallMounting.join(' • ') : 'Yok'}</p>
                           <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent((job.toProvince || '') + ' ' + (job.toDistrict || '') + ' ' + (job.toAddress || ''))}`} target="_blank" rel="noreferrer" className="text-[10px] font-bold bg-red-50 text-red-600 hover:bg-red-100 px-2.5 py-1.5 rounded-lg border border-red-200 flex items-center gap-1 transition w-max mt-2 ml-5">
                             <MapPin className="w-3 h-3"/> Yol Tarifi Al
                           </a>

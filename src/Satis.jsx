@@ -26,15 +26,17 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
   );
 
   // ============================================================================
-  // YENİ: Duvar Montajı seçenekleri ve sözleşme detayına otomatik eklenecek metinler
+  // YENİ: "Teslim Durumu" seçenekleri (eski adı Teslim Şekli / Duvar Montajı).
+  // NOT: Bu seçimler Sözleşme Detayı'na YAZI olarak EKLENMEZ. Bunun yerine
+  // sözleşme PDF'inde ve tüm iş kartlarında ayrı bir satır/etiket olarak gösterilir.
   // ============================================================================
-  const WALL_MOUNT_OPTIONS = ['TV Montajı', 'Mobilya Sabitleme', 'Raf/Tablo', 'Avize'];
-  const WALL_MOUNT_TEXTS = {
-    'TV Montajı': 'Müşterinin televizyonu duvara monte edilecektir.',
-    'Mobilya Sabitleme': 'Müşterinin mobilyaları devrilmeye karşı duvara sabitlenecektir.',
-    'Raf/Tablo': 'Müşterinin raf ve tabloları duvara monte edilecektir.',
-    'Avize': 'Müşterinin avizesi tavana monte edilecektir.'
-  };
+  const WALL_MOUNT_OPTIONS = ['TV Montajı', 'Mobilya Sabitleme', 'Raf/Tablo', 'Avize', 'Kalıcı Ambalaj', 'Montaj Yapılmayacak', 'Depoya Teslim'];
+
+  // YENİ: "Eşya Durumu" seçenekleri — Teslim Durumu ile AYNI mantıkta çoklu seçim.
+  // Varsayılan (boş seçim) = "Toplu". Firma toplaması gereken seçenekler materyal hesabını tetikler.
+  const ESYA_OPTIONS = ['Kendisi Topladı', 'Toplama Yapılacaktır', 'Sadece Mutfak Toplama', 'Sadece Kıyafet Toplama', 'Sökülüm İşlemi Yoktur', 'Ambalaj İşlemi Yoktur', 'Özel Mobilya Sökülüm'];
+  // Bu seçeneklerden biri seçiliyse firma toplaması yapılacak demektir (materyal hesabı için)
+  const ESYA_COMPANY_PACKING = ['Toplama Yapılacaktır', 'Sadece Mutfak Toplama', 'Sadece Kıyafet Toplama'];
 
   export const AddJobView = ({
     type, formData, setFormData, handleInputChange, handleProvinceChange,
@@ -42,31 +44,39 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
   }) => {
     // YENİ: İsim / telefon boş bırakılırsa gösterilecek uyarı penceresi state'i
     const [showValidationModal, setShowValidationModal] = useState(false);
-    // YENİ: Duvar Montajı açılır penceresinin açık/kapalı durumu
+    // YENİ: Teslim Durumu açılır penceresinin açık/kapalı durumu
     const [wallMountOpen, setWallMountOpen] = useState(false);
+    // YENİ: Eşya Durumu açılır penceresinin açık/kapalı durumu
+    const [esyaOpen, setEsyaOpen] = useState(false);
 
-    // YENİ: Seçili duvar montajı işlemleri (dizi). Boş dizi = "Yok" seçili demektir.
+    // YENİ: Seçili teslim durumu işlemleri (dizi). Boş dizi = "Yok" seçili demektir.
     const selectedWallMounts = formData.wallMounting || [];
+    // YENİ: Seçili eşya durumu işlemleri (dizi). Boş dizi = "Toplu" (varsayılan) demektir.
+    const selectedEsya = formData.esyaDurumu || [];
 
-    // YENİ: Duvar montajı seçimini değiştirir ve Sözleşme Detayı'nı OTOMATİK doldurur.
-    // Mantık: Sözleşme detayındaki eski otomatik satırlar temizlenir (elle yazılan metin korunur),
-    // ardından güncel seçimlere ait metinler alt alta eklenir.
+    // YENİ: Teslim durumu seçimini değiştirir. Sözleşme detayına HİÇBİR yazı eklenmez;
+    // sadece wallMounting dizisi güncellenir (sözleşme PDF'i ve iş kartları bu diziyi okur).
     const toggleWallMount = (opt) => {
       setFormData(prev => {
         const current = prev.wallMounting || [];
         const next = opt === 'Yok'
           ? [] // "Yok" seçilirse tüm seçimler temizlenir
           : (current.includes(opt) ? current.filter(o => o !== opt) : [...current, opt]);
-        const allAutoTexts = Object.values(WALL_MOUNT_TEXTS);
-        // Elle yazılmış satırları koru, otomatik eklenenleri çıkar
-        const manualLines = (prev.contractDetails || '')
-          .split('\n')
-          .filter(line => !allAutoTexts.includes(line.trim()))
-          .join('\n')
-          .trim();
-        const autoLines = next.map(o => WALL_MOUNT_TEXTS[o]).join('\n');
-        const combined = [manualLines, autoLines].filter(Boolean).join('\n');
-        return { ...prev, wallMounting: next, contractDetails: combined };
+        return { ...prev, wallMounting: next };
+      });
+    };
+
+    // YENİ: Eşya durumu seçimini değiştirir (Teslim Durumu ile aynı çoklu-seçim mantığı).
+    // "Kendisi Topladı" dahil tüm seçenekler bağımsız açılıp kapanır (çoklu seçim).
+    // Geriye dönük uyumluluk için fromPacking (string) senkron tutulur:
+    // firma toplaması gerektiren bir seçim varsa 'Toplama Yapılacak', yoksa 'Kendisi Topladı'.
+    const toggleEsya = (opt) => {
+      setFormData(prev => {
+        const current = prev.esyaDurumu || [];
+        const next = current.includes(opt) ? current.filter(o => o !== opt) : [...current, opt];
+        // Materyal hesabı ve sözleşmedeki "Toplama Hizmeti" için fromPacking senkronu
+        const needsCompanyPacking = next.some(o => ESYA_COMPANY_PACKING.includes(o));
+        return { ...prev, esyaDurumu: next, fromPacking: needsCompanyPacking ? 'Toplama Yapılacak' : 'Kendisi Topladı' };
       });
     };
 
@@ -176,15 +186,15 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
               <div className="grid grid-cols-3 gap-2">
                 <div className="min-w-0">
                   <label className={labelCls}>Tarih *</label>
-                  <input required type="date" name="date" value={formData.date} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-xs md:text-sm text-center" />
+                  <input required type="date" name="date" value={formData.date} onChange={handleInputChange} className="w-full min-w-0 box-border appearance-none px-1 py-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-[11px] md:text-sm text-center" />
                 </div>
                 <div className="min-w-0">
                   <label className={labelCls}>Saat *</label>
-                  <input required type="time" name="time" value={formData.time} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-xs md:text-sm text-center" />
+                  <input required type="time" name="time" value={formData.time} onChange={handleInputChange} className="w-full min-w-0 box-border appearance-none px-1 py-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-[11px] md:text-sm text-center" />
                 </div>
                 <div className="min-w-0">
                   <label className={labelCls}>İşlem Süresi *</label>
-                  <select name="durationDays" value={formData.durationDays || '1'} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-bold text-xs md:text-sm">
+                  <select name="durationDays" value={formData.durationDays || '1'} onChange={handleInputChange} className="w-full min-w-0 box-border px-1 py-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-bold text-[11px] md:text-sm">
                     {[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>{d} Gün</option>)}
                   </select>
                 </div>
@@ -310,21 +320,45 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                       </select>
                     </div>
                   </div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 relative">
                     <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Eşya Durumu'}</label>
-                    <select name="fromPacking" value={formData.fromPacking || (type === 'Asansör' ? 'Kendi İşimiz' : 'Toplu')} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-sm">
-                      {type === 'Asansör' ? (
-                        <>
-                          <option value="Kendi İşimiz">Kendi İşimiz</option>
-                          <option value="Dışarıya Kiralama">Dışarıya Kiralama</option>
-                        </>
-                      ) : (
-                        <>
-                          <option value="Toplu">Toplu</option>
-                          <option value="Toplama Yapılacak">Toplama Yapılacak</option>
-                        </>
-                      )}
-                    </select>
+                    {type === 'Asansör' ? (
+                      <select name="fromPacking" value={formData.fromPacking || 'Kendi İşimiz'} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-sm">
+                        <option value="Kendi İşimiz">Kendi İşimiz</option>
+                        <option value="Dışarıya Kiralama">Dışarıya Kiralama</option>
+                      </select>
+                    ) : (
+                      <>
+                        {/* YENİ: EŞYA DURUMU — Teslim Durumu ile aynı çoklu seçim açılır penceresi. Varsayılan: Kendisi Topladı */}
+                        <button
+                          type="button"
+                          onClick={() => setEsyaOpen(o => !o)}
+                          className={`w-full min-w-0 p-2 border rounded-xl outline-none bg-white text-xs md:text-sm text-left flex items-center justify-between gap-1 transition ${selectedEsya.length > 0 ? 'border-red-400 text-red-600 font-bold ring-1 ring-red-200' : 'border-neutral-300 text-neutral-700'}`}
+                        >
+                          {/* Kutuda: hiç seçim yoksa "Kendisi Topladı" (varsayılan), 1 seçimde adı, 2+ seçimde sayı */}
+                          <span className="truncate">{selectedEsya.length === 0 ? 'Kendisi Topladı' : (selectedEsya.length === 1 ? selectedEsya[0] : `${selectedEsya.length} işlem seçildi`)}</span>
+                          <span className="text-neutral-400 shrink-0">▾</span>
+                        </button>
+                        {esyaOpen && (
+                          <>
+                            <div className="fixed inset-0 z-20" onClick={() => setEsyaOpen(false)}></div>
+                            <div className="absolute z-30 mt-1 right-0 w-56 bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5 animate-in fade-in slide-in-from-top-1 max-h-64 overflow-y-auto custom-scrollbar">
+                              {ESYA_OPTIONS.map(opt => (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  onClick={() => toggleEsya(opt)}
+                                  className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition flex items-center justify-between gap-2 ${selectedEsya.includes(opt) ? 'bg-red-600 text-white' : 'text-neutral-700 hover:bg-neutral-100'}`}
+                                >
+                                  {opt}
+                                  {selectedEsya.includes(opt) && <span>✓</span>}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
                   </div>
                 </div>
             </div>
@@ -458,8 +492,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                           </>
                         ) : (
                           <>
-                            <option value="Toplu">Toplu</option>
-                            <option value="Toplama Yapılacak">Toplama Yapılacak</option>
+                            {ESYA_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
                           </>
                         )}
                       </select>
@@ -508,7 +541,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                   ...prev,
                   extraLoadingAddresses: [
                     ...(prev.extraLoadingAddresses || []),
-                    { id: Date.now(), province: '', district: '', floor: '1. Kat', transportMethod: 'Merdiven', packing: type === 'Asansör' ? 'Kendi İşimiz' : 'Toplu', roomCount: type === 'Asansör' ? 'Yükleme Kurulum' : '1+0 / Parça Eşya', distance: '', distanceUnit: 'Metre', address: '' }
+                    { id: Date.now(), province: '', district: '', floor: '1. Kat', transportMethod: 'Merdiven', packing: type === 'Asansör' ? 'Kendi İşimiz' : 'Kendisi Topladı', roomCount: type === 'Asansör' ? 'Yükleme Kurulum' : '1+0 / Parça Eşya', distance: '', distanceUnit: 'Metre', address: '' }
                   ]
                 }));
               }} 
@@ -602,9 +635,9 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                       </select>
                     </div>
                   </div>
-                  {/* YENİ: DUVAR MONTAJI — çoklu seçim yapılabilen açılır pencere */}
+                  {/* YENİ: TESLİM ŞEKLİ (eski adı Duvar Montajı) — çoklu seçim yapılabilen açılır pencere */}
                   <div className="min-w-0 relative">
-                    <label className={labelCls}>Duvar Montajı</label>
+                    <label className={labelCls}>Teslim Durumu</label>
                     <button
                       type="button"
                       onClick={() => setWallMountOpen(o => !o)}
@@ -618,7 +651,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                       <>
                         {/* Dışarıya tıklanınca pencereyi kapatan görünmez katman */}
                         <div className="fixed inset-0 z-20" onClick={() => setWallMountOpen(false)}></div>
-                        <div className="absolute z-30 mt-1 right-0 w-48 bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5 animate-in fade-in slide-in-from-top-1">
+                        <div className="absolute z-30 mt-1 right-0 w-56 bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5 animate-in fade-in slide-in-from-top-1 max-h-64 overflow-y-auto custom-scrollbar">
                           {/* "Yok" seçeneği: tüm seçimleri temizler */}
                           <button
                             type="button"
@@ -788,7 +821,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                   ...prev,
                   extraUnloadingAddresses: [
                     ...(prev.extraUnloadingAddresses || []),
-                    { id: Date.now(), province: '', district: '', floor: '1. Kat', transportMethod: 'Merdiven', packing: 'Toplu', roomCount: '1+0 / Parça Eşya', distance: '', distanceUnit: 'Metre', address: '' }
+                    { id: Date.now(), province: '', district: '', floor: '1. Kat', transportMethod: 'Merdiven', packing: 'Kendisi Topladı', roomCount: '1+0 / Parça Eşya', distance: '', distanceUnit: 'Metre', address: '' }
                   ]
                 }));
               }} 
