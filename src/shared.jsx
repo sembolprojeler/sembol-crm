@@ -792,6 +792,11 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
     const fiyat = parseInt(job.price || 0).toLocaleString('tr-TR');
     const kapora = parseInt(job.deposit || 0).toLocaleString('tr-TR');
 
+    // YENİ: PDF dosya adı "Ad-Soyad-GG.AA.YYYY" formatında oluşturulur.
+    // Tarayıcılar "PDF olarak kaydet" işleminde sayfa başlığını (title) dosya adı olarak kullanır.
+    const pdfDate = (job.date || '').split('-').reverse().join('.'); // YYYY-AA-GG -> GG.AA.YYYY
+    const pdfFileName = `${(job.customerName || 'Musteri').trim().replace(/\s+/g, '-')}-${pdfDate}`;
+
     const isBinaAsansorFrom = job.fromTransportMethod === 'Bina Asansörü' ? 'Var' : 'Yok';
     const isCepheAsansorFrom = job.fromTransportMethod === 'Dış Cephe Asansörü' ? 'Var' : 'Yok';
     const isToplamaFrom = job.fromPacking === 'Toplama Yapılacak' ? 'Var' : 'Yok';
@@ -804,7 +809,7 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
     <html lang="tr">
     <head>
       <meta charset="UTF-8">
-      <title>${job.customerName} - Sözleşme</title>
+      <title>${pdfFileName}</title>
       <style>
         @page { size: A4; margin: 0; }
         * { box-sizing: border-box; }

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
-import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials } from './shared.jsx';
+import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView } from './Finans.jsx';
@@ -2240,11 +2240,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     const [formData, setFormData] = useState({
       isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo',
-      fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '',
+      fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Toplu', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '',
       extraLoadingAddresses: [], selectedDepo: '', 
-      toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '',
+      toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Toplu', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '',
       extraUnloadingAddresses: [],
-      date: new Date().toISOString().split('T')[0], time: '08:00', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
+      date: new Date().toISOString().split('T')[0], time: '09:00', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
     });
 
     const isAddingCengizRef = React.useRef(false);
@@ -2270,8 +2270,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     const [existingCustomerMatch, setExistingCustomerMatch] = useState(null);
     const [showCustomerSearchBox, setShowCustomerSearchBox] = useState(false);
-    // YENİ: Kayıt oluşturuldu/güncellendi bildirimini (toast) kontrol eden state
-    const [showJobSavedNotice, setShowJobSavedNotice] = useState(null);
+    // YENİ: Kayıt sonrası açılan başarı paneli (WhatsApp bilgilendirme + Sözleşme indirme seçenekleriyle)
+    const [savedJobInfo, setSavedJobInfo] = useState(null);
     const [customerSearchQuery, setCustomerSearchQuery] = useState('');
 
     useEffect(() => {
@@ -2763,15 +2763,18 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const handleApprovePoints = async (job, individualPoints, reviewImageUrl, supportPersonnelIds = []) => {
       if (!firebaseUser) return;
       try {
+        // YENİ: Daha önce onaylanmışsa bu bir DÜZENLEMEDİR — eski puanlar önce geri alınır (çift sayım engellenir)
+        const isEditingApproval = !!job.pointsApproved;
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), {
           pointsApproved: true,
           reviewImage: reviewImageUrl || null,
-          supportPersonnelIds: supportPersonnelIds
+          supportPersonnelIds: supportPersonnelIds,
+          approvedPoints: individualPoints // YENİ: Verilen puanların anlık görüntüsü (düzenlemede geri almak için)
         });
 
         const hasAnyPoints = Object.values(individualPoints).some(v => parseFloat(v) > 0) || (supportPersonnelIds && supportPersonnelIds.length > 0);
 
-        if (hasAnyPoints) {
+        if (hasAnyPoints || isEditingApproval) {
           const jobDate = new Date(job.date);
           const year = jobDate.getFullYear();
           const month = jobDate.getMonth() + 1;
@@ -2780,6 +2783,26 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           const puantajRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${year}_${month}`);
           const snap = await getDoc(puantajRef);
           let records = snap.exists() ? snap.data().records : {};
+
+          // YENİ: DÜZENLEME ise önce eski onaydaki puanlar puantajdan düşülür
+          if (isEditingApproval) {
+            const oldPoints = job.approvedPoints || {};
+            let removedMain = false;
+            Object.keys(oldPoints).forEach(pId => {
+              const pts = parseFloat(oldPoints[pId]) || 0;
+              if (pts > 0 && records[pId]) {
+                records[pId][day] = Math.max(0, (parseFloat(records[pId][day]) || 0) - pts);
+                removedMain = true;
+              }
+            });
+            if (removedMain && records['daily_comments']) {
+              records['daily_comments'][day] = Math.max(0, (parseFloat(records['daily_comments'][day]) || 0) - 1);
+            }
+            // Eski destek puanları (0.5) da geri alınır
+            (job.supportPersonnelIds || []).forEach(spId => {
+              if (records[spId]) records[spId][day] = Math.max(0, (parseFloat(records[spId][day]) || 0) - 0.5);
+            });
+          }
 
           let addedMainPoints = false;
           
@@ -2805,7 +2828,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
             const notifsCol = collection(db, 'artifacts', appId, 'public', 'data', 'notifications');
             const assignDateStr = new Date().toISOString().split('T')[0];
-            for (const spId of supportPersonnelIds) {
+            // YENİ: Düzenlemede aynı kişiye tekrar bildirim gitmesin — sadece yeni eklenenlere gönder
+            const previousSupportIds = isEditingApproval ? (job.supportPersonnelIds || []) : [];
+            for (const spId of supportPersonnelIds.filter(id => !previousSupportIds.includes(id))) {
               await addDoc(notifsCol, {
                 userId: spId,
                 title: '🌟 Takım Desteği Puanı!',
@@ -2838,9 +2863,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       }
       const initialPoints = {};
       teamIds.forEach(id => {
-         initialPoints[id] = 1;
+         // YENİ: Düzenleme ise daha önce verilen puan otomatik gelir, yoksa varsayılan 1
+         initialPoints[id] = (job.approvedPoints && job.approvedPoints[id] !== undefined) ? job.approvedPoints[id] : 1;
       });
-      setApproveData({ individualPoints: initialPoints, reviewImage: '', supportPersonnelIds: [] });
+      setApproveData({ individualPoints: initialPoints, reviewImage: job.reviewImage || '', supportPersonnelIds: job.supportPersonnelIds || [] });
       setShowApproveModal(true);
     };
 
@@ -3060,15 +3086,15 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       const depo = DEPO_LOCATIONS.find(d => d.name === depoName);
       if (depo) {
         if (formData.depoDirection === 'fromDepo') {
-          setFormData({...formData, selectedDepo: depoName, fromProvince: depo.province, fromDistrict: depo.district, fromAddress: depo.address, fromFloor: 'Giriş Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre'});
+          setFormData({...formData, selectedDepo: depoName, fromProvince: depo.province, fromDistrict: depo.district, fromAddress: depo.address, fromFloor: 'Giriş Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Toplu', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre'});
         } else {
-          setFormData({...formData, selectedDepo: depoName, toProvince: depo.province, toDistrict: depo.district, toAddress: depo.address, toFloor: 'Giriş Kat', toTransportMethod: 'Merdiven', toPacking: 'Kendisi Topladı', toRoomCount: 'Depoevim Tesisleri', toDistance: '0', toDistanceUnit: 'Metre'});
+          setFormData({...formData, selectedDepo: depoName, toProvince: depo.province, toDistrict: depo.district, toAddress: depo.address, toFloor: 'Giriş Kat', toTransportMethod: 'Merdiven', toPacking: 'Toplu', toRoomCount: 'Depoevim Tesisleri', toDistance: '0', toDistanceUnit: 'Metre'});
         }
       } else {
         if (formData.depoDirection === 'fromDepo') {
-          setFormData({...formData, selectedDepo: '', fromProvince: '', fromDistrict: '', fromAddress: '', fromFloor: '1. Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı', fromRoomCount: '2+1', fromDistance: '', fromDistanceUnit: 'Metre'});
+          setFormData({...formData, selectedDepo: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromAddress: '', fromFloor: '1. Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Toplu', fromRoomCount: '2+1', fromDistance: '', fromDistanceUnit: 'Metre'});
         } else {
-          setFormData({...formData, selectedDepo: '', toProvince: '', toDistrict: '', toAddress: '', toFloor: '1. Kat', toTransportMethod: 'Merdiven', toPacking: 'Kendisi Topladı', toRoomCount: '2+1', toDistance: '', toDistanceUnit: 'Metre'});
+          setFormData({...formData, selectedDepo: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toAddress: '', toFloor: '1. Kat', toTransportMethod: 'Merdiven', toPacking: 'Toplu', toRoomCount: '2+1', toDistance: '', toDistanceUnit: 'Metre'});
         }
       }
     };
@@ -3266,12 +3292,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         }
         
         setFormData({
-          isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo', fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', extraLoadingAddresses: [], selectedDepo: '', toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', extraUnloadingAddresses: [], date: new Date().toISOString().split('T')[0], time: '08:00', durationDays: '1', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
+          isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Toplu', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', extraLoadingAddresses: [], selectedDepo: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Toplu', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', extraUnloadingAddresses: [], date: new Date().toISOString().split('T')[0], time: '09:00', durationDays: '1', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
         });
-        // YENİ: Kayıt tamamlandığında takvim ekranına yönlendir ve bildirim (toast) göster
-        setActiveTab('calendar');
-        setShowJobSavedNotice(wasEditing ? 'updated' : 'created');
-        setTimeout(() => setShowJobSavedNotice(null), 3000); // Bildirim 3 saniye sonra otomatik kapanır
+        // YENİ: Önceki takvim yönlendirmesi iptal edildi. Bunun yerine altta
+        // "Müşteri Kaydınız Oluşturuldu" paneli açılır (WA bilgilendirme + sözleşme indirme seçenekli).
+        setSavedJobInfo({ ...jobData, wasEditing });
       } catch (err) { console.error(err); }
     };
 
@@ -4177,19 +4202,19 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 {isAddJobSubMenuOpen && (
                   <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
                     <button 
-                      onClick={() => { setActiveTab('addNakliye'); setRecordType('Nakliye'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
+                      onClick={() => { setActiveTab('addNakliye'); setRecordType('Nakliye'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Toplu', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Toplu', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addNakliye' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addNakliye' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Nakliye Kayıt
                     </button>
                     <button 
-                      onClick={() => { setActiveTab('addDepo'); setRecordType('Depo'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: '', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', contractDetails: '', notes: '', selectedDepo: '', depoDirection: 'toDepo'}); setIsSidebarOpen(false); }}
+                      onClick={() => { setActiveTab('addDepo'); setRecordType('Depo'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Toplu', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Toplu', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', contractDetails: '', notes: '', selectedDepo: '', depoDirection: 'toDepo'}); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addDepo' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addDepo' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Depo Kayıt
                     </button>
                     <button 
-                      onClick={() => { setActiveTab('addAsansor'); setRecordType('Asansör'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: '', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '', contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
+                      onClick={() => { setActiveTab('addAsansor'); setRecordType('Asansör'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '', contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addAsansor' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addAsansor' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Asansör Kayıt
@@ -4244,6 +4269,24 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'damagedJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'damagedJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Hasarlı İşler
+                      {/* YENİ: Çözüm bekleyen hasarlı iş sayısı — yanıp sönen bildirim ışığı ve sayı rozeti */}
+                      {(() => {
+                        const unresolvedDamageCount = jobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var' && !j.endJobDetails?.damageResolved).length;
+                        if (unresolvedDamageCount === 0) return null;
+                        return (
+                          <span className="ml-auto flex items-center gap-1.5">
+                            {/* Yanıp sönen ışık (ping animasyonu) */}
+                            <span className="relative flex w-2.5 h-2.5">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                              <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-600"></span>
+                            </span>
+                            {/* Sayı rozeti de hafifçe yanıp söner */}
+                            <span className="bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center animate-pulse shadow-sm">
+                              {unresolvedDamageCount}
+                            </span>
+                          </span>
+                        );
+                      })()}
                     </button>
                     <button 
                       onClick={() => { setActiveTab('personelTahtasi'); setIsSidebarOpen(false); }}
@@ -4803,11 +4846,56 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'puantajTahtasi' && showOperasyon && <PuantajTahtasiView personnelList={personnelList} db={db} appId={appId} />}
             {activeTab === 'maviMesaiTahtasi' && showOperasyon && <MaviMesaiTahtasiView personnelList={personnelList} db={db} appId={appId} />}
             
-            {/* YENİ: Kayıt oluşturuldu/güncellendi bildirimi (toast). Takvim ekranına geçildiğinde de görünür kalır */}
-            {showJobSavedNotice && (
-              <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[9999] bg-green-600 text-white px-6 py-3.5 rounded-2xl shadow-2xl flex items-center gap-2.5 font-bold text-sm md:text-base animate-in fade-in slide-in-from-top-4 whitespace-nowrap">
-                <CheckCircle className="w-5 h-5 shrink-0" />
-                {showJobSavedNotice === 'updated' ? 'Kayıt başarıyla güncellendi!' : 'Kayıt başarıyla oluşturuldu!'}
+            {/* YENİ: Kayıt sonrası alttan açılan başarı paneli — WhatsApp bilgilendirme ve Sözleşme indirme seçenekleri */}
+            {savedJobInfo && (
+              <div className="fixed inset-0 bg-black/50 z-[9998] flex items-end md:items-center justify-center p-0 md:p-4 animate-in fade-in">
+                <div className="bg-white rounded-t-3xl md:rounded-3xl shadow-2xl w-full max-w-md p-6 pb-8 animate-in slide-in-from-bottom-8">
+                  <button 
+                    type="button" 
+                    onClick={() => setSavedJobInfo(null)}
+                    className="absolute top-4 right-4 p-2 bg-neutral-100 rounded-full hover:bg-neutral-200 transition"
+                  >
+                    <X className="w-4 h-4 text-neutral-500" />
+                  </button>
+                  <div className="flex flex-col items-center text-center">
+                    <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center mb-3 animate-in zoom-in">
+                      <CheckCircle className="w-9 h-9 text-green-600" />
+                    </div>
+                    <h3 className="text-lg font-black text-black mb-1">
+                      {savedJobInfo.wasEditing ? 'Müşteri Kaydınız Güncellendi!' : 'Müşteri Kaydınız Oluşturuldu!'}
+                    </h3>
+                    <p className="text-sm text-neutral-500 mb-5">
+                      <b>{savedJobInfo.customerName}</b> • {(savedJobInfo.date || '').split('-').reverse().join('.')} {savedJobInfo.time}
+                    </p>
+                    <div className="grid grid-cols-2 gap-3 w-full">
+                      {/* Müşteriyi Bilgilendir (WA): kayıt bilgilerini WhatsApp üzerinden müşteriye gönderir */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Telefonu uluslararası formata çevir (05xx -> 905xx)
+                          let phone = (savedJobInfo.customerPhone || '').replace(/\D/g, '');
+                          if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+                          else if (!phone.startsWith('90')) phone = '90' + phone;
+                          const trDate = (savedJobInfo.date || '').split('-').reverse().join('.');
+                          const rota = `${savedJobInfo.fromProvince || ''}/${savedJobInfo.fromDistrict || ''} ➡️ ${savedJobInfo.toProvince || ''}/${savedJobInfo.toDistrict || ''}`;
+                          const msg = `Sayın *${savedJobInfo.customerName}*,\n\nSembol Nakliyat olarak *${trDate}* tarihi saat *${savedJobInfo.time}* için ${savedJobInfo.type || 'Nakliye'} kaydınız başarıyla oluşturulmuştur. ✅\n\n📍 *Güzergah:* ${rota}\n💰 *Anlaşılan Tutar:* ${parseInt(savedJobInfo.price || 0).toLocaleString('tr-TR')} TL\n💵 *Alınan Kapora:* ${parseInt(savedJobInfo.deposit || 0).toLocaleString('tr-TR')} TL\n\nTaşıma gününden önce ekibimiz sizinle iletişime geçecektir. Bizi tercih ettiğiniz için teşekkür ederiz.\n\n*Sembol Nakliyat*`;
+                          window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+                        }}
+                        className="px-3 py-3 bg-[#25D366] text-white text-xs font-bold rounded-xl hover:bg-[#128C7E] transition flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <MessageCircle className="w-4 h-4 shrink-0" /> Müşteriyi Bilgilendir (WA)
+                      </button>
+                      {/* Sözleşmeyi İndir: takvimdeki sözleşme mantığıyla aynı PDF'i oluşturur (dosya adı: Ad-Soyad-GG.AA.YYYY.pdf) */}
+                      <button
+                        type="button"
+                        onClick={() => generateContractPDF(savedJobInfo)}
+                        className="px-3 py-3 bg-neutral-900 text-white text-xs font-bold rounded-xl hover:bg-black transition flex items-center justify-center gap-1.5 shadow-sm"
+                      >
+                        <Download className="w-4 h-4 shrink-0" /> Sözleşmeyi İndir
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             )}
 
