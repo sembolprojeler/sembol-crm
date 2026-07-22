@@ -9,14 +9,14 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
   // Punto, eski başlıklara göre ~%5 küçültülmüştür (16px -> 15px, 18px -> 17px).
   // ============================================================================
   const SectionHeader = ({ icon: Icon, title, rightSlot }) => (
-    <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 -mx-4 md:-mx-5 -mt-4 md:-mt-5 mb-5 px-4 md:px-5 py-3 rounded-t-2xl bg-gradient-to-r from-red-600/10 via-neutral-100 to-transparent border-b-2 border-red-600/20">
-      <div className="flex items-center gap-3">
-        {/* İkon rozeti: kırmızı zemin üzerinde beyaz ikon */}
-        <span className="w-8 h-8 shrink-0 rounded-xl bg-red-600 text-white flex items-center justify-center shadow-md shadow-red-600/30">
-          <Icon className="w-4 h-4" />
+    <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 -mx-3 md:-mx-4 -mt-3 md:-mt-4 mb-4 px-3 md:px-4 py-2.5 rounded-t-2xl bg-gradient-to-r from-red-600/10 via-neutral-100 to-transparent border-b-2 border-red-600/20">
+      <div className="flex items-center gap-2.5">
+        {/* İkon rozeti: kırmızı zemin üzerinde beyaz ikon (%10 küçültüldü) */}
+        <span className="w-7 h-7 shrink-0 rounded-lg bg-red-600 text-white flex items-center justify-center shadow-md shadow-red-600/30">
+          <Icon className="w-3.5 h-3.5" />
         </span>
-        {/* Başlık yazısı: %5 küçültülmüş punto */}
-        <h3 className="font-black text-neutral-900 uppercase tracking-wide text-[15px] md:text-[17px] leading-tight">
+        {/* Başlık yazısı: %10 küçültülmüş punto (15px→13.5px, 17px→15px) */}
+        <h3 className="font-black text-neutral-900 uppercase tracking-wide text-[13.5px] md:text-[15px] leading-tight">
           {title}
         </h3>
       </div>
@@ -25,12 +25,50 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
     </div>
   );
 
+  // ============================================================================
+  // YENİ: Duvar Montajı seçenekleri ve sözleşme detayına otomatik eklenecek metinler
+  // ============================================================================
+  const WALL_MOUNT_OPTIONS = ['TV Montajı', 'Mobilya Sabitleme', 'Raf/Tablo', 'Avize'];
+  const WALL_MOUNT_TEXTS = {
+    'TV Montajı': 'Müşterinin televizyonu duvara monte edilecektir.',
+    'Mobilya Sabitleme': 'Müşterinin mobilyaları devrilmeye karşı duvara sabitlenecektir.',
+    'Raf/Tablo': 'Müşterinin raf ve tabloları duvara monte edilecektir.',
+    'Avize': 'Müşterinin avizesi tavana monte edilecektir.'
+  };
+
   export const AddJobView = ({
     type, formData, setFormData, handleInputChange, handleProvinceChange,
     handleDepoChange, toggleDepoDirection, handleAddJob, editingJobId, handleSwapAddresses
   }) => {
     // YENİ: İsim / telefon boş bırakılırsa gösterilecek uyarı penceresi state'i
     const [showValidationModal, setShowValidationModal] = useState(false);
+    // YENİ: Duvar Montajı açılır penceresinin açık/kapalı durumu
+    const [wallMountOpen, setWallMountOpen] = useState(false);
+
+    // YENİ: Seçili duvar montajı işlemleri (dizi). Boş dizi = "Yok" seçili demektir.
+    const selectedWallMounts = formData.wallMounting || [];
+
+    // YENİ: Duvar montajı seçimini değiştirir ve Sözleşme Detayı'nı OTOMATİK doldurur.
+    // Mantık: Sözleşme detayındaki eski otomatik satırlar temizlenir (elle yazılan metin korunur),
+    // ardından güncel seçimlere ait metinler alt alta eklenir.
+    const toggleWallMount = (opt) => {
+      setFormData(prev => {
+        const current = prev.wallMounting || [];
+        const next = opt === 'Yok'
+          ? [] // "Yok" seçilirse tüm seçimler temizlenir
+          : (current.includes(opt) ? current.filter(o => o !== opt) : [...current, opt]);
+        const allAutoTexts = Object.values(WALL_MOUNT_TEXTS);
+        // Elle yazılmış satırları koru, otomatik eklenenleri çıkar
+        const manualLines = (prev.contractDetails || '')
+          .split('\n')
+          .filter(line => !allAutoTexts.includes(line.trim()))
+          .join('\n')
+          .trim();
+        const autoLines = next.map(o => WALL_MOUNT_TEXTS[o]).join('\n');
+        const combined = [manualLines, autoLines].filter(Boolean).join('\n');
+        return { ...prev, wallMounting: next, contractDetails: combined };
+      });
+    };
 
     // YENİ: Kayıt öncesi zorunlu alan kontrolü.
     // İsim veya telefon boşsa kayıt YAPILMAZ, uyarı penceresi açılır.
@@ -50,10 +88,10 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
     return (
       <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in">
         <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
-          {/* Sayfa ana başlığı: %5 küçültülmüş punto (24px -> ~22.8px) */}
-          <h2 className="text-[22px] md:text-[22.8px] font-black text-black flex items-center gap-2">
-            <PlusCircle className="w-7 h-7 text-red-600" /> 
-            {editingJobId ? `Detaylı ${type} Kaydını Güncelle` : `Detaylı ${type} Kaydı Oluştur`}
+          {/* Sayfa ana başlığı: "Detaylı" ibaresi kaldırıldı, tek satırda görünür (whitespace-nowrap) */}
+          <h2 className="text-[17px] md:text-[22px] font-black text-black flex items-center gap-2 whitespace-nowrap overflow-hidden">
+            <PlusCircle className="w-6 h-6 md:w-7 md:h-7 text-red-600 shrink-0" /> 
+            {editingJobId ? `${type} Kaydını Güncelle` : `${type} Kaydı Oluştur`}
           </h2>
           <button 
             type="button" 
@@ -68,7 +106,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
 
         <div className="space-y-6">
           {/* ==================== MÜŞTERİ VE RANDEVU BİLGİLERİ ==================== */}
-          <div className="bg-neutral-50 p-4 md:p-5 rounded-2xl border border-neutral-200 shadow-sm">
+          <div className="bg-neutral-50 p-3 md:p-4 rounded-2xl border border-neutral-200 shadow-sm">
             <SectionHeader icon={Users} title="Müşteri ve Randevu Bilgileri" />
             
             <div className="flex bg-neutral-200/60 p-1 rounded-xl mb-5 w-full md:w-fit border border-neutral-300">
@@ -104,7 +142,19 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                   {formData.customerType === 'Kurumsal' ? (
                     <input type="text" name="taxNo" value={formData.taxNo} onChange={handleInputChange} className={inputCls} placeholder="Vergi numarası" />
                   ) : (
-                    <input type="text" name="tcNo" value={formData.tcNo} onChange={handleInputChange} className={inputCls} placeholder="İsteğe bağlı" />
+                    // TC Kimlik No: inputMode=numeric ile mobilde sayı klavyesi açılır; onChange içinde harf/işaret temizlenir (yalnızca 0-9, en fazla 11 hane)
+                    <input 
+                      type="text" 
+                      inputMode="numeric" 
+                      name="tcNo" 
+                      value={formData.tcNo} 
+                      onChange={(e) => {
+                        const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 11); // Rakam dışı karakterleri sil
+                        handleInputChange({ target: { name: 'tcNo', value: onlyDigits } });
+                      }} 
+                      className={inputCls} 
+                      placeholder="İsteğe bağlı" 
+                    />
                   )}
                 </div>
               </div>
@@ -121,19 +171,20 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                 </div>
               </div>
 
-              {/* SATIR 3: Tarih + Saat + İşlem Süresi (mobilde de yan yana, 3 sütun) */}
-              <div className="grid grid-cols-3 gap-2 md:gap-4">
-                <div>
+              {/* SATIR 3: Tarih + Saat + İşlem Süresi — 3 eşit sütun, küçültülmüş ve hizalı, birbirine taşmaz */}
+              {/* min-w-0 + w-full taşmayı engeller, ortak küçük punto (text-sm) ile hepsi aynı görünür */}
+              <div className="grid grid-cols-3 gap-2">
+                <div className="min-w-0">
                   <label className={labelCls}>Tarih *</label>
-                  <input required type="date" name="date" value={formData.date} onChange={handleInputChange} className={`${inputCls} font-bold`} />
+                  <input required type="date" name="date" value={formData.date} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-xs md:text-sm text-center" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className={labelCls}>Saat *</label>
-                  <input required type="time" name="time" value={formData.time} onChange={handleInputChange} className={`${inputCls} font-bold`} />
+                  <input required type="time" name="time" value={formData.time} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-xs md:text-sm text-center" />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className={labelCls}>İşlem Süresi *</label>
-                  <select name="durationDays" value={formData.durationDays || '1'} onChange={handleInputChange} className={`${selectCls} font-bold`}>
+                  <select name="durationDays" value={formData.durationDays || '1'} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-bold text-xs md:text-sm">
                     {[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>{d} Gün</option>)}
                   </select>
                 </div>
@@ -143,7 +194,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
 
           {/* ==================== FİNANS VE OPERASYON NOTLARI ==================== */}
           {/* NOT: Bu bölüm, ekran görüntülerindeki akışa uygun şekilde müşteri bilgilerinin hemen altına taşındı */}
-          <div className="bg-neutral-50 p-4 md:p-5 rounded-2xl border border-neutral-200 shadow-sm">
+          <div className="bg-neutral-50 p-3 md:p-4 rounded-2xl border border-neutral-200 shadow-sm">
             <SectionHeader icon={Wallet} title="Finans ve Operasyon Notları" />
             <div className="space-y-4">
               {/* SATIR 1: Anlaşılan Fiyat + Alınan Kapora (mobilde de yan yana) */}
@@ -172,7 +223,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
           </div>
 
           {/* ==================== YÜKLEME BİLGİLERİ (1. ADRES) ==================== */}
-          <div className="bg-neutral-50 p-4 md:p-5 rounded-2xl border border-neutral-200 shadow-sm">
+          <div className="bg-neutral-50 p-3 md:p-4 rounded-2xl border border-neutral-200 shadow-sm">
             <SectionHeader 
               icon={ArrowUpRight} 
               title={type === 'Asansör' ? 'Kurulum Adresi' : 'Yükleme Bilgileri (1. Adres)'}
@@ -234,31 +285,34 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                   </div>
                 </div>
 
-                {/* SATIR 2: Taşıma Şekli + Yükleme Mesafesi + Küçük Eşyaların Durumu (mobilde de yan yana) */}
-                <div className={`grid ${type === 'Asansör' ? 'grid-cols-2' : 'grid-cols-3'} gap-2 md:gap-4`}>
+                {/* SATIR 2: Taşıma Şekli + Yükleme Mesafesi + Eşya Durumu — 3 eşit sütun, küçültülmüş ve hizalı, taşmasız */}
+                {/* items-end: farklı satır sayısındaki etiketlerde kutular alttan hizalanır. min-w-0: taşmayı engeller */}
+                <div className={`grid ${type === 'Asansör' ? 'grid-cols-2' : 'grid-cols-3'} gap-2 items-end`}>
                   {type !== 'Asansör' && (
-                    <div>
+                    <div className="min-w-0">
                       <label className={labelCls}>Taşıma Şekli</label>
-                      <select name="fromTransportMethod" value={formData.fromTransportMethod || 'Merdiven'} onChange={handleInputChange} className={`${selectCls} font-bold text-red-600`}>
+                      <select name="fromTransportMethod" value={formData.fromTransportMethod || 'Merdiven'} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-red-600 text-xs md:text-sm">
                         <option value="Bina Asansörü">Bina Asansörü</option>
                         <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
                         <option value="Merdiven">Merdiven</option>
                       </select>
                     </div>
                   )}
-                  <div>
+                  <div className="min-w-0">
                     <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Açısı' : 'Yükleme Mesafesi'}</label>
-                    <div className="flex gap-1.5 md:gap-2">
-                      <input type="number" name="fromDistance" value={formData.fromDistance} onChange={handleInputChange} placeholder="20" className={`flex-1 min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none`} />
-                      <select name="fromDistanceUnit" value={formData.fromDistanceUnit} onChange={handleInputChange} className="w-16 md:w-24 p-1 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-base">
-                        <option value="Metre">Metre</option>
-                        <option value="Adım">Adım</option>
+                    <div className="flex gap-1">
+                      {/* Sayı kutusu: 3 hane tam gözükecek genişlikte (min-w) */}
+                      <input type="number" name="fromDistance" value={formData.fromDistance} onChange={handleInputChange} placeholder="20" className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" />
+                      {/* Birim kutusu: kapalıyken kısa (M / A), listede tam açıklama görünür */}
+                      <select name="fromDistanceUnit" value={formData.fromDistanceUnit} onChange={handleInputChange} className="w-11 shrink-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-xs md:text-sm text-center">
+                        <option value="Metre">M</option>
+                        <option value="Adım">A</option>
                       </select>
                     </div>
                   </div>
-                  <div>
-                    <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Küçük Eşyaların Durumu'}</label>
-                    <select name="fromPacking" value={formData.fromPacking || (type === 'Asansör' ? 'Kendi İşimiz' : 'Kendisi Topladı')} onChange={handleInputChange} className={selectCls}>
+                  <div className="min-w-0">
+                    <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Eşya Durumu'}</label>
+                    <select name="fromPacking" value={formData.fromPacking || (type === 'Asansör' ? 'Kendi İşimiz' : 'Toplu')} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-sm">
                       {type === 'Asansör' ? (
                         <>
                           <option value="Kendi İşimiz">Kendi İşimiz</option>
@@ -266,7 +320,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                         </>
                       ) : (
                         <>
-                          <option value="Kendisi Topladı">Kendisi Topladı</option>
+                          <option value="Toplu">Toplu</option>
                           <option value="Toplama Yapılacak">Toplama Yapılacak</option>
                         </>
                       )}
@@ -354,15 +408,15 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                       </select>
                     </div>
                   </div>
-                  {/* SATIR 2: Taşıma Şekli + Mesafe + Küçük Eşyaların Durumu */}
-                  <div className={`grid ${type === 'Asansör' ? 'grid-cols-2' : 'grid-cols-3'} gap-2 md:gap-4`}>
+                  {/* SATIR 2: Taşıma Şekli + Mesafe + Eşya Durumu — 3 eşit sütun, hizalı, taşmasız */}
+                  <div className={`grid ${type === 'Asansör' ? 'grid-cols-2' : 'grid-cols-3'} gap-2 items-end`}>
                     {type !== 'Asansör' && (
-                      <div>
+                      <div className="min-w-0">
                         <label className={labelCls}>Taşıma Şekli</label>
                         <select 
                           value={addr.transportMethod} 
                           onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, transportMethod: e.target.value } : a) }))} 
-                          className={`${selectCls} font-bold text-red-600`}
+                          className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-red-600 text-xs md:text-sm"
                         >
                           <option value="Bina Asansörü">Bina Asansörü</option>
                           <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
@@ -370,32 +424,32 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                         </select>
                       </div>
                     )}
-                    <div>
+                    <div className="min-w-0">
                       <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Açısı' : 'Yükleme Mesafesi'}</label>
-                      <div className="flex gap-1.5 md:gap-2">
+                      <div className="flex gap-1">
                         <input 
                           type="number" 
                           value={addr.distance} 
                           onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, distance: e.target.value } : a) }))} 
                           placeholder="20" 
-                          className="flex-1 min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" 
+                          className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" 
                         />
                         <select 
                           value={addr.distanceUnit} 
                           onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, distanceUnit: e.target.value } : a) }))} 
-                          className="w-16 md:w-24 p-1 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-base"
+                          className="w-11 shrink-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-xs md:text-sm text-center"
                         >
-                          <option value="Metre">Metre</option>
-                          <option value="Adım">Adım</option>
+                          <option value="Metre">M</option>
+                          <option value="Adım">A</option>
                         </select>
                       </div>
                     </div>
-                    <div>
-                      <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Küçük Eşyaların Durumu'}</label>
+                    <div className="min-w-0">
+                      <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Eşya Durumu'}</label>
                       <select 
                         value={addr.packing} 
                         onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, packing: e.target.value } : a) }))} 
-                        className={selectCls}
+                        className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-sm"
                       >
                         {type === 'Asansör' ? (
                           <>
@@ -404,7 +458,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                           </>
                         ) : (
                           <>
-                            <option value="Kendisi Topladı">Kendisi Topladı</option>
+                            <option value="Toplu">Toplu</option>
                             <option value="Toplama Yapılacak">Toplama Yapılacak</option>
                           </>
                         )}
@@ -454,13 +508,13 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                   ...prev,
                   extraLoadingAddresses: [
                     ...(prev.extraLoadingAddresses || []),
-                    { id: Date.now(), province: '', district: '', floor: '1. Kat', transportMethod: 'Merdiven', packing: type === 'Asansör' ? 'Kendi İşimiz' : 'Kendisi Topladı', roomCount: type === 'Asansör' ? 'Yükleme Kurulum' : '1+0 / Parça Eşya', distance: '', distanceUnit: 'Metre', address: '' }
+                    { id: Date.now(), province: '', district: '', floor: '1. Kat', transportMethod: 'Merdiven', packing: type === 'Asansör' ? 'Kendi İşimiz' : 'Toplu', roomCount: type === 'Asansör' ? 'Yükleme Kurulum' : '1+0 / Parça Eşya', distance: '', distanceUnit: 'Metre', address: '' }
                   ]
                 }));
               }} 
-              className="mt-6 w-full py-3 border-2 border-dashed border-neutral-300 text-neutral-600 font-bold rounded-xl hover:bg-neutral-100 hover:border-neutral-400 transition flex justify-center items-center gap-2"
+              className="mt-4 w-full py-2 border border-dashed border-neutral-300 text-neutral-500 text-sm font-bold rounded-lg hover:bg-neutral-100 hover:border-neutral-400 transition flex justify-center items-center gap-1.5"
             >
-              <PlusCircle className="w-5 h-5" /> Yeni {type === 'Asansör' ? 'Kurulum' : 'Yükleme'} Adresi Ekle
+              <PlusCircle className="w-4 h-4" /> Yeni {type === 'Asansör' ? 'Kurulum' : 'Yükleme'} Adresi Ekle
             </button>
           </div>
 
@@ -469,18 +523,19 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
               {/* ORTADAKİ YER DEĞİŞTİRME BUTONU */}
               {/* NOT: Bu buton, tam olarak YÜKLEME ve BOŞALTMA bölümlerinin ORTASINDA konumlanır */}
               <div className="flex justify-center items-center h-0 relative z-10">
+                {/* Yönleri Değiştir: kullanıcı isteğiyle sadece simge olarak küçültüldü */}
                 <button 
                   type="button" 
                   onClick={handleSwapAddresses}
-                  className="bg-black text-white px-6 py-2.5 rounded-full shadow-2xl border-4 border-white hover:bg-neutral-800 transition flex items-center gap-2 font-bold text-sm absolute"
+                  className="bg-black text-white p-2.5 rounded-full shadow-xl border-[3px] border-white hover:bg-neutral-800 transition absolute"
                   title="Yükleme ve Boşaltma Bilgilerini Yer Değiştir"
                 >
-                  <ArrowUpDown className="w-5 h-5" /> Yönleri Değiştir
+                  <ArrowUpDown className="w-4 h-4" />
                 </button>
               </div>
 
               {/* ==================== BOŞALTMA BİLGİLERİ (1. ADRES) ==================== */}
-              <div className="bg-neutral-50 p-4 md:p-5 rounded-2xl border border-neutral-200 shadow-sm">
+              <div className="bg-neutral-50 p-3 md:p-4 rounded-2xl border border-neutral-200 shadow-sm">
                 <SectionHeader 
                   icon={MapPin} 
                   title="Boşaltma Bilgileri (1. Adres)"
@@ -527,25 +582,65 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                     </select>
                   </div>
                 </div>
-                {/* SATIR 2: Taşıma Şekli + Boşaltma Mesafesi (mobilde de yan yana) */}
-                <div className="grid grid-cols-2 gap-3 md:gap-4">
-                  <div>
+                {/* SATIR 2: Taşıma Şekli + Boşaltma Mesafesi + Duvar Montajı — yükleme adresindeki düzenle birebir aynı (3 eşit sütun, hizalı, taşmasız) */}
+                <div className="grid grid-cols-3 gap-2 items-end">
+                  <div className="min-w-0">
                     <label className={labelCls}>Taşıma Şekli</label>
-                    <select name="toTransportMethod" value={formData.toTransportMethod || 'Merdiven'} onChange={handleInputChange} className={`${selectCls} font-bold text-red-600`}>
+                    <select name="toTransportMethod" value={formData.toTransportMethod || 'Merdiven'} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-red-600 text-xs md:text-sm">
                       <option value="Bina Asansörü">Bina Asansörü</option>
                       <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
                       <option value="Merdiven">Merdiven</option>
                     </select>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <label className={labelCls}>Boşaltma Mesafesi</label>
-                    <div className="flex gap-1.5 md:gap-2">
-                      <input type="number" name="toDistance" value={formData.toDistance} onChange={handleInputChange} placeholder="15" className="flex-1 min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" />
-                      <select name="toDistanceUnit" value={formData.toDistanceUnit} onChange={handleInputChange} className="w-16 md:w-24 p-1 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-base">
-                        <option value="Metre">Metre</option>
-                        <option value="Adım">Adım</option>
+                    <div className="flex gap-1">
+                      <input type="number" name="toDistance" value={formData.toDistance} onChange={handleInputChange} placeholder="15" className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" />
+                      <select name="toDistanceUnit" value={formData.toDistanceUnit} onChange={handleInputChange} className="w-11 shrink-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-xs md:text-sm text-center">
+                        <option value="Metre">M</option>
+                        <option value="Adım">A</option>
                       </select>
                     </div>
+                  </div>
+                  {/* YENİ: DUVAR MONTAJI — çoklu seçim yapılabilen açılır pencere */}
+                  <div className="min-w-0 relative">
+                    <label className={labelCls}>Duvar Montajı</label>
+                    <button
+                      type="button"
+                      onClick={() => setWallMountOpen(o => !o)}
+                      className={`w-full min-w-0 p-2 border rounded-xl outline-none bg-white text-xs md:text-sm text-left flex items-center justify-between gap-1 transition ${selectedWallMounts.length > 0 ? 'border-red-400 text-red-600 font-bold ring-1 ring-red-200' : 'border-neutral-300 text-neutral-700'}`}
+                    >
+                      {/* Kutuda seçim sayısı gösterilir: hiç seçim yoksa "Yok" yazar */}
+                      <span className="truncate">{selectedWallMounts.length === 0 ? 'Yok' : `${selectedWallMounts.length} işlem seçildi`}</span>
+                      <span className="text-neutral-400 shrink-0">▾</span>
+                    </button>
+                    {wallMountOpen && (
+                      <>
+                        {/* Dışarıya tıklanınca pencereyi kapatan görünmez katman */}
+                        <div className="fixed inset-0 z-20" onClick={() => setWallMountOpen(false)}></div>
+                        <div className="absolute z-30 mt-1 right-0 w-48 bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5 animate-in fade-in slide-in-from-top-1">
+                          {/* "Yok" seçeneği: tüm seçimleri temizler */}
+                          <button
+                            type="button"
+                            onClick={() => { toggleWallMount('Yok'); setWallMountOpen(false); }}
+                            className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition ${selectedWallMounts.length === 0 ? 'bg-red-50 text-red-600' : 'text-neutral-600 hover:bg-neutral-100'}`}
+                          >
+                            Yok
+                          </button>
+                          {WALL_MOUNT_OPTIONS.map(opt => (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() => toggleWallMount(opt)}
+                              className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition flex items-center justify-between gap-2 ${selectedWallMounts.includes(opt) ? 'bg-red-600 text-white' : 'text-neutral-700 hover:bg-neutral-100'}`}
+                            >
+                              {opt}
+                              {selectedWallMounts.includes(opt) && <span>✓</span>}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
             </div>
@@ -637,15 +732,15 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                           value={addr.distance} 
                           onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distance: e.target.value } : a) }))} 
                           placeholder="15" 
-                          className="flex-1 min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" 
+                          className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" 
                         />
                         <select 
                           value={addr.distanceUnit} 
                           onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distanceUnit: e.target.value } : a) }))} 
-                          className="w-16 md:w-24 p-1 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-base"
+                          className="w-11 shrink-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-xs md:text-sm text-center"
                         >
-                          <option value="Metre">Metre</option>
-                          <option value="Adım">Adım</option>
+                          <option value="Metre">M</option>
+                          <option value="Adım">A</option>
                         </select>
                       </div>
                     </div>
@@ -693,13 +788,13 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                   ...prev,
                   extraUnloadingAddresses: [
                     ...(prev.extraUnloadingAddresses || []),
-                    { id: Date.now(), province: '', district: '', floor: '1. Kat', transportMethod: 'Merdiven', packing: 'Kendisi Topladı', roomCount: '1+0 / Parça Eşya', distance: '', distanceUnit: 'Metre', address: '' }
+                    { id: Date.now(), province: '', district: '', floor: '1. Kat', transportMethod: 'Merdiven', packing: 'Toplu', roomCount: '1+0 / Parça Eşya', distance: '', distanceUnit: 'Metre', address: '' }
                   ]
                 }));
               }} 
-              className="mt-6 w-full py-3 border-2 border-dashed border-neutral-300 text-neutral-600 font-bold rounded-xl hover:bg-neutral-100 hover:border-neutral-400 transition flex justify-center items-center gap-2"
+              className="mt-4 w-full py-2 border border-dashed border-neutral-300 text-neutral-500 text-sm font-bold rounded-lg hover:bg-neutral-100 hover:border-neutral-400 transition flex justify-center items-center gap-1.5"
             >
-              <PlusCircle className="w-5 h-5" /> Yeni Boşaltma Adresi Ekle
+              <PlusCircle className="w-4 h-4" /> Yeni Boşaltma Adresi Ekle
             </button>
           </div>
             </>
