@@ -1278,16 +1278,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-        {/* YENİ: Bugünün hücresi için hafif dikkat çeken nabız (pulse) çerçeve animasyonu */}
+        {/* YENİ: Bugünün hücresi için dikkat çeken SARI nabız (pulse) çerçeve animasyonu (daha belirgin ve hızlı) */}
         <style>{`
           .today-pulse-ring {
-            border-color: #dc2626 !important;
-            animation: todayPulse 2s ease-in-out infinite;
+            border-color: #f59e0b !important;
+            animation: todayPulse 1.1s ease-in-out infinite;
           }
           @keyframes todayPulse {
-            0%   { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.55); }
-            70%  { box-shadow: 0 0 0 6px rgba(220, 38, 38, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0); }
+            0%   { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.95); }
+            70%  { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
           }
         `}</style>
         <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
@@ -1373,20 +1373,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                             )
                         ) : (
                           <>
-                            {/* NAKLİYE/DEPO NOKTALARI: en fazla 6 nokta, tek satırda (taşmaz). min-h ile hiza sabit */}
-                            <div className="flex flex-nowrap gap-0.5 items-center min-h-[10px] overflow-hidden">
+                            {/* NAKLİYE/DEPO NOKTALARI: grid-cols-3 ile her satırda KESİN 3 nokta, 2 satır = en fazla 6. */}
+                            {/* Örn. 4 iş: üstte 3 nokta, altta 1 nokta. Alan sabit yükseklikte (h-[18px]) => tüm günler eşit. */}
+                            <div className="grid grid-cols-3 gap-0.5 w-fit content-start h-[18px] overflow-hidden">
                                 {coreJobs.slice(0, 6).map(job => (
                                   job.isSpecial ? 
-                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className="w-2.5 h-2.5 shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
+                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className="w-2 h-2 shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
                                   :
                                     <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className={`w-2 h-2 shrink-0 rounded-full ${job.type === 'Depo' ? 'bg-blue-600' : 'bg-red-600'}`}></div>
                                 ))}
                             </div>
                             
                             {/* ASANSÖR NOKTALARI: Asansör işi OLMASA BİLE bu satır her zaman render edilir (hiza sabit). */}
-                            {/* En fazla 6 yeşil nokta, TEK SATIRDA yan yana; sığması için noktalar küçültüldü (w-1.5). */}
-                            <div className={`flex flex-nowrap gap-0.5 mt-0.5 pt-0.5 w-full items-center min-h-[9px] overflow-hidden border-t ${asansorJobs.length > 0 ? 'border-black/10' : 'border-transparent'}`}>
-                                {asansorJobs.slice(0, 6).map(job => (
+                            {/* En fazla 3 yeşil nokta, TEK SATIRDA yan yana. Ayraç çizgisi SARI. Alan sabit yükseklikte. */}
+                            <div className={`flex flex-nowrap gap-0.5 mt-auto pt-1 w-full items-center h-[12px] overflow-hidden border-t ${asansorJobs.length > 0 ? 'border-yellow-400' : 'border-transparent'}`}>
+                                {asansorJobs.slice(0, 3).map(job => (
                                   job.isSpecial ?
                                     <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-1.5 h-1.5 shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
                                   :
