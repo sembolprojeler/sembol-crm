@@ -3234,6 +3234,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         Object.keys(jobData).forEach(key => jobData[key] === undefined && delete jobData[key]);
 
         const duration = parseInt(formData.durationDays || '1');
+        // YENİ: Başarı panelindeki WhatsApp mesajında kullanmak için teslim kodunu dış kapsamda tut
+        let savedDeliveryCode = jobData.deliveryCode || '';
 
         if (editingJobId) {
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', editingJobId), jobData);
@@ -3241,6 +3243,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           setEditingJobId(null);
         } else {
           const newDeliveryCode = Math.random().toString(36).substring(2, 8).toUpperCase();
+          savedDeliveryCode = newDeliveryCode; // Panelde göstermek/mesajda kullanmak için sakla
           
           for (let i = 0; i < duration; i++) {
             const jobDate = new Date(formData.date);
@@ -3301,7 +3304,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         // "Müşteri Kaydınız Oluşturuldu" paneli açılır (WA bilgilendirme + sözleşme indirme seçenekli).
         setSavedNotified(false);    // Tik durumlarını sıfırla
         setSavedContractDl(false);
-        setSavedJobInfo({ ...jobData, wasEditing });
+        setSavedJobInfo({ ...jobData, deliveryCode: savedDeliveryCode, wasEditing });
       } catch (err) { console.error(err); }
     };
 
@@ -4889,9 +4892,27 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                             let phone = (savedJobInfo.customerPhone || '').replace(/\D/g, '');
                             if (phone.startsWith('0')) phone = '90' + phone.substring(1);
                             else if (!phone.startsWith('90')) phone = '90' + phone;
-                            const trDate = (savedJobInfo.date || '').split('-').reverse().join('.');
-                            const rota = `${savedJobInfo.fromProvince || ''}/${savedJobInfo.fromDistrict || ''} ➡️ ${savedJobInfo.toProvince || ''}/${savedJobInfo.toDistrict || ''}`;
-                            const msg = `Sayın *${savedJobInfo.customerName}*,\n\nSembol Nakliyat olarak *${trDate}* tarihi saat *${savedJobInfo.time}* için ${savedJobInfo.type || 'Nakliye'} kaydınız başarıyla oluşturulmuştur. ✅\n\n📍 *Güzergah:* ${rota}\n💰 *Anlaşılan Tutar:* ${parseInt(savedJobInfo.price || 0).toLocaleString('tr-TR')} TL\n💵 *Alınan Kapora:* ${parseInt(savedJobInfo.deposit || 0).toLocaleString('tr-TR')} TL\n\nTaşıma gününden önce ekibimiz sizinle iletişime geçecektir. Bizi tercih ettiğiniz için teşekkür ederiz.\n\n*Sembol Nakliyat*`;
+                            // Her müşteriye özel değerler
+                            const price = parseInt(savedJobInfo.price || 0);
+                            const kapora = Math.round(price * 0.10); // Toplam tutarın %10'u kapora
+                            const kaporaStr = kapora.toLocaleString('tr-TR');
+                            const teslimKodu = savedJobInfo.deliveryCode || '------';
+                            // Kurumsal/bireysel başlığa göre özel hitap
+                            const unvan = savedJobInfo.customerType === 'Kurumsal' ? 'Değerli' : 'Sayın';
+                            const isTipi = savedJobInfo.type || 'Nakliye';
+                            const msg = `${unvan} *${savedJobInfo.customerName}*,\n\n` +
+                              `💰 *Kapora Bilgilendirmesi:*\n` +
+                              `İşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %10'u olan *${kaporaStr} TL* kapora ödemenizi rica ederiz.\n\n` +
+                              `🏦 *Banka Bilgileri:*\n` +
+                              `Banka: Denizbank\n` +
+                              `Alıcı: Şenol Beşinci\n` +
+                              `IBAN: TR 94 0013 4000 0262 9671 7000 01\n\n` +
+                              `⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (*${teslimKodu}*) yazınız.\n\n` +
+                              `*Sembol Nakliyat* olarak ${savedJobInfo.date || ''} tarihinde saat ${savedJobInfo.time || ''} sularında planlanan ${isTipi} işleminiz sistemimize başarıyla kaydedilmiştir.\n\n` +
+                              `🚚 *Güzergah Bilgisi:*\n` +
+                              `📍 Alış: ${savedJobInfo.fromProvince || ''} / ${savedJobInfo.fromDistrict || ''}\n` +
+                              `🏁 Teslim: ${savedJobInfo.toProvince || ''} / ${savedJobInfo.toDistrict || ''}\n\n` +
+                              `Bizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
                             window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
                             setSavedNotified(true); // Tıklandı olarak işaretle (tik görünür)
                           }}
