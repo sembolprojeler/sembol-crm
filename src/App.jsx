@@ -2272,6 +2272,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [showCustomerSearchBox, setShowCustomerSearchBox] = useState(false);
     // YENİ: Kayıt sonrası açılan başarı paneli (WhatsApp bilgilendirme + Sözleşme indirme seçenekleriyle)
     const [savedJobInfo, setSavedJobInfo] = useState(null);
+    // YENİ: Başarı panelinde hangi adımların tamamlandığını takip eder (tik işaretleri için)
+    const [savedNotified, setSavedNotified] = useState(false);   // WhatsApp bilgilendirme tıklandı mı
+    const [savedContractDl, setSavedContractDl] = useState(false); // Sözleşme indir tıklandı mı
     const [customerSearchQuery, setCustomerSearchQuery] = useState('');
 
     useEffect(() => {
@@ -3296,6 +3299,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         });
         // YENİ: Önceki takvim yönlendirmesi iptal edildi. Bunun yerine altta
         // "Müşteri Kaydınız Oluşturuldu" paneli açılır (WA bilgilendirme + sözleşme indirme seçenekli).
+        setSavedNotified(false);    // Tik durumlarını sıfırla
+        setSavedContractDl(false);
         setSavedJobInfo({ ...jobData, wasEditing });
       } catch (err) { console.error(err); }
     };
@@ -4864,36 +4869,76 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <h3 className="text-lg font-black text-black mb-1">
                       {savedJobInfo.wasEditing ? 'Müşteri Kaydınız Güncellendi!' : 'Müşteri Kaydınız Oluşturuldu!'}
                     </h3>
-                    <p className="text-sm text-neutral-500 mb-5">
+                    <p className="text-sm text-neutral-500 mb-4">
                       <b>{savedJobInfo.customerName}</b> • {(savedJobInfo.date || '').split('-').reverse().join('.')} {savedJobInfo.time}
                     </p>
+                    {/* YENİ: Kullanıcıya doğru sırayı hatırlatan bilgilendirme metni */}
+                    <div className="w-full bg-amber-50 border border-amber-200 rounded-xl p-3 mb-5 text-left flex items-start gap-2">
+                      <span className="text-amber-500 shrink-0 mt-0.5">💡</span>
+                      <p className="text-xs text-amber-800 leading-relaxed">
+                        Önce <b>müşteriyi WhatsApp'tan bilgilendirin</b>, ardından <b>sözleşmeyi indirip</b> yine WhatsApp üzerinden müşteriyle paylaşın. Her iki adımı da tamamladığınızda kaydı bitirebilirsiniz.
+                      </p>
+                    </div>
                     <div className="grid grid-cols-2 gap-3 w-full">
                       {/* Müşteriyi Bilgilendir (WA): kayıt bilgilerini WhatsApp üzerinden müşteriye gönderir */}
+                      <div className="flex flex-col items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            // Telefonu uluslararası formata çevir (05xx -> 905xx)
+                            let phone = (savedJobInfo.customerPhone || '').replace(/\D/g, '');
+                            if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+                            else if (!phone.startsWith('90')) phone = '90' + phone;
+                            const trDate = (savedJobInfo.date || '').split('-').reverse().join('.');
+                            const rota = `${savedJobInfo.fromProvince || ''}/${savedJobInfo.fromDistrict || ''} ➡️ ${savedJobInfo.toProvince || ''}/${savedJobInfo.toDistrict || ''}`;
+                            const msg = `Sayın *${savedJobInfo.customerName}*,\n\nSembol Nakliyat olarak *${trDate}* tarihi saat *${savedJobInfo.time}* için ${savedJobInfo.type || 'Nakliye'} kaydınız başarıyla oluşturulmuştur. ✅\n\n📍 *Güzergah:* ${rota}\n💰 *Anlaşılan Tutar:* ${parseInt(savedJobInfo.price || 0).toLocaleString('tr-TR')} TL\n💵 *Alınan Kapora:* ${parseInt(savedJobInfo.deposit || 0).toLocaleString('tr-TR')} TL\n\nTaşıma gününden önce ekibimiz sizinle iletişime geçecektir. Bizi tercih ettiğiniz için teşekkür ederiz.\n\n*Sembol Nakliyat*`;
+                            window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+                            setSavedNotified(true); // Tıklandı olarak işaretle (tik görünür)
+                          }}
+                          className={`w-full px-3 py-3 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm ${savedNotified ? 'bg-[#128C7E]' : 'bg-[#25D366] hover:bg-[#128C7E]'}`}
+                        >
+                          <MessageCircle className="w-4 h-4 shrink-0" /> Müşteriyi Bilgilendir (WA)
+                        </button>
+                        {/* YENİ: Bilgilendirme tıklandıysa altında yeşil tik işareti */}
+                        {savedNotified && (
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-green-600 animate-in fade-in">
+                            <CheckCircle className="w-3.5 h-3.5" /> Bilgilendirildi
+                          </span>
+                        )}
+                      </div>
+                      {/* Sözleşmeyi İndir: takvimdeki sözleşme mantığıyla aynı PDF'i oluşturur (dosya adı: Ad-Soyad-GG.AA.YYYY.pdf) */}
+                      <div className="flex flex-col items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            generateContractPDF(savedJobInfo);
+                            setSavedContractDl(true); // Tıklandı olarak işaretle (tik görünür)
+                          }}
+                          className={`w-full px-3 py-3 text-white text-xs font-bold rounded-xl transition flex items-center justify-center gap-1.5 shadow-sm ${savedContractDl ? 'bg-black' : 'bg-neutral-900 hover:bg-black'}`}
+                        >
+                          <Download className="w-4 h-4 shrink-0" /> Sözleşmeyi İndir
+                        </button>
+                        {/* YENİ: Sözleşme indir tıklandıysa altında yeşil tik işareti */}
+                        {savedContractDl && (
+                          <span className="flex items-center gap-1 text-[11px] font-bold text-green-600 animate-in fade-in">
+                            <CheckCircle className="w-3.5 h-3.5" /> İndirildi
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {/* YENİ: Her iki adım da tamamlanınca "Tamamlandı" butonu çıkar; tıklanınca panel kapanır ve takvime yönlendirir */}
+                    {savedNotified && savedContractDl && (
                       <button
                         type="button"
                         onClick={() => {
-                          // Telefonu uluslararası formata çevir (05xx -> 905xx)
-                          let phone = (savedJobInfo.customerPhone || '').replace(/\D/g, '');
-                          if (phone.startsWith('0')) phone = '90' + phone.substring(1);
-                          else if (!phone.startsWith('90')) phone = '90' + phone;
-                          const trDate = (savedJobInfo.date || '').split('-').reverse().join('.');
-                          const rota = `${savedJobInfo.fromProvince || ''}/${savedJobInfo.fromDistrict || ''} ➡️ ${savedJobInfo.toProvince || ''}/${savedJobInfo.toDistrict || ''}`;
-                          const msg = `Sayın *${savedJobInfo.customerName}*,\n\nSembol Nakliyat olarak *${trDate}* tarihi saat *${savedJobInfo.time}* için ${savedJobInfo.type || 'Nakliye'} kaydınız başarıyla oluşturulmuştur. ✅\n\n📍 *Güzergah:* ${rota}\n💰 *Anlaşılan Tutar:* ${parseInt(savedJobInfo.price || 0).toLocaleString('tr-TR')} TL\n💵 *Alınan Kapora:* ${parseInt(savedJobInfo.deposit || 0).toLocaleString('tr-TR')} TL\n\nTaşıma gününden önce ekibimiz sizinle iletişime geçecektir. Bizi tercih ettiğiniz için teşekkür ederiz.\n\n*Sembol Nakliyat*`;
-                          window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+                          setSavedJobInfo(null);       // Paneli kapat
+                          setActiveTab('calendar');    // Takvim sayfasına yönlendir
                         }}
-                        className="px-3 py-3 bg-[#25D366] text-white text-xs font-bold rounded-xl hover:bg-[#128C7E] transition flex items-center justify-center gap-1.5 shadow-sm"
+                        className="w-full mt-5 px-4 py-3.5 bg-green-600 text-white font-black rounded-2xl hover:bg-green-700 transition flex items-center justify-center gap-2 shadow-lg shadow-green-600/30 animate-in fade-in slide-in-from-bottom-2"
                       >
-                        <MessageCircle className="w-4 h-4 shrink-0" /> Müşteriyi Bilgilendir (WA)
+                        <CheckCircle className="w-5 h-5" /> Tamamlandı — Takvime Git
                       </button>
-                      {/* Sözleşmeyi İndir: takvimdeki sözleşme mantığıyla aynı PDF'i oluşturur (dosya adı: Ad-Soyad-GG.AA.YYYY.pdf) */}
-                      <button
-                        type="button"
-                        onClick={() => generateContractPDF(savedJobInfo)}
-                        className="px-3 py-3 bg-neutral-900 text-white text-xs font-bold rounded-xl hover:bg-black transition flex items-center justify-center gap-1.5 shadow-sm"
-                      >
-                        <Download className="w-4 h-4 shrink-0" /> Sözleşmeyi İndir
-                      </button>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
