@@ -15,6 +15,8 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
   const DashboardView = ({ jobs, allJobs, personnelList, currentUser, setViewingImage, transactions }) => {
     const [filterPeriod, setFilterPeriod] = useState('today');
     const [viewingDashboardJob, setViewingDashboardJob] = useState(null);
+    // YENİ: "Son Kaydedilen İşler" için dönem filtresi (bugün/hafta/ay/tümü)
+    const [sonKayitFilter, setSonKayitFilter] = useState('all');
 
     const isAdmin = ['Müdür', 'Firma Sahibi', 'Operasyon'].some(role => currentUser?.position?.includes(role) || currentUser?.rank === role) || currentUser?.permissions?.canEdit;
 
@@ -609,19 +611,61 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
         </div>
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 h-80 flex flex-col">
-          <h3 className="text-lg font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-100 pb-2"><ClipboardList className="w-5 h-5 text-red-600" /> Son Kaydedilen İşler</h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4 border-b border-neutral-100 pb-2">
+            <h3 className="text-lg font-bold text-black flex items-center gap-2"><ClipboardList className="w-5 h-5 text-red-600" /> Son Kaydedilen İşler</h3>
+            {/* YENİ: Dönem filtresi — kaydedilme (createdAt) tarihine göre bugün/hafta/ay/tümü */}
+            <div className="flex bg-neutral-100 p-1 rounded-xl flex-wrap gap-0.5">
+              {[{ k: 'today', l: 'Bugün' }, { k: 'week', l: 'Bu Hafta' }, { k: 'month', l: 'Bu Ay' }, { k: 'all', l: 'Tümü' }].map(opt => (
+                <button key={opt.k} type="button" onClick={() => setSonKayitFilter(opt.k)} className={`px-2.5 py-1 text-[11px] font-bold rounded-lg transition ${sonKayitFilter === opt.k ? 'bg-white text-red-600 shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+                  {opt.l}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
-            {jobs.slice().sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date)).slice(0, 5).map(job => (
-              <div key={job.id} onClick={() => setViewingDashboardJob(job)} className="p-3 bg-neutral-50 hover:bg-neutral-100 cursor-pointer rounded-xl border border-neutral-100 flex justify-between items-center text-sm transition">
-                <div>
-                  <p className="font-bold text-black">{job.customerName}</p>
-                  <p className="text-[10px] text-neutral-500">{job.date} - {job.time}</p>
-                  <p className="text-[10px] text-neutral-400 font-medium">Kaydeden: <span className="font-bold text-neutral-600">{job.createdBy || 'Bilinmiyor'}</span></p>
+            {(() => {
+              // YENİ: Kaydedilme (createdAt) tarihine göre dönem filtresi uygula
+              const now = new Date();
+              const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+              const startOfWeek = new Date(startOfDay); startOfWeek.setDate(startOfDay.getDate() - ((startOfDay.getDay() + 6) % 7)); // Pazartesi başlangıç
+              const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+              const inRange = (job) => {
+                if (sonKayitFilter === 'all') return true;
+                const t = new Date(job.createdAt || job.date);
+                if (isNaN(t.getTime())) return sonKayitFilter === 'all';
+                if (sonKayitFilter === 'today') return t >= startOfDay;
+                if (sonKayitFilter === 'week') return t >= startOfWeek;
+                if (sonKayitFilter === 'month') return t >= startOfMonth;
+                return true;
+              };
+              // Kaydedilme zamanını okunabilir biçimde göster
+              const formatKayitZamani = (job) => {
+                const t = new Date(job.createdAt || job.date);
+                if (isNaN(t.getTime())) return null;
+                return t.toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+              };
+              const list = jobs.slice()
+                .filter(inRange)
+                .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
+                .slice(0, 20);
+              if (list.length === 0) return <p className="text-center text-neutral-400 text-xs py-4">Bu dönemde kaydedilmiş iş yok.</p>;
+              return list.map(job => (
+                <div key={job.id} onClick={() => setViewingDashboardJob(job)} className="p-3 bg-neutral-50 hover:bg-neutral-100 cursor-pointer rounded-xl border border-neutral-100 flex justify-between items-center text-sm transition">
+                  <div>
+                    <p className="font-bold text-black">{job.customerName}</p>
+                    <p className="text-[10px] text-neutral-500">Taşıma: {job.date} - {job.time}</p>
+                    {/* YENİ: Kaydın ne zaman oluşturulduğu (kaydedilme zamanı) */}
+                    {formatKayitZamani(job) && (
+                      <p className="text-[10px] text-red-500 font-bold flex items-center gap-1 mt-0.5">
+                        <Clock className="w-3 h-3" /> Kaydedildi: {formatKayitZamani(job)}
+                      </p>
+                    )}
+                    <p className="text-[10px] text-neutral-400 font-medium">Kaydeden: <span className="font-bold text-neutral-600">{job.createdBy || 'Bilinmiyor'}</span></p>
+                  </div>
+                  <span className={`text-[9px] px-2 py-1 rounded font-bold text-white uppercase shrink-0 ml-2 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>{job.type || 'Nakliye'}</span>
                 </div>
-                <span className={`text-[9px] px-2 py-1 rounded font-bold text-white uppercase shrink-0 ml-2 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>{job.type || 'Nakliye'}</span>
-              </div>
-            ))}
-            {jobs.length === 0 && <p className="text-center text-neutral-400 text-xs py-4">Kayıtlı operasyon yok.</p>}
+              ));
+            })()}
           </div>
         </div>
         </>
@@ -2443,7 +2487,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             Object.keys(dayMap).forEach(dayNum => {
               const dayData = dayMap[dayNum];
               const code = typeof dayData === 'object' && dayData !== null ? dayData.status : dayData;
-              flat.push({ personId, year: parseInt(m[1]), month: parseInt(m[2]), day: parseInt(dayNum), code });
+              // YENİ: FGM/FM/EM saat bilgisini de taşı (Finans mesai ücreti hesabıyla birebir eşleşmesi için)
+              const hours = (typeof dayData === 'object' && dayData !== null) ? (parseFloat(dayData.hours) || 0) : 0;
+              flat.push({ personId, year: parseInt(m[1]), month: parseInt(m[2]), day: parseInt(dayNum), code, hours });
             });
           });
         });
