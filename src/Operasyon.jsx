@@ -4681,6 +4681,35 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const [primForm, setPrimForm] = useState({ mode: 'tutar', value: '', month: nowMonth, note: '' });
     const [primSubmitting, setPrimSubmitting] = useState(false);
 
+    // YENİ: Personel Giriş/Çıkış Belgeleri yükleme durumu
+    const [belgeUploading, setBelgeUploading] = useState('');
+
+    // YENİ: Giriş/Çıkış belgesi yükler ve personelin ÖZLÜK dosyasına (ozlukEkstra dizisi) ekler.
+    // kind: 'giris' | 'cikis' → belge özlük dosyasında ilgili başlıkla görünür.
+    const handleBelgeUpload = async (e, kind) => {
+      const file = e.target.files[0];
+      if (!file || !person) return;
+      setBelgeUploading(kind);
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
+        const text = await res.text();
+        let uploadedUrl = file.name;
+        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+        const label = kind === 'giris' ? 'Personel Giriş Belgesi' : 'Personel Çıkış Belgesi';
+        const newBelge = { id: Date.now().toString(), label: `${label} (${new Date().toLocaleDateString('tr-TR')})`, url: uploadedUrl };
+        // Özlük dosyasındaki ekstra belgeler dizisine ekle (Özlük Dosyaları ekranında da görünür)
+        const updatedExtra = [...(person.ozlukEkstra || []), newBelge];
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', person.id), { ozlukEkstra: updatedExtra });
+        addSystemLog(kind === 'giris' ? 'Personel Giriş Belgesi Eklendi' : 'Personel Çıkış Belgesi Eklendi', `${person.fullName} personeline ${label} eklendi (özlük dosyasına işlendi).`);
+      } catch (err) {
+        console.error("Yükleme hatası:", err);
+        alert("Belge yüklenemedi.");
+      }
+      setBelgeUploading('');
+    };
+
     // YENİ: Otomatik özellik puanı hesaplaması için TÜM personelin üzerine, sadece bu kişiye
     // ait manuel Performans Değerlendirme düzeltmeleri Firestore'dan dinlenir.
     const autoSkillsMap = React.useMemo(() => computeAllAutoSkills(personnelList, jobs, allPersonnelActions, vehicles, allMesaiRecords), [personnelList, jobs, allPersonnelActions, vehicles, allMesaiRecords]);
@@ -4798,6 +4827,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     });
     const periodJobsCount = periodJobs.length;
     const periodReviewsCount = periodJobs.filter(j => j.pointsApproved && j.reviewImage).length;
+    // YENİ: "Alınan Yorum" değeri artık Mavi Yaka Puantaj'daki YORUM PUANI ile birebir aynı hesaplanır.
+    // Puantaja işlenen puan = onaylanan işteki kişiye verilen puan (approvedPoints) + destek personeli ise 0.5.
+    const periodYorumPuani = periodJobs.reduce((sum, j) => {
+      if (!j.pointsApproved) return sum;
+      let s = parseFloat(j.approvedPoints?.[person.id] || 0);
+      if ((j.supportPersonnelIds || []).map(String).includes(String(person.id))) s += 0.5;
+      return sum + s;
+    }, 0);
     // YENİ: Bu personelin ekibine yazılmış (hasar var) işlerin dönem içi sayısı ve son hasarlı işler listesi
     const periodDamagesCount = periodJobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var').length;
     const recentDamagedJobs = personJobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var').slice(0, 5);
@@ -4816,6 +4853,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const periodFazlaMesaiSayisi = personMesaiForPeriod.filter(m => ['FG', 'FGM', 'FM'].includes(m.code)).length;
     // YENİ: Sadece "Fazla Gün" (FG) sayısı
     const periodFazlaGunSayisi = personMesaiForPeriod.filter(m => m.code === 'FG').length;
+    // YENİ: "Fazla Gün + Mesai" toplamı — hem tam fazla gün (FG) hem fazla gün+mesai (FGM) birlikte
+    const periodFazlaGunMesaiSayisi = personMesaiForPeriod.filter(m => m.code === 'FG' || m.code === 'FGM').length;
 
     // YENİ: PERSONEL HAREKET AKIŞI — Maaş hareketleri + Mesai/Devamsızlık/İzin + Yorum/Puan kayıtlarını tek listede birleştir.
     // Aylık filtrelenir (hareketMonth), tarihe göre yeniden eskiye sıralanır, ilk 5 gösterilir (tümünü gör ile hepsi).
@@ -5374,7 +5413,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const yolStatusStyle = financeMonthRow.yolOdendi ? 'bg-green-50 border-green-200 text-green-700' : 'bg-neutral-50 border-neutral-200 text-neutral-500';
 
     // YENİ: Prim ve Mesai Durumu — Maaş Tablosu'ndaki prim (fazla mesai saati) alanından hesaplanır
-    const financeSaatlikUcret = (parseFloat(person.maas) || 0) / 200;
+    // YENİ: Finans → Mavi Yaka Maaş (MaasView) ile BİREBİR aynı olması için saatlik ücret,
+    // maaş satırındaki override maaş varsa onu, yoksa personelin tanımlı maaşını kullanır (maas/200).
+    const financeEffectiveMaas = (financeMonthRow.maas !== undefined && financeMonthRow.maas !== '')
+      ? (parseFloat(financeMonthRow.maas) || 0)
+      : (parseFloat(person.maas) || 0);
+    const financeSaatlikUcret = financeEffectiveMaas / 200;
     const financePrimSaat = parseFloat(financeMonthRow.prim) || 0;
     const financePrimHesaplananTutar = financePrimSaat * financeSaatlikUcret;
     const financePrimManuelTutar = parseFloat(financeMonthRow.primOdenenTutar) || 0;
@@ -5385,9 +5429,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
     const [financeYearNum, financeMonthNum] = financeMonth.split('-').map(v => parseInt(v));
     const financePersonMesai = (allMesaiRecords || []).filter(m => String(m.personId) === String(personId) && m.year === financeYearNum && m.month === financeMonthNum);
-    const financeFazlaGunSayisi = financePersonMesai.filter(m => ['FG', 'FGM', 'FM'].includes(m.code)).length;
-    const financeDevamsizGunSayisi = financePersonMesai.filter(m => m.code === 'D').length;
-    const financeMesaiSaat = (financeFazlaGunSayisi * 10) - (financeDevamsizGunSayisi * 3) + financePrimSaat;
+    // EŞLEŞTİRİLDİ: Finans → Personel Muhasebe → Mavi Yaka Maaş (MesaiView/MaasView) ile BİREBİR aynı mantık.
+    // gunlukSaat: FGM/FM saatleri (+), EM saatleri (−) toplamı
+    const financeGunlukSaat = financePersonMesai.reduce((sum, m) => {
+      if (m.code === 'FGM' || m.code === 'FM') return sum + (parseFloat(m.hours) || 0);
+      if (m.code === 'EM') return sum - (parseFloat(m.hours) || 0);
+      return sum;
+    }, 0);
+    // Fazla Gün: yalnızca FG + FGM sayılır (FM fazla gün DEĞİL, sadece saat ekler). Maaş kaydında manuel override varsa o kullanılır.
+    const financeFazlaGunAuto = financePersonMesai.filter(m => ['FG', 'FGM'].includes(m.code)).length;
+    const financeFazlaGunSayisi = (financeMonthRow.fazlaGun !== undefined && financeMonthRow.fazlaGun !== '') ? (parseFloat(financeMonthRow.fazlaGun) || 0) : financeFazlaGunAuto;
+    // Devamsızlık: manuel override varsa o kullanılır
+    const financeDevamsizAuto = financePersonMesai.filter(m => m.code === 'D').length;
+    const financeDevamsizGunSayisi = (financeMonthRow.devamsizlik !== undefined && financeMonthRow.devamsizlik !== '') ? (parseFloat(financeMonthRow.devamsizlik) || 0) : financeDevamsizAuto;
+    // Toplam Saat = gunlukSaat + (fazlaGun*10) − (devamsızlık*3) + prim  → Finans MaasView ile aynı
+    const financeMesaiSaat = financeGunlukSaat + (financeFazlaGunSayisi * 10) - (financeDevamsizGunSayisi * 3) + financePrimSaat;
+    // Mesai ücreti = (maaş / 200) * toplam saat  → Finans ile aynı
     const financeMesaiTutar = financeMesaiSaat * financeSaatlikUcret;
 
     const financeAvansTutar = (parseFloat(financeMonthRow.nakitAvans) || 0) + (parseFloat(financeMonthRow.resmiAvans) || 0);
@@ -5401,17 +5458,28 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     // Kalan Nakit = Hak edilen net maaş − bankadan ödenen kısım − nakit avans + mesai ücreti
     const financeTanimliMaas = parseFloat(person.maas) || 0;                 // Personelin tanımlı aylık maaşı
     const financeBankaParasi = parseFloat(person.bankaParasi) || 0;          // Sabit banka ödemesi tutarı
-    const financeRaporGunSayisi = financePersonMesai.filter(m => m.code === 'R').length;      // Raporlu gün
+    // Raporlu gün: maaş kaydında manuel override varsa o kullanılır (Finans MaasView ile aynı)
+    const financeRaporAuto = financePersonMesai.filter(m => m.code === 'R').length;
+    const financeRaporGunSayisi = (financeMonthRow.rapor !== undefined && financeMonthRow.rapor !== '') ? (parseFloat(financeMonthRow.rapor) || 0) : financeRaporAuto;
     const financeUcretsizGunSayisi = financePersonMesai.filter(m => ['Üİ', 'İB'].includes(m.code)).length; // Ücretsiz izin / işi bıraktı
     // Çalışılan (ödenecek) gün sayısı: 30 günden rapor + devamsızlık + ücretsiz izin düşülür
     const financeMesaiGunSayisi = Math.max(0, 30 - financeRaporGunSayisi - financeDevamsizGunSayisi - financeUcretsizGunSayisi);
     const financeNetMaas = (financeTanimliMaas / 30) * financeMesaiGunSayisi;         // Hak edilen net maaş
     const financeHesaplananBanka = (financeBankaParasi / 30) * financeMesaiGunSayisi; // Bankadan ödenen kısım
     const financeNakitAvansTutar = parseFloat(financeMonthRow.nakitAvans) || 0;       // Bu ay çekilen nakit avans
-    const financeKalanNakit = financeNetMaas - financeHesaplananBanka - financeNakitAvansTutar + financeMesaiTutar;
+    // YENİ: Kalan Nakit hesaplanırken, ÖDENMİŞ (yatırılmış) yol parası ve yemek kartı tutarları da düşülür.
+    // Böylece personele elden verilecek nakit, yol/yemek ödemeleri sonrası net tutarı gösterir.
+    const financeOdenenYol = financeMonthRow.yolOdendi ? financeYolTutar : 0;
+    const financeOdenenYemek = financeMonthRow.yemekOdendi ? financeYemekTutar : 0;
+    const financeKalanNakit = financeNetMaas - financeHesaplananBanka - financeNakitAvansTutar + financeMesaiTutar - financeOdenenYol - financeOdenenYemek;
     // YENİ: Bankadan (resmi) çekilen avans ve o aya ait KALAN BANKA parası
     const financeResmiAvansTutar = parseFloat(financeMonthRow.resmiAvans) || 0;        // Bu ay çekilen banka/resmi avans
     const financeKalanBanka = financeHesaplananBanka - financeResmiAvansTutar;         // Bankadan ödenecek kalan tutar
+
+    // YENİ: İCRA — personelin icrası varsa (icrasiVar === 'Evet') hesaplanan bankanın %25'i icraya kesilir.
+    const financeIcraVar = person.icrasiVar === 'Evet';
+    const financeIcraKesintisi = financeIcraVar ? (financeHesaplananBanka / 4) : 0;    // İcra ücreti (%25)
+    const financeIcraSonrasiKalan = financeHesaplananBanka - financeIcraKesintisi;     // İcra düşüldükten sonra personele kalan banka
 
     // YENİ: Personelin ne zamandır çalıştığını gösteren kıdem metni (örn. "9 aydır", "1 sene 3 aydır")
     const getTenureText = (startDateStr) => {
@@ -5832,6 +5900,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <button type="button" onClick={() => { setPrimForm({ mode: 'tutar', value: '', month: nowMonth, note: '' }); setShowPrimModal(true); }} className="p-3 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-xl transition flex flex-col items-center justify-center gap-1.5 min-h-[84px]">
               <Star className="w-5 h-5" /> Prim Ödeme Gir
             </button>
+            {/* YENİ: PERSONEL GİRİŞ BELGELERİ — yüklenen belge personelin özlük dosyasına işlenir */}
+            <label className={`p-3 bg-green-50 hover:bg-green-100 text-green-700 text-xs font-bold rounded-xl transition flex flex-col items-center justify-center gap-1.5 min-h-[84px] cursor-pointer ${belgeUploading === 'giris' ? 'opacity-60 pointer-events-none' : ''}`}>
+              {belgeUploading === 'giris' ? <Loader2 className="w-5 h-5 animate-spin" /> : <UserPlus className="w-5 h-5" />}
+              {belgeUploading === 'giris' ? 'Yükleniyor...' : 'Personel Giriş Belgeleri'}
+              <input type="file" className="hidden" onChange={(e) => handleBelgeUpload(e, 'giris')} disabled={belgeUploading !== ''} />
+            </label>
+            {/* YENİ: PERSONEL ÇIKIŞ BELGELERİ — yüklenen belge personelin özlük dosyasına işlenir */}
+            <label className={`p-3 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-xl transition flex flex-col items-center justify-center gap-1.5 min-h-[84px] cursor-pointer ${belgeUploading === 'cikis' ? 'opacity-60 pointer-events-none' : ''}`}>
+              {belgeUploading === 'cikis' ? <Loader2 className="w-5 h-5 animate-spin" /> : <LogOut className="w-5 h-5" />}
+              {belgeUploading === 'cikis' ? 'Yükleniyor...' : 'Personel Çıkış Belgeleri'}
+              <input type="file" className="hidden" onChange={(e) => handleBelgeUpload(e, 'cikis')} disabled={belgeUploading !== ''} />
+            </label>
           </div>
         </div>
 
@@ -5877,7 +5957,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               { Icon: Wallet, iconCls: 'bg-neutral-800 text-white', title: 'Tanımlı Maaş', value: `₺${financeTanimliMaas.toLocaleString('tr-TR', {maximumFractionDigits: 2})}` },
               { Icon: CalendarDays, iconCls: 'bg-sky-100 text-sky-700', title: 'Çalışılan Gün', value: `${financeMesaiGunSayisi} / 30 gün`, sub: `Rapor: ${financeRaporGunSayisi} • Devamsız: ${financeDevamsizGunSayisi} • Ücretsiz İzin: ${financeUcretsizGunSayisi}` },
               { Icon: DollarSign, iconCls: 'bg-emerald-100 text-emerald-700', title: 'Hak Edilen Net Maaş', value: `₺${financeNetMaas.toLocaleString('tr-TR', {maximumFractionDigits: 2})}`, sub: 'Çalışılan güne göre hesaplanır' },
-              { Icon: Landmark, iconCls: 'bg-indigo-100 text-indigo-700', title: 'Banka Ödemesi (Hesaplanan)', value: `₺${financeHesaplananBanka.toLocaleString('tr-TR', {maximumFractionDigits: 2})}` },
+              { Icon: Landmark, iconCls: 'bg-indigo-100 text-indigo-700', title: 'Banka Ödemesi (Hesaplanan)', value: `₺${financeHesaplananBanka.toLocaleString('tr-TR', {maximumFractionDigits: 2})}`, sub: financeIcraVar ? `İcra kesintisi öncesi brüt banka tutarı` : null, badge: financeIcraVar ? { text: 'İcra Var', cls: 'bg-red-100 text-red-600 border-red-200' } : null },
+              // YENİ: İcra varsa kesinti tutarı ayrı satırda kırmızı gösterilir
+              ...(financeIcraVar ? [{ Icon: AlertTriangle, iconCls: 'bg-red-100 text-red-600', title: 'İcra Kesintisi (%25)', value: `-₺${financeIcraKesintisi.toLocaleString('tr-TR', {maximumFractionDigits: 2})}`, sub: 'Hesaplanan bankadan icraya kesilen tutar', negative: true }] : []),
+              // YENİ: İcra varsa icra sonrası personele kalan banka ödemesi ayrı satırda
+              ...(financeIcraVar ? [{ Icon: Landmark, iconCls: 'bg-green-100 text-green-700', title: 'İcra Sonrası Kalan Banka', value: `₺${financeIcraSonrasiKalan.toLocaleString('tr-TR', {maximumFractionDigits: 2})}`, sub: 'İcra kesintisi sonrası personele ödenecek banka tutarı', badge: { text: 'Personele', cls: 'bg-green-100 text-green-700 border-green-200' } }] : []),
               { Icon: Clock, iconCls: 'bg-blue-100 text-blue-700', title: `Mesai (${financeMonthLabel})`, value: `${financeMesaiSaat.toFixed(1)} Saat`, sub: `₺${financeMesaiTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})} mesai ücreti`, badge: financeMesaiSaat > 0 ? { text: 'Var', cls: 'bg-blue-100 text-blue-700 border-blue-200' } : { text: 'Yok', cls: 'bg-neutral-100 text-neutral-400 border-neutral-200' } },
               { Icon: Star, iconCls: 'bg-yellow-100 text-yellow-700', title: 'Prim', value: financePrimTutar > 0 ? `₺${financePrimTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})}` : '—', sub: financePrimSaat > 0 ? `${financePrimSaat.toFixed(1)} saat karşılığı` : null, badge: financePrimOdendi ? { text: 'Ödendi', cls: 'bg-green-100 text-green-700 border-green-200' } : (financePrimTutar > 0 ? { text: 'Bekliyor', cls: 'bg-amber-100 text-amber-700 border-amber-200' } : null) },
               { Icon: DollarSign, iconCls: 'bg-red-100 text-red-600', title: 'Kullanılan Nakit Avans', value: `₺${financeNakitAvansTutar.toLocaleString('tr-TR', {maximumFractionDigits: 2})}`, negative: financeNakitAvansTutar > 0 },
@@ -5935,7 +6019,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <span className="text-xs font-bold text-neutral-500">Yapılan İş</span>
             </div>
             <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-center">
-              <span className="text-3xl font-black text-yellow-600 block">{periodReviewsCount}</span>
+              <span className="text-3xl font-black text-yellow-600 block">{periodYorumPuani % 1 === 0 ? periodYorumPuani : periodYorumPuani.toFixed(1).replace('.', ',')}</span>
               <span className="text-xs font-bold text-yellow-700">Alınan Yorum</span>
             </div>
             {/* YENİ: Ekibine hasar kaydı yazılmış iş sayısı */}
@@ -5948,10 +6032,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <span className="text-3xl font-black text-blue-600 block">{periodFazlaMesaiSayisi}</span>
               <span className="text-xs font-bold text-blue-700">Fazla Mesai</span>
             </div>
-            {/* YENİ: Fazla Gün (FG) sayısı */}
+            {/* YENİ: Fazla Gün (FG) + Fazla Gün+Mesai (FGM) toplamı */}
             <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 text-center">
-              <span className="text-3xl font-black text-indigo-600 block">{periodFazlaGunSayisi}</span>
+              <span className="text-3xl font-black text-indigo-600 block">{periodFazlaGunMesaiSayisi}</span>
               <span className="text-xs font-bold text-indigo-700">Fazla Gün</span>
+              <span className="block text-[9px] font-bold text-indigo-400 mt-0.5">Fazla Gün: {periodFazlaGunSayisi} + Mesai: {periodFazlaGunMesaiSayisi - periodFazlaGunSayisi}</span>
             </div>
             <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
               <span className="text-3xl font-black text-neutral-600 block">{periodDevamsizlikSayisi}</span>
@@ -9175,11 +9260,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
                  {/* FİYAT BİLGİSİ (SADECE ASIL GÖREVLİ) */}
                  {isMainAssignee && job.price && (
-                    <div className="mt-2 flex items-center justify-between bg-green-50 border border-green-200 p-3 rounded-xl">
-                      <span className="text-xs font-bold text-green-800 flex items-center gap-1.5"><DollarSign className="w-4 h-4 text-green-600"/> Anlaşılan Ücret</span>
-                      <div className="text-right">
-                        <span className="block text-lg font-black text-green-700">₺{parseInt(job.price).toLocaleString('tr-TR')}</span>
-                        {job.deposit && <span className="block text-[10px] font-bold text-green-600">Kapora: ₺{parseInt(job.deposit).toLocaleString('tr-TR')}</span>}
+                    <div className="mt-2 bg-green-50 border border-green-200 p-3 rounded-xl">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-green-800 flex items-center gap-1.5"><DollarSign className="w-4 h-4 text-green-600"/> Anlaşılan Ücret</span>
+                        <div className="text-right">
+                          <span className="block text-lg font-black text-green-700">₺{parseInt(job.price).toLocaleString('tr-TR')}</span>
+                          {job.deposit && <span className="block text-[10px] font-bold text-green-600">Kapora: ₺{parseInt(job.deposit).toLocaleString('tr-TR')}</span>}
+                        </div>
+                      </div>
+                      {/* YENİ: Net Bakiye = Anlaşılan Ücret − Kapora. Tahsil edilecek tutar, diğerlerinden daha BÜYÜK ve belirgin gösterilir. */}
+                      <div className="mt-3 pt-3 border-t-2 border-green-200 border-dashed flex items-center justify-between">
+                        <span className="text-sm font-black text-green-900 flex items-center gap-1.5"><Wallet className="w-5 h-5 text-green-700"/> Tahsil Edilecek Net Bakiye</span>
+                        <span className="text-2xl md:text-3xl font-black text-green-700 leading-none">₺{(parseInt(job.price || 0) - parseInt(job.deposit || 0)).toLocaleString('tr-TR')}</span>
                       </div>
                     </div>
                  )}

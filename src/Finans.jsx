@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp } from 'lucide-react';
+import { Truck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus} from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore';
 import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './shared.jsx';
   export const ReportingView = ({ jobs, personnelList }) => {
@@ -1051,14 +1051,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
       const N = over20.length;
       const cikanRakam = (yorumSayisi * N) / 8;
 
+      // YENİ: Prim = her bir NET puanın (raw + bonus) 0.5 ile çarpımı. (Örn. 35 net puan → 17.5 prim)
       const nextMonthPrims = {};
       over20.forEach(p => {
-          nextMonthPrims[p.id] = Math.round(cikanRakam * p.finalScore);
+          nextMonthPrims[p.id] = p.finalScore * 0.5;
       });
+      // YENİ: 20 üstü herkesi net puana göre büyükten küçüğe sıralı liste (modalde sıralama gösterimi için)
+      const over20Sorted = [...over20].sort((a, b) => b.finalScore - a.finalScore);
 
       setMonthCloseModalData({
           rank1Score, rank2Score, rank3Score,
-          winners, over20, yorumSayisi, cikanRakam, nextMonthPrims, newBonusRecords
+          winners, over20, over20Sorted, yorumSayisi, cikanRakam, nextMonthPrims, newBonusRecords
       });
       setShowMonthCloseModal(true);
     };
@@ -1277,7 +1280,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                                 <p className="text-sm font-bold text-neutral-800">
                                     {monthCloseModalData.winners.rank1.length > 0 ? monthCloseModalData.winners.rank1.map(w => w.name).join(', ') : 'Kimse Yok'}
                                 </p>
-                                {monthCloseModalData.winners.rank1.length > 0 && <p className="text-[10px] font-bold text-white bg-yellow-500 px-2 py-0.5 rounded-full w-max mt-1">+10 Puan Eklenecek</p>}
+                                {monthCloseModalData.winners.rank1.length > 0 && (
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                    <span className="text-[10px] font-bold text-white bg-yellow-500 px-2 py-0.5 rounded-full">+10 Puan Eklenecek</span>
+                                    {/* YENİ: Bonus eklenmiş NET toplam puan */}
+                                    <span className="text-[10px] font-black text-yellow-700 bg-yellow-100 border border-yellow-300 px-2 py-0.5 rounded-full">Net: {monthCloseModalData.rank1Score + 10} Puan</span>
+                                  </div>
+                                )}
                             </div>
                         </div>
                         <div className="flex items-start gap-3 bg-white p-3 rounded-xl border border-neutral-300 shadow-sm">
@@ -1287,7 +1296,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                                 <p className="text-sm font-bold text-neutral-800">
                                     {monthCloseModalData.winners.rank2.length > 0 ? monthCloseModalData.winners.rank2.map(w => w.name).join(', ') : 'Kimse Yok'}
                                 </p>
-                                {monthCloseModalData.winners.rank2.length > 0 && <p className="text-[10px] font-bold text-white bg-neutral-500 px-2 py-0.5 rounded-full w-max mt-1">+5 Puan Eklenecek</p>}
+                                {monthCloseModalData.winners.rank2.length > 0 && (
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                    <span className="text-[10px] font-bold text-white bg-neutral-500 px-2 py-0.5 rounded-full">+5 Puan Eklenecek</span>
+                                    <span className="text-[10px] font-black text-neutral-700 bg-neutral-100 border border-neutral-300 px-2 py-0.5 rounded-full">Net: {monthCloseModalData.rank2Score + 5} Puan</span>
+                                  </div>
+                                )}
                             </div>
                         </div>
                         <div className="flex items-start gap-3 bg-white p-3 rounded-xl border border-orange-300 shadow-sm">
@@ -1297,8 +1311,32 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                                 <p className="text-sm font-bold text-neutral-800">
                                     {monthCloseModalData.winners.rank3.length > 0 ? monthCloseModalData.winners.rank3.map(w => w.name).join(', ') : 'Kimse Yok'}
                                 </p>
-                                {monthCloseModalData.winners.rank3.length > 0 && <p className="text-[10px] font-bold text-white bg-orange-500 px-2 py-0.5 rounded-full w-max mt-1">+3 Puan Eklenecek</p>}
+                                {monthCloseModalData.winners.rank3.length > 0 && (
+                                  <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                                    <span className="text-[10px] font-bold text-white bg-orange-500 px-2 py-0.5 rounded-full">+3 Puan Eklenecek</span>
+                                    <span className="text-[10px] font-black text-orange-700 bg-orange-100 border border-orange-300 px-2 py-0.5 rounded-full">Net: {monthCloseModalData.rank3Score + 3} Puan</span>
+                                  </div>
+                                )}
                             </div>
+                        </div>
+                    </div>
+
+                    {/* YENİ: 20 puan ve üzeri yorum alan HERKESİN tam sıralaması (bonus dahil net puanla) */}
+                    <div className="mt-4 pt-4 border-t border-purple-200">
+                        <p className="text-xs font-black text-purple-800 mb-2 uppercase tracking-wide">📋 20 Puan Üstü Tüm Sıralama</p>
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar">
+                            {(monthCloseModalData.over20Sorted || []).length > 0 ? monthCloseModalData.over20Sorted.map((p, idx) => (
+                                <div key={p.id} className="flex items-center gap-2 bg-white rounded-lg border border-purple-100 px-3 py-2">
+                                    <span className={`w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[11px] font-black ${idx === 0 ? 'bg-yellow-400 text-white' : idx === 1 ? 'bg-neutral-400 text-white' : idx === 2 ? 'bg-orange-400 text-white' : 'bg-purple-100 text-purple-700'}`}>{idx + 1}</span>
+                                    <span className="flex-1 font-bold text-sm text-neutral-800 truncate">{p.name}</span>
+                                    {/* Raw puan + kazanılan bonus + net puan ayrı gösterilir */}
+                                    <span className="text-[10px] font-medium text-neutral-400">{p.rawScore} puan</span>
+                                    {p.bonusScore > 0 && <span className="text-[10px] font-black text-green-600">+{p.bonusScore}</span>}
+                                    <span className="text-xs font-black text-purple-700 bg-purple-50 border border-purple-200 rounded px-2 py-0.5 w-max">Net: {p.finalScore}</span>
+                                </div>
+                            )) : (
+                                <p className="text-sm font-medium text-neutral-500 text-center py-3">20 puan ve üzeri personel bulunmuyor.</p>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -1306,7 +1344,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                 {/* 2. Kısım: Prim Hesaplama Formülü */}
                 <div className="bg-blue-50 rounded-2xl p-5 border border-blue-100">
                     <h4 className="font-black text-blue-900 text-lg mb-4 flex items-center gap-2 border-b border-blue-200 pb-2">💰 Prime Dönüşüm Hesaplaması</h4>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
                         <div className="bg-white p-3 rounded-xl border border-blue-200 text-center shadow-sm">
                             <p className="text-[10px] font-bold text-neutral-500 mb-1">Toplam Yorum</p>
                             <p className="text-xl font-black text-blue-600">{monthCloseModalData.yorumSayisi}</p>
@@ -1315,22 +1353,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                             <p className="text-[10px] font-bold text-neutral-500 mb-1">&ge;20 Puan Alan</p>
                             <p className="text-xl font-black text-blue-600">{monthCloseModalData.over20.length} Kişi</p>
                         </div>
-                        <div className="bg-white p-3 rounded-xl border border-blue-200 text-center shadow-sm">
-                            <p className="text-[10px] font-bold text-neutral-500 mb-1">Sabit Bölen</p>
-                            <p className="text-xl font-black text-blue-600">8</p>
-                        </div>
+                        {/* YENİ: Prim kuralı — her net puan 0.5 ile çarpılır */}
                         <div className="bg-blue-600 p-3 rounded-xl border border-blue-700 text-center shadow-sm">
-                            <p className="text-[10px] font-bold text-blue-200 mb-1">Birim Katsayı</p>
-                            <p className="text-xl font-black text-white">{monthCloseModalData.cikanRakam.toFixed(2)}</p>
+                            <p className="text-[10px] font-bold text-blue-200 mb-1">Puan Çarpanı</p>
+                            <p className="text-xl font-black text-white">× 0.5</p>
                         </div>
                     </div>
 
                     <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar bg-white p-3 rounded-xl border border-blue-200">
-                        <p className="text-xs font-bold text-blue-800 mb-2">Gelecek Ay Primine Yansıyacak Tutarlar:</p>
-                        {monthCloseModalData.over20.length > 0 ? monthCloseModalData.over20.map(p => (
+                        <p className="text-xs font-bold text-blue-800 mb-2">Gelecek Ay Primine Yansıyacak Tutarlar (Net Puan × 0.5):</p>
+                        {monthCloseModalData.over20.length > 0 ? (monthCloseModalData.over20Sorted || monthCloseModalData.over20).map(p => (
                             <div key={p.id} className="flex justify-between items-center border-b border-neutral-100 pb-2 last:border-0 last:pb-0">
-                                <span className="font-bold text-sm text-neutral-800">{p.name} <span className="text-[10px] text-neutral-400">({p.finalScore} Net Puan)</span></span>
-                                <span className="font-black text-green-600">₺{monthCloseModalData.nextMonthPrims[p.id]?.toLocaleString('tr-TR')}</span>
+                                <span className="font-bold text-sm text-neutral-800">{p.name} <span className="text-[10px] text-neutral-400">({p.finalScore} Net Puan × 0.5)</span></span>
+                                <span className="font-black text-green-600">{monthCloseModalData.nextMonthPrims[p.id]?.toLocaleString('tr-TR', {maximumFractionDigits: 1})} Prim</span>
                             </div>
                         )) : (
                             <p className="text-sm font-medium text-neutral-500 text-center py-4">Bu ay 20 puan ve üzerini geçen personel bulunmuyor.</p>
@@ -1823,6 +1858,23 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                       const cellColor = getCellColor(val);
                       const isWknd = isWeekend(d);
                       const weekSeparatorClass = isWknd ? 'border-r-[3px] border-r-neutral-800' : 'border-r border-neutral-300';
+
+                      // YENİ: Personelin işe başlangıç tarihinden ÖNCEKİ günler için "İŞE GİRİŞ" kutucuğu.
+                      // Bu günler düzenlenemez; personelin henüz işe başlamadığını belirtir.
+                      const _startD = person.startDate ? new Date(person.startDate + 'T00:00:00') : null;
+                      const _cellD = new Date(currentYear, currentMonth - 1, d);
+                      const isBeforeStart = _startD && !isNaN(_startD.getTime()) && _cellD < new Date(_startD.getFullYear(), _startD.getMonth(), _startD.getDate());
+
+                      if (isBeforeStart) {
+                        return (
+                          <td key={d} className={`${weekSeparatorClass} p-0 text-center relative w-12 min-w-[48px] max-w-[48px] md:w-16 md:min-w-[64px] md:max-w-[64px]`}>
+                            <div className="flex flex-col items-center justify-center h-7 md:h-11 bg-emerald-50 text-emerald-600 leading-none gap-0.5" title={`İşe Başlangıç: ${person.startDate} — bu tarihten önce personel işte değildi`}>
+                              <UserPlus className="w-3 h-3 md:w-3.5 md:h-3.5" />
+                              <span className="text-[6px] md:text-[8px] font-black tracking-tight">İŞE GİRİŞ</span>
+                            </div>
+                          </td>
+                        );
+                      }
 
                       return (
                         <td key={d} className={`${weekSeparatorClass} p-0 text-center relative w-12 min-w-[48px] max-w-[48px] md:w-16 md:min-w-[64px] md:max-w-[64px] ${isToday ? 'ring-1 ring-inset ring-blue-300' : isWknd && !val ? 'bg-red-50/20' : ''}`}>
