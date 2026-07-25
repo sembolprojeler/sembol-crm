@@ -1119,3 +1119,194 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
     printWindow.document.write(html);
     printWindow.document.close();
   };
+
+  // ============================================================================
+  // YENİ: PERSONEL GİRİŞ / ÇIKIŞ EVRAKLARI OTOMATİK OLUŞTURUCU
+  // Personel bilgileri (ad, TC, telefon, görev, adres, tarih) otomatik doldurulur.
+  // Tutanak evraklarıyla aynı stil: logo + şirket başlığı, sayfa/site alt bilgisi YOK.
+  // Hem yazdırılabilir hem (üst katmanda) yükleme için kullanılır.
+  //   type: 'is_sozlesmesi' | 'isg_proseduru' | 'ibraname' | 'istifa'
+  // ============================================================================
+  export const generatePersonnelDocPDF = (person, type) => {
+    const printWindow = window.open('', '_blank');
+    const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const bugun = new Date().toLocaleDateString('tr-TR');
+    const ad = esc(person.fullName || '..............................');
+    const tc = esc(person.tcNo || '..............................');
+    const tel = esc(person.personalPhone || person.companyPhone || '..............................');
+    const gorev = esc(person.position || 'Nakliye Personeli');
+    const adres = esc(person.address || '..............................');
+    const iseBaslama = esc(person.startDate ? person.startDate.split('-').reverse().join('.') : bugun);
+
+    // Belge başlıkları ve dosya adları
+    const META = {
+      is_sozlesmesi: { title: 'BELİRSİZ SÜRELİ İŞ SÖZLEŞMESİ', file: `${ad.replace(/\s+/g,'-')}-Is-Sozlesmesi` },
+      isg_proseduru: { title: 'İŞE GİRİŞ VE ÇALIŞMA PROSEDÜRLERİ', file: `${ad.replace(/\s+/g,'-')}-ISG-Proseduru` },
+      ibraname:      { title: 'İBRANAME', file: `${ad.replace(/\s+/g,'-')}-Ibraname` },
+      istifa:        { title: 'İSTİFA DİLEKÇESİ', file: `${ad.replace(/\s+/g,'-')}-Istifa-Dilekcesi` },
+    };
+    const meta = META[type] || META.is_sozlesmesi;
+
+    // Her belge türü için gövde HTML'i
+    let bodyHtml = '';
+
+    if (type === 'is_sozlesmesi') {
+      bodyHtml = `
+        <div class="main-title">BELİRSİZ SÜRELİ İŞ SÖZLEŞMESİ</div>
+        <table>
+          <tr><th colspan="2">İŞVEREN BİLGİLERİ</th></tr>
+          <tr><td class="label">Ünvanı</td><td>Sembol Nakliyat Depoculuk Tic. Ltd. Şti.</td></tr>
+          <tr><td class="label">Adresi</td><td>Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL</td></tr>
+          <tr><td class="label">Vergi No</td><td>7600944287</td></tr>
+        </table>
+        <table>
+          <tr><th colspan="2">İŞÇİ (ÇALIŞAN) BİLGİLERİ</th></tr>
+          <tr><td class="label">Adı Soyadı</td><td>${ad}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${tc}</td></tr>
+          <tr><td class="label">Görevi</td><td>${gorev}</td></tr>
+          <tr><td class="label">Telefon</td><td>${tel}</td></tr>
+          <tr><td class="label">Adresi</td><td>${adres}</td></tr>
+          <tr><td class="label">İşe Başlama Tarihi</td><td>${iseBaslama}</td></tr>
+        </table>
+        <div class="section-title">SÖZLEŞMENİN KONUSU VE HÜKÜMLERİ</div>
+        <div class="terms-list">
+          <p><b>1. Taraflar:</b> İşbu sözleşme yukarıda bilgileri yer alan işveren ile işçi arasında belirsiz süreli olarak akdedilmiştir.</p>
+          <p><b>2. İşin Niteliği:</b> İşçi, işveren tarafından verilecek "${gorev}" görevini, iş sağlığı ve güvenliği kurallarına uygun şekilde yerine getirmeyi kabul eder.</p>
+          <p><b>3. Çalışma Süresi:</b> Haftalık çalışma süresi yasal mevzuata uygun olup, fazla mesai ilgili kanun hükümlerine göre uygulanır.</p>
+          <p><b>4. Ücret:</b> İşçiye ödenecek ücret ve yan haklar taraflar arasında kararlaştırıldığı şekilde, yasal kesintiler yapılarak ödenir.</p>
+          <p><b>5. Deneme Süresi:</b> İşbu sözleşmede yasal sınırlar dahilinde deneme süresi uygulanabilir.</p>
+          <p><b>6. Yükümlülükler:</b> İşçi; işyeri kurallarına, iş güvenliği talimatlarına, gizlilik ve müşteri memnuniyeti ilkelerine uymayı taahhüt eder.</p>
+          <p><b>7. Feshi:</b> Sözleşmenin feshinde 4857 sayılı İş Kanunu hükümleri uygulanır.</p>
+          <p><b>8. Yürürlük:</b> İşbu sözleşme ${iseBaslama} tarihinde yürürlüğe girmiş olup, taraflarca okunarak imza altına alınmıştır.</p>
+        </div>
+        <div class="signatures">
+          <div class="sign-box"><div class="sign-title">İŞVEREN (KAŞE / İMZA)</div><div class="sign-details">Sembol Nakliyat Depoculuk Tic. Ltd. Şti.<br/><br/><br/>İmza:</div></div>
+          <div class="sign-box"><div class="sign-title">İŞÇİ (ÇALIŞAN)</div><div class="sign-details">Adı Soyadı: ${ad}<br/>T.C. No: ${tc}<br/><br/>İmza:</div></div>
+        </div>`;
+    } else if (type === 'isg_proseduru') {
+      bodyHtml = `
+        <div class="main-title">İŞE GİRİŞ VE ÇALIŞMA PROSEDÜRLERİ</div>
+        <table>
+          <tr><th colspan="2">İŞE BAŞLAYAN KİŞİNİN BİLGİLERİ</th></tr>
+          <tr><td class="label">Adı Soyadı</td><td>${ad}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${tc}</td></tr>
+          <tr><td class="label">Görevi</td><td>${gorev}</td></tr>
+          <tr><td class="label">Telefon Numarası</td><td>${tel}</td></tr>
+          <tr><td class="label">Ev Adresi</td><td>${adres}</td></tr>
+          <tr><td class="label">İşe Giriş Tarihi</td><td>${iseBaslama}</td></tr>
+        </table>
+        <div class="section-title">İDARİ İŞLER — TESLİM EDİLEN / ALINAN BELGELER</div>
+        <table>
+          <tr><th>Belge</th><th style="width:20%">Durum</th></tr>
+          ${['İşe Giriş Bildirgesi','Kimlik Fotokopisi','İkametgâh Senedi','Nüfus Kayıt Örneği','Adli Sicil Kaydı','Diploma Örneği','Vesikalık Fotoğraf','KKD Teslim Tutanağı','İSG Talimatı','İş Sözleşmesi','İSG Eğitim Sertifikası','Sağlık Raporu','İşe Başlangıç Muayenesi'].map(b => `<tr><td>${b}</td><td style="text-align:center">☐</td></tr>`).join('')}
+        </table>
+        <div class="section-title">TAAHHÜT</div>
+        <div class="desc-box">
+          Yukarıda kimliği yazılı çalışan olarak, Sembol Nakliyat firmasında çalıştığım sürece tarafıma tebliğ edilen iş sağlığı ve güvenliği kuralları ile çalışma prosedürlerine eksiksiz uymayı, KKD'lerimi kullanmayı, müşteri memnuniyeti ve gizlilik ilkelerine riayet etmeyi kabul ve taahhüt ederim.
+        </div>
+        <div class="signatures">
+          <div class="sign-box"><div class="sign-title">TEBLİĞ EDEN (İŞVEREN)</div><div class="sign-details">Sembol Nakliyat<br/><br/><br/>İmza:</div></div>
+          <div class="sign-box"><div class="sign-title">TEBELLÜĞ EDEN (ÇALIŞAN)</div><div class="sign-details">Adı Soyadı: ${ad}<br/>Tarih: ${iseBaslama}<br/><br/>İmza:</div></div>
+        </div>`;
+    } else if (type === 'ibraname') {
+      bodyHtml = `
+        <div class="main-title">İBRANAME</div>
+        <table>
+          <tr><th colspan="2">ÇALIŞAN BİLGİLERİ</th></tr>
+          <tr><td class="label">Adı Soyadı</td><td>${ad}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${tc}</td></tr>
+          <tr><td class="label">Görevi</td><td>${gorev}</td></tr>
+          <tr><td class="label">İşe Giriş Tarihi</td><td>${iseBaslama}</td></tr>
+          <tr><td class="label">İşten Ayrılış Tarihi</td><td>${bugun}</td></tr>
+        </table>
+        <div class="section-title">İBRA BEYANI</div>
+        <div class="terms-list">
+          <p>Sembol Nakliyat Depoculuk Tic. Ltd. Şti. bünyesinde <b>${iseBaslama}</b> - <b>${bugun}</b> tarihleri arasında <b>${gorev}</b> olarak çalıştım.</p>
+          <p>Çalıştığım süre boyunca hak etmiş olduğum <b>ücret, fazla mesai, yıllık izin, ihbar ve kıdem tazminatı</b> ile her türlü sosyal hak ve alacaklarımı eksiksiz ve nakden tahsil ettim.</p>
+          <p>İşverenden herhangi bir alacağımın kalmadığını, bundan sonra <b>maddi ve manevi hiçbir talebim olmayacağını</b> beyan eder; işvereni bu tarih itibarıyla <b>karşılıklı olarak ibra ederim.</b></p>
+          <p>İşbu ibraname tarafımca okunarak, hiçbir baskı altında kalmadan, kendi hür irademle imzalanmıştır. Tarih: ${bugun}</p>
+        </div>
+        <div class="signatures">
+          <div class="sign-box"><div class="sign-title">İŞVEREN (KAŞE / İMZA)</div><div class="sign-details">Sembol Nakliyat Depoculuk Tic. Ltd. Şti.<br/><br/><br/>İmza:</div></div>
+          <div class="sign-box"><div class="sign-title">İBRA EDEN (ÇALIŞAN)</div><div class="sign-details">Adı Soyadı: ${ad}<br/>T.C. No: ${tc}<br/><br/>İmza:</div></div>
+        </div>`;
+    } else if (type === 'istifa') {
+      bodyHtml = `
+        <div class="main-title">İSTİFA DİLEKÇESİ</div>
+        <div style="text-align:right; font-size:11px; margin-bottom:10px;">Tarih: ${bugun}</div>
+        <div style="font-weight:bold; font-size:12px; margin-bottom:10px;">SEMBOL NAKLİYAT DEPOCULUK TİC. LTD. ŞTİ. İNSAN KAYNAKLARI DEPARTMANINA,</div>
+        <div class="terms-list">
+          <p>Firmanız bünyesinde <b>${iseBaslama}</b> tarihinden itibaren <b>${gorev}</b> pozisyonunda görev yapmaktayım.</p>
+          <p>Kişisel nedenlerimden dolayı <b>${bugun}</b> tarihi itibarıyla görevimden kendi isteğimle istifa etmek istiyorum.</p>
+          <p>Gereğinin yapılmasını bilgilerinize arz ederim.</p>
+        </div>
+        <table style="margin-top:14px;">
+          <tr><td class="label">Adı Soyadı</td><td>${ad}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${tc}</td></tr>
+          <tr><td class="label">Telefon</td><td>${tel}</td></tr>
+        </table>
+        <div class="signatures">
+          <div class="sign-box" style="width:45%; margin-left:auto;"><div class="sign-title">İSTİFA EDEN (İMZA)</div><div class="sign-details">Adı Soyadı: ${ad}<br/>Tarih: ${bugun}<br/><br/>İmza:</div></div>
+        </div>`;
+    }
+
+    const html = `
+    <!DOCTYPE html>
+    <html lang="tr">
+    <head>
+      <meta charset="UTF-8">
+      <title>${meta.file}</title>
+      <style>
+        @page { size: A4; margin: 0; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Arial', sans-serif; margin: 0; padding: 0; background: #525659; display: flex; flex-direction: column; align-items: center; font-size: 10px; }
+        .page { width: 210mm; min-height: 297mm; background: white; padding: 12mm 14mm; margin: 10mm auto; box-shadow: 0 0 10px rgba(0,0,0,0.5); position: relative; }
+        @media print {
+          @page { margin: 0 !important; }
+          body { background: white; margin: 0; -webkit-print-color-adjust: exact; }
+          .page { margin: 0; padding: 12mm 14mm; box-shadow: none; border: none; }
+        }
+        .header { text-align: center; border-bottom: 2px solid #d32f2f; padding-bottom: 6px; margin-bottom: 10px; display: flex; flex-direction: column; align-items: center; }
+        .logo-img { height: 44px; margin-bottom: 4px; object-fit: contain; }
+        .subtitle { font-size: 11px; color: #333; font-weight: bold; margin-bottom: 3px; letter-spacing: 1px; }
+        .contact-info { font-size: 9px; color: #555; line-height: 1.2; }
+        .main-title { font-size: 14px; font-weight: bold; text-align: center; margin: 10px 0; padding: 6px; background: #f0f0f0; border: 1px solid #ccc; text-transform: uppercase; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 10px; font-size: 10px; }
+        th { background: #f0f0f0; padding: 5px; border: 1px solid #ccc; text-align: left; font-size: 11px; color: #d32f2f; }
+        td { padding: 5px; border: 1px solid #ccc; vertical-align: top; }
+        .label { font-weight: bold; width: 35%; background: #fafafa; }
+        .section-title { font-weight: bold; font-size: 11px; color: #d32f2f; margin-top: 10px; margin-bottom: 5px; border-bottom: 1px solid #ccc; padding-bottom: 2px; }
+        .desc-box { padding: 8px; border: 1px dashed #ccc; font-size: 10px; min-height: 30px; margin-bottom: 10px; background: #fafafa; line-height: 1.5; }
+        .terms-list { font-size: 10.5px; line-height: 1.6; text-align: justify; }
+        .terms-list p { margin: 6px 0; }
+        .signatures { display: flex; justify-content: space-between; margin-top: 30px; }
+        .sign-box { width: 45%; font-size: 10px; }
+        .sign-title { font-weight: bold; text-align: center; margin-bottom: 6px; text-decoration: underline; }
+        .sign-details { line-height: 1.6; }
+      </style>
+    </head>
+    <body>
+      <div class="page">
+        <div class="header">
+          <img src="https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp" class="logo-img" alt="Sembol Nakliyat" />
+          <div class="subtitle">EVDEN EVE - ASANSÖRLÜ TAŞIMA - DEPOLAMA</div>
+          <div class="contact-info">
+            Bahçelievler Mah. Yeni Sokak No:5/C Pendik / İSTANBUL | Tel: (0216) 390 89 99<br/>
+            Vergi No: 7600944287 | www.sembolnakliyat.com
+          </div>
+        </div>
+        ${bodyHtml}
+      </div>
+      <script>
+        // Sol-alt (site adresi) ve sağ-alt (sayfa no) yazdırma bilgilerini gizlemek için sayfa marjı sıfırlanır.
+        const style = document.createElement('style');
+        style.textContent = '@page { margin: 0; } @media print { body { -webkit-print-color-adjust: exact; } }';
+        document.head.appendChild(style);
+        window.addEventListener('load', () => { setTimeout(() => { window.print(); }, 400); });
+      </script>
+    </body>
+    </html>`;
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };

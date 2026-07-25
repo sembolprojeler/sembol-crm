@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus} from 'lucide-react';
+import { Truck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus} from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc } from 'firebase/firestore';
 import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './shared.jsx';
   export const ReportingView = ({ jobs, personnelList }) => {
@@ -1071,7 +1071,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
            const puantajRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${docPrefix}${currentYear}_${currentMonth}`);
            await setDoc(puantajRef, {
                bonusRecords: monthCloseModalData.newBonusRecords,
-               isClosed: true
+               isClosed: true,
+               appliedPrims: monthCloseModalData.nextMonthPrims // YENİ: Geri alma için uygulanan primler saklanır
            }, { merge: true });
 
            let nextMonth = currentMonth + 1;
@@ -1093,7 +1094,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
 
            await setDoc(nextMaasRef, { records: nextMaasRecords, updatedAt: new Date().toISOString() }, { merge: true });
 
-           setPuantajMeta(prev => ({...prev, bonusRecords: monthCloseModalData.newBonusRecords, isClosed: true}));
+           setPuantajMeta(prev => ({...prev, bonusRecords: monthCloseModalData.newBonusRecords, isClosed: true, appliedPrims: monthCloseModalData.nextMonthPrims}));
            setShowMonthCloseModal(false);
            addSystemLog('Ay Sonu Kapanışı', `${currentMonth}/${currentYear} dönemi ${collarType} puantajı kapatıldı, primler hesaplanıp ${nextMonth}/${nextYear} maaşlarına eklendi.`);
            
@@ -1101,6 +1102,43 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
            console.error(e);
            alert("Kapatma işlemi sırasında hata oluştu.");
        }
+    };
+
+    // YENİ: AY KAPANIŞINI GERİ AL — kapatmada uygulanan bonus puanları ve gelecek aya
+    // eklenen primleri geri alır; ayı tekrar açık (düzenlenebilir) hale getirir.
+    const handleUndoCloseMonth = async () => {
+      if (!window.confirm('Bu ayın kapanışını geri almak istediğinize emin misiniz?\n\nVerilen bonus puanlar ve gelecek aya eklenen primler geri alınacak, ay yeniden düzenlenebilir hale gelecek.')) return;
+      try {
+          const appliedPrims = puantajMeta.appliedPrims || {};
+
+          // 1) Gelecek aydaki maaş primlerinden, kapatmada eklenen tutarları düş
+          let nextMonth = currentMonth + 1;
+          let nextYear = currentYear;
+          if (nextMonth > 12) { nextMonth = 1; nextYear++; }
+          const nextDocId = `${docPrefix}${nextYear}_${nextMonth}`;
+          const nextMaasRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', nextDocId);
+          const nextMaasSnap = await getDoc(nextMaasRef);
+          if (nextMaasSnap.exists()) {
+              let nextMaasRecords = nextMaasSnap.data().records || {};
+              Object.keys(appliedPrims).forEach(pId => {
+                  if (nextMaasRecords[pId]) {
+                      const existingPrim = parseFloat(nextMaasRecords[pId].prim) || 0;
+                      nextMaasRecords[pId].prim = Math.max(0, existingPrim - (parseFloat(appliedPrims[pId]) || 0));
+                  }
+              });
+              await setDoc(nextMaasRef, { records: nextMaasRecords, updatedAt: new Date().toISOString() }, { merge: true });
+          }
+
+          // 2) Puantaj meta: bonusları temizle, kapalı durumu ve uygulanan primleri sıfırla
+          const puantajRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${docPrefix}${currentYear}_${currentMonth}`);
+          await setDoc(puantajRef, { bonusRecords: {}, isClosed: false, appliedPrims: {} }, { merge: true });
+
+          setPuantajMeta(prev => ({ ...prev, bonusRecords: {}, isClosed: false, appliedPrims: {} }));
+          addSystemLog('Ay Kapanışı Geri Alındı', `${currentMonth}/${currentYear} dönemi ${collarType} kapanışı geri alındı; bonus puanlar ve ${nextMonth}/${nextYear} maaşına eklenen primler iptal edildi.`);
+      } catch (e) {
+          console.error(e);
+          alert("Geri alma işlemi sırasında hata oluştu.");
+      }
     };
 
     return (
@@ -1125,8 +1163,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                   <Star className="w-4 h-4" /> Ayı Kapat & Primleri Dağıt
                 </button>
             ) : (
-                <div className="w-full md:w-auto bg-purple-100 text-purple-800 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 border border-purple-200 text-sm mt-1 md:mt-0 order-last md:order-none cursor-not-allowed">
-                  <CheckCircle className="w-4 h-4" /> Ay Kapatıldı
+                <div className="flex items-center gap-2 w-full md:w-auto mt-1 md:mt-0 order-last md:order-none">
+                  <div className="flex-1 md:flex-none bg-purple-100 text-purple-800 px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 border border-purple-200 text-sm cursor-not-allowed">
+                    <CheckCircle className="w-4 h-4" /> Ay Kapatıldı
+                  </div>
+                  {/* YENİ: Kapanışı geri al — bonus puanları ve eklenen primleri iptal eder */}
+                  <button onClick={handleUndoCloseMonth} title="Ay kapanışını geri al" className="shrink-0 bg-amber-500 hover:bg-amber-600 text-white px-3 py-2 rounded-lg font-bold flex items-center justify-center gap-1.5 transition shadow-md text-sm">
+                    <ArrowRightLeft className="w-4 h-4" /> Geri Al
+                  </button>
                 </div>
             )}
             <div className="flex items-center w-full md:w-28 justify-center md:justify-end mt-1 md:mt-0">
@@ -2085,8 +2129,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
       const ucretsizIzinSayisi = ucretsizIzinCount; // Ücretsiz izin mesai tablosundan çekilir
       const fazlaGunSayisi = row.fazlaGun !== undefined && row.fazlaGun !== '' ? parseFloat(row.fazlaGun) : fazlaGunCount;
 
-      // Devamsızlık, Rapor ve Ücretsiz İzin doğrudan Mesai Gün Sayısını eksiltir
-      const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzinSayisi);
+      // YENİ: İŞE GİRİŞ günleri (personelin işe başlangıç tarihinden ÖNCEKİ günler) ücretsiz izin gibi
+      // sayılır; bu günler için maaş hesaplanmaz (çalışılmamış kabul edilir).
+      let iseGirisGunSayisi = 0;
+      if (person.startDate) {
+        const _s = new Date(person.startDate + 'T00:00:00');
+        if (!isNaN(_s.getTime())) {
+          const _daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+          const _startMidnight = new Date(_s.getFullYear(), _s.getMonth(), _s.getDate());
+          for (let _d = 1; _d <= _daysInMonth; _d++) {
+            if (new Date(currentYear, currentMonth - 1, _d) < _startMidnight) iseGirisGunSayisi++;
+          }
+        }
+      }
+
+      // Devamsızlık, Rapor, Ücretsiz İzin ve İŞE GİRİŞ günleri doğrudan Mesai Gün Sayısını eksiltir
+      const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzinSayisi - iseGirisGunSayisi);
       const odenecekGun = mesaiGunSayisi;
       
       const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : person.maas) || 0;
@@ -2506,8 +2564,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
       const devamsizlikSayisi = row.devamsizlik !== undefined && row.devamsizlik !== '' ? parseFloat(row.devamsizlik) : devamsiz;
       const rapor = row.rapor !== undefined && row.rapor !== '' ? parseFloat(row.rapor) : raporCount;
       const ucretsizIzinSayisi = ucretsizIzinCount;
-      
-      const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzinSayisi);
+
+      // YENİ: İŞE GİRİŞ günleri (işe başlangıç öncesi) ücretsiz izin gibi sayılır (o günler için ödeme yok)
+      let iseGirisGunSayisi = 0;
+      if (person.startDate) {
+        const _s = new Date(person.startDate + 'T00:00:00');
+        if (!isNaN(_s.getTime())) {
+          const _daysInMonth = new Date(currentYear, currentMonth, 0).getDate();
+          const _startMidnight = new Date(_s.getFullYear(), _s.getMonth(), _s.getDate());
+          for (let _d = 1; _d <= _daysInMonth; _d++) {
+            if (new Date(currentYear, currentMonth - 1, _d) < _startMidnight) iseGirisGunSayisi++;
+          }
+        }
+      }
+
+      const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzinSayisi - iseGirisGunSayisi);
       const odenecekGun = mesaiGunSayisi;
       
       const bankaParasiBase = parseFloat(person.bankaParasi) || 0;

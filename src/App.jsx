@@ -4,7 +4,7 @@ import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'fi
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView } from './Satis.jsx';
-import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView } from './Operasyon.jsx';
+import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView } from './Finans.jsx';
   // ============================================================================
   // GÜNCELLENMİŞ DashboardView — Kendi App.jsx dosyanızdaki eski DashboardView
@@ -2192,6 +2192,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [deleteJobId, setDeleteJobId] = useState(null);
     const [markDamageJobId, setMarkDamageJobId] = useState(null);
     const [resolveDamageModal, setResolveDamageModal] = useState({ isOpen: false, jobId: null, note: '' });
+    // YENİ: Hasarlı İşler "Düzenle" — hasar notu ve (varsa) çözüm notunu düzenleme modalı
+    const [editDamageModal, setEditDamageModal] = useState({ isOpen: false, jobId: null, damageDetails: '', damageResolutionNote: '', damageResolved: false });
 
     const [showChangeDateModal, setShowChangeDateModal] = useState(false);
     const [jobToChangeDate, setJobToChangeDate] = useState(null);
@@ -2647,10 +2649,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         position: cand.position || 'Şoför',
         rank: 'Standart',
         employmentStatus: 'Aktif',
-        email: '', password: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '',
+        email: '', password: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: cand.address || '', profileImage: '',
         bankaParasi: '', maas: cand.expectedSalary || '', yemek: '', yol: '', icrasiVar: 'Hayır',
         startDate: new Date().toISOString().split('T')[0],
         hiredFromCandidate: true, // Aday takip sisteminden geldiğini işaretle
+        ozlukEkstra: (cand.belgeler || []).map(b => ({ id: b.id || Date.now().toString(), label: b.label, url: b.url })), // YENİ: aday belgeleri özlük dosyasına aktarılır
         permissions: { canView: true, canEdit: false },
         createdAt: new Date().toISOString()
       });
@@ -3304,6 +3307,38 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
       addSystemLog('Hasar Çözüldü', `${job.customerName} müşterisinin hasar kaydı çözüldü olarak işaretlendi.`);
       setResolveDamageModal({ isOpen: false, jobId: null, note: '' });
+    };
+
+    // YENİ: Hasarlı İşler "Düzenle" butonu — hasar notunu ve (çözülmüşse) çözüm notunu düzenlemek için modalı açar.
+    const handleOpenEditDamageModal = (job) => {
+      setEditDamageModal({
+        isOpen: true,
+        jobId: job.id,
+        damageDetails: job.endJobDetails?.damageDetails || '',
+        damageResolutionNote: job.endJobDetails?.damageResolutionNote || '',
+        damageResolved: !!job.endJobDetails?.damageResolved
+      });
+    };
+
+    // YENİ: Düzenlenen hasar/çözüm notlarını kaydet
+    const handleEditDamageSubmit = async (e) => {
+      e.preventDefault();
+      if (!firebaseUser || !editDamageModal.jobId) return;
+      const job = jobs.find(j => j.id === editDamageModal.jobId);
+      if (!job) return;
+
+      const updatedEndJobDetails = {
+        ...(job.endJobDetails || {}),
+        damageDetails: editDamageModal.damageDetails,
+        ...(editDamageModal.damageResolved ? { damageResolutionNote: editDamageModal.damageResolutionNote } : {})
+      };
+
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), {
+        endJobDetails: updatedEndJobDetails
+      });
+
+      addSystemLog('Hasar Notu Düzenlendi', `${job.customerName} müşterisinin hasar notu${editDamageModal.damageResolved ? ' ve çözüm notu' : ''} güncellendi.`);
+      setEditDamageModal({ isOpen: false, jobId: null, damageDetails: '', damageResolutionNote: '', damageResolved: false });
     };
 
     const handleAddJob = async (e) => {
@@ -4603,6 +4638,14 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                         <span className="absolute right-4 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{complaints.filter(c => !c.read).length}</span>
                       )}
                     </button>
+                    {/* YENİ: Şirket Evrakları — şirkete ait genel belgelerin yüklenip yönetildiği bölüm */}
+                    <button 
+                      onClick={() => { setActiveTab('sirketEvraklari'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'sirketEvraklari' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sirketEvraklari' ? 'bg-white' : 'bg-green-500'}`}></div> 
+                      Şirket Evrakları
+                    </button>
                   </div>
                 )}
               </div>
@@ -5118,18 +5161,20 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'currentJobs' && showJobList && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
             {activeTab === 'completedJobs' && showJobList && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} handleOpenResolveDamageModal={handleOpenResolveDamageModal} />}
             {activeTab === 'allJobs' && showJobList && <AllJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} />}
-            {activeTab === 'damagedJobs' && showJobList && <DamagedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} handleOpenResolveDamageModal={handleOpenResolveDamageModal} />}
+            {activeTab === 'damagedJobs' && showJobList && <DamagedJobsView jobs={jobs} handleEditJob={handleOpenEditDamageModal} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} handleOpenResolveDamageModal={handleOpenResolveDamageModal} canDelete={isManager} />}
             {activeTab === 'cancelledJobs' && showJobList && <CancelledJobsView jobs={jobs} handleEditJob={handleEditJob} handleRestoreJob={handleRestoreJob} setDeleteJobId={setDeleteJobId} />}
 
             {activeTab === 'customerBlacklist' && showCustomers && <PlaceholderView title="Müşteri Kara Listesi" icon={AlertTriangle} />}
             
             {/* YENİ: Personel Başvuru (Aday Takip) sayfası */}
-            {activeTab === 'personelBasvuru' && showPersonnel && <PersonelBasvuruView positions={positions} currentUser={currentUser} onHire={handleHireCandidate} addSystemLog={addSystemLog} />}
+            {activeTab === 'personelBasvuru' && showPersonnel && <PersonelBasvuruView positions={positions} currentUser={currentUser} onHire={handleHireCandidate} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
             {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} />}
             {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} allPersonnelActions={allPersonnelActions} vehicles={vehicles} currentUser={currentUser} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
+            {/* YENİ: Şirket Evrakları sayfası */}
+            {activeTab === 'sirketEvraklari' && showPersonnel && <SirketEvraklariView db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
             {activeTab === 'addVehicle' && showOperasyon && <AddVehicleView onAdd={handleAddVehicle} onCancel={() => setActiveTab('vehicleList')} />}
             {activeTab === 'vehicleList' && showOperasyon && (
               <>
@@ -6477,6 +6522,36 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   </div>
                   <button type="button" onClick={handleResolveDamageSubmit} className="w-full py-4 bg-green-500 text-white font-black rounded-xl hover:bg-green-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> Çözüldü Olarak Kaydet
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: Hasarlı İşler "Düzenle" modalı — hasar notunu ve (çözülmüşse) çözüm notunu düzenler */}
+        {editDamageModal.isOpen && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
+              <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-red-600 shrink-0">
+                <h3 className="font-bold text-lg flex items-center gap-2"><Edit className="w-5 h-5 text-red-500" /> Hasar Notunu Düzenle</h3>
+                <button onClick={() => setEditDamageModal({ isOpen: false, jobId: null, damageDetails: '', damageResolutionNote: '', damageResolved: false })} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <div className="p-6 overflow-y-auto custom-scrollbar">
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-2">Hasar Notu</label>
+                    <textarea required value={editDamageModal.damageDetails} onChange={e => setEditDamageModal({ ...editDamageModal, damageDetails: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-500 outline-none h-24 resize-none transition text-sm" placeholder="Hasarın ne olduğunu açıklayın."></textarea>
+                  </div>
+                  {/* Çözüm notu sadece daha önce "Çözüldü" işaretlenmişse düzenlenebilir */}
+                  {editDamageModal.damageResolved && (
+                    <div>
+                      <label className="block text-sm font-bold text-black mb-2">Çözüm Notu</label>
+                      <textarea value={editDamageModal.damageResolutionNote} onChange={e => setEditDamageModal({ ...editDamageModal, damageResolutionNote: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none transition text-sm" placeholder="Sorun nasıl çözüldü?"></textarea>
+                    </div>
+                  )}
+                  <button type="button" onClick={handleEditDamageSubmit} className="w-full py-4 bg-red-600 text-white font-black rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                    <Save className="w-5 h-5" /> Değişiklikleri Kaydet
                   </button>
                 </div>
               </div>
