@@ -2251,6 +2251,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const cekimRef = useRef({ sayac: 0, sonZaman: 0, zamanlayici: null });
     const [yenilemeAsamasi, setYenilemeAsamasi] = useState(0); // 0: yok, 1: bir kez çekildi, 2: yenileniyor
     const [isAuthChecking, setIsAuthChecking] = useState(true);
+    // YENİ: Kayıtlı oturum var mı? (varsa açılışta giriş ekranı "flaş" etmesin)
+    const kayitliOturumVar = React.useMemo(() => {
+      try { return !!localStorage.getItem('sembol_crm_user'); } catch (e) { return false; }
+    }, []);
+    const [oturumDenendi, setOturumDenendi] = useState(false);
     const [currentUser, setCurrentUser] = useState(null);
     const [loginError, setLoginError] = useState('');
 
@@ -2376,7 +2381,20 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [positions, setPositions] = useState([]);
     const [ranks, setRanks] = useState([]);
     const [positionModules, setPositionModules] = useState({});
-    const [appBranding, setAppBranding] = useState({ logoUrl: '', logoSize: 100 });
+    // YENİ: Logo önbelleği — Firebase'den marka ayarları gelene kadar (özellikle
+    // açılış/yükleme ekranında) kullanıcının yüklediği logo görünmüyordu, çünkü
+    // appBranding henüz boştu ve varsayılan logoya düşülüyordu. Artık logo
+    // localStorage'da saklanıyor ve uygulama ilk karede doğru logoyla açılıyor.
+    const [appBranding, setAppBranding] = useState(() => {
+      try {
+        const kayitli = localStorage.getItem('sembol_crm_branding');
+        if (kayitli) {
+          const p = JSON.parse(kayitli);
+          return { logoUrl: p.logoUrl || '', logoSize: p.logoSize || 100 };
+        }
+      } catch (e) {}
+      return { logoUrl: '', logoSize: 100 };
+    });
     const [complaints, setComplaints] = useState([]);
     const [companyContacts, setCompanyContacts] = useState([]);
     const [todos, setTodos] = useState([]);
@@ -2624,12 +2642,12 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       }, console.error));
 
       unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'appBranding'), docSnap => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          setAppBranding({ logoUrl: data.logoUrl || '', logoSize: data.logoSize || 100 });
-        } else {
-          setAppBranding({ logoUrl: '', logoSize: 100 });
-        }
+        const yeni = docSnap.exists()
+          ? { logoUrl: docSnap.data().logoUrl || '', logoSize: docSnap.data().logoSize || 100 }
+          : { logoUrl: '', logoSize: 100 };
+        setAppBranding(yeni);
+        // YENİ: Sonraki açılışta logo ilk karede görünsün diye önbelleğe yaz
+        try { localStorage.setItem('sembol_crm_branding', JSON.stringify(yeni)); } catch (e) {}
       }, console.error));
 
       return () => unsubs.forEach(unsub => unsub());
@@ -2653,6 +2671,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             }
           }
         } catch (e) {}
+        // YENİ: Oturum geri yükleme denemesi bitti (başarılı ya da değil)
+        setOturumDenendi(true);
       }
     }, [personnelList, isAuthenticated]); 
 
@@ -4129,13 +4149,21 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     const allDataLoaded = Object.values(dataLoadStatus).every(v => v === true);
 
-    if (isAuthChecking) {
+    // YENİ: Açılış ekranı SADECE gerçekten gerekli olduğunda gösterilir:
+    //  - Firebase kimlik kontrolü sürüyorsa, veya
+    //  - Kayıtlı bir oturum varsa ve o oturum henüz geri yüklenmeye çalışılmadıysa
+    //    (böylece giriş ekranı bir an "flaş" edip kaybolmaz).
+    // Artık TÜM koleksiyonların yüklenmesi BEKLENMİYOR; uygulama hemen açılır,
+    // veriler arka planda geldikçe ekranlara dolar.
+    const acilisEkraniGoster = isAuthChecking || (kayitliOturumVar && !isAuthenticated && !oturumDenendi);
+
+    if (acilisEkraniGoster) {
       return (
         <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
           <img 
             src={appBranding?.logoUrl || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"} 
             alt="Sembol Nakliyat" 
-            className="w-auto object-contain mb-6 animate-pulse drop-shadow-2xl" 
+            className="max-w-[80vw] w-auto object-contain mb-6 animate-pulse drop-shadow-2xl" 
             style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
             onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-4 animate-pulse">S</div>'; }} 
           />
@@ -4159,14 +4187,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       );
     }
 
-    if (!allDataLoaded) {
-      return (
-        <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
-          <Loader2 className="w-12 h-12 text-red-600 animate-spin mb-4" />
-          <p className="font-bold tracking-widest text-neutral-400">BULUT VERİLERİ EŞİTLENİYOR...</p>
-        </div>
-      );
-    }
+    // KALDIRILDI: "BULUT VERİLERİ EŞİTLENİYOR..." tam ekran beklemesi.
+    // Eskiden 12 koleksiyonun TAMAMI yüklenene kadar hiçbir şey gösterilmiyordu; iş
+    // kaydı sayısı arttıkça bu bekleme uzuyordu. Artık uygulama anında açılıyor,
+    // eşitleme sürerken sağ altta küçük bir bilgi rozeti gösteriliyor (aşağıda).
 
     const userPos = currentUser?.position || '';
     const isSuperAdmin = currentUser?.fullName === 'Sistem Yöneticisi' || userPos === 'Firma Sahibi';
@@ -5096,6 +5120,15 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             </button>
           </div>
         </aside>
+
+        {/* YENİ: Arka planda veri eşitlemesi sürerken küçük bilgi rozeti.
+            Uygulamayı ENGELLEMEZ; kullanıcı bu sırada her yerde gezinebilir. */}
+        {!allDataLoaded && (
+          <div className="fixed bottom-4 right-4 z-[60] bg-black/85 backdrop-blur text-white px-3 py-2 rounded-full shadow-xl flex items-center gap-2 pointer-events-none animate-in fade-in">
+            <Loader2 className="w-3.5 h-3.5 text-red-500 animate-spin shrink-0" />
+            <span className="text-[11px] font-black tracking-wide">Veriler eşitleniyor...</span>
+          </div>
+        )}
 
         {/* YENİ: "İki kez yukarı çek → yenile" göstergesi */}
         {yenilemeAsamasi > 0 && (
