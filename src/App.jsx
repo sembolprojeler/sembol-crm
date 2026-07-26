@@ -4887,11 +4887,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {showCalendar && (
               <button 
                 onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-3 rounded-xl bg-gradient-to-r from-neutral-400 via-neutral-200 to-neutral-500 shadow-lg shadow-neutral-400/40 hover:scale-[1.02] ${activeTab === 'calendar' ? 'ring-2 ring-neutral-700/70' : ''}`}
+                className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-3 rounded-xl bg-gradient-to-r from-teal-400 via-cyan-300 to-teal-500 shadow-lg shadow-teal-400/40 hover:scale-[1.02] ${activeTab === 'calendar' ? 'ring-2 ring-teal-800/70' : ''}`}
               >
-                <CalendarDays className="w-5 h-5 shrink-0 text-neutral-700" />
-                {/* YENİ: Gümüş/gri parıltı geçişli, yanıp sönen ışıltılı yazı efekti */}
-                <span className="whitespace-nowrap font-black bg-gradient-to-r from-neutral-600 via-white to-neutral-600 bg-clip-text text-transparent animate-pulse [background-size:200%_auto]">Takvim</span>
+                <CalendarDays className="w-5 h-5 shrink-0 text-teal-900" />
+                {/* YENİ: Turkuz parıltı geçişli, yanıp sönen ışıltılı yazı efekti */}
+                <span className="whitespace-nowrap font-black bg-gradient-to-r from-teal-800 via-white to-teal-800 bg-clip-text text-transparent animate-pulse [background-size:200%_auto]">Takvim</span>
               </button>
             )}
 
@@ -4899,7 +4899,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {showProfileSettings && (
               <button 
                 onClick={() => { setActiveTab('profileSettings'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'profileSettings' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-[#8B5E34] via-[#B98A55] to-[#5C3B1E] text-white shadow-lg shadow-[#5C3B1E]/40 hover:scale-[1.02] ${activeTab === 'profileSettings' ? 'ring-2 ring-white/70' : ''}`}
               >
                 <div className="flex items-center gap-3">
                   <User className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Profilim</span>
