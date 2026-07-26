@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { FileText, CheckCircle, Camera, Upload, Copy, FolderOpen } from 'lucide-react';
+import { FileText, CheckCircle, Camera, Upload, Copy, FolderOpen, X } from 'lucide-react';
   // --- FIREBASE BAĞLANTISI (CANLI / PRODUCTION MODU) ---
   // NOT: Önceki önizleme sürümünde burada bellek içi (in-memory) sahte bir
   // Firestore + Auth katmanı vardı. Canlıya alma kapsamında bu sahte katman
@@ -287,28 +287,46 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
           <span className={compact ? "" : "text-sm font-bold text-neutral-600"}>{buttonLabel || 'Fotoğraf / Video Ekle'}</span>
         </button>
 
+        {/* YENİ: Seçenekler artık açılır kutu (dropdown) değil, EKRANIN ORTASINDA
+            açılan bir pencere. Eskiden menü `absolute` konumluydu ve modal/kart
+            taşma sınırında kırpıldığı için bazı ekranlarda hiç görünmüyordu. */}
         {isOpen && (
-          <>
-            <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)}></div>
-            <div className="absolute left-0 top-full mt-1.5 w-56 bg-white border border-neutral-200 rounded-xl shadow-2xl z-50 overflow-hidden animate-in fade-in zoom-in-95">
-              <button type="button" onClick={() => handlePick(cameraInputRef)} className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-bold text-black hover:bg-neutral-50 transition border-b border-neutral-100">
-                <Camera className="w-4 h-4 text-red-600 shrink-0" /> Şimdi Çek
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setIsOpen(false)}></div>
+            <div className="relative bg-white w-full max-w-xs rounded-2xl shadow-2xl overflow-hidden animate-in fade-in zoom-in-95">
+              <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200">
+                <span className="text-sm font-black text-black">Dosya Ekle</span>
+                <button type="button" onClick={() => setIsOpen(false)} className="text-neutral-400 hover:text-black transition"><X className="w-5 h-5" /></button>
+              </div>
+
+              <button type="button" onClick={() => handlePick(cameraInputRef)} className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold text-black hover:bg-neutral-50 transition border-b border-neutral-100 text-left">
+                <Camera className="w-5 h-5 text-red-600 shrink-0" />
+                <span className="flex-1">Şimdi Çek<span className="block text-[10px] font-bold text-neutral-400">Kamerayı aç (fotoğraf / video)</span></span>
               </button>
-              <button type="button" onClick={() => handlePick(galleryInputRef)} className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-bold text-black hover:bg-neutral-50 transition border-b border-neutral-100">
-                <FolderOpen className="w-4 h-4 text-blue-600 shrink-0" /> Galeriden Yükle
+              <button type="button" onClick={() => handlePick(galleryInputRef)} className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold text-black hover:bg-neutral-50 transition border-b border-neutral-100 text-left">
+                <FolderOpen className="w-5 h-5 text-blue-600 shrink-0" />
+                <span className="flex-1">Galeriden Yükle<span className="block text-[10px] font-bold text-neutral-400">Fotoğraf ve video{multiple ? ' — birden fazla seçilebilir' : ''}</span></span>
               </button>
-              <button type="button" onClick={() => handlePick(fileInputRef)} className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-bold text-black hover:bg-neutral-50 transition">
-                <FileText className="w-4 h-4 text-neutral-600 shrink-0" /> Dosyadan
+              <button type="button" onClick={() => handlePick(fileInputRef)} className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold text-black hover:bg-neutral-50 transition text-left">
+                <FileText className="w-5 h-5 text-neutral-600 shrink-0" />
+                <span className="flex-1">Dosyadan<span className="block text-[10px] font-bold text-neutral-400">PDF, Word, Excel, JPEG{multiple ? ' — birden fazla seçilebilir' : ''}</span></span>
               </button>
+
+              <div className="p-3 bg-neutral-50 border-t border-neutral-200">
+                <button type="button" onClick={() => setIsOpen(false)} className="w-full py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
+              </div>
             </div>
-          </>
+          </div>
         )}
 
         {/* Kamera çekimi doğası gereği tek seferde tek kare verir; 'multiple' burada zararsızdır. */}
         <input ref={cameraInputRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
-        {/* Galeriden ve dosyadan seçimde 'multiple' sayesinde birden fazla fotoğraf/belge tek seferde seçilebilir. */}
+        {/* Galeriden: fotoğraf ve video; 'multiple' ile tek seferde birden fazla seçilebilir. */}
         <input ref={galleryInputRef} type="file" accept="image/*,video/*" multiple={multiple} className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
-        <input ref={fileInputRef} type="file" accept="*/*" multiple={multiple} className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
+        {/* Dosyadan: PDF, Word, Excel, PowerPoint, metin, arşiv, görsel ve video dosyaları */}
+        <input ref={fileInputRef} type="file"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.rtf,.zip,.rar,.heic,.heif,image/*,video/*,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          multiple={multiple} className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
       </div>
     );
   };

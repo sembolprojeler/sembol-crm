@@ -19,6 +19,39 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
   // ============================================================================
   const VARSAYILAN_LOGO = 'https://www.sembolevdeneve.com/wp-content/uploads/2026/07/favicon.webp';
 
+  // ============================================================================
+  // YENİ: SAYFA (MODÜL) KATALOĞU — "ANA ŞEMA"
+  // Kişiye Özel Modül Yetkileri'nde görünen sayfa listesi artık kodda sabit değil;
+  // Firebase'de (settings/company → moduleCatalog) tutulur ve "Modül Görüntüleme"
+  // sayfasından yönetilir. Yeni bir sayfa geliştirildiğinde oradan eklenir,
+  // gereksizler kaldırılır. Aşağıdaki liste yalnızca İLK KURULUM ve
+  // "Varsayılanlara Sıfırla" için kullanılan başlangıç şemasıdır.
+  // ============================================================================
+  const VARSAYILAN_MODUL_KATALOGU = [
+    { id: 'dashboard', label: 'Anasayfa' },
+    { id: 'calendar', label: 'Takvim' },
+    { id: 'profileSettings', label: 'Profilim' },
+    { id: 'addInfo', label: 'Bilgilendirme Ekle' },
+    { id: 'mySpecialTasks', label: 'Özel Görevlerim' },
+    { id: 'addJob', label: 'Satış Bölümü' },
+    { id: 'operasyon', label: 'Operasyon Bölümü' },
+    { id: 'jobList', label: 'İş Listesi' },
+    { id: 'customers', label: 'Müşteri Listesi' },
+    { id: 'personnel', label: 'Personel Listesi' },
+    { id: 'todos', label: 'Yapılacak Listesi' },
+    { id: 'finance', label: 'Finans Yönetimi' },
+    { id: 'auth', label: 'Yetkilendirme' },
+    { id: 'systemFiles', label: 'Sistem Dosyaları' },
+    { id: 'myComplaint', label: 'Şikayet Bildirim' },
+    { id: 'globalSearch', label: 'Arama Barı' },
+    { id: 'globalSearchCustomer', label: 'Arama: Müşteri' },
+    { id: 'globalSearchVehicle', label: 'Arama: Araç' },
+    { id: 'globalSearchPersonnel', label: 'Arama: Personel' },
+    { id: 'davaDosyalari', label: 'Dava Dosyaları' },
+    { id: 'companyContacts', label: 'Şirket İletişimi Yönetimi' }
+  ];
+
+
   const MarkaLogo = ({ logoUrl, className = '', style = {}, fallback = null, alt = 'Sembol Nakliyat' }) => {
     const [hata, setHata] = useState(false);
     const kaynak = logoUrl || VARSAYILAN_LOGO;
@@ -1005,7 +1038,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     </div>
   );
 
-  const TodoListView = ({ todos, handleUpdateTodoStatus, handleDeleteTodo }) => {
+  const TodoListView = ({ todos, handleUpdateTodoStatus, handleDeleteTodo, onAddClick }) => {
     const columns = [
       { id: 'todo', title: 'YAPILACAK', color: 'bg-neutral-800' },
       { id: 'in-progress', title: 'İŞLEME ALINDI', color: 'bg-blue-600' },
@@ -1018,6 +1051,13 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           <h2 className="text-2xl font-bold text-black flex items-center gap-2">
             <ClipboardList className="w-7 h-7 text-red-600" /> Takip ve Yapılacak İşler
           </h2>
+          {/* YENİ: "Yeni Ekle" artık sol menüde değil, burada sağ üstte bir buton */}
+          <button
+            onClick={onAddClick}
+            className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-black rounded-xl transition flex items-center gap-2 shadow-md shadow-red-600/20 shrink-0"
+          >
+            <PlusCircle className="w-4 h-4" /> Yeni Ekle
+          </button>
         </div>
 
         <div className="flex-1 flex gap-6 overflow-x-auto pb-4 custom-scrollbar items-start">
@@ -1087,32 +1127,17 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     </div>
   );
 
-  const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, positionModules }) => {
+  const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, positionModules, moduleCatalog }) => {
     const [editingUser, setEditingUser] = useState(null);
+    // YENİ: Arama + pozisyon/yaka filtresi + alfabetik sıralama
+    const [searchQuery, setSearchQuery] = useState('');
+    const [filterPosition, setFilterPosition] = useState('Tümü');
+    const [filterCollar, setFilterCollar] = useState('Tümü');
 
-    const modules = [
-      { id: 'dashboard', label: 'Anasayfa' },
-      { id: 'calendar', label: 'Takvim' },
-      { id: 'profileSettings', label: 'Profilim' },
-      { id: 'addInfo', label: 'Bilgilendirme Ekle' },
-      { id: 'mySpecialTasks', label: 'Özel Görevlerim' },
-      { id: 'addJob', label: 'Satış Bölümü' },
-      { id: 'operasyon', label: 'Operasyon Bölümü' },
-      { id: 'jobList', label: 'İş Listesi' },
-      { id: 'customers', label: 'Müşteri Listesi' },
-      { id: 'personnel', label: 'Personel Listesi' },
-      { id: 'todos', label: 'Yapılacak Listesi' },
-      { id: 'finance', label: 'Finans Yönetimi' },
-      { id: 'auth', label: 'Yetkilendirme' },
-      { id: 'systemFiles', label: 'Sistem Dosyaları' },
-      { id: 'myComplaint', label: 'Şikayet Bildirim' },
-      { id: 'globalSearch', label: 'Arama Barı' },
-      { id: 'globalSearchCustomer', label: 'Arama: Müşteri' },
-      { id: 'globalSearchVehicle', label: 'Arama: Araç' },
-      { id: 'globalSearchPersonnel', label: 'Arama: Personel' },
-      { id: 'davaDosyalari', label: 'Dava Dosyaları' }, // YENİ: hukuk takip modülü yetkisi (ör. Avukat pozisyonu için)
-      { id: 'companyContacts', label: 'Şirket İletişimi Yönetimi' } // YENİ: sol menüdeki iletişim listesini düzenleme yetkisi
-    ];
+    // YENİ: Kişiye Özel Modül Yetkileri'nde görünen sayfa listesi artık kodda sabit
+    // değil; "Modül Görüntüleme" sayfasından yönetilen ANA ŞEMA'dan (Firebase:
+    // settings/company → moduleCatalog) gelir. Katalog boşsa varsayılan liste kullanılır.
+    const modules = (moduleCatalog && moduleCatalog.length > 0) ? moduleCatalog : VARSAYILAN_MODUL_KATALOGU;
 
     const handleToggleModule = (moduleId, currentMergedState) => {
         const currentModules = editingUser.permissions?.modules || {};
@@ -1126,6 +1151,17 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
         setEditingUser({...editingUser, permissions: updatedPermissions});
     };
 
+    // YENİ: Arama + Pozisyon/Yaka filtresi + Ad Soyad'a göre alfabetik sıralama (tr-TR)
+    const filteredSortedPersonnel = personnelList
+      .filter(p => {
+        const q = searchQuery.trim().toLocaleLowerCase('tr-TR');
+        const matchQuery = !q || (p.fullName || '').toLocaleLowerCase('tr-TR').includes(q) || (p.email || '').toLocaleLowerCase('tr-TR').includes(q);
+        const matchPosition = filterPosition === 'Tümü' || p.position === filterPosition;
+        const matchCollar = filterCollar === 'Tümü' || (p.collarType || 'Mavi Yaka') === filterCollar;
+        return matchQuery && matchPosition && matchCollar;
+      })
+      .sort((a, b) => (a.fullName || '').localeCompare((b.fullName || ''), 'tr-TR'));
+
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-5xl mx-auto">
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
@@ -1134,6 +1170,26 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
         
         <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium mb-6 border border-blue-200">
           Kullanıcıları düzenleyebilir, silebilir veya onlara <b>kişiye özel</b> modül erişim yetkileri atayabilirsiniz. Kişiye özel atanan yetkiler, pozisyon yetkilerini ezer.
+        </div>
+
+        {/* YENİ: Arama + Pozisyon/Yaka filtresi (liste her zaman ada göre alfabetik sıralı) */}
+        <div className="flex flex-col md:flex-row gap-2 mb-4">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="İsim veya e-posta ile ara..."
+              className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-600 transition" />
+          </div>
+          <select value={filterPosition} onChange={e => setFilterPosition(e.target.value)}
+            className="px-3 py-2.5 border border-neutral-300 rounded-xl text-sm bg-white font-medium text-neutral-700 outline-none focus:ring-2 focus:ring-red-600 cursor-pointer">
+            <option value="Tümü">Tüm Pozisyonlar</option>
+            {(positions || []).map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={filterCollar} onChange={e => setFilterCollar(e.target.value)}
+            className="px-3 py-2.5 border border-neutral-300 rounded-xl text-sm bg-white font-medium text-neutral-700 outline-none focus:ring-2 focus:ring-red-600 cursor-pointer">
+            <option value="Tümü">Tüm Yakalar</option>
+            <option value="Mavi Yaka">Mavi Yaka</option>
+            <option value="Beyaz Yaka">Beyaz Yaka</option>
+          </select>
         </div>
 
         <div className="overflow-x-auto">
@@ -1148,7 +1204,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
-              {personnelList.map(person => (
+              {filteredSortedPersonnel.map(person => (
                 <tr key={person.id} className="hover:bg-neutral-50 transition">
                   <td className="p-4 font-bold text-black flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
@@ -1171,9 +1227,11 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
                   </td>
                 </tr>
               ))}
-              {personnelList.length === 0 && (
+              {filteredSortedPersonnel.length === 0 && (
                 <tr>
-                  <td colSpan="5" className="p-6 text-center text-neutral-500">Kayıtlı kullanıcı bulunamadı.</td>
+                  <td colSpan="5" className="p-6 text-center text-neutral-500">
+                    {searchQuery.trim() || filterPosition !== 'Tümü' || filterCollar !== 'Tümü' ? 'Aramanıza uygun kullanıcı bulunamadı.' : 'Kayıtlı kullanıcı bulunamadı.'}
+                  </td>
                 </tr>
               )}
             </tbody>
@@ -1260,8 +1318,20 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     );
   };
 
-  const PositionsView = ({ positions, onAddPosition, onDeletePosition }) => {
+  const PositionsView = ({ positions, onAddPosition, onDeletePosition, onUpdatePosition }) => {
     const [newPos, setNewPos] = useState('');
+    // YENİ: Satır içi isim düzenleme — hangi pozisyon düzenleniyor ve geçici metin
+    const [editingPos, setEditingPos] = useState(null);
+    const [editValue, setEditValue] = useState('');
+
+    const startEdit = (pos) => { setEditingPos(pos); setEditValue(pos); };
+    const cancelEdit = () => { setEditingPos(null); setEditValue(''); };
+    const saveEdit = () => {
+      const trimmed = editValue.trim();
+      if (trimmed && trimmed !== editingPos) onUpdatePosition(editingPos, trimmed);
+      cancelEdit();
+    };
+
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-2xl mx-auto">
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
@@ -1273,9 +1343,31 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
         </div>
         <div className="space-y-2">
           {positions.map((pos, idx) => (
-            <div key={idx} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-200">
-              <span className="font-bold text-black">{pos}</span>
-              <button onClick={() => onDeletePosition(pos)} className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition"><X className="w-4 h-4" /></button>
+            <div key={idx} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-200 gap-2">
+              {editingPos === pos ? (
+                <>
+                  {/* YENİ: İsim düzenleme modu — Enter ile kaydet, Esc ile vazgeç */}
+                  <input
+                    autoFocus
+                    type="text"
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                    className="flex-1 p-2 border border-red-300 rounded-lg outline-none focus:ring-2 focus:ring-red-600 font-bold text-black"
+                  />
+                  <button onClick={saveEdit} className="p-1.5 text-green-600 hover:bg-green-100 rounded-lg transition" title="Kaydet"><CheckCircle className="w-4 h-4" /></button>
+                  <button onClick={cancelEdit} className="p-1.5 text-neutral-500 hover:bg-neutral-200 rounded-lg transition" title="Vazgeç"><X className="w-4 h-4" /></button>
+                </>
+              ) : (
+                <>
+                  <span className="font-bold text-black">{pos}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {/* YENİ: İsim Düzenle butonu */}
+                    <button onClick={() => startEdit(pos)} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition" title="İsmi Düzenle"><Edit className="w-4 h-4" /></button>
+                    <button onClick={() => onDeletePosition(pos)} className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition" title="Sil"><X className="w-4 h-4" /></button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -1283,8 +1375,21 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     );
   };
 
-  const RanksView = ({ ranks, onAddRank, onDeleteRank }) => {
+
+  const RanksView = ({ ranks, onAddRank, onDeleteRank, onUpdateRank }) => {
     const [newRank, setNewRank] = useState('');
+    // YENİ: Satır içi isim düzenleme — hangi rütbe düzenleniyor ve geçici metin
+    const [editingRank, setEditingRank] = useState(null);
+    const [editValue, setEditValue] = useState('');
+
+    const startEdit = (rank) => { setEditingRank(rank); setEditValue(rank); };
+    const cancelEdit = () => { setEditingRank(null); setEditValue(''); };
+    const saveEdit = () => {
+      const trimmed = editValue.trim();
+      if (trimmed && trimmed !== editingRank) onUpdateRank(editingRank, trimmed);
+      cancelEdit();
+    };
+
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-2xl mx-auto">
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
@@ -1296,9 +1401,31 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
         </div>
         <div className="space-y-2">
           {ranks.map((rank, idx) => (
-            <div key={idx} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-200">
-              <span className="font-bold text-black">{rank}</span>
-              <button onClick={() => onDeleteRank(rank)} className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition"><X className="w-4 h-4" /></button>
+            <div key={idx} className="flex justify-between items-center bg-neutral-50 p-3 rounded-xl border border-neutral-200 gap-2">
+              {editingRank === rank ? (
+                <>
+                  {/* YENİ: İsim düzenleme modu — Enter ile kaydet, Esc ile vazgeç */}
+                  <input
+                    autoFocus
+                    type="text"
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                    className="flex-1 p-2 border border-red-300 rounded-lg outline-none focus:ring-2 focus:ring-red-600 font-bold text-black"
+                  />
+                  <button onClick={saveEdit} className="p-1.5 text-green-600 hover:bg-green-100 rounded-lg transition" title="Kaydet"><CheckCircle className="w-4 h-4" /></button>
+                  <button onClick={cancelEdit} className="p-1.5 text-neutral-500 hover:bg-neutral-200 rounded-lg transition" title="Vazgeç"><X className="w-4 h-4" /></button>
+                </>
+              ) : (
+                <>
+                  <span className="font-bold text-black">{rank}</span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    {/* YENİ: İsim Düzenle butonu */}
+                    <button onClick={() => startEdit(rank)} className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-lg transition" title="İsmi Düzenle"><Edit className="w-4 h-4" /></button>
+                    <button onClick={() => onDeleteRank(rank)} className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition" title="Sil"><X className="w-4 h-4" /></button>
+                  </div>
+                </>
+              )}
             </div>
           ))}
         </div>
@@ -1306,7 +1433,23 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     );
   };
 
-  const PermissionsView = ({ personnelList, handleUpdatePermissions }) => (
+  const PermissionsView = ({ personnelList, handleUpdatePermissions, positions }) => {
+    // YENİ: Arama + pozisyon/yaka filtresi + ada göre alfabetik sıralama (tr-TR)
+    const [searchQuery, setSearchQuery] = useState('');
+    const [filterPosition, setFilterPosition] = useState('Tümü');
+    const [filterCollar, setFilterCollar] = useState('Tümü');
+
+    const filteredSortedPersonnel = personnelList
+      .filter(p => {
+        const q = searchQuery.trim().toLocaleLowerCase('tr-TR');
+        const matchQuery = !q || (p.fullName || '').toLocaleLowerCase('tr-TR').includes(q);
+        const matchPosition = filterPosition === 'Tümü' || p.position === filterPosition;
+        const matchCollar = filterCollar === 'Tümü' || (p.collarType || 'Mavi Yaka') === filterCollar;
+        return matchQuery && matchPosition && matchCollar;
+      })
+      .sort((a, b) => (a.fullName || '').localeCompare((b.fullName || ''), 'tr-TR'));
+
+    return (
     <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
       <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
         <Shield className="w-6 h-6 text-red-600" /> İzinler Yönetimi
@@ -1314,6 +1457,27 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
       <div className="bg-red-50 text-red-800 p-4 rounded-xl text-sm font-medium mb-6 border border-red-200">
         Personellerin sisteme müdahale (veri ekleme, silme, düzenleme) ve sisteme giriş yetkilerini buradan yönetebilirsiniz. <b>Düzenleme Yetkisi</b> verilen personeller görüntüleyebildikleri modüllerde değişiklik yapabilirler. Sayfa görünürlükleri "Modül Görüntüleme" alanından belirlenir.
       </div>
+
+      {/* YENİ: Arama + Pozisyon/Yaka filtresi (liste her zaman ada göre alfabetik sıralı) */}
+      <div className="flex flex-col md:flex-row gap-2 mb-4">
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="İsim ile ara..."
+            className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-600 transition" />
+        </div>
+        <select value={filterPosition} onChange={e => setFilterPosition(e.target.value)}
+          className="px-3 py-2.5 border border-neutral-300 rounded-xl text-sm bg-white font-medium text-neutral-700 outline-none focus:ring-2 focus:ring-red-600 cursor-pointer">
+          <option value="Tümü">Tüm Pozisyonlar</option>
+          {(positions || []).map(p => <option key={p} value={p}>{p}</option>)}
+        </select>
+        <select value={filterCollar} onChange={e => setFilterCollar(e.target.value)}
+          className="px-3 py-2.5 border border-neutral-300 rounded-xl text-sm bg-white font-medium text-neutral-700 outline-none focus:ring-2 focus:ring-red-600 cursor-pointer">
+          <option value="Tümü">Tüm Yakalar</option>
+          <option value="Mavi Yaka">Mavi Yaka</option>
+          <option value="Beyaz Yaka">Beyaz Yaka</option>
+        </select>
+      </div>
+
       <div className="overflow-x-auto">
         <table className="w-full text-left text-sm">
           <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600">
@@ -1325,7 +1489,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
             </tr>
           </thead>
           <tbody className="divide-y divide-neutral-100">
-            {personnelList.map(user => (
+            {filteredSortedPersonnel.map(user => (
               <tr key={user.id} className="hover:bg-neutral-50 transition">
                 <td className="p-4 font-bold text-black">{user.fullName}</td>
                 <td className="p-4 text-neutral-600">{user.position} - {user.rank}</td>
@@ -1343,83 +1507,125 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
                 </td>
               </tr>
             ))}
+            {filteredSortedPersonnel.length === 0 && (
+              <tr>
+                <td colSpan="4" className="p-6 text-center text-neutral-500">
+                  {searchQuery.trim() || filterPosition !== 'Tümü' || filterCollar !== 'Tümü' ? 'Aramanıza uygun kullanıcı bulunamadı.' : 'Kayıtlı kullanıcı bulunamadı.'}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
     </div>
-  );
+    );
+  };
 
-const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdatePositionModuleAccess }) => {
-    const modules = [
-      { id: 'dashboard', label: 'Anasayfa' },
-      { id: 'calendar', label: 'Takvim' },
-      { id: 'profileSettings', label: 'Profilim' },
-      { id: 'addInfo', label: 'Bilgilendirme Ekle' },
-      { id: 'mySpecialTasks', label: 'Özel Görevlerim' },
-      { id: 'addJob', label: 'Satış Bölümü' },
-      { id: 'operasyon', label: 'Operasyon Bölümü' },
-      { id: 'jobList', label: 'İş Listesi' },
-      { id: 'customers', label: 'Müşteri Listesi' },
-      { id: 'personnel', label: 'Personel Listesi' },
-      { id: 'todos', label: 'Yapılacak Listesi' },
-      { id: 'finance', label: 'Finans Yönetimi' },
-      { id: 'auth', label: 'Yetkilendirme' },
-      { id: 'systemFiles', label: 'Sistem Dosyaları' },
-      { id: 'myComplaint', label: 'Şikayet Bildirim' },
-      { id: 'globalSearch', label: 'Arama Barı' },
-      { id: 'globalSearchCustomer', label: 'Arama: Müşteri' },
-      { id: 'globalSearchVehicle', label: 'Arama: Araç' },
-      { id: 'globalSearchPersonnel', label: 'Arama: Personel' },
-      { id: 'davaDosyalari', label: 'Dava Dosyaları' }, // YENİ: hukuk takip modülü yetkisi (ör. Avukat pozisyonu için)
-      { id: 'companyContacts', label: 'Şirket İletişimi Yönetimi' } // YENİ: sol menüdeki iletişim listesini düzenleme yetkisi
-    ];
+// YENİDEN TASARLANDI: "Modül Görüntüleme" artık pozisyon bazlı toggle sayfası değil,
+// SAYFA KATALOĞU (ANA ŞEMA) yönetim sayfasıdır. Buradaki liste, her kullanıcının
+// "Kişiye Özel Modül Yetkileri" penceresinde görünen sayfaları belirler:
+//   1) Önce buradan ana şema oluşturulur (sayfa ekle / kaldır),
+//   2) Sonra "Mevcut Kullanıcılar"dan kişi kişi girip o sayfalar açılıp kapatılır.
+// Yeni bir sayfa/bölüm geliştirildiğinde buradan eklenir; tüm değişiklikler
+// anında Firebase'e (settings/company → moduleCatalog) kaydedilir.
+// NOT: Eski pozisyon bazlı yetki VERİLERİ silinmez; arka planda geçerli olmaya
+// devam eder (kişiye özel yetki > pozisyon > rütbe önceliği aynen korunur).
+const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
+    const [yeniEtiket, setYeniEtiket] = useState('');
+    const [yeniAnahtar, setYeniAnahtar] = useState('');
+    const [hata, setHata] = useState('');
+    const [kaydediliyor, setKaydediliyor] = useState(false);
 
-    const allGroups = [...new Set([...(positions || []), ...(ranks || [])])];
+    const katalog = (moduleCatalog && moduleCatalog.length > 0) ? moduleCatalog : VARSAYILAN_MODUL_KATALOGU;
 
-    const handleToggle = (group, moduleId, currentStatus) => {
-      handleUpdatePositionModuleAccess(group, moduleId, !currentStatus);
+    // Kataloğu Firebase'e yaz (tüm değişikliklerin tek kayıt noktası)
+    const katalogKaydet = async (yeniListe, logMesaji) => {
+      setKaydediliyor(true);
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { moduleCatalog: yeniListe });
+        if (logMesaji) addSystemLog?.('Sayfa Kataloğu Güncellendi', logMesaji);
+      } catch (err) { console.error(err); setHata('Kaydedilemedi: ' + err.message); }
+      setKaydediliyor(false);
+    };
+
+    // Yeni sayfa ekleme
+    const handleEkle = async () => {
+      setHata('');
+      const etiket = yeniEtiket.trim();
+      // Anahtar: boşluklar temizlenir; girilmediyse etiketten otomatik türetilir
+      let anahtar = yeniAnahtar.trim().replace(/\s+/g, '');
+      if (!etiket) { setHata('Sayfa adı boş olamaz.'); return; }
+      if (!anahtar) {
+        anahtar = etiket.toLocaleLowerCase('tr-TR')
+          .replace(/[çÇ]/g, 'c').replace(/[ğĞ]/g, 'g').replace(/[ıİi]/g, 'i')
+          .replace(/[öÖ]/g, 'o').replace(/[şŞ]/g, 's').replace(/[üÜ]/g, 'u')
+          .replace(/[^a-z0-9]+/g, '');
+      }
+      if (katalog.some(m => m.id === anahtar)) { setHata(`"${anahtar}" anahtarı zaten listede var.`); return; }
+      await katalogKaydet([...katalog, { id: anahtar, label: etiket }], `"${etiket}" (${anahtar}) sayfası kataloğa eklendi.`);
+      setYeniEtiket(''); setYeniAnahtar('');
+    };
+
+    // Sayfayı katalogdan kaldırma
+    const handleKaldir = async (mod) => {
+      if (!window.confirm(`"${mod.label}" sayfası katalogdan kaldırılacak.\n\nBu sayfa artık Kişiye Özel Modül Yetkileri listesinde GÖRÜNMEYECEK. Daha önce kişilere verilmiş yetki kayıtları silinmez; sayfayı tekrar eklerseniz aynı anahtarla geri gelir.\n\nDevam edilsin mi?`)) return;
+      await katalogKaydet(katalog.filter(m => m.id !== mod.id), `"${mod.label}" (${mod.id}) sayfası katalogdan kaldırıldı.`);
+    };
+
+    // Varsayılan listeyi geri yükleme
+    const handleSifirla = async () => {
+      if (!window.confirm('Sayfa kataloğu varsayılan listeye sıfırlanacak. Sonradan eklediğiniz özel sayfalar listeden çıkar (yetki kayıtları silinmez). Devam edilsin mi?')) return;
+      await katalogKaydet([...VARSAYILAN_MODUL_KATALOGU], 'Sayfa kataloğu varsayılan listeye sıfırlandı.');
     };
 
     return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-4xl mx-auto">
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
-          <Eye className="w-6 h-6 text-red-600" /> Pozisyona Göre Modül Görüntüleme Yetkileri
+          <Eye className="w-6 h-6 text-red-600" /> Modül Görüntüleme — Sayfa Kataloğu (Ana Şema)
         </h2>
+
         <div className="bg-blue-50 text-blue-800 p-4 rounded-xl text-sm font-medium mb-6 border border-blue-200">
-          Bu sayfadan yetkilendirmeleri <b>pozisyonlara göre</b> yönetebilirsiniz. Burada yapacağınız ayarlamalar o pozisyonda çalışan tüm personeller için geçerli olacaktır. Görüntüleme yetkisi olmayan kullanıcılar o modüle erişemezler.
+          Buradaki liste, her kullanıcının <b>Kişiye Özel Modül Yetkileri</b> penceresinde görünen sayfaları belirler.
+          Önce buradan <b>ana şemayı</b> oluşturun (sayfa ekleyin/kaldırın); sonra <b>Mevcut Kullanıcılar</b> bölümünden
+          kişi kişi girip bu sayfaları o kullanıcıya özel açıp kapatın. Tüm değişiklikler anında kaydedilir.
         </div>
-        
-        <div className="space-y-6">
-          {allGroups.map(group => (
-            <div key={group} className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 shadow-sm">
-              <div className="flex items-center gap-3 mb-4 border-b border-neutral-200 pb-3">
-                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold">
-                  <Briefcase className="w-4 h-4" />
-                </div>
-                <div>
-                  <h4 className="font-black text-black">{group}</h4>
-                  <p className="text-[10px] text-neutral-500 font-bold uppercase">Tüm "{group}" personelleri için geçerlidir</p>
-                </div>
+
+        {hata && <div className="bg-red-50 border border-red-200 text-red-700 text-sm font-bold rounded-xl p-3 mb-4">{hata}</div>}
+
+        {/* YENİ SAYFA EKLEME */}
+        <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-4 mb-6">
+          <p className="text-xs font-black text-neutral-700 uppercase tracking-wider mb-3 flex items-center gap-1.5"><PlusCircle className="w-4 h-4 text-red-600" /> Kataloğa Yeni Sayfa Ekle</p>
+          <div className="flex flex-col md:flex-row gap-2">
+            <input value={yeniEtiket} onChange={e => setYeniEtiket(e.target.value)} placeholder="Sayfa Adı (örn: Filo Takibi)"
+              className="flex-1 p-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-600 transition" />
+            <input value={yeniAnahtar} onChange={e => setYeniAnahtar(e.target.value)} placeholder="Sistem Anahtarı (örn: filoTakibi)"
+              className="flex-1 p-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-600 transition font-mono" />
+            <button onClick={handleEkle} disabled={kaydediliyor}
+              className="px-6 py-3 bg-red-600 text-white font-black rounded-xl hover:bg-red-700 transition disabled:opacity-50 whitespace-nowrap">Ekle</button>
+          </div>
+          <p className="text-[11px] text-neutral-400 font-bold mt-2">
+            Sistem anahtarı, yazılımdaki modül anahtarıyla <b>birebir aynı</b> olmalıdır (örn: davaDosyalari). Boş bırakırsanız sayfa adından otomatik türetilir.
+          </p>
+        </div>
+
+        {/* KATALOG LİSTESİ */}
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs font-black text-neutral-500 uppercase tracking-wider">Katalogdaki Sayfalar ({katalog.length})</p>
+          <button onClick={handleSifirla} disabled={kaydediliyor} className="text-[11px] font-black text-neutral-400 hover:text-red-600 transition underline underline-offset-2">Varsayılanlara Sıfırla</button>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {katalog.map(mod => (
+            <div key={mod.id} className="flex items-center justify-between gap-2 bg-white border border-neutral-200 rounded-xl px-3 py-2.5 hover:border-red-300 transition">
+              <div className="min-w-0">
+                <p className="text-sm font-bold text-black truncate">{mod.label}</p>
+                <p className="text-[10px] font-mono text-neutral-400 truncate">{mod.id}</p>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {modules.map(mod => {
-                  const hasAccess = positionModules?.[group]?.[mod.id] ?? false;
-                  return (
-                    <label key={mod.id} className={`flex items-center justify-between p-2.5 rounded-lg border cursor-pointer transition ${hasAccess ? 'bg-blue-50 border-blue-200' : 'bg-white border-neutral-200 hover:bg-neutral-100'}`}>
-                      <span className={`text-xs font-bold ${hasAccess ? 'text-blue-800' : 'text-neutral-600'}`}>{mod.label}</span>
-                      <div className="relative inline-flex items-center">
-                        <input type="checkbox" className="sr-only peer" checked={hasAccess} onChange={() => handleToggle(group, mod.id, hasAccess)} />
-                        <div className="w-7 h-4 bg-neutral-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"></div>
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
+              <button onClick={() => handleKaldir(mod)} disabled={kaydediliyor}
+                className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition shrink-0" title="Katalogdan Kaldır">
+                <X className="w-4 h-4" />
+              </button>
             </div>
           ))}
-          {allGroups.length === 0 && (
-            <p className="text-center text-neutral-500 italic py-4">Sistemde tanımlı pozisyon/rütbe bulunmuyor.</p>
-          )}
         </div>
       </div>
     );
@@ -1981,7 +2187,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     );
   };
 
-  const NotificationsView = ({ notifications, markNotificationsAsRead, currentUser }) => {
+  const NotificationsView = ({ notifications, markNotificationsAsRead, currentUser, canAddInfo, onAddInfo }) => {
     useEffect(() => {
       if (currentUser?.id) {
         markNotificationsAsRead(currentUser.id);
@@ -2005,9 +2211,21 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     return (
       <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-        <h2 className="text-2xl font-black text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
-          <Bell className="w-7 h-7 text-red-600" /> Bildirim Merkezi
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6 border-b border-neutral-200 pb-4">
+          <h2 className="text-2xl font-black text-black flex items-center gap-2">
+            <Bell className="w-7 h-7 text-red-600" /> Bildirim Merkezi
+          </h2>
+          {/* YENİ: "Bilgilendirme Ekle" artık sol menüde ayrı bir bölüm değil,
+              Bildirim Merkezi'nin sağ üstünde bir buton olarak burada. */}
+          {canAddInfo && (
+            <button
+              onClick={onAddInfo}
+              className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-black rounded-xl transition flex items-center gap-2 shadow-md shadow-red-600/20"
+            >
+              <PlusCircle className="w-4 h-4" /> Bilgilendirme Ekle
+            </button>
+          )}
+        </div>
         <div className="space-y-4">
           {myNotifications.length === 0 ? (
              <div className="p-8 text-center bg-neutral-50 rounded-xl border border-neutral-200">
@@ -2037,7 +2255,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     );
   };
 
-  const ProfileSettingsView = ({ currentUser, handleUpdatePersonnel }) => {
+  const ProfileSettingsView = ({ currentUser, handleUpdatePersonnel, showMySpecialTasks, tasks, handleUpdateTaskStatus, showMyComplaint, db, appId, addSystemLog }) => {
     const [editForm, setEditForm] = useState({ 
       personalPhone: currentUser?.personalPhone || '', 
       password: currentUser?.password || '', 
@@ -2045,6 +2263,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     });
     const [isUploading, setIsUploading] = useState(false);
     const [statusMessage, setStatusMessage] = useState({ text: '', type: '' });
+    // YENİ: Giriş şifresi varsayılan olarak gizli; göz ikonuyla geçici açılıp kapanabilir
+    const [sifreGorunur, setSifreGorunur] = useState(false);
 
     const showMessage = (text, type = 'success') => {
       setStatusMessage({ text, type });
@@ -2079,7 +2299,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     };
 
     return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-4xl mx-auto relative">
+      <div className="max-w-4xl mx-auto space-y-6">
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in relative">
          {statusMessage.text && (
             <div className={`absolute top-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full font-bold text-sm shadow-xl z-50 animate-in slide-in-from-top-4 ${statusMessage.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
               {statusMessage.text}
@@ -2118,9 +2339,33 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                <label className="block text-sm font-bold text-neutral-700 mb-1">Kişisel Telefon</label>
                <input type="tel" value={editForm.personalPhone} onChange={e => setEditForm({...editForm, personalPhone: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
              </div>
+             {/* YENİ: Şirket Telefonu — şirket tarafından atanır, buradan sadece görüntülenir */}
+             <div>
+               <label className="block text-sm font-bold text-neutral-700 mb-1">Şirket Telefonu (Değiştirilemez)</label>
+               <input type="text" readOnly value={currentUser?.companyPhone || 'Kayıtlı değil'} className="w-full p-3 border border-neutral-300 rounded-xl bg-neutral-100 text-neutral-500 font-bold outline-none cursor-not-allowed" />
+             </div>
+             {/* YENİ: Doğum Tarihi — Özlük'ten girilir, buradan sadece görüntülenir */}
+             <div>
+               <label className="block text-sm font-bold text-neutral-700 mb-1">Doğum Tarihi (Değiştirilemez)</label>
+               <input type="text" readOnly value={currentUser?.birthDate ? new Date(currentUser.birthDate).toLocaleDateString('tr-TR') : 'Kayıtlı değil'} className="w-full p-3 border border-neutral-300 rounded-xl bg-neutral-100 text-neutral-500 font-bold outline-none cursor-not-allowed" />
+             </div>
              <div>
                <label className="block text-sm font-bold text-neutral-700 mb-1">Giriş Şifresi</label>
-               <input type="text" value={editForm.password} onChange={e => setEditForm({...editForm, password: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+               {/* YENİ: Şifre varsayılan olarak gizli (type="password"); göz ikonuyla geçici görülebilir */}
+               <div className="relative">
+                 <input
+                   type={sifreGorunur ? 'text' : 'password'}
+                   value={editForm.password}
+                   onChange={e => setEditForm({...editForm, password: e.target.value})}
+                   className="w-full p-3 pr-11 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition"
+                 />
+                 <button type="button" onClick={() => setSifreGorunur(v => !v)}
+                   className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-neutral-700 transition"
+                   title={sifreGorunur ? 'Şifreyi Gizle' : 'Şifreyi Göster'}
+                 >
+                   {sifreGorunur ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                 </button>
+               </div>
              </div>
            </div>
 
@@ -2128,6 +2373,21 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
              Bilgilerimi Güncelle
            </button>
          </div>
+      </div>
+
+      {/* YENİ: "Özel Görevlerim" artık sol menüde ayrı bir bölüm değil, Profilim
+          sayfasının bir parçası. Yeni/bitmemiş görev sayısı sol menüdeki
+          "Profilim" yazısının yanında yanıp sönen ışıkla da gösteriliyor. */}
+      {showMySpecialTasks && (
+        <MyTasksView currentUser={currentUser} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />
+      )}
+
+      {/* YENİ: "Şikayet Bildirim" de aynı mantıkla artık sol menüde değil,
+          Profilim sayfasının bir parçası. Sistem/personel/araç sorunlarını
+          buradan yönetime bildirebilirsiniz. */}
+      {showMyComplaint && (
+        <MyComplaintSubmitView currentUser={currentUser} db={db} appId={appId} addSystemLog={addSystemLog} />
+      )}
       </div>
     );
   };
@@ -2319,6 +2579,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [isFinanceSubMenuOpen, setIsFinanceSubMenuOpen] = useState(false);
     const [isSystemFilesSubMenuOpen, setIsSystemFilesSubMenuOpen] = useState(false);
     const [isTodoSubMenuOpen, setIsTodoSubMenuOpen] = useState(false);
+    // YENİ: "Mevcut Kullanıcılar" sayfası artık İzinler Yönetimi ve Modül Görüntüleme'yi
+    // de sekme olarak barındırıyor; bu üçü artık ayrı sol menü öğeleri değil.
+    const [kullaniciYonetimSekme, setKullaniciYonetimSekme] = useState('kullanicilar');
     
     const [isOperasyonSubMenuOpen, setIsOperasyonSubMenuOpen] = useState(false);
     // YENİ: Şirket Dosyaları (Dava Dosyaları vb.) alt menüsünün açık/kapalı durumu
@@ -2413,6 +2676,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [positions, setPositions] = useState([]);
     const [ranks, setRanks] = useState([]);
     const [positionModules, setPositionModules] = useState({});
+    // YENİ: Sayfa kataloğu (Ana Şema) — kişiye özel yetki ekranında listelenen sayfalar
+    const [moduleCatalog, setModuleCatalog] = useState(VARSAYILAN_MODUL_KATALOGU);
     // YENİ: Logo önbelleği — Firebase'den marka ayarları gelene kadar (özellikle
     // açılış/yükleme ekranında) kullanıcının yüklediği logo görünmüyordu, çünkü
     // appBranding henüz boştu ve varsayılan logoya düşülüyordu. Artık logo
@@ -2438,6 +2703,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [draggingTask, setDraggingTask] = useState(null);
     const [newTask, setNewTask] = useState({ title: '', description: '', assignee: 'Tüm Personeller', date: new Date().toISOString().split('T')[0] });
     const [newTodo, setNewTodo] = useState({ title: '', details: '', reminderDate: new Date().toISOString().split('T')[0], priority: 'Normal', status: 'todo' });
+    // YENİ: "Yeni Ekle" artık sol menüde ayrı bir sayfa değil; Takip ve Yapılacak
+    // İşler sayfasının sağ üstünde bir buton/modal olarak açılıyor.
+    const [showAddTodoModal, setShowAddTodoModal] = useState(false);
 
     const [showContactModal, setShowContactModal] = useState(false);
     // YENİ: Şirket İletişimi yönetim penceresi (sıralama / düzenleme / silme tek yerde)
@@ -2662,6 +2930,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           setPositions(data.positions || []);
           setRanks(data.ranks || []);
           setPositionModules(data.positionModules || {});
+          // YENİ: Sayfa kataloğu (Ana Şema) — Firebase'de kayıtlıysa onu, yoksa varsayılan listeyi kullan
+          setModuleCatalog(Array.isArray(data.moduleCatalog) && data.moduleCatalog.length > 0 ? data.moduleCatalog : VARSAYILAN_MODUL_KATALOGU);
         } else {
           const defaultPos = ['Şoför', 'Taşıma Elemanı', 'Muhasebe', 'Mobilya Ustası', 'Satış Personeli', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operasyon', 'Operatör', 'Firma Sahibi'];
           const defaultRanks = ['Müdür', 'Ekip Şefi', 'Asistan', 'Standart', 'Heryerden Usta', 'Kalfa'];
@@ -2806,11 +3076,14 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     }, [activeTab]);
 
     // ========================================================================
-    // YENİ: "İKİ KEZ YUKARI ÇEK → SAYFAYI YENİLE"
-    // Sayfa en üstteyken kullanıcı arka arkaya İKİ kez yukarı doğru çekerse
-    // (mobilde parmakla aşağı sürükleme, masaüstünde yukarı kaydırma/trackpad)
+    // "İKİ KEZ YUKARI ÇEK → SAYFAYI YENİLE" — SADECE MOBİL (dokunmatik)
+    // Sayfa en üstteyken kullanıcı arka arkaya İKİ kez parmağıyla aşağı sürüklerse
     // sayfa yenilenir. İlk çekimde uyarı çıkar, ikincisinde yenileme başlar.
     // Yenileme sonrası kullanıcı aynı bölümde ve sayfanın en üstünde devam eder.
+    // NOT: Masaüstünde (fare/trackpad tekerleği) bu davranış KASITLI OLARAK
+    // devre dışı — normal sayfa kaydırması sırasında yanlışlıkla sayfayı
+    // yenilemesin diye. Masaüstünde yenilemek için tarayıcının kendi
+    // yenileme tuşu / Cmd+R kullanılır.
     // ========================================================================
     useEffect(() => {
       const el = mainScrollRef.current;
@@ -2849,26 +3122,13 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       };
       const onTouchEnd = () => { baslangicY = null; };
 
-      // --- Fare / trackpad (masaüstü): en üstteyken yukarı kaydırma ---
-      let birikim = 0, sonTekerlek = 0;
-      const onWheel = (e) => {
-        if (el.scrollTop > 0 || e.deltaY >= 0) { birikim = 0; return; }
-        const simdi = Date.now();
-        if (simdi - sonTekerlek > 600) birikim = 0; // duraklama olduysa yeni hareket sayılır
-        sonTekerlek = simdi;
-        birikim += -e.deltaY;
-        if (birikim > ESIK * 2) { birikim = 0; cekimAlgilandi(); }
-      };
-
       el.addEventListener('touchstart', onTouchStart, { passive: true });
       el.addEventListener('touchmove', onTouchMove, { passive: true });
       el.addEventListener('touchend', onTouchEnd, { passive: true });
-      el.addEventListener('wheel', onWheel, { passive: true });
       return () => {
         el.removeEventListener('touchstart', onTouchStart);
         el.removeEventListener('touchmove', onTouchMove);
         el.removeEventListener('touchend', onTouchEnd);
-        el.removeEventListener('wheel', onWheel);
         clearTimeout(cekimRef.current.zamanlayici);
       };
     }, [isAuthenticated]);
@@ -2998,6 +3258,32 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { positions: positions.filter(p => p !== posToDelete) });
     };
 
+    // YENİ: Pozisyon adını düzenleme — pozisyon listesindeki adı, o pozisyona
+    // sahip TÜM personelin kaydındaki position alanını VE Modül Görüntüleme'de
+    // o pozisyon adına bağlı yetkileri (positionModules) günceller. Aksi halde
+    // hem seçim kutularında yetim bir isim kalır hem de daha önce o pozisyona
+    // verilmiş modül yetkileri sessizce kaybolurdu.
+    const handleUpdatePosition = async (oldPos, newPosName) => {
+      if (!firebaseUser) return;
+      const trimmed = (newPosName || '').trim();
+      if (!trimmed || trimmed === oldPos) return;
+      const yeniPositions = positions.map(p => p === oldPos ? trimmed : p);
+      const yeniPositionModules = { ...positionModules };
+      if (yeniPositionModules[oldPos] !== undefined) {
+        yeniPositionModules[trimmed] = yeniPositionModules[oldPos];
+        delete yeniPositionModules[oldPos];
+      }
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), {
+        positions: yeniPositions,
+        positionModules: yeniPositionModules
+      });
+      const etkilenenPersonel = personnelList.filter(p => p.position === oldPos);
+      await Promise.all(etkilenenPersonel.map(p =>
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', p.id), { position: trimmed })
+      ));
+      addSystemLog('Pozisyon Adı Güncellendi', `"${oldPos}" pozisyonu "${trimmed}" olarak yeniden adlandırıldı (${etkilenenPersonel.length} personel etkilendi).`);
+    };
+
     const handleAddRank = async (newRank) => {
       if (!firebaseUser) return;
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { ranks: [...ranks, newRank] });
@@ -3006,6 +3292,23 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const handleDeleteRank = async (rankToDelete) => {
       if (!firebaseUser) return;
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), { ranks: ranks.filter(r => r !== rankToDelete) });
+    };
+
+    // YENİ: Rütbe adını düzenleme — hem rütbe listesindeki adı, hem de o rütbeye
+    // sahip TÜM personelin kaydındaki rank alanını günceller (veri tutarlılığı için;
+    // aksi halde seçim kutularında artık listede olmayan eski isim yetim kalırdı).
+    const handleUpdateRank = async (oldRank, newRankName) => {
+      if (!firebaseUser) return;
+      const trimmed = (newRankName || '').trim();
+      if (!trimmed || trimmed === oldRank) return;
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), {
+        ranks: ranks.map(r => r === oldRank ? trimmed : r)
+      });
+      const etkilenenPersonel = personnelList.filter(p => p.rank === oldRank);
+      await Promise.all(etkilenenPersonel.map(p =>
+        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', p.id), { rank: trimmed })
+      ));
+      addSystemLog('Rütbe Adı Güncellendi', `"${oldRank}" rütbesi "${trimmed}" olarak yeniden adlandırıldı (${etkilenenPersonel.length} personel etkilendi).`);
     };
 
     const handleAddVehicle = async (newVehicle) => {
@@ -3100,6 +3403,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'todos'), { ...newTodo, createdBy: currentUser?.fullName, createdAt: new Date().toISOString() });
       setNewTodo({ title: '', details: '', reminderDate: new Date().toISOString().split('T')[0], priority: 'Normal', status: 'todo' });
       setActiveTab('todoList');
+      // YENİ: Kayıt sonrası "Yeni Ekle" modalı otomatik kapanır
+      setShowAddTodoModal(false);
       addSystemLog('Yapılacak Eklendi', `Yeni bir yapılacak iş eklendi: ${newTodo.title}`);
     };
 
@@ -4533,16 +4838,38 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   <span className="text-[10px] text-neutral-400 truncate">{currentUser?.email}</span>
                 </div>
               </div>
-              <button 
-                onClick={() => { setActiveTab('notifications'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-                className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'notifications' ? 'bg-red-600 text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
-                title="Bildirimler"
-              >
-                <Bell className="w-5 h-5" />
-                {unreadNotifCount > 0 && (
-                  <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-neutral-900"></span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* YENİ: "Yapılacak Listesi" artık ayrı bir sol menü değil; bu simgeden
+                    doğrudan "Takip ve Yapılacak İşler" sayfasına gidilir. Bitmemiş iş
+                    varsa yanıp sönen ışık ve sayı rozeti gösterilir. */}
+                {showTodos && (
+                  <button
+                    onClick={() => { setActiveTab('todoList'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
+                    className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'todoList' ? 'bg-red-600 text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
+                    title="Takip ve Yapılacak İşler"
+                  >
+                    <ListTodo className="w-5 h-5" />
+                    {generalTodosCount > 0 && (
+                      <span className="absolute -top-1 -right-1 flex items-center justify-center">
+                        <span className="relative flex w-4 h-4">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex items-center justify-center rounded-full w-4 h-4 bg-red-500 text-white text-[9px] font-black">{generalTodosCount > 9 ? '9+' : generalTodosCount}</span>
+                        </span>
+                      </span>
+                    )}
+                  </button>
                 )}
-              </button>
+                <button 
+                  onClick={() => { setActiveTab('notifications'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
+                  className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'notifications' ? 'bg-red-600 text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
+                  title="Bildirimler"
+                >
+                  <Bell className="w-5 h-5" />
+                  {unreadNotifCount > 0 && (
+                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-neutral-900"></span>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
           
@@ -4551,7 +4878,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {showDashboard && (
               <button 
                 onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'dashboard' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-3 rounded-xl bg-gradient-to-r from-white via-neutral-100 to-neutral-300 text-black shadow-lg shadow-neutral-300/40 hover:scale-[1.02] ${activeTab === 'dashboard' ? 'ring-2 ring-black/70' : ''}`}
               >
                 <Calendar className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Anasayfa</span>
               </button>
@@ -4560,11 +4887,14 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {showCalendar && (
               <button 
                 onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'calendar' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-3 rounded-xl bg-gradient-to-r from-neutral-400 via-neutral-200 to-neutral-500 shadow-lg shadow-neutral-400/40 hover:scale-[1.02] ${activeTab === 'calendar' ? 'ring-2 ring-neutral-700/70' : ''}`}
               >
-                <CalendarDays className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Takvim</span>
+                <CalendarDays className="w-5 h-5 shrink-0 text-neutral-700" />
+                {/* YENİ: Gümüş/gri parıltı geçişli, yanıp sönen ışıltılı yazı efekti */}
+                <span className="whitespace-nowrap font-black bg-gradient-to-r from-neutral-600 via-white to-neutral-600 bg-clip-text text-transparent animate-pulse [background-size:200%_auto]">Takvim</span>
               </button>
             )}
+
 
             {showProfileSettings && (
               <button 
@@ -4574,33 +4904,28 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 <div className="flex items-center gap-3">
                   <User className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Profilim</span>
                 </div>
-              </button>
-            )}
-
-            {showAddInfo && (
-              <button 
-                onClick={() => { setActiveTab('addInfo'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl mt-2 ${activeTab === 'addInfo' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-              >
-                <div className="flex items-center gap-3">
-                  <Bell className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Bilgilendirme Ekle</span>
-                </div>
-              </button>
-            )}
-
-            {showMySpecialTasks && (
-              <button 
-                onClick={() => { setActiveTab('mySpecialTasks'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl mt-2 ${activeTab === 'mySpecialTasks' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-              >
-                <div className="flex items-center gap-3">
-                  <CheckSquare className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Özel Görevlerim</span>
-                </div>
-                {unreadTasksCount > 0 && (
-                  <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{unreadTasksCount}</span>
+                {/* YENİ: "Özel Görevlerim" artık Profilim sayfasının içinde; yeni/bitmemiş
+                    görev varsa burada yanıp sönen ışık ve sayı rozeti gösterilir. */}
+                {showMySpecialTasks && unreadTasksCount > 0 && (
+                  <span className="flex items-center gap-1.5 shrink-0">
+                    <span className="relative flex w-2.5 h-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-500"></span>
+                    </span>
+                    <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{unreadTasksCount}</span>
+                  </span>
                 )}
               </button>
             )}
+
+            {/* NOT: "Bilgilendirme Ekle" sol menüden kaldırıldı — artık Bildirim Merkezi'nin
+                (Bell simgesi) sağ üstünde buton olarak erişiliyor. Sayfa rotası (activeTab
+                === 'addInfo') aynen duruyor, sadece menüdeki kısayol kaldırıldı. */}
+
+            {/* NOT: "Özel Görevlerim" ayrı bir sol menü öğesi olmaktan çıkarıldı;
+                artık "Profilim" sayfasının içinde bir bölüm olarak gösteriliyor
+                (bkz. ProfileSettingsView). Sayfa rotası (activeTab === 'mySpecialTasks')
+                geriye dönük uyumluluk için hâlâ mevcut. */}
 
 {isMaviYakaUser && (
                 <button 
@@ -4695,9 +5020,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     {/* TAŞINDI: Hasarlı İşler butonu, kullanıcı isteğiyle İzin Tahtası'nın altına alındı (kod birebir aynı) */}
                     <button 
                       onClick={() => { setActiveTab('damagedJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'damagedJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'damagedJobs' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'damagedJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Hasarlı İşler
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'damagedJobs' ? 'bg-white' : 'bg-orange-500'}`}></div> Hasarlı İşler
                       {/* YENİ: Çözüm bekleyen hasarlı iş sayısı — yanıp sönen bildirim ışığı ve sayı rozeti */}
                       {(() => {
                         const unresolvedDamageCount = jobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var' && !j.endJobDetails?.damageResolved).length;
@@ -4843,9 +5168,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     {showJobList && (<>
                     <button 
                       onClick={() => { setActiveTab('allJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allJobs' ? 'bg-amber-700 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm İşler
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allJobs' ? 'bg-white' : 'bg-amber-700'}`}></div> Tüm İşler
                     </button>
                     </>)}
                     {/* Müşteri Listesi alt menüsü — "Özel Müşteriler / Kara Liste" sol menüden
@@ -4853,9 +5178,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     {showCustomers && (<>
                     <button 
                       onClick={() => { setActiveTab('allCustomers'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allCustomers' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allCustomers' ? 'bg-amber-700 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allCustomers' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm Müşteriler
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allCustomers' ? 'bg-white' : 'bg-amber-700'}`}></div> Tüm Müşteriler
                     </button>
                     </>)}
                   </div>
@@ -4886,40 +5211,34 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     </button>
                     <button 
                       onClick={() => { setActiveTab('addPersonnel'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addPersonnel' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addPersonnel' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addPersonnel' ? 'bg-white' : 'bg-red-600'}`}></div> Personel Ekle
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addPersonnel' ? 'bg-white' : 'bg-green-500'}`}></div> Personel Ekle
                     </button>
                     <button 
                       onClick={() => { setActiveTab('personnelList'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personnelList' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personnelList' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personnelList' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm Personel
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personnelList' ? 'bg-white' : 'bg-green-500'}`}></div> Tüm Personel
                     </button>
                     <button 
                       onClick={() => { setActiveTab('ozlukDosyalari'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'ozlukDosyalari' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'ozlukDosyalari' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'ozlukDosyalari' ? 'bg-white' : 'bg-red-600'}`}></div> Özlük Dosyaları
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'ozlukDosyalari' ? 'bg-white' : 'bg-green-500'}`}></div> Özlük Dosyaları
                     </button>
                     <button 
                       onClick={() => { setActiveTab('complaints'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'complaints' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'} relative`}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'complaints' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'} relative`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'complaints' ? 'bg-white' : 'bg-red-600'}`}></div> 
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'complaints' ? 'bg-white' : 'bg-green-500'}`}></div> 
                       Şikayet Bildirimleri
                       {complaints.filter(c => !c.read).length > 0 && (
                         <span className="absolute right-4 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{complaints.filter(c => !c.read).length}</span>
                       )}
                     </button>
-                    {/* YENİ: Şirket Evrakları — şirkete ait genel belgelerin yüklenip yönetildiği bölüm */}
-                    <button 
-                      onClick={() => { setActiveTab('sirketEvraklari'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'sirketEvraklari' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sirketEvraklari' ? 'bg-white' : 'bg-green-500'}`}></div> 
-                      Şirket Evrakları
-                    </button>
+                    {/* NOT: İK altındaki eski "Şirket Evrakları" (sirketEvraklari) menüden kaldırıldı —
+                        aynı işlev artık "Şirket Dosyaları" ana menüsü altında (sirketBelgeleri) yönetiliyor. */}
                   </div>
                 )}
               </div>
@@ -4965,109 +5284,51 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {showTodos && (
-              <div className="flex flex-col gap-1">
-                <button 
-                  onClick={() => { setIsTodoSubMenuOpen(!isTodoSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'addTodo' || activeTab === 'todoList') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <ListTodo className={`w-5 h-5 shrink-0 ${(activeTab === 'addTodo' || activeTab === 'todoList') ? 'text-red-500' : ''}`} /> 
-                    <span className="whitespace-nowrap">Yapılacak Listesi</span>
-                    {generalTodosCount > 0 && (
-                      <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{generalTodosCount}</span>
-                    )}
-                  </div>
-                  {isTodoSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-                
-                {isTodoSubMenuOpen && (
-                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
-                    <button 
-                      onClick={() => { setActiveTab('addTodo'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addTodo' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addTodo' ? 'bg-white' : 'bg-red-600'}`}></div> Yeni Ekle
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('todoList'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'todoList' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'todoList' ? 'bg-white' : 'bg-red-600'}`}></div> <span className="whitespace-nowrap">Takip ve Yapılacaklar</span>
-                      </div>
-                      {generalTodosCount > 0 && (
-                        <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{generalTodosCount}</span>
-                      )}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            {/* NOT: "Yapılacak Listesi" sol menüden kaldırıldı — artık üstteki
+                Bildirim (zil) simgesinin yanındaki liste simgesinden erişiliyor.
+                Sayfa rotası (activeTab === 'todoList') aynen duruyor. */}
 
-            {showAuth && (
-              <div className="flex flex-col gap-1">
-                <button 
-                  onClick={() => { setIsAuthSubMenuOpen(!isAuthSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'userList' || activeTab === 'positions' || activeTab === 'ranks' || activeTab === 'permissions' || activeTab === 'moduleAccess') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Shield className={`w-5 h-5 shrink-0 ${(activeTab === 'userList' || activeTab === 'positions' || activeTab === 'ranks' || activeTab === 'permissions' || activeTab === 'moduleAccess') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Yetkilendirme</span>
-                  </div>
-                  {isAuthSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-                
-                {isAuthSubMenuOpen && (
-                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
-                    <button 
-                      onClick={() => { setActiveTab('userList'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'userList' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'userList' ? 'bg-white' : 'bg-red-600'}`}></div> Mevcut Kullanıcılar
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('positions'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'positions' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'positions' ? 'bg-white' : 'bg-red-600'}`}></div> Pozisyonlar
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('ranks'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'ranks' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'ranks' ? 'bg-white' : 'bg-red-600'}`}></div> Rütbeler
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('permissions'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'permissions' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'permissions' ? 'bg-white' : 'bg-red-600'}`}></div> İzinler Yönetimi
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('moduleAccess'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'moduleAccess' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'moduleAccess' ? 'bg-white' : 'bg-red-600'}`}></div> Modül Görüntüleme
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {showSystemFiles && (
+            {/* YENİ: "Yetkilendirme" artık ayrı bir ana menü değil; alt öğeleri (Mevcut
+                Kullanıcılar, Pozisyonlar, Rütbeler, İzinler Yönetimi, Modül Görüntüleme)
+                "Sistem Dosyaları" menüsünün altına taşındı. Yetki kontrolleri (showAuth /
+                showSystemFiles) öğe bazında AYNEN korunuyor, sadece tek başlık altında
+                toplandılar. Başlığın arka planı artık Finans Bölümü'ndeki gibi HER ZAMAN
+                renk geçişli — burada kırmızı tonlarda. */}
+            {(showAuth || showSystemFiles) && (
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsSystemFilesSubMenuOpen(!isSystemFilesSubMenuOpen); setIsAuthSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${(activeTab === 'backupSystem' || activeTab === 'systemLogs' || activeTab === 'userActivities' || activeTab === 'companyPasswords') ? 'bg-neutral-900 text-white border border-neutral-800' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-red-500 via-red-600 to-red-800 text-white shadow-lg shadow-red-700/30 hover:scale-[1.02]`}
                 >
                   <div className="flex items-center gap-3">
-                    <FileText className={`w-5 h-5 shrink-0 ${(activeTab === 'backupSystem' || activeTab === 'systemLogs' || activeTab === 'userActivities' || activeTab === 'companyPasswords') ? 'text-red-500' : ''}`} /> <span className="whitespace-nowrap">Sistem Dosyaları</span>
+                    <FileText className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Sistem Dosyaları</span>
                   </div>
                   {isSystemFilesSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
                 
                 {isSystemFilesSubMenuOpen && (
                   <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    {/* Eskiden "Yetkilendirme" başlığı altındaydı — yetki kontrolü (showAuth) aynen korunuyor */}
+                    {showAuth && (<>
+                    <button 
+                      onClick={() => { setActiveTab('userList'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'userList' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'userList' ? 'bg-white' : 'bg-red-600'}`}></div> Mevcut Kullanıcılar
+                    </button>
+                    {/* NOT: "Pozisyonlar" ve "Rütbeler" de artık ayrı sol menü öğeleri
+                        değil; "Mevcut Kullanıcılar" sayfasının içine sekme olarak taşındı
+                        (bkz. UserListView üstündeki sekme çubuğu). Sayfa rotaları
+                        (activeTab === 'positions' / 'ranks') geriye dönük uyumluluk için
+                        hâlâ mevcut. */}
+                    {/* NOT: "İzinler Yönetimi" ve "Modül Görüntüleme" artık ayrı sol menü
+                        öğeleri değil; "Mevcut Kullanıcılar" sayfasının içine sekme olarak
+                        taşındı (bkz. UserListView üstündeki sekme çubuğu). Sayfa rotaları
+                        (activeTab === 'permissions' / 'moduleAccess') geriye dönük
+                        uyumluluk için hâlâ mevcut. */}
+                    </>)}
+                    {/* Sistem Dosyaları'nın kendi mevcut öğeleri — showSystemFiles aynen korunuyor */}
+                    {showSystemFiles && (<>
                     <button 
                       onClick={() => { setActiveTab('backupSystem'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'backupSystem' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -5092,30 +5353,25 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'companyPasswords' ? 'bg-white' : 'bg-red-600'}`}></div> Kurumsal Şifreler
                     </button>
+                    {/* YENİ: "Uygulama Ayarları" artık ayrı bir ana menü değil,
+                        Sistem Dosyaları'nın alt menüsüne taşındı. */}
+                    <button 
+                      onClick={() => { setActiveTab('appSettings'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'appSettings' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'appSettings' ? 'bg-white' : 'bg-red-600'}`}></div> Uygulama Ayarları
+                    </button>
+                    </>)}
                   </div>
                 )}
               </div>
             )}
 
-            {showSystemFiles && (
-              <button 
-                onClick={() => { setActiveTab('appSettings'); setIsSidebarOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'appSettings' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-              >
-                <Sparkles className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Uygulama Ayarları</span>
-              </button>
-            )}
 
-            {showMyComplaint && (
-              <button 
-                onClick={() => { setActiveTab('myComplaint'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl mt-2 ${activeTab === 'myComplaint' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-              >
-                <div className="flex items-center gap-3">
-                  <AlertTriangle className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Şikayet Bildirim</span>
-                </div>
-              </button>
-            )}
+            {/* NOT: "Şikayet Bildirim" ayrı bir sol menü öğesi olmaktan çıkarıldı;
+                artık "Özel Görevlerim" gibi "Profilim" sayfasının içinde bir bölüm
+                olarak gösteriliyor (bkz. ProfileSettingsView). Sayfa rotası
+                (activeTab === 'myComplaint') geriye dönük uyumluluk için hâlâ mevcut. */}
 
           </nav>
 
@@ -5293,9 +5549,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {/* YENİ: Avukat pozisyonundaki kullanıcıya TAMAMEN ÖZEL anasayfa (hukuk odaklı, maaş/mesai içermez) */}
             {activeTab === 'dashboard' && showDashboard && isAvukatUser && <AvukatDashboardView currentUser={currentUser} setActiveTab={setActiveTab} setViewingImage={setViewingImage} />}
             {activeTab === 'dashboard' && showDashboard && !isAvukatUser && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions} />}
-            {activeTab === 'notifications' && <NotificationsView notifications={visibleNotifications} markNotificationsAsRead={markNotificationsAsRead} currentUser={currentUser} />}
+            {activeTab === 'notifications' && <NotificationsView notifications={visibleNotifications} markNotificationsAsRead={markNotificationsAsRead} currentUser={currentUser} canAddInfo={showAddInfo} onAddInfo={() => setActiveTab('addInfo')} />}
             {activeTab === 'calendar' && showCalendar && <CalendarView jobs={currentUser?.position === 'Operatör' ? jobs : visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} setJobToChangeDate={setJobToChangeDate} setNewJobDate={setNewJobDate} setShowChangeDateModal={setShowChangeDateModal} setCancelJobId={setCancelJobId} />}
-            {activeTab === 'profileSettings' && showProfileSettings && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} />}
+            {activeTab === 'profileSettings' && showProfileSettings && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} showMySpecialTasks={showMySpecialTasks} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} showMyComplaint={showMyComplaint} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'myAssignedJobs' && <MyAssignedJobsView currentUser={currentUser} jobs={visibleJobs} handleOpenEndJobModal={handleOpenEndJobModal} markNotificationsAsRead={markNotificationsAsRead} />}
             {activeTab === 'mySpecialTasks' && showMySpecialTasks && <MyTasksView currentUser={currentUser} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
             
@@ -5418,7 +5674,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             )}
 
             {activeTab === 'myComplaint' && showMyComplaint && <MyComplaintSubmitView currentUser={currentUser} db={db} appId={appId} addSystemLog={addSystemLog} />}
-            {activeTab === 'addInfo' && showAddInfo && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
+            {activeTab === 'addInfo' && showAddInfo && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} onBack={() => setActiveTab('notifications')} />}
             
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
               <div className="space-y-4">
@@ -5815,8 +6071,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'vehicleMaintenance' && showOperasyon && <VehicleMaintenanceView vehicles={vehicles} onUpdateVehicle={handleUpdateVehicle} addSystemLog={addSystemLog} />}
             {activeTab === 'vehicleProfile' && showOperasyon && <VehicleProfileView vehicleId={viewingVehicleProfileId} vehicles={vehicles} jobs={jobs} handleEditJob={handleEditJob} setViewingRuhsatUrl={setViewingRuhsatUrl} onBack={() => setActiveTab('vehicleList')} />}
 
-            {activeTab === 'addTodo' && showTodos && <AddTodoView newTodo={newTodo} setNewTodo={setNewTodo} handleAddTodo={handleAddTodo} />}
-            {activeTab === 'todoList' && showTodos && <TodoListView todos={todos} handleUpdateTodoStatus={handleUpdateTodoStatus} handleDeleteTodo={handleDeleteTodo} />}
+            {/* NOT: "Yeni Ekle" artık tam sayfa değil, aşağıda modal olarak render ediliyor (showAddTodoModal) */}
+            {activeTab === 'todoList' && showTodos && <TodoListView todos={todos} handleUpdateTodoStatus={handleUpdateTodoStatus} handleDeleteTodo={handleDeleteTodo} onAddClick={() => setShowAddTodoModal(true)} />}
 
             {activeTab === 'materialList' && showOperasyon && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} onUpdateStock={handleUpdateMaterialStock} onAdd={handleAddMaterial} systemLogs={systemLogs} />}
             
@@ -5846,10 +6102,45 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               />
             }
             
-            {activeTab === 'userList' && showAuth && <UserListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} onDelete={handleDeletePersonnel} positions={positions} ranks={ranks} positionModules={positionModules} />}            {activeTab === 'positions' && showAuth && <PositionsView positions={positions} onAddPosition={handleAddPosition} onDeletePosition={handleDeletePosition} />}
-            {activeTab === 'ranks' && showAuth && <RanksView ranks={ranks} onAddRank={handleAddRank} onDeleteRank={handleDeleteRank} />}
-            {activeTab === 'permissions' && showAuth && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} />}
-            {activeTab === 'moduleAccess' && showAuth && <ModuleAccessView positions={positions} ranks={ranks} positionModules={positionModules} handleUpdatePositionModuleAccess={handleUpdatePositionModuleAccess} />}
+            {activeTab === 'userList' && showAuth && (
+              <div className="max-w-5xl mx-auto">
+                {/* YENİ: Mevcut Kullanıcılar / İzinler Yönetimi / Modül Görüntüleme / Pozisyonlar /
+                    Rütbeler artık aynı sayfada sekme olarak bir arada; ayrı sol menü öğeleri kaldırıldı. */}
+                <div className="flex flex-wrap gap-2 mb-4 bg-neutral-100 p-1.5 rounded-xl">
+                  <button onClick={() => setKullaniciYonetimSekme('kullanicilar')}
+                    className={`flex-1 min-w-[140px] py-2.5 px-3 rounded-lg text-sm font-black transition flex items-center justify-center gap-2 ${kullaniciYonetimSekme === 'kullanicilar' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+                    <Users className="w-4 h-4" /> Mevcut Kullanıcılar
+                  </button>
+                  <button onClick={() => setKullaniciYonetimSekme('izinler')}
+                    className={`flex-1 min-w-[140px] py-2.5 px-3 rounded-lg text-sm font-black transition flex items-center justify-center gap-2 ${kullaniciYonetimSekme === 'izinler' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+                    <Shield className="w-4 h-4" /> İzinler Yönetimi
+                  </button>
+                  <button onClick={() => setKullaniciYonetimSekme('modul')}
+                    className={`flex-1 min-w-[140px] py-2.5 px-3 rounded-lg text-sm font-black transition flex items-center justify-center gap-2 ${kullaniciYonetimSekme === 'modul' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+                    <Eye className="w-4 h-4" /> Modül Görüntüleme
+                  </button>
+                  <button onClick={() => setKullaniciYonetimSekme('pozisyonlar')}
+                    className={`flex-1 min-w-[140px] py-2.5 px-3 rounded-lg text-sm font-black transition flex items-center justify-center gap-2 ${kullaniciYonetimSekme === 'pozisyonlar' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+                    <Briefcase className="w-4 h-4" /> Pozisyonlar
+                  </button>
+                  <button onClick={() => setKullaniciYonetimSekme('rutbeler')}
+                    className={`flex-1 min-w-[140px] py-2.5 px-3 rounded-lg text-sm font-black transition flex items-center justify-center gap-2 ${kullaniciYonetimSekme === 'rutbeler' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>
+                    <Star className="w-4 h-4" /> Rütbeler
+                  </button>
+                </div>
+                {kullaniciYonetimSekme === 'kullanicilar' && <UserListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} onDelete={handleDeletePersonnel} positions={positions} ranks={ranks} positionModules={positionModules} moduleCatalog={moduleCatalog} />}
+                {kullaniciYonetimSekme === 'izinler' && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} positions={positions} />}
+                {kullaniciYonetimSekme === 'modul' && <ModuleAccessView moduleCatalog={moduleCatalog} addSystemLog={addSystemLog} />}
+                {kullaniciYonetimSekme === 'pozisyonlar' && <PositionsView positions={positions} onAddPosition={handleAddPosition} onDeletePosition={handleDeletePosition} onUpdatePosition={handleUpdatePosition} />}
+                {kullaniciYonetimSekme === 'rutbeler' && <RanksView ranks={ranks} onAddRank={handleAddRank} onDeleteRank={handleDeleteRank} onUpdateRank={handleUpdateRank} />}
+              </div>
+            )}
+            {/* NOT: "Pozisyonlar" ve "Rütbeler" sayfa rotaları (activeTab === 'positions' / 'ranks')
+                geriye dönük uyumluluk için hâlâ mevcut; menüden erişim yukarıdaki sekmelerden yapılır. */}
+            {activeTab === 'positions' && showAuth && <PositionsView positions={positions} onAddPosition={handleAddPosition} onDeletePosition={handleDeletePosition} onUpdatePosition={handleUpdatePosition} />}
+            {activeTab === 'ranks' && showAuth && <RanksView ranks={ranks} onAddRank={handleAddRank} onDeleteRank={handleDeleteRank} onUpdateRank={handleUpdateRank} />}
+            {activeTab === 'permissions' && showAuth && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} positions={positions} />}
+            {activeTab === 'moduleAccess' && showAuth && <ModuleAccessView moduleCatalog={moduleCatalog} addSystemLog={addSystemLog} />}
             
             {activeTab === 'backupSystem' && showSystemFiles && <SystemFilesView jobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'systemLogs' && showSystemFiles && <SystemLogsView logs={systemLogs} />}
@@ -6908,6 +7199,22 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                     <Save className="w-5 h-5" /> Değişiklikleri Kaydet
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: "YENİ EKLE" (Yapılacak İş) MODALI — Takip ve Yapılacak İşler
+            sayfasının sağ üstündeki butonla açılır; sol menüde ayrı sayfa değildir. */}
+        {showAddTodoModal && showTodos && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+              <div className="bg-red-700 text-white p-4 flex justify-between items-center sticky top-0 z-10">
+                <h3 className="font-bold text-lg flex items-center gap-2"><ListTodo className="w-5 h-5" /> Yeni Yapılacak İş Ekle</h3>
+                <button onClick={() => setShowAddTodoModal(false)} className="text-red-200 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <div className="p-2">
+                <AddTodoView newTodo={newTodo} setNewTodo={setNewTodo} handleAddTodo={handleAddTodo} />
               </div>
             </div>
           </div>

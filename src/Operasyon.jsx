@@ -144,7 +144,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     )
   };
 
-  export const AddInfoView = ({ currentUser, personnelList, addSystemLog }) => {
+  export const AddInfoView = ({ currentUser, personnelList, addSystemLog, onBack }) => {
     const [infoType, setInfoType] = useState('Duyuru'); // Duyuru, Paylaşım, En İyiler
 
     // Form States
@@ -269,6 +269,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
     return (
       <>
+        {/* YENİ: Bu sayfa artık sol menüde değil, Bildirim Merkezi'nin sağ üstündeki
+            butondan açılıyor; bu yüzden geri dönüş bağlantısı eklendi. */}
+        {onBack && (
+          <div className="max-w-2xl mx-auto mb-3">
+            <button onClick={onBack} className="text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
+              <ChevronLeft className="w-4 h-4" /> Bildirim Merkezi'ne Dön
+            </button>
+          </div>
+        )}
         <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
             <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
                 <Bell className="w-6 h-6 text-red-600" /> Bilgilendirme Ekle
@@ -3906,7 +3915,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const [formData, setFormData] = useState({
       fullName: '', email: '', password: '', position: positions?.[0] || 'Şoför', rank: ranks?.[0] || 'Standart',
       collarType: 'Mavi Yaka', employmentStatus: 'Aktif',
-      personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '',
+      personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '', birthDate: '',
       bankaParasi: '', maas: '', yemek: '', yol: '', icrasiVar: 'Hayır', startDate: new Date().toISOString().split('T')[0]
     });
     const [isUploading, setIsUploading] = useState(false);
@@ -3937,7 +3946,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       setFormData({
         fullName: '', email: '', password: '', position: positions?.[0] || 'Şoför', rank: ranks?.[0] || 'Standart',
         collarType: 'Mavi Yaka', employmentStatus: 'Aktif',
-        personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '',
+        personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '', birthDate: '',
         bankaParasi: '', maas: '', yemek: '', yol: '', icrasiVar: 'Hayır', startDate: new Date().toISOString().split('T')[0]
       });
       alert('Personel başarıyla sisteme eklendi!');
@@ -3988,6 +3997,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">İşe Başlama Tarihi</label>
               <input type="date" value={formData.startDate} onChange={e => setFormData({...formData, startDate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-medium text-neutral-700" />
+            </div>
+            {/* YENİ: Doğum Tarihi — Profilim sayfasında salt-okunur gösterilir */}
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Doğum Tarihi</label>
+              <input type="date" value={formData.birthDate || ''} onChange={e => setFormData({...formData, birthDate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-medium text-neutral-700" />
             </div>
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">SetCard Numarası</label>
@@ -4284,6 +4298,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                   <div>
                     <label className="block text-sm font-bold text-neutral-700 mb-1">İşe Başlama Tarihi</label>
                     <input type="date" value={editingUser.startDate || ''} onChange={e => setEditingUser({...editingUser, startDate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-medium text-neutral-700" />
+                  </div>
+                  {/* YENİ: Doğum Tarihi — Profilim sayfasında salt-okunur gösterilir */}
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Doğum Tarihi</label>
+                    <input type="date" value={editingUser.birthDate || ''} onChange={e => setEditingUser({...editingUser, birthDate: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-medium text-neutral-700" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-neutral-700 mb-1">SetCard Numarası</label>
@@ -7372,6 +7391,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       { id: 'tutanaklar', label: 'Tutanaklar' },
       { id: 'icraDosyasi', label: 'İcra Dosyası' },
       { id: 'isGuvenligi', label: 'İş Güvenliği' },
+      // YENİ: KVKK Aydınlatma/Rıza Metni ve Maaş Bordroları
+      { id: 'kvkk', label: 'KVKK Aydınlatma Metni' },
+      { id: 'maasBordro', label: 'Maaş Bordrosu' },
       { id: 'digerBelgeler', label: 'Diğer Belgeler' }
     ];
 
@@ -7955,6 +7977,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-700 mb-2">
                       <span className="truncate flex-1"><MapPin className="w-3 h-3 inline mr-0.5 text-neutral-400"/>{job.fromDistrict} ➔ {job.toDistrict || '?'}</span>
                     </div>
+                    {/* YENİ: Eşya Durumu (Teslim Durumu'ndan ÖNCE) + Teslim Şekli.
+                        Eşya durumu seçilmemişse varsayılan "Kendisi Topladı" gösterilir. */}
+                    <div className="flex flex-wrap gap-1 mb-1.5 items-center">
+                      <span className="text-[9px] font-bold text-neutral-400">Eşya:</span>
+                      {(job.esyaDurumu && job.esyaDurumu.length > 0)
+                        ? job.esyaDurumu.map(e => (
+                            <span key={e} className="text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded">{e}</span>
+                          ))
+                        : <span className="text-[9px] font-bold bg-neutral-100 text-neutral-500 border border-neutral-200 px-1.5 py-0.5 rounded">Kendisi Topladı</span>}
+                    </div>
                     {/* YENİ: Teslim Şekli her zaman gösterilir; seçim yoksa "Yok" etiketi (eski kayıtlar dahil) */}
                     <div className="flex flex-wrap gap-1 mb-2 items-center">
                       <span className="text-[9px] font-bold text-neutral-400">Teslim:</span>
@@ -7963,6 +7995,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                             <span key={w} className="text-[9px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded">{w}</span>
                           ))
                         : <span className="text-[9px] font-bold bg-neutral-100 text-neutral-500 border border-neutral-200 px-1.5 py-0.5 rounded">Yok</span>}
+                    </div>
+                    {/* YENİ: İşin anlaşılan fiyatı (varsa kapora da gösterilir) */}
+                    <div className="flex items-center justify-between gap-2 mb-2 bg-white border border-green-200 rounded px-1.5 py-1">
+                      <span className="text-[9px] font-bold text-neutral-400 uppercase">Fiyat</span>
+                      <span className="text-[11px] font-black text-green-700">
+                        {job.price ? `₺${(parseFloat(job.price) || 0).toLocaleString('tr-TR')}` : 'Belirtilmemiş'}
+                        {job.deposit && parseFloat(job.deposit) > 0 && (
+                          <span className="text-[9px] font-bold text-neutral-400 ml-1">(Kapora ₺{(parseFloat(job.deposit) || 0).toLocaleString('tr-TR')})</span>
+                        )}
+                      </span>
                     </div>
                     <div className="text-[11px] font-bold text-neutral-700 bg-white p-1.5 rounded border border-neutral-200 shadow-sm flex items-center gap-1">
                       <User className="w-3.5 h-3.5 text-blue-600" /> {job.team}
