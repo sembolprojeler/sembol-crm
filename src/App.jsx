@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF } from './shared.jsx';
-import { AddJobView, CustomerListView, CustomerProfileView } from './Satis.jsx';
-import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView } from './Operasyon.jsx';
+import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar } from './Satis.jsx';
+import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView } from './Finans.jsx';
   // ============================================================================
   // GÜNCELLENMİŞ DashboardView — Kendi App.jsx dosyanızdaki eski DashboardView
@@ -17,22 +17,43 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     const [viewingDashboardJob, setViewingDashboardJob] = useState(null);
     // YENİ: "Son Kaydedilen İşler" için dönem filtresi (bugün/hafta/ay/tümü)
     const [sonKayitFilter, setSonKayitFilter] = useState('all');
+    // YENİ: "Tümünü Gör" — liste varsayılan olarak 15 kayıtla sınırlıdır, butonla tamamı açılır
+    const [sonKayitHepsi, setSonKayitHepsi] = useState(false);
 
     const isAdmin = ['Müdür', 'Firma Sahibi', 'Operasyon'].some(role => currentUser?.position?.includes(role) || currentUser?.rank === role) || currentUser?.permissions?.canEdit;
 
     const today = new Date();
-    const todayStr = today.toISOString().split('T')[0];
+    // DÜZELTME: toISOString() tarihi UTC'ye kaydırdığı için gece/sabah saatlerinde
+    // kayıtlar yanlış güne düşüyordu. Artık yerel (Türkiye) tarihine göre anahtar üretilir.
+    const localGunKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const todayStr = localGunKey(today);
     const todayMonth = today.getMonth();
     const todayYear = today.getFullYear();
 
+    // YENİ: Bir işin GERÇEK kayıt (oluşturulma) zamanını döndürür.
+    // ÖNEMLİ: Artık taşıma tarihine (job.date) geri düşülmez! Eskiden createdAt yoksa
+    // taşıma tarihi kayıt zamanı sanılıyor, ileri tarihli işler "bugün kaydedilmiş"
+    // gibi görünüyordu. Gerçek kayıt zamanı yoksa null döner.
+    const getKayitZamani = (job) => {
+      const ham = job?.createdAt || job?.createdDate || job?.kayitTarihi || job?.timestamp;
+      if (!ham) return null;
+      // Firestore Timestamp nesnesi gelirse saniyeden çevir
+      const t = (typeof ham === 'object' && ham.seconds) ? new Date(ham.seconds * 1000) : new Date(ham);
+      return isNaN(t.getTime()) ? null : t;
+    };
+
     const matchesPeriod = (d) => {
       if (filterPeriod === 'all') return true;
-      if (filterPeriod === 'today') return d.toISOString().split('T')[0] === todayStr;
+      if (!d || isNaN(d.getTime())) return false; // geçersiz/eksik tarih dönem filtrelerine girmez
+      if (filterPeriod === 'today') return localGunKey(d) === todayStr;
       if (filterPeriod === 'week') {
+        // DÜZELTME: Haftaya ÜST SINIR eklendi. Önceden sadece "haftanın başından sonrası"
+        // kontrol ediliyordu; bu yüzden gelecek tarihli tüm kayıtlar da "Bu Hafta" sayılıyordu.
         const day = today.getDay();
         const diffToMonday = day === 0 ? 6 : day - 1;
         const weekStart = new Date(today); weekStart.setDate(today.getDate() - diffToMonday); weekStart.setHours(0, 0, 0, 0);
-        return d >= weekStart;
+        const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7); // Pazartesi 00:00 (dahil değil)
+        return d >= weekStart && d < weekEnd;
       }
       if (filterPeriod === 'month') return d.getMonth() === todayMonth && d.getFullYear() === todayYear;
       if (filterPeriod === 'lastMonth') {
@@ -45,7 +66,49 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     };
 
     const dashboardJobs = jobs.filter(j => matchesPeriod(new Date(j.date)));
-    const registrationJobs = jobs.filter(j => matchesPeriod(new Date(j.createdAt || j.date)));
+
+    // YENİ: SATIŞ BÖLÜMÜ KAYITLARI — "Kayıt İstatistiği" artık yalnızca Satış Bölümü'nden
+    // girilen GERÇEK kayıtları sayar. Önceki sürümde sayılar şişiyordu, çünkü:
+    //  1) Nakliye/Depo kaydı açılırken sistemin otomatik ürettiği 0₺'lik "Asansör Kurulum"
+    //     kaydı da ayrı bir kayıt gibi sayılıyordu.
+    //  2) Çok günlü işlerde (durationDays > 1) her gün için ayrı doküman açıldığından
+    //     tek bir satış kaydı birden fazla kez sayılıyordu.
+    // Bu kayıtların hepsi AYNI teslim kodunu (deliveryCode) paylaştığı için gruplayıp
+    // her gruptan tek bir temsilci kayıt alıyoruz.
+    const otomatikAsansorMu = (j) => j.type === 'Asansör' && typeof j.contractDetails === 'string' && j.contractDetails.includes('Otomatik Oluşturulan Asansör');
+
+    const satisKayitlari = (() => {
+      const gruplar = new Map();
+      jobs.forEach(j => {
+        const anahtar = j.deliveryCode || j.id; // teslim kodu yoksa kaydın kendisi tekil sayılır
+        if (!gruplar.has(anahtar)) gruplar.set(anahtar, []);
+        gruplar.get(anahtar).push(j);
+      });
+      const sonuc = [];
+      gruplar.forEach(grup => {
+        // Temsilci: otomatik asansör kaydı değil, en erken oluşturulan gerçek satış kaydı
+        const gercekler = grup.filter(j => !otomatikAsansorMu(j));
+        const kaynak = gercekler.length ? gercekler : grup;
+        const aday = kaynak.slice().sort((a, b) => {
+          const ta = getKayitZamani(a), tb = getKayitZamani(b);
+          if (ta && tb) return ta - tb;
+          if (ta) return -1; if (tb) return 1;
+          return String(a.date || '').localeCompare(String(b.date || ''));
+        })[0];
+        // Bir satış kaydı, kendisine ait tüm gün kayıtları iptal edildiyse "iptal" sayılır
+        const iptalMi = kaynak.every(j => j.status === 'cancelled');
+        sonuc.push({ ...aday, __iptalMi: iptalMi });
+      });
+      return sonuc;
+    })();
+
+    // Kayıt istatistikleri: gerçek kayıt zamanına göre dönem filtresi uygulanır.
+    // Kayıt zamanı olmayan eski kayıtlar yalnızca "Tümü" seçildiğinde sayılır.
+    const registrationJobs = satisKayitlari.filter(j => {
+      const t = getKayitZamani(j);
+      if (!t) return filterPeriod === 'all';
+      return matchesPeriod(t);
+    });
 
     // YENİ: Mavi Yaka mı, Beyaz Yaka mı olduğunu belirle
     const isMaviYaka = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
@@ -529,7 +592,8 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           </select>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* İŞ İSTATİSTİKLERİ — "Bekleyen" kartı kaldırıldı; 3 kart üzerinden takip edilir */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
             <p className="text-neutral-500 text-sm font-medium mb-1">Toplam İş</p>
             <p className="text-2xl font-black text-black mb-2">{dashboardJobs.length}</p>
@@ -537,15 +601,6 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
               <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.type === 'Nakliye' || !j.type).length} Nakliye</span>
               <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.type === 'Depo').length} Depo</span>
               <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.type === 'Asansör').length} Asansör</span>
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
-            <p className="text-neutral-500 text-sm font-medium mb-1">Bekleyen</p>
-            <p className="text-2xl font-black text-neutral-600 mb-2">{dashboardJobs.filter(j => j.status === 'pending').length}</p>
-            <div className="flex flex-wrap gap-1 mt-auto">
-              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{dashboardJobs.filter(j => j.status === 'pending' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
-              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{dashboardJobs.filter(j => j.status === 'pending' && j.type === 'Depo').length} Depo</span>
-              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{dashboardJobs.filter(j => j.status === 'pending' && j.type === 'Asansör').length} Asansör</span>
             </div>
           </div>
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 border-l-4 border-l-red-600 flex flex-col justify-between">
@@ -571,7 +626,8 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
         <div className="flex justify-between items-end mt-2">
           <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider">Kayıt İstatistiği</h3>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* KAYIT İSTATİSTİĞİ — sadece Satış Bölümü'nden girilen kayıtlar; 2 kart üzerinden takip */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
             <p className="text-neutral-500 text-sm font-medium mb-1">Toplam Kayıt</p>
             <p className="text-2xl font-black text-black mb-2">{registrationJobs.length}</p>
@@ -581,31 +637,14 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
               <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{registrationJobs.filter(j => j.type === 'Asansör').length} Asansör</span>
             </div>
           </div>
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col justify-between">
-            <p className="text-neutral-500 text-sm font-medium mb-1">Onay Bekleyen Kayıt</p>
-            <p className="text-2xl font-black text-neutral-600 mb-2">{registrationJobs.filter(j => j.status === 'pending').length}</p>
-            <div className="flex flex-wrap gap-1 mt-auto">
-              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{registrationJobs.filter(j => j.status === 'pending' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
-              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{registrationJobs.filter(j => j.status === 'pending' && j.type === 'Depo').length} Depo</span>
-              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{registrationJobs.filter(j => j.status === 'pending' && j.type === 'Asansör').length} Asansör</span>
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 border-l-4 border-l-neutral-400 flex flex-col justify-between">
+          {/* İptal Edilen Kayıt — yukarıdaki toplamın alt kümesidir, böylece iki kart her zaman tutarlıdır */}
+          <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 border-l-4 border-l-red-500 flex flex-col justify-between">
             <p className="text-neutral-500 text-sm font-medium mb-1">İptal Edilen Kayıt</p>
-            <p className="text-2xl font-black text-neutral-500 mb-2">{registrationJobs.filter(j => j.status === 'cancelled').length}</p>
+            <p className="text-2xl font-black text-red-600 mb-2">{registrationJobs.filter(j => j.__iptalMi).length}</p>
             <div className="flex flex-wrap gap-1 mt-auto">
-              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{registrationJobs.filter(j => j.status === 'cancelled' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
-              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{registrationJobs.filter(j => j.status === 'cancelled' && j.type === 'Depo').length} Depo</span>
-              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{registrationJobs.filter(j => j.status === 'cancelled' && j.type === 'Asansör').length} Asansör</span>
-            </div>
-          </div>
-          <div className="bg-black p-4 rounded-2xl shadow-sm border border-black flex flex-col justify-between">
-            <p className="text-neutral-400 text-sm font-medium mb-1">Onaylanan Kayıt</p>
-            <p className="text-2xl font-black text-white mb-2">{registrationJobs.filter(j => j.status !== 'cancelled' && j.status !== 'pending').length}</p>
-            <div className="flex flex-wrap gap-1 mt-auto">
-              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{registrationJobs.filter(j => j.status !== 'cancelled' && j.status !== 'pending' && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
-              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{registrationJobs.filter(j => j.status !== 'cancelled' && j.status !== 'pending' && j.type === 'Depo').length} Depo</span>
-              <span className="text-[10px] font-bold bg-neutral-800 text-neutral-300 px-1.5 py-0.5 rounded border border-neutral-700">{registrationJobs.filter(j => j.status !== 'cancelled' && j.status !== 'pending' && j.type === 'Asansör').length} Asansör</span>
+              <span className="text-[10px] font-bold bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{registrationJobs.filter(j => j.__iptalMi && (j.type === 'Nakliye' || !j.type)).length} Nakliye</span>
+              <span className="text-[10px] font-bold bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{registrationJobs.filter(j => j.__iptalMi && j.type === 'Depo').length} Depo</span>
+              <span className="text-[10px] font-bold bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{registrationJobs.filter(j => j.__iptalMi && j.type === 'Asansör').length} Asansör</span>
             </div>
           </div>
         </div>
@@ -624,47 +663,87 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           </div>
           <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3">
             {(() => {
-              // YENİ: Kaydedilme (createdAt) tarihine göre dönem filtresi uygula
+              // DÜZELTME: Dönem filtresi artık GERÇEK kayıt zamanına (createdAt) göre ve
+              // ALT+ÜST SINIRLI çalışır. Önceki sürümde iki hata vardı:
+              //  1) createdAt yoksa taşıma tarihine (job.date) düşülüyordu → ileri tarihli işler
+              //     "bugün kaydedilmiş" görünüyordu (ekrandaki 09.08.2026 03:00 hatası).
+              //  2) Aralıkların üst sınırı yoktu (sadece "t >= başlangıç") → gelecek tarihli
+              //     her kayıt Bugün/Bu Hafta/Bu Ay filtrelerinden geçiyordu.
               const now = new Date();
               const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+              const endOfDay = new Date(startOfDay); endOfDay.setDate(startOfDay.getDate() + 1);
               const startOfWeek = new Date(startOfDay); startOfWeek.setDate(startOfDay.getDate() - ((startOfDay.getDay() + 6) % 7)); // Pazartesi başlangıç
+              const endOfWeek = new Date(startOfWeek); endOfWeek.setDate(startOfWeek.getDate() + 7);
               const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+              const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+
               const inRange = (job) => {
                 if (sonKayitFilter === 'all') return true;
-                const t = new Date(job.createdAt || job.date);
-                if (isNaN(t.getTime())) return sonKayitFilter === 'all';
-                if (sonKayitFilter === 'today') return t >= startOfDay;
-                if (sonKayitFilter === 'week') return t >= startOfWeek;
-                if (sonKayitFilter === 'month') return t >= startOfMonth;
+                const t = getKayitZamani(job);
+                if (!t) return false; // kayıt zamanı bilinmeyen eski kayıtlar sadece "Tümü"de görünür
+                if (sonKayitFilter === 'today') return t >= startOfDay && t < endOfDay;
+                if (sonKayitFilter === 'week') return t >= startOfWeek && t < endOfWeek;
+                if (sonKayitFilter === 'month') return t >= startOfMonth && t < endOfMonth;
                 return true;
               };
-              // Kaydedilme zamanını okunabilir biçimde göster
+
+              // Kaydedilme zamanını okunabilir biçimde göster (yoksa null → sahte tarih yazılmaz)
               const formatKayitZamani = (job) => {
-                const t = new Date(job.createdAt || job.date);
-                if (isNaN(t.getTime())) return null;
+                const t = getKayitZamani(job);
+                if (!t) return null;
                 return t.toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
               };
-              const list = jobs.slice()
+
+              // YENİ: Asansör işleri bu listede gösterilmez — sadece Nakliye ve Depo kayıtları listelenir.
+              const nakliyeVeyaDepo = (j) => j.type === 'Depo' || j.type === 'Nakliye' || !j.type;
+
+              // En son kaydedilen en üstte olacak şekilde sırala (kayıt zamanı olmayanlar en sona)
+              const tumListe = jobs.slice()
+                .filter(nakliyeVeyaDepo)
                 .filter(inRange)
-                .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
-                .slice(0, 20);
-              if (list.length === 0) return <p className="text-center text-neutral-400 text-xs py-4">Bu dönemde kaydedilmiş iş yok.</p>;
-              return list.map(job => (
+                .sort((a, b) => {
+                  const ta = getKayitZamani(a), tb = getKayitZamani(b);
+                  if (ta && tb) return tb - ta;
+                  if (ta) return -1;
+                  if (tb) return 1;
+                  return new Date(b.date) - new Date(a.date);
+                });
+
+              // Varsayılan 15 kayıt; "Tümünü Gör" ile tamamı açılır
+              const LIMIT = 15;
+              const list = sonKayitHepsi ? tumListe : tumListe.slice(0, LIMIT);
+              const gizliSayisi = tumListe.length - list.length;
+
+              if (tumListe.length === 0) return <p className="text-center text-neutral-400 text-xs py-4">Bu dönemde kaydedilmiş iş yok.</p>;
+              return (<>
+                {list.map(job => (
                 <div key={job.id} onClick={() => setViewingDashboardJob(job)} className="p-3 bg-neutral-50 hover:bg-neutral-100 cursor-pointer rounded-xl border border-neutral-100 flex justify-between items-center text-sm transition">
                   <div>
                     <p className="font-bold text-black">{job.customerName}</p>
                     <p className="text-[10px] text-neutral-500">Taşıma: {job.date} - {job.time}</p>
-                    {/* YENİ: Kaydın ne zaman oluşturulduğu (kaydedilme zamanı) */}
-                    {formatKayitZamani(job) && (
+                    {/* Kaydın gerçekten ne zaman oluşturulduğu; bilinmiyorsa dürüstçe belirtilir */}
+                    {formatKayitZamani(job) ? (
                       <p className="text-[10px] text-red-500 font-bold flex items-center gap-1 mt-0.5">
                         <Clock className="w-3 h-3" /> Kaydedildi: {formatKayitZamani(job)}
+                      </p>
+                    ) : (
+                      <p className="text-[10px] text-neutral-400 font-bold flex items-center gap-1 mt-0.5">
+                        <Clock className="w-3 h-3" /> Kayıt zamanı yok (eski kayıt)
                       </p>
                     )}
                     <p className="text-[10px] text-neutral-400 font-medium">Kaydeden: <span className="font-bold text-neutral-600">{job.createdBy || 'Bilinmiyor'}</span></p>
                   </div>
-                  <span className={`text-[9px] px-2 py-1 rounded font-bold text-white uppercase shrink-0 ml-2 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>{job.type || 'Nakliye'}</span>
+                  <span className={`text-[9px] px-2 py-1 rounded font-bold text-white uppercase shrink-0 ml-2 ${job.type === 'Depo' ? 'bg-blue-600' : 'bg-red-600'}`}>{job.type || 'Nakliye'}</span>
                 </div>
-              ));
+                ))}
+                {/* YENİ: En altta "Tümünü Gör" / "Daha Az Göster" butonu */}
+                {tumListe.length > LIMIT && (
+                  <button type="button" onClick={() => setSonKayitHepsi(v => !v)}
+                    className="w-full py-2.5 rounded-xl border border-dashed border-neutral-300 text-xs font-black text-neutral-500 hover:text-red-600 hover:border-red-400 transition">
+                    {sonKayitHepsi ? 'Daha Az Göster' : `Tümünü Gör (${gizliSayisi} kayıt daha)`}
+                  </button>
+                )}
+              </>);
             })()}
           </div>
         </div>
@@ -1002,7 +1081,9 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
       { id: 'globalSearch', label: 'Arama Barı' },
       { id: 'globalSearchCustomer', label: 'Arama: Müşteri' },
       { id: 'globalSearchVehicle', label: 'Arama: Araç' },
-      { id: 'globalSearchPersonnel', label: 'Arama: Personel' }
+      { id: 'globalSearchPersonnel', label: 'Arama: Personel' },
+      { id: 'davaDosyalari', label: 'Dava Dosyaları' }, // YENİ: hukuk takip modülü yetkisi (ör. Avukat pozisyonu için)
+      { id: 'companyContacts', label: 'Şirket İletişimi Yönetimi' } // YENİ: sol menüdeki iletişim listesini düzenleme yetkisi
     ];
 
     const handleToggleModule = (moduleId, currentMergedState) => {
@@ -1260,7 +1341,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       { id: 'globalSearch', label: 'Arama Barı' },
       { id: 'globalSearchCustomer', label: 'Arama: Müşteri' },
       { id: 'globalSearchVehicle', label: 'Arama: Araç' },
-      { id: 'globalSearchPersonnel', label: 'Arama: Personel' }
+      { id: 'globalSearchPersonnel', label: 'Arama: Personel' },
+      { id: 'davaDosyalari', label: 'Dava Dosyaları' }, // YENİ: hukuk takip modülü yetkisi (ör. Avukat pozisyonu için)
+      { id: 'companyContacts', label: 'Şirket İletişimi Yönetimi' } // YENİ: sol menüdeki iletişim listesini düzenleme yetkisi
     ];
 
     const allGroups = [...new Set([...(positions || []), ...(ranks || [])])];
@@ -2163,11 +2246,28 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
   export default function App() {
     const [firebaseUser, setFirebaseUser] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
+    // YENİ: Ana içerik alanının kaydırma kabı — "iki kez yukarı çek → yenile" için gerekli
+    const mainScrollRef = useRef(null);
+    const cekimRef = useRef({ sayac: 0, sonZaman: 0, zamanlayici: null });
+    const [yenilemeAsamasi, setYenilemeAsamasi] = useState(0); // 0: yok, 1: bir kez çekildi, 2: yenileniyor
     const [isAuthChecking, setIsAuthChecking] = useState(true);
     const [currentUser, setCurrentUser] = useState(null);
     const [loginError, setLoginError] = useState('');
 
-    const [activeTab, setActiveTab] = useState('dashboard'); 
+    // ========================================================================
+    // YENİ: SAYFA YENİLENSE BİLE AYNI BÖLÜMDE KALMA
+    // Aktif sekme sessionStorage'da saklanır; yenilemeden sonra kullanıcı
+    // kaldığı bölümden (sayfanın en üstünden) devam eder.
+    // Not: Detay sayfaları (cari/personel/araç profili) geçici bir seçime bağlı
+    // olduğundan, yenilemede kendi liste sayfalarına düşer.
+    const GECICI_SEKME_KARSILIGI = { customerProfile: 'allCustomers', personnelProfile: 'personnelList', vehicleProfile: 'vehicleList' };
+    const [activeTab, setActiveTab] = useState(() => {
+      try {
+        const kayitli = sessionStorage.getItem('sembolAktifSekme');
+        if (!kayitli) return 'dashboard';
+        return GECICI_SEKME_KARSILIGI[kayitli] || kayitli;
+      } catch (e) { return 'dashboard'; }
+    }); 
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [globalSearchQuery, setGlobalSearchQuery] = useState('');
     const [isSubMenuOpen, setIsSubMenuOpen] = useState(false);
@@ -2184,6 +2284,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [isTodoSubMenuOpen, setIsTodoSubMenuOpen] = useState(false);
     
     const [isOperasyonSubMenuOpen, setIsOperasyonSubMenuOpen] = useState(false);
+    // YENİ: Şirket Dosyaları (Dava Dosyaları vb.) alt menüsünün açık/kapalı durumu
+    const [isSirketDosyalariSubMenuOpen, setIsSirketDosyalariSubMenuOpen] = useState(false);
     
     const [recordType, setRecordType] = useState('Nakliye');
     const [transactionType, setTransactionType] = useState('income');
@@ -2230,6 +2332,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       damageDetails: '',
       damageImages: [],
       truckImages: [],
+      deliveryImages: [], // YENİ: Teslim edilen yerin fotoğraf/videoları
       truckStatus: 'Herhangi bir sorun yok',
       truckIssueDetails: '',
       customerSatisfaction: 'Herhangi bir işlem yapmadı.',
@@ -2287,6 +2390,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const [newTodo, setNewTodo] = useState({ title: '', details: '', reminderDate: new Date().toISOString().split('T')[0], priority: 'Normal', status: 'todo' });
 
     const [showContactModal, setShowContactModal] = useState(false);
+    // YENİ: Şirket İletişimi yönetim penceresi (sıralama / düzenleme / silme tek yerde)
+    const [showContactsManageModal, setShowContactsManageModal] = useState(false);
+    // YENİ: Eski sistemden içe aktarma penceresi
+    const [showImportModal, setShowImportModal] = useState(false);
+    const [contactDeleteId, setContactDeleteId] = useState(null);
     const [contactForm, setContactForm] = useState({ name: '', phone: '', position: '' });
     const [isContactsOpen, setIsContactsOpen] = useState(false);
     const [editingContact, setEditingContact] = useState(null);
@@ -2605,9 +2713,90 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'systemLogs'), {
         action, details,
         user: currentUser ? currentUser.fullName : 'Sistem',
+        // YENİ: Sıralamanın metin ayrıştırmasına bağlı kalmaması için makine okunur zaman damgası
+        createdAt: new Date().toISOString(),
         timestamp: new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
       });
     };
+
+    // YENİ: Aktif sekme her değiştiğinde saklanır → yenilemede aynı bölüm açılır
+    useEffect(() => {
+      try { sessionStorage.setItem('sembolAktifSekme', activeTab); } catch (e) { /* gizli mod vb. */ }
+    }, [activeTab]);
+
+    // YENİ: Bölüm değiştiğinde (ve yenilemeden sonra) içerik en üstten başlar
+    useEffect(() => {
+      if (mainScrollRef.current) mainScrollRef.current.scrollTop = 0;
+      if (typeof window !== 'undefined') window.scrollTo(0, 0);
+    }, [activeTab]);
+
+    // ========================================================================
+    // YENİ: "İKİ KEZ YUKARI ÇEK → SAYFAYI YENİLE"
+    // Sayfa en üstteyken kullanıcı arka arkaya İKİ kez yukarı doğru çekerse
+    // (mobilde parmakla aşağı sürükleme, masaüstünde yukarı kaydırma/trackpad)
+    // sayfa yenilenir. İlk çekimde uyarı çıkar, ikincisinde yenileme başlar.
+    // Yenileme sonrası kullanıcı aynı bölümde ve sayfanın en üstünde devam eder.
+    // ========================================================================
+    useEffect(() => {
+      const el = mainScrollRef.current;
+      if (!el || !isAuthenticated) return;
+
+      const ESIK = 70;    // çekme mesafesi eşiği (px)
+      const SURE = 2500;  // iki çekim arasında izin verilen süre (ms)
+
+      const cekimAlgilandi = () => {
+        const s = cekimRef.current;
+        const simdi = Date.now();
+        if (simdi - s.sonZaman > SURE) s.sayac = 0; // arada çok beklendiyse baştan say
+        s.sayac += 1;
+        s.sonZaman = simdi;
+
+        if (s.sayac >= 2) {
+          // İkinci çekim: sayfayı yenile (aktif sekme zaten saklandığı için aynı bölüm açılır)
+          s.sayac = 0;
+          clearTimeout(s.zamanlayici);
+          setYenilemeAsamasi(2);
+          setTimeout(() => { try { window.location.reload(); } catch (e) {} }, 300);
+          return;
+        }
+        // İlk çekim: kullanıcıyı bilgilendir, süre dolarsa sayacı sıfırla
+        setYenilemeAsamasi(1);
+        clearTimeout(s.zamanlayici);
+        s.zamanlayici = setTimeout(() => { cekimRef.current.sayac = 0; setYenilemeAsamasi(0); }, SURE);
+      };
+
+      // --- Dokunmatik (mobil): en üstteyken parmağı aşağı sürükleme ---
+      let baslangicY = null;
+      const onTouchStart = (e) => { baslangicY = el.scrollTop <= 0 ? e.touches[0].clientY : null; };
+      const onTouchMove = (e) => {
+        if (baslangicY === null || el.scrollTop > 0) return;
+        if (e.touches[0].clientY - baslangicY > ESIK) { baslangicY = null; cekimAlgilandi(); }
+      };
+      const onTouchEnd = () => { baslangicY = null; };
+
+      // --- Fare / trackpad (masaüstü): en üstteyken yukarı kaydırma ---
+      let birikim = 0, sonTekerlek = 0;
+      const onWheel = (e) => {
+        if (el.scrollTop > 0 || e.deltaY >= 0) { birikim = 0; return; }
+        const simdi = Date.now();
+        if (simdi - sonTekerlek > 600) birikim = 0; // duraklama olduysa yeni hareket sayılır
+        sonTekerlek = simdi;
+        birikim += -e.deltaY;
+        if (birikim > ESIK * 2) { birikim = 0; cekimAlgilandi(); }
+      };
+
+      el.addEventListener('touchstart', onTouchStart, { passive: true });
+      el.addEventListener('touchmove', onTouchMove, { passive: true });
+      el.addEventListener('touchend', onTouchEnd, { passive: true });
+      el.addEventListener('wheel', onWheel, { passive: true });
+      return () => {
+        el.removeEventListener('touchstart', onTouchStart);
+        el.removeEventListener('touchmove', onTouchMove);
+        el.removeEventListener('touchend', onTouchEnd);
+        el.removeEventListener('wheel', onWheel);
+        clearTimeout(cekimRef.current.zamanlayici);
+      };
+    }, [isAuthenticated]);
 
     const handleSyncOldData = async () => {
       try {
@@ -3202,7 +3391,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const handleCancelJob = async (id) => {
       if (!firebaseUser) return;
       const jobToCancel = jobs.find(j => j.id === id);
-      const updateData = { status: 'cancelled' };
+      // YENİ: İptalin ne zaman ve kim tarafından yapıldığı da kayda işlenir (raporlama için)
+      const updateData = { status: 'cancelled', cancelledAt: new Date().toISOString(), cancelledBy: currentUser?.fullName || 'Sistem' };
 
       if (jobToCancel && (
         (jobToCancel.assignedPersonnelIds && jobToCancel.assignedPersonnelIds.length > 0) ||
@@ -3357,7 +3547,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         let savedDeliveryCode = jobData.deliveryCode || '';
 
         if (editingJobId) {
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', editingJobId), jobData);
+          // DÜZELTME: Düzenlemede orijinal kayıt zamanı (createdAt) korunur; ayrıca
+          // "en son ne zaman / kim güncelledi" bilgisi de kayda işlenir.
+          const mevcut = jobs.find(j => j.id === editingJobId);
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', editingJobId), {
+            ...jobData,
+            createdAt: mevcut?.createdAt || jobData.createdAt || new Date().toISOString(),
+            createdBy: mevcut?.createdBy || jobData.createdBy || (currentUser?.fullName || 'Sistem'),
+            updatedAt: new Date().toISOString(),
+            updatedBy: currentUser?.fullName || 'Sistem'
+          });
           addSystemLog('Kayıt Güncellendi', `${formData.customerName} müşterisine ait iş güncellendi.`);
           setEditingJobId(null);
         } else {
@@ -3680,7 +3879,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       setJobToEnd(job);
       setEndJobError('');
       setEndJobData({ 
-        paymentMethod: 'Nakit', damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '',
+        paymentMethod: 'Nakit', damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], deliveryImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '',
         elevatorSetup: 'Evet', elevatorSetupReason: '', elevatorImages: [], elevatorIssue: 'Hayır', elevatorIssueReason: '', vehicleIssue: 'Hayır', vehicleIssueReason: '',
         // YENİ: İş zaten sonlandırılmışsa (düzenleme modu) önceki sonlandırma bilgilerini forma doldur.
         // Yeni/devam eden işlerde job.endJobDetails boş olduğu için varsayılanlar aynen kalır.
@@ -3689,46 +3888,39 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       setShowEndJobModal(true);
     };
 
+    // YENİ: Sonlandırma ekranındaki görsel alanları. 'delivery' = Teslim Edilen Yer fotoğrafları.
+    const END_JOB_GORSEL_ALANI = { truck: 'truckImages', delivery: 'deliveryImages', elevator: 'elevatorImages', damage: 'damageImages' };
+
+    // YENİ: Artık BİRDEN FAZLA fotoğraf/video aynı anda seçilip yüklenebilir.
+    // Dosyalar sırayla yüklenir; her biri yüklenirken listede "Yükleniyor..." görünür.
     const handleFileUpload = async (e, type) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      
-      if (type === 'truck') setEndJobData(prev => ({ ...prev, truckImages: [...(prev.truckImages || []), 'Yükleniyor...'] }));
-      else if (type === 'elevator') setEndJobData(prev => ({ ...prev, elevatorImages: [...(prev.elevatorImages || []), 'Yükleniyor...'] }));
-      else setEndJobData(prev => ({ ...prev, damageImages: [...(prev.damageImages || []), 'Yükleniyor...'] }));
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      const alan = END_JOB_GORSEL_ALANI[type] || 'damageImages';
 
-      const formData = new FormData();
-      formData.append('file', file);
+      for (const file of files) {
+        setEndJobData(prev => ({ ...prev, [alan]: [...(prev[alan] || []), 'Yükleniyor...'] }));
 
-      try {
-        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', {
-          method: 'POST',
-          body: formData,
-        });
-        const text = await res.text();
-        let uploadedUrl = file.name;
+        const formData = new FormData();
+        formData.append('file', file);
+
         try {
-          const json = JSON.parse(text);
-          uploadedUrl = json.url || json.fileName || json.file || text;
+          const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', {
+            method: 'POST',
+            body: formData,
+          });
+          const text = await res.text();
+          let uploadedUrl = file.name;
+          try {
+            const json = JSON.parse(text);
+            uploadedUrl = json.url || json.fileName || json.file || text;
+          } catch (err) {
+            uploadedUrl = text.trim();
+          }
+          setEndJobData(prev => ({ ...prev, [alan]: (prev[alan] || []).map(img => img === 'Yükleniyor...' ? uploadedUrl : img) }));
         } catch (err) {
-          uploadedUrl = text.trim();
-        }
-        
-        if (type === 'truck') {
-          setEndJobData(prev => ({ ...prev, truckImages: prev.truckImages.map(img => img === 'Yükleniyor...' ? uploadedUrl : img) }));
-        } else if (type === 'elevator') {
-          setEndJobData(prev => ({ ...prev, elevatorImages: prev.elevatorImages.map(img => img === 'Yükleniyor...' ? uploadedUrl : img) }));
-        } else {
-          setEndJobData(prev => ({ ...prev, damageImages: prev.damageImages.map(img => img === 'Yükleniyor...' ? uploadedUrl : img) }));
-        }
-      } catch (err) {
-        console.error("Yükleme hatası:", err);
-        if (type === 'truck') {
-          setEndJobData(prev => ({ ...prev, truckImages: prev.truckImages.map(img => img === 'Yükleniyor...' ? file.name : img) }));
-        } else if (type === 'elevator') {
-          setEndJobData(prev => ({ ...prev, elevatorImages: prev.elevatorImages.map(img => img === 'Yükleniyor...' ? file.name : img) }));
-        } else {
-          setEndJobData(prev => ({ ...prev, damageImages: prev.damageImages.map(img => img === 'Yükleniyor...' ? file.name : img) }));
+          console.error("Yükleme hatası:", err);
+          setEndJobData(prev => ({ ...prev, [alan]: (prev[alan] || []).map(img => img === 'Yükleniyor...' ? file.name : img) }));
         }
       }
     };
@@ -3763,6 +3955,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           { key: 'koli', amount: estData.koli || 0 }
         ];
 
+        // YENİ: Aynı malzeme birden fazla kez düşülecekse TEK kalemde toplanır.
+        // Böylece stok hareketi kaydında "7 Adet Koli, 7 Adet Koli, ..." gibi
+        // tekrar eden uzun listeler oluşmaz.
+        const toplamlar = new Map(); // materialId -> { target, miktar }
+
         for (const mt of materialTypes) {
           const target = materials.find(m => norm(m.name).includes(mt.key));
           if (!target) continue;
@@ -3772,9 +3969,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           if (cMat) deductAmount += parseFloat(cMat.amount) || 0;
 
           if (deductAmount > 0) {
-            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', target.id), { stock: String((parseFloat(target.stock) || 0) - deductAmount) });
-            deductedList.push(`${deductAmount} ${target.unit} ${target.name}`);
+            const mevcut = toplamlar.get(target.id);
+            if (mevcut) mevcut.miktar += deductAmount;
+            else toplamlar.set(target.id, { target, miktar: deductAmount });
           }
+        }
+
+        for (const { target, miktar } of toplamlar.values()) {
+          const yuvarlanmis = Math.round(miktar * 100) / 100; // ondalık artıkları temizle
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', target.id), { stock: String((parseFloat(target.stock) || 0) - yuvarlanmis) });
+          deductedList.push(`${yuvarlanmis} ${target.unit} ${target.name}`);
         }
         
         if (deductedList.length > 0) {
@@ -3895,6 +4099,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
     const handleLogout = () => {
       setIsAuthenticated(false); setCurrentUser(null); setActiveTab('dashboard'); setIsSidebarOpen(false);
+      // YENİ: Çıkışta saklanan aktif sekme temizlenir; sonraki girişte anasayfadan başlanır
+      try { sessionStorage.removeItem('sembolAktifSekme'); } catch (e) {}
       try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
     };
 
@@ -3992,6 +4198,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     const showGlobalSearchCustomer = checkAccess('globalSearchCustomer');
     const showGlobalSearchVehicle = checkAccess('globalSearchVehicle');
     const showGlobalSearchPersonnel = checkAccess('globalSearchPersonnel');
+    // YENİ: Dava Dosyaları modül yetkisi — Yetkilendirme'den kişiye/pozisyona göre açılıp kapatılır
+    const showDavaDosyalari = checkAccess('davaDosyalari');
+    // YENİ: Şirket İletişimi listesini düzenleme yetkisi.
+    // Yöneticiler her zaman yetkilidir; ayrıca Yetkilendirme'den başka kişilere de verilebilir.
+    const canManageContacts = isManager || checkAccess('companyContacts');
+    // YENİ: Avukat pozisyonundaki kullanıcı tespiti — anasayfası tamamen kendine özel olur
+    const isAvukatUser = (currentUser?.position || '').toLocaleLowerCase('tr').includes('avukat');
+    // YENİ: Maaş/mesai/puantaj/muhasebe ekranlarına AVUKAT pozisyonu dahil edilmez.
+    // Avukat, personel değerlendirme ve bordro süreçlerinin tamamen dışında tutulur.
+    const personnelListMuhasebe = personnelList.filter(p => !((p.position || '').toLocaleLowerCase('tr').includes('avukat')));
     
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
     const isStandardBlueCollarApp = isMaviYakaUser && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Heryerden Usta' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
@@ -4352,7 +4568,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             )}
 
             {showOperasyon && (
-              <div className="flex flex-col gap-1 mt-2 mb-2">
+              <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsOperasyonSubMenuOpen(!isOperasyonSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-lg shadow-red-600/30 hover:scale-[1.02]`}
@@ -4473,7 +4689,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             )}
 
             {showFinance && (
-              <div className="flex flex-col gap-1 mt-2 mb-2">
+              <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsFinanceSubMenuOpen(!isFinanceSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-sky-500 to-blue-700 text-white shadow-lg shadow-blue-600/30 hover:scale-[1.02]`}
@@ -4536,52 +4752,24 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                 
                 {isJobSubMenuOpen && (
                   <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
-                    {/* İş Listesi alt menüleri */}
+                    {/* İş Listesi alt menüsü — "Mevcut / Tamamlanan / İptal Edilen İşler" sol menüden
+                        kaldırıldı; artık "Tüm İşler" sayfasının en üstündeki butonlardan seçiliyor. */}
                     {showJobList && (<>
-                    <button 
-                      onClick={() => { setActiveTab('currentJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'currentJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'currentJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Mevcut İşler
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('completedJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'completedJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'completedJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Tamamlanan İşler
-                    </button>
                     <button 
                       onClick={() => { setActiveTab('allJobs'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allJobs' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm İşler
                     </button>
-                    <button 
-                      onClick={() => { setActiveTab('cancelledJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'cancelledJobs' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'cancelledJobs' ? 'bg-white' : 'bg-red-600'}`}></div> İptal Edilen İşler
-                    </button>
                     </>)}
-                    {/* Müşteri Listesi alt menüleri (aynı başlık altında) */}
+                    {/* Müşteri Listesi alt menüsü — "Özel Müşteriler / Kara Liste" sol menüden
+                        kaldırıldı; artık "Tüm Müşteriler" sayfasının en üstündeki butonlardan seçiliyor. */}
                     {showCustomers && (<>
                     <button 
                       onClick={() => { setActiveTab('allCustomers'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allCustomers' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allCustomers' ? 'bg-white' : 'bg-red-600'}`}></div> Tüm Müşteriler
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('specialCustomers'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'specialCustomers' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'specialCustomers' ? 'bg-white' : 'bg-red-600'}`}></div> Özel Müşteriler
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('customerBlacklist'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'customerBlacklist' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'customerBlacklist' ? 'bg-white' : 'bg-red-600'}`}></div> Kara Liste
                     </button>
                     </>)}
                   </div>
@@ -4646,6 +4834,46 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sirketEvraklari' ? 'bg-white' : 'bg-green-500'}`}></div> 
                       Şirket Evrakları
                     </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* YENİ: ŞİRKET DOSYALARI — mor geçişli ana menü. Hukuki süreçlerin (dava, icra,
+                ihtar/ihbar vb.) ve avukat muhasebesinin yönetildiği bölümler burada toplanır.
+                İK yetkisi OLMAYAN ama 'Dava Dosyaları' yetkisi verilen kullanıcılar (ör. Avukat) da görür. */}
+            {(showPersonnel || showDavaDosyalari) && (
+              <div className="flex flex-col gap-1">
+                <button 
+                  onClick={() => { setIsSirketDosyalariSubMenuOpen(!isSirketDosyalariSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-purple-500 via-purple-700 to-fuchsia-950 text-white shadow-lg shadow-purple-700/40 hover:scale-[1.02]`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Scale className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Şirket Dosyaları</span>
+                  </div>
+                  {isSirketDosyalariSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+                
+                {isSirketDosyalariSubMenuOpen && (
+                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    {/* Dava Dosyaları — hukuk takip merkezi + avukat muhasebesi (İK veya davaDosyalari yetkisi) */}
+                    {(showPersonnel || showDavaDosyalari) && (
+                    <button 
+                      onClick={() => { setActiveTab('davaDosyalari'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'davaDosyalari' ? 'bg-purple-700 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'davaDosyalari' ? 'bg-white' : 'bg-purple-500'}`}></div> Dava Dosyaları
+                    </button>
+                    )}
+                    {/* YENİ: Şirket Evrakları — kategorili şirket evrak arşiv merkezi (sadece İK yetkisi) */}
+                    {showPersonnel && (
+                    <button 
+                      onClick={() => { setActiveTab('sirketBelgeleri'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'sirketBelgeleri' ? 'bg-purple-700 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sirketBelgeleri' ? 'bg-white' : 'bg-purple-500'}`}></div> Şirket Evrakları
+                    </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -4811,30 +5039,24 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                   <button onClick={() => setIsContactsOpen(!isContactsOpen)} className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-black uppercase tracking-wider hover:text-white transition flex-1 text-left">
                     <Phone className="w-3.5 h-3.5"/> Şirket İletişimi {isContactsOpen ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
                   </button>
-                  {isManager && (
-                    <button onClick={() => { setContactForm({ name: '', phone: '', position: '' }); setEditingContact(null); setShowContactModal(true); }} className="hover:text-white transition bg-emerald-800/50 hover:bg-emerald-700/50 p-1.5 rounded-lg flex items-center justify-center text-emerald-400 shrink-0">
-                      <PlusCircle className="w-3.5 h-3.5" />
+                  {/* YENİ: Tek düzenleme butonu — ekleme, sıralama, düzenleme ve silme
+                      işlemlerinin tamamı açılan yönetim penceresinden yapılır. */}
+                  {canManageContacts && (
+                    <button onClick={() => setShowContactsManageModal(true)} title="İletişim Listesini Düzenle"
+                      className="hover:text-white transition bg-emerald-800/50 hover:bg-emerald-700/50 p-1.5 rounded-lg flex items-center justify-center text-emerald-400 shrink-0">
+                      <Edit className="w-3.5 h-3.5" />
                     </button>
                   )}
                </div>
                
                {isContactsOpen && (
                  <div className="space-y-1 mt-1 max-h-40 overflow-y-auto custom-scrollbar">
-                    {companyContacts.map((c, index) => (
-                       <div key={c.id} className="flex justify-between items-center group">
-                          <a href={`tel:${c.phone}`} className="flex flex-col hover:bg-emerald-800/30 p-1.5 rounded transition w-full">
-                             <span className="text-white text-xs font-bold truncate">{c.name}</span>
-                             <span className="text-emerald-200/70 text-[9px] truncate mt-0.5">{c.position} - {c.phone}</span>
-                          </a>
-                          {isManager && (
-                             <div className="flex items-center shrink-0 gap-1 bg-emerald-900/50 p-1 rounded-lg">
-                                <button disabled={index === 0} onClick={() => handleReorderContact(index, 'up')} className="text-neutral-400 hover:text-white disabled:opacity-30 p-0.5"><ChevronUp className="w-3 h-3"/></button>
-                                <button disabled={index === companyContacts.length - 1} onClick={() => handleReorderContact(index, 'down')} className="text-neutral-400 hover:text-white disabled:opacity-30 p-0.5"><ChevronDown className="w-3 h-3"/></button>
-                                <button onClick={() => { setEditingContact(c); setContactForm({name: c.name, phone: c.phone, position: c.position}); setShowContactModal(true); }} className="text-blue-400 hover:text-blue-300 p-0.5"><Edit className="w-3 h-3"/></button>
-                                <button onClick={() => handleDeleteContact(c.id)} className="text-red-400 hover:text-red-300 p-0.5"><X className="w-3 h-3"/></button>
-                             </div>
-                          )}
-                       </div>
+                    {/* Liste artık sade: sadece isim, unvan ve telefon. Tıklayınca arama başlar. */}
+                    {companyContacts.map((c) => (
+                       <a key={c.id} href={`tel:${c.phone}`} className="flex flex-col hover:bg-emerald-800/30 p-1.5 rounded transition w-full">
+                          <span className="text-white text-xs font-bold truncate">{c.name}</span>
+                          <span className="text-emerald-200/70 text-[9px] truncate mt-0.5">{c.position} - {c.phone}</span>
+                       </a>
                     ))}
                     {companyContacts.length === 0 && <p className="text-[10px] text-emerald-200/50 italic py-1 px-1.5">Kayıtlı numara yok.</p>}
                  </div>
@@ -4852,7 +5074,18 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         </aside>
 
-        <main className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
+        {/* YENİ: "İki kez yukarı çek → yenile" göstergesi */}
+        {yenilemeAsamasi > 0 && (
+          <div className="fixed top-0 left-0 right-0 z-[70] flex justify-center pointer-events-none">
+            <div className={`mt-3 px-4 py-2 rounded-full shadow-xl text-xs font-black flex items-center gap-2 animate-in fade-in slide-in-from-top-2 ${yenilemeAsamasi === 2 ? 'bg-red-600 text-white' : 'bg-white text-neutral-700 border border-neutral-200'}`}>
+              {yenilemeAsamasi === 2
+                ? (<><Loader2 className="w-3.5 h-3.5 animate-spin" /> Sayfa yenileniyor...</>)
+                : (<><ChevronUp className="w-3.5 h-3.5 text-red-600" /> Yenilemek için bir kez daha yukarı çekin</>)}
+            </div>
+          </div>
+        )}
+
+        <main ref={mainScrollRef} className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
           <div className="max-w-6xl mx-auto">
             {showGlobalSearch && (
               <div className="hidden md:block relative mb-6">
@@ -4962,7 +5195,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
 
-            {activeTab === 'dashboard' && showDashboard && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions} />}
+            {/* YENİ: Avukat pozisyonundaki kullanıcıya TAMAMEN ÖZEL anasayfa (hukuk odaklı, maaş/mesai içermez) */}
+            {activeTab === 'dashboard' && showDashboard && isAvukatUser && <AvukatDashboardView currentUser={currentUser} setActiveTab={setActiveTab} setViewingImage={setViewingImage} />}
+            {activeTab === 'dashboard' && showDashboard && !isAvukatUser && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions} />}
             {activeTab === 'notifications' && <NotificationsView notifications={visibleNotifications} markNotificationsAsRead={markNotificationsAsRead} currentUser={currentUser} />}
             {activeTab === 'calendar' && showCalendar && <CalendarView jobs={currentUser?.position === 'Operatör' ? jobs : visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} setJobToChangeDate={setJobToChangeDate} setNewJobDate={setNewJobDate} setShowChangeDateModal={setShowChangeDateModal} setCancelJobId={setCancelJobId} />}
             {activeTab === 'profileSettings' && showProfileSettings && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} />}
@@ -4972,9 +5207,9 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'isOnaylamaTahtasi' && showOperasyon && <IsOnaylamaTahtasiView jobs={visibleJobs} handleEditJob={handleEditJob} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} handleOpenEndJobModal={handleOpenEndJobModal} isManager={isManager} />}
             {activeTab === 'ekipKurmaTahtasi' && showOperasyon && <EkipKurmaTahtasiView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} allPersonnelActions={allPersonnelActions} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'izinTahtasi' && showOperasyon && <IzinTahtasiView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
-            {activeTab === 'personelTahtasi' && showOperasyon && <PersonelTahtasiView personnelList={personnelList} setViewingPersonnelProfileId={setViewingPersonnelProfileId} setActiveTab={setActiveTab} jobs={jobs} allPersonnelActions={allPersonnelActions} vehicles={vehicles} allMesaiRecords={allMesaiRecords} />}
-            {activeTab === 'puantajTahtasi' && showOperasyon && <PuantajTahtasiView personnelList={personnelList} db={db} appId={appId} />}
-            {activeTab === 'maviMesaiTahtasi' && showOperasyon && <MaviMesaiTahtasiView personnelList={personnelList} db={db} appId={appId} />}
+            {activeTab === 'personelTahtasi' && showOperasyon && <PersonelTahtasiView personnelList={personnelListMuhasebe} setViewingPersonnelProfileId={setViewingPersonnelProfileId} setActiveTab={setActiveTab} jobs={jobs} allPersonnelActions={allPersonnelActions} vehicles={vehicles} allMesaiRecords={allMesaiRecords} />}
+            {activeTab === 'puantajTahtasi' && showOperasyon && <PuantajTahtasiView personnelList={personnelListMuhasebe} db={db} appId={appId} />}
+            {activeTab === 'maviMesaiTahtasi' && showOperasyon && <MaviMesaiTahtasiView personnelList={personnelListMuhasebe} db={db} appId={appId} />}
             
             {/* YENİ: Kayıt sonrası alttan açılan başarı paneli — WhatsApp bilgilendirme ve Sözleşme indirme seçenekleri */}
             {savedJobInfo && (
@@ -5092,6 +5327,19 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
               <div className="space-y-4">
+                {/* YENİ: Sağ üstte "İçe Aktar" — eski sistemin SQL yedeğinden iş/müşteri aktarımı.
+                    Yalnızca Nakliye Kayıt sayfasında ve yönetici yetkisiyle görünür. */}
+                {activeTab === 'addNakliye' && isManager && (
+                  <div className="max-w-4xl mx-auto flex justify-end">
+                    <button
+                      onClick={() => setShowImportModal(true)}
+                      className="px-4 py-2.5 bg-black hover:bg-neutral-800 text-white text-sm font-black rounded-xl transition flex items-center gap-2 shadow-md"
+                      title="Eski sistemin SQL yedeğinden iş ve müşteri kayıtlarını aktar"
+                    >
+                      <Database className="w-4 h-4 text-yellow-400" /> İçe Aktar
+                    </button>
+                  </div>
+                )}
                 {/* NOT: "Kayıtlı Müşteriden Seç" butonu kullanıcı isteğiyle kaldırıldı */}
                 {formData.customerName && formData.customerPhone && (() => {
                   const cariMatchJob = jobs.find(j =>
@@ -5156,11 +5404,13 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
             {activeTab === 'specialCustomers' && showCustomers && <CustomerListView jobs={jobs} title="Özel Müşteriler" handleEditJob={handleEditJob} onViewCari={(key) => { setViewingCariKey(key); setActiveTab('customerProfile'); }} />}
-            {activeTab === 'customerProfile' && showCustomers && <CustomerProfileView jobs={jobs} cariKey={viewingCariKey} handleEditJob={handleEditJob} onBack={() => setActiveTab('allCustomers')} db={db} appId={appId} addSystemLog={addSystemLog} personnelList={personnelList} vehicles={vehicles} />}
+            {activeTab === 'customerProfile' && showCustomers && <CustomerProfileView currentUser={currentUser} jobs={jobs} cariKey={viewingCariKey} handleEditJob={handleEditJob} onBack={() => setActiveTab('allCustomers')} db={db} appId={appId} addSystemLog={addSystemLog} personnelList={personnelList} vehicles={vehicles} />}
 
             {activeTab === 'currentJobs' && showJobList && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
             {activeTab === 'completedJobs' && showJobList && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} handleOpenResolveDamageModal={handleOpenResolveDamageModal} />}
-            {activeTab === 'allJobs' && showJobList && <AllJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} />}
+            {/* YENİ: "Tüm İşler" artık kategori butonlu İş Merkezi'ni açar
+                (Tüm / Mevcut / Tamamlanan / İptal Edilen tek sayfada) */}
+            {activeTab === 'allJobs' && showJobList && <IsMerkeziView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} handleOpenResolveDamageModal={handleOpenResolveDamageModal} handleRestoreJob={handleRestoreJob} />}
             {activeTab === 'damagedJobs' && showJobList && <DamagedJobsView jobs={jobs} handleEditJob={handleOpenEditDamageModal} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} handleOpenResolveDamageModal={handleOpenResolveDamageModal} canDelete={isManager} />}
             {activeTab === 'cancelledJobs' && showJobList && <CancelledJobsView jobs={jobs} handleEditJob={handleEditJob} handleRestoreJob={handleRestoreJob} setDeleteJobId={setDeleteJobId} />}
 
@@ -5175,6 +5425,10 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {/* YENİ: Şirket Evrakları sayfası */}
             {activeTab === 'sirketEvraklari' && showPersonnel && <SirketEvraklariView db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
+            {/* YENİ: Dava Dosyaları (Şirket Dosyaları > Hukuk Takip Merkezi) sayfası — İK veya davaDosyalari yetkisiyle erişilir */}
+            {activeTab === 'davaDosyalari' && (showPersonnel || showDavaDosyalari) && <DavaDosyalariView currentUser={currentUser} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
+            {/* YENİ: Şirket Evrakları (Şirket Dosyaları > Evrak Arşiv Merkezi) sayfası */}
+            {activeTab === 'sirketBelgeleri' && showPersonnel && <SirketBelgeleriView currentUser={currentUser} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'addVehicle' && showOperasyon && <AddVehicleView onAdd={handleAddVehicle} onCancel={() => setActiveTab('vehicleList')} />}
             {activeTab === 'vehicleList' && showOperasyon && (
               <>
@@ -5487,8 +5741,8 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             {activeTab === 'financeDashboard' && showFinance && <FinanceDashboardView jobs={jobs} transactions={transactions} transactionType={transactionType} setTransactionType={setTransactionType} newTransaction={newTransaction} setNewTransaction={setNewTransaction} handleAddTransaction={handleAddTransaction} personnelList={personnelList} handleEditJob={handleEditJob} db={db} appId={appId} />}
             {activeTab === 'reporting' && showFinance && <ReportingView jobs={jobs} personnelList={personnelList} />}
             {activeTab === 'advancedReporting' && showFinance && <AdvancedReportingView jobs={jobs} />}
-            {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
-            {activeTab === 'personelOdeme' && showFinance && <PersonelOdemeView personnelList={personnelList} transactions={transactions} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
+            {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelListMuhasebe} db={db} appId={appId} addSystemLog={addSystemLog} />}
+            {activeTab === 'personelOdeme' && showFinance && <PersonelOdemeView personnelList={personnelListMuhasebe} transactions={transactions} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
 
             {activeTab === 'addTask' && showOperasyon &&
               <AddTaskFormView 
@@ -6111,7 +6365,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                               )}
                             </div>
                           ))}
-                          <MediaCaptureMenu onChange={(e) => handleFileUpload(e, 'elevator')} buttonLabel="Fotoğraf / Video Ekle" buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2" />
+                          <MediaCaptureMenu multiple onChange={(e) => handleFileUpload(e, 'elevator')} buttonLabel="Fotoğraf / Video Ekle" buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2" />
                         </div>
                       </div>
 
@@ -6201,7 +6455,25 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                               )}
                             </div>
                           ))}
-                          <MediaCaptureMenu onChange={(e) => handleFileUpload(e, 'truck')} buttonLabel="Yeni Görsel Ekle" buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2" />
+                          {/* YENİ: multiple → birden fazla fotoğraf/video aynı anda; "Şimdi Çek" doğrudan kamerayı açar (iOS/Android) */}
+                          <MediaCaptureMenu multiple onChange={(e) => handleFileUpload(e, 'truck')} buttonLabel="Yeni Görsel Ekle" buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2" />
+                        </div>
+                      </div>
+
+                      {/* YENİ: TESLİM EDİLEN YERİN FOTOĞRAFI / VİDEOSU — kasa fotoğrafıyla birebir aynı mantık */}
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-1">Teslim Edilen Yerin Fotoğrafı / Videosu (İş Sonu)</label>
+                        <div className="flex flex-col gap-2">
+                          {(endJobData.deliveryImages || []).map((img, idx) => (
+                            <div key={'dlvimg'+idx} className="flex items-center gap-2 bg-neutral-50 p-2 rounded-xl border border-neutral-200">
+                              <Camera className="w-4 h-4 text-neutral-500 shrink-0" />
+                              <span className="text-sm font-medium text-neutral-600 flex-1 truncate">{img}</span>
+                              {img !== 'Yükleniyor...' && (
+                                <button type="button" onClick={() => setEndJobData(prev => ({...prev, deliveryImages: (prev.deliveryImages || []).filter((_, i) => i !== idx)}))} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"><X className="w-4 h-4"/></button>
+                              )}
+                            </div>
+                          ))}
+                          <MediaCaptureMenu multiple onChange={(e) => handleFileUpload(e, 'delivery')} buttonLabel="Yeni Görsel Ekle" buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2" />
                         </div>
                       </div>
 
@@ -6221,7 +6493,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
                                 )}
                               </div>
                             ))}
-                            <MediaCaptureMenu onChange={(e) => handleFileUpload(e, 'damage')} buttonLabel="Yeni Hasar Fotoğrafı Ekle" buttonClassName="cursor-pointer w-full bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2 text-red-600" />
+                            <MediaCaptureMenu multiple onChange={(e) => handleFileUpload(e, 'damage')} buttonLabel="Yeni Hasar Fotoğrafı Ekle" buttonClassName="cursor-pointer w-full bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2 text-red-600" />
                           </div>
                           
                           {endJobData.damageDetails.trim().length > 0 && (
@@ -6559,8 +6831,89 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           </div>
         )}
 
-        {showContactModal && (
+        {/* YENİ: ESKİ SİSTEMDEN İÇE AKTARMA PENCERESİ */}
+        {showImportModal && isManager && (
+          <EskiVeriIceAktar
+            jobs={jobs}
+            currentUser={currentUser}
+            addSystemLog={addSystemLog}
+            onClose={() => setShowImportModal(false)}
+          />
+        )}
+
+        {/* YENİ: ŞİRKET İLETİŞİMİ YÖNETİM PENCERESİ
+            Ekleme, sıra değiştirme (yukarı/aşağı), düzenleme ve silme işlemlerinin
+            tamamı bu tek pencerede toplanır. Sol menüdeki liste sade kalır. */}
+        {showContactsManageModal && canManageContacts && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[85vh]">
+              <div className="bg-emerald-700 text-white p-4 flex justify-between items-center shrink-0">
+                <h3 className="font-bold text-lg flex items-center gap-2"><Phone className="w-5 h-5" /> Şirket İletişimi Yönetimi</h3>
+                <button onClick={() => { setShowContactsManageModal(false); setContactDeleteId(null); }} className="text-emerald-200 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+
+              <div className="p-4 border-b border-neutral-200 shrink-0">
+                <button
+                  onClick={() => { setContactForm({ name: '', phone: '', position: '' }); setEditingContact(null); setShowContactModal(true); }}
+                  className="w-full py-2.5 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition text-sm flex items-center justify-center gap-2">
+                  <PlusCircle className="w-4 h-4" /> Yeni Kişi Ekle
+                </button>
+                <p className="text-[11px] text-neutral-400 font-bold mt-2 text-center">Sıralamayı ok tuşlarıyla değiştirebilir, kayıtları düzenleyip silebilirsiniz.</p>
+              </div>
+
+              <div className="p-4 space-y-2 overflow-y-auto">
+                {companyContacts.length === 0 && (
+                  <p className="text-center text-neutral-400 text-sm font-bold py-8">Kayıtlı numara yok. "Yeni Kişi Ekle" ile başlayın.</p>
+                )}
+                {companyContacts.map((c, index) => (
+                  <div key={c.id} className="border border-neutral-200 rounded-xl p-3 flex items-center gap-3 hover:border-emerald-400 transition">
+                    {/* Sıra numarası + yukarı/aşağı taşıma */}
+                    <div className="flex flex-col items-center gap-0.5 shrink-0">
+                      <button disabled={index === 0} onClick={() => handleReorderContact(index, 'up')} title="Yukarı Taşı"
+                        className="p-1 rounded-lg text-neutral-500 hover:text-black hover:bg-neutral-100 disabled:opacity-25 disabled:cursor-not-allowed transition"><ChevronUp className="w-4 h-4" /></button>
+                      <span className="text-[10px] font-black text-neutral-400">{index + 1}</span>
+                      <button disabled={index === companyContacts.length - 1} onClick={() => handleReorderContact(index, 'down')} title="Aşağı Taşı"
+                        className="p-1 rounded-lg text-neutral-500 hover:text-black hover:bg-neutral-100 disabled:opacity-25 disabled:cursor-not-allowed transition"><ChevronDown className="w-4 h-4" /></button>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="font-black text-black text-sm truncate">{c.name}</p>
+                      <p className="text-[11px] text-neutral-500 font-bold truncate">{c.position}</p>
+                      <p className="text-[11px] text-emerald-600 font-bold">{c.phone}</p>
+                    </div>
+
+                    {/* Düzenle / Sil */}
+                    {contactDeleteId === c.id ? (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] font-black text-red-600">Silinsin mi?</span>
+                        <button onClick={async () => { await handleDeleteContact(c.id); addSystemLog('İletişim Hattı', `Şirket iletişim hattından kişi silindi: ${c.name}`); setContactDeleteId(null); }}
+                          className="px-2.5 py-1.5 bg-red-600 text-white text-[11px] font-black rounded-lg hover:bg-red-700 transition">Evet</button>
+                        <button onClick={() => setContactDeleteId(null)}
+                          className="px-2.5 py-1.5 bg-neutral-100 text-neutral-600 text-[11px] font-bold rounded-lg hover:bg-neutral-200 transition">Vazgeç</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button onClick={() => { setEditingContact(c); setContactForm({ name: c.name, phone: c.phone, position: c.position }); setShowContactModal(true); }} title="Düzenle"
+                          className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-lg transition"><Edit className="w-4 h-4" /></button>
+                        <button onClick={() => setContactDeleteId(c.id)} title="Sil"
+                          className="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition"><X className="w-4 h-4" /></button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="p-4 border-t border-neutral-200 shrink-0">
+                <button onClick={() => { setShowContactsManageModal(false); setContactDeleteId(null); }}
+                  className="w-full py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition text-sm">Kapat</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {showContactModal && (
+          /* Bu pencere, yönetim penceresinin ÜSTÜNDE açılır (z-[60]) */
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
               <div className="bg-emerald-600 text-white p-4 flex justify-between items-center shrink-0">
                 <h3 className="font-bold text-lg flex items-center gap-2"><Phone className="w-5 h-5" /> {editingContact ? 'İletişim Numarası Düzenle' : 'İletişim Numarası Ekle'}</h3>

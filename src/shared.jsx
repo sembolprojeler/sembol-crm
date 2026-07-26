@@ -256,7 +256,11 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
   };
 
   // --- YENİ: FOTOĞRAF/VİDEO EKLEME MENÜSÜ (Şimdi Çek / Galeriden Yükle / Dosyadan) ---
-  export const MediaCaptureMenu = ({ onChange, disabled, buttonLabel, buttonClassName, compact = false }) => {
+  // NOT: 'multiple' parametresi geriye dönük uyumludur (varsayılan false).
+  // Var olan tüm çağrılar hiçbir değişiklik yapmadan aynı şekilde çalışmaya devam eder;
+  // sadece multiple={true} verilen yerlerde galeri/dosya seçiminde birden fazla
+  // dosya/fotoğraf aynı anda seçilebilir hale gelir.
+  export const MediaCaptureMenu = ({ onChange, disabled, buttonLabel, buttonClassName, compact = false, multiple = false }) => {
     const [isOpen, setIsOpen] = useState(false);
     const cameraInputRef = React.useRef(null);
     const galleryInputRef = React.useRef(null);
@@ -300,9 +304,11 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
           </>
         )}
 
+        {/* Kamera çekimi doğası gereği tek seferde tek kare verir; 'multiple' burada zararsızdır. */}
         <input ref={cameraInputRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
-        <input ref={galleryInputRef} type="file" accept="image/*,video/*" className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
-        <input ref={fileInputRef} type="file" accept="*/*" className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
+        {/* Galeriden ve dosyadan seçimde 'multiple' sayesinde birden fazla fotoğraf/belge tek seferde seçilebilir. */}
+        <input ref={galleryInputRef} type="file" accept="image/*,video/*" multiple={multiple} className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
+        <input ref={fileInputRef} type="file" accept="*/*" multiple={multiple} className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
       </div>
     );
   };
@@ -1309,4 +1315,64 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
     printWindow.document.open();
     printWindow.document.write(html);
     printWindow.document.close();
+  };
+  // ============================================================================
+  // YENİ: SAYFALAMA ÇUBUĞU (PAGINATION BAR)
+  // Uzun listeleri sayfalara böler. Liste bileşenleri yalnızca aktif sayfanın
+  // dilimini ekrana basar; sayfa geçişi bu çubuktan yapılır.
+  // Kullanım: <SayfalamaBar toplam={liste.length} sayfa={sayfa} onSayfaChange={setSayfa} birim="iş" />
+  // ============================================================================
+  export const SayfalamaBar = ({ toplam = 0, sayfa = 1, sayfaBoyutu = 50, onSayfaChange, birim = 'kayıt' }) => {
+    const toplamSayfa = Math.max(1, Math.ceil(toplam / sayfaBoyutu));
+    if (toplam === 0) return null;
+
+    const bas = (sayfa - 1) * sayfaBoyutu + 1;
+    const son = Math.min(sayfa * sayfaBoyutu, toplam);
+
+    // Görünecek sayfa numaraları: ilk, son ve aktif sayfanın komşuları (arası "…" ile kısaltılır)
+    const numaralar = [];
+    const ekle = (n) => { if (n >= 1 && n <= toplamSayfa && !numaralar.includes(n)) numaralar.push(n); };
+    ekle(1); ekle(toplamSayfa);
+    for (let i = sayfa - 1; i <= sayfa + 1; i++) ekle(i);
+    numaralar.sort((a, b) => a - b);
+
+    const git = (n) => {
+      const hedef = Math.min(Math.max(1, n), toplamSayfa);
+      onSayfaChange?.(hedef);
+      // Sayfa değişince listenin başına dön (uzun listelerde kullanıcı kaybolmasın)
+      if (typeof window !== 'undefined') window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+
+    return (
+      <div className="flex flex-col md:flex-row items-center justify-between gap-3 mt-5 pt-4 border-t border-neutral-200">
+        {/* Kaç kayıttan kaçının gösterildiği bilgisi */}
+        <span className="text-xs font-bold text-neutral-500">
+          Toplam <span className="text-black">{toplam.toLocaleString('tr-TR')}</span> {birim} — {bas}-{son} arası gösteriliyor
+          {toplamSayfa > 1 && <span className="text-neutral-400"> (Sayfa {sayfa}/{toplamSayfa})</span>}
+        </span>
+
+        {toplamSayfa > 1 && (
+          <div className="flex items-center gap-1 flex-wrap justify-center">
+            <button onClick={() => git(sayfa - 1)} disabled={sayfa === 1}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-bold border border-neutral-200 bg-white text-neutral-600 hover:border-red-400 hover:text-red-600 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-neutral-200 disabled:hover:text-neutral-600">
+              ‹ Önceki
+            </button>
+            {numaralar.map((n, i) => (
+              <span key={n} className="flex items-center gap-1">
+                {/* Araya boşluk düşüyorsa üç nokta göster */}
+                {i > 0 && n - numaralar[i - 1] > 1 && <span className="text-neutral-300 text-xs px-0.5">…</span>}
+                <button onClick={() => git(n)}
+                  className={`min-w-[32px] px-2 py-1.5 rounded-lg text-xs font-black border transition ${n === sayfa ? 'bg-red-600 text-white border-red-600 shadow-sm' : 'bg-white text-neutral-600 border-neutral-200 hover:border-red-400 hover:text-red-600'}`}>
+                  {n}
+                </button>
+              </span>
+            ))}
+            <button onClick={() => git(sayfa + 1)} disabled={sayfa === toplamSayfa}
+              className="px-2.5 py-1.5 rounded-lg text-xs font-bold border border-neutral-200 bg-white text-neutral-600 hover:border-red-400 hover:text-red-600 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:border-neutral-200 disabled:hover:text-neutral-600">
+              Sonraki ›
+            </button>
+          </div>
+        )}
+      </div>
+    );
   };

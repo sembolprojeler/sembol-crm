@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, Calendar, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap } from 'lucide-react';
+import { Truck, Calendar, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, where } from 'firebase/firestore';
-import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi } from './shared.jsx';
+import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar } from './shared.jsx';
   export const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [mesaiData, setMesaiData] = useState({});
@@ -727,6 +727,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                           <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-green-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
                         </button>
                       ))}
+                      {/* YENİ: Teslim edilen yerin fotoğraf/videoları */}
+                      {(job.endJobDetails.deliveryImages || []).map((img, idx) => (
+                        <button key={'dlv'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Teslim Yeri Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-blue-700 bg-blue-50 p-2.5 rounded-lg border border-blue-200 hover:bg-blue-100 transition flex justify-between items-center shadow-sm">
+                          <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Teslim Yeri Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
+                          <span className="text-[10px] bg-white px-2 py-1 rounded font-bold border border-blue-200 flex items-center gap-1 shrink-0">Aç <ArrowUpRight className="w-3 h-3"/></span>
+                        </button>
+                      ))}
                       {(job.endJobDetails.damageImages || (job.endJobDetails.damageImage ? [job.endJobDetails.damageImage] : [])).map((img, idx) => (
                         <button key={'damage'+idx} type="button" onClick={(e) => { e.stopPropagation(); setViewingImage({title: 'Hasar Fotoğrafı', name: img}); }} className="md:col-span-2 text-left text-red-600 bg-red-50 p-2.5 rounded-lg border border-red-200 hover:bg-red-100 transition flex justify-between items-center shadow-sm">
                           <span className="flex items-center gap-1.5"><Camera className="w-4 h-4 shrink-0"/> <b>Hasar Fotoğrafı {idx > 0 ? idx+1 : ''}:</b> {img}</span>
@@ -786,6 +793,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
   export const AllJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerateMessage, handleEstimateMaterials, setCancelJobId, setDeleteJobId }) => {
     const [sortOrder, setSortOrder] = useState('newest');
     const [searchQuery, setSearchQuery] = useState('');
+    // YENİ: Sayfalama — liste 50'şerli sayfalara bölünür
+    const SAYFA_BOYUTU = 50;
+    const [sayfa, setSayfa] = useState(1);
     
     // Arama metnine göre filtreleme (Müşteri Adı veya Telefon)
     const filteredJobs = jobs.filter(job => 
@@ -797,6 +807,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       if (sortOrder === 'newest') return new Date(b.date) - new Date(a.date);
       return new Date(a.date) - new Date(b.date);
     });
+
+    // Arama veya sıralama değişince ilk sayfaya dön
+    useEffect(() => { setSayfa(1); }, [searchQuery, sortOrder]);
+    // Yalnızca aktif sayfanın kayıtları ekrana basılır
+    const pagedJobs = sortedJobs.slice((sayfa - 1) * SAYFA_BOYUTU, sayfa * SAYFA_BOYUTU);
 
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
@@ -831,7 +846,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         
         {/* KART TABANLI YAPI (Responsive Fix) */}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {sortedJobs.map(job => (
+          {pagedJobs.map(job => (
             <div key={job.id} className={`bg-white p-4 rounded-xl shadow-sm border flex flex-col gap-3 transition ${job.status === 'cancelled' ? 'border-red-400 bg-red-50/40' : job.isSpecial ? 'border-yellow-400 ring-1 ring-yellow-100 bg-yellow-50/20' : 'border-neutral-200 hover:border-red-400'}`}>
                 <div className="flex justify-between items-start gap-2">
                   <div className="flex flex-wrap items-center gap-1.5">
@@ -939,6 +954,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <div className="col-span-full p-8 text-center text-neutral-500">Kayıtlı iş bulunamadı.</div>
           )}
         </div>
+
+        {/* YENİ: Sayfalama çubuğu — 50'şerli sayfa geçişi */}
+        <SayfalamaBar toplam={sortedJobs.length} sayfa={sayfa} sayfaBoyutu={SAYFA_BOYUTU} onSayfaChange={setSayfa} birim="iş" />
       </div>
     );
   };
@@ -1156,6 +1174,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                   {(job.endJobDetails?.truckImages || (job.endJobDetails?.truckImage ? [job.endJobDetails.truckImage] : [])).map((img, idx) => (
                     <button key={idx} onClick={() => setViewingImage({title: 'Kasa Fotoğrafı', name: img})} className="w-full px-4 py-2 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition flex justify-center items-center gap-2 text-sm border border-neutral-200">
                       <Camera className="w-4 h-4" /> Kasa Görseli {idx > 0 ? idx+1 : ''}
+                    </button>
+                  ))}
+
+                  {/* YENİ: Teslim edilen yerin görselleri */}
+                  {(job.endJobDetails?.deliveryImages || []).map((img, idx) => (
+                    <button key={'dlv'+idx} onClick={() => setViewingImage({title: 'Teslim Yeri Fotoğrafı', name: img})} className="w-full px-4 py-2 bg-blue-50 text-blue-700 font-bold rounded-xl hover:bg-blue-100 transition flex justify-center items-center gap-2 text-sm border border-blue-200">
+                      <Camera className="w-4 h-4" /> Teslim Yeri Görseli {idx > 0 ? idx+1 : ''}
                     </button>
                   ))}
                   
@@ -2652,14 +2677,85 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
        return new Date(`${y}-${m}-${d}T${hr}:${min}:00`).getTime() || 0;
     };
 
-    // Sistem loglarından sadece malzeme ve stok hareketlerini filtrele
+    // YENİ: Sıralama önce makine okunur createdAt alanına bakar; yoksa metin tarihini ayrıştırır.
+    // Böylece "en son işlem en üstte" sıralaması her kayıtta güvenilir çalışır.
+    const logZamani = (log) => {
+      if (log?.createdAt) {
+        const t = new Date(log.createdAt).getTime();
+        if (!isNaN(t)) return t;
+      }
+      return parseLogDate(log?.timestamp);
+    };
+
+    // YENİ: Hareket detayını ayrıştırıp TEKRAR EDEN malzemeleri tek kalemde toplar.
+    // Eski kayıtlarda "1 Kg Kağıt, 7 Adet Koli, 1 Kg Kağıt, 7 Adet Koli..." şeklinde
+    // uzayan listeler bu sayede "2 Kg Kağıt, 14 Adet Koli" olarak sade görünür.
+    const parseMalzemeDetay = (metin) => {
+      if (!metin) return { baslik: '', kalemler: [] };
+      const ayirac = metin.indexOf(':');
+      if (ayirac === -1) return { baslik: metin, kalemler: [] };
+      const baslik = metin.slice(0, ayirac).trim();
+      const govde = metin.slice(ayirac + 1);
+      const harita = new Map();
+      const cozulemeyen = [];
+      govde.split(',').map(s => s.trim()).filter(Boolean).forEach(parca => {
+        const m = parca.match(/^([\d.,]+)\s+(.+)$/); // "1.5 Rulo Streç" → 1.5 + "Rulo Streç"
+        if (!m) { cozulemeyen.push(parca); return; }
+        const miktar = parseFloat(String(m[1]).replace(',', '.'));
+        if (isNaN(miktar)) { cozulemeyen.push(parca); return; }
+        const ad = m[2].trim();
+        harita.set(ad, (harita.get(ad) || 0) + miktar);
+      });
+      const kalemler = Array.from(harita.entries()).map(([ad, miktar]) => ({ ad, miktar: Math.round(miktar * 100) / 100 }));
+      return { baslik, kalemler, cozulemeyen };
+    };
+
+    // YENİ: Hareket listesi için arama ve işlem türü filtresi
+    const [logArama, setLogArama] = useState('');
+    const [logTuru, setLogTuru] = useState('Tümü'); // 'Tümü' | 'giris' | 'cikis'
+
+    // Sistem loglarından sadece malzeme ve stok hareketlerini filtrele (en yeni en üstte)
     const allMaterialLogsSorted = systemLogs.filter(log => 
       log.action?.includes('Malzeme') || log.action?.includes('Stok')
-    ).sort((a, b) => parseLogDate(b.timestamp) - parseLogDate(a.timestamp));
+    ).sort((a, b) => logZamani(b) - logZamani(a));
+
+    // Arama + tür filtresi uygulanmış liste
+    const filtrelenmisLoglar = allMaterialLogsSorted.filter(log => {
+      const cikisMi = (log.action || '').includes('Çıkış');
+      if (logTuru === 'cikis' && !cikisMi) return false;
+      if (logTuru === 'giris' && cikisMi) return false;
+      const q = logArama.trim().toLocaleLowerCase('tr-TR');
+      if (!q) return true;
+      return `${log.details || ''} ${log.user || ''} ${log.action || ''}`.toLocaleLowerCase('tr-TR').includes(q);
+    });
 
     // YENİ: "Tüm Hareketleri Gör" butonu için TAM liste (kesilmemiş)
-    const allMaterialLogs = allMaterialLogsSorted;
-    const materialLogs = allMaterialLogsSorted.slice(0, 20); // Son 20 hareketi göster
+    const allMaterialLogs = filtrelenmisLoglar;
+    const materialLogs = filtrelenmisLoglar.slice(0, 20); // Son 20 hareketi göster
+
+    // Hareket satırının detay hücresi — başlık + toplanmış malzeme etiketleri
+    const DetayHucresi = ({ log }) => {
+      const { baslik, kalemler, cozulemeyen } = parseMalzemeDetay(log.details);
+      const cikisMi = (log.action || '').includes('Çıkış');
+      if (!kalemler || kalemler.length === 0) {
+        return <span className="text-neutral-600 font-medium">{log.details}</span>;
+      }
+      return (
+        <div className="min-w-0">
+          <p className="text-neutral-700 font-bold text-[13px] mb-1.5">{baslik}</p>
+          <div className="flex flex-wrap gap-1">
+            {kalemler.map((k, i) => (
+              <span key={i} className={`text-[11px] font-black px-2 py-0.5 rounded-lg border ${cikisMi ? 'bg-red-50 text-red-700 border-red-100' : 'bg-green-50 text-green-700 border-green-100'}`}>
+                {cikisMi ? '−' : '+'}{k.miktar} {k.ad}
+              </span>
+            ))}
+            {(cozulemeyen || []).map((c, i) => (
+              <span key={'x' + i} className="text-[11px] font-bold px-2 py-0.5 rounded-lg border bg-neutral-50 text-neutral-500 border-neutral-200">{c}</span>
+            ))}
+          </div>
+        </div>
+      );
+    };
 
     return (
       <div className="flex flex-col gap-6 animate-in fade-in">
@@ -2725,9 +2821,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
         {/* YENİ EKLENEN: MALZEME HAREKETLERİ */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 relative">
-          <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 border-b border-neutral-200 pb-4 gap-3">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-4 border-b border-neutral-200 pb-4 gap-3">
             <h2 className="text-xl font-bold text-black flex items-center gap-2">
-              <History className="w-6 h-6 text-red-600" /> Malzeme Hareketleri (Son 20 İşlem)
+              <History className="w-6 h-6 text-red-600" /> Stok Hareketleri
+              <span className="text-xs font-bold text-neutral-400">(en yeni en üstte)</span>
             </h2>
             {/* YENİ: Tüm Hareketleri Gör Butonu */}
             <button
@@ -2737,6 +2834,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <History className="w-4 h-4" /> Tüm Hareketleri Gör ({allMaterialLogs.length})
             </button>
           </div>
+
+          {/* YENİ: Arama + işlem türü filtresi */}
+          <div className="flex flex-col md:flex-row gap-2 mb-4">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input value={logArama} onChange={e => setLogArama(e.target.value)} placeholder="Müşteri, malzeme veya personel ara..."
+                className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-600 transition" />
+            </div>
+            <div className="flex gap-1.5">
+              {[{ k: 'Tümü', l: 'Tümü' }, { k: 'cikis', l: 'Stok Çıkışı' }, { k: 'giris', l: 'Stok Girişi' }].map(o => (
+                <button key={o.k} onClick={() => setLogTuru(o.k)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition whitespace-nowrap ${logTuru === o.k ? 'bg-red-600 text-white border-red-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-red-400'}`}>
+                  {o.l}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600">
@@ -2749,20 +2864,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               </thead>
               <tbody className="divide-y divide-neutral-100">
                 {materialLogs.map(log => (
-                  <tr key={log.id} className="hover:bg-neutral-50 transition">
+                  <tr key={log.id} className="hover:bg-neutral-50 transition align-top">
                     <td className="p-4 font-medium text-black whitespace-nowrap">{log.timestamp}</td>
                     <td className="p-4">
-                      <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${log.action.includes('Çıkışı') ? 'bg-red-50 text-red-700 border-red-100' : 'bg-green-50 text-green-700 border-green-100'}`}>
+                      <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border whitespace-nowrap ${log.action.includes('Çıkış') ? 'bg-red-50 text-red-700 border-red-100' : 'bg-green-50 text-green-700 border-green-100'}`}>
                         {log.action}
                       </span>
                     </td>
-                    <td className="p-4 text-neutral-600 font-medium">{log.details}</td>
-                    <td className="p-4 font-bold text-neutral-800">{log.user}</td>
+                    <td className="p-4"><DetayHucresi log={log} /></td>
+                    <td className="p-4 font-bold text-neutral-800 whitespace-nowrap">{log.user}</td>
                   </tr>
                 ))}
                 {materialLogs.length === 0 && (
                   <tr>
-                    <td colSpan="4" className="p-6 text-center text-neutral-500">Henüz malzeme hareketi bulunmuyor.</td>
+                    <td colSpan="4" className="p-6 text-center text-neutral-500">
+                      {logArama.trim() || logTuru !== 'Tümü' ? 'Aramanıza uygun hareket bulunamadı.' : 'Henüz malzeme hareketi bulunmuyor.'}
+                    </td>
                   </tr>
                 )}
               </tbody>
@@ -2806,15 +2923,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                   </thead>
                   <tbody className="divide-y divide-neutral-100">
                     {allMaterialLogs.map(log => (
-                      <tr key={log.id} className="hover:bg-neutral-50 transition">
+                      <tr key={log.id} className="hover:bg-neutral-50 transition align-top">
                         <td className="p-4 font-medium text-black whitespace-nowrap">{log.timestamp}</td>
                         <td className="p-4">
-                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${log.action.includes('Çıkışı') ? 'bg-red-50 text-red-700 border-red-100' : 'bg-green-50 text-green-700 border-green-100'}`}>
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold border whitespace-nowrap ${log.action.includes('Çıkış') ? 'bg-red-50 text-red-700 border-red-100' : 'bg-green-50 text-green-700 border-green-100'}`}>
                             {log.action}
                           </span>
                         </td>
-                        <td className="p-4 text-neutral-600 font-medium">{log.details}</td>
-                        <td className="p-4 font-bold text-neutral-800">{log.user}</td>
+                        <td className="p-4"><DetayHucresi log={log} /></td>
+                        <td className="p-4 font-bold text-neutral-800 whitespace-nowrap">{log.user}</td>
                       </tr>
                     ))}
                     {allMaterialLogs.length === 0 && (
@@ -2941,6 +3058,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
   export const CancelledJobsView = ({ jobs, handleEditJob, handleRestoreJob, setDeleteJobId }) => {
     const [searchQuery, setSearchQuery] = useState('');
+    // YENİ: Sayfalama — liste 50'şerli sayfalara bölünür
+    const SAYFA_BOYUTU = 50;
+    const [sayfa, setSayfa] = useState(1);
 
     const cancelledJobs = jobs.filter(j => {
       if (j.status !== 'cancelled') return false;
@@ -2950,6 +3070,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       }
       return true;
     }).sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // Arama değişince ilk sayfaya dön; yalnızca aktif sayfa render edilir
+    useEffect(() => { setSayfa(1); }, [searchQuery]);
+    const pagedCancelled = cancelledJobs.slice((sayfa - 1) * SAYFA_BOYUTU, sayfa * SAYFA_BOYUTU);
 
     return (
       <div className="space-y-6 animate-in fade-in">
@@ -2982,7 +3106,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <p className="text-lg font-medium">{searchQuery.trim() ? 'Aramanıza uygun kayıt bulunamadı.' : 'Sistemde iptal edilmiş operasyon bulunmuyor.'}</p>
             </div>
           ) : (
-            cancelledJobs.map(job => (
+            pagedCancelled.map(job => (
               <div key={job.id} className="bg-red-50/30 p-5 rounded-2xl shadow-sm border border-red-200 transition flex flex-col gap-4 hover:border-red-400">
                 <div className="flex justify-between items-start">
                   <div>
@@ -3024,6 +3148,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               </div>
             ))
           )}
+        </div>
+
+        {/* YENİ: Sayfalama çubuğu — 50'şerli sayfa geçişi */}
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200">
+          <SayfalamaBar toplam={cancelledJobs.length} sayfa={sayfa} sayfaBoyutu={SAYFA_BOYUTU} onSayfaChange={setSayfa} birim="iptal kaydı" />
         </div>
       </div>
     );
@@ -7868,11 +7997,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                        <div className="text-xs text-neutral-400 italic text-center py-2">Sonlandırma detayı yok.</div>
                      )}
                      {/* YENİ: Ekip şefinin yüklediği kasa/hasar/asansör medyalarının görüntülenmesi */}
-                     {setViewingImage && (job.endJobDetails?.truckImages || job.endJobDetails?.damageImages || job.endJobDetails?.elevatorImages) && (
+                     {setViewingImage && (job.endJobDetails?.truckImages || job.endJobDetails?.deliveryImages || job.endJobDetails?.damageImages || job.endJobDetails?.elevatorImages) && (
                        <div className="flex flex-wrap gap-1.5">
                          {(job.endJobDetails?.truckImages || []).filter(img => img && img !== 'Yükleniyor...').map((img, idx) => (
                            <button key={'truck'+idx} onClick={() => setViewingImage({ title: 'Kasa Fotoğrafı', name: img })} className="text-[10px] font-bold px-2 py-1 rounded-lg bg-neutral-100 text-neutral-600 hover:bg-neutral-200 transition flex items-center gap-1">
                              <Camera className="w-3 h-3" /> Kasa {idx > 0 ? idx + 1 : ''}
+                           </button>
+                         ))}
+                         {/* YENİ: Teslim edilen yer görselleri */}
+                         {(job.endJobDetails?.deliveryImages || []).filter(img => img && img !== 'Yükleniyor...').map((img, idx) => (
+                           <button key={'dlv'+idx} onClick={() => setViewingImage({ title: 'Teslim Yeri Fotoğrafı', name: img })} className="text-[10px] font-bold px-2 py-1 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition flex items-center gap-1">
+                             <Camera className="w-3 h-3" /> Teslim Yeri {idx > 0 ? idx + 1 : ''}
                            </button>
                          ))}
                          {(job.endJobDetails?.damageImages || []).filter(img => img && img !== 'Yükleniyor...').map((img, idx) => (
@@ -9408,6 +9543,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                  {job.status === 'completed' && isMainAssignee && (() => {
                     // Kasa/İş fotoğrafı eklenmiş mi? ('Yükleniyor...' geçici değerini saymıyoruz.)
                     const kasaFotoVar = (job.endJobDetails?.truckImages || []).filter(img => img && img !== 'Yükleniyor...').length > 0;
+                    // YENİ: Teslim edilen yerin fotoğrafı eklenmiş mi?
+                    const teslimFotoVar = (job.endJobDetails?.deliveryImages || []).filter(img => img && img !== 'Yükleniyor...').length > 0;
 
                     return (
                       <div className="mt-4 flex flex-col gap-2 border-t border-neutral-100 pt-4">
@@ -9416,6 +9553,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                           <div className="flex items-start gap-2 bg-amber-50 border border-amber-300 text-amber-800 p-3 rounded-xl text-sm font-medium">
                             <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600" />
                             <span>Bu işe <b>Kasa / İş fotoğrafı</b> eklemeyi unutmuşsunuz. Aşağıdaki butondan düzenleyip fotoğrafı ekleyebilirsiniz.</span>
+                          </div>
+                        )}
+                        {/* YENİ: Teslim yeri fotoğrafı eksikse uyarı bildirimi */}
+                        {!teslimFotoVar && (
+                          <div className="flex items-start gap-2 bg-amber-50 border border-amber-300 text-amber-800 p-3 rounded-xl text-sm font-medium">
+                            <AlertTriangle className="w-5 h-5 shrink-0 text-amber-600" />
+                            <span>Bu işe <b>Teslim edilen yerin fotoğrafı</b> eklemeyi unutmuşsunuz. Aşağıdaki butondan düzenleyip ekleyebilirsiniz.</span>
                           </div>
                         )}
                         {/* Düzenleme butonu — sonlandırma modalını mevcut bilgilerle açar (her zaman aktif) */}
@@ -9551,14 +9695,23 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       try { const json = JSON.parse(text); return json.url || json.fileName || json.file || text; } catch (err) { return text.trim(); }
     };
 
-    // YENİ: Form içinde belge ekle (aday kaydından önce). Yüklenen belge form.belgeler dizisine eklenir.
+    // YENİ: Form içinde belge ekle (aday kaydından önce). Artık BİRDEN FAZLA dosya/fotoğraf aynı anda
+    // seçilebilir (Şimdi Çek / Galeriden Yükle / Dosyadan). Her dosya sırayla yüklenip form.belgeler
+    // dizisine ayrı bir kayıt olarak eklenir. "Belge adı" artık opsiyoneldir: yazılmazsa dosyanın kendi
+    // adı kullanılır; yazılıp birden fazla dosya seçilirse sonuna sıra numarası eklenir (CV (1), CV (2)...).
     const handleFormBelgeUpload = async (e) => {
-      const file = e.target.files[0];
-      if (!file || !belgeLabel.trim()) return;
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
       setBelgeUploading(true);
       try {
-        const url = await uploadFile(file);
-        setForm(prev => ({ ...prev, belgeler: [...(prev.belgeler || []), { id: Date.now().toString(), label: belgeLabel.trim(), url }] }));
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const url = await uploadFile(file);
+          const label = belgeLabel.trim()
+            ? (files.length > 1 ? `${belgeLabel.trim()} (${i + 1})` : belgeLabel.trim())
+            : (file.name || `Belge ${i + 1}`);
+          setForm(prev => ({ ...prev, belgeler: [...(prev.belgeler || []), { id: Date.now().toString() + '_' + i, label, url }] }));
+        }
         setBelgeLabel('');
       } catch (err) { alert('Belge yüklenemedi.'); }
       setBelgeUploading(false);
@@ -9605,19 +9758,23 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       });
     };
 
-    // YENİ: Detay panelinde belge ekle (kayıtlı adaya)
+    // YENİ: Detay panelinde belge ekle (kayıtlı adaya). Artık BİRDEN FAZLA dosya/fotoğraf
+    // aynı anda seçilebilir (Şimdi Çek / Galeriden / Dosyadan). Belge adı olarak dosyanın
+    // kendi adı kullanılır; sonradan kalem simgesiyle yeniden adlandırılabilir.
     const handleDetayBelgeUpload = async (cand, e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const lbl = window.prompt('Belge adı girin (örn: CV, Kimlik, Ehliyet):', '');
-      if (lbl === null || !lbl.trim()) return;
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
       setDetayBelgeUploading(cand.id);
       try {
-        const url = await uploadFile(file);
-        const yeni = { id: Date.now().toString(), label: lbl.trim(), url };
+        const yeniler = [];
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const url = await uploadFile(file);
+          yeniler.push({ id: Date.now().toString() + '_' + i, label: (file.name || `Belge ${i + 1}`), url });
+        }
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'candidates', cand.id), {
-          belgeler: [...(cand.belgeler || []), yeni],
-          history: [...(cand.history || []), { date: new Date().toISOString(), text: `Belge eklendi: ${lbl.trim()}`, by: currentUser?.fullName || 'Sistem' }]
+          belgeler: [...(cand.belgeler || []), ...yeniler],
+          history: [...(cand.history || []), { date: new Date().toISOString(), text: `${yeniler.length} belge eklendi`, by: currentUser?.fullName || 'Sistem' }]
         });
       } catch (err) { alert('Belge yüklenemedi.'); }
       setDetayBelgeUploading(null);
@@ -9766,11 +9923,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                       <div className="flex items-center justify-between mb-2">
                         <h4 className="text-xs font-black text-neutral-700 flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-blue-600" /> Aday Belgeleri</h4>
                         {!isFinal && (
-                          <label className="text-[11px] font-bold text-blue-600 hover:text-blue-800 cursor-pointer flex items-center gap-1">
-                            {detayBelgeUploading === cand.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <PlusCircle className="w-3.5 h-3.5" />}
-                            {detayBelgeUploading === cand.id ? 'Yükleniyor...' : 'Belge Ekle'}
-                            <input type="file" className="hidden" onChange={(e) => handleDetayBelgeUpload(cand, e)} disabled={detayBelgeUploading === cand.id} />
-                          </label>
+                          /* YENİ: Şimdi Çek / Galeriden Yükle / Dosyadan seçenekleri + birden fazla belge/fotoğraf seçimi */
+                          <MediaCaptureMenu
+                            compact
+                            multiple
+                            disabled={detayBelgeUploading === cand.id}
+                            buttonLabel={detayBelgeUploading === cand.id ? 'Yükleniyor...' : 'Belge Ekle'}
+                            buttonClassName="text-[11px] font-bold text-blue-600 hover:text-blue-800 cursor-pointer flex items-center gap-1"
+                            onChange={(e) => handleDetayBelgeUpload(cand, e)}
+                          />
                         )}
                       </div>
                       {(cand.belgeler || []).length === 0 ? (
@@ -9890,11 +10051,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <div className="border border-neutral-200 rounded-xl p-3 bg-neutral-50">
                   <label className="text-xs font-black text-neutral-700 mb-2 flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-blue-600" /> Belgeler</label>
                   <div className="flex gap-1.5 mb-2">
-                    <input value={belgeLabel} onChange={e => setBelgeLabel(e.target.value)} placeholder="Belge adı (örn: CV)" className="flex-1 min-w-0 p-2 border border-neutral-300 rounded-lg text-xs outline-none focus:ring-1 focus:ring-emerald-600" />
-                    <label className={`shrink-0 px-3 py-2 rounded-lg font-bold text-xs flex items-center justify-center gap-1 cursor-pointer transition ${belgeLabel.trim() ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-neutral-200 text-neutral-400 pointer-events-none'}`}>
-                      {belgeUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Yükle
-                      <input type="file" className="hidden" onChange={handleFormBelgeUpload} disabled={belgeUploading || !belgeLabel.trim()} />
-                    </label>
+                    <input value={belgeLabel} onChange={e => setBelgeLabel(e.target.value)} placeholder="Belge adı (opsiyonel, örn: CV)" className="flex-1 min-w-0 p-2 border border-neutral-300 rounded-lg text-xs outline-none focus:ring-1 focus:ring-emerald-600" />
+                    {/* YENİ: Şimdi Çek / Galeriden Yükle / Dosyadan seçenekleri + birden fazla belge/fotoğraf seçimi (multiple) */}
+                    <MediaCaptureMenu
+                      compact
+                      multiple
+                      disabled={belgeUploading}
+                      buttonLabel={belgeUploading ? 'Yükleniyor...' : 'Yükle'}
+                      onChange={handleFormBelgeUpload}
+                    />
                   </div>
                   {(form.belgeler || []).length > 0 && (
                     <div className="space-y-1">
@@ -10132,6 +10297,1325 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               </div>
             </div>
           </div>
+        )}
+      </div>
+    );
+  };
+  // ============================================================================
+  // YENİ: DAVA DOSYALARI (ŞİRKET DOSYALARI > HUKUK TAKİP MERKEZİ)
+  // Şirkete gelen/açılan tüm hukuki süreçlerin tek merkezden yönetildiği bölüm:
+  // Davalar, İcra Takipleri, İhtarnameler, İhbarnameler, Arabuluculuk, UETS
+  // Tebligatları, Vergi/İdari süreçler vb.
+  // Özellikler:
+  //  - Dosya bazlı takip: dosya no, mahkeme/kurum, karşı taraf, konum (davacı/davalı...),
+  //    dava tutarı, kritik tarihler (duruşma / itiraz-cevap son günü), avukat, notlar.
+  //  - Belge yönetimi: fotoğraf + PDF + her tür dosya, ÇOKLU yükleme (Şimdi Çek /
+  //    Galeriden / Dosyadan). Her belgede KİMİN ve NE ZAMAN yüklediği görünür.
+  //  - Süreç geçmişi: durum değişiklikleri ve önemli olaylar otomatik loglanır.
+  //  - Filtreleme: durum, dosya türü ve serbest arama.
+  //  - AVUKAT MUHASEBESİ: dosya masrafı, harç, bilirkişi, vekalet ücreti, aylık
+  //    sabit ücret vb. giderler ile yapılan ödemeler ayrı ayrı kaydedilir.
+  //    Toplam Masraf / Ödenen / Kalan Bakiye anlık hesaplanır. Kaydı kimin
+  //    girdiği (ör. şirket avukatı kendi kullanıcısıyla) her satırda görünür.
+  // Veriler Firestore'da 'davaDosyalari' ve 'avukatMuhasebe' koleksiyonlarında tutulur.
+  // ============================================================================
+  export const DavaDosyalariView = ({ currentUser, addSystemLog, setViewingImage }) => {
+    // Dosya türleri (hukuki süreç çeşitleri)
+    const DOSYA_TURLERI = ['İş Davası', 'Ticari Dava', 'Hukuk Davası', 'Ceza Davası', 'İcra Takibi', 'İhtarname', 'İhbarname', 'Arabuluculuk', 'UETS Tebligatı', 'Vergi / İdari', 'Sigorta / Hasar', 'Diğer'];
+    // Dosya durumları ve renk kodları (rozet + kart kenarı için)
+    const DURUMLAR = [
+      { id: 'Yeni',               color: 'bg-sky-100 text-sky-700 border-sky-200',           dot: 'bg-sky-500' },
+      { id: 'İnceleniyor',        color: 'bg-amber-100 text-amber-700 border-amber-200',     dot: 'bg-amber-500' },
+      { id: 'Devam Ediyor',       color: 'bg-orange-100 text-orange-700 border-orange-200',  dot: 'bg-orange-500' },
+      { id: 'Duruşma Bekleniyor', color: 'bg-purple-100 text-purple-700 border-purple-200',  dot: 'bg-purple-500' },
+      { id: 'İtiraz Süreci',      color: 'bg-rose-100 text-rose-700 border-rose-200',        dot: 'bg-rose-500' },
+      { id: 'Uzlaşıldı',          color: 'bg-teal-100 text-teal-700 border-teal-200',        dot: 'bg-teal-500' },
+      { id: 'Kazanıldı',          color: 'bg-green-100 text-green-700 border-green-200',     dot: 'bg-green-600' },
+      { id: 'Kaybedildi',         color: 'bg-red-100 text-red-600 border-red-200',           dot: 'bg-red-500' },
+      { id: 'Arşiv',              color: 'bg-neutral-100 text-neutral-500 border-neutral-200', dot: 'bg-neutral-400' },
+    ];
+    // Şirketin dosyadaki konumu
+    const TARAFLAR = ['Davacı', 'Davalı', 'Alacaklı', 'Borçlu', 'Müşteki', 'İhtar Eden', 'İhtar Edilen', 'Tebliğ Alan'];
+    // Muhasebe kayıt türleri: 'masraf' = borçlandıran gider, 'odeme' = avukata/kuruma yapılan ödeme
+    const MASRAF_TURLERI = ['Dava Masrafı', 'Harç', 'Bilirkişi Ücreti', 'Tebligat / Posta', 'İcra Masrafı', 'Vekalet Ücreti', 'Aylık Sabit Ücret', 'Diğer Masraf'];
+
+    const [dosyalar, setDosyalar] = useState([]);
+    const [muhasebe, setMuhasebe] = useState([]);
+    const [altSekme, setAltSekme] = useState('dosyalar'); // 'dosyalar' | 'muhasebe'
+    const [searchQuery, setSearchQuery] = useState('');
+    const [durumFilter, setDurumFilter] = useState('Tümü');
+    const [turFilter, setTurFilter] = useState('Tümü');
+    const [showForm, setShowForm] = useState(false);
+    const [editingId, setEditingId] = useState(null);
+    const [expandedId, setExpandedId] = useState(null);
+    const [deleteId, setDeleteId] = useState(null);
+    const [belgeUploading, setBelgeUploading] = useState(false);     // form içi belge yükleme durumu
+    const [belgeLabel, setBelgeLabel] = useState('');                // form içi yeni belge adı (opsiyonel)
+    const [detayBelgeUploading, setDetayBelgeUploading] = useState(null); // detayda yükleme yapılan dosya id
+
+    // Boş dosya formu
+    const emptyForm = {
+      baslik: '', dosyaTuru: 'İş Davası', durum: 'Yeni', taraf: 'Davalı',
+      dosyaNo: '', mahkeme: '', karsiTaraf: '', avukat: '', tutar: '',
+      acilisTarihi: new Date().toISOString().split('T')[0], durusmaTarihi: '', sonTarih: '',
+      notlar: '', belgeler: []
+    };
+    const [form, setForm] = useState(emptyForm);
+
+    // Muhasebe kayıt formu (yon: masraf/odeme)
+    const emptyMuhForm = { yon: 'masraf', tur: 'Dava Masrafı', tutar: '', tarih: new Date().toISOString().split('T')[0], dosyaId: '', aciklama: '' };
+    const [muhForm, setMuhForm] = useState(emptyMuhForm);
+    const [muhDosyaFilter, setMuhDosyaFilter] = useState('Tümü');
+    const [muhDeleteId, setMuhDeleteId] = useState(null);
+
+    // Dava dosyaları Firestore'dan canlı dinlenir
+    useEffect(() => {
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari'), snap => {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        setDosyalar(list);
+      });
+      return () => unsub();
+    }, []);
+
+    // Avukat muhasebe kayıtları Firestore'dan canlı dinlenir
+    useEffect(() => {
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe'), snap => {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        list.sort((a, b) => (b.tarih || '').localeCompare(a.tarih || ''));
+        setMuhasebe(list);
+      });
+      return () => unsub();
+    }, []);
+
+    // Dosyayı sunucuya yükleyip URL döndürür (mevcut upload altyapısıyla aynı)
+    const uploadFile = async (file) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
+      const text = await res.text();
+      try { const json = JSON.parse(text); return json.url || json.fileName || json.file || text; } catch (err) { return text.trim(); }
+    };
+
+    // ÇOKLU belge yükleme (form içinde, dosya kaydından önce). Fotoğraf/PDF/her tür dosya desteklenir.
+    // Her belgeye yükleyen kişi ve tarih otomatik işlenir.
+    const handleFormBelgeUpload = async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      setBelgeUploading(true);
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const url = await uploadFile(file);
+          const label = belgeLabel.trim()
+            ? (files.length > 1 ? `${belgeLabel.trim()} (${i + 1})` : belgeLabel.trim())
+            : (file.name || `Belge ${i + 1}`);
+          setForm(prev => ({ ...prev, belgeler: [...(prev.belgeler || []), { id: Date.now().toString() + '_' + i, label, url, uploadedBy: currentUser?.fullName || 'Sistem', date: new Date().toISOString() }] }));
+        }
+        setBelgeLabel('');
+      } catch (err) { alert('Belge yüklenemedi.'); }
+      setBelgeUploading(false);
+    };
+    const handleFormBelgeRemove = (id) => setForm(prev => ({ ...prev, belgeler: (prev.belgeler || []).filter(b => b.id !== id) }));
+
+    // Kayıtlı dosyaya detay panelinden ÇOKLU belge ekleme
+    const handleDetayBelgeUpload = async (dosya, e) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      setDetayBelgeUploading(dosya.id);
+      try {
+        const yeniler = [];
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const url = await uploadFile(file);
+          yeniler.push({ id: Date.now().toString() + '_' + i, label: file.name || `Belge ${i + 1}`, url, uploadedBy: currentUser?.fullName || 'Sistem', date: new Date().toISOString() });
+        }
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), {
+          belgeler: [...(dosya.belgeler || []), ...yeniler],
+          history: [...(dosya.history || []), { date: new Date().toISOString(), text: `${yeniler.length} belge eklendi`, by: currentUser?.fullName || 'Sistem' }]
+        });
+        addSystemLog?.('Dava Dosyası Belge', `${dosya.baslik} dosyasına ${yeniler.length} belge eklendi.`);
+      } catch (err) { alert('Belge yüklenemedi.'); }
+      setDetayBelgeUploading(null);
+    };
+    const handleDetayBelgeRemove = async (dosya, id) => {
+      const b = (dosya.belgeler || []).find(x => x.id === id);
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), {
+        belgeler: (dosya.belgeler || []).filter(x => x.id !== id),
+        history: [...(dosya.history || []), { date: new Date().toISOString(), text: `Belge silindi: ${b?.label || ''}`, by: currentUser?.fullName || 'Sistem' }]
+      });
+    };
+    const handleDetayBelgeRename = async (dosya, id) => {
+      const cur = (dosya.belgeler || []).find(b => b.id === id);
+      const yeni = window.prompt('Belge adını düzenleyin:', cur?.label || '');
+      if (yeni === null || !yeni.trim()) return;
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), { belgeler: (dosya.belgeler || []).map(b => b.id === id ? { ...b, label: yeni.trim() } : b) });
+    };
+
+    // Dosya kaydet (yeni veya düzenleme)
+    const handleSaveDosya = async () => {
+      if (!form.baslik.trim()) return;
+      if (editingId) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', editingId), { ...form });
+        addSystemLog?.('Dava Dosyası Güncellendi', `${form.baslik} dosyası güncellendi.`);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari'), {
+          ...form,
+          history: [{ date: new Date().toISOString(), text: 'Dosya açıldı', by: currentUser?.fullName || 'Sistem' }],
+          createdBy: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+        });
+        addSystemLog?.('Yeni Dava Dosyası', `${form.baslik} (${form.dosyaTuru}) dosyası açıldı.`);
+      }
+      setForm(emptyForm); setEditingId(null); setShowForm(false); setBelgeLabel('');
+    };
+
+    // Durum değiştir (süreç geçmişine otomatik işlenir)
+    const handleDurumChange = async (dosya, yeniDurum) => {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), {
+        durum: yeniDurum,
+        history: [...(dosya.history || []), { date: new Date().toISOString(), text: `Durum: ${yeniDurum}`, by: currentUser?.fullName || 'Sistem' }]
+      });
+    };
+
+    // Muhasebe kaydı ekle (masraf veya ödeme). Kim girdiyse ismi kayda işlenir (avukat dahil).
+    const handleSaveMuhasebe = async () => {
+      if (!muhForm.tutar || isNaN(parseFloat(muhForm.tutar))) return;
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe'), {
+        ...muhForm, tutar: parseFloat(muhForm.tutar),
+        ekleyen: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+      });
+      addSystemLog?.('Avukat Muhasebe', `${muhForm.yon === 'masraf' ? 'Masraf' : 'Ödeme'} kaydı eklendi: ${parseFloat(muhForm.tutar).toLocaleString('tr-TR')} TL (${muhForm.tur}).`);
+      setMuhForm(emptyMuhForm);
+    };
+
+    // --- HESAPLAMALAR ---
+    const paraFormat = (n) => (Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    const toplamMasraf = muhasebe.filter(m => m.yon === 'masraf').reduce((s, m) => s + (Number(m.tutar) || 0), 0);
+    const toplamOdenen = muhasebe.filter(m => m.yon === 'odeme').reduce((s, m) => s + (Number(m.tutar) || 0), 0);
+    const kalanBakiye = toplamMasraf - toplamOdenen; // pozitifse avukata/kurumlara borç var demektir
+    const aktifDosyaSayisi = dosyalar.filter(d => !['Arşiv', 'Kazanıldı', 'Kaybedildi', 'Uzlaşıldı'].includes(d.durum)).length;
+
+    // Önümüzdeki 30 gün içinde duruşması / son tarihi olan dosyalar (yaklaşan kritik tarihler)
+    const bugun = new Date(); bugun.setHours(0, 0, 0, 0);
+    const gunFarki = (tarihStr) => tarihStr ? Math.ceil((new Date(tarihStr) - bugun) / (1000 * 60 * 60 * 24)) : null;
+    const yaklasanlar = dosyalar
+      .map(d => {
+        const f1 = gunFarki(d.durusmaTarihi); const f2 = gunFarki(d.sonTarih);
+        const enYakin = [f1, f2].filter(x => x !== null && x >= 0).sort((a, b) => a - b)[0];
+        return { ...d, kalanGun: enYakin === undefined ? null : enYakin };
+      })
+      .filter(d => d.kalanGun !== null && d.kalanGun <= 30 && !['Arşiv'].includes(d.durum))
+      .sort((a, b) => a.kalanGun - b.kalanGun);
+
+    // Dosya bazlı masraf toplamı (kart üstünde gösterilir)
+    const dosyaMasrafi = (dosyaId) => muhasebe.filter(m => m.dosyaId === dosyaId && m.yon === 'masraf').reduce((s, m) => s + (Number(m.tutar) || 0), 0);
+
+    // Filtrelenmiş dosya listesi
+    const filtered = dosyalar.filter(d => {
+      const q = searchQuery.toLowerCase();
+      const matchQ = !q || (d.baslik || '').toLowerCase().includes(q) || (d.dosyaNo || '').toLowerCase().includes(q) || (d.karsiTaraf || '').toLowerCase().includes(q) || (d.mahkeme || '').toLowerCase().includes(q) || (d.avukat || '').toLowerCase().includes(q);
+      const matchDurum = durumFilter === 'Tümü' || d.durum === durumFilter;
+      const matchTur = turFilter === 'Tümü' || d.dosyaTuru === turFilter;
+      return matchQ && matchDurum && matchTur;
+    });
+
+    // Muhasebe listesi filtreli
+    const muhFiltered = muhasebe.filter(m => muhDosyaFilter === 'Tümü' || (muhDosyaFilter === 'Genel' ? !m.dosyaId : m.dosyaId === muhDosyaFilter));
+
+    const durumOf = (id) => DURUMLAR.find(s => s.id === id) || DURUMLAR[0];
+    const dosyaAdi = (id) => dosyalar.find(d => d.id === id)?.baslik || 'Genel (dosyasız)';
+    const tarihGoster = (t) => t ? new Date(t).toLocaleDateString('tr-TR') : '—';
+
+    return (
+      <div className="max-w-6xl mx-auto animate-in fade-in space-y-5">
+        {/* BAŞLIK + ÖZET — mor geçişli hukuk paneli */}
+        <div className="bg-gradient-to-r from-purple-600 via-purple-800 to-fuchsia-950 rounded-2xl p-5 md:p-6 text-white shadow-lg">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><Scale className="w-6 h-6" /> Dava Dosyaları — Hukuk Takip Merkezi</h2>
+              <p className="text-purple-200 text-xs md:text-sm mt-1">Dava, icra, ihtar/ihbar, arabuluculuk ve tüm hukuki süreçler ile avukat muhasebesi tek merkezden yönetilir.</p>
+            </div>
+            <button onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(true); setBelgeLabel(''); }}
+              className="shrink-0 px-4 py-2.5 bg-white text-purple-900 font-black rounded-xl shadow hover:scale-[1.03] transition flex items-center gap-2 text-sm">
+              <PlusCircle className="w-4 h-4" /> Yeni Dosya Aç
+            </button>
+          </div>
+          {/* Özet kartları: dosya + muhasebe durumu bir arada */}
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-4">
+            <div className="rounded-xl px-3 py-2.5 bg-white/10 border border-white/20"><div className="text-lg font-black leading-none">{aktifDosyaSayisi}</div><div className="text-[9px] font-bold mt-1 opacity-90">AKTİF DOSYA</div></div>
+            <div className={`rounded-xl px-3 py-2.5 border ${yaklasanlar.length > 0 ? 'bg-red-500/30 border-red-300/40' : 'bg-white/10 border-white/20'}`}><div className="text-lg font-black leading-none">{yaklasanlar.length}</div><div className="text-[9px] font-bold mt-1 opacity-90">YAKLAŞAN TARİH (30 GÜN)</div></div>
+            <div className="rounded-xl px-3 py-2.5 bg-white/10 border border-white/20"><div className="text-lg font-black leading-none">{paraFormat(toplamMasraf)} ₺</div><div className="text-[9px] font-bold mt-1 opacity-90">TOPLAM MASRAF</div></div>
+            <div className="rounded-xl px-3 py-2.5 bg-white/10 border border-white/20"><div className="text-lg font-black leading-none">{paraFormat(toplamOdenen)} ₺</div><div className="text-[9px] font-bold mt-1 opacity-90">ÖDENEN TUTAR</div></div>
+            <div className={`rounded-xl px-3 py-2.5 border ${kalanBakiye > 0 ? 'bg-amber-500/30 border-amber-300/40' : 'bg-emerald-500/30 border-emerald-300/40'}`}><div className="text-lg font-black leading-none">{paraFormat(kalanBakiye)} ₺</div><div className="text-[9px] font-bold mt-1 opacity-90">KALAN BAKİYE</div></div>
+          </div>
+        </div>
+
+        {/* YAKLAŞAN KRİTİK TARİH UYARILARI */}
+        {yaklasanlar.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-3">
+            <div className="text-[10px] font-black text-red-500 uppercase mb-2 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> Yaklaşan Duruşma / Son Tarihler</div>
+            <div className="flex flex-wrap gap-2">
+              {yaklasanlar.map(d => (
+                <button key={d.id} onClick={() => { setAltSekme('dosyalar'); setExpandedId(d.id); }}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition ${d.kalanGun <= 7 ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
+                  {d.baslik} — {d.kalanGun === 0 ? 'BUGÜN' : `${d.kalanGun} gün kaldı`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ALT SEKME GEÇİŞİ: Dosyalar / Avukat Muhasebesi */}
+        <div className="flex gap-2">
+          <button onClick={() => setAltSekme('dosyalar')} className={`flex-1 py-2.5 rounded-xl text-sm font-black transition border ${altSekme === 'dosyalar' ? 'bg-purple-700 text-white border-purple-700 shadow' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}><span className="flex items-center justify-center gap-2"><FolderOpen className="w-4 h-4" /> Dosyalar ({dosyalar.length})</span></button>
+          <button onClick={() => setAltSekme('muhasebe')} className={`flex-1 py-2.5 rounded-xl text-sm font-black transition border ${altSekme === 'muhasebe' ? 'bg-purple-700 text-white border-purple-700 shadow' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}><span className="flex items-center justify-center gap-2"><Wallet className="w-4 h-4" /> Avukat Muhasebesi ({muhasebe.length})</span></button>
+        </div>
+
+        {/* ================= DOSYALAR SEKMESİ ================= */}
+        {altSekme === 'dosyalar' && (<>
+        {/* FİLTRELER */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 space-y-2">
+          <div className="relative">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Dosya adı, dosya no, karşı taraf, mahkeme veya avukat ara..."
+              className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-purple-600 outline-none text-sm" />
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-black text-neutral-400 uppercase">Durum:</span>
+            {['Tümü', ...DURUMLAR.map(s => s.id)].map(s => (
+              <button key={s} onClick={() => setDurumFilter(s)} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${durumFilter === s ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}>{s}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] font-black text-neutral-400 uppercase">Tür:</span>
+            {['Tümü', ...DOSYA_TURLERI].map(t => (
+              <button key={t} onClick={() => setTurFilter(t)} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${turFilter === t ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}>{t}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* DOSYA KARTLARI */}
+        <div className="space-y-3">
+          {filtered.length === 0 && (
+            <div className="bg-white rounded-2xl border border-dashed border-neutral-300 p-10 text-center text-sm font-bold text-neutral-400">Kayıtlı dosya bulunamadı. "Yeni Dosya Aç" ile ilk hukuki süreci ekleyin.</div>
+          )}
+          {filtered.map(d => {
+            const st = durumOf(d.durum);
+            const masraf = dosyaMasrafi(d.id);
+            const kalanG = [gunFarki(d.durusmaTarihi), gunFarki(d.sonTarih)].filter(x => x !== null && x >= 0).sort((a, b) => a - b)[0];
+            return (
+              <div key={d.id} className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
+                {/* KART BAŞLIĞI */}
+                <button onClick={() => setExpandedId(expandedId === d.id ? null : d.id)} className="w-full text-left p-4 hover:bg-neutral-50 transition">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center shrink-0"><Scale className="w-5 h-5 text-purple-700" /></div>
+                      <div className="min-w-0">
+                        <div className="font-black text-black text-sm truncate">{d.baslik}</div>
+                        <div className="text-[11px] text-neutral-500 font-bold mt-0.5 flex flex-wrap gap-x-2">
+                          <span>{d.dosyaTuru}</span>
+                          {d.dosyaNo && <span>• No: {d.dosyaNo}</span>}
+                          {d.karsiTaraf && <span>• Karşı Taraf: {d.karsiTaraf}</span>}
+                          {d.taraf && <span>• Konum: {d.taraf}</span>}
+                        </div>
+                        <div className="text-[11px] text-neutral-400 font-bold mt-0.5 flex flex-wrap gap-x-2">
+                          {d.mahkeme && <span>{d.mahkeme}</span>}
+                          {d.avukat && <span>• Av. {d.avukat}</span>}
+                          {masraf > 0 && <span className="text-amber-600">• Masraf: {paraFormat(masraf)} ₺</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-black border ${st.color}`}>{d.durum}</span>
+                      {kalanG !== undefined && kalanG !== null && <span className={`text-[10px] font-black ${kalanG <= 7 ? 'text-red-600' : 'text-amber-600'}`}>⏳ {kalanG === 0 ? 'BUGÜN' : `${kalanG} gün`}</span>}
+                      {(d.belgeler || []).length > 0 && <span className="text-[10px] font-bold text-neutral-400">{(d.belgeler || []).length} belge</span>}
+                    </div>
+                  </div>
+                </button>
+
+                {/* DETAY PANELİ */}
+                {expandedId === d.id && (
+                  <div className="border-t border-neutral-100 p-4 space-y-4 animate-in slide-in-from-top-2 bg-neutral-50/50">
+                    {/* Bilgi ızgarası */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Açılış Tarihi</div><div className="font-black text-black">{tarihGoster(d.acilisTarihi)}</div></div>
+                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Duruşma / Kritik Tarih</div><div className="font-black text-black">{tarihGoster(d.durusmaTarihi)}</div></div>
+                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">İtiraz / Cevap Son Günü</div><div className="font-black text-black">{tarihGoster(d.sonTarih)}</div></div>
+                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Dava / Takip Tutarı</div><div className="font-black text-black">{d.tutar ? `${paraFormat(d.tutar)} ₺` : '—'}</div></div>
+                    </div>
+                    {d.notlar && <div className="bg-white rounded-xl border border-neutral-200 p-3 text-xs text-neutral-600"><span className="font-black text-neutral-400 text-[10px] uppercase block mb-1">Notlar</span>{d.notlar}</div>}
+
+                    {/* Durum değiştir + işlem butonları */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select value={d.durum} onChange={e => handleDurumChange(d, e.target.value)} className="p-2 border border-neutral-300 rounded-lg bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600">
+                        {DURUMLAR.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}
+                      </select>
+                      <button onClick={() => { setForm({ ...emptyForm, ...d }); setEditingId(d.id); setShowForm(true); }} className="px-3 py-2 bg-neutral-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-black transition"><Edit className="w-3.5 h-3.5" /> Düzenle</button>
+                      <button onClick={() => { setAltSekme('muhasebe'); setMuhDosyaFilter(d.id); setMuhForm({ ...emptyMuhForm, dosyaId: d.id }); }} className="px-3 py-2 bg-purple-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-purple-800 transition"><Wallet className="w-3.5 h-3.5" /> Dosya Muhasebesi</button>
+                      <button onClick={() => setDeleteId(d.id)} className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-red-100 transition"><X className="w-3.5 h-3.5" /> Sil</button>
+                    </div>
+
+                    {/* BELGELER — çoklu yükleme (fotoğraf/PDF/dosya), yükleyen kişi + tarih görünür */}
+                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-purple-600" /> Dosya Belgeleri</span>
+                        <MediaCaptureMenu compact multiple disabled={detayBelgeUploading === d.id}
+                          buttonLabel={detayBelgeUploading === d.id ? 'Yükleniyor...' : 'Belge Ekle'}
+                          onChange={(e) => handleDetayBelgeUpload(d, e)} />
+                      </div>
+                      {(d.belgeler || []).length === 0 && <div className="text-[11px] text-neutral-400 font-bold py-2">Henüz belge yüklenmemiş.</div>}
+                      <div className="space-y-1">
+                        {(d.belgeler || []).map(b => (
+                          <div key={b.id} className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1.5 text-xs">
+                            <FileText className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-bold text-neutral-700 truncate">{b.label}</div>
+                              <div className="text-[10px] text-neutral-400 font-bold">{b.uploadedBy || '—'} • {b.date ? new Date(b.date).toLocaleString('tr-TR') : ''}</div>
+                            </div>
+                            <button onClick={() => setViewingImage?.({ title: b.label, name: b.url })} className="text-neutral-500 hover:text-black" title="Görüntüle"><Eye className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => handleDetayBelgeRename(d, b.id)} className="text-neutral-500 hover:text-black" title="Adını değiştir"><Edit className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => handleDetayBelgeRemove(d, b.id)} className="text-red-400 hover:text-red-600" title="Sil"><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* SÜREÇ GEÇMİŞİ */}
+                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
+                      <span className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5 mb-2"><History className="w-3.5 h-3.5 text-purple-600" /> Süreç Geçmişi</span>
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {[...(d.history || [])].reverse().map((h, i) => (
+                          <div key={i} className="text-[11px] text-neutral-500 font-bold flex gap-2">
+                            <span className="text-neutral-400 shrink-0">{new Date(h.date).toLocaleString('tr-TR')}</span>
+                            <span className="text-neutral-700">{h.text}</span>
+                            <span className="text-purple-600 ml-auto shrink-0">{h.by}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+        </>)}
+
+        {/* ================= AVUKAT MUHASEBESİ SEKMESİ ================= */}
+        {altSekme === 'muhasebe' && (<>
+        {/* Muhasebe özet şeridi */}
+        <div className="grid grid-cols-3 gap-2">
+          <div className="bg-white rounded-2xl border border-neutral-200 p-4 text-center"><div className="text-lg font-black text-amber-600">{paraFormat(toplamMasraf)} ₺</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-1">Toplam Masraf / Ücret</div></div>
+          <div className="bg-white rounded-2xl border border-neutral-200 p-4 text-center"><div className="text-lg font-black text-emerald-600">{paraFormat(toplamOdenen)} ₺</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-1">Toplam Ödenen</div></div>
+          <div className="bg-white rounded-2xl border border-neutral-200 p-4 text-center"><div className={`text-lg font-black ${kalanBakiye > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{paraFormat(kalanBakiye)} ₺</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-1">Kalan Bakiye</div></div>
+        </div>
+
+        {/* YENİ KAYIT FORMU — masraf (avukat da girebilir) veya ödeme */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 space-y-3">
+          <div className="text-xs font-black text-neutral-700 flex items-center gap-1.5"><PlusCircle className="w-4 h-4 text-purple-600" /> Yeni Muhasebe Kaydı</div>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+            {/* Kayıt yönü: masraf mı ödeme mi */}
+            <select value={muhForm.yon} onChange={e => setMuhForm({ ...muhForm, yon: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600">
+              <option value="masraf">Masraf / Ücret (Gider)</option>
+              <option value="odeme">Ödeme (Ödenen Tutar)</option>
+            </select>
+            <select value={muhForm.tur} onChange={e => setMuhForm({ ...muhForm, tur: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600">
+              {(muhForm.yon === 'masraf' ? MASRAF_TURLERI : ['Avukata Ödeme', 'Harç Ödemesi', 'Kurum Ödemesi', 'Diğer Ödeme']).map(t => <option key={t}>{t}</option>)}
+            </select>
+            <input type="number" value={muhForm.tutar} onChange={e => setMuhForm({ ...muhForm, tutar: e.target.value })} placeholder="Tutar (TL)" className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600" />
+            <input type="date" value={muhForm.tarih} onChange={e => setMuhForm({ ...muhForm, tarih: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600" />
+            {/* Kayıt bir dosyaya bağlanabilir ya da genel (ör. aylık sabit ücret) olabilir */}
+            <select value={muhForm.dosyaId} onChange={e => setMuhForm({ ...muhForm, dosyaId: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600">
+              <option value="">Genel (dosyasız)</option>
+              {dosyalar.map(d => <option key={d.id} value={d.id}>{d.baslik}</option>)}
+            </select>
+            <button onClick={handleSaveMuhasebe} disabled={!muhForm.tutar} className="p-2.5 bg-purple-700 text-white rounded-xl text-xs font-black hover:bg-purple-800 transition disabled:opacity-40">Kaydet</button>
+          </div>
+          <input value={muhForm.aciklama} onChange={e => setMuhForm({ ...muhForm, aciklama: e.target.value })} placeholder="Açıklama (opsiyonel — örn: Nisan ayı sabit ücret, X dosyası bilirkişi ücreti)" className="w-full p-2.5 border border-neutral-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-purple-600" />
+        </div>
+
+        {/* DOSYAYA GÖRE FİLTRE */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex items-center gap-2 flex-wrap">
+          <span className="text-[10px] font-black text-neutral-400 uppercase">Dosya:</span>
+          <button onClick={() => setMuhDosyaFilter('Tümü')} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${muhDosyaFilter === 'Tümü' ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200'}`}>Tümü</button>
+          <button onClick={() => setMuhDosyaFilter('Genel')} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${muhDosyaFilter === 'Genel' ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200'}`}>Genel</button>
+          {dosyalar.map(d => (
+            <button key={d.id} onClick={() => setMuhDosyaFilter(d.id)} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${muhDosyaFilter === d.id ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200'}`}>{d.baslik}</button>
+          ))}
+        </div>
+
+        {/* MUHASEBE TABLOSU — kaydı kimin girdiği (avukat dahil) her satırda görünür */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-neutral-900 text-white">
+              <tr>
+                <th className="p-3 font-bold rounded-tl-2xl">Tarih</th>
+                <th className="p-3 font-bold">Yön</th>
+                <th className="p-3 font-bold">Tür</th>
+                <th className="p-3 font-bold">Dosya</th>
+                <th className="p-3 font-bold">Açıklama</th>
+                <th className="p-3 font-bold">Ekleyen</th>
+                <th className="p-3 font-bold text-right">Tutar</th>
+                <th className="p-3 font-bold rounded-tr-2xl"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {muhFiltered.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-neutral-400 font-bold">Kayıt bulunamadı.</td></tr>}
+              {muhFiltered.map(m => (
+                <tr key={m.id} className="border-b border-neutral-100 hover:bg-neutral-50">
+                  <td className="p-3 font-bold text-neutral-600">{tarihGoster(m.tarih)}</td>
+                  <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${m.yon === 'masraf' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{m.yon === 'masraf' ? 'MASRAF' : 'ÖDEME'}</span></td>
+                  <td className="p-3 font-bold text-neutral-700">{m.tur}</td>
+                  <td className="p-3 text-neutral-500 font-bold">{dosyaAdi(m.dosyaId)}</td>
+                  <td className="p-3 text-neutral-500 max-w-[200px] truncate">{m.aciklama || '—'}</td>
+                  <td className="p-3 font-bold text-purple-700">{m.ekleyen || '—'}</td>
+                  <td className={`p-3 text-right font-black ${m.yon === 'masraf' ? 'text-amber-600' : 'text-emerald-600'}`}>{m.yon === 'masraf' ? '+' : '−'}{paraFormat(m.tutar)} ₺</td>
+                  <td className="p-3 text-right"><button onClick={() => setMuhDeleteId(m.id)} className="text-red-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        </>)}
+
+        {/* YENİ / DÜZENLE DOSYA MODALI */}
+        {showForm && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 animate-in zoom-in-95 my-8 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2"><Scale className="w-5 h-5 text-purple-700" /> {editingId ? 'Dosyayı Düzenle' : 'Yeni Dava Dosyası'}</h3>
+                <button onClick={() => setShowForm(false)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Dosya Başlığı *</label>
+                  <input value={form.baslik} onChange={e => setForm({ ...form, baslik: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="Örn: X Ltd. Şti. alacak davası" /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Dosya Türü</label>
+                    <select value={form.dosyaTuru} onChange={e => setForm({ ...form, dosyaTuru: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-purple-600 text-sm">
+                      {DOSYA_TURLERI.map(t => <option key={t}>{t}</option>)}
+                    </select></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Şirketin Konumu</label>
+                    <select value={form.taraf} onChange={e => setForm({ ...form, taraf: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-purple-600 text-sm">
+                      {TARAFLAR.map(t => <option key={t}>{t}</option>)}
+                    </select></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Dosya / Esas No</label>
+                    <input value={form.dosyaNo} onChange={e => setForm({ ...form, dosyaNo: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="2026/1234 E." /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Mahkeme / İcra Dairesi / Kurum</label>
+                    <input value={form.mahkeme} onChange={e => setForm({ ...form, mahkeme: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="İst. 5. İş Mahkemesi" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Karşı Taraf</label>
+                    <input value={form.karsiTaraf} onChange={e => setForm({ ...form, karsiTaraf: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlgili Avukat</label>
+                    <input value={form.avukat} onChange={e => setForm({ ...form, avukat: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="Şirket avukatı adı" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Dava / Takip Tutarı (TL)</label>
+                    <input type="number" value={form.tutar} onChange={e => setForm({ ...form, tutar: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Açılış Tarihi</label>
+                    <input type="date" value={form.acilisTarihi} onChange={e => setForm({ ...form, acilisTarihi: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Duruşma / Kritik Tarih</label>
+                    <input type="date" value={form.durusmaTarihi} onChange={e => setForm({ ...form, durusmaTarihi: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">İtiraz / Cevap Son Günü</label>
+                    <input type="date" value={form.sonTarih} onChange={e => setForm({ ...form, sonTarih: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
+                </div>
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Notlar</label>
+                  <textarea value={form.notlar} onChange={e => setForm({ ...form, notlar: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm h-16 resize-none" placeholder="Sürece dair önemli notlar..." /></div>
+
+                {/* BELGELER — form aşamasında da çoklu yükleme yapılabilir */}
+                <div className="border border-neutral-200 rounded-xl p-3 bg-neutral-50">
+                  <label className="text-xs font-black text-neutral-700 mb-2 flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-purple-600" /> Belgeler</label>
+                  <div className="flex gap-1.5 mb-2">
+                    <input value={belgeLabel} onChange={e => setBelgeLabel(e.target.value)} placeholder="Belge adı (opsiyonel, örn: Tebligat)" className="flex-1 min-w-0 p-2 border border-neutral-300 rounded-lg text-xs outline-none focus:ring-1 focus:ring-purple-600" />
+                    <MediaCaptureMenu compact multiple disabled={belgeUploading}
+                      buttonLabel={belgeUploading ? 'Yükleniyor...' : 'Yükle'}
+                      onChange={handleFormBelgeUpload} />
+                  </div>
+                  {(form.belgeler || []).length > 0 && (
+                    <div className="space-y-1">
+                      {(form.belgeler || []).map(b => (
+                        <div key={b.id} className="flex items-center gap-2 bg-white border border-neutral-200 rounded-lg px-2 py-1.5 text-xs">
+                          <FileText className="w-3.5 h-3.5 text-purple-500" />
+                          <span className="font-bold text-neutral-700 flex-1 truncate">{b.label} <span className="text-neutral-400 font-normal">({b.uploadedBy})</span></span>
+                          <button onClick={() => setViewingImage?.({ title: b.label, name: b.url })} className="text-neutral-500 hover:text-black"><Eye className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => handleFormBelgeRemove(b.id)} className="text-red-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2 mt-5">
+                <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
+                <button onClick={handleSaveDosya} disabled={!form.baslik.trim()} className="flex-1 py-2.5 bg-purple-700 text-white font-black rounded-xl hover:bg-purple-800 transition text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                  {editingId ? 'Güncelle' : 'Dosyayı Kaydet'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DOSYA SİLME ONAYI */}
+        {deleteId && (
+          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center animate-in zoom-in-95">
+              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
+              <p className="text-sm font-bold text-neutral-700 mb-4">Bu dava dosyası kalıcı olarak silinecek. Emin misiniz?</p>
+              <div className="flex gap-2">
+                <button onClick={() => setDeleteId(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
+                <button onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', deleteId)); addSystemLog?.('Dava Dosyası Silindi', 'Bir dava dosyası silindi.'); setDeleteId(null); }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MUHASEBE KAYDI SİLME ONAYI */}
+        {muhDeleteId && (
+          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center animate-in zoom-in-95">
+              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
+              <p className="text-sm font-bold text-neutral-700 mb-4">Bu muhasebe kaydı silinecek. Emin misiniz?</p>
+              <div className="flex gap-2">
+                <button onClick={() => setMuhDeleteId(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
+                <button onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe', muhDeleteId)); addSystemLog?.('Avukat Muhasebe', 'Bir muhasebe kaydı silindi.'); setMuhDeleteId(null); }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============================================================================
+  // YENİ: ŞİRKET BELGELERİ (ŞİRKET DOSYALARI > BELGE ARŞİV MERKEZİ)
+  // Şirkete ait TÜM resmi evrakların kategorili arşiv mantığıyla saklandığı,
+  // arandığı ve yönetildiği bölüm: İmza Sirküleri, Kira Kontratı, Vergi Levhası,
+  // Ticaret Sicil, Faaliyet Belgesi, Sigorta Poliçeleri, Ruhsat/İzinler vb.
+  // Özellikler:
+  //  - KATEGORİ (BÖLÜM) MANTIĞI: Her belge bir bölüme eklenir; bölümlere göre
+  //    tek tıkla filtrelenir, her bölümün belge sayısı görünür.
+  //  - ARŞİV ARAMA: Belge adı, açıklama, etiket ve ekli dosya adlarında arama.
+  //  - GEÇERLİLİK TAKİBİ: Son geçerlilik tarihi olan belgelerde (kontrat,
+  //    poliçe, ruhsat vb.) süresi geçen KIRMIZI, 30 gün içinde dolacak olan
+  //    SARI uyarıyla üstte listelenir.
+  //  - ÇOKLU DOSYA: Her belge kaydına birden fazla fotoğraf/PDF/dosya eklenir
+  //    (Şimdi Çek / Galeriden / Dosyadan). Kimin ne zaman yüklediği görünür.
+  //  - Tam yönetim: ekle / görüntüle / düzenle / dosya ekle-çıkar / sil,
+  //    tüm hareketler kayıt geçmişine (kim, ne zaman) işlenir.
+  // Veriler Firestore'da 'sirketBelgeleri' koleksiyonunda tutulur.
+  // ============================================================================
+  export const SirketBelgeleriView = ({ currentUser, addSystemLog, setViewingImage }) => {
+    // Arşiv bölümleri (kategoriler): ikon + renk ile birlikte tanımlanır
+    const KATEGORILER = [
+      { id: 'Resmi Evraklar',        icon: Landmark,   color: 'text-indigo-600',  bg: 'bg-indigo-100',  desc: 'İmza sirküleri, ticaret sicil, faaliyet belgesi...' },
+      { id: 'Sözleşme & Kontratlar', icon: FileText,   color: 'text-purple-600',  bg: 'bg-purple-100',  desc: 'Kira kontratı, tedarikçi ve iş sözleşmeleri...' },
+      { id: 'Vergi & Mali Evraklar', icon: Wallet,     color: 'text-emerald-600', bg: 'bg-emerald-100', desc: 'Vergi levhası, beyannameler, mali tablolar...' },
+      { id: 'Sigorta Poliçeleri',    icon: CheckSquare,color: 'text-sky-600',     bg: 'bg-sky-100',     desc: 'İşyeri, nakliyat, araç ve sorumluluk poliçeleri...' },
+      { id: 'Ruhsat & İzinler',      icon: Key,        color: 'text-amber-600',   bg: 'bg-amber-100',   desc: 'İşyeri ruhsatı, taşıma yetki belgeleri (K1 vb.)...' },
+      { id: 'Araç Belgeleri',        icon: Car,        color: 'text-red-600',     bg: 'bg-red-100',     desc: 'Şirket araçlarına ait genel evraklar...' },
+      { id: 'Banka & Finans',        icon: CreditCard, color: 'text-teal-600',    bg: 'bg-teal-100',    desc: 'Banka sözleşmeleri, kredi ve teminat evrakları...' },
+      { id: 'Diğer',                 icon: Package,    color: 'text-neutral-600', bg: 'bg-neutral-100', desc: 'Diğer tüm şirket belgeleri...' },
+    ];
+
+    const [belgeler, setBelgeler] = useState([]);
+    const [searchQuery, setSearchQuery] = useState('');
+    const [kategoriFilter, setKategoriFilter] = useState('Tümü');
+    const [siralama, setSiralama] = useState('yeni'); // 'yeni' | 'gecerlilik' | 'az'
+    const [showForm, setShowForm] = useState(false);
+    const [editingId, setEditingId] = useState(null);
+    const [expandedId, setExpandedId] = useState(null);
+    const [deleteId, setDeleteId] = useState(null);
+    const [dosyaUploading, setDosyaUploading] = useState(false);      // form içi yükleme
+    const [detayUploading, setDetayUploading] = useState(null);       // detayda yükleme yapılan belge id
+    const [dosyaLabel, setDosyaLabel] = useState('');                 // form içi dosya adı (opsiyonel)
+
+    // Boş belge kayıt formu
+    const emptyForm = {
+      baslik: '', kategori: 'Resmi Evraklar', aciklama: '', etiketler: '',
+      gecerlilikTarihi: '', dosyalar: []
+    };
+    const [form, setForm] = useState(emptyForm);
+
+    // Şirket belgeleri Firestore'dan canlı dinlenir
+    useEffect(() => {
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri'), snap => {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        setBelgeler(list);
+      });
+      return () => unsub();
+    }, []);
+
+    // Dosyayı sunucuya yükleyip URL döndürür (mevcut upload altyapısıyla aynı)
+    const uploadFile = async (file) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
+      const text = await res.text();
+      try { const json = JSON.parse(text); return json.url || json.fileName || json.file || text; } catch (err) { return text.trim(); }
+    };
+
+    // ÇOKLU dosya yükleme (form içinde, kayıttan önce). Yükleyen + tarih otomatik işlenir.
+    const handleFormDosyaUpload = async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      setDosyaUploading(true);
+      try {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const url = await uploadFile(file);
+          const label = dosyaLabel.trim()
+            ? (files.length > 1 ? `${dosyaLabel.trim()} (${i + 1})` : dosyaLabel.trim())
+            : (file.name || `Dosya ${i + 1}`);
+          setForm(prev => ({ ...prev, dosyalar: [...(prev.dosyalar || []), { id: Date.now().toString() + '_' + i, label, url, uploadedBy: currentUser?.fullName || 'Sistem', date: new Date().toISOString() }] }));
+        }
+        setDosyaLabel('');
+      } catch (err) { alert('Dosya yüklenemedi.'); }
+      setDosyaUploading(false);
+    };
+    const handleFormDosyaRemove = (id) => setForm(prev => ({ ...prev, dosyalar: (prev.dosyalar || []).filter(d => d.id !== id) }));
+
+    // Kayıtlı belgeye detay panelinden ÇOKLU dosya ekleme
+    const handleDetayDosyaUpload = async (belge, e) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      setDetayUploading(belge.id);
+      try {
+        const yeniler = [];
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          const url = await uploadFile(file);
+          yeniler.push({ id: Date.now().toString() + '_' + i, label: file.name || `Dosya ${i + 1}`, url, uploadedBy: currentUser?.fullName || 'Sistem', date: new Date().toISOString() });
+        }
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri', belge.id), {
+          dosyalar: [...(belge.dosyalar || []), ...yeniler],
+          history: [...(belge.history || []), { date: new Date().toISOString(), text: `${yeniler.length} dosya eklendi`, by: currentUser?.fullName || 'Sistem' }]
+        });
+        addSystemLog?.('Şirket Evrakı', `${belge.baslik} kaydına ${yeniler.length} dosya eklendi.`);
+      } catch (err) { alert('Dosya yüklenemedi.'); }
+      setDetayUploading(null);
+    };
+    const handleDetayDosyaRemove = async (belge, id) => {
+      const d = (belge.dosyalar || []).find(x => x.id === id);
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri', belge.id), {
+        dosyalar: (belge.dosyalar || []).filter(x => x.id !== id),
+        history: [...(belge.history || []), { date: new Date().toISOString(), text: `Dosya silindi: ${d?.label || ''}`, by: currentUser?.fullName || 'Sistem' }]
+      });
+    };
+    const handleDetayDosyaRename = async (belge, id) => {
+      const cur = (belge.dosyalar || []).find(d => d.id === id);
+      const yeni = window.prompt('Dosya adını düzenleyin:', cur?.label || '');
+      if (yeni === null || !yeni.trim()) return;
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri', belge.id), { dosyalar: (belge.dosyalar || []).map(d => d.id === id ? { ...d, label: yeni.trim() } : d) });
+    };
+
+    // Belge kaydet (yeni veya düzenleme)
+    const handleSaveBelge = async () => {
+      if (!form.baslik.trim()) return;
+      if (editingId) {
+        const eski = belgeler.find(b => b.id === editingId);
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri', editingId), {
+          ...form,
+          history: [...(eski?.history || []), { date: new Date().toISOString(), text: 'Belge bilgileri güncellendi', by: currentUser?.fullName || 'Sistem' }]
+        });
+        addSystemLog?.('Şirket Evrakı Güncellendi', `${form.baslik} evrakı güncellendi.`);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri'), {
+          ...form,
+          history: [{ date: new Date().toISOString(), text: 'Belge arşive eklendi', by: currentUser?.fullName || 'Sistem' }],
+          createdBy: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+        });
+        addSystemLog?.('Yeni Şirket Evrakı', `${form.baslik} (${form.kategori}) arşive eklendi.`);
+      }
+      setForm(emptyForm); setEditingId(null); setShowForm(false); setDosyaLabel('');
+    };
+
+    // --- GEÇERLİLİK (SÜRE) HESAPLARI ---
+    const bugun = new Date(); bugun.setHours(0, 0, 0, 0);
+    const kalanGun = (t) => t ? Math.ceil((new Date(t) - bugun) / (1000 * 60 * 60 * 24)) : null;
+    // Süresi geçmiş veya 30 gün içinde dolacak belgeler (uyarı şeridi için)
+    const suresiKritikler = belgeler
+      .map(b => ({ ...b, kalan: kalanGun(b.gecerlilikTarihi) }))
+      .filter(b => b.kalan !== null && b.kalan <= 30)
+      .sort((a, b) => a.kalan - b.kalan);
+
+    // Kategori bazlı belge sayıları
+    const kategoriSayisi = (kat) => belgeler.filter(b => b.kategori === kat).length;
+
+    // Filtrelenmiş + sıralanmış arşiv listesi
+    const filtered = belgeler.filter(b => {
+      const q = searchQuery.toLowerCase();
+      const matchQ = !q
+        || (b.baslik || '').toLowerCase().includes(q)
+        || (b.aciklama || '').toLowerCase().includes(q)
+        || (b.etiketler || '').toLowerCase().includes(q)
+        || (b.dosyalar || []).some(d => (d.label || '').toLowerCase().includes(q));
+      const matchKat = kategoriFilter === 'Tümü' || b.kategori === kategoriFilter;
+      return matchQ && matchKat;
+    }).sort((a, b) => {
+      if (siralama === 'az') return (a.baslik || '').localeCompare(b.baslik || '', 'tr');
+      if (siralama === 'gecerlilik') {
+        // Geçerlilik tarihi olanlar en yakından uzağa; olmayanlar sona
+        const ka = kalanGun(a.gecerlilikTarihi), kb = kalanGun(b.gecerlilikTarihi);
+        if (ka === null && kb === null) return 0;
+        if (ka === null) return 1; if (kb === null) return -1;
+        return ka - kb;
+      }
+      return (b.createdAt || '').localeCompare(a.createdAt || ''); // 'yeni'
+    });
+
+    const katOf = (id) => KATEGORILER.find(k => k.id === id) || KATEGORILER[KATEGORILER.length - 1];
+    const tarihGoster = (t) => t ? new Date(t).toLocaleDateString('tr-TR') : '—';
+    // Geçerlilik rozeti: süresi geçmiş / yaklaşan / normal
+    const gecerlilikRozet = (t) => {
+      const k = kalanGun(t);
+      if (k === null) return null;
+      if (k < 0) return <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-600 border border-red-200">SÜRESİ GEÇTİ ({Math.abs(k)} gün)</span>;
+      if (k <= 30) return <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-700 border border-amber-200">{k === 0 ? 'BUGÜN DOLUYOR' : `${k} GÜN KALDI`}</span>;
+      return <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 border border-emerald-200">GEÇERLİ</span>;
+    };
+
+    return (
+      <div className="max-w-6xl mx-auto animate-in fade-in space-y-5">
+        {/* BAŞLIK — mor/indigo geçişli arşiv paneli */}
+        <div className="bg-gradient-to-r from-indigo-600 via-purple-700 to-fuchsia-950 rounded-2xl p-5 md:p-6 text-white shadow-lg">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><FolderOpen className="w-6 h-6" /> Şirket Evrakları — Arşiv Merkezi</h2>
+              <p className="text-purple-200 text-xs md:text-sm mt-1">İmza sirküleri, kira kontratı, vergi levhası ve tüm şirket evrakları bölüm bölüm arşivlenir; anında aranır ve bulunur.</p>
+            </div>
+            <button onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(true); setDosyaLabel(''); }}
+              className="shrink-0 px-4 py-2.5 bg-white text-purple-900 font-black rounded-xl shadow hover:scale-[1.03] transition flex items-center gap-2 text-sm">
+              <PlusCircle className="w-4 h-4" /> Yeni Evrak Ekle
+            </button>
+          </div>
+          {/* Genel sayaçlar */}
+          <div className="grid grid-cols-3 gap-2 mt-4">
+            <div className="rounded-xl px-3 py-2.5 bg-white/10 border border-white/20"><div className="text-lg font-black leading-none">{belgeler.length}</div><div className="text-[9px] font-bold mt-1 opacity-90">TOPLAM EVRAK</div></div>
+            <div className="rounded-xl px-3 py-2.5 bg-white/10 border border-white/20"><div className="text-lg font-black leading-none">{belgeler.reduce((s, b) => s + (b.dosyalar || []).length, 0)}</div><div className="text-[9px] font-bold mt-1 opacity-90">TOPLAM DOSYA</div></div>
+            <div className={`rounded-xl px-3 py-2.5 border ${suresiKritikler.length > 0 ? 'bg-red-500/30 border-red-300/40' : 'bg-white/10 border-white/20'}`}><div className="text-lg font-black leading-none">{suresiKritikler.length}</div><div className="text-[9px] font-bold mt-1 opacity-90">SÜRESİ KRİTİK EVRAK</div></div>
+          </div>
+        </div>
+
+        {/* SÜRESİ KRİTİK BELGE UYARILARI (geçmiş veya 30 gün içinde dolacak) */}
+        {suresiKritikler.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-3">
+            <div className="text-[10px] font-black text-red-500 uppercase mb-2 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> Geçerlilik Süresi Kritik Evraklar</div>
+            <div className="flex flex-wrap gap-2">
+              {suresiKritikler.map(b => (
+                <button key={b.id} onClick={() => { setKategoriFilter('Tümü'); setExpandedId(b.id); }}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition ${b.kalan < 0 ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
+                  {b.baslik} — {b.kalan < 0 ? `${Math.abs(b.kalan)} gün geçti` : b.kalan === 0 ? 'BUGÜN doluyor' : `${b.kalan} gün kaldı`}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* KATEGORİ (BÖLÜM) KARTLARI — arşiv bölümleri, tıklayınca filtreler */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          {KATEGORILER.map(k => {
+            const Icon = k.icon;
+            const aktif = kategoriFilter === k.id;
+            return (
+              <button key={k.id} onClick={() => setKategoriFilter(aktif ? 'Tümü' : k.id)}
+                className={`text-left rounded-2xl border p-3 transition hover:scale-[1.02] ${aktif ? 'bg-purple-700 border-purple-700 text-white shadow-lg' : 'bg-white border-neutral-200 hover:border-purple-300'}`}>
+                <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 ${aktif ? 'bg-white/20' : k.bg}`}>
+                  <Icon className={`w-4.5 h-4.5 w-5 h-5 ${aktif ? 'text-white' : k.color}`} />
+                </div>
+                <div className={`text-xs font-black ${aktif ? 'text-white' : 'text-black'}`}>{k.id}</div>
+                <div className={`text-[10px] font-bold mt-0.5 ${aktif ? 'text-purple-100' : 'text-neutral-400'}`}>{kategoriSayisi(k.id)} evrak</div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ARAMA + SIRALAMA */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex flex-col md:flex-row gap-2">
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Arşivde ara: evrak adı, açıklama, etiket veya dosya adı..."
+              className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-purple-600 outline-none text-sm" />
+          </div>
+          <div className="flex gap-1.5">
+            {[{ id: 'yeni', l: 'Yeni Eklenen' }, { id: 'gecerlilik', l: 'Geçerlilik Tarihi' }, { id: 'az', l: 'A → Z' }].map(s => (
+              <button key={s.id} onClick={() => setSiralama(s.id)} className={`px-3 py-2 rounded-xl text-[11px] font-bold border transition whitespace-nowrap ${siralama === s.id ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}>{s.l}</button>
+            ))}
+            {kategoriFilter !== 'Tümü' && (
+              <button onClick={() => setKategoriFilter('Tümü')} className="px-3 py-2 rounded-xl text-[11px] font-bold bg-neutral-100 text-neutral-600 border border-neutral-200 flex items-center gap-1"><X className="w-3 h-3" /> {kategoriFilter}</button>
+            )}
+          </div>
+        </div>
+
+        {/* BELGE KARTLARI */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {filtered.length === 0 && (
+            <div className="md:col-span-2 bg-white rounded-2xl border border-dashed border-neutral-300 p-10 text-center text-sm font-bold text-neutral-400">Arşivde evrak bulunamadı. "Yeni Evrak Ekle" ile ilk evrakı arşive ekleyin.</div>
+          )}
+          {filtered.map(b => {
+            const kat = katOf(b.kategori);
+            const Icon = kat.icon;
+            const acik = expandedId === b.id;
+            return (
+              <div key={b.id} className={`bg-white rounded-2xl shadow-sm border overflow-hidden ${acik ? 'border-purple-300 md:col-span-2' : 'border-neutral-200'}`}>
+                {/* KART BAŞLIĞI */}
+                <button onClick={() => setExpandedId(acik ? null : b.id)} className="w-full text-left p-4 hover:bg-neutral-50 transition">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${kat.bg}`}><Icon className={`w-5 h-5 ${kat.color}`} /></div>
+                      <div className="min-w-0">
+                        <div className="font-black text-black text-sm truncate">{b.baslik}</div>
+                        <div className="text-[11px] text-neutral-500 font-bold mt-0.5">{b.kategori} • {(b.dosyalar || []).length} dosya</div>
+                        {b.etiketler && <div className="text-[10px] text-purple-600 font-bold mt-0.5 truncate">🏷 {b.etiketler}</div>}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      {gecerlilikRozet(b.gecerlilikTarihi)}
+                      <span className="text-[10px] font-bold text-neutral-400">{tarihGoster(b.createdAt)}</span>
+                    </div>
+                  </div>
+                </button>
+
+                {/* DETAY PANELİ */}
+                {acik && (
+                  <div className="border-t border-neutral-100 p-4 space-y-4 animate-in slide-in-from-top-2 bg-neutral-50/50">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
+                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Bölüm</div><div className="font-black text-black">{b.kategori}</div></div>
+                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Geçerlilik Tarihi</div><div className="font-black text-black">{tarihGoster(b.gecerlilikTarihi)}</div></div>
+                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Ekleyen</div><div className="font-black text-black">{b.createdBy || '—'}</div></div>
+                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Eklenme Tarihi</div><div className="font-black text-black">{tarihGoster(b.createdAt)}</div></div>
+                    </div>
+                    {b.aciklama && <div className="bg-white rounded-xl border border-neutral-200 p-3 text-xs text-neutral-600"><span className="font-black text-neutral-400 text-[10px] uppercase block mb-1">Açıklama</span>{b.aciklama}</div>}
+
+                    {/* İşlem butonları */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button onClick={() => { setForm({ ...emptyForm, ...b }); setEditingId(b.id); setShowForm(true); }} className="px-3 py-2 bg-neutral-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-black transition"><Edit className="w-3.5 h-3.5" /> Düzenle</button>
+                      <button onClick={() => setDeleteId(b.id)} className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-red-100 transition"><X className="w-3.5 h-3.5" /> Sil</button>
+                    </div>
+
+                    {/* EKLİ DOSYALAR — çoklu yükleme; yükleyen kişi + tarih görünür */}
+                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-purple-600" /> Ekli Dosyalar</span>
+                        <MediaCaptureMenu compact multiple disabled={detayUploading === b.id}
+                          buttonLabel={detayUploading === b.id ? 'Yükleniyor...' : 'Dosya Ekle'}
+                          onChange={(e) => handleDetayDosyaUpload(b, e)} />
+                      </div>
+                      {(b.dosyalar || []).length === 0 && <div className="text-[11px] text-neutral-400 font-bold py-2">Henüz dosya yüklenmemiş.</div>}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                        {(b.dosyalar || []).map(d => (
+                          <div key={d.id} className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1.5 text-xs">
+                            <FileText className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-bold text-neutral-700 truncate">{d.label}</div>
+                              <div className="text-[10px] text-neutral-400 font-bold">{d.uploadedBy || '—'} • {d.date ? new Date(d.date).toLocaleString('tr-TR') : ''}</div>
+                            </div>
+                            <button onClick={() => setViewingImage?.({ title: d.label, name: d.url })} className="text-neutral-500 hover:text-black" title="Görüntüle"><Eye className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => handleDetayDosyaRename(b, d.id)} className="text-neutral-500 hover:text-black" title="Adını değiştir"><Edit className="w-3.5 h-3.5" /></button>
+                            <button onClick={() => handleDetayDosyaRemove(b, d.id)} className="text-red-400 hover:text-red-600" title="Sil"><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* KAYIT GEÇMİŞİ */}
+                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
+                      <span className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5 mb-2"><History className="w-3.5 h-3.5 text-purple-600" /> Kayıt Geçmişi</span>
+                      <div className="space-y-1 max-h-32 overflow-y-auto">
+                        {[...(b.history || [])].reverse().map((h, i) => (
+                          <div key={i} className="text-[11px] text-neutral-500 font-bold flex gap-2">
+                            <span className="text-neutral-400 shrink-0">{new Date(h.date).toLocaleString('tr-TR')}</span>
+                            <span className="text-neutral-700">{h.text}</span>
+                            <span className="text-purple-600 ml-auto shrink-0">{h.by}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* YENİ / DÜZENLE BELGE MODALI */}
+        {showForm && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in overflow-y-auto">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 animate-in zoom-in-95 my-8 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2"><FolderOpen className="w-5 h-5 text-purple-700" /> {editingId ? 'Evrakı Düzenle' : 'Yeni Şirket Evrakı'}</h3>
+                <button onClick={() => setShowForm(false)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Evrak Adı *</label>
+                  <input value={form.baslik} onChange={e => setForm({ ...form, baslik: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="Örn: İmza Sirküleri 2026, Merkez Ofis Kira Kontratı" /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Bölüm (Kategori)</label>
+                    <select value={form.kategori} onChange={e => setForm({ ...form, kategori: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-purple-600 text-sm">
+                      {KATEGORILER.map(k => <option key={k.id} value={k.id}>{k.id}</option>)}
+                    </select></div>
+                  {/* Süreli belgelerde (kontrat, poliçe, ruhsat vb.) doldurulur; sistem otomatik uyarır */}
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Geçerlilik / Bitiş Tarihi</label>
+                    <input type="date" value={form.gecerlilikTarihi} onChange={e => setForm({ ...form, gecerlilikTarihi: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
+                </div>
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Etiketler <span className="text-neutral-400 font-normal">(virgülle ayırın — aramada kullanılır)</span></label>
+                  <input value={form.etiketler} onChange={e => setForm({ ...form, etiketler: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="örn: noter, 2026, merkez ofis" /></div>
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Açıklama</label>
+                  <textarea value={form.aciklama} onChange={e => setForm({ ...form, aciklama: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm h-16 resize-none" placeholder="Evraka dair notlar..." /></div>
+
+                {/* DOSYALAR — çoklu yükleme (fotoğraf/PDF/dosya) */}
+                <div className="border border-neutral-200 rounded-xl p-3 bg-neutral-50">
+                  <label className="text-xs font-black text-neutral-700 mb-2 flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-purple-600" /> Dosyalar</label>
+                  <div className="flex gap-1.5 mb-2">
+                    <input value={dosyaLabel} onChange={e => setDosyaLabel(e.target.value)} placeholder="Dosya adı (opsiyonel)" className="flex-1 min-w-0 p-2 border border-neutral-300 rounded-lg text-xs outline-none focus:ring-1 focus:ring-purple-600" />
+                    <MediaCaptureMenu compact multiple disabled={dosyaUploading}
+                      buttonLabel={dosyaUploading ? 'Yükleniyor...' : 'Yükle'}
+                      onChange={handleFormDosyaUpload} />
+                  </div>
+                  {(form.dosyalar || []).length > 0 && (
+                    <div className="space-y-1">
+                      {(form.dosyalar || []).map(d => (
+                        <div key={d.id} className="flex items-center gap-2 bg-white border border-neutral-200 rounded-lg px-2 py-1.5 text-xs">
+                          <FileText className="w-3.5 h-3.5 text-purple-500" />
+                          <span className="font-bold text-neutral-700 flex-1 truncate">{d.label} <span className="text-neutral-400 font-normal">({d.uploadedBy})</span></span>
+                          <button onClick={() => setViewingImage?.({ title: d.label, name: d.url })} className="text-neutral-500 hover:text-black"><Eye className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => handleFormDosyaRemove(d.id)} className="text-red-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2 mt-5">
+                <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
+                <button onClick={handleSaveBelge} disabled={!form.baslik.trim()} className="flex-1 py-2.5 bg-purple-700 text-white font-black rounded-xl hover:bg-purple-800 transition text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                  {editingId ? 'Güncelle' : 'Arşive Ekle'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SİLME ONAYI */}
+        {deleteId && (
+          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center animate-in zoom-in-95">
+              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
+              <p className="text-sm font-bold text-neutral-700 mb-4">Bu evrak ve tüm ekli dosya kayıtları arşivden kalıcı olarak silinecek. Emin misiniz?</p>
+              <div className="flex gap-2">
+                <button onClick={() => setDeleteId(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
+                <button onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri', deleteId)); addSystemLog?.('Şirket Evrakı Silindi', 'Bir şirket evrakı arşivden silindi.'); setDeleteId(null); }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============================================================================
+  // YENİ: AVUKAT ANASAYFASI (SADECE "AVUKAT" POZİSYONUNDAKİ KULLANICIYA ÖZEL)
+  // Avukat pozisyonundaki kullanıcı sisteme girdiğinde standart operasyon
+  // anasayfası yerine BU sayfa açılır. İçerikte maaş, mesai, puantaj, personel
+  // değerlendirme gibi HİÇBİR personel-muhasebe unsuru YOKTUR; tamamen hukuk
+  // süreçlerine odaklıdır:
+  //  - Kişiye özel karşılama + günün hukuk odaklı özeti
+  //  - Dosya istatistikleri (aktif, duruşma bekleyen, kritik tarih, belge sayısı)
+  //  - Duruma göre FİLTRELİ dosya raporu (tek tıkla durum bazlı liste)
+  //  - Yaklaşan duruşma / son tarih ajandası
+  //  - SON EKLENEN BELGELER akışı (kim, hangi dosyaya, ne zaman yükledi)
+  //  - SON HAREKETLER bildirim akışı (tüm dosyalardaki süreç geçmişinden)
+  //  - Avukat muhasebesi özeti (toplam masraf / ödenen / kalan bakiye)
+  // Veriler 'davaDosyalari' ve 'avukatMuhasebe' koleksiyonlarından canlı okunur.
+  // ============================================================================
+  export const AvukatDashboardView = ({ currentUser, setActiveTab, setViewingImage }) => {
+    // DavaDosyalariView ile aynı durum tanımları (renk uyumu için)
+    const DURUMLAR = [
+      { id: 'Yeni',               color: 'bg-sky-100 text-sky-700 border-sky-200' },
+      { id: 'İnceleniyor',        color: 'bg-amber-100 text-amber-700 border-amber-200' },
+      { id: 'Devam Ediyor',       color: 'bg-orange-100 text-orange-700 border-orange-200' },
+      { id: 'Duruşma Bekleniyor', color: 'bg-purple-100 text-purple-700 border-purple-200' },
+      { id: 'İtiraz Süreci',      color: 'bg-rose-100 text-rose-700 border-rose-200' },
+      { id: 'Uzlaşıldı',          color: 'bg-teal-100 text-teal-700 border-teal-200' },
+      { id: 'Kazanıldı',          color: 'bg-green-100 text-green-700 border-green-200' },
+      { id: 'Kaybedildi',         color: 'bg-red-100 text-red-600 border-red-200' },
+      { id: 'Arşiv',              color: 'bg-neutral-100 text-neutral-500 border-neutral-200' },
+    ];
+
+    const [dosyalar, setDosyalar] = useState([]);
+    const [muhasebe, setMuhasebe] = useState([]);
+    const [durumFilter, setDurumFilter] = useState('Tümü'); // duruma göre hızlı rapor filtresi
+
+    // Dava dosyaları canlı dinlenir
+    useEffect(() => {
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari'), snap => {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        setDosyalar(list);
+      });
+      return () => unsub();
+    }, []);
+
+    // Avukat muhasebe kayıtları canlı dinlenir
+    useEffect(() => {
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe'), snap => {
+        setMuhasebe(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      });
+      return () => unsub();
+    }, []);
+
+    // --- HESAPLAMALAR ---
+    const paraFormat = (n) => (Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+    const bugun = new Date(); bugun.setHours(0, 0, 0, 0);
+    const kalanGun = (t) => t ? Math.ceil((new Date(t) - bugun) / (1000 * 60 * 60 * 24)) : null;
+
+    const aktifDosyalar = dosyalar.filter(d => !['Arşiv', 'Kazanıldı', 'Kaybedildi', 'Uzlaşıldı'].includes(d.durum));
+    const durusmaBekleyen = dosyalar.filter(d => d.durum === 'Duruşma Bekleniyor');
+    const toplamBelge = dosyalar.reduce((s, d) => s + (d.belgeler || []).length, 0);
+
+    // Yaklaşan 30 gün ajandası (duruşma veya itiraz/cevap son günü)
+    const yaklasanlar = dosyalar
+      .map(d => {
+        const f1 = kalanGun(d.durusmaTarihi); const f2 = kalanGun(d.sonTarih);
+        const enYakin = [f1, f2].filter(x => x !== null && x >= 0).sort((a, b) => a - b)[0];
+        return { ...d, kalan: enYakin === undefined ? null : enYakin };
+      })
+      .filter(d => d.kalan !== null && d.kalan <= 30 && d.durum !== 'Arşiv')
+      .sort((a, b) => a.kalan - b.kalan);
+
+    // Muhasebe özeti
+    const toplamMasraf = muhasebe.filter(m => m.yon === 'masraf').reduce((s, m) => s + (Number(m.tutar) || 0), 0);
+    const toplamOdenen = muhasebe.filter(m => m.yon === 'odeme').reduce((s, m) => s + (Number(m.tutar) || 0), 0);
+    const kalanBakiye = toplamMasraf - toplamOdenen;
+
+    // SON EKLENEN BELGELER: tüm dosyaların belgeleri tek akışta, en yeniden eskiye
+    const sonBelgeler = dosyalar
+      .flatMap(d => (d.belgeler || []).map(b => ({ ...b, dosyaBaslik: d.baslik, dosyaId: d.id })))
+      .filter(b => b.date)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+      .slice(0, 10);
+
+    // SON HAREKETLER (bildirim akışı): tüm dosyaların süreç geçmişi birleşik
+    const sonHareketler = dosyalar
+      .flatMap(d => (d.history || []).map(h => ({ ...h, dosyaBaslik: d.baslik })))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+      .slice(0, 12);
+
+    // Duruma göre filtreli rapor listesi
+    const filtreliDosyalar = (durumFilter === 'Tümü' ? dosyalar : dosyalar.filter(d => d.durum === durumFilter));
+    const durumOf = (id) => DURUMLAR.find(s => s.id === id) || DURUMLAR[0];
+    const tarihGoster = (t) => t ? new Date(t).toLocaleDateString('tr-TR') : '—';
+
+    return (
+      <div className="max-w-6xl mx-auto animate-in fade-in space-y-5">
+        {/* KİŞİYE ÖZEL KARŞILAMA — hukuk odaklı anasayfa başlığı */}
+        <div className="bg-gradient-to-r from-purple-700 via-purple-900 to-fuchsia-950 rounded-2xl p-5 md:p-7 text-white shadow-lg">
+          <h2 className="text-xl md:text-2xl font-black flex items-center gap-2">
+            <Scale className="w-7 h-7" /> Hoş Geldiniz, Av. {currentUser?.fullName}
+          </h2>
+          <p className="text-purple-200 text-xs md:text-sm mt-1.5">
+            {new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} — Şirketin tüm hukuki süreçlerinin güncel özeti aşağıdadır.
+          </p>
+          {/* Hızlı istatistikler */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">
+            <button onClick={() => setActiveTab?.('davaDosyalari')} className="rounded-xl px-3 py-3 bg-white/10 border border-white/20 text-left hover:bg-white/20 transition">
+              <div className="text-2xl font-black leading-none">{aktifDosyalar.length}</div>
+              <div className="text-[10px] font-bold mt-1.5 opacity-90">AKTİF DOSYA</div>
+            </button>
+            <button onClick={() => { setDurumFilter('Duruşma Bekleniyor'); }} className="rounded-xl px-3 py-3 bg-white/10 border border-white/20 text-left hover:bg-white/20 transition">
+              <div className="text-2xl font-black leading-none">{durusmaBekleyen.length}</div>
+              <div className="text-[10px] font-bold mt-1.5 opacity-90">DURUŞMA BEKLEYEN</div>
+            </button>
+            <div className={`rounded-xl px-3 py-3 border ${yaklasanlar.length > 0 ? 'bg-red-500/30 border-red-300/40' : 'bg-white/10 border-white/20'}`}>
+              <div className="text-2xl font-black leading-none">{yaklasanlar.length}</div>
+              <div className="text-[10px] font-bold mt-1.5 opacity-90">KRİTİK TARİH (30 GÜN)</div>
+            </div>
+            <div className="rounded-xl px-3 py-3 bg-white/10 border border-white/20">
+              <div className="text-2xl font-black leading-none">{toplamBelge}</div>
+              <div className="text-[10px] font-bold mt-1.5 opacity-90">TOPLAM BELGE</div>
+            </div>
+          </div>
+        </div>
+
+        {/* YAKLAŞAN DURUŞMA / SON TARİH AJANDASI */}
+        {yaklasanlar.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-4">
+            <div className="text-xs font-black text-red-500 uppercase mb-3 flex items-center gap-1.5"><CalendarDays className="w-4 h-4" /> Yaklaşan Duruşma & Son Tarihler</div>
+            <div className="space-y-2">
+              {yaklasanlar.map(d => (
+                <button key={d.id} onClick={() => setActiveTab?.('davaDosyalari')}
+                  className={`w-full text-left flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition ${d.kalan <= 7 ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-amber-50 border-amber-200 hover:bg-amber-100'}`}>
+                  <div className="min-w-0">
+                    <div className="text-xs font-black text-black truncate">{d.baslik}</div>
+                    <div className="text-[10px] font-bold text-neutral-500">{d.dosyaTuru} {d.mahkeme ? `• ${d.mahkeme}` : ''} {d.durusmaTarihi ? `• Duruşma: ${tarihGoster(d.durusmaTarihi)}` : ''} {d.sonTarih ? `• Son gün: ${tarihGoster(d.sonTarih)}` : ''}</div>
+                  </div>
+                  <span className={`shrink-0 text-xs font-black ${d.kalan <= 7 ? 'text-red-600' : 'text-amber-600'}`}>{d.kalan === 0 ? 'BUGÜN' : `${d.kalan} gün`}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* DURUMA GÖRE FİLTRELİ DOSYA RAPORU */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-xs font-black text-neutral-700 uppercase flex items-center gap-1.5"><ClipboardList className="w-4 h-4 text-purple-600" /> Duruma Göre Dosya Raporu</div>
+            <button onClick={() => setActiveTab?.('davaDosyalari')} className="text-[11px] font-black text-purple-700 hover:underline flex items-center gap-1">Tüm Dosyalara Git <ArrowUpRight className="w-3.5 h-3.5" /></button>
+          </div>
+          {/* Durum filtresi: sayaçlı çipler */}
+          <div className="flex items-center gap-1.5 flex-wrap mb-3">
+            <button onClick={() => setDurumFilter('Tümü')} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${durumFilter === 'Tümü' ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}>Tümü ({dosyalar.length})</button>
+            {DURUMLAR.map(s => {
+              const cnt = dosyalar.filter(d => d.durum === s.id).length;
+              if (cnt === 0) return null; // boş durumları gizle, rapor sade kalsın
+              return (
+                <button key={s.id} onClick={() => setDurumFilter(durumFilter === s.id ? 'Tümü' : s.id)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${durumFilter === s.id ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}>
+                  {s.id} ({cnt})
+                </button>
+              );
+            })}
+          </div>
+          {/* Filtreli mini dosya listesi */}
+          <div className="space-y-1.5 max-h-80 overflow-y-auto">
+            {filtreliDosyalar.length === 0 && <div className="text-[11px] text-neutral-400 font-bold py-3 text-center">Bu durumda dosya bulunmuyor.</div>}
+            {filtreliDosyalar.map(d => {
+              const st = durumOf(d.durum);
+              return (
+                <button key={d.id} onClick={() => setActiveTab?.('davaDosyalari')} className="w-full text-left flex items-center justify-between gap-3 rounded-xl border border-neutral-200 px-3 py-2.5 hover:bg-neutral-50 transition">
+                  <div className="min-w-0 flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center shrink-0"><Scale className="w-4 h-4 text-purple-700" /></div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-black text-black truncate">{d.baslik}</div>
+                      <div className="text-[10px] font-bold text-neutral-500 truncate">{d.dosyaTuru}{d.dosyaNo ? ` • ${d.dosyaNo}` : ''}{d.karsiTaraf ? ` • ${d.karsiTaraf}` : ''}</div>
+                    </div>
+                  </div>
+                  <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-black border ${st.color}`}>{d.durum}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          {/* SON EKLENEN BELGELER AKIŞI */}
+          <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
+            <div className="text-xs font-black text-neutral-700 uppercase mb-3 flex items-center gap-1.5"><FolderOpen className="w-4 h-4 text-purple-600" /> Son Eklenen Belgeler</div>
+            <div className="space-y-1.5 max-h-80 overflow-y-auto">
+              {sonBelgeler.length === 0 && <div className="text-[11px] text-neutral-400 font-bold py-3 text-center">Henüz belge yüklenmemiş.</div>}
+              {sonBelgeler.map(b => (
+                <div key={b.dosyaId + '_' + b.id} className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-2 text-xs">
+                  <FileText className="w-3.5 h-3.5 text-purple-500 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-neutral-700 truncate">{b.label}</div>
+                    <div className="text-[10px] text-neutral-400 font-bold truncate">{b.dosyaBaslik} • {b.uploadedBy || '—'} • {b.date ? new Date(b.date).toLocaleString('tr-TR') : ''}</div>
+                  </div>
+                  <button onClick={() => setViewingImage?.({ title: b.label, name: b.url })} className="text-neutral-500 hover:text-black shrink-0" title="Görüntüle"><Eye className="w-4 h-4" /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* SON HAREKETLER — bildirim akışı */}
+          <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
+            <div className="text-xs font-black text-neutral-700 uppercase mb-3 flex items-center gap-1.5"><Bell className="w-4 h-4 text-purple-600" /> Son Hareketler & Bildirimler</div>
+            <div className="space-y-1.5 max-h-80 overflow-y-auto">
+              {sonHareketler.length === 0 && <div className="text-[11px] text-neutral-400 font-bold py-3 text-center">Henüz hareket kaydı yok.</div>}
+              {sonHareketler.map((h, i) => (
+                <div key={i} className="flex items-start gap-2 border-b border-neutral-100 pb-1.5 text-[11px]">
+                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 shrink-0"></div>
+                  <div className="min-w-0">
+                    <span className="font-black text-black">{h.dosyaBaslik}:</span>{' '}
+                    <span className="text-neutral-600 font-bold">{h.text}</span>
+                    <div className="text-[10px] text-neutral-400 font-bold">{new Date(h.date).toLocaleString('tr-TR')} • {h.by}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* AVUKAT MUHASEBESİ ÖZETİ — sadece dava/hukuk muhasebesi (maaş/mesai YOK) */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-xs font-black text-neutral-700 uppercase flex items-center gap-1.5"><Wallet className="w-4 h-4 text-purple-600" /> Hukuk Muhasebesi Özeti</div>
+            <button onClick={() => setActiveTab?.('davaDosyalari')} className="text-[11px] font-black text-purple-700 hover:underline flex items-center gap-1">Detaylı Muhasebe <ArrowUpRight className="w-3.5 h-3.5" /></button>
+          </div>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-base md:text-lg font-black text-amber-600">{paraFormat(toplamMasraf)} ₺</div><div className="text-[9px] md:text-[10px] font-black text-neutral-400 uppercase mt-1">Toplam Masraf / Ücret</div></div>
+            <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-base md:text-lg font-black text-emerald-600">{paraFormat(toplamOdenen)} ₺</div><div className="text-[9px] md:text-[10px] font-black text-neutral-400 uppercase mt-1">Ödenen Tutar</div></div>
+            <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className={`text-base md:text-lg font-black ${kalanBakiye > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{paraFormat(kalanBakiye)} ₺</div><div className="text-[9px] md:text-[10px] font-black text-neutral-400 uppercase mt-1">Kalan Bakiye</div></div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ============================================================================
+  // YENİ: İŞ MERKEZİ — TEK SAYFADA KATEGORİ BUTONLARI
+  // Daha önce sol menüde ayrı ayrı duran "Mevcut İşler", "Tamamlanan İşler" ve
+  // "İptal Edilen İşler" bölümleri buraya taşındı. Sol menüde artık yalnızca
+  // "Tüm İşler" var; kategoriler bu sayfanın en üstündeki butonlardan seçilir.
+  // Her butona basıldığında ilgili MEVCUT bileşen (kodu değişmeden) render edilir.
+  // ============================================================================
+  export const IsMerkeziView = ({
+    jobs, handleEditJob, handleOpenAssignModal, handleGenerateMessage, handleEstimateMaterials,
+    setCancelJobId, setViewingImage, setDeleteJobId, setMarkDamageJobId, canApprovePoints,
+    handleOpenApproveModal, handleOpenMesaiModal, handleOpenResolveDamageModal, handleRestoreJob
+  }) => {
+    // Açılışta "Tüm İşler" sekmesi seçilidir
+    const [kategori, setKategori] = useState('all');
+
+    // Sekme butonları: id, etiket, ikon, aktif renk ve canlı sayaç
+    const SEKMELER = [
+      { id: 'all',       label: 'Tüm İşler',          icon: ClipboardList, renk: 'bg-red-600',    sayac: jobs.length },
+      { id: 'current',   label: 'Mevcut İşler',       icon: Clock,         renk: 'bg-orange-600', sayac: jobs.filter(j => j.status !== 'completed' && j.status !== 'cancelled').length },
+      { id: 'completed', label: 'Tamamlanan İşler',   icon: CheckCircle,   renk: 'bg-black',      sayac: jobs.filter(j => j.status === 'completed').length },
+      { id: 'cancelled', label: 'İptal Edilen İşler', icon: Ban,           renk: 'bg-red-700',    sayac: jobs.filter(j => j.status === 'cancelled').length },
+    ];
+
+    return (
+      <div className="space-y-4 animate-in fade-in">
+        {/* ÜST KATEGORİ BUTONLARI */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            {SEKMELER.map(s => {
+              const Icon = s.icon;
+              const aktif = kategori === s.id;
+              return (
+                <button key={s.id} onClick={() => setKategori(s.id)}
+                  className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-sm font-black border transition hover:scale-[1.02] ${aktif ? `${s.renk} text-white border-transparent shadow-md` : 'bg-white text-neutral-500 border-neutral-200 hover:border-red-400 hover:text-red-600'}`}>
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="whitespace-nowrap">{s.label}</span>
+                  <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${aktif ? 'bg-white/25 text-white' : 'bg-neutral-100 text-neutral-500'}`}>{s.sayac}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* SEÇİLEN KATEGORİNİN MEVCUT BİLEŞENİ (kodları değiştirilmeden kullanılır) */}
+        {kategori === 'all' && (
+          <AllJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal}
+            handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials}
+            setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} />
+        )}
+        {kategori === 'current' && (
+          <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal}
+            handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials}
+            setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />
+        )}
+        {kategori === 'completed' && (
+          <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage}
+            setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints}
+            handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal}
+            handleOpenResolveDamageModal={handleOpenResolveDamageModal} />
+        )}
+        {kategori === 'cancelled' && (
+          <CancelledJobsView jobs={jobs} handleEditJob={handleEditJob} handleRestoreJob={handleRestoreJob} setDeleteJobId={setDeleteJobId} />
         )}
       </div>
     );

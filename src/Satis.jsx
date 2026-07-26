@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
-import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen } from 'lucide-react';
-import { collection, addDoc, onSnapshot, doc, setDoc, query, where } from 'firebase/firestore';
-import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF } from './shared.jsx';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle } from 'lucide-react';
+import { collection, addDoc, onSnapshot, doc, setDoc, deleteDoc, writeBatch, query, where } from 'firebase/firestore';
+import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar } from './shared.jsx';
 
   // ============================================================================
   // YENİ: Ortak Bölüm Başlığı Bileşeni (SectionHeader)
@@ -870,9 +870,31 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
 
   export const CustomerListView = ({ jobs, title, handleEditJob, onViewCari }) => {
     const [searchQuery, setSearchQuery] = useState('');
+    // YENİ: Kategori sekmesi — "Özel Müşteriler" ve "Kara Liste" artık sol menüde değil,
+    // bu sayfanın en üstündeki butonlardan seçiliyor.
+    const [kategori, setKategori] = useState(title === 'Özel Müşteriler' ? 'ozel' : 'tum');
+    // YENİ: Sayfalama — liste 50'şerli sayfalara bölünür
+    const SAYFA_BOYUTU = 50;
+    const [sayfa, setSayfa] = useState(1);
 
-    // Sadece başlığa göre filtreleme yapıyoruz
-    const relevantJobs = title === 'Özel Müşteriler' ? jobs.filter(j => j.isSpecial) : jobs;
+    // YENİ: Kara liste bilgisi cari profillerinde tutulur; canlı dinlenir
+    const [profilMap, setProfilMap] = useState({});
+    useEffect(() => {
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'customerProfiles'), snap => {
+        const m = {};
+        snap.docs.forEach(d => { m[d.id] = d.data(); });
+        setProfilMap(m);
+      }, console.error);
+      return () => unsub();
+    }, []);
+    // Bir işin müşterisi kara listede mi? (cari anahtarı üzerinden bakılır)
+    const isKaraListe = (job) => !!profilMap[normalizeCariPhone(job.customerPhone)]?.blacklisted;
+
+    // Seçili kategoriye göre kaynak iş listesi
+    const relevantJobs =
+      kategori === 'ozel' ? jobs.filter(j => j.isSpecial) :
+      kategori === 'kara' ? jobs.filter(j => isKaraListe(j)) :
+      jobs;
 
     // Müşterileri telefon numaralarına göre gruplayıp tekilleştiriyoruz
     const customersMap = new Map();
@@ -918,11 +940,43 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
       .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.phone.includes(searchQuery))
       .sort((a, b) => new Date(b.lastJobDate) - new Date(a.lastJobDate));
 
+    // Arama veya kategori değişince ilk sayfaya dön; yalnızca aktif sayfa render edilir
+    useEffect(() => { setSayfa(1); }, [searchQuery, kategori]);
+    const pagedCustomers = customers.slice((sayfa - 1) * SAYFA_BOYUTU, sayfa * SAYFA_BOYUTU);
+
+    // Üst kategori butonları için canlı sayaçlar (tekil müşteri sayısı)
+    const tekilSayisi = (list) => new Set(list.filter(j => j.customerPhone).map(j => j.customerPhone.replace(/\s+/g, ''))).size;
+    const SEKMELER = [
+      { id: 'tum',  label: 'Tüm Müşteriler',  icon: Users, renk: 'bg-red-600',    sayac: tekilSayisi(jobs) },
+      { id: 'ozel', label: 'Özel Müşteriler', icon: Star,  renk: 'bg-yellow-500', sayac: tekilSayisi(jobs.filter(j => j.isSpecial)) },
+      { id: 'kara', label: 'Kara Liste',      icon: Ban,   renk: 'bg-black',      sayac: tekilSayisi(jobs.filter(j => isKaraListe(j))) },
+    ];
+    const aktifBaslik = SEKMELER.find(s => s.id === kategori)?.label || title;
+
     return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
+      <div className="space-y-4 animate-in fade-in">
+        {/* YENİ: ÜST KATEGORİ BUTONLARI — Tüm / Özel / Kara Liste */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {SEKMELER.map(s => {
+              const Icon = s.icon;
+              const aktif = kategori === s.id;
+              return (
+                <button key={s.id} onClick={() => setKategori(s.id)}
+                  className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-sm font-black border transition hover:scale-[1.02] ${aktif ? `${s.renk} text-white border-transparent shadow-md` : 'bg-white text-neutral-500 border-neutral-200 hover:border-red-400 hover:text-red-600'}`}>
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="whitespace-nowrap">{s.label}</span>
+                  <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${aktif ? 'bg-white/25 text-white' : 'bg-neutral-100 text-neutral-500'}`}>{s.sayac}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4">
           <h2 className="text-xl font-bold text-black flex items-center gap-2 shrink-0">
-            <Users className="w-6 h-6 text-red-600" /> {title}
+            <Users className="w-6 h-6 text-red-600" /> {aktifBaslik}
           </h2>
           <div className="relative w-full md:w-64">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
@@ -949,14 +1003,27 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
-              {customers.map((c, index) => (
-                <tr key={index} className="hover:bg-neutral-50 transition">
+              {pagedCustomers.map((c, index) => {
+                // YENİ: Bu müşteri kara listede mi? Sebebi de tooltip olarak gösterilir.
+                const karaProfil = profilMap[c.cariKey];
+                const kara = !!karaProfil?.blacklisted;
+                return (
+                <tr key={index} className={`transition ${kara ? 'bg-red-50/50 hover:bg-red-50' : 'hover:bg-neutral-50'}`}>
                   <td className="p-4 font-bold text-black">
                     <div className="flex items-center gap-2">
-                      {c.isSpecial && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500 drop-shadow-sm shrink-0" />}
+                      {kara
+                        ? <Ban className="w-4 h-4 text-red-600 shrink-0" />
+                        : (c.isSpecial && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500 drop-shadow-sm shrink-0" />)}
                       <div>
-                        {c.name}
+                        {/* Kara listedeki müşterinin adı üstü çizili gösterilir */}
+                        <span className={kara ? 'line-through decoration-red-500 decoration-2 text-neutral-500' : ''}>{c.name}</span>
+                        {kara && <span className="ml-2 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full align-middle tracking-wider">KARA LİSTE</span>}
                         <span className="block text-[10px] text-neutral-500 font-medium">{c.type} Müşteri</span>
+                        {kara && karaProfil?.blacklistReason && (
+                          <span className="block text-[10px] text-red-600 font-bold mt-0.5 max-w-[240px] truncate" title={karaProfil.blacklistReason}>
+                            Sebep: {karaProfil.blacklistReason}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </td>
@@ -985,15 +1052,26 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
                     </button>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {customers.length === 0 && (
                 <tr>
-                  <td colSpan="7" className="p-6 text-center text-neutral-500">Müşteri kaydı bulunamadı.</td>
+                  <td colSpan="7" className="p-6 text-center text-neutral-500">
+                    {kategori === 'kara'
+                      ? 'Kara listeye alınmış müşteri bulunmuyor.'
+                      : kategori === 'ozel'
+                        ? 'Özel müşteri kaydı bulunamadı.'
+                        : 'Müşteri kaydı bulunamadı.'}
+                  </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+
+        {/* YENİ: Sayfalama çubuğu — 50'şerli sayfa geçişi */}
+        <SayfalamaBar toplam={customers.length} sayfa={sayfa} sayfaBoyutu={SAYFA_BOYUTU} onSayfaChange={setSayfa} birim="müşteri" />
+      </div>
       </div>
     );
   };
@@ -1005,7 +1083,7 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
   // iş kaydı otomatik olarak ilgili müşterinin cari profiline işliyor;
   // ayrıca büyük/küçük harf ve telefon formatı farkı gözetmeksizin aynı
   // müşteri tek bir cari profilde birleşmiş oluyor.
-  export const CustomerProfileView = ({ jobs, cariKey, onBack, handleEditJob, db, appId, addSystemLog, personnelList = [], vehicles = [] }) => {
+  export const CustomerProfileView = ({ jobs, cariKey, onBack, handleEditJob, db, appId, addSystemLog, personnelList = [], vehicles = [], currentUser }) => {
     const customerJobs = jobs
       .filter(j => normalizeCariPhone(j.customerPhone) === cariKey)
       .sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -1023,6 +1101,10 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
     const [showAddDebtModal, setShowAddDebtModal] = useState(false);
     const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
     const [manualEntryForm, setManualEntryForm] = useState({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
+    // YENİ: KARA LİSTE — müşteriyi sebebiyle birlikte kara listeye alma / düzenleme / çıkarma
+    const [showBlacklistModal, setShowBlacklistModal] = useState(false);
+    const [blacklistReasonInput, setBlacklistReasonInput] = useState('');
+    const [showBlacklistRemoveConfirm, setShowBlacklistRemoveConfirm] = useState(false);
 
     useEffect(() => {
       if (!cariKey || !db) return;
@@ -1111,6 +1193,42 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
       setShowEditProfileModal(false);
     };
 
+    // YENİ: KARA LİSTE DURUMU — customerProfiles dokümanında saklanır
+    const isBlacklisted = !!profileOverride?.blacklisted;
+    const blacklistReason = profileOverride?.blacklistReason || '';
+    const blacklistedBy = profileOverride?.blacklistedBy || '';
+    const blacklistedAt = profileOverride?.blacklistedAt || '';
+
+    // Müşteriyi kara listeye al veya mevcut sebebi güncelle
+    const handleSaveBlacklist = async (e) => {
+      e.preventDefault();
+      if (!blacklistReasonInput.trim()) return;
+      const yeniKayit = !isBlacklisted; // ilk kez mi ekleniyor
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customerProfiles', cariKey), {
+        blacklisted: true,
+        blacklistReason: blacklistReasonInput.trim(),
+        blacklistedBy: yeniKayit ? (currentUser?.fullName || 'Sistem') : (blacklistedBy || currentUser?.fullName || 'Sistem'),
+        blacklistedAt: yeniKayit ? new Date().toISOString() : (blacklistedAt || new Date().toISOString()),
+        blacklistUpdatedBy: currentUser?.fullName || 'Sistem',
+        blacklistUpdatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      if (addSystemLog) addSystemLog(yeniKayit ? 'Müşteri Kara Listeye Alındı' : 'Kara Liste Sebebi Güncellendi', `${customerName} (${customerPhone}) — Sebep: ${blacklistReasonInput.trim()}`);
+      setShowBlacklistModal(false);
+    };
+
+    // Müşteriyi kara listeden çıkar (sebep kaydı geçmiş için saklanır)
+    const handleRemoveBlacklist = async () => {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customerProfiles', cariKey), {
+        blacklisted: false,
+        blacklistRemovedBy: currentUser?.fullName || 'Sistem',
+        blacklistRemovedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      if (addSystemLog) addSystemLog('Müşteri Kara Listeden Çıkarıldı', `${customerName} (${customerPhone}) kara listeden çıkarıldı.`);
+      setShowBlacklistRemoveConfirm(false);
+    };
+
     const handleAddManualEntry = async (e, type) => {
       e.preventDefault();
       if (!manualEntryForm.amount) return;
@@ -1135,17 +1253,65 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
         </button>
 
         {/* Kişisel Bilgiler */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <h2 className="text-xl font-bold text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-4">
-            <Users className="w-6 h-6 text-red-600" /> Cari Hesap Profili
-          </h2>
+        <div className={`bg-white rounded-2xl shadow-sm border p-6 ${isBlacklisted ? 'border-red-300 ring-1 ring-red-100' : 'border-neutral-200'}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4 border-b border-neutral-200 pb-4">
+            <h2 className="text-xl font-bold text-black flex items-center gap-2">
+              <Users className="w-6 h-6 text-red-600" /> Cari Hesap Profili
+            </h2>
+            {/* YENİ: SAĞ ÜST KARA LİSTE BUTONU */}
+            {isBlacklisted ? (
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => { setBlacklistReasonInput(blacklistReason); setShowBlacklistModal(true); }}
+                  className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-black rounded-xl transition flex items-center gap-1.5 border border-red-200">
+                  <Edit className="w-3.5 h-3.5" /> Sebebi Düzenle
+                </button>
+                <button type="button" onClick={() => setShowBlacklistRemoveConfirm(true)}
+                  className="px-3 py-2 bg-green-50 hover:bg-green-100 text-green-700 text-xs font-black rounded-xl transition flex items-center gap-1.5 border border-green-200">
+                  <CheckCircle className="w-3.5 h-3.5" /> Kara Listeden Çıkar
+                </button>
+              </div>
+            ) : (
+              <button type="button" onClick={() => { setBlacklistReasonInput(''); setShowBlacklistModal(true); }}
+                className="px-4 py-2 bg-black hover:bg-red-700 text-white text-xs font-black rounded-xl transition flex items-center gap-2 shadow-sm">
+                <Ban className="w-4 h-4" /> Kara Listeye Al
+              </button>
+            )}
+          </div>
+
+          {/* YENİ: KARA LİSTE BİLDİRİM BANDI — sebep, ekleyen ve tarih görünür */}
+          {isBlacklisted && (
+            <div className="mb-5 rounded-xl border-2 border-red-300 bg-red-50 p-4 animate-in fade-in">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-600 flex items-center justify-center shrink-0">
+                  <Ban className="w-5 h-5 text-white" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-black text-red-700 flex items-center gap-2">
+                    BU MÜŞTERİ KARA LİSTEDE
+                    <span className="text-[10px] font-black bg-red-600 text-white px-2 py-0.5 rounded-full">DİKKAT</span>
+                  </p>
+                  <p className="text-sm font-bold text-red-900 mt-1.5 whitespace-pre-wrap">{blacklistReason || 'Sebep belirtilmemiş.'}</p>
+                  <p className="text-[11px] font-bold text-red-500 mt-2">
+                    {blacklistedBy ? `Ekleyen: ${blacklistedBy}` : ''}
+                    {blacklistedAt ? ` • ${new Date(blacklistedAt).toLocaleString('tr-TR')}` : ''}
+                    {profileOverride?.blacklistUpdatedAt && profileOverride.blacklistUpdatedAt !== blacklistedAt
+                      ? ` • Son güncelleme: ${profileOverride.blacklistUpdatedBy || '—'} (${new Date(profileOverride.blacklistUpdatedAt).toLocaleString('tr-TR')})`
+                      : ''}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="flex items-center gap-4 mb-5">
-            <div className="w-16 h-16 rounded-full bg-orange-100 flex items-center justify-center text-2xl font-black text-orange-600 shrink-0">
+            <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl font-black shrink-0 ${isBlacklisted ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>
               {customerName.charAt(0).toUpperCase()}
             </div>
             <div className="flex-1">
-              <h3 className="text-2xl font-black text-black flex items-center gap-2">
-                {customerName}
+              <h3 className="text-2xl font-black text-black flex items-center gap-2 flex-wrap">
+                {/* Kara listedeki müşterinin adı üstü çizili gösterilir */}
+                <span className={isBlacklisted ? 'line-through decoration-red-500 decoration-2 text-neutral-500' : ''}>{customerName}</span>
+                {isBlacklisted && <span className="text-[10px] font-black bg-red-600 text-white px-2 py-1 rounded-full tracking-wider">KARA LİSTE</span>}
                 {latestJob.isSpecial && <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />}
                 {/* YENİ: İsmin yanına düzenleme butonu */}
                 <button
@@ -1362,6 +1528,53 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
           </div>
         </div>
 
+        {/* YENİ: KARA LİSTEYE ALMA / SEBEP DÜZENLEME MODALI */}
+        {showBlacklistModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-red-700 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><Ban className="w-5 h-5" /> {isBlacklisted ? 'Kara Liste Sebebini Düzenle' : 'Müşteriyi Kara Listeye Al'}</h3>
+                <button onClick={() => setShowBlacklistModal(false)} className="text-red-200 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleSaveBlacklist} className="p-6 space-y-4">
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+                  <p className="text-xs font-bold text-neutral-400 uppercase">Müşteri</p>
+                  <p className="text-sm font-black text-black">{customerName}</p>
+                  <p className="text-xs font-bold text-neutral-500">{customerPhone}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Kara Liste Sebebi *</label>
+                  <textarea required value={blacklistReasonInput} onChange={e => setBlacklistReasonInput(e.target.value)}
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600 h-28 resize-none text-sm"
+                    placeholder="Örn: Ödemesini yapmadı ve iletişimi kesti / Ekibimize hakaret etti / Sürekli asılsız hasar iddiası..." />
+                  <p className="text-[11px] text-neutral-400 font-bold mt-1.5">Bu sebep cari profilinde ve kara liste ekranında görünecektir.</p>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => setShowBlacklistModal(false)} className="flex-1 py-3 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
+                  <button type="submit" disabled={!blacklistReasonInput.trim()} className="flex-1 py-3 bg-red-700 text-white font-black rounded-xl hover:bg-red-800 transition text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                    {isBlacklisted ? 'Sebebi Güncelle' : 'Onayla ve Kara Listeye Al'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: KARA LİSTEDEN ÇIKARMA ONAY MODALI */}
+        {showBlacklistRemoveConfirm && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-xs rounded-2xl shadow-2xl p-6 text-center animate-in zoom-in-95">
+              <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-3" />
+              <p className="text-sm font-bold text-neutral-700 mb-1"><b>{customerName}</b> kara listeden çıkarılacak.</p>
+              <p className="text-xs text-neutral-400 font-bold mb-4">Müşteri tekrar normal listede görünecek.</p>
+              <div className="flex gap-2">
+                <button onClick={() => setShowBlacklistRemoveConfirm(false)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
+                <button onClick={handleRemoveBlacklist} className="flex-1 py-2.5 bg-green-600 text-white font-black rounded-xl text-sm hover:bg-green-700">Evet, Çıkar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* YENİ: Cari Profil Düzenleme Modalı */}
         {showEditProfileModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
@@ -1459,6 +1672,583 @@ import { db, appId, PROVINCES, FLOORS, normalizeCariPhone, generateContractPDF }
             </div>
           </div>
         )}
+      </div>
+    );
+  };
+
+  // ============================================================================
+  // YENİ: ESKİ SİSTEMDEN VERİ AKTARIMI (semboln_db.sql → CRM)
+  // Eski uygulamanın phpMyAdmin SQL yedeğini okuyup iş + müşteri kayıtlarını
+  // yeni sisteme aktarır. Kurallar:
+  //  - 'orders' (işler) ve 'transfers' (yükleme/boşaltma detayları) tabloları okunur.
+  //    Depo KİRALAMA tabloları (rents/users/stores) HİÇ okunmaz → o 346 kayıt yok sayılır.
+  //  - Ad Soyad → customerName, Telefon → customerPhone, TC → tcNo,
+  //    Tarih+Saat → date+time, Toplam Tutar → price, Kapora → deposit,
+  //    Ek Açıklama → notes (Operasyon Notları).
+  //  - Adres → açık adres alanına yazılır; metinde il/ilçe tespit edilirse seçilir,
+  //    edilemezse il/ilçe BOŞ bırakılır.
+  //  - Kat → 'n. Kat' (0=Giriş Kat); Taşıma Şekli: dış asansör varsa 'Dış Cephe
+  //    Asansörü', bina asansörü varsa 'Bina Asansörü', yoksa 'Merdiven'.
+  //  - Toplanacak eşya varsa 'Toplama Yapılacak', yoksa 'Kendisi Topladı'.
+  //  - Adreste 'Depoevim' geçiyorsa kayıt DEPO formatında açılır; şube adı
+  //    (Çekmeköy/Kartal/Ümraniye) geçiyorsa o şube, geçmiyorsa Pendik seçilir.
+  //  - complate/wait/work → tamamlanmış; canceled → iptal olarak aktarılır.
+  //    Ekip/personel BOŞ bırakılır; puan ve mesai otomatik ONAYLI işaretlenir,
+  //    stok düşümü yapılmaz (materialsDeducted: true).
+  //  - 'deneme/test/asdf' gibi çöp kayıtlar atlanır. Aynı kayıt (legacyId)
+  //    ikinci kez aktarılmaz. Aynı isim+telefon zaten aynı cari profilde birleşir.
+  //  - Her aktarım bir parti (batch) olarak kaydedilir; SON AKTARIM tek tuşla
+  //    GERİ ALINABİLİR (eklenen tüm kayıtlar silinir, hiç yüklenmemiş gibi olur).
+  // ============================================================================
+  export const EskiVeriIceAktar = ({ jobs = [], currentUser, addSystemLog, onClose }) => {
+    const [asama, setAsama] = useState('dosya'); // dosya | onizleme | aktariliyor | bitti
+    const [hata, setHata] = useState('');
+    const [ozet, setOzet] = useState(null);        // önizleme özeti
+    const [hazirKayitlar, setHazirKayitlar] = useState([]); // aktarılacak yeni iş dokümanları
+    const [ilerleme, setIlerleme] = useState({ yazilan: 0, toplam: 0 });
+    const [sonPartiler, setSonPartiler] = useState([]);     // geçmiş aktarımlar (geri alma için)
+    const [geriAliniyor, setGeriAliniyor] = useState(false);
+
+    // Geçmiş aktarım partilerini canlı dinle (geri alma butonu için)
+    useEffect(() => {
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'legacyImports'), snap => {
+        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+        setSonPartiler(list);
+      });
+      return () => unsub();
+    }, []);
+
+    // ---------------- SQL AYRIŞTIRICI ----------------
+    // Belirtilen tablonun tüm INSERT ifadelerindeki satır demetlerini döndürür.
+    // Tek tırnaklı stringleri, \' ve '' kaçışlarını, NULL ve sayıları doğru çözer.
+    const parseInsertRows = (sql, tablo) => {
+      const rows = [];
+      const marker = 'INSERT INTO `' + tablo + '`';
+      let from = 0;
+      while (true) {
+        const idx = sql.indexOf(marker, from);
+        if (idx === -1) break;
+        const valIdx = sql.indexOf('VALUES', idx);
+        if (valIdx === -1) break;
+        let i = valIdx + 6;
+        let depth = 0, inStr = false, cur = '', tuple = [], done = false;
+        const pushVal = () => {
+          const t = cur;
+          cur = '';
+          if (t === '\u0000NULL\u0000') tuple.push(null);
+          else tuple.push(t);
+        };
+        while (i < sql.length && !done) {
+          const ch = sql[i];
+          if (inStr) {
+            if (ch === '\\') { // backslash kaçışı: \' \\ \n vb.
+              const nx = sql[i + 1];
+              cur += nx === 'n' ? '\n' : nx === 'r' ? '\r' : nx === 't' ? '\t' : (nx ?? '');
+              i += 2; continue;
+            }
+            if (ch === "'") {
+              if (sql[i + 1] === "'") { cur += "'"; i += 2; continue; } // '' kaçışı
+              inStr = false; i++; continue;
+            }
+            cur += ch; i++; continue;
+          }
+          if (ch === "'") { inStr = true; i++; continue; }
+          if (ch === '(') { depth++; if (depth === 1) { tuple = []; cur = ''; } else cur += ch; i++; continue; }
+          if (ch === ')') {
+            depth--;
+            if (depth === 0) { pushVal(); rows.push(tuple); } else cur += ch;
+            i++; continue;
+          }
+          if (depth >= 1) {
+            if (ch === ',' && depth === 1) { pushVal(); i++; continue; }
+            cur += ch; i++; continue;
+          }
+          if (ch === ';') { done = true; break; }
+          i++;
+        }
+        // NULL değerlerini işaretle: tırnaksız NULL token'ları trim edilmiş 'NULL' olarak gelir
+        for (const r of rows) for (let k = 0; k < r.length; k++) {
+          if (typeof r[k] === 'string' && r[k].trim() === 'NULL') r[k] = null;
+          else if (typeof r[k] === 'string') r[k] = r[k].trim() === r[k] ? r[k] : r[k].trim();
+        }
+        from = valIdx + 6;
+      }
+      return rows;
+    };
+
+    // ---------------- YARDIMCI EŞLEYİCİLER ----------------
+    const trLower = (s) => (s || '').toLocaleLowerCase('tr-TR');
+
+    // Çöp/deneme kayıt tespiti
+    const copKayitMi = (ad) => {
+      const t = trLower(ad).trim();
+      if (!t) return true;
+      if (/(deneme|test\b|asdf|sdfs|dsad|qwe|zxc|xxxx|aaaa)/.test(t)) return true;
+      // tek kelime + 4+ harf + hiç sesli harf yok → rastgele tuş basımı
+      if (/^[bcçdfgğhjklmnprsştvzqwx]{4,}$/.test(t)) return true;
+      return false;
+    };
+
+    // YENİ KURAL: İsim en az İKİ kelimeli olmalı (ad + soyad). Tek kelimelik kayıtlar atlanır.
+    const isimGecerliMi = (ad) => {
+      const kelimeler = String(ad || '').trim().split(/\s+/).filter(k => k.length >= 2);
+      return kelimeler.length >= 2;
+    };
+
+    // YENİ KURAL: Telefon 11 haneli geçerli bir Türk cep numarası olmalı (05XXXXXXXXX).
+    // 11111111111, 33333333333 gibi tek rakamdan oluşan/uydurma numaralar elenir.
+    const telefonGecerliMi = (tel) => {
+      let t = String(tel || '').replace(/\D/g, '');
+      if (t.startsWith('90') && t.length === 12) t = '0' + t.slice(2); // +90... formatı
+      if (t.length === 10 && t.startsWith('5')) t = '0' + t;           // baştaki 0 eksikse tamamla
+      if (t.length !== 11) return false;            // 11 hane değilse aktarma
+      if (!t.startsWith('05')) return false;        // cep numarası değilse aktarma
+      if (/^(\d)\1{10}$/.test(t)) return false;     // 11111111111 gibi hepsi aynı rakam
+      if (/^0(\d)\1{9}$/.test(t)) return false;     // 05555555555 gibi kalıp numara
+      const govde = t.slice(1);                     // 5XXXXXXXXX
+      if (new Set(govde).size <= 2) return false;   // 2 farklı rakamdan az → uydurma
+      if (/^0501234567|^05123456789|^05000000/.test(t)) return false; // ardışık/sıfır kalıpları
+      return true;
+    };
+
+    // Telefonu standart 11 haneli biçime çevir (05XXXXXXXXX)
+    const telefonNormalize = (tel) => {
+      let t = String(tel || '').replace(/\D/g, '');
+      if (t.startsWith('90') && t.length === 12) t = '0' + t.slice(2);
+      if (t.length === 10 && t.startsWith('5')) t = '0' + t;
+      return t;
+    };
+
+    // Metni sadeleştir: küçük harf, noktalama → boşluk (kelime bazlı eşleşme için)
+    const adresNorm = (s) => (s || '').toLocaleLowerCase('tr-TR')
+      .replace(/i̇/g, 'i').replace(/[^a-zçğıöşü0-9]+/g, ' ').trim();
+
+    // Tek başına il belirtmeyen, çok sayıda ilde bulunan genel adlar
+    const GENEL_ILCE_ADLARI = new Set(['merkez', 'cumhuriyet', 'carsi', 'çarşı', 'sahil']);
+
+    // İl/ilçe arama indeksi — bir kez kurulur, her adreste yeniden taranmaz.
+    // (Eski sürüm her adres için 972 ilçeyi tek tek tarıyordu; 4.600 kayıtta tarayıcı donuyordu.)
+    const KONUM_INDEKS = useMemo(() => {
+      const ilce = new Map(), il = new Map();
+      for (const [ilAdi, ilceler] of Object.entries(TURKEY_LOCATIONS)) {
+        il.set(adresNorm(ilAdi.replace(/\s*\(.*\)/, '')), ilAdi);
+        for (const d of ilceler) {
+          for (const k of new Set([adresNorm(d), adresNorm(d).replace(/ /g, '')])) {
+            if (!ilce.has(k)) ilce.set(k, []);
+            if (!ilce.get(k).some(x => x.district === d && x.province === ilAdi)) ilce.get(k).push({ province: ilAdi, district: d });
+          }
+        }
+      }
+      return { ilce, il };
+    }, []);
+
+    // Adres metninden il/ilçe tespiti.
+    // Türkçe adreslerde ilçe/il SONDA yazıldığı için tarama sondan başa yapılır;
+    // böylece "Yenişehir mah. ... / Pendik" adresi Bursa değil, Pendik olarak eşleşir.
+    // Kesin sonuç yoksa il/ilçe BOŞ bırakılır (kullanıcı kuralı).
+    const ilIlceBul = (adres) => {
+      const bos = { province: '', district: '' };
+      if (!adres) return bos;
+      const kelimeler = adresNorm(adres).split(' ').filter(Boolean);
+      if (kelimeler.length === 0) return bos;
+
+      // Adreste açıkça il adı geçiyor mu? (belirsiz ilçelerde ipucu olarak kullanılır)
+      let ipucuIl = '';
+      for (const k of kelimeler) { const v = KONUM_INDEKS.il.get(k); if (v) ipucuIl = v; }
+      const istanbulMu = kelimeler.includes('istanbul');
+
+      // Sondan başa, 1-3 kelimelik birleşimlerle aday ara (Küçük Çekmece, Gazi Osman Paşa gibi)
+      const adaylar = [];
+      for (let i = kelimeler.length - 1; i >= 0; i--) {
+        for (let n = 3; n >= 1; n--) {
+          if (i - n + 1 < 0) continue;
+          const parca = kelimeler.slice(i - n + 1, i + 1).join(' ');
+          for (const key of new Set([parca, parca.replace(/ /g, '')])) {
+            const bulunan = KONUM_INDEKS.ilce.get(key);
+            if (bulunan) adaylar.push({ key, secenekler: bulunan });
+          }
+        }
+      }
+      if (adaylar.length === 0) {
+        if (ipucuIl && !ipucuIl.startsWith('İstanbul')) return { province: ipucuIl, district: '' };
+        return bos;
+      }
+
+      for (const aday of adaylar) {
+        let sec = aday.secenekler;
+        if (sec.length > 1) {
+          const ipucuyla = ipucuIl ? sec.filter(s => s.province === ipucuIl) : [];
+          if (ipucuyla.length) sec = ipucuyla;
+          else if (istanbulMu) { const ist = sec.filter(s => s.province.startsWith('İstanbul')); if (ist.length === 1) sec = ist; }
+        }
+        if (sec.length === 1) {
+          // Genel ad (Merkez vb.) + il ipucu yoksa güvenilmez → boş bırak
+          if (GENEL_ILCE_ADLARI.has(aday.key) && !ipucuIl && !istanbulMu) continue;
+          return { province: sec[0].province, district: sec[0].district };
+        }
+        const anadolu = sec.find(s => s.province === 'İstanbul (Anadolu)');
+        if (anadolu && istanbulMu) return { province: anadolu.province, district: anadolu.district };
+      }
+      if (ipucuIl && !ipucuIl.startsWith('İstanbul')) return { province: ipucuIl, district: '' };
+      return bos;
+    };
+
+    // Kat eşlemesi: 0 → Giriş Kat, n → 'n. Kat' (1-30 arası FLOORS ile birebir)
+    const katEsle = (n) => {
+      const f = parseInt(n);
+      if (isNaN(f)) return '';
+      if (f <= 0) return 'Giriş Kat';
+      return `${Math.min(f, 30)}. Kat`;
+    };
+
+    // Taşıma şekli eşlemesi (eski sistemdeki iki ayrı alan birleştirilir):
+    //   nelevator = "Nakliye Asansörü" (dış cephe)  → 1: Var, 0: Yok
+    //   elevator  = "Asansör" (bina asansörü)       → 2: Var, 1/0: Yok
+    // Kural: Dış cephe asansörü varsa (bina asansörü olsun olmasın) 'Dış Cephe Asansörü';
+    //        yoksa bina asansörü varsa 'Bina Asansörü'; ikisi de yoksa 'Merdiven'.
+    const tasimaEsle = (t) => {
+      if (!t) return 'Merdiven';
+      if (parseInt(t.nelevator) === 1) return 'Dış Cephe Asansörü';
+      if (parseInt(t.elevator) === 2) return 'Bina Asansörü';
+      return 'Merdiven';
+    };
+
+    // Daire tipi eşlemesi: eski sistemde sayı (3 → "3+1"). Yeni sistemdeki
+    // seçenek listesinde karşılığı yoksa BOŞ bırakılır.
+    const DAIRE_TIPLERI = { 1: '1+1', 2: '2+1', 3: '3+1', 4: '4+1', 5: '5+1', 6: '6+1' };
+    const daireTipiEsle = (n) => DAIRE_TIPLERI[parseInt(n)] || '';
+
+    // Depoevim şube tespiti
+    const depoSubeBul = (adres) => {
+      const t = trLower(adres);
+      if (t.includes('çekmeköy') || t.includes('cekmekoy')) return 'Çekmeköy Depoevim';
+      if (t.includes('kartal')) return 'Kartal Depoevim';
+      if (t.includes('ümraniye') || t.includes('umraniye')) return 'Ümraniye Depoevim';
+      return 'Pendik Depoevim'; // sadece "depoevim" yazıyorsa varsayılan şube
+    };
+
+    // ---------------- DOSYA OKUMA + ÖNİZLEME ----------------
+    const handleDosyaSec = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setHata('');
+      const reader = new FileReader();
+      reader.onerror = () => setHata('Dosya okunamadı.');
+      reader.onload = () => {
+        try { analizEt(String(reader.result)); }
+        catch (err) { console.error(err); setHata('SQL dosyası ayrıştırılamadı: ' + err.message); }
+      };
+      reader.readAsText(file, 'utf-8');
+    };
+
+    const analizEt = (sql) => {
+      // orders sütun sırası: id, name_surname, mobile, TC_kimlik, date, km, amount, final_amount,
+      // status, new_control, sef_control, kasko, kapora, ekInfo, canceledNote, load_info, unload_info, ...
+      const orderRows = parseInsertRows(sql, 'orders');
+      // transfers sütun sırası: id, type, elevator, carry_stuff, apartment_type, floor, address, ...
+      const transferRows = parseInsertRows(sql, 'transfers');
+      if (orderRows.length === 0) { setHata("Dosyada 'orders' tablosu bulunamadı. Doğru yedek dosyasını seçtiğinizden emin olun."); return; }
+
+      const transferMap = new Map();
+      // transfers sütun sırası (0'dan): id, type, elevator, carry_stuff, apartment_type,
+      // floor, address, kmbosaltma, kmyukleme, nelevator, createDate, created_at, updated_at
+      // NOT: nelevator 9. indekstedir (10 = createDate). Bu eşleşme, eski uygulamanın
+      // "Nakliye Asansörü / Asansör / Kat / Daire Tipi" ekranıyla birebir doğrulanmıştır.
+      transferRows.forEach(r => transferMap.set(String(r[0]), {
+        elevator: r[2], carry_stuff: r[3], apartment_type: r[4], floor: r[5], address: r[6] || '', nelevator: r[9]
+      }));
+
+      // Daha önce aktarılmış kayıtları atla (legacyId üzerinden)
+      const mevcutLegacy = new Set(jobs.map(j => j.legacyId).filter(Boolean));
+
+      const kayitlar = [];
+      let atlananCop = 0, atlananMukerrer = 0, atlananBos = 0, atlananIsim = 0, atlananTelefon = 0;
+      let sayacIptal = 0, sayacDepo = 0;
+
+      for (const r of orderRows) {
+        const [id, ad, tel, tc, tarihSaat, , , toplam, status, , , , kapora, ekInfo, canceledNote, loadId, unloadId] = r;
+        const legacyId = 'order_' + id;
+        if (mevcutLegacy.has(legacyId)) { atlananMukerrer++; continue; }
+        if (!ad || !String(ad).trim()) { atlananBos++; continue; }
+        if (copKayitMi(ad)) { atlananCop++; continue; }
+        // YENİ: Ad + soyad yoksa (tek kelimelik isim) aktarma
+        if (!isimGecerliMi(ad)) { atlananIsim++; continue; }
+        // YENİ: 11 haneli geçerli cep numarası yoksa aktarma
+        if (!telefonGecerliMi(tel)) { atlananTelefon++; continue; }
+
+        const yuk = transferMap.get(String(loadId)) || null;
+        const bos = transferMap.get(String(unloadId)) || null;
+
+        // Tarih/saat: '2021-06-01 03:30:00' → '2021-06-01' + '03:30'
+        let date = '', time = '';
+        if (tarihSaat) {
+          const [d, t] = String(tarihSaat).split(' ');
+          date = d || '';
+          time = (t || '').slice(0, 5);
+        }
+
+        const yukAdres = (yuk?.address || '').trim();
+        const bosAdres = (bos?.address || '').trim();
+
+        // Depoevim tespiti: yükleme veya boşaltma adresinde geçiyorsa DEPO kaydı olur
+        const yukDepo = trLower(yukAdres).includes('depoevim') || trLower(yukAdres).includes('depo evim');
+        const bosDepo = trLower(bosAdres).includes('depoevim') || trLower(bosAdres).includes('depo evim');
+        const depoMu = yukDepo || bosDepo;
+
+        // İptal durumu
+        const iptalMi = trLower(status) === 'canceled';
+        if (iptalMi) sayacIptal++;
+        if (depoMu) sayacDepo++;
+
+        const simdi = new Date().toISOString();
+        const jobDoc = {
+          legacyId,
+          type: depoMu ? 'Depo' : 'Nakliye',
+          customerType: 'Bireysel',
+          customerName: String(ad).trim(),
+          customerPhone: telefonNormalize(tel),
+          altPhone: '',
+          tcNo: tc ? String(tc).trim() : '',
+          taxNo: '',
+          date, time,
+          price: toplam ? String(parseFloat(String(toplam).replace(',', '.')) || '') : '',
+          deposit: kapora ? String(parseFloat(String(kapora).replace(',', '.')) || '') : '',
+          notes: [ekInfo, canceledNote].filter(Boolean).join(' | ').trim(),
+          durationDays: '1',
+          isSpecial: false,
+          deliveryCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
+          // Ekip bilgisi BOŞ bırakılır
+          team: 'Atanmadı', assignedPersonnelId: null, assignedPersonnelIds: [], teamNames: [],
+          extraLoadingAddresses: [], extraUnloadingAddresses: [],
+          // Durum: iptal → cancelled; diğer her şey → tamamlanmış + onaylı
+          status: iptalMi ? 'cancelled' : 'completed',
+          endJobDetails: null,
+          materialsDeducted: true,   // eski işler için stok DÜŞÜLMEZ
+          pointsApproved: !iptalMi,  // puan otomatik onaylı
+          mesaiApproved: !iptalMi,   // mesai otomatik onaylı
+          completedAt: !iptalMi && date ? `${date}T${time || '09:00'}:00` : null,
+          cancelledAt: iptalMi && date ? `${date}T${time || '09:00'}:00` : null,
+          createdBy: 'Eski Sistem Aktarımı',
+          createdAt: date ? `${date}T${time || '09:00'}:00` : simdi,
+          importedLegacy: true,
+        };
+
+        // ---- YÜKLEME TARAFI ----
+        if (yukDepo) {
+          const sube = DEPO_LOCATIONS.find(d => d.name === depoSubeBul(yukAdres)) || DEPO_LOCATIONS[0];
+          Object.assign(jobDoc, {
+            depoDirection: 'fromDepo', selectedDepo: sube.name,
+            fromProvince: sube.province, fromDistrict: sube.district, fromAddress: sube.address,
+            fromFloor: 'Giriş Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı',
+            fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre',
+          });
+        } else {
+          const konum = yukAdres ? ilIlceBul(yukAdres) : { province: '', district: '' };
+          Object.assign(jobDoc, {
+            fromProvince: konum.province, fromDistrict: konum.district, fromAddress: yukAdres,
+            fromFloor: katEsle(yuk?.floor), fromTransportMethod: tasimaEsle(yuk),
+            fromPacking: parseInt(yuk?.carry_stuff) === 2 ? 'Toplama Yapılacak' : 'Kendisi Topladı',
+            fromRoomCount: daireTipiEsle(yuk?.apartment_type), fromDistance: '', fromDistanceUnit: 'Metre',
+          });
+        }
+
+        // ---- BOŞALTMA TARAFI ----
+        if (bosDepo && !yukDepo) {
+          const sube = DEPO_LOCATIONS.find(d => d.name === depoSubeBul(bosAdres)) || DEPO_LOCATIONS[0];
+          Object.assign(jobDoc, {
+            depoDirection: 'toDepo', selectedDepo: sube.name,
+            toProvince: sube.province, toDistrict: sube.district, toAddress: sube.address,
+            toFloor: 'Giriş Kat', toTransportMethod: 'Merdiven', toPacking: 'Kendisi Topladı',
+            toRoomCount: 'Depoevim Tesisleri', toDistance: '0', toDistanceUnit: 'Metre',
+          });
+        } else {
+          const konum = bosAdres ? ilIlceBul(bosAdres) : { province: '', district: '' };
+          Object.assign(jobDoc, {
+            toProvince: konum.province, toDistrict: konum.district, toAddress: bosAdres,
+            toFloor: katEsle(bos?.floor), toTransportMethod: tasimaEsle(bos),
+            toPacking: 'Kendisi Topladı',
+            toRoomCount: daireTipiEsle(bos?.apartment_type), toDistance: '', toDistanceUnit: 'Metre',
+          });
+        }
+
+        // Teslim durumu eski sistemde yok → boş bırakılır (görünümde 'Yok' yazar)
+        jobDoc.wallMounting = [];
+
+        kayitlar.push(jobDoc);
+      }
+
+      // Aktarım tarihine göre eskiden yeniye yaz (cari 'ilk kayıt' tarihleri doğru otursun)
+      kayitlar.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+      setHazirKayitlar(kayitlar);
+      setOzet({
+        okunanIs: orderRows.length,
+        okunanAdres: transferRows.length,
+        aktarilacak: kayitlar.length,
+        tamamlanan: kayitlar.length - sayacIptal,
+        iptal: sayacIptal,
+        depo: sayacDepo,
+        nakliye: kayitlar.length - sayacDepo,
+        tekilMusteri: new Set(kayitlar.map(k => (k.customerPhone || '').replace(/\D/g, ''))).size,
+        atlananCop, atlananMukerrer, atlananBos, atlananIsim, atlananTelefon,
+      });
+      setAsama('onizleme');
+    };
+
+    // ---------------- AKTARIM (Firestore'a yazma) ----------------
+    const aktarimiBaslat = async () => {
+      if (hazirKayitlar.length === 0) return;
+      setAsama('aktariliyor');
+      setIlerleme({ yazilan: 0, toplam: hazirKayitlar.length });
+      const partiId = 'imp_' + Date.now();
+      const yazilanIdler = [];
+      try {
+        const PARCA = 350; // Firestore batch limiti 500; güvenli pay bırakıyoruz
+        for (let i = 0; i < hazirKayitlar.length; i += PARCA) {
+          const dilim = hazirKayitlar.slice(i, i + PARCA);
+          const batch = writeBatch(db);
+          for (const kayit of dilim) {
+            const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'));
+            batch.set(ref, { ...kayit, importBatchId: partiId });
+            yazilanIdler.push(ref.id);
+          }
+          await batch.commit();
+          setIlerleme({ yazilan: Math.min(i + PARCA, hazirKayitlar.length), toplam: hazirKayitlar.length });
+        }
+        // Geri alma için parti kaydı oluştur
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'legacyImports', partiId), {
+          jobIds: yazilanIdler, count: yazilanIdler.length,
+          by: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+        });
+        addSystemLog?.('Eski Sistem Aktarımı', `${yazilanIdler.length} iş kaydı eski sistemden içe aktarıldı.`);
+        setAsama('bitti');
+      } catch (err) {
+        console.error(err);
+        setHata('Aktarım sırasında hata oluştu: ' + err.message + ' — "Son Yüklemeyi Geri Al" ile yarım aktarımı temizleyebilirsiniz.');
+        // Yarım kalan parti de geri alınabilsin diye kaydı yine oluştur
+        if (yazilanIdler.length > 0) {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'legacyImports', partiId), {
+            jobIds: yazilanIdler, count: yazilanIdler.length, incomplete: true,
+            by: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+          });
+        }
+        setAsama('onizleme');
+      }
+    };
+
+    // ---------------- SON YÜKLEMEYİ GERİ AL ----------------
+    const sonYuklemeyiGeriAl = async () => {
+      const parti = sonPartiler[0];
+      if (!parti || geriAliniyor) return;
+      setGeriAliniyor(true);
+      try {
+        const ids = parti.jobIds || [];
+        const PARCA = 350;
+        for (let i = 0; i < ids.length; i += PARCA) {
+          const batch = writeBatch(db);
+          ids.slice(i, i + PARCA).forEach(id => batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id)));
+          await batch.commit();
+        }
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'legacyImports', parti.id));
+        addSystemLog?.('Eski Sistem Aktarımı Geri Alındı', `${ids.length} içe aktarılmış kayıt silindi; sistem aktarım öncesine döndü.`);
+      } catch (err) { setHata('Geri alma sırasında hata: ' + err.message); }
+      setGeriAliniyor(false);
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex justify-center items-center p-4">
+        <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+          <div className="bg-black text-white p-4 flex justify-between items-center shrink-0">
+            <h3 className="font-bold text-lg flex items-center gap-2"><Database className="w-5 h-5 text-yellow-400" /> Eski Sistemden İçe Aktar</h3>
+            <button onClick={onClose} disabled={asama === 'aktariliyor'} className="text-neutral-400 hover:text-white transition disabled:opacity-40"><X className="w-6 h-6" /></button>
+          </div>
+
+          <div className="p-5 overflow-y-auto space-y-4">
+            {hata && <div className="bg-red-50 border border-red-200 text-red-700 text-sm font-bold rounded-xl p-3">{hata}</div>}
+
+            {/* AŞAMA 1: DOSYA SEÇİMİ */}
+            {asama === 'dosya' && (
+              <>
+                <p className="text-sm text-neutral-600 font-medium">
+                  Eski uygulamanın SQL yedeğini (<b>semboln_db.sql</b>) seçin. İş kayıtları ve müşteriler
+                  otomatik eşleştirilerek sisteme aktarılır. <b>Depo kiralama kayıtları aktarılmaz.</b>
+                </p>
+                <label className="cursor-pointer w-full py-8 bg-neutral-50 border-2 border-neutral-300 border-dashed rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-neutral-100 hover:border-red-400 transition">
+                  <Database className="w-8 h-8 text-neutral-400" />
+                  <span className="text-sm font-black text-neutral-600">SQL Dosyası Seç (.sql)</span>
+                  <span className="text-[11px] font-bold text-neutral-400">Dosya sadece tarayıcınızda okunur, önce önizleme gösterilir</span>
+                  <input type="file" accept=".sql,text/plain" className="hidden" onChange={handleDosyaSec} />
+                </label>
+              </>
+            )}
+
+            {/* AŞAMA 2: ÖNİZLEME */}
+            {asama === 'onizleme' && ozet && (
+              <>
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-xs font-bold text-neutral-500">
+                  Dosyada {ozet.okunanIs.toLocaleString('tr-TR')} iş ve {ozet.okunanAdres.toLocaleString('tr-TR')} adres kaydı okundu.
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-black">{ozet.aktarilacak.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">Aktarılacak İş</div></div>
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-purple-700">{ozet.tekilMusteri.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">Tekil Müşteri (Cari)</div></div>
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-green-600">{ozet.tamamlanan.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">Tamamlanmış + Onaylı</div></div>
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-red-600">{ozet.iptal.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">İptal Edilmiş</div></div>
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-red-500">{ozet.nakliye.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">Nakliye Kaydı</div></div>
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-blue-600">{ozet.depo.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">Depo Kaydı</div></div>
+                </div>
+                <div className="text-[11px] font-bold text-neutral-400 bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+                  <b className="text-neutral-500">Atlanan kayıtlar:</b> {ozet.atlananCop} deneme/çöp • {ozet.atlananTelefon} geçersiz telefon (11 hane değil veya uydurma)
+                  • {ozet.atlananIsim} tek kelimelik isim (soyadı yok) • {ozet.atlananBos} isimsiz • {ozet.atlananMukerrer} daha önce aktarılmış.
+                  Depo kiralama müşterileri hiç okunmadı.
+                </div>
+                <button onClick={aktarimiBaslat} className="w-full py-3.5 bg-red-600 text-white font-black rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg">
+                  <Database className="w-5 h-5" /> {ozet.aktarilacak.toLocaleString('tr-TR')} Kaydı İçe Aktar
+                </button>
+              </>
+            )}
+
+            {/* AŞAMA 3: AKTARILIYOR */}
+            {asama === 'aktariliyor' && (
+              <div className="py-6 text-center space-y-3">
+                <div className="text-sm font-black text-black">Kayıtlar aktarılıyor, lütfen pencereyi kapatmayın...</div>
+                <div className="w-full bg-neutral-100 rounded-full h-3 overflow-hidden border border-neutral-200">
+                  <div className="bg-red-600 h-full transition-all" style={{ width: `${ilerleme.toplam ? Math.round((ilerleme.yazilan / ilerleme.toplam) * 100) : 0}%` }}></div>
+                </div>
+                <div className="text-xs font-bold text-neutral-500">{ilerleme.yazilan.toLocaleString('tr-TR')} / {ilerleme.toplam.toLocaleString('tr-TR')}</div>
+              </div>
+            )}
+
+            {/* AŞAMA 4: BİTTİ */}
+            {asama === 'bitti' && (
+              <div className="py-4 text-center space-y-3">
+                <CheckCircle className="w-14 h-14 text-green-600 mx-auto" />
+                <div className="text-base font-black text-black">Aktarım tamamlandı!</div>
+                <p className="text-xs font-bold text-neutral-500">
+                  {ilerleme.toplam.toLocaleString('tr-TR')} iş kaydı eklendi. Müşteriler cari profillerinde otomatik birleşti.
+                  Tamamlanan İşler, İptal Edilen İşler ve Tüm Müşteriler bölümlerinden kontrol edebilirsiniz.
+                </p>
+                <button onClick={onClose} className="w-full py-3 bg-neutral-900 text-white font-black rounded-xl hover:bg-black transition">Kapat</button>
+              </div>
+            )}
+
+            {/* SON YÜKLEMEYİ GERİ AL — her aşamada altta görünür (aktarım sırasında hariç) */}
+            {asama !== 'aktariliyor' && sonPartiler.length > 0 && (
+              <div className="border-t border-neutral-200 pt-4">
+                <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-amber-800">Son yükleme: {sonPartiler[0].count?.toLocaleString('tr-TR')} kayıt{sonPartiler[0].incomplete ? ' (yarım kaldı)' : ''}</p>
+                    <p className="text-[10px] font-bold text-amber-600">{sonPartiler[0].by} • {sonPartiler[0].createdAt ? new Date(sonPartiler[0].createdAt).toLocaleString('tr-TR') : ''}</p>
+                  </div>
+                  <button onClick={sonYuklemeyiGeriAl} disabled={geriAliniyor}
+                    className="shrink-0 px-3 py-2 bg-amber-600 text-white text-xs font-black rounded-lg hover:bg-amber-700 transition disabled:opacity-50 flex items-center gap-1.5">
+                    {geriAliniyor ? 'Geri Alınıyor...' : 'Son Yüklemeyi Geri Al'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     );
   };
