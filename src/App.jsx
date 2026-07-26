@@ -6,6 +6,34 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView } from './Finans.jsx';
+
+  // ============================================================================
+  // YENİ: MARKA LOGOSU BİLEŞENİ
+  // Eskiden her logo yerinde onError içinde `outerHTML` ile DOM doğrudan
+  // değiştiriliyordu. Bu YIKICI bir işlemdi: bir kez hata alındığında React o
+  // düğümü artık güncelleyemiyor, Firebase'den gerçek logo gelse bile ekranda
+  // kalıcı olarak "S" kutusu kalıyordu. Ayrıca eski varsayılan adres yüklenmediği
+  // için ilk açılışta HER ZAMAN "S" görünüyordu.
+  // Artık hata React state'inde tutuluyor ve logo adresi değişince otomatik
+  // yeniden denenir; böylece gerçek logo gelir gelmez ekrana oturur.
+  // ============================================================================
+  const VARSAYILAN_LOGO = 'https://www.sembolevdeneve.com/wp-content/uploads/2026/07/favicon.webp';
+
+  const MarkaLogo = ({ logoUrl, className = '', style = {}, fallback = null, alt = 'Sembol Nakliyat' }) => {
+    const [hata, setHata] = useState(false);
+    const kaynak = logoUrl || VARSAYILAN_LOGO;
+    // Adres değiştiğinde (ör. Firebase'den gerçek logo geldiğinde) tekrar dene
+    useEffect(() => { setHata(false); }, [kaynak]);
+
+    if (hata) {
+      // Görsel yüklenemezse yerine geçecek içerik (her kullanım yeri kendi tasarımını verir)
+      return fallback || (
+        <div className="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg">S</div>
+      );
+    }
+    return <img src={kaynak} alt={alt} className={className} style={style} onError={() => setHata(true)} />;
+  };
+
   // ============================================================================
   // GÜNCELLENMİŞ DashboardView — Kendi App.jsx dosyanızdaki eski DashboardView
   // bileşeninin TAMAMININ yerine bunu koyun. Diğer hiçbir dosyaya/bileşene
@@ -1732,12 +1760,12 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
           )}
 
           <div className="bg-black rounded-2xl p-8 flex justify-center items-center mb-5 border border-neutral-800">
-            <img
-              src={logoPreview || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"}
+            <MarkaLogo
+              logoUrl={logoPreview}
               alt="Logo Önizleme"
-              className="w-auto object-contain"
+              className="max-w-full w-auto object-contain"
               style={{ height: `${96 * (logoSize / 100)}px` }}
-              onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl">S</div>'; }}
+              fallback={<div className="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl">S</div>}
             />
           </div>
 
@@ -2173,12 +2201,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       <div className="min-h-screen bg-black flex items-center justify-center p-4 animate-in fade-in">
         <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
           <div className="bg-neutral-50 p-8 flex flex-col items-center border-b border-neutral-200">
-            <img 
-              src={appBranding?.logoUrl || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"} 
-              alt="Sembol Nakliyat" 
-              className="w-auto object-contain mb-2 drop-shadow-sm" 
+            <MarkaLogo
+              logoUrl={appBranding?.logoUrl}
+              className="max-w-[80%] w-auto object-contain mb-2 drop-shadow-sm"
               style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
-              onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-4">S</div><h1 class="text-2xl font-black text-black tracking-widest">SEMBOL</h1>'; }} 
+              fallback={(
+                <div className="flex flex-col items-center mb-2">
+                  <div className="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg">S</div>
+                  <h1 className="text-2xl font-black text-black tracking-widest mt-2">SEMBOL</h1>
+                </div>
+              )}
             />
             <p className="text-red-600 text-xs font-bold mt-1 tracking-[0.2em] bg-red-50 px-3 py-1 rounded-full border border-red-100">OPERASYON MERKEZİ</p>
           </div>
@@ -4160,12 +4192,11 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
     if (acilisEkraniGoster) {
       return (
         <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
-          <img 
-            src={appBranding?.logoUrl || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"} 
-            alt="Sembol Nakliyat" 
-            className="max-w-[80vw] w-auto object-contain mb-6 animate-pulse drop-shadow-2xl" 
+          <MarkaLogo
+            logoUrl={appBranding?.logoUrl}
+            className="max-w-[80vw] w-auto object-contain mb-6 animate-pulse drop-shadow-2xl"
             style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
-            onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-4 animate-pulse">S</div>'; }} 
+            fallback={<div className="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-6 animate-pulse">S</div>}
           />
           <p className="font-bold tracking-widest text-neutral-400">SİSTEM YÜKLENİYOR...</p>
         </div>
@@ -4330,12 +4361,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
         
         <div className="md:hidden absolute top-0 left-0 right-0 h-16 bg-black text-white flex items-center gap-2 px-3 z-30 shadow-md border-b border-red-600">
           <div className="flex items-center gap-2 shrink-0">
-            <img 
-              src={appBranding?.logoUrl || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"} 
-              alt="Sembol Nakliyat" 
-              className="w-auto object-contain" 
+            <MarkaLogo
+              logoUrl={appBranding?.logoUrl}
+              className="w-auto object-contain max-w-[160px]"
               style={{ height: `${Math.min(48, 40 * ((appBranding?.logoSize || 100) / 100))}px` }}
-              onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="flex items-center gap-2"><div class="w-8 h-8 bg-red-600 flex items-center justify-center rounded-lg font-black text-white">S</div><h1 class="font-bold text-lg">Sembol Nakliyat</h1></div>'; }} 
+              fallback={(
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 bg-red-600 flex items-center justify-center rounded-lg font-black text-white">S</div>
+                  <h1 className="font-bold text-lg">Sembol Nakliyat</h1>
+                </div>
+              )}
             />
           </div>
 
@@ -4465,12 +4500,16 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
 
         <aside className={`${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative top-0 left-0 z-40 w-64 md:min-w-[256px] bg-black text-white flex flex-col shadow-2xl shrink-0 h-full transition-transform duration-300 ease-in-out border-r border-neutral-800`}>
           <div className="p-6 flex flex-col items-center gap-2 border-b border-neutral-800 text-center">
-            <img 
-              src={appBranding?.logoUrl || "https://www.sembolevdeneve.com/sembol-nakliyat-logo.webp"} 
-              alt="Sembol Nakliyat" 
-              className="w-full object-contain mb-2" 
+            <MarkaLogo
+              logoUrl={appBranding?.logoUrl}
+              className="w-full object-contain mb-2"
               style={{ maxWidth: `${180 * ((appBranding?.logoSize || 100) / 100)}px` }}
-              onError={(e) => { e.target.onerror = null; e.target.outerHTML = '<div class="flex items-center gap-4"><div class="shrink-0 w-16 h-16 flex items-center justify-center overflow-hidden rounded-full border-2 border-neutral-800/50 bg-red-600"><span class="font-black text-3xl text-white">S</span></div><div><h1 class="text-2xl font-black leading-tight text-white tracking-widest">SEMBOL</h1></div></div>'; }} 
+              fallback={(
+                <div className="flex items-center gap-4 mb-2">
+                  <div className="shrink-0 w-16 h-16 flex items-center justify-center overflow-hidden rounded-full border-2 border-neutral-800/50 bg-red-600"><span className="font-black text-3xl text-white">S</span></div>
+                  <div><h1 className="text-2xl font-black leading-tight text-white tracking-widest">SEMBOL</h1></div>
+                </div>
+              )}
             />
             <p className="text-red-600 text-[10px] font-bold mt-0.5 tracking-[0.2em] bg-red-600/10 px-3 py-1 rounded-full border border-red-600/20">OPERASYON MERKEZİ</p>
           </div>
