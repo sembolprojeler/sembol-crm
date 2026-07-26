@@ -2719,6 +2719,29 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
       });
     };
 
+    // YENİ: SEKME SİMGESİ (FAVICON)
+    // Uygulama açılırken mevcut favicon bağlantıları kaldırılıp yerine
+    // Sembol Nakliyat logosu takılır. (Kalıcı çözüm için index.html'deki
+    // <link rel="icon"> satırını da aynı adresle güncellemek gerekir.)
+    useEffect(() => {
+      const FAVICON_URL = 'https://www.sembolevdeneve.com/wp-content/uploads/2026/07/favicon.webp';
+      try {
+        // Var olan tüm ikon bağlantılarını temizle (eski favicon kalmasın)
+        document.querySelectorAll("link[rel~='icon'], link[rel='shortcut icon'], link[rel='apple-touch-icon']").forEach(el => el.remove());
+        // Yeni ikonu ekle
+        const link = document.createElement('link');
+        link.rel = 'icon';
+        link.type = 'image/webp';
+        link.href = FAVICON_URL;
+        document.head.appendChild(link);
+        // iOS ana ekran kısayolu için
+        const apple = document.createElement('link');
+        apple.rel = 'apple-touch-icon';
+        apple.href = FAVICON_URL;
+        document.head.appendChild(apple);
+      } catch (e) { /* tarayıcı engellerse sessiz geç */ }
+    }, []);
+
     // YENİ: Aktif sekme her değiştiğinde saklanır → yenilemede aynı bölüm açılır
     useEffect(() => {
       try { sessionStorage.setItem('sembolAktifSekme', activeTab); } catch (e) { /* gizli mod vb. */ }
@@ -5327,19 +5350,6 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
             
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
               <div className="space-y-4">
-                {/* YENİ: Sağ üstte "İçe Aktar" — eski sistemin SQL yedeğinden iş/müşteri aktarımı.
-                    Yalnızca Nakliye Kayıt sayfasında ve yönetici yetkisiyle görünür. */}
-                {activeTab === 'addNakliye' && isManager && (
-                  <div className="max-w-4xl mx-auto flex justify-end">
-                    <button
-                      onClick={() => setShowImportModal(true)}
-                      className="px-4 py-2.5 bg-black hover:bg-neutral-800 text-white text-sm font-black rounded-xl transition flex items-center gap-2 shadow-md"
-                      title="Eski sistemin SQL yedeğinden iş ve müşteri kayıtlarını aktar"
-                    >
-                      <Database className="w-4 h-4 text-yellow-400" /> İçe Aktar
-                    </button>
-                  </div>
-                )}
                 {/* NOT: "Kayıtlı Müşteriden Seç" butonu kullanıcı isteğiyle kaldırıldı */}
                 {formData.customerName && formData.customerPhone && (() => {
                   const cariMatchJob = jobs.find(j =>
@@ -5404,7 +5414,7 @@ const ModuleAccessView = ({ positions, ranks = [], positionModules, handleUpdate
               </div>
             )}
             {activeTab === 'specialCustomers' && showCustomers && <CustomerListView jobs={jobs} title="Özel Müşteriler" handleEditJob={handleEditJob} onViewCari={(key) => { setViewingCariKey(key); setActiveTab('customerProfile'); }} />}
-            {activeTab === 'customerProfile' && showCustomers && <CustomerProfileView currentUser={currentUser} jobs={jobs} cariKey={viewingCariKey} handleEditJob={handleEditJob} onBack={() => setActiveTab('allCustomers')} db={db} appId={appId} addSystemLog={addSystemLog} personnelList={personnelList} vehicles={vehicles} />}
+            {activeTab === 'customerProfile' && showCustomers && <CustomerProfileView currentUser={currentUser} setViewingImage={setViewingImage} jobs={jobs} cariKey={viewingCariKey} handleEditJob={handleEditJob} onBack={() => setActiveTab('allCustomers')} db={db} appId={appId} addSystemLog={addSystemLog} personnelList={personnelList} vehicles={vehicles} />}
 
             {activeTab === 'currentJobs' && showJobList && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
             {activeTab === 'completedJobs' && showJobList && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} handleOpenResolveDamageModal={handleOpenResolveDamageModal} />}
