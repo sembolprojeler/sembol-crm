@@ -2164,12 +2164,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       if (!isPersonnelVisibleInMonth(p, currentListYear, currentListMonth)) return false;
       return p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position));
     }).sort((a, b) => {
-        const orderA = { 'Şoför': 1, 'Mobilya Ustası': 2, 'Taşıma Elemanı': 3 }[a.position] || 99;
-        const orderB = { 'Şoför': 1, 'Mobilya Ustası': 2, 'Taşıma Elemanı': 3 }[b.position] || 99;
-        if (orderA !== orderB) return orderA - orderB;
+        // YENİ: Liste artık pozisyona göre değil, doğrudan Ad Soyad'a göre
+        // ALFABETİK (tr-TR) sıralanır. İşten ayrılanlar (Pasif) yine en sonda kalır.
         if (a.employmentStatus === 'Pasif' && b.employmentStatus !== 'Pasif') return 1;
         if (a.employmentStatus !== 'Pasif' && b.employmentStatus === 'Pasif') return -1;
-        return a.fullName.localeCompare(b.fullName);
+        return (a.fullName || '').localeCompare((b.fullName || ''), 'tr-TR');
     });
 
     const weekDays = Array.from({ length: 7 }, (_, i) => {
@@ -2361,12 +2360,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       if (!isPersonnelVisibleInMonth(p, currentListYear, currentListMonth)) return false;
       return p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position));
     }).sort((a, b) => {
-        const orderA = { 'Şoför': 1, 'Mobilya Ustası': 2, 'Taşıma Elemanı': 3 }[a.position] || 99;
-        const orderB = { 'Şoför': 1, 'Mobilya Ustası': 2, 'Taşıma Elemanı': 3 }[b.position] || 99;
-        if (orderA !== orderB) return orderA - orderB;
+        // YENİ: Liste artık pozisyona göre değil, doğrudan Ad Soyad'a göre
+        // ALFABETİK (tr-TR) sıralanır. İşten ayrılanlar (Pasif) yine en sonda kalır.
         if (a.employmentStatus === 'Pasif' && b.employmentStatus !== 'Pasif') return 1;
         if (a.employmentStatus !== 'Pasif' && b.employmentStatus === 'Pasif') return -1;
-        return a.fullName.localeCompare(b.fullName);
+        return (a.fullName || '').localeCompare((b.fullName || ''), 'tr-TR');
     });
 
     const weekDays = Array.from({ length: 7 }, (_, i) => {
@@ -3169,7 +3167,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
   export const AddVehicleView = ({ onAdd, onCancel }) => {
     const [formData, setFormData] = useState({
-      plate: '', type: 'Kamyon', capacity: [], volume: '', km: '', model: '', color: 'Beyaz', transmission: 'Manuel', ruhsatFoto: '', vehiclePhoto: '', requiredLicense: 'Küçük Ehliyet'
+      plate: '', type: 'Kamyon', capacity: [], volume: '', km: '', model: '', color: 'Beyaz', transmission: 'Manuel', ruhsatFoto: '', vehiclePhoto: '', requiredLicense: 'Küçük Ehliyet', tonnage: ''
     });
 
     const handleRuhsatUpload = async (e) => {
@@ -3270,7 +3268,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">Hacim (m³)</label>
               <input required type="number" value={formData.volume} onChange={(e) => setFormData({...formData, volume: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
@@ -3282,6 +3280,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <div>
               <label className="block text-sm font-bold text-neutral-700 mb-1">Model (Yıl)</label>
               <input required type="number" value={formData.model} onChange={(e) => setFormData({...formData, model: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+            </div>
+            {/* YENİ: Tonaj (kg) — araç filosunun toplam taşıma kapasitesi hesabında kullanılır */}
+            <div>
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Tonaj (kg)</label>
+              <input type="number" value={formData.tonnage || ''} onChange={(e) => setFormData({...formData, tonnage: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: 3500" />
             </div>
           </div>
 
@@ -3572,6 +3575,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         <option value="Periyodik Bakım">Periyodik Bakım (Yağ/Filtre)</option>
                         <option value="Araç Muayenesi">Araç Muayenesi</option>
                         <option value="Sigorta / Kasko">Sigorta / Kasko</option>
+                        <option value="K3 Belgesi Yenileme">K3 Belgesi Yenileme</option>
                         <option value="Lastik Değişimi">Lastik Değişimi</option>
                         <option value="Arıza / Tamir">Arıza / Tamir</option>
                         <option value="Ceza / Trafik">Ceza / Trafik</option>
@@ -3592,7 +3596,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     </div>
                     <div>
                       <label className="block text-sm font-bold text-neutral-700 mb-1">Gelecek İşlem Tarihi</label>
-                      <input type="date" value={recordForm.nextDate} onChange={e => setRecordForm({...recordForm, nextDate: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" title="Muayene veya Sigorta bitiş tarihi" />
+                      <input type="date" value={recordForm.nextDate} onChange={e => setRecordForm({...recordForm, nextDate: e.target.value})} className="w-full p-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none" title="Muayene, Sigorta veya K3 belgesi bitiş/yenileme tarihi" />
                     </div>
                     <div>
                       <label className="block text-sm font-bold text-neutral-700 mb-1">Gelecek İşlem KM</label>
@@ -4120,7 +4124,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       </div>
     );
   };
-  export const PersonnelListView = ({ personnelList, onUpdate, positions = [], ranks = [], onViewProfile, pendingEditPersonnelId, setPendingEditPersonnelId }) => {
+  export const PersonnelListView = ({ personnelList, onUpdate, positions = [], ranks = [], onViewProfile, pendingEditPersonnelId, setPendingEditPersonnelId, onAddClick }) => {
     const [filterYaka, setFilterYaka] = useState('');
     const [filterPozisyon, setFilterPozisyon] = useState('');
     const [filterRutbe, setFilterRutbe] = useState('');
@@ -4137,15 +4141,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       }
     }, [pendingEditPersonnelId, personnelList]);
 
-    const filteredList = personnelList.filter(p => {
-      if (filterYaka && p.collarType !== filterYaka) return false;
-      if (filterPozisyon && p.position !== filterPozisyon) return false;
-      if (filterRutbe && p.rank !== filterRutbe) return false;
-      const durum = p.employmentStatus === 'Pasif' ? 'Pasif' : 'Aktif';
-      if (filterDurum === 'Aktif' && durum !== 'Aktif') return false;
-      if (filterDurum === 'Pasif' && durum !== 'Pasif') return false;
-      return true;
-    });
+    const filteredList = personnelList
+      .filter(p => {
+        if (filterYaka && p.collarType !== filterYaka) return false;
+        if (filterPozisyon && p.position !== filterPozisyon) return false;
+        if (filterRutbe && p.rank !== filterRutbe) return false;
+        const durum = p.employmentStatus === 'Pasif' ? 'Pasif' : 'Aktif';
+        if (filterDurum === 'Aktif' && durum !== 'Aktif') return false;
+        if (filterDurum === 'Pasif' && durum !== 'Pasif') return false;
+        return true;
+      })
+      // YENİ: Liste her zaman Ad Soyad'a göre alfabetik (tr-TR) sıralı gösterilir
+      .sort((a, b) => (a.fullName || '').localeCompare((b.fullName || ''), 'tr-TR'));
 
     const handleImageUpload = async (e) => {
       const file = e.target.files[0];
@@ -4192,6 +4199,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <option value="">Tüm Rütbeler</option>
               {ranks.map(r => <option key={r} value={r}>{r}</option>)}
             </select>
+            {/* YENİ: "Personel Ekle" artık sol menüde ayrı bir sayfa değil; bu sayfanın
+                sağ üst köşesinde (filtrelerin sonunda) buton olarak duruyor. */}
+            {onAddClick && (
+              <button
+                type="button"
+                onClick={onAddClick}
+                className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-black rounded-lg transition flex items-center gap-1.5 shadow-md shadow-green-600/20 shrink-0"
+              >
+                <PlusCircle className="w-4 h-4" /> Personel Ekle
+              </button>
+            )}
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -5147,6 +5165,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         let uploadedUrl = file.name;
         try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
         setClothingForm(prev => ({ ...prev, fileUrl: uploadedUrl }));
+
+        // YENİ: İmzalı zimmet tutanağı, aynı anda Özlük Dosyaları > Fazladan
+        // Belgeler altına da otomatik olarak kaydedilir; her yükleme yeni bir
+        // kayıt olarak eklenir (öncekiler silinmez), böylece geçmiş tüm
+        // tutanaklar Özlük Dosyaları'ndan da görülebilir.
+        const etiket = `Kıyafet Zimmet Tutanağı - ${clothingForm.item || 'Kıyafet'} (${clothingForm.date || new Date().toISOString().split('T')[0]})`;
+        const yeniOzlukKaydi = { id: Date.now().toString(), label: etiket, url: uploadedUrl };
+        const guncelOzlukEkstra = [...(person.ozlukEkstra || []), yeniOzlukKaydi];
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', person.id), { ozlukEkstra: guncelOzlukEkstra });
+        addSystemLog?.('Zimmet Tutanağı Kaydedildi', `${person.fullName} personeline ait "${etiket}" belgesi Özlük Dosyaları'na eklendi.`);
       } catch (err) {
         console.error('Belge yükleme hatası:', err);
         alert('Belge yüklenemedi.');
@@ -5277,6 +5305,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         let uploadedUrl = file.name;
         try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
         setPhoneForm(prev => ({ ...prev, fileUrl: uploadedUrl }));
+
+        // YENİ: İmzalı zimmet tutanağı, aynı anda Özlük Dosyaları > Fazladan
+        // Belgeler altına da otomatik olarak kaydedilir; her yükleme yeni bir
+        // kayıt olarak eklenir (öncekiler silinmez).
+        const etiket = `Telefon Zimmet Tutanağı - ${phoneForm.model || 'Telefon'} (${phoneForm.date || new Date().toISOString().split('T')[0]})`;
+        const yeniOzlukKaydi = { id: Date.now().toString(), label: etiket, url: uploadedUrl };
+        const guncelOzlukEkstra = [...(person.ozlukEkstra || []), yeniOzlukKaydi];
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', person.id), { ozlukEkstra: guncelOzlukEkstra });
+        addSystemLog?.('Zimmet Tutanağı Kaydedildi', `${person.fullName} personeline ait "${etiket}" belgesi Özlük Dosyaları'na eklendi.`);
       } catch (err) {
         console.error('Belge yükleme hatası:', err);
         alert('Belge yüklenemedi.');
@@ -5473,8 +5510,20 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       // Maaş tablosu ile aynı formüller (Devamsız/Rapor/Ücretsiz İzin düşülmüş "Ödenecek Gün"e orantılı)
       const hesaplananBanka = (bankaParasiBase / 30) * odenecekGun;
       const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
+
+      // YENİ: "Fazla Mesai / Devamsızlık Ücret Etkisi", Personel Muhasebe > Maaş
+      // bölümündeki "Mesai Ücreti" formülüyle BİREBİR aynı hesaplanır:
+      //   Mesai Ücreti = (Maaş / 200) × Toplam Saat
+      //   Toplam Saat  = Günlük Saat (FM/FGM +, EM −) + (Fazla Gün × 10) − (Devamsız × 3)
+      // (Maaş tablosundaki "Prim Saati" bu ekranda veri kaynağı olmadığı için 0 kabul edilir.)
+      let gunlukSaat = 0;
+      personMesaiUpToResign.forEach(m => {
+        if (m.code === 'FGM' || m.code === 'FM') gunlukSaat += (parseFloat(m.hours) || 0);
+        else if (m.code === 'EM') gunlukSaat -= (parseFloat(m.hours) || 0);
+      });
+      const toplamSaat = gunlukSaat + (fazlaGunSayisi * 10) - (devamsizGun * 3);
       const saatlikUcret = maas / 200;
-      const fazlaMesaiUcreti = saatlikUcret * ((fazlaGunSayisi * 10) - (devamsizGun * 3));
+      const fazlaMesaiUcreti = saatlikUcret * toplamSaat;
       // YENİ: Hak Edilen Net Maaş; personel maaş bölümüyle aynı mantıkla MESAİ ÜCRETİ +
       // YEMEK ve YOL parası da eklenerek hesaplanır (aylık yemek/yol tutarı brüt hak edişe dahil edilir).
       const netMaasBase = (maas / 30) * odenecekGun;
@@ -6398,11 +6447,34 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
         {/* Kıyafet Takibi */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-4 gap-2">
             <h3 className="font-bold text-lg text-black flex items-center gap-2"><Shirt className="w-6 h-6 text-indigo-600" /> Kıyafet Takibi</h3>
-            <button type="button" onClick={() => { setEditingClothingId(null); setClothingForm({ item: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setShowClothingModal(true); }} className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
-              <PlusCircle className="w-3.5 h-3.5" /> Kıyafet Ekle
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* YENİ: "Tutanak Hazırla" — kayıtlı en son kıyafeti (varsa) hazır getirir,
+                  yoksa boş formla açar. Aynı pencereden sözleşme yazdırılır, imzalı belge
+                  yüklenir ve bu belge otomatik olarak Özlük Dosyaları > Fazladan Belgeler
+                  altına da kaydedilir. */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (clothingRecords.length > 0) {
+                    const r = clothingRecords[0];
+                    setEditingClothingId(r.id);
+                    setClothingForm({ item: r.item || '', date: r.date || new Date().toISOString().split('T')[0], note: r.note || '', fileUrl: r.fileUrl || '' });
+                  } else {
+                    setEditingClothingId(null);
+                    setClothingForm({ item: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
+                  }
+                  setShowClothingModal(true);
+                }}
+                className="px-3 py-2 bg-neutral-900 hover:bg-black text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5"
+              >
+                <FileText className="w-3.5 h-3.5" /> Tutanak Hazırla
+              </button>
+              <button type="button" onClick={() => { setEditingClothingId(null); setClothingForm({ item: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setShowClothingModal(true); }} className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                <PlusCircle className="w-3.5 h-3.5" /> Kıyafet Ekle
+              </button>
+            </div>
           </div>
           {clothingRecords.length === 0 ? (
             <p className="text-sm text-neutral-500 italic">Henüz kıyafet verilmemiş.</p>
@@ -6448,11 +6520,34 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
         {/* Telefon Takibi */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
-          <div className="flex justify-between items-center mb-4">
+          <div className="flex justify-between items-center mb-4 gap-2">
             <h3 className="font-bold text-lg text-black flex items-center gap-2"><Smartphone className="w-6 h-6 text-teal-600" /> Telefon Takibi</h3>
-            <button type="button" onClick={() => { setEditingPhoneId(null); setPhoneForm({ model: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setShowPhoneModal(true); }} className="px-3 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
-              <PlusCircle className="w-3.5 h-3.5" /> Telefon Ekle
-            </button>
+            <div className="flex items-center gap-2 shrink-0">
+              {/* YENİ: "Tutanak Hazırla" — kayıtlı en son telefonu (varsa) hazır getirir,
+                  yoksa boş formla açar. Aynı pencereden sözleşme yazdırılır, imzalı belge
+                  yüklenir ve bu belge otomatik olarak Özlük Dosyaları > Fazladan Belgeler
+                  altına da kaydedilir. */}
+              <button
+                type="button"
+                onClick={() => {
+                  if (phoneRecords.length > 0) {
+                    const r = phoneRecords[0];
+                    setEditingPhoneId(r.id);
+                    setPhoneForm({ model: r.model || '', date: r.date || new Date().toISOString().split('T')[0], note: r.note || '', fileUrl: r.fileUrl || '' });
+                  } else {
+                    setEditingPhoneId(null);
+                    setPhoneForm({ model: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
+                  }
+                  setShowPhoneModal(true);
+                }}
+                className="px-3 py-2 bg-neutral-900 hover:bg-black text-white text-xs font-bold rounded-lg transition flex items-center gap-1.5"
+              >
+                <FileText className="w-3.5 h-3.5" /> Tutanak Hazırla
+              </button>
+              <button type="button" onClick={() => { setEditingPhoneId(null); setPhoneForm({ model: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setShowPhoneModal(true); }} className="px-3 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                <PlusCircle className="w-3.5 h-3.5" /> Telefon Ekle
+              </button>
+            </div>
           </div>
           {phoneRecords.length === 0 ? (
             <p className="text-sm text-neutral-500 italic">Henüz şirket telefonu verilmemiş.</p>
@@ -6883,7 +6978,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                       {(settlementData.devamsizGun > 0 || settlementData.raporGun > 0 || settlementData.ucretsizIzinGun > 0 || settlementData.fazlaGunSayisi > 0) && (
                         <>
                           <tr className="bg-neutral-50"><td className="p-2.5 text-neutral-500 text-xs">Devamsız / Raporlu / Ücretsiz İzin Günü</td><td className="p-2.5 text-right text-xs text-neutral-500">{settlementData.devamsizGun} / {settlementData.raporGun} / {settlementData.ucretsizIzinGun} gün</td></tr>
-                          <tr className="bg-neutral-50"><td className="p-2.5 text-neutral-500 text-xs">Fazla Mesai / Gün Sayısı</td><td className="p-2.5 text-right text-xs text-neutral-500">{settlementData.fazlaGunSayisi} gün</td></tr>
                         </>
                       )}
                       <tr><td className="p-2.5 text-neutral-600">Ödenecek Gün (Puantaj Kırılımlı)</td><td className="p-2.5 text-right font-bold text-black">{settlementData.odenecekGun} gün</td></tr>
@@ -6892,13 +6986,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                           <td className={`p-2.5 ${settlementData.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>Fazla Mesai / Devamsızlık Ücret Etkisi</td>
                           <td className={`p-2.5 text-right font-bold ${settlementData.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>{settlementData.fazlaMesaiUcreti > 0 ? '+' : ''}₺{settlementData.fazlaMesaiUcreti.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td>
                         </tr>
-                      )}
-                      {/* YENİ: Yemek ve Yol parası da hak edilen net maaşa eklenir */}
-                      {settlementData.yemekAylik > 0 && (
-                        <tr className="bg-green-50"><td className="p-2.5 text-green-700">Yemek Parası (Maaşa Eklenen)</td><td className="p-2.5 text-right font-bold text-green-700">+ ₺{settlementData.yemekAylik.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
-                      )}
-                      {settlementData.yolAylik > 0 && (
-                        <tr className="bg-green-50"><td className="p-2.5 text-green-700">Yol Parası (Maaşa Eklenen)</td><td className="p-2.5 text-right font-bold text-green-700">+ ₺{settlementData.yolAylik.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
                       )}
                       <tr><td className="p-2.5 text-neutral-600">Hak Edilen Net Maaş <span className="text-[10px] text-neutral-400">(maaş + mesai + yemek + yol)</span></td><td className="p-2.5 text-right font-bold text-black">₺{settlementData.netMaas.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
                       <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yemek Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− ₺{settlementData.yemekIade.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
@@ -6997,7 +7084,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         {(sd.devamsizGun > 0 || sd.raporGun > 0 || sd.ucretsizIzinGun > 0 || sd.fazlaGunSayisi > 0) && (
                           <>
                             <tr className="bg-neutral-50"><td className="p-2.5 text-neutral-500 text-xs">Devamsız / Raporlu / Ücretsiz İzin Günü</td><td className="p-2.5 text-right text-xs text-neutral-500">{sd.devamsizGun} / {sd.raporGun} / {sd.ucretsizIzinGun} gün</td></tr>
-                            <tr className="bg-neutral-50"><td className="p-2.5 text-neutral-500 text-xs">Fazla Mesai / Gün Sayısı</td><td className="p-2.5 text-right text-xs text-neutral-500">{sd.fazlaGunSayisi} gün</td></tr>
                           </>
                         )}
                         <tr><td className="p-2.5 text-neutral-600">Ödenecek Gün (Puantaj Kırılımlı)</td><td className="p-2.5 text-right font-bold text-black">{sd.odenecekGun} gün</td></tr>
@@ -7006,13 +7092,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                             <td className={`p-2.5 ${sd.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>Fazla Mesai / Devamsızlık Ücret Etkisi</td>
                             <td className={`p-2.5 text-right font-bold ${sd.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>{sd.fazlaMesaiUcreti > 0 ? '+' : ''}₺{sd.fazlaMesaiUcreti.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td>
                           </tr>
-                        )}
-                        {/* YENİ: Yemek ve Yol parası da hak edilen net maaşa eklenir */}
-                        {sd.yemekAylik > 0 && (
-                          <tr className="bg-green-50"><td className="p-2.5 text-green-700">Yemek Parası (Maaşa Eklenen)</td><td className="p-2.5 text-right font-bold text-green-700">+ ₺{sd.yemekAylik.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
-                        )}
-                        {sd.yolAylik > 0 && (
-                          <tr className="bg-green-50"><td className="p-2.5 text-green-700">Yol Parası (Maaşa Eklenen)</td><td className="p-2.5 text-right font-bold text-green-700">+ ₺{sd.yolAylik.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
                         )}
                         <tr><td className="p-2.5 text-neutral-600">Hak Edilen Net Maaş <span className="text-[10px] text-neutral-400">(maaş + mesai + yemek + yol)</span></td><td className="p-2.5 text-right font-bold text-black">₺{sd.netMaas.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
                         <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yemek Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− ₺{sd.yemekIade.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
@@ -7394,6 +7473,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       // YENİ: KVKK Aydınlatma/Rıza Metni ve Maaş Bordroları
       { id: 'kvkk', label: 'KVKK Aydınlatma Metni' },
       { id: 'maasBordro', label: 'Maaş Bordrosu' },
+      // YENİ: Askerlik Belgesi (Terhis / Tecil / Muafiyet Belgesi)
+      { id: 'askerlik', label: 'Askerlik Belgesi' },
       { id: 'digerBelgeler', label: 'Diğer Belgeler' }
     ];
 
@@ -10519,6 +10600,47 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       });
     };
 
+    // ========================================================================
+    // YENİ: SÜREÇ İŞLEMLERİ — dosya TÜRÜNE göre mantıklı takip adımları.
+    // Her buton tek dokunuşla Süreç Geçmişi'ne tarih + kullanıcı adıyla işlenir;
+    // istenirse işleme kısa bir not da eklenebilir. "Özel İşlem" ile listede
+    // olmayan herhangi bir adım serbest metin olarak kaydedilebilir.
+    // ========================================================================
+    const SUREC_ISLEMLERI = {
+      'İcra Takibi':    ['Takip Açıldı', 'Ödeme Emri Gönderildi', 'Tebliğ Edildi', 'İtiraz Edildi', 'İtirazın Kaldırılması İstendi', 'Haciz Talep Edildi', 'Haciz Yapıldı', 'Tahsilat Yapıldı', 'Dosya Kapandı'],
+      'İş Davası':      ['Dava Açıldı', 'Dilekçe Sunuldu', 'Cevap Dilekçesi Geldi', 'Duruşma Yapıldı', 'Bilirkişi Raporu Geldi', 'Karar Çıktı', 'İstinaf / Temyiz Edildi'],
+      'Ticari Dava':    ['Dava Açıldı', 'Dilekçe Sunuldu', 'Cevap Dilekçesi Geldi', 'Duruşma Yapıldı', 'Bilirkişi Raporu Geldi', 'Karar Çıktı', 'İstinaf / Temyiz Edildi'],
+      'Hukuk Davası':   ['Dava Açıldı', 'Dilekçe Sunuldu', 'Cevap Dilekçesi Geldi', 'Duruşma Yapıldı', 'Bilirkişi Raporu Geldi', 'Karar Çıktı', 'İstinaf / Temyiz Edildi'],
+      'Ceza Davası':    ['Şikayet / İhbar Yapıldı', 'İfade Verildi', 'İddianame Kabul Edildi', 'Duruşma Yapıldı', 'Karar Çıktı', 'İstinaf / Temyiz Edildi'],
+      'İhtarname':      ['İhtar Gönderildi', 'Tebliğ Edildi', 'Cevap Geldi', 'Süre Doldu (Cevapsız)'],
+      'İhbarname':      ['İhbar Gönderildi', 'Tebliğ Edildi', 'Cevap Geldi', 'Süre Doldu (Cevapsız)'],
+      'Arabuluculuk':   ['Başvuru Yapıldı', 'Toplantı Tarihi Belirlendi', 'Toplantı Yapıldı', 'Anlaşma Sağlandı', 'Anlaşma Sağlanamadı (Son Tutanak)'],
+      'UETS Tebligatı': ['Tebligat Alındı', 'İncelendi', 'Cevap / İtiraz Verildi', 'Gereği Yapıldı'],
+      'Vergi / İdari':  ['Başvuru / Beyan Yapıldı', 'Tebligat Alındı', 'İtiraz / Uzlaşma Talep Edildi', 'Ödeme Yapıldı', 'Sonuçlandı'],
+      'Sigorta / Hasar':['Hasar Bildirimi Yapıldı', 'Eksper İncelemesi Yapıldı', 'Teklif Geldi', 'Ödeme Alındı', 'Dosya Kapandı'],
+      'Diğer':          ['Başvuru Yapıldı', 'Cevap Geldi', 'İşlem Yapıldı', 'Sonuçlandı'],
+    };
+
+    const handleSurecIslem = async (dosya, islemAdi) => {
+      // İşleme isteğe bağlı kısa bir açıklama eklenebilir (boş bırakılabilir)
+      const not = window.prompt(`"${islemAdi}" işlemi kaydedilecek.\n\nİsterseniz kısa bir not ekleyin (boş bırakılabilir):`, '');
+      if (not === null) return; // Vazgeçildi
+      const metin = not.trim() ? `${islemAdi} — ${not.trim()}` : islemAdi;
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), {
+        history: [...(dosya.history || []), { date: new Date().toISOString(), text: metin, by: currentUser?.fullName || 'Sistem' }]
+      });
+      addSystemLog?.('Dava Dosyası İşlemi', `${dosya.baslik}: ${metin}`);
+    };
+
+    const handleOzelIslem = async (dosya) => {
+      const metin = window.prompt('Yapılan işlemi yazın (örn: "Karşı tarafla görüşüldü, ek süre istendi"):', '');
+      if (metin === null || !metin.trim()) return;
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), {
+        history: [...(dosya.history || []), { date: new Date().toISOString(), text: metin.trim(), by: currentUser?.fullName || 'Sistem' }]
+      });
+      addSystemLog?.('Dava Dosyası İşlemi', `${dosya.baslik}: ${metin.trim()}`);
+    };
+
     // Muhasebe kaydı ekle (masraf veya ödeme). Kim girdiyse ismi kayda işlenir (avukat dahil).
     const handleSaveMuhasebe = async () => {
       if (!muhForm.tutar || isNaN(parseFloat(muhForm.tutar))) return;
@@ -10695,6 +10817,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                       <button onClick={() => { setForm({ ...emptyForm, ...d }); setEditingId(d.id); setShowForm(true); }} className="px-3 py-2 bg-neutral-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-black transition"><Edit className="w-3.5 h-3.5" /> Düzenle</button>
                       <button onClick={() => { setAltSekme('muhasebe'); setMuhDosyaFilter(d.id); setMuhForm({ ...emptyMuhForm, dosyaId: d.id }); }} className="px-3 py-2 bg-purple-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-purple-800 transition"><Wallet className="w-3.5 h-3.5" /> Dosya Muhasebesi</button>
                       <button onClick={() => setDeleteId(d.id)} className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-red-100 transition"><X className="w-3.5 h-3.5" /> Sil</button>
+                    </div>
+
+                    {/* YENİ: SÜREÇ İŞLEMLERİ — dosyanın türüne göre takip adımları.
+                        Tek dokunuşla Süreç Geçmişi'ne işlenir; her işleme not eklenebilir. */}
+                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
+                      <span className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5 mb-2"><CheckSquare className="w-3.5 h-3.5 text-purple-600" /> Süreç İşlemleri <span className="normal-case font-bold text-neutral-400">({d.dosyaTuru})</span></span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(SUREC_ISLEMLERI[d.dosyaTuru] || SUREC_ISLEMLERI['Diğer']).map(islem => (
+                          <button key={islem} onClick={() => handleSurecIslem(d, islem)}
+                            className="px-2.5 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-[11px] font-bold hover:bg-purple-100 hover:border-purple-300 transition">
+                            {islem}
+                          </button>
+                        ))}
+                        <button onClick={() => handleOzelIslem(d)}
+                          className="px-2.5 py-1.5 bg-neutral-800 text-white rounded-lg text-[11px] font-bold hover:bg-black transition flex items-center gap-1">
+                          <PlusCircle className="w-3 h-3" /> Özel İşlem
+                        </button>
+                      </div>
                     </div>
 
                     {/* BELGELER — çoklu yükleme (fotoğraf/PDF/dosya), yükleyen kişi + tarih görünür */}
@@ -11077,7 +11217,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
     // --- GEÇERLİLİK (SÜRE) HESAPLARI ---
     const bugun = new Date(); bugun.setHours(0, 0, 0, 0);
-    const kalanGun = (t) => t ? Math.ceil((new Date(t) - bugun) / (1000 * 60 * 60 * 24)) : null;
+    // YENİ: "SÜRESİZ" işaretli (tarihi olmayan) evraklar süre hesabına hiç girmez —
+    // ne süresi geçti uyarısı ne de "kritik evraklar" şeridinde görünür.
+    const kalanGun = (t) => (t && t !== 'SÜRESİZ') ? Math.ceil((new Date(t) - bugun) / (1000 * 60 * 60 * 24)) : null;
     // Süresi geçmiş veya 30 gün içinde dolacak belgeler (uyarı şeridi için)
     const suresiKritikler = belgeler
       .map(b => ({ ...b, kalan: kalanGun(b.gecerlilikTarihi) }))
@@ -11110,7 +11252,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     });
 
     const katOf = (id) => KATEGORILER.find(k => k.id === id) || KATEGORILER[KATEGORILER.length - 1];
-    const tarihGoster = (t) => t ? new Date(t).toLocaleDateString('tr-TR') : '—';
+    const tarihGoster = (t) => t === 'SÜRESİZ' ? 'Süresiz' : (t ? new Date(t).toLocaleDateString('tr-TR') : '—');
     // Geçerlilik rozeti: süresi geçmiş / yaklaşan / normal
     const gecerlilikRozet = (t) => {
       const k = kalanGun(t);
@@ -11299,9 +11441,26 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     <select value={form.kategori} onChange={e => setForm({ ...form, kategori: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-purple-600 text-sm">
                       {KATEGORILER.map(k => <option key={k.id} value={k.id}>{k.id}</option>)}
                     </select></div>
-                  {/* Süreli belgelerde (kontrat, poliçe, ruhsat vb.) doldurulur; sistem otomatik uyarır */}
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Geçerlilik / Bitiş Tarihi</label>
-                    <input type="date" value={form.gecerlilikTarihi} onChange={e => setForm({ ...form, gecerlilikTarihi: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
+                  {/* Süreli belgelerde (kontrat, poliçe, ruhsat vb.) doldurulur; sistem otomatik uyarır.
+                      YENİ: Tarihi olmayan (süresiz) evraklar için tek dokunuşla tarih alanını
+                      pasifleştiren buton — bu evraklarda tarih girmek ZORUNLU DEĞİLDİR. */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-neutral-600">Geçerlilik / Bitiş Tarihi</label>
+                      <button
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, gecerlilikTarihi: f.gecerlilikTarihi === 'SÜRESİZ' ? '' : 'SÜRESİZ' }))}
+                        className={`text-[10px] font-black px-2 py-0.5 rounded-full border transition ${form.gecerlilikTarihi === 'SÜRESİZ' ? 'bg-purple-600 text-white border-purple-600' : 'bg-neutral-100 text-neutral-500 border-neutral-200 hover:bg-neutral-200'}`}
+                      >
+                        {form.gecerlilikTarihi === 'SÜRESİZ' ? '✓ Süresiz' : 'Tarihi Yok'}
+                      </button>
+                    </div>
+                    {form.gecerlilikTarihi === 'SÜRESİZ' ? (
+                      <div className="w-full p-2.5 border border-dashed border-neutral-300 rounded-xl text-sm text-neutral-400 font-bold bg-neutral-50">Bu evrakın son kullanma tarihi yok</div>
+                    ) : (
+                      <input type="date" value={form.gecerlilikTarihi} onChange={e => setForm({ ...form, gecerlilikTarihi: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" />
+                    )}
+                  </div>
                 </div>
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Etiketler <span className="text-neutral-400 font-normal">(virgülle ayırın — aramada kullanılır)</span></label>
                   <input value={form.etiketler} onChange={e => setForm({ ...form, etiketler: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="örn: noter, 2026, merkez ofis" /></div>
