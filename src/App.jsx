@@ -5,7 +5,7 @@ import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getD
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView } from './Operasyon.jsx';
-import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView } from './Finans.jsx';
+import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
 
   // ============================================================================
   // YENİ: MARKA LOGOSU BİLEŞENİ
@@ -4889,9 +4889,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-3 rounded-xl bg-gradient-to-r from-teal-400 via-cyan-300 to-teal-500 shadow-lg shadow-teal-400/40 hover:scale-[1.02] ${activeTab === 'calendar' ? 'ring-2 ring-teal-800/70' : ''}`}
               >
-                <CalendarDays className="w-5 h-5 shrink-0 text-teal-900" />
-                {/* YENİ: Turkuz parıltı geçişli, yanıp sönen ışıltılı yazı efekti */}
-                <span className="whitespace-nowrap font-black bg-gradient-to-r from-teal-800 via-white to-teal-800 bg-clip-text text-transparent animate-pulse [background-size:200%_auto]">Takvim</span>
+                <CalendarDays className="w-5 h-5 shrink-0 text-white" />
+                <span className="whitespace-nowrap font-black text-white">Takvim</span>
               </button>
             )}
 
@@ -4945,7 +4944,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsAddJobSubMenuOpen(!isAddJobSubMenuOpen); setIsJobSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-yellow-400 to-yellow-600 text-black shadow-lg shadow-yellow-500/30 hover:scale-[1.02]`}
+                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-yellow-400 to-yellow-600 text-white shadow-lg shadow-yellow-500/30 hover:scale-[1.02]`}
                 >
                   <div className="flex items-center gap-3">
                     <PlusCircle className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Satış Bölümü</span>
@@ -5143,6 +5142,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelOdeme' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Ödemeleri
                     </button>
+                    {/* YENİ: Defter — kasa/cari alacak-verecek takip sayfası */}
+                    <button 
+                      onClick={() => { setActiveTab('finansDefter'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'finansDefter' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'finansDefter' ? 'bg-white' : 'bg-blue-500'}`}></div> Defter
+                    </button>
                   </div>
                 )}
               </div>
@@ -5209,12 +5215,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelBasvuru' ? 'bg-white' : 'bg-green-500'}`}></div> Personel Başvuru
                     </button>
-                    <button 
-                      onClick={() => { setActiveTab('addPersonnel'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addPersonnel' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addPersonnel' ? 'bg-white' : 'bg-green-500'}`}></div> Personel Ekle
-                    </button>
+                    {/* NOT: "Personel Ekle" sol menüden kaldırıldı — artık "Tüm Personel"
+                        sayfasının sağ üst köşesinde buton olarak duruyor. Sayfa rotası
+                        (activeTab === 'addPersonnel') geriye dönük uyumluluk için hâlâ mevcut. */}
                     <button 
                       onClick={() => { setActiveTab('personnelList'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personnelList' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -5757,7 +5760,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {/* YENİ: Personel Başvuru (Aday Takip) sayfası */}
             {activeTab === 'personelBasvuru' && showPersonnel && <PersonelBasvuruView positions={positions} currentUser={currentUser} onHire={handleHireCandidate} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
-            {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} />}
+            {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} onAddClick={() => setActiveTab('addPersonnel')} />}
             {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} allPersonnelActions={allPersonnelActions} vehicles={vehicles} currentUser={currentUser} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
@@ -5830,7 +5833,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                                 <span><b className="text-black">KM:</b> {vehicle.km}</span>
                                 <span><b className="text-black">Model:</b> {vehicle.model}</span>
                                 <span><b className="text-black">Renk:</b> {vehicle.color}</span>
-                                <span className="col-span-2"><b className="text-black">Vites:</b> {vehicle.transmission}</span>
+                                <span><b className="text-black">Vites:</b> {vehicle.transmission}</span>
+                                {/* YENİ: Tonaj bilgisi */}
+                                <span><b className="text-black">Tonaj:</b> {vehicle.tonnage ? `${parseFloat(vehicle.tonnage).toLocaleString('tr-TR')} kg` : '-'}</span>
                               </div>
                             </td>
                             <td className="p-4">
@@ -5882,6 +5887,28 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       </tbody>
                     </table>
                   </div>
+
+                  {/* YENİ: MEVCUT ARAÇ FİLOSU TONAJ KAYDI — tüm araçların tonajlarının toplamı.
+                      Tonaj bilgisi girilmemiş araçlar toplama dahil edilmez. */}
+                  {vehicles.length > 0 && (
+                    <div className="mt-5 bg-gradient-to-r from-neutral-900 to-black rounded-2xl p-5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-lg">
+                      <div className="flex items-center gap-3">
+                        <div className="w-11 h-11 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
+                          <Truck className="w-6 h-6 text-white" />
+                        </div>
+                        <div>
+                          <p className="text-white font-black text-sm md:text-base">Mevcut Araç Filosu Tonaj Kaydı</p>
+                          <p className="text-neutral-400 text-xs font-bold">{vehicles.length} araç • {vehicles.filter(v => parseFloat(v.tonnage) > 0).length} tanesinde tonaj bilgisi girili</p>
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-2xl md:text-3xl font-black text-white">
+                          {vehicles.reduce((toplam, v) => toplam + (parseFloat(v.tonnage) || 0), 0).toLocaleString('tr-TR')} <span className="text-base font-bold text-neutral-400">kg</span>
+                        </p>
+                        <p className="text-[11px] font-bold text-neutral-500 uppercase tracking-wide">Toplam Filo Tonajı</p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {editingVehicle && (
@@ -5933,7 +5960,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                           <div>
                             <label className="block text-sm font-bold text-neutral-700 mb-1">Hacim (m³)</label>
                             <input required type="number" value={vehicleEditForm.volume} onChange={(e) => setVehicleEditForm({...vehicleEditForm, volume: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
@@ -5945,6 +5972,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                           <div>
                             <label className="block text-sm font-bold text-neutral-700 mb-1">Model (Yıl)</label>
                             <input required type="number" value={vehicleEditForm.model} onChange={(e) => setVehicleEditForm({...vehicleEditForm, model: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                          </div>
+                          {/* YENİ: Tonaj (kg) — araç filosunun toplam taşıma kapasitesi hesabında kullanılır */}
+                          <div>
+                            <label className="block text-sm font-bold text-neutral-700 mb-1">Tonaj (kg)</label>
+                            <input type="number" value={vehicleEditForm.tonnage || ''} onChange={(e) => setVehicleEditForm({...vehicleEditForm, tonnage: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: 3500" />
                           </div>
                         </div>
 
@@ -6081,6 +6113,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'advancedReporting' && showFinance && <AdvancedReportingView jobs={jobs} />}
             {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelListMuhasebe} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'personelOdeme' && showFinance && <PersonelOdemeView personnelList={personnelListMuhasebe} transactions={transactions} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
+            {/* YENİ: Defter — kasa/cari alacak-verecek takibi */}
+            {activeTab === 'finansDefter' && showFinance && <FinansDefterView currentUser={currentUser} addSystemLog={addSystemLog} />}
 
             {activeTab === 'addTask' && showOperasyon &&
               <AddTaskFormView 
