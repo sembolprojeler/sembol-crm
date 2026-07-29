@@ -100,7 +100,19 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
       if (!ham) return null;
       // Firestore Timestamp nesnesi gelirse saniyeden çevir
       const t = (typeof ham === 'object' && ham.seconds) ? new Date(ham.seconds * 1000) : new Date(ham);
-      return isNaN(t.getTime()) ? null : t;
+      if (isNaN(t.getTime())) return null;
+      // DÜZELTME: Bir kayıt GELECEKTE oluşturulmuş olamaz. Eski sistem aktarımında
+      // createdAt alanı taşıma tarihine eşitlendiği için ileri tarihli işlerde
+      // (örn. 2030/2032 taşıma tarihi) kayıt zamanı gelecekte görünüyordu; bu da
+      // "Son Kaydedilen İşler > Tümü" listesinde bu kayıtların en üstte kalmasına,
+      // gerçekten en son kaydedilen işin aşağıda kaybolmasına yol açıyordu.
+      // Gelecek tarihli kayıt zamanları güvenilmez sayılır (saat dilimi farkları için
+      // 1 günlük pay bırakılır) ve zamanı bilinmeyen kayıt gibi davranır: listenin
+      // sonuna düşer, dönem filtrelerine girmez.
+      const ustSinir = new Date();
+      ustSinir.setDate(ustSinir.getDate() + 1);
+      if (t > ustSinir) return null;
+      return t;
     };
 
     const matchesPeriod = (d) => {
@@ -5762,7 +5774,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
             {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} onAddClick={() => setActiveTab('addPersonnel')} />}
             {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} allPersonnelActions={allPersonnelActions} vehicles={vehicles} currentUser={currentUser} allMesaiRecords={allMesaiRecords} />}
-            {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
+            {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {/* YENİ: Şirket Evrakları sayfası */}
             {activeTab === 'sirketEvraklari' && showPersonnel && <SirketEvraklariView db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}

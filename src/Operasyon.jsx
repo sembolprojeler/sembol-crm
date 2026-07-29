@@ -5483,7 +5483,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     // Mantık: Yemek ve yol parası AY BAŞINDA peşin (1 aylık) verildiği için, çalışılmayan günlerin
     // yemek/yol bedeli personelden İADE alınır. Bu iade, önce Kalan Nakit'ten, yetmezse Kalan Banka'dan düşülür.
     // Banka/İcra hesabı, maaş tablosundaki formülün aynısıdır (çalışılan güne orantılı).
-    const computeSettlement = (dateStr) => {
+    const computeSettlement = async (dateStr) => {
       const d = new Date(dateStr);
       const year = d.getFullYear();
       const month = d.getMonth() + 1;
@@ -5492,7 +5492,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       const calışılanGun = resignDay;        // ayın 1'inden ayrılış gününe kadar çalıştı sayılır
       const calışılmayanGun = daysInMonth - resignDay;
 
-      const maas = parseFloat(person.maas) || 0;
+      // YENİ: Personel Muhasebe > Maaş tablosundaki O AYA AİT kaydı oku. Mesai Ücreti'nin
+      // BİREBİR aynı çıkması için maaş tablosundaki manuel değerler (Prim saati, elle
+      // girilmiş Devamsızlık / Rapor / Fazla Gün ve Maaş) burada da kullanılır.
+      let maasRow = {};
+      try {
+        const _prefix = person.collarType === 'Beyaz Yaka' ? 'beyaz_' : '';
+        const _snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${_prefix}${year}_${month}`));
+        if (_snap.exists()) maasRow = (_snap.data().records || {})[personId] || {};
+      } catch (e) {
+        console.error('Maaş kaydı okunamadı (mesai ücreti hesabı için):', e);
+      }
+
+      const maas = parseFloat(maasRow.maas !== undefined && maasRow.maas !== '' ? maasRow.maas : person.maas) || 0;
       const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
       const yemekAylik = parseFloat(person.yemek) || 0;
       const yolAylik = parseFloat(person.yol) || 0;
@@ -5501,27 +5513,38 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       // Devamsız/Rapor/Ücretsiz İzin günleri "Ödenecek Gün"den düşülür; Fazla Mesai/Gün günleri
       // fazla mesai ücreti olarak ayrıca eklenir.
       const personMesaiUpToResign = (allMesaiRecords || []).filter(m => String(m.personId) === String(personId) && m.year === year && m.month === month && m.day <= resignDay);
-      const devamsizGun = personMesaiUpToResign.filter(m => m.code === 'D').length;
-      const raporGun = personMesaiUpToResign.filter(m => m.code === 'R').length;
-      const ucretsizIzinGun = personMesaiUpToResign.filter(m => m.code === 'Üİ').length;
-      const fazlaGunSayisi = personMesaiUpToResign.filter(m => ['FG', 'FGM', 'FM'].includes(m.code)).length;
+      const devamsizGunOto = personMesaiUpToResign.filter(m => m.code === 'D').length;
+      const raporGunOto = personMesaiUpToResign.filter(m => m.code === 'R').length;
+      const ucretsizIzinGun = personMesaiUpToResign.filter(m => m.code === 'Üİ' || m.code === 'İB').length;
+      // DÜZELTME: "Fazla Gün" sayımı Personel Muhasebe > Maaş ile aynı olacak şekilde
+      // yalnızca FG (Fazla Gün) ve FGM (Fazla Gün + Mesai) kodlarını sayar. FM (Fazla
+      // Mesai) bir GÜN değil SAAT kaydıdır; aşağıda "Günlük Saat" içinde saat olarak
+      // eklenir. Önceden FM de fazla gün sayıldığı için aynı gün hem ×10 saat hem de
+      // kendi saati eklenip Mesai Ücreti şişiyordu.
+      const fazlaGunOto = personMesaiUpToResign.filter(m => ['FG', 'FGM'].includes(m.code)).length;
+
+      // Maaş tablosundaki elle girilmiş değerler varsa onlar geçerlidir (Finans ile aynı mantık)
+      const devamsizGun = maasRow.devamsizlik !== undefined && maasRow.devamsizlik !== '' ? parseFloat(maasRow.devamsizlik) : devamsizGunOto;
+      const raporGun = maasRow.rapor !== undefined && maasRow.rapor !== '' ? parseFloat(maasRow.rapor) : raporGunOto;
+      const fazlaGunSayisi = maasRow.fazlaGun !== undefined && maasRow.fazlaGun !== '' ? parseFloat(maasRow.fazlaGun) : fazlaGunOto;
+      const primSaati = parseFloat(maasRow.prim) || 0;
+
       const odenecekGun = Math.max(0, calışılanGun - devamsizGun - raporGun - ucretsizIzinGun);
 
       // Maaş tablosu ile aynı formüller (Devamsız/Rapor/Ücretsiz İzin düşülmüş "Ödenecek Gün"e orantılı)
       const hesaplananBanka = (bankaParasiBase / 30) * odenecekGun;
       const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
 
-      // YENİ: "Fazla Mesai / Devamsızlık Ücret Etkisi", Personel Muhasebe > Maaş
-      // bölümündeki "Mesai Ücreti" formülüyle BİREBİR aynı hesaplanır:
+      // "Fazla Mesai / Devamsızlık Ücret Etkisi", Personel Muhasebe > Maaş bölümündeki
+      // "Mesai Ücreti" ile BİREBİR aynı formülle hesaplanır:
       //   Mesai Ücreti = (Maaş / 200) × Toplam Saat
-      //   Toplam Saat  = Günlük Saat (FM/FGM +, EM −) + (Fazla Gün × 10) − (Devamsız × 3)
-      // (Maaş tablosundaki "Prim Saati" bu ekranda veri kaynağı olmadığı için 0 kabul edilir.)
+      //   Toplam Saat  = Günlük Saat (FM/FGM +, EM −) + (Fazla Gün × 10) − (Devamsız × 3) + Prim Saati
       let gunlukSaat = 0;
       personMesaiUpToResign.forEach(m => {
         if (m.code === 'FGM' || m.code === 'FM') gunlukSaat += (parseFloat(m.hours) || 0);
         else if (m.code === 'EM') gunlukSaat -= (parseFloat(m.hours) || 0);
       });
-      const toplamSaat = gunlukSaat + (fazlaGunSayisi * 10) - (devamsizGun * 3);
+      const toplamSaat = gunlukSaat + (fazlaGunSayisi * 10) - (devamsizGun * 3) + primSaati;
       const saatlikUcret = maas / 200;
       const fazlaMesaiUcreti = saatlikUcret * toplamSaat;
       // YENİ: Hak Edilen Net Maaş; personel maaş bölümüyle aynı mantıkla MESAİ ÜCRETİ +
@@ -7364,11 +7387,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     );
   };
 
-  export const OzlukDosyalariView = ({ personnelList, db, appId, addSystemLog, setViewingImage }) => {
+  export const OzlukDosyalariView = ({ personnelList, db, appId, addSystemLog, setViewingImage, currentUser }) => {
     const [selectedPerson, setSelectedPerson] = useState(null);
     const [isUploading, setIsUploading] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [collarFilter, setCollarFilter] = useState('Tümü'); // 'Tümü', 'Mavi Yaka', 'Beyaz Yaka'
+    // YENİ: Çalışma durumu filtresi — açılışta yalnızca ÇALIŞAN personel listelenir.
+    // "İşten Ayrılmış Personel" sekmesiyle ayrılanlara geçilir; Mavi/Beyaz Yaka filtresi
+    // her iki sekmede de aynı şekilde çalışır.
+    const [durumFilter, setDurumFilter] = useState('Aktif'); // 'Aktif' | 'Pasif'
+    // YENİ: "Hareketler" bölümünde tüm kayıtların gösterilip gösterilmeyeceği
+    const [hareketHepsi, setHareketHepsi] = useState(false);
     // YENİ: Fazladan (ekstra) belge ekleme formu için state
     const [showExtraForm, setShowExtraForm] = useState(false);
     const [extraLabel, setExtraLabel] = useState('');
@@ -7376,8 +7405,38 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const filteredList = personnelList.filter(p => {
       const matchesSearch = p.fullName.toLowerCase().includes(searchQuery.toLowerCase()) || (p.position && p.position.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCollar = collarFilter === 'Tümü' ? true : p.collarType === collarFilter;
-      return matchesSearch && matchesCollar;
+      // YENİ: employmentStatus 'Pasif' olanlar işten ayrılmış sayılır; alanı hiç
+      // girilmemiş eski kayıtlar çalışan (Aktif) kabul edilir.
+      const durum = p.employmentStatus === 'Pasif' ? 'Pasif' : 'Aktif';
+      const matchesDurum = durum === durumFilter;
+      return matchesSearch && matchesCollar && matchesDurum;
+    }).sort((a, b) => (a.fullName || '').localeCompare((b.fullName || ''), 'tr-TR'));
+
+    // Sekme rozetlerinde gösterilecek sayılar (yaka filtresi dahil, arama hariç)
+    const durumSayisi = (hedefDurum) => personnelList.filter(p => {
+      const matchesCollar = collarFilter === 'Tümü' ? true : p.collarType === collarFilter;
+      const durum = p.employmentStatus === 'Pasif' ? 'Pasif' : 'Aktif';
+      return matchesCollar && durum === hedefDurum;
+    }).length;
+
+    // ========================================================================
+    // YENİ: HAREKETLER (ozlukGecmisi) — personelin özlük dosyasında yapılan her
+    // işlem (belge ekleme, değiştirme, silme, yeniden adlandırma) tarih/saat ve
+    // kullanıcı adıyla kaydedilir. Sayfanın en altındaki "Hareketler" bölümü bu
+    // kayıtları en yenisi en üstte olacak şekilde listeler; eklenen belge
+    // doğrudan oradan açılabilir.
+    // ========================================================================
+    const hareketKaydi = (tip, belgeAdi, url) => ({
+      id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      tip,                                   // 'ekleme' | 'degistirme' | 'silme' | 'yenidenAdlandirma'
+      belgeAdi,
+      url: url || '',
+      tarih: new Date().toISOString(),
+      kullanici: currentUser?.fullName || 'Sistem',
     });
+
+    // Belge türü kimliğinden okunabilir adı bulur (documentTypes aşağıda tanımlıdır)
+    const belgeAdiBul = (docTypeId) => (documentTypes.find(d => d.id === docTypeId)?.label) || docTypeId;
 
     const handleFileUpload = async (e, docType) => {
       const file = e.target.files[0];
@@ -7394,9 +7453,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
 
         const updatedOzluk = { ...(selectedPerson.ozlukDosyalari || {}), [docType]: uploadedUrl };
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukDosyalari: updatedOzluk });
-        addSystemLog('Özlük Dosyası Eklendi', `${selectedPerson.fullName} personeline ait ${docType} dosyası eklendi.`);
-        setSelectedPerson({ ...selectedPerson, ozlukDosyalari: updatedOzluk });
+        // Aynı belge zaten varsa bu bir "değiştirme", yoksa "ekleme" hareketidir
+        const vardiMi = !!(selectedPerson.ozlukDosyalari || {})[docType];
+        const yeniGecmis = [...(selectedPerson.ozlukGecmisi || []), hareketKaydi(vardiMi ? 'degistirme' : 'ekleme', belgeAdiBul(docType), uploadedUrl)];
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukDosyalari: updatedOzluk, ozlukGecmisi: yeniGecmis });
+        addSystemLog('Özlük Dosyası Eklendi', `${selectedPerson.fullName} personeline ait ${belgeAdiBul(docType)} dosyası ${vardiMi ? 'değiştirildi' : 'eklendi'}.`);
+        setSelectedPerson({ ...selectedPerson, ozlukDosyalari: updatedOzluk, ozlukGecmisi: yeniGecmis });
       } catch (err) {
         console.error("Yükleme hatası:", err);
         alert("Dosya yüklenemedi.");
@@ -7408,9 +7470,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       if (!window.confirm('Bu dosyayı silmek istediğinize emin misiniz?')) return;
       const updatedOzluk = { ...(selectedPerson.ozlukDosyalari || {}) };
       delete updatedOzluk[docType];
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukDosyalari: updatedOzluk });
-      addSystemLog('Özlük Dosyası Silindi', `${selectedPerson.fullName} personeline ait ${docType} dosyası silindi.`);
-      setSelectedPerson({ ...selectedPerson, ozlukDosyalari: updatedOzluk });
+      const yeniGecmis = [...(selectedPerson.ozlukGecmisi || []), hareketKaydi('silme', belgeAdiBul(docType), '')];
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukDosyalari: updatedOzluk, ozlukGecmisi: yeniGecmis });
+      addSystemLog('Özlük Dosyası Silindi', `${selectedPerson.fullName} personeline ait ${belgeAdiBul(docType)} dosyası silindi.`);
+      setSelectedPerson({ ...selectedPerson, ozlukDosyalari: updatedOzluk, ozlukGecmisi: yeniGecmis });
     };
 
     // YENİ: FAZLADAN (EKSTRA) BELGE yükle — sabit 12 belge türü dışında özel adlı belge eklenir.
@@ -7428,9 +7491,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
         const newExtra = { id: Date.now().toString(), label: extraLabel.trim(), url: uploadedUrl };
         const updatedExtra = [...(selectedPerson.ozlukEkstra || []), newExtra];
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukEkstra: updatedExtra });
+        const yeniGecmis = [...(selectedPerson.ozlukGecmisi || []), hareketKaydi('ekleme', extraLabel.trim(), uploadedUrl)];
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukEkstra: updatedExtra, ozlukGecmisi: yeniGecmis });
         addSystemLog('Ekstra Belge Eklendi', `${selectedPerson.fullName} personeline "${extraLabel.trim()}" belgesi eklendi.`);
-        setSelectedPerson({ ...selectedPerson, ozlukEkstra: updatedExtra });
+        setSelectedPerson({ ...selectedPerson, ozlukEkstra: updatedExtra, ozlukGecmisi: yeniGecmis });
         setExtraLabel(''); setShowExtraForm(false);
       } catch (err) {
         console.error("Yükleme hatası:", err);
@@ -7442,10 +7506,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     // YENİ: Ekstra belgeyi sil
     const handleDeleteExtraFile = async (extraId) => {
       if (!window.confirm('Bu ekstra belgeyi silmek istediğinize emin misiniz?')) return;
+      const silinen = (selectedPerson.ozlukEkstra || []).find(x => x.id === extraId);
       const updatedExtra = (selectedPerson.ozlukEkstra || []).filter(x => x.id !== extraId);
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukEkstra: updatedExtra });
-      addSystemLog('Ekstra Belge Silindi', `${selectedPerson.fullName} personeline ait ekstra belge silindi.`);
-      setSelectedPerson({ ...selectedPerson, ozlukEkstra: updatedExtra });
+      const yeniGecmis = [...(selectedPerson.ozlukGecmisi || []), hareketKaydi('silme', silinen?.label || 'Ekstra Belge', '')];
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukEkstra: updatedExtra, ozlukGecmisi: yeniGecmis });
+      addSystemLog('Ekstra Belge Silindi', `${selectedPerson.fullName} personeline ait "${silinen?.label || 'ekstra belge'}" silindi.`);
+      setSelectedPerson({ ...selectedPerson, ozlukEkstra: updatedExtra, ozlukGecmisi: yeniGecmis });
     };
 
     // YENİ: Ekstra belgenin adını düzenle
@@ -7454,8 +7520,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       const yeni = window.prompt('Belge adını düzenleyin:', current?.label || '');
       if (yeni === null || !yeni.trim()) return;
       const updatedExtra = (selectedPerson.ozlukEkstra || []).map(x => x.id === extraId ? { ...x, label: yeni.trim() } : x);
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukEkstra: updatedExtra });
-      setSelectedPerson({ ...selectedPerson, ozlukEkstra: updatedExtra });
+      const yeniGecmis = [...(selectedPerson.ozlukGecmisi || []), hareketKaydi('yenidenAdlandirma', `${current?.label || '-'} → ${yeni.trim()}`, current?.url || '')];
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), { ozlukEkstra: updatedExtra, ozlukGecmisi: yeniGecmis });
+      setSelectedPerson({ ...selectedPerson, ozlukEkstra: updatedExtra, ozlukGecmisi: yeniGecmis });
     };
 
     const documentTypes = [
@@ -7481,7 +7548,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     if (!selectedPerson) {
       return (
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-7xl mx-auto h-full flex flex-col">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4 shrink-0">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 border-b border-neutral-200 pb-4 gap-4 shrink-0">
             <h2 className="text-xl font-bold text-red-600 flex items-center gap-2">
               <FolderOpen className="w-6 h-6" /> Personel Özlük Dosyaları
             </h2>
@@ -7498,6 +7565,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             </div>
           </div>
 
+          {/* YENİ: ÇALIŞMA DURUMU SEKMELERİ — açılışta "Çalışan Personel" seçilidir.
+              "İşten Ayrılmış Personel"e geçildiğinde ayrılan personelin özlük dosyaları
+              görünür. Yukarıdaki Mavi/Beyaz Yaka filtresi ve arama iki sekmede de geçerlidir. */}
+          <div className="flex flex-wrap gap-2 mb-5 shrink-0">
+            <button onClick={() => setDurumFilter('Aktif')}
+              className={`px-4 py-2.5 rounded-xl text-sm font-black transition flex items-center gap-2 border ${durumFilter === 'Aktif' ? 'bg-green-600 text-white border-green-600 shadow-md shadow-green-600/20' : 'bg-white text-neutral-500 border-neutral-200 hover:border-green-400 hover:text-green-700'}`}>
+              <Users className="w-4 h-4" /> Çalışan Personel
+              <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${durumFilter === 'Aktif' ? 'bg-white/25 text-white' : 'bg-neutral-100 text-neutral-500'}`}>{durumSayisi('Aktif')}</span>
+            </button>
+            <button onClick={() => setDurumFilter('Pasif')}
+              className={`px-4 py-2.5 rounded-xl text-sm font-black transition flex items-center gap-2 border ${durumFilter === 'Pasif' ? 'bg-neutral-800 text-white border-neutral-800 shadow-md shadow-neutral-800/20' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400 hover:text-black'}`}>
+              <Ban className="w-4 h-4" /> İşten Ayrılmış Personel
+              <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${durumFilter === 'Pasif' ? 'bg-white/25 text-white' : 'bg-neutral-100 text-neutral-500'}`}>{durumSayisi('Pasif')}</span>
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 overflow-y-auto custom-scrollbar pr-2 pb-4">
             {filteredList.map(p => {
               const evrakCount = Object.keys(p.ozlukDosyalari || {}).length;
@@ -7510,6 +7593,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                     <div className="overflow-hidden flex-1">
                       <h3 className="font-bold text-black text-sm truncate" title={p.fullName}>{p.fullName}</h3>
                       <p className="text-[11px] text-neutral-500 truncate font-medium mt-0.5" title={p.position}>{p.position}</p>
+                      {/* YENİ: İşten ayrılmış personelde ayrılış tarihi rozeti */}
+                      {p.employmentStatus === 'Pasif' && (
+                        <span className="inline-flex items-center gap-1 mt-1 text-[9px] font-black px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 border border-neutral-200">
+                          <Ban className="w-2.5 h-2.5" /> {p.resignationDate ? `Ayrıldı: ${new Date(p.resignationDate).toLocaleDateString('tr-TR')}` : 'İşten Ayrıldı'}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <div className="mt-auto flex items-center justify-between pt-3 border-t border-red-50">
@@ -7526,7 +7615,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             })}
             {filteredList.length === 0 && (
               <div className="col-span-full py-12 text-center text-neutral-500 font-medium">
-                Aradığınız kriterlere uygun personel bulunamadı.
+                {searchQuery.trim()
+                  ? 'Aradığınız kriterlere uygun personel bulunamadı.'
+                  : durumFilter === 'Pasif'
+                    ? 'İşten ayrılmış personel kaydı bulunmuyor.'
+                    : 'Çalışan personel kaydı bulunmuyor.'}
               </div>
             )}
           </div>
@@ -7662,6 +7755,76 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 </div>
               ))}
             </div>
+          </div>
+
+          {/* ================== YENİ: HAREKETLER ==================
+              Özlük dosyasında yapılan tüm işlemler (ekleme / değiştirme / silme /
+              yeniden adlandırma) en yenisi en üstte olacak şekilde listelenir.
+              En son eklenen belge en tepede görünür ve "Aç" ile doğrudan açılır. */}
+          <div className="border-t-2 border-neutral-200 mt-8 pt-6">
+            <div className="flex items-center justify-between gap-2 mb-4">
+              <h3 className="font-black text-black flex items-center gap-2">
+                <History className="w-5 h-5 text-red-600" /> Hareketler
+              </h3>
+              <span className="text-[11px] font-bold text-neutral-400">{(selectedPerson.ozlukGecmisi || []).length} kayıt</span>
+            </div>
+
+            {(selectedPerson.ozlukGecmisi || []).length === 0 ? (
+              <p className="text-xs text-neutral-400 font-medium py-2">
+                Henüz hareket kaydı yok. Bundan sonra eklenen, değiştirilen veya silinen her belge tarih ve saatiyle burada görünecek.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {/* En yeni hareket en üstte; varsayılan 10 kayıt gösterilir */}
+                {(selectedPerson.ozlukGecmisi || [])
+                  .slice()
+                  .sort((a, b) => new Date(b.tarih) - new Date(a.tarih))
+                  .slice(0, hareketHepsi ? undefined : 10)
+                  .map((h, idx) => {
+                    // NOT: Tailwind sınıfları derleme sırasında taranarak üretildiği için
+                    // sınıf adları dinamik birleştirilemez; her hareket türünün sınıfları
+                    // aşağıdaki sabit haritada tam olarak yazılmıştır.
+                    const STIL = {
+                      ekleme:            { kutu: 'bg-green-50 border-green-100', ikon: 'text-green-600', rozet: 'bg-green-50 text-green-700 border-green-100', etiket: 'Eklendi' },
+                      degistirme:        { kutu: 'bg-blue-50 border-blue-100',   ikon: 'text-blue-600',  rozet: 'bg-blue-50 text-blue-700 border-blue-100',   etiket: 'Değiştirildi' },
+                      silme:             { kutu: 'bg-red-50 border-red-100',     ikon: 'text-red-600',   rozet: 'bg-red-50 text-red-700 border-red-100',     etiket: 'Silindi' },
+                      yenidenAdlandirma: { kutu: 'bg-amber-50 border-amber-100', ikon: 'text-amber-600', rozet: 'bg-amber-50 text-amber-700 border-amber-100', etiket: 'Adı Değişti' },
+                    };
+                    const st = STIL[h.tip] || STIL.ekleme;
+                    return (
+                      <div key={h.id} className={`flex items-center gap-3 p-3 rounded-xl border bg-white ${idx === 0 ? 'border-red-200 shadow-sm' : 'border-neutral-200'}`}>
+                        <div className={`w-9 h-9 rounded-lg shrink-0 flex items-center justify-center border ${st.kutu}`}>
+                          <FileText className={`w-4 h-4 ${st.ikon}`} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-bold text-sm text-black truncate">{h.belgeAdi}</span>
+                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border uppercase ${st.rozet}`}>{st.etiket}</span>
+                            {/* En son hareket vurgulanır */}
+                            {idx === 0 && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white uppercase">En Son</span>}
+                          </div>
+                          <div className="text-[11px] font-bold text-neutral-400 mt-0.5">
+                            {new Date(h.tarih).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })} • {h.kullanici}
+                          </div>
+                        </div>
+                        {/* Silinmeyen belgeler doğrudan buradan açılabilir */}
+                        {h.url && h.tip !== 'silme' && (
+                          <button onClick={() => setViewingImage({ title: h.belgeAdi, name: h.url })}
+                            className="shrink-0 px-3 py-2 bg-neutral-900 hover:bg-black text-white text-[11px] font-black rounded-lg transition flex items-center gap-1.5">
+                            <Eye className="w-3.5 h-3.5" /> Aç
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                {(selectedPerson.ozlukGecmisi || []).length > 10 && (
+                  <button onClick={() => setHareketHepsi(v => !v)}
+                    className="w-full py-2.5 text-xs font-black text-red-600 hover:bg-red-50 rounded-xl transition border border-red-100">
+                    {hareketHepsi ? 'Daha Az Göster' : `Tümünü Gör (${(selectedPerson.ozlukGecmisi || []).length} kayıt)`}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
