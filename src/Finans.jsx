@@ -1972,11 +1972,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
   // YENİ DÜZEN: Maaş tablosu 4 kategori BLOĞU olarak alt alta, tek sayfada
   // (yatay kaydırma olmadan) gösterilir. Bloklar salt-okunurdur; her bloğun
   // başlığındaki "Düzenle" butonu, o kategoriyi düzenlenebilir bir pencerede açar.
+  // cizgi: kategoriler arasındaki KALIN AYIRICI ÇİZGİNİN rengi (kategori rengiyle aynı tonda).
+  // Tailwind sınıf adları dinamik üretilemediği için çizgi rengi inline style ile verilir.
   const MAAS_KATEGORILER = [
-    { id: 'genel',   label: 'Genel Bilgiler',  renk: 'bg-neutral-800', sayi: 3 },
-    { id: 'izinler', label: 'İzinler Durumu',  renk: 'bg-blue-600',    sayi: 7 },
-    { id: 'hakedis', label: 'Hak Ediş Durumu', renk: 'bg-purple-700',  sayi: 6 },
-    { id: 'finans',  label: 'Finans Durumu',   renk: 'bg-green-600',   sayi: 4 },
+    { id: 'genel',   label: 'Genel Bilgiler',  renk: 'bg-neutral-800', sayi: 3, cizgi: '#262626' },
+    { id: 'izinler', label: 'İzinler Durumu',  renk: 'bg-blue-600',    sayi: 7, cizgi: '#2563eb' },
+    { id: 'hakedis', label: 'Hak Ediş Durumu', renk: 'bg-purple-700',  sayi: 6, cizgi: '#6d28d9' },
+    { id: 'finans',  label: 'Finans Durumu',   renk: 'bg-green-600',   sayi: 4, cizgi: '#16a34a' },
   ];
 
   export const MaasView = ({ collarType, personnelList, db, appId, addSystemLog }) => {
@@ -1999,14 +2001,28 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
       const aktifSutunSayisi = gosterilenKategoriler.reduce((t, k) => t + k.sayi, 0) + 1;
       return (
         <div className="w-full h-full overflow-auto border border-neutral-300 custom-scrollbar-table rounded-xl bg-white shadow-inner relative">
-          <table className={`w-full border-collapse text-[10px] md:text-[11px] ${duzenlenebilir ? '' : 'pointer-events-none select-none'}`}>
+          {/* table-fixed: tüm veri sütunları BİREBİR AYNI genişlikte kalır (tarayıcı
+              içeriğe göre sütun genişletmez). min-w yalnız 4 kategori birlikte
+              gösterilirken uygulanır; tek kategorilik düzenleme penceresinde gerekmez. */}
+          <table className={`w-full table-fixed border-collapse text-[10px] md:text-[11px] ${katListe.length > 1 ? 'min-w-[1344px]' : ''} ${duzenlenebilir ? '' : 'pointer-events-none select-none'}`}>
+            {/* colgroup: table-fixed düzeninde sütun genişlikleri YALNIZCA ilk satırdan
+                okunur; ilk satırda birleştirilmiş (colSpan) grup başlıkları olduğu için
+                genişlikler burada tek tek sabitlenir. Böylece Personel Bilgisi dışındaki
+                TÜM veri sütunları birebir aynı genişlikte kalır. */}
+            <colgroup>
+              <col className="w-36" />
+              {gosterilenKategoriler.flatMap(k => Array.from({ length: k.sayi }).map((_, i) => (
+                <col key={`${k.id}-${i}`} className="w-[60px]" />
+              )))}
+            </colgroup>
             <thead className="sticky top-0 z-30 shadow-md">
               {/* YENİ: KATEGORİ GRUP BAŞLIĞI — 4 kategori yan yana, her grubun kendi
-                  rengi ve kendi "Düzenle" butonu vardır (salt-okunur tabloda da tıklanır). */}
+                  rengi, kendi "Düzenle" butonu ve kendi renginde KALIN AYIRICI ÇİZGİSİ
+                  vardır (salt-okunur tabloda da tıklanır). */}
               <tr>
                 <th rowSpan="2" className="bg-neutral-200 text-black font-black px-1.5 py-1 border-b border-r border-neutral-400 sticky left-0 z-30 w-36 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] text-[10px] align-middle">PERSONEL BİLGİSİ</th>
                 {gosterilenKategoriler.map(k => (
-                  <th key={k.id} colSpan={k.sayi} className={`${k.renk} text-white font-black px-1 py-1 border-b border-r border-neutral-500 text-[10px] uppercase tracking-wide`}>
+                  <th key={k.id} colSpan={k.sayi} style={{ borderRight: `3px solid ${k.cizgi}` }} className={`${k.renk} text-white font-black px-1 py-1 border-b border-neutral-500 text-[10px] uppercase tracking-wide`}>
                     <div className="flex items-center justify-center gap-1.5">
                       <span className="truncate">{k.label}</span>
                       {!duzenlenebilir && (
@@ -2021,26 +2037,26 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                 ))}
               </tr>
               <tr>
-                {g('genel') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24 text-center">İŞE BAŞLANGIÇ TARİHİ</th>}
-                {g('genel') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">BANKA PARASI</th>}
-                {g('genel') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">MAAŞ</th>}
-                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">GÜNLÜK SAAT</th>}
-                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">TOPLAM SAAT</th>}
-                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">MESAİ GÜN SAYISI</th>}
-                {g('izinler') && <th className="bg-teal-100 text-teal-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">FAZLA GÜN SAYISI</th>}
-                {g('izinler') && <th className="bg-red-100 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">DEVAMSIZLIK</th>}
-                {g('izinler') && <th className="bg-orange-100 text-orange-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">RAPOR</th>}
-                {g('izinler') && <th className="bg-purple-100 text-purple-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">YILLIK İZİN</th>}
-                {g('hakedis') && <th className="bg-yellow-100 text-yellow-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">NAKİT AVANS</th>}
-                {g('hakedis') && <th className="bg-yellow-100 text-yellow-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">RESMİ AVANS</th>}
-                {g('hakedis') && <th className="bg-green-100 text-green-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">PRİM</th>}
-                {g('hakedis') && <th className="bg-purple-200 text-purple-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">MESAİ ÜCRETİ</th>}
-                {g('hakedis') && <th className="bg-red-100 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">BORÇLANMA</th>}
-                {g('hakedis') && <th className="bg-red-200 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">İCRA TUTARI</th>}
-                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">YEMEK PARASI</th>}
-                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">YOL PARASI</th>}
-                {g('finans') && <th className="bg-yellow-200 text-yellow-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">KALAN BANKA</th>}
-                {g('finans') && <th className="bg-orange-200 text-orange-900 font-black px-0.5 py-1 border-b border-neutral-400 text-[9px] leading-tight w-24">KALAN NAKİT</th>}
+                {g('genel') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px] text-center">BAŞLAMA</th>}
+                {g('genel') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">BANKA</th>}
+                {g('genel') && <th style={{ borderRight: '3px solid #262626' }} className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">MAAŞ</th>}
+                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">GÜN. SAAT</th>}
+                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">TOP. SAAT</th>}
+                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">MESAİ GÜN</th>}
+                {g('izinler') && <th className="bg-teal-100 text-teal-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">FAZLA GÜN</th>}
+                {g('izinler') && <th className="bg-red-100 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">DEVAMSIZ</th>}
+                {g('izinler') && <th className="bg-orange-100 text-orange-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">RAPOR</th>}
+                {g('izinler') && <th style={{ borderRight: '3px solid #2563eb' }} className="bg-purple-100 text-purple-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">YIL. İZİN</th>}
+                {g('hakedis') && <th className="bg-yellow-100 text-yellow-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">NAKİT AV.</th>}
+                {g('hakedis') && <th className="bg-yellow-100 text-yellow-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">RESMİ AV.</th>}
+                {g('hakedis') && <th className="bg-green-100 text-green-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">PRİM</th>}
+                {g('hakedis') && <th className="bg-purple-200 text-purple-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">MESAİ ÜCR.</th>}
+                {g('hakedis') && <th className="bg-red-100 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">BORÇ</th>}
+                {g('hakedis') && <th style={{ borderRight: '3px solid #6d28d9' }} className="bg-red-200 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">İCRA</th>}
+                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">YEMEK</th>}
+                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">YOL</th>}
+                {g('finans') && <th className="bg-yellow-200 text-yellow-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">KAL. BANKA</th>}
+                {g('finans') && <th style={{ borderRight: '3px solid #16a34a' }} className="bg-orange-200 text-orange-900 font-black px-0.5 py-1 border-b border-neutral-400 text-[9px] leading-tight w-[60px]">KAL. NAKİT</th>}
               </tr>
             </thead>
             <tbody>
@@ -2072,7 +2088,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                     </td>
                     )}
                     {g('genel') && (
-                      <td className="border-r border-neutral-300 px-0.5 py-0.5">
+                      <td style={{ borderRight: '3px solid #262626' }} className="border-r border-neutral-300 px-0.5 py-0.5">
                       <input type="number" value={row.maas !== undefined ? row.maas : (person.maas || '')} onChange={e => handleCellChange(person.id, 'maas', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-blue-50 focus:ring-1 focus:ring-blue-400 rounded font-bold" placeholder="0" />
                     </td>
                     )}
@@ -2107,7 +2123,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                     </td>
                     )}
                     {g('izinler') && (
-                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-purple-50/50">
+                      <td style={{ borderRight: '3px solid #2563eb' }} className="border-r border-neutral-300 px-0.5 py-0.5 bg-purple-50/50">
                       <input type="number" value={(yearlyData[person.id] && yearlyData[person.id].yillikIzin) || ''} onChange={e => handleYearlyChange(person.id, 'yillikIzin', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-purple-100 focus:ring-1 focus:ring-purple-400 rounded text-purple-700 font-bold" placeholder="0" title="Tüm yıl boyunca geçerlidir. Yıl sonunda sıfırlanır." />
                     </td>
                     )}
@@ -2137,7 +2153,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                     </td>
                     )}
                     {g('hakedis') && (
-                      <td className={`border-r border-neutral-300 px-0.5 py-0.5 font-black text-center align-middle ${row.icraOdendi ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      <td style={{ borderRight: '3px solid #6d28d9' }} className={`border-r border-neutral-300 px-0.5 py-0.5 font-black text-center align-middle ${row.icraOdendi ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                       <div className="flex items-center justify-center gap-1">
                         <span className={row.icraOdendi ? 'line-through opacity-70' : ''}>{c.icraKesintisi.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
                         {c.icraKesintisi > 0 && (
@@ -2179,7 +2195,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                     </td>
                     )}
                     {g('finans') && (
-                      <td className={`px-0.5 py-0.5 align-middle ${row.nakitOdendi ? 'bg-green-300' : 'bg-orange-100'}`}>
+                      <td style={{ borderRight: '3px solid #16a34a' }} className={`px-0.5 py-0.5 align-middle ${row.nakitOdendi ? 'bg-green-300' : 'bg-orange-100'}`}>
                       <div className="flex items-center justify-center gap-1">
                         <span className={`font-black ${row.nakitOdendi ? 'text-green-900 line-through opacity-70' : 'text-orange-900'}`}>{c.kalanNakit.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
                         <button type="button" onClick={() => handlePaymentToggle(person.id, 'nakitOdendi', 'nakitOdenenTutar', c.kalanNakit)} className={`p-0.5 shrink-0 rounded transition ${row.nakitOdendi ? 'text-green-800' : 'text-orange-600/50 hover:text-orange-800'}`} title={row.nakitOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
@@ -2542,7 +2558,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
             kayıt mekanizmasıyla anında Firebase'e yazılır. */}
         {duzenlemeKategori && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[80] flex justify-center items-center p-3 md:p-6">
-            <div className="bg-white w-full max-w-6xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[92vh]">
+            {/* h-[88vh]: Pencereye KESİN yükseklik verilir. Yükseklik "içeriğe göre"
+                bırakıldığında içindeki tablonun h-full değeri hesaplanamıyor, tablo
+                kendi kaydırma alanını oluşturmadan taşıyor ve alt satırlar kesiliyordu.
+                Sabit yükseklikle tablo alanı kesinleşir; liste aşağıya doğru kaydırılır,
+                başlık satırları üstte, "Kaydet ve Kapat" altta sabit kalır. */}
+            <div className="bg-white w-full max-w-6xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col h-[88vh]">
               <div className={`${MAAS_KATEGORILER.find(k => k.id === duzenlemeKategori)?.renk || 'bg-neutral-800'} text-white px-4 py-3 flex justify-between items-center shrink-0`}>
                 <h3 className="font-black text-sm md:text-base flex items-center gap-2">
                   <Edit className="w-4 h-4" /> {MAAS_KATEGORILER.find(k => k.id === duzenlemeKategori)?.label} — Düzenleme
@@ -2558,7 +2579,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                   yüksekliğini taşırmaz ve tüm personel listesi AŞAĞIYA DOĞRU KAYDIRILARAK
                   görülebilir (başlık satırları üstte sabit kalır). 4 kategorinin
                   düzenleme penceresi de aynı iskeleti kullandığı için hepsinde geçerlidir. */}
-              <div className="flex-1 min-h-0 overflow-hidden p-3">
+              {/* Tablo alanına px cinsinden KESİN yükseklik verilir (pencere 88vh, üstteki
+                  başlık ~48px, alttaki "Kaydet ve Kapat" ~72px). Yükseklik flex hesabına
+                  bırakıldığında tarayıcı içteki tablonun h-full değerini çözemiyor ve
+                  liste kaydırılamayıp alt satırlar kesiliyordu. Kesin yükseklikle 4
+                  kategorinin (Genel Bilgiler / İzinler / Hak Ediş / Finans) ve hem Mavi
+                  hem Beyaz Yaka ekranlarının düzenleme penceresi aşağıya kaydırılabilir. */}
+              <div className="shrink-0 overflow-hidden p-3 h-[calc(88vh-120px)]">
                 {tabloRender(duzenlemeKategori, true)}
               </div>
               <div className="p-3 border-t border-neutral-200 shrink-0">
