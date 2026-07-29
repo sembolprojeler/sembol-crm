@@ -1990,35 +1990,57 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
     // görüntüleme); true iken mevcut giriş alanları normal çalışır ve
     // değişiklikler mevcut otomatik kayıt mekanizmasıyla Firebase'e yazılır.
     // ========================================================================
-    const tabloRender = (aktifKat, duzenlenebilir) => {
-      const g = (kat) => kat === aktifKat;
-      const aktifSutunSayisi = (MAAS_KATEGORILER.find(k => k.id === aktifKat)?.sayi || 0) + 1;
+    // aktifKatlar: kategori kimliği dizisi (örn. ['genel','izinler','hakedis','finans']).
+    // Tek dize de verilebilir; tümü aynı tablo iskeletini kullanır.
+    const tabloRender = (aktifKatlar, duzenlenebilir) => {
+      const katListe = Array.isArray(aktifKatlar) ? aktifKatlar : [aktifKatlar];
+      const g = (kat) => katListe.includes(kat);
+      const gosterilenKategoriler = MAAS_KATEGORILER.filter(k => g(k.id));
+      const aktifSutunSayisi = gosterilenKategoriler.reduce((t, k) => t + k.sayi, 0) + 1;
       return (
         <div className="w-full h-full overflow-auto border border-neutral-300 custom-scrollbar-table rounded-xl bg-white shadow-inner relative">
-          <table className={`w-full border-collapse text-xs md:text-sm ${duzenlenebilir ? '' : 'pointer-events-none select-none'}`}>
+          <table className={`w-full border-collapse text-[10px] md:text-[11px] ${duzenlenebilir ? '' : 'pointer-events-none select-none'}`}>
             <thead className="sticky top-0 z-30 shadow-md">
+              {/* YENİ: KATEGORİ GRUP BAŞLIĞI — 4 kategori yan yana, her grubun kendi
+                  rengi ve kendi "Düzenle" butonu vardır (salt-okunur tabloda da tıklanır). */}
               <tr>
-                <th className="bg-neutral-200 text-black font-black p-2 border-b border-r border-neutral-400 sticky left-0 z-30 w-48 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] text-xs align-middle">PERSONEL BİLGİSİ</th>
-                {g('genel') && <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24 text-center">İŞE BAŞLANGIÇ TARİHİ</th>}
-                {g('hakedis') && <th className="bg-yellow-100 text-yellow-900 font-bold p-2 border-b border-r border-neutral-400 w-24">NAKİT AVANS</th>}
-                {g('hakedis') && <th className="bg-yellow-100 text-yellow-900 font-bold p-2 border-b border-r border-neutral-400 w-24">RESMİ AVANS</th>}
-                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold p-2 border-b border-r border-neutral-400 w-20">GÜNLÜK SAAT</th>}
-                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold p-2 border-b border-r border-neutral-400 w-20">TOPLAM SAAT</th>}
-                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold p-2 border-b border-r border-neutral-400 w-20">MESAİ GÜN SAYISI</th>}
-                {g('izinler') && <th className="bg-teal-100 text-teal-900 font-bold p-2 border-b border-r border-neutral-400 w-24">FAZLA GÜN SAYISI</th>}
-                {g('izinler') && <th className="bg-red-100 text-red-900 font-bold p-2 border-b border-r border-neutral-400 w-20">DEVAMSIZLIK</th>}
-                {g('izinler') && <th className="bg-orange-100 text-orange-900 font-bold p-2 border-b border-r border-neutral-400 w-20">RAPOR</th>}
-                {g('izinler') && <th className="bg-purple-100 text-purple-900 font-bold p-2 border-b border-r border-neutral-400 w-24">YILLIK İZİN</th>}
-                {g('genel') && <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24">BANKA PARASI</th>}
-                {g('hakedis') && <th className="bg-green-100 text-green-900 font-bold p-2 border-b border-r border-neutral-400 w-20">PRİM</th>}
-                {g('genel') && <th className="bg-blue-100 text-blue-900 font-bold p-2 border-b border-r border-neutral-400 w-24">MAAŞ</th>}
-                {g('hakedis') && <th className="bg-purple-200 text-purple-900 font-black p-2 border-b border-r border-neutral-400 w-24">MESAİ ÜCRETİ</th>}
-                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24">YEMEK PARASI</th>}
-                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold p-2 border-b border-r border-neutral-400 w-24">YOL PARASI</th>}
-                {g('hakedis') && <th className="bg-red-100 text-red-900 font-bold p-2 border-b border-r border-neutral-400 w-24">BORÇLANMA</th>}
-                {g('hakedis') && <th className="bg-red-200 text-red-900 font-bold p-2 border-b border-r border-neutral-400 w-24">İCRA TUTARI</th>}
-                {g('finans') && <th className="bg-yellow-200 text-yellow-900 font-black p-2 border-b border-r border-neutral-400 w-24">KALAN BANKA</th>}
-                {g('finans') && <th className="bg-orange-200 text-orange-900 font-black p-2 border-b border-neutral-400 w-24">KALAN NAKİT</th>}
+                <th rowSpan="2" className="bg-neutral-200 text-black font-black px-1.5 py-1 border-b border-r border-neutral-400 sticky left-0 z-30 w-36 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] text-[10px] align-middle">PERSONEL BİLGİSİ</th>
+                {gosterilenKategoriler.map(k => (
+                  <th key={k.id} colSpan={k.sayi} className={`${k.renk} text-white font-black px-1 py-1 border-b border-r border-neutral-500 text-[10px] uppercase tracking-wide`}>
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span className="truncate">{k.label}</span>
+                      {!duzenlenebilir && (
+                        <button type="button" onClick={() => setDuzenlemeKategori(k.id)}
+                          className="pointer-events-auto shrink-0 px-1.5 py-0.5 bg-white/20 hover:bg-white/40 rounded border border-white/30 flex items-center gap-1 text-[9px] font-black transition"
+                          title={`${k.label} sütunlarını düzenle`}>
+                          <Edit className="w-2.5 h-2.5" /> Düzenle
+                        </button>
+                      )}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+              <tr>
+                {g('genel') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24 text-center">İŞE BAŞLANGIÇ TARİHİ</th>}
+                {g('genel') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">BANKA PARASI</th>}
+                {g('genel') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">MAAŞ</th>}
+                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">GÜNLÜK SAAT</th>}
+                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">TOPLAM SAAT</th>}
+                {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">MESAİ GÜN SAYISI</th>}
+                {g('izinler') && <th className="bg-teal-100 text-teal-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">FAZLA GÜN SAYISI</th>}
+                {g('izinler') && <th className="bg-red-100 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">DEVAMSIZLIK</th>}
+                {g('izinler') && <th className="bg-orange-100 text-orange-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">RAPOR</th>}
+                {g('izinler') && <th className="bg-purple-100 text-purple-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">YILLIK İZİN</th>}
+                {g('hakedis') && <th className="bg-yellow-100 text-yellow-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">NAKİT AVANS</th>}
+                {g('hakedis') && <th className="bg-yellow-100 text-yellow-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">RESMİ AVANS</th>}
+                {g('hakedis') && <th className="bg-green-100 text-green-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-20">PRİM</th>}
+                {g('hakedis') && <th className="bg-purple-200 text-purple-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">MESAİ ÜCRETİ</th>}
+                {g('hakedis') && <th className="bg-red-100 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">BORÇLANMA</th>}
+                {g('hakedis') && <th className="bg-red-200 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">İCRA TUTARI</th>}
+                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">YEMEK PARASI</th>}
+                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">YOL PARASI</th>}
+                {g('finans') && <th className="bg-yellow-200 text-yellow-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-24">KALAN BANKA</th>}
+                {g('finans') && <th className="bg-orange-200 text-orange-900 font-black px-0.5 py-1 border-b border-neutral-400 text-[9px] leading-tight w-24">KALAN NAKİT</th>}
               </tr>
             </thead>
             <tbody>
@@ -2027,141 +2049,141 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                 const c = calcRow(person.id);
                 return (
                   <tr key={person.id} className="hover:bg-neutral-50 transition border-b border-neutral-300">
-                    <td className="sticky left-0 z-20 bg-white border-r border-neutral-400 p-2 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
+                    <td className="sticky left-0 z-20 bg-white border-r border-neutral-400 px-1.5 py-1 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
                       <div className="flex items-center gap-2">
-                        <div className="w-6 h-6 md:w-8 md:h-8 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 border border-neutral-300 text-[8px] md:text-sm">
+                        <div className="w-5 h-5 md:w-6 md:h-6 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 border border-neutral-300 text-[8px] md:text-sm">
                           {person.profileImage ? (
                             <img src={person.profileImage} alt={person.fullName} className="w-full h-full object-cover" />
                           ) : (
                             person.fullName.charAt(0)
                           )}
                         </div>
-                        <span className="font-bold text-neutral-800 text-xs truncate max-w-[150px]">{person.fullName.toUpperCase()}</span>
+                        <span className="font-bold text-neutral-800 text-[10px] truncate max-w-[120px]">{person.fullName.toUpperCase()}</span>
                       </div>
                     </td>
                     {g('genel') && (
-                      <td className="border-r border-neutral-300 p-1 text-center text-xs font-medium text-neutral-600 align-middle">
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 text-center text-xs font-medium text-neutral-600 align-middle">
                       {person.startDate || '-'}
                     </td>
                     )}
-                    {g('hakedis') && (
-                      <td className="border-r border-neutral-300 p-1 bg-yellow-50/30">
-                      <input type="number" value={row.nakitAvans || ''} onChange={e => handleCellChange(person.id, 'nakitAvans', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-yellow-100 focus:ring-1 focus:ring-yellow-400 rounded" placeholder="0" />
-                    </td>
-                    )}
-                    {g('hakedis') && (
-                      <td className="border-r border-neutral-300 p-1 bg-yellow-50/30">
-                      <input type="number" value={row.resmiAvans || ''} onChange={e => handleCellChange(person.id, 'resmiAvans', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-yellow-100 focus:ring-1 focus:ring-yellow-400 rounded" placeholder="0" />
-                    </td>
-                    )}
-                    {g('izinler') && (
-                      <td className="border-r border-neutral-300 p-1 bg-blue-50/50">
-                      <input type="number" readOnly value={c.gunlukSaat || ''} className="w-full h-8 text-center bg-transparent outline-none rounded font-bold text-blue-600 cursor-not-allowed" placeholder="0" title="Mesai tablosundan otomatik hesaplanır" />
-                    </td>
-                    )}
-                    {g('izinler') && (
-                      <td className="border-r border-neutral-300 p-1 bg-blue-50/50">
-                      <input type="number" readOnly value={c.toplamSaat} className="w-full h-8 text-center bg-transparent outline-none rounded font-bold text-blue-600 cursor-not-allowed" placeholder="0" title="Otomatik hesaplanır" />
-                    </td>
-                    )}
-                    {g('izinler') && (
-                      <td className="border-r border-neutral-300 p-1 bg-blue-50/50">
-                      <input type="number" readOnly value={c.mesaiGunSayisi} className="w-full h-8 text-center bg-transparent outline-none rounded font-bold cursor-not-allowed" title="Mesai tablosundan otomatik hesaplanır" />
-                    </td>
-                    )}
-                    {g('izinler') && (
-                      <td className="border-r border-neutral-300 p-1 bg-teal-50/50">
-                      <input type="number" value={row.fazlaGun !== undefined ? row.fazlaGun : (c.fazlaGunSayisi || '')} onChange={e => handleCellChange(person.id, 'fazlaGun', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-teal-100 focus:ring-1 focus:ring-teal-400 rounded text-teal-700 font-bold" placeholder="0" title="Manuel düzenlenebilir" />
-                    </td>
-                    )}
-                    {g('izinler') && (
-                      <td className="border-r border-neutral-300 p-1 bg-red-50/50">
-                      <input type="number" value={row.devamsizlik !== undefined ? row.devamsizlik : (c.devamsizlikSayisi || '')} onChange={e => handleCellChange(person.id, 'devamsizlik', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-red-100 focus:ring-1 focus:ring-red-400 rounded text-red-600 font-bold" placeholder="0" title="Manuel düzenlenebilir" />
-                    </td>
-                    )}
-                    {g('izinler') && (
-                      <td className="border-r border-neutral-300 p-1 bg-orange-50/50">
-                      <input type="number" value={row.rapor !== undefined ? row.rapor : (c.rapor || '')} onChange={e => handleCellChange(person.id, 'rapor', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-orange-100 focus:ring-1 focus:ring-orange-400 rounded text-orange-600 font-bold" placeholder="0" title="Manuel düzenlenebilir" />
-                    </td>
-                    )}
-                    {g('izinler') && (
-                      <td className="border-r border-neutral-300 p-1 bg-purple-50/50">
-                      <input type="number" value={(yearlyData[person.id] && yearlyData[person.id].yillikIzin) || ''} onChange={e => handleYearlyChange(person.id, 'yillikIzin', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-purple-100 focus:ring-1 focus:ring-purple-400 rounded text-purple-700 font-bold" placeholder="0" title="Tüm yıl boyunca geçerlidir. Yıl sonunda sıfırlanır." />
-                    </td>
-                    )}
                     {g('genel') && (
-                      <td className="border-r border-neutral-300 p-1 bg-neutral-100 font-bold text-neutral-600 text-center align-middle">
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-neutral-100 font-bold text-neutral-600 text-center align-middle">
                       {c.hesaplananBanka.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                     </td>
                     )}
-                    {g('hakedis') && (
-                      <td className="border-r border-neutral-300 p-1">
-                      <input type="number" value={row.prim || ''} onChange={e => handleCellChange(person.id, 'prim', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-green-50 focus:ring-1 focus:ring-green-400 rounded text-green-600 font-bold" placeholder="0" />
-                    </td>
-                    )}
                     {g('genel') && (
-                      <td className="border-r border-neutral-300 p-1">
-                      <input type="number" value={row.maas !== undefined ? row.maas : (person.maas || '')} onChange={e => handleCellChange(person.id, 'maas', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-blue-50 focus:ring-1 focus:ring-blue-400 rounded font-bold" placeholder="0" />
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5">
+                      <input type="number" value={row.maas !== undefined ? row.maas : (person.maas || '')} onChange={e => handleCellChange(person.id, 'maas', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-blue-50 focus:ring-1 focus:ring-blue-400 rounded font-bold" placeholder="0" />
+                    </td>
+                    )}
+                    {g('izinler') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-blue-50/50">
+                      <input type="number" readOnly value={c.gunlukSaat || ''} className="w-full h-6 text-center text-[10px] bg-transparent outline-none rounded font-bold text-blue-600 cursor-not-allowed" placeholder="0" title="Mesai tablosundan otomatik hesaplanır" />
+                    </td>
+                    )}
+                    {g('izinler') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-blue-50/50">
+                      <input type="number" readOnly value={c.toplamSaat} className="w-full h-6 text-center text-[10px] bg-transparent outline-none rounded font-bold text-blue-600 cursor-not-allowed" placeholder="0" title="Otomatik hesaplanır" />
+                    </td>
+                    )}
+                    {g('izinler') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-blue-50/50">
+                      <input type="number" readOnly value={c.mesaiGunSayisi} className="w-full h-6 text-center text-[10px] bg-transparent outline-none rounded font-bold cursor-not-allowed" title="Mesai tablosundan otomatik hesaplanır" />
+                    </td>
+                    )}
+                    {g('izinler') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-teal-50/50">
+                      <input type="number" value={row.fazlaGun !== undefined ? row.fazlaGun : (c.fazlaGunSayisi || '')} onChange={e => handleCellChange(person.id, 'fazlaGun', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-teal-100 focus:ring-1 focus:ring-teal-400 rounded text-teal-700 font-bold" placeholder="0" title="Manuel düzenlenebilir" />
+                    </td>
+                    )}
+                    {g('izinler') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-red-50/50">
+                      <input type="number" value={row.devamsizlik !== undefined ? row.devamsizlik : (c.devamsizlikSayisi || '')} onChange={e => handleCellChange(person.id, 'devamsizlik', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-red-100 focus:ring-1 focus:ring-red-400 rounded text-red-600 font-bold" placeholder="0" title="Manuel düzenlenebilir" />
+                    </td>
+                    )}
+                    {g('izinler') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-orange-50/50">
+                      <input type="number" value={row.rapor !== undefined ? row.rapor : (c.rapor || '')} onChange={e => handleCellChange(person.id, 'rapor', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-orange-100 focus:ring-1 focus:ring-orange-400 rounded text-orange-600 font-bold" placeholder="0" title="Manuel düzenlenebilir" />
+                    </td>
+                    )}
+                    {g('izinler') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-purple-50/50">
+                      <input type="number" value={(yearlyData[person.id] && yearlyData[person.id].yillikIzin) || ''} onChange={e => handleYearlyChange(person.id, 'yillikIzin', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-purple-100 focus:ring-1 focus:ring-purple-400 rounded text-purple-700 font-bold" placeholder="0" title="Tüm yıl boyunca geçerlidir. Yıl sonunda sıfırlanır." />
                     </td>
                     )}
                     {g('hakedis') && (
-                      <td className="border-r border-neutral-300 p-1 bg-purple-100 font-bold text-purple-900 text-center align-middle">
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-yellow-50/30">
+                      <input type="number" value={row.nakitAvans || ''} onChange={e => handleCellChange(person.id, 'nakitAvans', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-yellow-100 focus:ring-1 focus:ring-yellow-400 rounded" placeholder="0" />
+                    </td>
+                    )}
+                    {g('hakedis') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-yellow-50/30">
+                      <input type="number" value={row.resmiAvans || ''} onChange={e => handleCellChange(person.id, 'resmiAvans', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-yellow-100 focus:ring-1 focus:ring-yellow-400 rounded" placeholder="0" />
+                    </td>
+                    )}
+                    {g('hakedis') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5">
+                      <input type="number" value={row.prim || ''} onChange={e => handleCellChange(person.id, 'prim', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-green-50 focus:ring-1 focus:ring-green-400 rounded text-green-600 font-bold" placeholder="0" />
+                    </td>
+                    )}
+                    {g('hakedis') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-purple-100 font-bold text-purple-900 text-center align-middle">
                       {c.mesaiUcreti.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                     </td>
                     )}
-                    {g('finans') && (
-                      <td className={`border-r border-neutral-300 p-1 ${row.yemekOdendi ? 'bg-green-50' : ''}`}>
-                      <div className="flex items-center gap-1">
-                        <input type="number" value={row.yemek !== undefined ? row.yemek : (person.yemek || '')} onChange={e => handleCellChange(person.id, 'yemek', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
-                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'yemekOdendi', 'yemekOdenenTutar', (row.yemek !== undefined ? row.yemek : (person.yemek || 0)))} className={`p-1 shrink-0 rounded transition ${row.yemekOdendi ? 'text-green-600' : 'text-neutral-300 hover:text-neutral-500'}`} title={row.yemekOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
-                          <CheckCircle className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
-                    )}
-                    {g('finans') && (
-                      <td className={`border-r border-neutral-300 p-1 ${row.yolOdendi ? 'bg-green-50' : ''}`}>
-                      <div className="flex items-center gap-1">
-                        <input type="number" value={row.yol !== undefined ? row.yol : (person.yol || '')} onChange={e => handleCellChange(person.id, 'yol', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
-                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'yolOdendi', 'yolOdenenTutar', (row.yol !== undefined ? row.yol : (person.yol || 0)))} className={`p-1 shrink-0 rounded transition ${row.yolOdendi ? 'text-green-600' : 'text-neutral-300 hover:text-neutral-500'}`} title={row.yolOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
-                          <CheckCircle className="w-4 h-4" />
-                        </button>
-                      </div>
+                    {g('hakedis') && (
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-red-50/50">
+                      <input type="number" value={(yearlyData[person.id] && yearlyData[person.id].borclanma) || ''} onChange={e => handleYearlyChange(person.id, 'borclanma', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-red-100 focus:ring-1 focus:ring-red-400 rounded text-red-700 font-bold" placeholder="0" title="Tüm yıl boyunca geçerlidir. Yıl sonunda sıfırlanır." />
                     </td>
                     )}
                     {g('hakedis') && (
-                      <td className="border-r border-neutral-300 p-1 bg-red-50/50">
-                      <input type="number" value={(yearlyData[person.id] && yearlyData[person.id].borclanma) || ''} onChange={e => handleYearlyChange(person.id, 'borclanma', e.target.value)} className="w-full h-8 text-center bg-transparent outline-none focus:bg-red-100 focus:ring-1 focus:ring-red-400 rounded text-red-700 font-bold" placeholder="0" title="Tüm yıl boyunca geçerlidir. Yıl sonunda sıfırlanır." />
-                    </td>
-                    )}
-                    {g('hakedis') && (
-                      <td className={`border-r border-neutral-300 p-1 font-black text-center align-middle ${row.icraOdendi ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      <td className={`border-r border-neutral-300 px-0.5 py-0.5 font-black text-center align-middle ${row.icraOdendi ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                       <div className="flex items-center justify-center gap-1">
                         <span className={row.icraOdendi ? 'line-through opacity-70' : ''}>{c.icraKesintisi.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
                         {c.icraKesintisi > 0 && (
                           <button type="button" onClick={() => handlePaymentToggle(person.id, 'icraOdendi', 'icraOdenenTutar', c.icraKesintisi)} className={`p-0.5 shrink-0 rounded transition ${row.icraOdendi ? 'text-green-700' : 'text-red-600/50 hover:text-red-800'}`} title={row.icraOdendi ? 'İcra Kesintisi Yatırıldı (Gidere işlendi)' : 'İcra Kesintisi Ödenmedi'}>
-                            <CheckCircle className="w-4 h-4" />
+                            <CheckCircle className="w-3 h-3" />
                           </button>
                         )}
                       </div>
                     </td>
                     )}
                     {g('finans') && (
-                      <td className={`border-r border-neutral-300 p-1 align-middle ${row.bankaOdendi ? 'bg-green-200' : 'bg-yellow-100'}`}>
-                      <div className="flex items-center justify-center gap-1">
-                        <span className={`font-black ${row.bankaOdendi ? 'text-green-800 line-through opacity-70' : 'text-yellow-900'}`}>{c.bankaKalan.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
-                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'bankaOdendi', 'bankaOdenenTutar', c.bankaKalan)} className={`p-0.5 shrink-0 rounded transition ${row.bankaOdendi ? 'text-green-700' : 'text-yellow-600/50 hover:text-yellow-800'}`} title={row.bankaOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
-                          <CheckCircle className="w-4 h-4" />
+                      <td className={`border-r border-neutral-300 px-0.5 py-0.5 ${row.yemekOdendi ? 'bg-green-50' : ''}`}>
+                      <div className="flex items-center gap-1">
+                        <input type="number" value={row.yemek !== undefined ? row.yemek : (person.yemek || '')} onChange={e => handleCellChange(person.id, 'yemek', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
+                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'yemekOdendi', 'yemekOdenenTutar', (row.yemek !== undefined ? row.yemek : (person.yemek || 0)))} className={`p-1 shrink-0 rounded transition ${row.yemekOdendi ? 'text-green-600' : 'text-neutral-300 hover:text-neutral-500'}`} title={row.yemekOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
+                          <CheckCircle className="w-3 h-3" />
                         </button>
                       </div>
                     </td>
                     )}
                     {g('finans') && (
-                      <td className={`p-1 align-middle ${row.nakitOdendi ? 'bg-green-300' : 'bg-orange-100'}`}>
+                      <td className={`border-r border-neutral-300 px-0.5 py-0.5 ${row.yolOdendi ? 'bg-green-50' : ''}`}>
+                      <div className="flex items-center gap-1">
+                        <input type="number" value={row.yol !== undefined ? row.yol : (person.yol || '')} onChange={e => handleCellChange(person.id, 'yol', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-neutral-100 focus:ring-1 focus:ring-neutral-400 rounded" placeholder="0" />
+                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'yolOdendi', 'yolOdenenTutar', (row.yol !== undefined ? row.yol : (person.yol || 0)))} className={`p-1 shrink-0 rounded transition ${row.yolOdendi ? 'text-green-600' : 'text-neutral-300 hover:text-neutral-500'}`} title={row.yolOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
+                          <CheckCircle className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </td>
+                    )}
+                    {g('finans') && (
+                      <td className={`border-r border-neutral-300 px-0.5 py-0.5 align-middle ${row.bankaOdendi ? 'bg-green-200' : 'bg-yellow-100'}`}>
+                      <div className="flex items-center justify-center gap-1">
+                        <span className={`font-black ${row.bankaOdendi ? 'text-green-800 line-through opacity-70' : 'text-yellow-900'}`}>{c.bankaKalan.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
+                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'bankaOdendi', 'bankaOdenenTutar', c.bankaKalan)} className={`p-0.5 shrink-0 rounded transition ${row.bankaOdendi ? 'text-green-700' : 'text-yellow-600/50 hover:text-yellow-800'}`} title={row.bankaOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
+                          <CheckCircle className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </td>
+                    )}
+                    {g('finans') && (
+                      <td className={`px-0.5 py-0.5 align-middle ${row.nakitOdendi ? 'bg-green-300' : 'bg-orange-100'}`}>
                       <div className="flex items-center justify-center gap-1">
                         <span className={`font-black ${row.nakitOdendi ? 'text-green-900 line-through opacity-70' : 'text-orange-900'}`}>{c.kalanNakit.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
                         <button type="button" onClick={() => handlePaymentToggle(person.id, 'nakitOdendi', 'nakitOdenenTutar', c.kalanNakit)} className={`p-0.5 shrink-0 rounded transition ${row.nakitOdendi ? 'text-green-800' : 'text-orange-600/50 hover:text-orange-800'}`} title={row.nakitOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
-                          <CheckCircle className="w-4 h-4" />
+                          <CheckCircle className="w-3 h-3" />
                         </button>
                       </div>
                     </td>
@@ -2180,13 +2202,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
             {/* Toplam satırı yalnızca Finans kategorisinde anlamlıdır (parasal sütunlar orada) */}
             {targetPersonnelList.length > 0 && g('finans') && (
               <tfoot className="sticky bottom-0 z-40 shadow-[0_-4px_6px_-2px_rgba(0,0,0,0.1)]">
-                <tr className="bg-black text-white font-black text-xs md:text-sm">
-                  {/* Finans Durumu sütunları: Personel + Banka Parası = 2, kalan 4 sütun toplam hücreleri */}
-                  <td colSpan="2" className="p-2 md:p-3 text-right border-r border-neutral-600">GENEL TOPLAMLAR :</td>
-                  <td className="p-2 md:p-3 text-center border-r border-neutral-600 text-white">₺{totalYemek.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
-                  <td className="p-2 md:p-3 text-center border-r border-neutral-600 text-white">₺{totalYol.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
-                  <td className="p-2 md:p-3 text-center border-r border-neutral-600 text-yellow-400">₺{totalKalanBanka.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
-                  <td className="p-2 md:p-3 text-center text-orange-400">₺{totalKalanNakit.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
+                <tr className="bg-black text-white font-black text-[10px]">
+                  {/* Toplam hücreleri son 4 sütuna (Yemek/Yol/Kalan Banka/Kalan Nakit) denk gelir;
+                      soldaki tüm sütunlar tek hücrede birleştirilir. */}
+                  <td colSpan={aktifSutunSayisi - 4} className="px-2 py-2 text-right border-r border-neutral-600">GENEL TOPLAMLAR :</td>
+                  <td className="px-1 py-2 text-center border-r border-neutral-600 text-white text-[10px]">₺{totalYemek.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
+                  <td className="px-1 py-2 text-center border-r border-neutral-600 text-white text-[10px]">₺{totalYol.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
+                  <td className="px-1 py-2 text-center border-r border-neutral-600 text-yellow-400 text-[10px]">₺{totalKalanBanka.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
+                  <td className="px-1 py-2 text-center text-orange-400 text-[10px]">₺{totalKalanNakit.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
                 </tr>
               </tfoot>
             )}
@@ -2506,26 +2529,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
           </div>
         </div>
 
-        {/* YENİ: 4 KATEGORİ BLOĞU — hepsi tek sayfada, yatay kaydırma yok.
-            Bloklar salt-okunurdur; sağ üstteki "Düzenle" ile pencere açılır. */}
-        <div className="flex-1 w-full overflow-y-auto custom-scrollbar-table space-y-5 pr-1">
-          {MAAS_KATEGORILER.map(k => (
-            <div key={k.id} className="border border-neutral-200 rounded-xl overflow-hidden shadow-sm">
-              <div className={`flex items-center justify-between px-3 py-2 ${k.renk} text-white`}>
-                <span className="font-black text-xs md:text-sm uppercase tracking-wide flex items-center gap-2">
-                  {k.label}
-                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-white/25">{k.sayi} sütun</span>
-                </span>
-                <button type="button" onClick={() => setDuzenlemeKategori(k.id)}
-                  className="px-3 py-1.5 bg-white/15 hover:bg-white/30 text-white text-[11px] md:text-xs font-black rounded-lg transition flex items-center gap-1.5 border border-white/30">
-                  <Edit className="w-3.5 h-3.5" /> Düzenle
-                </button>
-              </div>
-              <div className="max-h-[55vh]">
-                {tabloRender(k.id, false)}
-              </div>
-            </div>
-          ))}
+        {/* YENİ: 4 KATEGORİ YAN YANA — Genel Bilgiler / İzinler Durumu / Hak Ediş Durumu /
+            Finans Durumu tek tabloda gruplanır. Personel Bilgisi sütunu tektir ve solda
+            sabit kalır; tüm personel listesi tek sayfada görünür. Sütunlar tek ekrana
+            sığacak şekilde daraltılmıştır. Her grup başlığındaki "Düzenle" butonu o
+            kategoriyi düzenlenebilir pencerede açar. */}
+        <div className="flex-1 w-full min-h-0">
+          {tabloRender(['genel', 'izinler', 'hakedis', 'finans'], false)}
         </div>
 
         {/* YENİ: KATEGORİ DÜZENLEME PENCERESİ — değişiklikler mevcut otomatik
@@ -2544,7 +2554,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                   <button onClick={() => setDuzenlemeKategori(null)} className="text-white/70 hover:text-white transition"><X className="w-6 h-6" /></button>
                 </div>
               </div>
-              <div className="flex-1 overflow-hidden p-3">
+              {/* min-h-0: flex çocuğunun küçülmesine izin verir; böylece tablo pencere
+                  yüksekliğini taşırmaz ve tüm personel listesi AŞAĞIYA DOĞRU KAYDIRILARAK
+                  görülebilir (başlık satırları üstte sabit kalır). 4 kategorinin
+                  düzenleme penceresi de aynı iskeleti kullandığı için hepsinde geçerlidir. */}
+              <div className="flex-1 min-h-0 overflow-hidden p-3">
                 {tabloRender(duzenlemeKategori, true)}
               </div>
               <div className="p-3 border-t border-neutral-200 shrink-0">
