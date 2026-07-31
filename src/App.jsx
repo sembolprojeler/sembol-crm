@@ -4,7 +4,7 @@ import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'fi
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar } from './Satis.jsx';
-import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView } from './Operasyon.jsx';
+import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
 
   // ============================================================================
@@ -2674,6 +2674,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     });
     
     const [jobs, setJobs] = useState([]);
+    // YENİ: Şeflerin saha denetimleri — merkezi olarak dinlenir ve iş listelerine prop
+    // olarak geçilir; böylece her işte "kim denetledi" bilgisi gösterilebilir.
+    const [sahaDenetimleri, setSahaDenetimleri] = useState([]);
     const [transactions, setTransactions] = useState([]);
     const [tasks, setTasks] = useState([]);
     const [notifications, setNotifications] = useState([]);
@@ -2934,6 +2937,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           });
         });
         setAllMesaiRecords(flat);
+      }, console.error));
+
+      // YENİ: Saha denetimleri (şef puanlama + raporlama) canlı dinlenir
+      unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), snap => {
+        setSahaDenetimleri(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }, console.error));
 
       unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), async docSnap => {
@@ -5242,6 +5250,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'ozlukDosyalari' ? 'bg-white' : 'bg-green-500'}`}></div> Özlük Dosyaları
                     </button>
+                    {/* YENİ: Saha Raporlaması — şeflerin saha denetimleri ve personel puanlamaları */}
+                    <button 
+                      onClick={() => { setActiveTab('sahaRaporlamasi'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'sahaRaporlamasi' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sahaRaporlamasi' ? 'bg-white' : 'bg-green-500'}`}></div> Saha Raporlaması
+                    </button>
                     <button 
                       onClick={() => { setActiveTab('complaints'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'complaints' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'} relative`}
@@ -5570,7 +5585,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'myAssignedJobs' && <MyAssignedJobsView currentUser={currentUser} jobs={visibleJobs} handleOpenEndJobModal={handleOpenEndJobModal} markNotificationsAsRead={markNotificationsAsRead} />}
             {activeTab === 'mySpecialTasks' && showMySpecialTasks && <MyTasksView currentUser={currentUser} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
             
-            {activeTab === 'isOnaylamaTahtasi' && showOperasyon && <IsOnaylamaTahtasiView jobs={visibleJobs} handleEditJob={handleEditJob} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} handleOpenEndJobModal={handleOpenEndJobModal} isManager={isManager} />}
+            {activeTab === 'isOnaylamaTahtasi' && showOperasyon && <IsOnaylamaTahtasiView jobs={visibleJobs} handleEditJob={handleEditJob} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} handleOpenEndJobModal={handleOpenEndJobModal} isManager={isManager} currentUser={currentUser} />}
             {activeTab === 'ekipKurmaTahtasi' && showOperasyon && <EkipKurmaTahtasiView jobs={visibleJobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} allPersonnelActions={allPersonnelActions} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'izinTahtasi' && showOperasyon && <IzinTahtasiView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'personelTahtasi' && showOperasyon && <PersonelTahtasiView personnelList={personnelListMuhasebe} setViewingPersonnelProfileId={setViewingPersonnelProfileId} setActiveTab={setActiveTab} jobs={jobs} allPersonnelActions={allPersonnelActions} vehicles={vehicles} allMesaiRecords={allMesaiRecords} />}
@@ -5763,7 +5778,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'completedJobs' && showJobList && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} handleOpenResolveDamageModal={handleOpenResolveDamageModal} />}
             {/* YENİ: "Tüm İşler" artık kategori butonlu İş Merkezi'ni açar
                 (Tüm / Mevcut / Tamamlanan / İptal Edilen tek sayfada) */}
-            {activeTab === 'allJobs' && showJobList && <IsMerkeziView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} handleOpenResolveDamageModal={handleOpenResolveDamageModal} handleRestoreJob={handleRestoreJob} />}
+            {activeTab === 'allJobs' && showJobList && <IsMerkeziView jobs={jobs} sahaDenetimleri={sahaDenetimleri} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} handleOpenResolveDamageModal={handleOpenResolveDamageModal} handleRestoreJob={handleRestoreJob} />}
             {activeTab === 'damagedJobs' && showJobList && <DamagedJobsView jobs={jobs} handleEditJob={handleOpenEditDamageModal} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} handleOpenResolveDamageModal={handleOpenResolveDamageModal} canDelete={isManager} />}
             {activeTab === 'cancelledJobs' && showJobList && <CancelledJobsView jobs={jobs} handleEditJob={handleEditJob} handleRestoreJob={handleRestoreJob} setDeleteJobId={setDeleteJobId} />}
 
@@ -5775,6 +5790,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Tüm Personel" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} onAddClick={() => setActiveTab('addPersonnel')} />}
             {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} allPersonnelActions={allPersonnelActions} vehicles={vehicles} currentUser={currentUser} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
+            {/* YENİ: Saha Raporlaması — şef denetimlerinin yönetim ekranı */}
+            {activeTab === 'sahaRaporlamasi' && showPersonnel && <SahaRaporlamasiView personnelList={personnelList} db={db} appId={appId} setViewingImage={setViewingImage} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {/* YENİ: Şirket Evrakları sayfası */}
             {activeTab === 'sirketEvraklari' && showPersonnel && <SirketEvraklariView db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
