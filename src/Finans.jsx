@@ -2004,15 +2004,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
           {/* table-fixed: tüm veri sütunları BİREBİR AYNI genişlikte kalır (tarayıcı
               içeriğe göre sütun genişletmez). min-w yalnız 4 kategori birlikte
               gösterilirken uygulanır; tek kategorilik düzenleme penceresinde gerekmez. */}
-          <table className={`w-full table-fixed border-collapse text-[10px] md:text-[11px] ${katListe.length > 1 ? 'min-w-[1344px]' : ''} ${duzenlenebilir ? '' : 'pointer-events-none select-none'}`}>
+          <table className={`w-full table-fixed border-collapse text-[10px] md:text-[11px] ${katListe.length > 1 ? 'min-w-[1368px]' : ''} ${duzenlenebilir ? '' : 'pointer-events-none select-none'}`}>
             {/* colgroup: table-fixed düzeninde sütun genişlikleri YALNIZCA ilk satırdan
                 okunur; ilk satırda birleştirilmiş (colSpan) grup başlıkları olduğu için
                 genişlikler burada tek tek sabitlenir. Böylece Personel Bilgisi dışındaki
                 TÜM veri sütunları birebir aynı genişlikte kalır. */}
             <colgroup>
               <col className="w-36" />
+              {/* Finans Durumu sütunları (Yemek / Yol / Kalan Banka / Kalan Nakit) diğer
+                  sütunlardan %10 daha geniştir: 60px -> 66px. Bu sütunlarda tutarın yanında
+                  ödeme onay tiki de bulunduğu için ek genişlik gerekir. */}
               {gosterilenKategoriler.flatMap(k => Array.from({ length: k.sayi }).map((_, i) => (
-                <col key={`${k.id}-${i}`} className="w-[60px]" />
+                <col key={`${k.id}-${i}`} className={k.id === 'finans' ? 'w-[66px]' : 'w-[60px]'} />
               )))}
             </colgroup>
             <thead className="sticky top-0 z-30 shadow-md">
@@ -2020,7 +2023,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                   rengi, kendi "Düzenle" butonu ve kendi renginde KALIN AYIRICI ÇİZGİSİ
                   vardır (salt-okunur tabloda da tıklanır). */}
               <tr>
-                <th rowSpan="2" className="bg-neutral-200 text-black font-black px-1.5 py-1 border-b border-r border-neutral-400 sticky left-0 z-30 w-36 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] text-[10px] align-middle">PERSONEL BİLGİSİ</th>
+                <th rowSpan="2" className="bg-blue-100 text-blue-900 font-black px-1.5 py-1 border-b border-r border-neutral-400 sticky left-0 z-30 w-36 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)] text-[10px] align-middle">PERSONEL BİLGİSİ</th>
                 {gosterilenKategoriler.map(k => (
                   <th key={k.id} colSpan={k.sayi} style={{ borderRight: `3px solid ${k.cizgi}` }} className={`${k.renk} text-white font-black px-1 py-1 border-b border-neutral-500 text-[10px] uppercase tracking-wide`}>
                     <div className="flex items-center justify-center gap-1.5">
@@ -2039,7 +2042,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
               <tr>
                 {g('genel') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px] text-center">BAŞLAMA</th>}
                 {g('genel') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">BANKA</th>}
-                {g('genel') && <th style={{ borderRight: '3px solid #262626' }} className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">MAAŞ</th>}
+                {g('genel') && <th style={{ borderRight: '3px solid #262626' }} className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">MAAŞ</th>}
                 {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">GÜN. SAAT</th>}
                 {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">TOP. SAAT</th>}
                 {g('izinler') && <th className="bg-blue-100 text-blue-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">MESAİ GÜN</th>}
@@ -2053,10 +2056,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                 {g('hakedis') && <th className="bg-purple-200 text-purple-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">MESAİ ÜCR.</th>}
                 {g('hakedis') && <th className="bg-red-100 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">BORÇ</th>}
                 {g('hakedis') && <th style={{ borderRight: '3px solid #6d28d9' }} className="bg-red-200 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">İCRA</th>}
-                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">YEMEK</th>}
-                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">YOL</th>}
-                {g('finans') && <th className="bg-yellow-200 text-yellow-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">KAL. BANKA</th>}
-                {g('finans') && <th style={{ borderRight: '3px solid #16a34a' }} className="bg-orange-200 text-orange-900 font-black px-0.5 py-1 border-b border-neutral-400 text-[9px] leading-tight w-[60px]">KAL. NAKİT</th>}
+                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[66px]">YEMEK</th>}
+                {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[66px]">YOL</th>}
+                {g('finans') && <th className="bg-yellow-200 text-yellow-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[66px]">KAL. BANKA</th>}
+                {g('finans') && <th style={{ borderRight: '3px solid #16a34a' }} className="bg-orange-200 text-orange-900 font-black px-0.5 py-1 border-b border-neutral-400 text-[9px] leading-tight w-[66px]">KAL. NAKİT</th>}
               </tr>
             </thead>
             <tbody>
@@ -2078,7 +2081,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                       </div>
                     </td>
                     {g('genel') && (
-                      <td className="border-r border-neutral-300 px-0.5 py-0.5 text-center text-xs font-medium text-neutral-600 align-middle">
+                      <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-neutral-100 text-center text-xs font-medium text-neutral-600 align-middle">
                       {person.startDate || '-'}
                     </td>
                     )}
@@ -2088,8 +2091,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                     </td>
                     )}
                     {g('genel') && (
-                      <td style={{ borderRight: '3px solid #262626' }} className="border-r border-neutral-300 px-0.5 py-0.5">
-                      <input type="number" value={row.maas !== undefined ? row.maas : (person.maas || '')} onChange={e => handleCellChange(person.id, 'maas', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-blue-50 focus:ring-1 focus:ring-blue-400 rounded font-bold" placeholder="0" />
+                      <td style={{ borderRight: '3px solid #262626' }} className="border-r border-neutral-300 px-0.5 py-0.5 bg-neutral-100">
+                      <input type="number" value={row.maas !== undefined ? row.maas : (person.maas || '')} onChange={e => handleCellChange(person.id, 'maas', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-white focus:ring-1 focus:ring-neutral-500 rounded font-bold" placeholder="0" />
                     </td>
                     )}
                     {g('izinler') && (
