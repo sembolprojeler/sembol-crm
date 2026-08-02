@@ -2975,9 +2975,37 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
   export const DamagedJobsView = ({ jobs, handleEditJob, setViewingImage, setDeleteJobId, handleOpenResolveDamageModal, canDelete }) => {
     const [searchQuery, setSearchQuery] = useState('');
+    // YENİ: İş tipi filtresi — 'Tümü' | 'Nakliye' | 'Depo' | 'Asansör'
+    const [tipFiltre, setTipFiltre] = useState('Tümü');
+    // YENİ: Çözülmüş hasarlar VARSAYILAN OLARAK GİZLİDİR. Sağ üstteki
+    // "Çözülen İşler" butonuna basıldığında listeye dahil edilirler.
+    const [cozulenGoster, setCozulenGoster] = useState(false);
+
+    // Kaydın çözülmüş sayılıp sayılmadığını belirleyen tek nokta
+    const cozuldu = (j) => !!j.endJobDetails?.damageResolved;
+
+    // YENİ: Hasarın hangi iş tipinde oluştuğunu görmek için tip bazlı sayaçlar.
+    // Sayaçlar arama kutusundan BAĞIMSIZDIR; ancak "Çözülen İşler" düğmesinin
+    // durumunu dikkate alır — böylece rozetlerdeki sayı ekrandaki kart sayısıyla uyuşur.
+    const tumHasarli = jobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var');
+    const cozulenSayisi = tumHasarli.filter(cozuldu).length;     // Butonun rozetinde gösterilir
+    const sayimListesi = cozulenGoster ? tumHasarli : tumHasarli.filter(j => !cozuldu(j));
+    const tipSayaclari = {
+      'Tümü': sayimListesi.length,
+      'Nakliye': sayimListesi.filter(j => !j.type || j.type === 'Nakliye').length,
+      'Depo': sayimListesi.filter(j => j.type === 'Depo').length,
+      'Asansör': sayimListesi.filter(j => j.type === 'Asansör').length,
+    };
 
     const damagedJobs = jobs.filter(j => {
       if (j.endJobDetails?.damageStatus !== 'Hasar var') return false;
+      // YENİ: Çözülmüş kayıtlar, düğme açılmadıkça listede GÖSTERİLMEZ
+      if (!cozulenGoster && cozuldu(j)) return false;
+      // YENİ: Seçili iş tipine göre süz ("Nakliye" seçiliyse tipi boş olan eski kayıtlar da dahildir)
+      if (tipFiltre !== 'Tümü') {
+        const jobTipi = j.type || 'Nakliye';
+        if (jobTipi !== tipFiltre) return false;
+      }
       if (searchQuery.trim()) {
         return (j.customerName && j.customerName.toLowerCase().includes(searchQuery.toLowerCase())) || 
                (j.customerPhone && j.customerPhone.includes(searchQuery));
@@ -2997,23 +3025,53 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <p className="text-sm font-medium text-neutral-500">Operasyon sırasında hasar bildirimi yapılmış kayıtlar.</p>
             </div>
           </div>
-          <div className="relative w-full md:w-72 shrink-0">
-            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-            <input
-              type="text"
-              placeholder="Müşteri Ara..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-600 transition"
-            />
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto shrink-0">
+            {/* YENİ: ÇÖZÜLEN İŞLER DÜĞMESİ — çözülmüş hasar kayıtları varsayılan olarak
+                gizlidir; bu düğmeyle listeye dahil edilip tekrar gizlenebilir.
+                Rozetteki sayı, sistemdeki toplam çözülmüş hasar adedini gösterir. */}
+            <button type="button" onClick={() => setCozulenGoster(v => !v)}
+              className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition flex items-center justify-center gap-2 whitespace-nowrap ${cozulenGoster ? 'bg-green-600 text-white border-green-600 shadow-sm' : 'bg-green-50 text-green-700 border-green-200 hover:border-green-400'}`}
+              title={cozulenGoster ? 'Çözülen işleri listeden gizle' : 'Çözülen işleri de listede göster'}>
+              {cozulenGoster ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              {cozulenGoster ? 'Çözülenleri Gizle' : 'Çözülen İşler'}
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${cozulenGoster ? 'bg-white/25' : 'bg-white/80'}`}>{cozulenSayisi}</span>
+            </button>
+            <div className="relative w-full md:w-72 shrink-0">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+              <input
+                type="text"
+                placeholder="Müşteri Ara..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-600 transition"
+              />
+            </div>
           </div>
+        </div>
+
+        {/* YENİ: İŞ TİPİ FİLTRESİ — hasarın hangi tip işte oluştuğunu sayılarla gösterir
+            ve tıklandığında listeyi o tipe göre süzer. Renkler kart rozetleriyle aynıdır. */}
+        <div className="bg-white p-3 rounded-2xl shadow-sm border border-neutral-200 flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-black text-neutral-400 uppercase tracking-wide mr-1">Hasarın Oluştuğu İş Tipi:</span>
+          {[
+            { tip: 'Tümü', aktifRenk: 'bg-neutral-800 text-white border-neutral-800', pasifRenk: 'bg-neutral-50 text-neutral-600 border-neutral-200 hover:border-neutral-400' },
+            { tip: 'Nakliye', aktifRenk: 'bg-red-600 text-white border-red-600', pasifRenk: 'bg-red-50 text-red-700 border-red-200 hover:border-red-400' },
+            { tip: 'Depo', aktifRenk: 'bg-blue-600 text-white border-blue-600', pasifRenk: 'bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-400' },
+            { tip: 'Asansör', aktifRenk: 'bg-green-500 text-white border-green-500', pasifRenk: 'bg-green-50 text-green-700 border-green-200 hover:border-green-400' },
+          ].map(f => (
+            <button key={f.tip} type="button" onClick={() => setTipFiltre(f.tip)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 transition flex items-center gap-1.5 ${tipFiltre === f.tip ? f.aktifRenk : f.pasifRenk}`}>
+              {f.tip}
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${tipFiltre === f.tip ? 'bg-white/25' : 'bg-white/70'}`}>{tipSayaclari[f.tip]}</span>
+            </button>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {damagedJobs.length === 0 ? (
             <div className="col-span-full p-12 bg-white rounded-2xl shadow-sm border border-neutral-200 text-center text-neutral-500">
               <CheckCircle className="w-16 h-16 mx-auto mb-4 text-green-500 opacity-50" />
-              <p className="text-lg font-medium">{searchQuery.trim() ? 'Aramanıza uygun hasarlı kayıt bulunamadı.' : 'Sistemde hasar kaydı bulunan operasyon bulunmuyor.'}</p>
+              <p className="text-lg font-medium">{searchQuery.trim() ? 'Aramanıza uygun hasarlı kayıt bulunamadı.' : tipFiltre !== 'Tümü' ? `${tipFiltre} işlerinde ${cozulenGoster ? '' : 'çözüm bekleyen '}hasar kaydı bulunmuyor.` : cozulenGoster ? 'Sistemde hasar kaydı bulunan operasyon bulunmuyor.' : 'Çözüm bekleyen hasar kaydı yok. Çözülmüş kayıtları görmek için sağ üstteki "Çözülen İşler" düğmesine basın.'}</p>
             </div>
           ) : (
             damagedJobs.map(job => (
@@ -3021,7 +3079,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <div className="flex justify-between items-start">
                   <div>
                     <h3 className="font-bold text-black text-lg">{job.customerName}</h3>
-                    <p className="text-xs text-neutral-500 font-medium flex items-center gap-1 mt-1">
+                    {/* YENİ: İŞ TİPİ ROZETİ — hasarın Nakliye işinde mi, Depo işinde mi yoksa
+                        Asansör işinde mi oluştuğu ilk bakışta görülür. Renk kodu diğer
+                        ekranlardaki (İş Onaylama / Ekip Kurma Tahtası) desenle aynıdır:
+                        Nakliye = kırmızı, Depo = mavi, Asansör = yeşil. */}
+                    <span className={`inline-flex items-center gap-1 mt-1.5 text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase tracking-wider shadow-sm ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                      {job.type === 'Depo' ? <Package className="w-3 h-3" /> : job.type === 'Asansör' ? <ArrowUpRight className="w-3 h-3" /> : <Truck className="w-3 h-3" />}
+                      {job.type || 'Nakliye'} İşi
+                    </span>
+                    <p className="text-xs text-neutral-500 font-medium flex items-center gap-1 mt-1.5">
                       <CalendarDays className="w-3.5 h-3.5" /> {job.date} - {job.time}
                     </p>
                     <p className="text-xs text-neutral-500 font-medium flex items-center gap-1 mt-0.5">
@@ -3042,6 +3108,67 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                       <p className="font-bold text-green-800 mb-1.5 flex items-center gap-1.5"><CheckCircle className="w-4 h-4"/> Çözüm Notu:</p>
                       <p className="text-neutral-700 leading-relaxed text-xs">{job.endJobDetails.damageResolutionNote}</p>
                     </div>
+                  )}
+                </div>
+
+                {/* YENİ: ADRES BİLGİSİ — hasarın hangi güzergâhta oluştuğu görülür.
+                    Alış (AL) ve Teslim (VR) adresleri, varsa açık adres metniyle birlikte
+                    gösterilir. Depo işlerinde teslim adresi olmayabilir; o durumda yalnızca
+                    alış adresi çıkar. Ek yükleme/boşaltma noktası varsa sayısı belirtilir. */}
+                <div className="text-[11px] text-neutral-600 flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-neutral-200">
+                  <div className="flex items-start gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-neutral-400 shrink-0 mt-0.5" />
+                    <div className="flex-1 leading-tight min-w-0">
+                      <span className="text-black font-bold block mb-0.5">
+                        {job.extraLoadingAddresses?.length > 0 ? '1. AL:' : 'AL:'} {job.fromProvince || '-'}/{job.fromDistrict || '-'}
+                      </span>
+                      {job.fromAddress && <span className="text-[10px] font-medium text-neutral-500 block">{job.fromAddress}</span>}
+                      {(job.fromRoomCount || job.fromFloor) && (
+                        <span className="text-[9px] font-medium text-neutral-400 block mt-0.5">{[job.fromRoomCount, job.fromFloor].filter(Boolean).join(' • ')}</span>
+                      )}
+                      {job.extraLoadingAddresses?.length > 0 && (
+                        <span className="text-[9px] font-bold text-neutral-500 block mt-0.5">+{job.extraLoadingAddresses.length} ek yükleme noktası</span>
+                      )}
+                    </div>
+                  </div>
+                  {job.toProvince && (
+                    <div className="flex items-start gap-1.5 pt-1.5 border-t border-neutral-200/80">
+                      <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                      <div className="flex-1 leading-tight min-w-0">
+                        <span className="text-red-900 font-bold block mb-0.5">
+                          {job.extraUnloadingAddresses?.length > 0 ? '1. VR:' : 'VR:'} {job.toProvince}/{job.toDistrict || '-'}
+                        </span>
+                        {job.toAddress && <span className="text-[10px] font-medium text-red-700/70 block">{job.toAddress}</span>}
+                        {(job.toRoomCount || job.toFloor) && (
+                          <span className="text-[9px] font-medium text-red-600/60 block mt-0.5">{[job.toRoomCount, job.toFloor].filter(Boolean).join(' • ')}</span>
+                        )}
+                        {job.extraUnloadingAddresses?.length > 0 && (
+                          <span className="text-[9px] font-bold text-red-600/70 block mt-0.5">+{job.extraUnloadingAddresses.length} ek boşaltma noktası</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* YENİ: İŞE GİDEN EKİP — hasarın hangi ekip tarafından yapıldığı görülür.
+                    Ekip bilgisi kaydın kendisinde (job.teamNames / job.team) zaten mevcut;
+                    diğer ekranlardaki (İş Onaylama Tahtası vb.) gösterim deseniyle aynıdır. */}
+                <div className="text-xs">
+                  <p className="font-bold text-neutral-500 mb-1.5 flex items-center gap-1.5 uppercase text-[10px] tracking-wide">
+                    <Users className="w-3.5 h-3.5" /> İşe Giden Ekip
+                  </p>
+                  {(job.teamNames || (job.team && job.team !== 'Atanmadı' ? [job.team] : [])).length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {(job.teamNames || [job.team]).map((name, i) => (
+                        <span key={i} className="flex items-center gap-1 font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded-lg border border-blue-100">
+                          <User className="w-3.5 h-3.5" /> {name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="flex items-center gap-1 w-max font-bold bg-yellow-50 text-yellow-700 px-2 py-1 rounded-lg border border-yellow-100">
+                      <User className="w-3.5 h-3.5" /> Ekip Atanmamış
+                    </span>
                   )}
                 </div>
 
@@ -8238,6 +8365,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const handleDenetimMedyaSil = (url) => setDenetimMedya(prev => prev.filter(x => x !== url));
     const [denetimDogruluk, setDenetimDogruluk] = useState('');   // Kayıt doğruluğu cevabı
     const [denetimKaydediliyor, setDenetimKaydediliyor] = useState(false);
+    // YENİ: Sıfırlama modu. "Sıfırla" butonuna basıldığında true olur; form boş bırakılıp
+    // kaydedilirse mevcut denetim kaydı Firebase'den TAMAMEN SİLİNİR (hiç denetlenmemiş gibi olur).
+    const [denetimSifirlandi, setDenetimSifirlandi] = useState(false);
     const [mevcutDenetimler, setMevcutDenetimler] = useState([]); // Bu tarihteki kayıtlı denetimler
 
     // Görüntülenen günün denetim kayıtları canlı dinlenir (kart üzerinde "Denetlendi" rozeti için)
@@ -8270,6 +8400,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         setDenetimMedya([]);
       }
       setDenetimJob(job);
+      setDenetimSifirlandi(false); // YENİ: Pencere her açıldığında sıfırlama modu kapalı başlar
+    };
+
+    // YENİ: DENETİMİ SIFIRLA — Formdaki tüm girdileri (puanlar, notlar, kayıt doğruluğu,
+    // fotoğraf/video, saha raporu) temizler ve sıfırlama modunu açar. Kullanıcı bu haldeyken
+    // "Sıfırlamayı Kaydet" derse, bu işe ait denetim kaydı Firebase'den silinir ve iş
+    // hiç denetlenmemiş duruma döner. Yanlışlıkla basılmaya karşı onay sorulur.
+    const handleDenetimSifirla = () => {
+      const mevcut = denetimJob ? jobDenetimi(denetimJob.id) : null;
+      const mesaj = mevcut
+        ? 'Bu işin denetimi tamamen sıfırlanacak.\n\nFormdaki tüm bilgiler silinir ve "Sıfırlamayı Kaydet" dediğinizde kayıtlı denetim de silinerek iş HİÇ DENETLENMEMİŞ duruma döner.\n\nDevam edilsin mi?'
+        : 'Formdaki tüm girdiler (puanlar, notlar, fotoğraflar, rapor) temizlenecek.\n\nDevam edilsin mi?';
+      if (!window.confirm(mesaj)) return;
+      setDenetimPuanlar({});
+      setDenetimRapor('');
+      setDenetimDogruluk('');
+      setDenetimMedya([]);
+      setDenetimSifirlandi(true);
     };
 
     // Denetim penceresindeki ekip listesi: sistemli personel + sistem dışı isimler
@@ -8291,6 +8439,36 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const handleSaveDenetim = async () => {
       if (!denetimJob) return;
       const ekip = denetimEkibi(denetimJob);
+
+      // ====================================================================
+      // YENİ: SIFIRLAMA KAYDI
+      // "Sıfırla" butonuna basılmış ve form tamamen boşsa; normal doğrulamalar
+      // (rapor/medya/puan zorunluluğu) ATLANIR ve bu işe ait kayıtlı denetim
+      // Firebase'den SİLİNİR. Böylece iş hiç denetlenmemiş duruma döner.
+      // Kullanıcı sıfırladıktan sonra yeniden bilgi girmişse form boş olmayacağı
+      // için bu dal çalışmaz; normal kaydetme akışı devam eder.
+      // ====================================================================
+      const formBos = !denetimRapor.trim() && !denetimDogruluk && denetimMedya.length === 0
+        && !ekip.some(p => (parseInt(denetimPuanlar[p.id]?.puan) || 0) > 0);
+      if (denetimSifirlandi && formBos) {
+        const mevcutKayit = jobDenetimi(denetimJob.id);
+        setDenetimKaydediliyor(true);
+        try {
+          if (mevcutKayit) {
+            // Kayıtlı denetimi tamamen sil — iş "Denetlendi" rozetini kaybeder
+            await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri', mevcutKayit.id));
+            addSystemLog?.('Saha Denetimi Sıfırlandı', `${denetimJob.customerName || ''} işine ait şef denetimi silindi; iş hiç denetlenmemiş duruma döndürüldü.`);
+          }
+          setDenetimSifirlandi(false);
+          setDenetimJob(null);
+        } catch (e) {
+          console.error('Saha denetimi sıfırlanamadı:', e);
+          alert('Denetim sıfırlanamadı. Lütfen tekrar deneyin.');
+        }
+        setDenetimKaydediliyor(false);
+        return;
+      }
+
       // Raporlama zorunlu: şef sahada gördüklerini yazmadan pencere kapatılamaz
       if (!denetimRapor.trim()) { alert('Lütfen "Saha Raporu" bölümünü doldurun. Sahada gördüklerinizi yazmadan denetim kaydedilemez.'); return; }
       if (!denetimDogruluk) { alert('Lütfen işin kaydının doğru açılıp açılmadığını değerlendirin.'); return; }
@@ -8331,6 +8509,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), kayit);
           addSystemLog?.('Saha Denetimi Yapıldı', `${kayit.jobCustomerName} işi ${kayit.sefAdi} tarafından denetlendi (${puanlananlar.length} personel, ortalama ${kayit.ortalamaPuan} puan).`);
         }
+        setDenetimSifirlandi(false); // YENİ: Normal kayıt yapıldıysa sıfırlama modu kapanır
         setDenetimJob(null);
       } catch (e) {
         console.error('Saha denetimi kaydedilemedi:', e);
@@ -8648,12 +8827,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                   <h3 className="font-black text-base flex items-center gap-2"><ClipboardCheck className="w-5 h-5" /> Şef Denetimi</h3>
                   <p className="text-[11px] font-bold text-purple-200 truncate">{job.customerName} • {job.type} • {job.date} {job.time}</p>
                 </div>
-                <button onClick={() => setDenetimJob(null)} className="text-purple-200 hover:text-white transition shrink-0"><X className="w-6 h-6" /></button>
+                <button onClick={() => { setDenetimJob(null); setDenetimSifirlandi(false); }} className="text-purple-200 hover:text-white transition shrink-0"><X className="w-6 h-6" /></button>
               </div>
 
               {/* İçerik — kaydırmalı */}
               <div className="flex-1 min-h-0 overflow-y-auto custom-scrollbar p-4 space-y-5">
-                {mevcut && (
+                {/* YENİ: SIFIRLAMA MODU UYARISI — "Sıfırla" butonuna basıldığında görünür */}
+                {denetimSifirlandi && (
+                  <div className="bg-red-50 border-2 border-red-300 rounded-xl p-3 text-xs font-bold text-red-800 flex items-start gap-2">
+                    <History className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>
+                      Denetim <b>sıfırlandı</b>. Bu haliyle <b>"Sıfırlamayı Kaydet ve Kapat"</b> derseniz bu işe ait denetim kaydı silinir ve iş hiç denetlenmemiş duruma döner.
+                      Vazgeçmek isterseniz pencereyi kapatın; yeniden denetim girmek isterseniz aşağıdaki alanları doldurmanız yeterlidir.
+                    </span>
+                  </div>
+                )}
+                {mevcut && !denetimSifirlandi && (
                   <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-xs font-bold text-emerald-800">
                     Bu iş {new Date(mevcut.denetimTarihi).toLocaleString('tr-TR')} tarihinde <b>{mevcut.sefAdi}</b> tarafından denetlendi. Değişiklik yapıp yeniden kaydedebilirsiniz.
                   </div>
@@ -8775,10 +8964,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
               {/* Kaydet */}
               <div className="p-3 border-t border-neutral-200 shrink-0 flex gap-2">
-                <button onClick={() => setDenetimJob(null)} className="px-4 py-3 bg-neutral-100 text-neutral-600 font-black rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
+                <button onClick={() => { setDenetimJob(null); setDenetimSifirlandi(false); }} className="px-4 py-3 bg-neutral-100 text-neutral-600 font-black rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
+                {/* YENİ: SIFIRLA — formdaki tüm girdileri temizler; kaydedildiğinde
+                    kayıtlı denetim silinir ve iş hiç denetlenmemiş duruma döner. */}
+                <button type="button" onClick={handleDenetimSifirla} disabled={denetimKaydediliyor}
+                  className="px-4 py-3 bg-red-50 hover:bg-red-100 text-red-700 border-2 border-red-200 font-black rounded-xl transition text-sm flex items-center gap-2 disabled:opacity-60"
+                  title="Girilen tüm bilgileri temizle ve denetimi sıfırla">
+                  <History className="w-4 h-4" /> Sıfırla
+                </button>
                 <button onClick={handleSaveDenetim} disabled={denetimKaydediliyor}
-                  className="flex-1 py-3 bg-purple-700 hover:bg-purple-800 disabled:opacity-60 text-white font-black rounded-xl transition flex justify-center items-center gap-2">
-                  {denetimKaydediliyor ? <><Loader2 className="w-5 h-5 animate-spin" /> Kaydediliyor...</> : <><CheckCircle className="w-5 h-5" /> Denetimi Kaydet ve Kapat</>}
+                  className={`flex-1 py-3 disabled:opacity-60 text-white font-black rounded-xl transition flex justify-center items-center gap-2 ${denetimSifirlandi ? 'bg-red-600 hover:bg-red-700' : 'bg-purple-700 hover:bg-purple-800'}`}>
+                  {denetimKaydediliyor
+                    ? <><Loader2 className="w-5 h-5 animate-spin" /> {denetimSifirlandi ? 'Sıfırlanıyor...' : 'Kaydediliyor...'}</>
+                    : denetimSifirlandi
+                      ? <><History className="w-5 h-5" /> Sıfırlamayı Kaydet ve Kapat</>
+                      : <><CheckCircle className="w-5 h-5" /> Denetimi Kaydet ve Kapat</>}
                 </button>
               </div>
             </div>
@@ -11060,6 +11260,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const [muhForm, setMuhForm] = useState(emptyMuhForm);
     const [muhDosyaFilter, setMuhDosyaFilter] = useState('Tümü');
     const [muhDeleteId, setMuhDeleteId] = useState(null);
+    // YENİ: Muhasebe kaydına eklenecek dekont/belge listesi (birden fazla olabilir).
+    // Her öğe: { url, name, type } — type 'image' veya 'pdf'/'file'
+    const [muhBelgeler, setMuhBelgeler] = useState([]);
+    const [muhBelgeYukleniyor, setMuhBelgeYukleniyor] = useState(false);
+    // YENİ: "Dekontu Gör" penceresinde gösterilecek kayıt
+    const [muhBelgeGoster, setMuhBelgeGoster] = useState(null);
 
     // Dava dosyaları Firestore'dan canlı dinlenir
     useEffect(() => {
@@ -11211,15 +11417,52 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       addSystemLog?.('Dava Dosyası İşlemi', `${dosya.baslik}: ${metin.trim()}`);
     };
 
+    // ======================================================================
+    // YENİ: DEKONT / BELGE YÜKLEME (çoklu seçim destekli)
+    // Şirket Evrakları ekranındaki ile AYNI yükleme altyapısını kullanır
+    // (upload.php). Seçilen dosyalar tek tek yüklenir, dönen adresler
+    // muhBelgeler listesinde birikir ve "Kaydet"e basıldığında muhasebe
+    // kaydının içine 'belgeler' alanı olarak yazılır.
+    // PDF ve fotoğraf (jpg/png/heic vb.) birlikte seçilebilir.
+    // ======================================================================
+    const handleMuhBelgeUpload = async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      setMuhBelgeYukleniyor(true);
+      const yeniler = [];
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+          const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
+          const text = await res.text();
+          let uploadedUrl = file.name;
+          try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
+          // Dosya tipini uzantıdan belirle (önizlemede resim mi bağlantı mı gösterileceğini seçer)
+          const uzanti = (file.name.split('.').pop() || '').toLowerCase();
+          const tip = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'].includes(uzanti) ? 'image' : (uzanti === 'pdf' ? 'pdf' : 'file');
+          yeniler.push({ url: uploadedUrl, name: file.name, type: tip });
+        } catch (err) {
+          console.error('Dekont yüklenemedi:', file.name, err);
+          alert(`"${file.name}" yüklenemedi.`);
+        }
+      }
+      setMuhBelgeler(prev => [...prev, ...yeniler]);
+      setMuhBelgeYukleniyor(false);
+      e.target.value = ''; // Aynı dosya tekrar seçilebilsin diye giriş sıfırlanır
+    };
+
     // Muhasebe kaydı ekle (masraf veya ödeme). Kim girdiyse ismi kayda işlenir (avukat dahil).
     const handleSaveMuhasebe = async () => {
       if (!muhForm.tutar || isNaN(parseFloat(muhForm.tutar))) return;
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe'), {
         ...muhForm, tutar: parseFloat(muhForm.tutar),
+        belgeler: muhBelgeler, // YENİ: Yüklenen dekont/belge listesi kayda eklenir
         ekleyen: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
       });
-      addSystemLog?.('Avukat Muhasebe', `${muhForm.yon === 'masraf' ? 'Masraf' : 'Ödeme'} kaydı eklendi: ${parseFloat(muhForm.tutar).toLocaleString('tr-TR')} TL (${muhForm.tur}).`);
+      addSystemLog?.('Avukat Muhasebe', `${muhForm.yon === 'masraf' ? 'Masraf' : 'Ödeme'} kaydı eklendi: ${parseFloat(muhForm.tutar).toLocaleString('tr-TR')} TL (${muhForm.tur})${muhBelgeler.length ? ` — ${muhBelgeler.length} belge eklendi` : ''}.`);
       setMuhForm(emptyMuhForm);
+      setMuhBelgeler([]); // YENİ: Belge listesi de temizlenir
     };
 
     // --- HESAPLAMALAR ---
@@ -11484,6 +11727,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             <button onClick={handleSaveMuhasebe} disabled={!muhForm.tutar} className="p-2.5 bg-purple-700 text-white rounded-xl text-xs font-black hover:bg-purple-800 transition disabled:opacity-40">Kaydet</button>
           </div>
           <input value={muhForm.aciklama} onChange={e => setMuhForm({ ...muhForm, aciklama: e.target.value })} placeholder="Açıklama (opsiyonel — örn: Nisan ayı sabit ücret, X dosyası bilirkişi ücreti)" className="w-full p-2.5 border border-neutral-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-purple-600" />
+
+          {/* YENİ: DEKONT / BELGE YÜKLEME — birden fazla PDF ve fotoğraf seçilebilir */}
+          <div className="border-2 border-dashed border-purple-200 rounded-xl p-3 bg-purple-50/40 space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <label className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer ${muhBelgeYukleniyor ? 'bg-neutral-200 text-neutral-400 pointer-events-none' : 'bg-purple-700 text-white hover:bg-purple-800'}`}>
+                {muhBelgeYukleniyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlusCircle className="w-4 h-4" />}
+                {muhBelgeYukleniyor ? 'Yükleniyor...' : 'Dekont / Belge Yükle'}
+                {/* multiple: birden fazla dosya birlikte seçilebilir. accept: fotoğraf + PDF */}
+                <input type="file" multiple accept="image/*,application/pdf,.pdf" className="hidden" onChange={handleMuhBelgeUpload} disabled={muhBelgeYukleniyor} />
+              </label>
+              <span className="text-[10px] font-bold text-neutral-500">
+                {muhBelgeler.length > 0 ? `${muhBelgeler.length} belge eklendi — kaydettiğinizde kayda bağlanacak` : 'PDF ve fotoğraf seçebilirsiniz (birden fazla)'}
+              </span>
+            </div>
+            {/* Yüklenen belgelerin küçük önizlemeleri — kaydetmeden önce çıkarılabilir */}
+            {muhBelgeler.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {muhBelgeler.map((b, i) => (
+                  <div key={i} className="relative group flex items-center gap-1.5 bg-white border border-purple-200 rounded-lg pl-1.5 pr-6 py-1.5 shadow-sm">
+                    {b.type === 'image'
+                      ? <img src={b.url} alt={b.name} className="w-8 h-8 object-cover rounded" />
+                      : <span className="w-8 h-8 rounded bg-red-50 text-red-600 flex items-center justify-center"><FileText className="w-4 h-4" /></span>}
+                    <span className="text-[10px] font-bold text-neutral-700 max-w-[110px] truncate">{b.name}</span>
+                    {/* Yanlış yüklenen belgeyi listeden çıkar */}
+                    <button type="button" onClick={() => setMuhBelgeler(prev => prev.filter((_, x) => x !== i))}
+                      className="absolute right-1 top-1/2 -translate-y-1/2 text-neutral-300 hover:text-red-600 transition" title="Bu belgeyi çıkar">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* DOSYAYA GÖRE FİLTRE */}
@@ -11507,12 +11783,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <th className="p-3 font-bold">Dosya</th>
                 <th className="p-3 font-bold">Açıklama</th>
                 <th className="p-3 font-bold">Ekleyen</th>
+                {/* YENİ: Kayda bağlı dekont/belge varsa buradan görüntülenir */}
+                <th className="p-3 font-bold text-center">Dekont</th>
                 <th className="p-3 font-bold text-right">Tutar</th>
                 <th className="p-3 font-bold rounded-tr-2xl"></th>
               </tr>
             </thead>
             <tbody>
-              {muhFiltered.length === 0 && <tr><td colSpan={8} className="p-6 text-center text-neutral-400 font-bold">Kayıt bulunamadı.</td></tr>}
+              {muhFiltered.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-neutral-400 font-bold">Kayıt bulunamadı.</td></tr>}
               {muhFiltered.map(m => (
                 <tr key={m.id} className="border-b border-neutral-100 hover:bg-neutral-50">
                   <td className="p-3 font-bold text-neutral-600">{tarihGoster(m.tarih)}</td>
@@ -11521,6 +11799,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                   <td className="p-3 text-neutral-500 font-bold">{dosyaAdi(m.dosyaId)}</td>
                   <td className="p-3 text-neutral-500 max-w-[200px] truncate">{m.aciklama || '—'}</td>
                   <td className="p-3 font-bold text-purple-700">{m.ekleyen || '—'}</td>
+                  {/* YENİ: DEKONTU GÖR — kayda belge eklenmişse buton, yoksa tire görünür */}
+                  <td className="p-3 text-center">
+                    {m.belgeler?.length > 0 ? (
+                      <button onClick={() => setMuhBelgeGoster(m)}
+                        className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition"
+                        title="Bu kayda ait dekont/belgeleri görüntüle">
+                        <Eye className="w-3 h-3" /> Dekontu Gör ({m.belgeler.length})
+                      </button>
+                    ) : <span className="text-neutral-300 font-bold">—</span>}
+                  </td>
                   <td className={`p-3 text-right font-black ${m.yon === 'masraf' ? 'text-amber-600' : 'text-emerald-600'}`}>{m.yon === 'masraf' ? '+' : '−'}{paraFormat(m.tutar)} ₺</td>
                   <td className="p-3 text-right"><button onClick={() => setMuhDeleteId(m.id)} className="text-red-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button></td>
                 </tr>
@@ -11529,6 +11817,48 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
           </table>
         </div>
         </>)}
+
+        {/* YENİ: DEKONT GÖRÜNTÜLEME PENCERESİ
+            Kayda bağlı tüm belgeleri listeler. Fotoğraflar doğrudan gösterilir
+            (tıklayınca yeni sekmede tam boyut açılır), PDF'ler görüntüleme
+            bağlantısı olarak sunulur. */}
+        {muhBelgeGoster && (
+          <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setMuhBelgeGoster(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+              <div className="p-4 border-b border-neutral-200 flex items-center justify-between shrink-0">
+                <div className="min-w-0">
+                  <h3 className="font-black text-black flex items-center gap-2 text-sm"><Wallet className="w-5 h-5 text-purple-700" /> Ödeme Dekontu / Belgeler</h3>
+                  <p className="text-[11px] font-bold text-neutral-500 mt-1 truncate">
+                    {tarihGoster(muhBelgeGoster.tarih)} • {muhBelgeGoster.tur} • {muhBelgeGoster.yon === 'masraf' ? '+' : '−'}{paraFormat(muhBelgeGoster.tutar)} ₺
+                  </p>
+                </div>
+                <button onClick={() => setMuhBelgeGoster(null)} className="text-neutral-400 hover:text-black shrink-0"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(muhBelgeGoster.belgeler || []).map((b, i) => (
+                  <a key={i} href={b.url} target="_blank" rel="noopener noreferrer"
+                    className="border border-neutral-200 rounded-xl overflow-hidden hover:border-purple-400 hover:shadow-md transition group">
+                    {b.type === 'image' ? (
+                      <img src={b.url} alt={b.name} className="w-full h-40 object-cover bg-neutral-100" />
+                    ) : (
+                      <div className="w-full h-40 bg-red-50 flex flex-col items-center justify-center gap-2 text-red-600">
+                        <FileText className="w-10 h-10" />
+                        <span className="text-[10px] font-black uppercase">{b.type === 'pdf' ? 'PDF Belge' : 'Dosya'}</span>
+                      </div>
+                    )}
+                    <div className="p-2 flex items-center gap-1.5 bg-white">
+                      <Eye className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                      <span className="text-[11px] font-bold text-neutral-700 truncate group-hover:text-purple-700">{b.name || 'Belge'}</span>
+                    </div>
+                  </a>
+                ))}
+              </div>
+              <div className="p-3 border-t border-neutral-200 shrink-0">
+                <button onClick={() => setMuhBelgeGoster(null)} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm transition">Kapat</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* YENİ / DÜZENLE DOSYA MODALI */}
         {showForm && (
