@@ -2,7 +2,373 @@ import React, { useState, useEffect } from 'react';
 import { Truck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, Tag, History} from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './shared.jsx';
+
+  // ==========================================================================
+  // YENİ BİLEŞEN: MAAŞ RAPORU (Genel Ciro Raporu sayfasındaki 2. sekme)
+  // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir; mevcut hiçbir koda
+  // dokunulmadı. Maaş Tablosu'ndaki (maas + mesai koleksiyonları) verileri
+  // okuyarak dönem bazında (Aylık/Yıllık) toplam personel maliyetini,
+  // Mavi Yaka / Beyaz Yaka kırılımını, ödenen ve kalan tutarları raporlar.
+  // Hesaplama mantığı MaasView.calcRow ile birebir aynı tutulmuştur; böylece
+  // Maaş Tablosu'nda görünen rakamlarla bu rapor her zaman tutarlı olur.
+  // ==========================================================================
+  const MaasRaporuView = ({ personnelList }) => {
+    const bugun = new Date();
+    const [raporDonem, setRaporDonem] = useState('month'); // 'month' | 'year'
+    const [raporYil, setRaporYil] = useState(bugun.getFullYear());
+    const [raporAy, setRaporAy] = useState(bugun.getMonth() + 1);
+    const [yakaFiltre, setYakaFiltre] = useState('Tümü'); // Tümü | Mavi Yaka | Beyaz Yaka
+    const [yukleniyor, setYukleniyor] = useState(true);
+    // Firebase'den okunan ham veriler: anahtar = `${prefix}${ay}` (örn. '7' veya 'beyaz_7')
+    const [maasKayitlari, setMaasKayitlari] = useState({});
+    const [mesaiKayitlari, setMesaiKayitlari] = useState({});
+
+    const aylar = [
+      { val: 1, label: 'Ocak' }, { val: 2, label: 'Şubat' }, { val: 3, label: 'Mart' },
+      { val: 4, label: 'Nisan' }, { val: 5, label: 'Mayıs' }, { val: 6, label: 'Haziran' },
+      { val: 7, label: 'Temmuz' }, { val: 8, label: 'Ağustos' }, { val: 9, label: 'Eylül' },
+      { val: 10, label: 'Ekim' }, { val: 11, label: 'Kasım' }, { val: 12, label: 'Aralık' }
+    ];
+    const yillar = Array.from({ length: 10 }, (_, i) => 2024 + i);
+
+    // Mavi yaka pozisyonları (MaasView'daki filtreyle birebir aynı liste)
+    const MAVI_POZISYONLAR = ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'];
+    const yakaTipi = (p) => (p.collarType === 'Mavi Yaka' || (!p.collarType && MAVI_POZISYONLAR.includes(p.position))) ? 'Mavi Yaka' : 'Beyaz Yaka';
+
+    // Seçilen döneme ait maas + mesai dokümanlarını (her iki yaka için) Firebase'den yükle
+    useEffect(() => {
+      let iptal = false;
+      const yukle = async () => {
+        setYukleniyor(true);
+        const hedefAylar = raporDonem === 'year' ? Array.from({ length: 12 }, (_, i) => i + 1) : [raporAy];
+        const prefixler = ['', 'beyaz_']; // '' = Mavi Yaka, 'beyaz_' = Beyaz Yaka (mevcut doküman adlandırması)
+        const maasSonuc = {};
+        const mesaiSonuc = {};
+        try {
+          await Promise.all(hedefAylar.flatMap(ay => prefixler.flatMap(pref => ([
+            getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${pref}${raporYil}_${ay}`))
+              .then(s => { if (s.exists()) maasSonuc[`${pref}${ay}`] = s.data().records || {}; })
+              .catch(() => {}),
+            getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${pref}${raporYil}_${ay}`))
+              .then(s => { if (s.exists()) mesaiSonuc[`${pref}${ay}`] = s.data().records || {}; })
+              .catch(() => {})
+          ]))));
+        } catch (e) { console.error('Maaş raporu verisi yüklenemedi:', e); }
+        if (!iptal) { setMaasKayitlari(maasSonuc); setMesaiKayitlari(mesaiSonuc); setYukleniyor(false); }
+      };
+      yukle();
+      return () => { iptal = true; };
+    }, [raporDonem, raporYil, raporAy]);
+
+    // ------------------------------------------------------------------
+    // TEK SATIR HESABI — MaasView.calcRow ile birebir aynı formüller.
+    // Ek olarak: Mesai Ücreti ile Prim Ücreti raporda AYRI gösterilir.
+    // (Orijinal mesaiUcreti = mesai + prim'i birlikte içerir; burada
+    // primTL = (maas/200)*primSaat olarak ayrıştırılır, toplam değişmez.)
+    // ------------------------------------------------------------------
+    const hesaplaKisiAy = (person, row, mesaiRecord, yil, ay) => {
+      let devamsiz = 0, raporSay = 0, ucretsizIzin = 0, toplamMesaiSaati = 0, fazlaGun = 0;
+      Object.values(mesaiRecord || {}).forEach(val => {
+        if (typeof val === 'object' && val !== null) {
+          if (val.status === 'D') devamsiz++;
+          else if (val.status === 'R') raporSay++;
+          else if (val.status === 'Üİ' || val.status === 'İB') ucretsizIzin++;
+          else if (val.status === 'FG') fazlaGun++;
+          else if (val.status === 'FGM') { fazlaGun++; toplamMesaiSaati += parseFloat(val.hours) || 0; }
+          else if (val.status === 'FM') toplamMesaiSaati += parseFloat(val.hours) || 0;
+          else if (val.status === 'EM') toplamMesaiSaati -= parseFloat(val.hours) || 0;
+        } else {
+          if (val === 'D') devamsiz++;
+          else if (val === 'R') raporSay++;
+          else if (val === 'Üİ' || val === 'İB') ucretsizIzin++;
+          else if (val === 'FG') fazlaGun++;
+          else if (val === 'FGM') fazlaGun++;
+        }
+      });
+      // Manuel girilmiş değerler otomatik hesaplananları ezer (MaasView ile aynı davranış)
+      const devamsizlikSayisi = row.devamsizlik !== undefined && row.devamsizlik !== '' ? parseFloat(row.devamsizlik) : devamsiz;
+      const rapor = row.rapor !== undefined && row.rapor !== '' ? parseFloat(row.rapor) : raporSay;
+      const fazlaGunSayisi = row.fazlaGun !== undefined && row.fazlaGun !== '' ? parseFloat(row.fazlaGun) : fazlaGun;
+      // İşe giriş tarihinden önceki günler ücretsiz izin gibi sayılır
+      let iseGirisGun = 0;
+      if (person.startDate) {
+        const s = new Date(person.startDate + 'T00:00:00');
+        if (!isNaN(s.getTime())) {
+          const ayGunSayisi = new Date(yil, ay, 0).getDate();
+          const baslangic = new Date(s.getFullYear(), s.getMonth(), s.getDate());
+          for (let d = 1; d <= ayGunSayisi; d++) {
+            if (new Date(yil, ay - 1, d) < baslangic) iseGirisGun++;
+          }
+        }
+      }
+      const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzin - iseGirisGun);
+      const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : person.maas) || 0;
+      const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
+      const nakitAvans = parseFloat(row.nakitAvans) || 0;
+      const resmiAvans = parseFloat(row.resmiAvans) || 0;
+      const prim = parseFloat(row.prim) || 0; // Prim SAAT cinsindendir
+      const yol = parseFloat(row.yol !== undefined && row.yol !== '' ? row.yol : person.yol) || 0;
+      const yemek = parseFloat(row.yemek !== undefined && row.yemek !== '' ? row.yemek : person.yemek) || 0;
+      const hesaplananBanka = (bankaParasiBase / 30) * mesaiGunSayisi;
+      const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
+      const bankaKalan = hesaplananBanka - icraKesintisi - resmiAvans;
+      const toplamSaat = toplamMesaiSaati + (fazlaGunSayisi * 10) - (devamsizlikSayisi * 3) + prim;
+      const mesaiUcretiToplam = (maas / 200) * toplamSaat; // prim dahil (orijinal formül)
+      const primTL = (maas / 200) * prim;                   // primin TL karşılığı (raporda ayrı gösterilir)
+      const mesaiUcreti = mesaiUcretiToplam - primTL;       // primden arındırılmış saf mesai ücreti
+      const netMaas = (maas / 30) * mesaiGunSayisi;
+      const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcretiToplam;
+      const maliyet = netMaas + mesaiUcretiToplam + yol + yemek; // toplam işveren maliyeti
+      // Ödeme tikleriyle GİDERE işlenmiş (fiilen ödenmiş) tutarlar
+      const odenen = (parseFloat(row.yemekOdenenTutar) || 0) + (parseFloat(row.yolOdenenTutar) || 0)
+        + (parseFloat(row.bankaOdenenTutar) || 0) + (parseFloat(row.nakitOdenenTutar) || 0)
+        + (parseFloat(row.icraOdenenTutar) || 0);
+      return { netMaas, mesaiUcreti, primTL, yol, yemek, nakitAvans, resmiAvans, icraKesintisi, hesaplananBanka, bankaKalan, kalanNakit, maliyet, odenen };
+    };
+
+    // ------------------------------------------------------------------
+    // DÖNEM TOPLAMA: seçili aya (veya yıllıkta 12 aya) ait tüm kişilerin
+    // hesaplarını topla; kişi bazlı satırlar ve yaka bazlı özetler üret.
+    // ------------------------------------------------------------------
+    const hedefAylar = raporDonem === 'year' ? Array.from({ length: 12 }, (_, i) => i + 1) : [raporAy];
+    const kisiSatirlari = {}; // personId -> birikimli toplamlar
+    const bosToplam = () => ({ netMaas: 0, mesaiUcreti: 0, primTL: 0, yol: 0, yemek: 0, nakitAvans: 0, resmiAvans: 0, icraKesintisi: 0, kalanNakit: 0, bankaKalan: 0, maliyet: 0, odenen: 0 });
+
+    personnelList.filter(p => p.position !== 'Firma Sahibi').forEach(person => {
+      const yaka = yakaTipi(person);
+      if (yakaFiltre !== 'Tümü' && yaka !== yakaFiltre) return; // Yaka filtresi
+      const prefix = yaka === 'Mavi Yaka' ? '' : 'beyaz_';
+      hedefAylar.forEach(ay => {
+        if (!isPersonnelVisibleInMonth(person, raporYil, ay)) return; // O ay çalışmıyorsa dahil etme
+        const row = (maasKayitlari[`${prefix}${ay}`] || {})[person.id];
+        const mesaiRec = (mesaiKayitlari[`${prefix}${ay}`] || {})[person.id];
+        if (!row && !mesaiRec && !(parseFloat(person.maas) > 0)) return; // Hiç verisi yoksa atla
+        const c = hesaplaKisiAy(person, row || {}, mesaiRec || {}, raporYil, ay);
+        if (!kisiSatirlari[person.id]) kisiSatirlari[person.id] = { person, yaka, ...bosToplam() };
+        const t = kisiSatirlari[person.id];
+        Object.keys(bosToplam()).forEach(k => { t[k] += c[k]; });
+      });
+    });
+
+    const satirlar = Object.values(kisiSatirlari).sort((a, b) => b.maliyet - a.maliyet);
+    // Genel ve yaka bazlı toplamlar
+    const genel = bosToplam();
+    const mavi = bosToplam();
+    const beyaz = bosToplam();
+    satirlar.forEach(s => {
+      Object.keys(bosToplam()).forEach(k => {
+        genel[k] += s[k];
+        if (s.yaka === 'Mavi Yaka') mavi[k] += s[k]; else beyaz[k] += s[k];
+      });
+    });
+    const kalanOdeme = Math.max(0, genel.maliyet - genel.odenen); // Henüz ödenmemiş kısım
+    const tl = (n) => `₺${(n || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+
+    // Özet kartlarında gösterilecek kalemler (etiket, tutar, renk sınıfları)
+    const ozetKartlari = [
+      { etiket: 'Net Maaş Toplamı', tutar: genel.netMaas, ikon: DollarSign, renk: 'bg-green-50 text-green-600' },
+      { etiket: 'Mesai Ücreti Toplamı', tutar: genel.mesaiUcreti, ikon: Clock, renk: 'bg-purple-50 text-purple-600' },
+      { etiket: 'Prim Ücreti Toplamı', tutar: genel.primTL, ikon: TrendingUp, renk: 'bg-amber-50 text-amber-600' },
+      { etiket: 'Yemek Toplamı', tutar: genel.yemek, ikon: Package, renk: 'bg-orange-50 text-orange-600' },
+      { etiket: 'Yol Toplamı', tutar: genel.yol, ikon: Truck, renk: 'bg-blue-50 text-blue-600' },
+      { etiket: 'Avanslar (Nakit+Resmi)', tutar: genel.nakitAvans + genel.resmiAvans, ikon: Wallet, renk: 'bg-yellow-50 text-yellow-700' },
+      { etiket: 'İcra Kesintileri', tutar: genel.icraKesintisi, ikon: Ban, renk: 'bg-red-50 text-red-600' },
+      { etiket: 'Ödenen (Tikli Kalemler)', tutar: genel.odenen, ikon: CheckCircle, renk: 'bg-emerald-50 text-emerald-600' },
+    ];
+
+    return (
+      <div className="space-y-6 animate-in fade-in">
+        {/* BAŞLIK + FİLTRELER */}
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <h2 className="text-2xl font-bold text-black flex items-center gap-2">
+            <DollarSign className="w-7 h-7 text-green-600" /> Maaş Raporu
+          </h2>
+          <div className="flex flex-wrap items-center gap-3 bg-white p-2 rounded-2xl border border-neutral-200 shadow-sm w-full md:w-auto">
+            {/* Aylık / Yıllık dönem seçimi */}
+            <div className="flex bg-neutral-100 p-1 rounded-xl">
+              <button onClick={() => setRaporDonem('month')} className={`px-4 py-1.5 text-sm font-bold rounded-lg transition ${raporDonem === 'month' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>Aylık</button>
+              <button onClick={() => setRaporDonem('year')} className={`px-4 py-1.5 text-sm font-bold rounded-lg transition ${raporDonem === 'year' ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}>Yıllık</button>
+            </div>
+            <select value={raporYil} onChange={e => setRaporYil(parseInt(e.target.value))} className="px-3 py-1.5 text-sm font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none">
+              {yillar.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+            {raporDonem === 'month' && (
+              <select value={raporAy} onChange={e => setRaporAy(parseInt(e.target.value))} className="px-3 py-1.5 text-sm font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none">
+                {aylar.map(m => <option key={m.val} value={m.val}>{m.label}</option>)}
+              </select>
+            )}
+            {/* Mavi / Beyaz Yaka filtresi */}
+            <select value={yakaFiltre} onChange={e => setYakaFiltre(e.target.value)} className="px-3 py-1.5 text-sm font-bold bg-green-50 text-green-700 border border-green-200 rounded-xl outline-none">
+              <option value="Tümü">Tüm Personel</option>
+              <option value="Mavi Yaka">Sadece Mavi Yaka</option>
+              <option value="Beyaz Yaka">Sadece Beyaz Yaka</option>
+            </select>
+          </div>
+        </div>
+
+        {yukleniyor ? (
+          <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-16 flex flex-col items-center justify-center gap-3">
+            <Loader2 className="w-8 h-8 text-green-600 animate-spin" />
+            <p className="text-sm font-bold text-neutral-500">Maaş verileri yükleniyor...</p>
+          </div>
+        ) : (
+          <>
+            {/* BÜYÜK ÖZET: Toplam Maliyet + Kalan Ödeme + Yaka Kırılımı */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 flex items-center gap-4">
+                <div className="p-4 bg-green-50 text-green-600 rounded-2xl shrink-0"><Landmark className="w-8 h-8" /></div>
+                <div>
+                  <p className="text-neutral-500 text-sm font-bold mb-1">Dönem İçi Toplam Personel Maliyeti</p>
+                  <p className="text-3xl font-black text-green-600">{tl(genel.maliyet)}</p>
+                  <p className="text-[11px] font-bold text-neutral-400 mt-1">Net Maaş + Mesai + Prim + Yemek + Yol</p>
+                </div>
+              </div>
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 flex items-center gap-4">
+                <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl shrink-0"><CheckCircle className="w-8 h-8" /></div>
+                <div>
+                  <p className="text-neutral-500 text-sm font-bold mb-1">Fiilen Ödenen (Tikli)</p>
+                  <p className="text-3xl font-black text-emerald-600">{tl(genel.odenen)}</p>
+                  <p className="text-[11px] font-bold text-neutral-400 mt-1">Maaş tablosunda tik atılmış kalemler</p>
+                </div>
+              </div>
+              <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 flex items-center gap-4">
+                <div className="p-4 bg-red-50 text-red-600 rounded-2xl shrink-0"><Wallet className="w-8 h-8" /></div>
+                <div>
+                  <p className="text-neutral-500 text-sm font-bold mb-1">Kalan Ödenecek</p>
+                  <p className="text-3xl font-black text-red-600">{tl(kalanOdeme)}</p>
+                  <p className="text-[11px] font-bold text-neutral-400 mt-1">Toplam Maliyet − Ödenen</p>
+                </div>
+              </div>
+            </div>
+
+            {/* YAKA KIRILIMI: Mavi Yaka / Beyaz Yaka karşılaştırması */}
+            {yakaFiltre === 'Tümü' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {[{ ad: 'Mavi Yaka', t: mavi, renk: 'blue' }, { ad: 'Beyaz Yaka', t: beyaz, renk: 'neutral' }].map(y => (
+                  <div key={y.ad} className={`bg-white p-5 rounded-2xl shadow-sm border ${y.renk === 'blue' ? 'border-blue-200' : 'border-neutral-300'}`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className={`font-black text-sm uppercase tracking-wide flex items-center gap-2 ${y.renk === 'blue' ? 'text-blue-700' : 'text-neutral-700'}`}>
+                        <Users className="w-4 h-4" /> {y.ad}
+                      </h3>
+                      <span className={`text-lg font-black ${y.renk === 'blue' ? 'text-blue-700' : 'text-neutral-800'}`}>{tl(y.t.maliyet)}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-[11px] font-bold">
+                      <span className="text-neutral-500">Net Maaş</span><span className="text-right text-black">{tl(y.t.netMaas)}</span>
+                      <span className="text-neutral-500">Mesai Ücreti</span><span className="text-right text-purple-700">{tl(y.t.mesaiUcreti)}</span>
+                      <span className="text-neutral-500">Prim Ücreti</span><span className="text-right text-amber-700">{tl(y.t.primTL)}</span>
+                      <span className="text-neutral-500">Yemek</span><span className="text-right text-black">{tl(y.t.yemek)}</span>
+                      <span className="text-neutral-500">Yol</span><span className="text-right text-black">{tl(y.t.yol)}</span>
+                      <span className="text-neutral-500">Avanslar</span><span className="text-right text-yellow-700">{tl(y.t.nakitAvans + y.t.resmiAvans)}</span>
+                      <span className="text-neutral-500">Ödenen</span><span className="text-right text-emerald-700">{tl(y.t.odenen)}</span>
+                      <span className="text-neutral-500">Kalan</span><span className="text-right text-red-600">{tl(Math.max(0, y.t.maliyet - y.t.odenen))}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* KALEM BAZLI ÖZET KARTLARI: Neye ne kadar ödediğinizi tek bakışta gösterir */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {ozetKartlari.map(k => {
+                const Ikon = k.ikon;
+                return (
+                  <div key={k.etiket} className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex items-center gap-3">
+                    <div className={`p-2.5 rounded-xl shrink-0 ${k.renk}`}><Ikon className="w-5 h-5" /></div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-bold text-neutral-400 uppercase tracking-wide truncate">{k.etiket}</p>
+                      <p className="text-base font-black text-black">{tl(k.tutar)}</p>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* PERSONEL BAZLI DETAY TABLOSU */}
+            <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
+              <div className="p-4 border-b border-neutral-200 bg-neutral-50 flex items-center gap-2">
+                <User className="w-5 h-5 text-green-600" />
+                <h3 className="font-bold text-black">Personel Bazlı Maaş Ödeme Detayı</h3>
+                <span className="ml-auto text-xs font-bold text-neutral-400">{satirlar.length} personel</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600">
+                    <tr>
+                      <th className="p-3 font-bold">Personel</th>
+                      <th className="p-3 font-bold text-center">Yaka</th>
+                      <th className="p-3 font-bold text-right">Net Maaş</th>
+                      <th className="p-3 font-bold text-right">Mesai</th>
+                      <th className="p-3 font-bold text-right">Prim</th>
+                      <th className="p-3 font-bold text-right">Yemek</th>
+                      <th className="p-3 font-bold text-right">Yol</th>
+                      <th className="p-3 font-bold text-right">Avans</th>
+                      <th className="p-3 font-bold text-right">Toplam Maliyet</th>
+                      <th className="p-3 font-bold text-right">Ödenen</th>
+                      <th className="p-3 font-bold text-right">Kalan</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-neutral-100">
+                    {satirlar.map(s => (
+                      <tr key={s.person.id} className="hover:bg-neutral-50 transition">
+                        <td className="p-3 font-bold text-black">
+                          <div className="flex items-center gap-2">
+                            <div className="w-7 h-7 rounded-full bg-neutral-200 flex items-center justify-center text-neutral-600 font-bold overflow-hidden shrink-0 text-[10px]">
+                              {s.person.profileImage ? <img src={s.person.profileImage} alt={s.person.fullName} className="w-full h-full object-cover" /> : (s.person.fullName || '?').charAt(0)}
+                            </div>
+                            <span className="truncate">{s.person.fullName}</span>
+                          </div>
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className={`px-2 py-0.5 rounded-lg text-[10px] font-black border ${s.yaka === 'Mavi Yaka' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-neutral-100 text-neutral-700 border-neutral-300'}`}>{s.yaka}</span>
+                        </td>
+                        <td className="p-3 text-right font-bold">{tl(s.netMaas)}</td>
+                        <td className="p-3 text-right font-bold text-purple-700">{tl(s.mesaiUcreti)}</td>
+                        <td className="p-3 text-right font-bold text-amber-700">{tl(s.primTL)}</td>
+                        <td className="p-3 text-right">{tl(s.yemek)}</td>
+                        <td className="p-3 text-right">{tl(s.yol)}</td>
+                        <td className="p-3 text-right text-yellow-700">{tl(s.nakitAvans + s.resmiAvans)}</td>
+                        <td className="p-3 text-right font-black text-black">{tl(s.maliyet)}</td>
+                        <td className="p-3 text-right font-black text-emerald-600">{tl(s.odenen)}</td>
+                        <td className="p-3 text-right font-black text-red-600">{tl(Math.max(0, s.maliyet - s.odenen))}</td>
+                      </tr>
+                    ))}
+                    {satirlar.length === 0 && (
+                      <tr>
+                        <td colSpan="11" className="p-8 text-center text-neutral-500 font-medium">Bu döneme ait maaş kaydı bulunamadı. Maaş Tablosu'na veri girildikçe rapor burada oluşur.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                  {/* TOPLAM SATIRI */}
+                  {satirlar.length > 0 && (
+                    <tfoot>
+                      <tr className="bg-black text-white font-black">
+                        <td className="p-3 text-right" colSpan="2">GENEL TOPLAM :</td>
+                        <td className="p-3 text-right">{tl(genel.netMaas)}</td>
+                        <td className="p-3 text-right text-purple-300">{tl(genel.mesaiUcreti)}</td>
+                        <td className="p-3 text-right text-amber-300">{tl(genel.primTL)}</td>
+                        <td className="p-3 text-right">{tl(genel.yemek)}</td>
+                        <td className="p-3 text-right">{tl(genel.yol)}</td>
+                        <td className="p-3 text-right text-yellow-300">{tl(genel.nakitAvans + genel.resmiAvans)}</td>
+                        <td className="p-3 text-right text-green-400">{tl(genel.maliyet)}</td>
+                        <td className="p-3 text-right text-emerald-400">{tl(genel.odenen)}</td>
+                        <td className="p-3 text-right text-red-400">{tl(kalanOdeme)}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  };
+
   export const ReportingView = ({ jobs, personnelList }) => {
+    // YENİ: Rapor sekmesi — 'operasyon' (mevcut Operasyon & Ciro Raporu) ile
+    // 'maas' (yeni Maaş Raporu) arasında geçiş yapılır. Mevcut rapor koduna
+    // hiç dokunulmadı; Maaş Raporu tamamen ayrı bileşen olarak eklendi.
+    const [reportTab, setReportTab] = useState('operasyon');
     const [reportPeriod, setReportPeriod] = useState('month'); // 'month' or 'year'
     const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
     const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -114,8 +480,36 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
     const damagedDepo = damagedJobsInPeriod.filter(j => j.type === 'Depo').length;
     const damagedAsansor = damagedJobsInPeriod.filter(j => j.type === 'Asansör').length;
 
+    // YENİ: SEKME ÇUBUĞU — Operasyon & Ciro Raporu ile Maaş Raporu arasında
+    // geçiş sağlar. Her iki sekmede de aynı çubuk gösterilir.
+    const sekmeBar = (
+      <div className="flex bg-white p-1.5 rounded-2xl border border-neutral-200 shadow-sm w-fit">
+        <button type="button" onClick={() => setReportTab('operasyon')}
+          className={`px-4 py-2 text-sm font-bold rounded-xl transition flex items-center gap-2 ${reportTab === 'operasyon' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-500 hover:text-black'}`}>
+          <BarChart className="w-4 h-4" /> Operasyon & Ciro Raporu
+        </button>
+        <button type="button" onClick={() => setReportTab('maas')}
+          className={`px-4 py-2 text-sm font-bold rounded-xl transition flex items-center gap-2 ${reportTab === 'maas' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-500 hover:text-black'}`}>
+          <DollarSign className="w-4 h-4" /> Maaş Raporu
+        </button>
+      </div>
+    );
+
+    // YENİ: Maaş Raporu sekmesi seçiliyse yeni bileşeni göster (erken dönüş);
+    // mevcut Operasyon & Ciro Raporu kodu hiç değişmeden aşağıda çalışmaya devam eder.
+    if (reportTab === 'maas') {
+      return (
+        <div className="space-y-6 animate-in fade-in">
+          {sekmeBar}
+          <MaasRaporuView personnelList={personnelList} />
+        </div>
+      );
+    }
+
     return (
       <div className="space-y-6 animate-in fade-in">
+        {/* YENİ: Rapor sekmesi geçiş çubuğu (Operasyon & Ciro / Maaş Raporu) */}
+        {sekmeBar}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <h2 className="text-2xl font-bold text-black flex items-center gap-2">
             <BarChart className="w-7 h-7 text-red-600" /> Operasyon & Ciro Raporu
@@ -1984,6 +2378,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
   export const MaasView = ({ collarType, personnelList, db, appId, addSystemLog }) => {
     // YENİ: Düzenleme penceresi — hangi kategori düzenleniyorsa onun kimliği tutulur
     const [duzenlemeKategori, setDuzenlemeKategori] = useState(null);
+    // YENİ: PRİM hücresi artık TL (tutar) gösterir. Girişin hâlâ SAAT olarak
+    // yapılabilmesi için, tıklanan hücre bu state ile geçici olarak saat
+    // giriş kutusuna dönüşür; odaktan çıkılınca yeniden TL karşılığı gösterilir.
+    const [primDuzenlenenId, setPrimDuzenlenenId] = useState(null);
 
     // ========================================================================
     // YENİ: KATEGORİ TABLOSU ÜRETİCİ
@@ -2004,7 +2402,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
           {/* table-fixed: tüm veri sütunları BİREBİR AYNI genişlikte kalır (tarayıcı
               içeriğe göre sütun genişletmez). min-w yalnız 4 kategori birlikte
               gösterilirken uygulanır; tek kategorilik düzenleme penceresinde gerekmez. */}
-          <table className={`w-full table-fixed border-collapse text-[10px] md:text-[11px] ${katListe.length > 1 ? 'min-w-[1368px]' : ''} ${duzenlenebilir ? '' : 'pointer-events-none select-none'}`}>
+          <table className={`w-full table-fixed border-collapse text-[10px] md:text-[11px] ${katListe.length > 1 ? 'min-w-[1408px]' : ''} ${duzenlenebilir ? '' : 'pointer-events-none select-none'}`}>
             {/* colgroup: table-fixed düzeninde sütun genişlikleri YALNIZCA ilk satırdan
                 okunur; ilk satırda birleştirilmiş (colSpan) grup başlıkları olduğu için
                 genişlikler burada tek tek sabitlenir. Böylece Personel Bilgisi dışındaki
@@ -2012,10 +2410,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
             <colgroup>
               <col className="w-36" />
               {/* Finans Durumu sütunları (Yemek / Yol / Kalan Banka / Kalan Nakit) diğer
-                  sütunlardan %10 daha geniştir: 60px -> 66px. Bu sütunlarda tutarın yanında
-                  ödeme onay tiki de bulunduğu için ek genişlik gerekir. */}
+                  sütunlardan daha geniştir: 60px -> 76px (%15 ek genişletme yapıldı).
+                  Bu sütunlarda tutarın yanında ödeme onay tiki de bulunduğu için
+                  rakamların taşmaması adına ek genişlik gerekir. */}
               {gosterilenKategoriler.flatMap(k => Array.from({ length: k.sayi }).map((_, i) => (
-                <col key={`${k.id}-${i}`} className={k.id === 'finans' ? 'w-[66px]' : 'w-[60px]'} />
+                <col key={`${k.id}-${i}`} className={k.id === 'finans' ? 'w-[76px]' : 'w-[60px]'} />
               )))}
             </colgroup>
             <thead className="sticky top-0 z-30 shadow-md">
@@ -2052,8 +2451,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                 {g('izinler') && <th style={{ borderRight: '3px solid #2563eb' }} className="bg-purple-100 text-purple-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">YIL. İZİN</th>}
                 {g('hakedis') && <th className="bg-yellow-100 text-yellow-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">NAKİT AV.</th>}
                 {g('hakedis') && <th className="bg-yellow-100 text-yellow-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">RESMİ AV.</th>}
-                {g('hakedis') && <th className="bg-green-100 text-green-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">PRİM</th>}
-                {g('hakedis') && <th className="bg-purple-200 text-purple-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">MESAİ ÜCR.</th>}
+                {/* YENİ: Başlıklar artık her iki sütunun da TUTAR gösterdiğini belirtir.
+                    PRİM hücresine giriş yine SAAT olarak yapılır (tıklayınca saat kutusu açılır). */}
+                {g('hakedis') && <th className="bg-green-100 text-green-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]" title="Girilen prim saatinin TL karşılığı. Düzenlemek için hücreye tıklayın, saat olarak girin.">PRİM ₺</th>}
+                {g('hakedis') && <th className="bg-purple-200 text-purple-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]" title="Prim payı düşülmüş saf mesai ücreti.">MESAİ ÜCR.</th>}
                 {g('hakedis') && <th className="bg-red-100 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">BORÇ</th>}
                 {g('hakedis') && <th style={{ borderRight: '3px solid #6d28d9' }} className="bg-red-200 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">İCRA</th>}
                 {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[66px]">YEMEK</th>}
@@ -2142,12 +2543,32 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                     )}
                     {g('hakedis') && (
                       <td className="border-r border-neutral-300 px-0.5 py-0.5">
-                      <input type="number" value={row.prim || ''} onChange={e => handleCellChange(person.id, 'prim', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-green-50 focus:ring-1 focus:ring-green-400 rounded text-green-600 font-bold" placeholder="0" />
+                      {/* YENİ: PRİM SÜTUNU ARTIK TUTAR (TL) GÖSTERİR.
+                          Giriş mantığı değişmedi: hücreye tıklandığında yine SAAT girilir
+                          (row.prim saat olarak saklanır ve toplam saate eklenir).
+                          Odaktan çıkılınca saatin TL karşılığı (maas/200 * saat) görünür. */}
+                      {duzenlenebilir && primDuzenlenenId === person.id ? (
+                        <input type="number" autoFocus value={row.prim || ''}
+                          onChange={e => handleCellChange(person.id, 'prim', e.target.value)}
+                          onBlur={() => setPrimDuzenlenenId(null)}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setPrimDuzenlenenId(null); }}
+                          className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-green-50 focus:ring-1 focus:ring-green-400 rounded text-green-600 font-bold"
+                          placeholder="Saat" title="Prim SAAT olarak girilir; tabloda TL karşılığı gösterilir." />
+                      ) : (
+                        <div
+                          onClick={() => { if (duzenlenebilir) setPrimDuzenlenenId(person.id); }}
+                          className={`w-full h-6 flex items-center justify-center text-[10px] font-bold text-green-700 rounded ${duzenlenebilir ? 'cursor-pointer hover:bg-green-50' : ''}`}
+                          title={duzenlenebilir ? `Girilen prim: ${c.prim} saat — değiştirmek için tıklayın` : `Girilen prim: ${c.prim} saat`}>
+                          {c.primTL.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                        </div>
+                      )}
                     </td>
                     )}
                     {g('hakedis') && (
                       <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-purple-100 font-bold text-purple-900 text-center align-middle">
-                      {c.mesaiUcreti.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                      {/* YENİ: Mesai ücreti artık PRİM PAYI DÜŞÜLMÜŞ olarak gösterilir.
+                          Maaş hesabı değişmedi; Kalan Nakit hâlâ prim dahil tutarı kullanır. */}
+                      {c.mesaiUcretiSaf.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
                     </td>
                     )}
                     {g('hakedis') && (
@@ -2223,8 +2644,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
               <tfoot className="sticky bottom-0 z-40 shadow-[0_-4px_6px_-2px_rgba(0,0,0,0.1)]">
                 <tr className="bg-black text-white font-black text-[10px]">
                   {/* Toplam hücreleri son 4 sütuna (Yemek/Yol/Kalan Banka/Kalan Nakit) denk gelir;
-                      soldaki tüm sütunlar tek hücrede birleştirilir. */}
-                  <td colSpan={aktifSutunSayisi - 4} className="px-2 py-2 text-right border-r border-neutral-600">GENEL TOPLAMLAR :</td>
+                      soldaki tüm sütunlar tek hücrede birleştirilir.
+                      YENİ: Tik atılan (ödenen) kalemler bu toplamlara dahil edilmediği için
+                      burada görünen rakamlar her zaman KALAN ÖDENECEK tutarlardır. */}
+                  <td colSpan={aktifSutunSayisi - 4} className="px-2 py-2 text-right border-r border-neutral-600">KALAN ÖDENECEK TOPLAM :</td>
                   <td className="px-1 py-2 text-center border-r border-neutral-600 text-white text-[10px]">₺{totalYemek.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
                   <td className="px-1 py-2 text-center border-r border-neutral-600 text-white text-[10px]">₺{totalYol.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
                   <td className="px-1 py-2 text-center border-r border-neutral-600 text-yellow-400 text-[10px]">₺{totalKalanBanka.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</td>
@@ -2437,6 +2860,20 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
 
       // Mesai ücreti: Toplam saat üzerinden hesaplanan tutar (Prim saate eklendi)
       const mesaiUcreti = ((maas / 200) * toplamSaat);
+
+      // ====================================================================
+      // YENİ: SADECE GÖSTERİM İÇİN AYRIŞTIRMA
+      // Alttaki hesap mantığı AYNEN KORUNDU: prim hâlâ SAAT olarak girilir,
+      // saate eklenir ve mesaiUcreti içinde yer alır. Kalan Banka / Kalan Nakit
+      // / Maliyet hesapları aşağıda değişmeden mesaiUcreti'ni kullanmaya devam eder.
+      // Aşağıdaki iki değer YALNIZCA tabloda ayrı ayrı göstermek içindir:
+      //   primTL        -> girilen prim saatinin TL karşılığı
+      //   mesaiUcretiSaf-> prim payı düşülmüş saf mesai ücreti
+      // Toplamları eşittir: mesaiUcretiSaf + primTL = mesaiUcreti (değişim yok)
+      // ====================================================================
+      const primTL = (maas / 200) * prim;
+      const mesaiUcretiSaf = mesaiUcreti - primTL;
+
       const toplamAvans = nakitAvans + resmiAvans;
       const netMaas = (maas / 30) * mesaiGunSayisi;
       const maliyet = netMaas + mesaiUcreti + yol + yemek;
@@ -2448,11 +2885,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
         nakitAvans, resmiAvans, gunlukSaat, toplamSaat, mesaiGunSayisi, 
         maas, fazlaGunSayisi, devamsizlikSayisi, rapor, ucretsizIzinSayisi, prim, yol, yemek,
         hesaplananBanka, icraKesintisi, bankaKalan,
-        mesaiUcreti, toplamAvans, netMaas, maliyet, kalanNakit 
+        mesaiUcreti, primTL, mesaiUcretiSaf, toplamAvans, netMaas, maliyet, kalanNakit 
       };
     };
 
     // Alt Kısımda Gösterilecek Genel Toplamları Hesapla
+    // YENİ: Ödeme tiki ATILAN (ödenmiş) kalemler toplama DAHİL EDİLMEZ.
+    // Böylece alttaki toplam satırı her zaman "KALAN ÖDENECEK" tutarı gösterir;
+    // bir kaleme tik atıldığında ilgili sütunun toplamı anında azalır,
+    // tik kaldırıldığında tutar toplama geri eklenir.
     let totalKalanBanka = 0;
     let totalKalanNakit = 0;
     let totalYol = 0;
@@ -2460,17 +2901,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
 
     targetPersonnelList.forEach(person => {
         const c = calcRow(person.id);
-        totalKalanBanka += c.bankaKalan;
-        totalKalanNakit += c.kalanNakit;
-        totalYol += c.yol;
-        totalYemek += c.yemek;
+        const row = maasData[person.id] || {}; // Ödeme tiki durumları bu satırda tutulur
+        if (!row.yemekOdendi) totalYemek += c.yemek;          // Yemek ödenmediyse toplama ekle
+        if (!row.yolOdendi) totalYol += c.yol;                // Yol ödenmediyse toplama ekle
+        if (!row.bankaOdendi) totalKalanBanka += c.bankaKalan; // Banka ödenmediyse toplama ekle
+        if (!row.nakitOdendi) totalKalanNakit += c.kalanNakit; // Nakit ödenmediyse toplama ekle
     });
 
     const handleDownloadCSV = () => {
       const headers = [
         "PERSONEL BİLGİSİ", "İŞE BAŞLANGIÇ TARİHİ", "NAKİT AVANS", "RESMİ AVANS", "GÜNLÜK SAAT", "TOPLAM SAAT", 
         "MESAİ GÜN SAYISI", "FAZLA GÜN SAYISI", "DEVAMSIZLIK", "RAPOR", "YILLIK İZİN", "BANKA PARASI", 
-        "PRİM", "MAAŞ", "MESAİ ÜCRETİ", "YEMEK PARASI", "YOL PARASI", "BORÇLANMA", "İCRA TUTARI", "KALAN BANKA", "KALAN NAKİT"
+        "PRİM SAAT", "PRİM ÜCRETİ", "MAAŞ", "MESAİ ÜCRETİ", "YEMEK PARASI", "YOL PARASI", "BORÇLANMA", "İCRA TUTARI", "KALAN BANKA", "KALAN NAKİT"
       ];
       let csvContent = "\uFEFF" + headers.join(";") + "\n";
       
@@ -2490,9 +2932,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
               c.rapor,
               yRow.yillikIzin || 0,
               c.hesaplananBanka.toFixed(2),
-              c.prim,
+              c.prim,                       // Girilen prim SAATİ (mantık aynı kaldı)
+              c.primTL.toFixed(2),          // YENİ: Primin TL karşılığı
               c.maas,
-              c.mesaiUcreti.toFixed(2),
+              c.mesaiUcretiSaf.toFixed(2),  // YENİ: Prim payı düşülmüş saf mesai ücreti
               c.yemek,
               c.yol,
               yRow.borclanma || 0,
