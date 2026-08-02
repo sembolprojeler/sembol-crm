@@ -3106,6 +3106,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // yenileme tuşu / Cmd+R kullanılır.
     // ========================================================================
     useEffect(() => {
+      // YENİ: Bu özellik KAPATILDI. Mobilde en üstteyken iki kez arka arkaya
+      // aşağı çekme hareketi artık sayfayı yenilemez. Kod silinmedi; ileride
+      // tekrar açmak istenirse aşağıdaki değişkeni true yapmak yeterlidir.
+      const CIFT_CEKME_YENILEME_AKTIF = false;
+      if (!CIFT_CEKME_YENILEME_AKTIF) return;
+
       const el = mainScrollRef.current;
       if (!el || !isAuthenticated) return;
 
@@ -4334,7 +4340,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         const realCode = (jobToEnd.deliveryCode || '').toString().trim().toUpperCase();
 
         if (realCode && userCode !== realCode) {
-          setEndJobError(`Girdiğiniz kod hatalı. Müşteriden "${realCode}" kodunu istemelisiniz.`); 
+          // GÜVENLİK: Hata mesajında gerçek teslim kodu ARTIK GÖSTERİLMEZ.
+          // Aksi halde personel hiçbir şey girmeden "Doğrula" diyerek kodu
+          // ekranda görüp müşteriye sormadan işi kapatabiliyordu.
+          setEndJobError(userCode
+            ? 'Girdiğiniz kod hatalı. Lütfen müşteriden aldığınız teslim kodunu kontrol edip tekrar deneyin.'
+            : 'Lütfen müşteriden 6 haneli teslim kodunu isteyip yukarıdaki alana girin.');
           return;
         }
       }
@@ -7420,6 +7431,27 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         )}
         
         <style dangerouslySetInnerHTML={{__html: `
+          /* ================================================================
+             YENİ: MOBİLDE "AŞAĞI ÇEKİNCE SAYFA YENİLEME" (pull-to-refresh) KAPALI
+             Sayfanın en üstündeyken parmakla aşağı çekildiğinde tarayıcının
+             sayfayı yenilemesini engeller. "contain" değeri sayfa içindeki
+             normal kaydırmayı BOZMAZ; yalnızca kaydırma sınırına gelindiğinde
+             tarayıcının devraldığı yenileme/zincirleme davranışını durdurur.
+             Chrome (Android), Edge, Safari 16+ ve Chrome iOS'ta geçerlidir.
+             ================================================================ */
+          html, body {
+            overscroll-behavior-y: contain;
+            overscroll-behavior-x: none;
+          }
+          /* Uygulamanın kök kapsayıcısı da aynı davranışı devralır (React mount noktası) */
+          #root, #app {
+            overscroll-behavior: contain;
+          }
+          /* Pencere/tablo içi kaydırma alanları: alt/üst sınıra gelindiğinde
+             kaydırmanın arkadaki sayfaya "taşmasını" ve yenilemeyi tetiklemesini önler */
+          .custom-scrollbar, .custom-scrollbar-table {
+            overscroll-behavior: contain;
+          }
           .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
           }
