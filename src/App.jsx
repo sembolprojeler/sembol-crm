@@ -3,15 +3,9 @@ import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, Clipb
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF } from './shared.jsx';
-import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
-import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView } from './Operasyon.jsx';
+import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar } from './Satis.jsx';
+import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
-// NOT: MusteriHavuzuView ve SahaPortfoyView artık ayrı dosyalar değil;
-// kullanıcı isteğiyle Satış Bölümü'nün parçası olarak Satis.jsx içine taşındı
-// (yukarıdaki Satis.jsx import satırından geliyorlar).
-// NOT: HatirlatmalarView ve IsKilavuzuView artık ayrı dosyalar değil;
-// kullanıcı isteğiyle Operasyon Bölümü'nün parçası olarak Operasyon.jsx
-// içine taşındı (yukarıdaki Operasyon.jsx import satırından geliyorlar).
 
   // ============================================================================
   // YENİ: MARKA LOGOSU BİLEŞENİ
@@ -2553,12 +2547,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
   };
 
   // --- ANA UYGULAMA (APP) ---
-  // YENİ: Bu fonksiyonun adı "App" idi, "AppInternal" olarak değiştirildi.
-  // İçeriğine (state'ler, useEffect'ler, JSX) TEK BİR SATIR dokunulmadı.
-  // Sebep: aşağıda tanımlanan ErrorBoundary ile sarmalanabilmesi için.
-  // Dosyanın en altındaki "export default function App()" gerçek giriş
-  // noktasıdır ve AppInternal'i ErrorBoundary içinde render eder.
-  function AppInternal() {
+  export default function App() {
     const [firebaseUser, setFirebaseUser] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     // YENİ: Ana içerik alanının kaydırma kabı — "iki kez yukarı çek → yenile" için gerekli
@@ -2572,33 +2561,6 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     }, []);
     const [oturumDenendi, setOturumDenendi] = useState(false);
     const [currentUser, setCurrentUser] = useState(null);
-
-    // ========================================================================
-    // YENİ: HATIRLATMA BİLDİRİM SAYACI
-    // Sol menüdeki "Hatırlatmalar" öğesinin yanında yanan ışık ve sayı için.
-    // Sayaç = bugüne ait + geçmişte kalıp hâlâ tamamlanmamış hatırlatmalar.
-    // (Modülün kendi verisini dinler; başka hiçbir mevcut state'e dokunmaz.)
-    // ÖNEMLİ: Bu blok, React Hook Kuralları gereği fonksiyonun en başında,
-    // HERHANGİ BİR erken "return" ifadesinden ÖNCE bulunmak zorundadır.
-    // (Önceki konumu erken return'lerden sonraydı; bu, giriş yapıldıktan
-    // sonra hook sırası değiştiği için React'i çökertip BEYAZ EKRANA
-    // sebep oluyordu. Buraya taşınarak sorun kalıcı olarak çözüldü.)
-    // ========================================================================
-    const [hatirlatmaBildirim, setHatirlatmaBildirim] = useState(0);
-    useEffect(() => {
-      if (!isAuthenticated) return;
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), (snap) => {
-        const bugunTarih = new Date();
-        const bugunStr = `${bugunTarih.getFullYear()}-${String(bugunTarih.getMonth() + 1).padStart(2, '0')}-${String(bugunTarih.getDate()).padStart(2, '0')}`;
-        const sayi = snap.docs.filter(d => {
-          const k = d.data();
-          return !k.tamamlandi && k.tarih && k.tarih <= bugunStr; // bugünkü + geciken
-        }).length;
-        setHatirlatmaBildirim(sayi);
-      }, () => {});
-      return () => unsub();
-    }, [isAuthenticated]);
-
     const [loginError, setLoginError] = useState('');
 
     // ========================================================================
@@ -3144,12 +3106,6 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // yenileme tuşu / Cmd+R kullanılır.
     // ========================================================================
     useEffect(() => {
-      // YENİ: Bu özellik KAPATILDI. Mobilde en üstteyken iki kez arka arkaya
-      // aşağı çekme hareketi artık sayfayı yenilemez. Kod silinmedi; ileride
-      // tekrar açmak istenirse aşağıdaki değişkeni true yapmak yeterlidir.
-      const CIFT_CEKME_YENILEME_AKTIF = false;
-      if (!CIFT_CEKME_YENILEME_AKTIF) return;
-
       const el = mainScrollRef.current;
       if (!el || !isAuthenticated) return;
 
@@ -3466,8 +3422,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       if (!firebaseUser) return;
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'todos'), { ...newTodo, createdBy: currentUser?.fullName, createdAt: new Date().toISOString() });
       setNewTodo({ title: '', details: '', reminderDate: new Date().toISOString().split('T')[0], priority: 'Normal', status: 'todo' });
-      // KALDIRILDI: setActiveTab('todoList') yönlendirmesi — "Takip ve Yapılacak İşler"
-      // sayfası kapatıldığı için kayıt sonrası kullanıcı bulunduğu ekranda kalır.
+      setActiveTab('todoList');
       // YENİ: Kayıt sonrası "Yeni Ekle" modalı otomatik kapanır
       setShowAddTodoModal(false);
       addSystemLog('Yapılacak Eklendi', `Yeni bir yapılacak iş eklendi: ${newTodo.title}`);
@@ -4379,12 +4334,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         const realCode = (jobToEnd.deliveryCode || '').toString().trim().toUpperCase();
 
         if (realCode && userCode !== realCode) {
-          // GÜVENLİK: Hata mesajında gerçek teslim kodu ARTIK GÖSTERİLMEZ.
-          // Aksi halde personel hiçbir şey girmeden "Doğrula" diyerek kodu
-          // ekranda görüp müşteriye sormadan işi kapatabiliyordu.
-          setEndJobError(userCode
-            ? 'Girdiğiniz kod hatalı. Lütfen müşteriden aldığınız teslim kodunu kontrol edip tekrar deneyin.'
-            : 'Lütfen müşteriden 6 haneli teslim kodunu isteyip yukarıdaki alana girin.');
+          setEndJobError(`Girdiğiniz kod hatalı. Müşteriden "${realCode}" kodunu istemelisiniz.`); 
           return;
         }
       }
@@ -4909,16 +4859,26 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 </div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                {/* YENİ: İŞ KILAVUZU VE İŞ ŞEMASI — kaldırılan "Takip ve Yapılacak İşler"
-                    butonunun yerine geçti. Personel buradan kendi pozisyonunun görev
-                    kılavuzunu ve iş akış şemasını görür. */}
-                <button
-                  onClick={() => { setActiveTab('isKilavuzu'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                  className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'isKilavuzu' ? 'bg-red-600 text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
-                  title="İş Kılavuzu ve İş Şeması"
-                >
-                  <ClipboardList className="w-5 h-5" />
-                </button>
+                {/* YENİ: "Yapılacak Listesi" artık ayrı bir sol menü değil; bu simgeden
+                    doğrudan "Takip ve Yapılacak İşler" sayfasına gidilir. Bitmemiş iş
+                    varsa yanıp sönen ışık ve sayı rozeti gösterilir. */}
+                {showTodos && (
+                  <button
+                    onClick={() => { setActiveTab('todoList'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
+                    className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'todoList' ? 'bg-red-600 text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
+                    title="Takip ve Yapılacak İşler"
+                  >
+                    <ListTodo className="w-5 h-5" />
+                    {generalTodosCount > 0 && (
+                      <span className="absolute -top-1 -right-1 flex items-center justify-center">
+                        <span className="relative flex w-4 h-4">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex items-center justify-center rounded-full w-4 h-4 bg-red-500 text-white text-[9px] font-black">{generalTodosCount > 9 ? '9+' : generalTodosCount}</span>
+                        </span>
+                      </span>
+                    )}
+                  </button>
+                )}
                 <button 
                   onClick={() => { setActiveTab('notifications'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
                   className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'notifications' ? 'bg-red-600 text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
@@ -4950,8 +4910,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-3 rounded-xl bg-gradient-to-r from-teal-400 via-cyan-300 to-teal-500 shadow-lg shadow-teal-400/40 hover:scale-[1.02] ${activeTab === 'calendar' ? 'ring-2 ring-teal-800/70' : ''}`}
               >
                 <CalendarDays className="w-5 h-5 shrink-0 text-white" />
-                {/* YENİ: Menü adı "Takvim" → "Randevular" olarak değiştirildi (sayfa/rota aynı) */}
-                <span className="whitespace-nowrap font-black text-white">Randevular</span>
+                <span className="whitespace-nowrap font-black text-white">Takvim</span>
               </button>
             )}
 
@@ -4977,37 +4936,6 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 )}
               </button>
             )}
-
-            {/* ================================================================
-                YENİ: HATIRLATMALAR — Profilim'in hemen altında.
-                Takvim mantığıyla görev/not takibi (bkz. Hatirlatmalar.jsx).
-                Bekleyen hatırlatma varsa (bugünkü + geciken) menü öğesi AÇIK
-                KIRMIZI ARKA PLANLI ÇERÇEVEYE bürünür ve ismin yanında yanıp
-                sönen bildirim ışığı + sayı rozeti görünür.
-                ================================================================ */}
-            <button
-              onClick={() => { setActiveTab('hatirlatmalar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-              className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl ${
-                activeTab === 'hatirlatmalar'
-                  ? 'bg-red-600 text-white shadow-md shadow-red-600/20'
-                  : hatirlatmaBildirim > 0
-                    ? 'bg-red-50 text-red-700 border-2 border-red-300 shadow-sm hover:border-red-500'
-                    : 'text-neutral-400 hover:text-white hover:bg-neutral-900'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <CalendarDays className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Hatırlatmalar</span>
-              </div>
-              {hatirlatmaBildirim > 0 && (
-                <span className="flex items-center gap-1.5 shrink-0">
-                  <span className="relative flex w-2.5 h-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-500"></span>
-                  </span>
-                  <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{hatirlatmaBildirim}</span>
-                </span>
-              )}
-            </button>
 
             {/* NOT: "Bilgilendirme Ekle" sol menüden kaldırıldı — artık Bildirim Merkezi'nin
                 (Bell simgesi) sağ üstünde buton olarak erişiliyor. Sayfa rotası (activeTab
@@ -5046,42 +4974,23 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 
                 {isAddJobSubMenuOpen && (
                   <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
-                    {/* YENİ: Nakliye Kayıt, Depo Kayıt ve Asansör Kayıt artık TEK SAYFA
-                        ("Müşteri Kayıt") altında birleştirildi. Üç ayrı menü öğesi yerine
-                        tek giriş noktası var; sayfanın içinde üstte 3 geçiş butonu bulunur
-                        (Nakliye Kayıt / Depo Kayıt / Asansör Kayıt) — bkz. aşağıdaki render
-                        bloğundaki "musteriKayitSekmeleri". Buraya tıklandığında varsayılan
-                        olarak son seçili sekme (activeTab addNakliye/addDepo/addAsansor'dan
-                        biriyse) açık kalır; hiçbiri seçili değilse Nakliye ile başlar. */}
                     <button 
-                      onClick={() => {
-                        const zatenSayfadayiz = ['addNakliye', 'addDepo', 'addAsansor'].includes(activeTab);
-                        if (!zatenSayfadayiz) {
-                          setActiveTab('addNakliye'); setRecordType('Nakliye'); setEditingJobId(null);
-                          setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', wallMounting: [], esyaDurumu: [], contractDetails: '', notes: ''});
-                        }
-                        setIsSidebarOpen(false);
-                      }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${['addNakliye', 'addDepo', 'addAsansor'].includes(activeTab) ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      onClick={() => { setActiveTab('addNakliye'); setRecordType('Nakliye'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', wallMounting: [], esyaDurumu: [], contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addNakliye' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${['addNakliye', 'addDepo', 'addAsansor'].includes(activeTab) ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Kayıt
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addNakliye' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Nakliye Kayıt
                     </button>
-                    {/* YENİ: MÜŞTERİ HAVUZU — telefon/WhatsApp/Instagram/Gmail kanallarından
-                        gelen tüm müşteri adaylarının toplandığı havuz ekranı */}
-                    <button
-                      onClick={() => { setActiveTab('musteriHavuzu'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'musteriHavuzu' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    <button 
+                      onClick={() => { setActiveTab('addDepo'); setRecordType('Depo'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', wallMounting: [], esyaDurumu: [], contractDetails: '', notes: '', selectedDepo: '', depoDirection: 'toDepo'}); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addDepo' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'musteriHavuzu' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Havuzu
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addDepo' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Depo Kayıt
                     </button>
-                    {/* YENİ: SAHA PORTFÖY — Satış Bölümü'nün EN ALTINDA. Saha pazarlama
-                        ekibinin iş ortağı portföyü: emlak ofisleri, site yönetimleri,
-                        ziyaret takibi, komisyon/teminat carisi ve kartvizit arşivi. */}
-                    <button
-                      onClick={() => { setActiveTab('sahaPortfoy'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'sahaPortfoy' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    <button 
+                      onClick={() => { setActiveTab('addAsansor'); setRecordType('Asansör'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '', contractDetails: '', notes: ''}); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'addAsansor' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sahaPortfoy' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Saha Portföy
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'addAsansor' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Asansör Kayıt
                     </button>
                   </div>
                 )}
@@ -5405,8 +5314,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               </div>
             )}
 
-            {/* NOT: "Takip ve Yapılacak İşler" sayfası ve ona giden kısayol butonu
-                kullanıcı isteğiyle tamamen kaldırıldı (rota kapatıldı). */}
+            {/* NOT: "Yapılacak Listesi" sol menüden kaldırıldı — artık üstteki
+                Bildirim (zil) simgesinin yanındaki liste simgesinden erişiliyor.
+                Sayfa rotası (activeTab === 'todoList') aynen duruyor. */}
 
             {/* YENİ: "Yetkilendirme" artık ayrı bir ana menü değil; alt öğeleri (Mevcut
                 Kullanıcılar, Pozisyonlar, Rütbeler, İzinler Yönetimi, Modül Görüntüleme)
@@ -5796,52 +5706,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'myComplaint' && showMyComplaint && <MyComplaintSubmitView currentUser={currentUser} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'addInfo' && showAddInfo && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} onBack={() => setActiveTab('notifications')} />}
             
-            {/* YENİ: MÜŞTERİ HAVUZU EKRANI — Satış Bölümü yetkisiyle görünür */}
-            {activeTab === 'musteriHavuzu' && showAddJob &&
-              <MusteriHavuzuView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
-
-            {/* YENİ: SAHA PORTFÖY EKRANI — saha pazarlama ekibinin iş ortağı portföyü */}
-            {activeTab === 'sahaPortfoy' && showAddJob &&
-              <SahaPortfoyView personnelList={personnelList} currentUser={currentUser} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
-
-            {/* YENİ: HATIRLATMALAR EKRANI — takvim mantığıyla görev/not takibi.
-                jobs/personnelList/vehicles, konuya göre "İlgili" seçimi için geçilir. */}
-            {activeTab === 'hatirlatmalar' &&
-              <HatirlatmalarView jobs={jobs} personnelList={personnelList} vehicles={vehicles} currentUser={currentUser} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
-
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
               <div className="space-y-4">
-                {/* ============================================================
-                    YENİ: MÜŞTERİ KAYIT — 3 GEÇİŞ SEKMESİ
-                    Nakliye Kayıt / Depo Kayıt / Asansör Kayıt artık tek sayfa.
-                    Her butonun içindeki mantık (activeTab, recordType, formData
-                    sıfırlama), eskiden sol menüde ayrı ayrı duran 3 butonla
-                    BİREBİR AYNIDIR — sadece konumu sayfanın üstüne taşındı.
-                    ============================================================ */}
-                <div className="max-w-4xl mx-auto flex bg-neutral-100 p-1.5 rounded-2xl shadow-sm border border-neutral-200 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => { setActiveTab('addNakliye'); setRecordType('Nakliye'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', wallMounting: [], esyaDurumu: [], contractDetails: '', notes: ''}); }}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-black transition flex items-center justify-center gap-2 ${activeTab === 'addNakliye' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-500 hover:text-black hover:bg-white'}`}
-                  >
-                    <Car className="w-4 h-4" /> Nakliye Kayıt
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setActiveTab('addDepo'); setRecordType('Depo'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', wallMounting: [], esyaDurumu: [], contractDetails: '', notes: '', selectedDepo: '', depoDirection: 'toDepo'}); }}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-black transition flex items-center justify-center gap-2 ${activeTab === 'addDepo' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-500 hover:text-black hover:bg-white'}`}
-                  >
-                    <Package className="w-4 h-4" /> Depo Kayıt
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setActiveTab('addAsansor'); setRecordType('Asansör'); setEditingJobId(null); setFormData({...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '', contractDetails: '', notes: ''}); }}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-black transition flex items-center justify-center gap-2 ${activeTab === 'addAsansor' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-500 hover:text-black hover:bg-white'}`}
-                  >
-                    <ArrowUpRight className="w-4 h-4" /> Asansör Kayıt
-                  </button>
-                </div>
-
                 {/* NOT: "Kayıtlı Müşteriden Seç" butonu kullanıcı isteğiyle kaldırıldı */}
                 {formData.customerName && formData.customerPhone && (() => {
                   const cariMatchJob = jobs.find(j =>
@@ -6267,16 +6133,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'vehicleProfile' && showOperasyon && <VehicleProfileView vehicleId={viewingVehicleProfileId} vehicles={vehicles} jobs={jobs} handleEditJob={handleEditJob} setViewingRuhsatUrl={setViewingRuhsatUrl} onBack={() => setActiveTab('vehicleList')} />}
 
             {/* NOT: "Yeni Ekle" artık tam sayfa değil, aşağıda modal olarak render ediliyor (showAddTodoModal) */}
-            {/* KALDIRILDI: "Takip ve Yapılacak İşler" sayfası kullanıcı isteğiyle kapatıldı.
-                TodoListView bileşeni ve todos verisi silinmedi (Anasayfa'daki sayaçlar vb.
-                başka yerler kullanıyor olabilir); yalnızca bu rota render edilmiyor.
-                Geri açmak isterseniz aşağıdaki satırın başındaki `false &&` kısmını kaldırın. */}
-            {false && activeTab === 'todoList' && showTodos && <TodoListView todos={todos} handleUpdateTodoStatus={handleUpdateTodoStatus} handleDeleteTodo={handleDeleteTodo} onAddClick={() => setShowAddTodoModal(true)} />}
-
-            {/* YENİ: İŞ KILAVUZU VE İŞ ŞEMASI — pozisyona göre görev rehberi.
-                Kaldırılan "Takip ve Yapılacak İşler" sayfasının yerine geçti. */}
-            {activeTab === 'isKilavuzu' &&
-              <IsKilavuzuView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
+            {activeTab === 'todoList' && showTodos && <TodoListView todos={todos} handleUpdateTodoStatus={handleUpdateTodoStatus} handleDeleteTodo={handleDeleteTodo} onAddClick={() => setShowAddTodoModal(true)} />}
 
             {activeTab === 'materialList' && showOperasyon && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} onUpdateStock={handleUpdateMaterialStock} onAdd={handleAddMaterial} systemLogs={systemLogs} />}
             
@@ -7563,27 +7420,6 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         )}
         
         <style dangerouslySetInnerHTML={{__html: `
-          /* ================================================================
-             YENİ: MOBİLDE "AŞAĞI ÇEKİNCE SAYFA YENİLEME" (pull-to-refresh) KAPALI
-             Sayfanın en üstündeyken parmakla aşağı çekildiğinde tarayıcının
-             sayfayı yenilemesini engeller. "contain" değeri sayfa içindeki
-             normal kaydırmayı BOZMAZ; yalnızca kaydırma sınırına gelindiğinde
-             tarayıcının devraldığı yenileme/zincirleme davranışını durdurur.
-             Chrome (Android), Edge, Safari 16+ ve Chrome iOS'ta geçerlidir.
-             ================================================================ */
-          html, body {
-            overscroll-behavior-y: contain;
-            overscroll-behavior-x: none;
-          }
-          /* Uygulamanın kök kapsayıcısı da aynı davranışı devralır (React mount noktası) */
-          #root, #app {
-            overscroll-behavior: contain;
-          }
-          /* Pencere/tablo içi kaydırma alanları: alt/üst sınıra gelindiğinde
-             kaydırmanın arkadaki sayfaya "taşmasını" ve yenilemeyi tetiklemesini önler */
-          .custom-scrollbar, .custom-scrollbar-table {
-            overscroll-behavior: contain;
-          }
           .custom-scrollbar::-webkit-scrollbar {
             width: 6px;
           }
@@ -7615,84 +7451,3 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       </div>
     );
   }
-
-// ============================================================================
-// YENİ: HATA YAKALAYICI (ErrorBoundary) — "Beyaz Ekran" Sorununa Kalıcı Çözüm
-// ----------------------------------------------------------------------------
-// Sorun: Uygulama içinde bir yerde beklenmeyen bir JavaScript hatası oluşursa,
-// React o an ekrandaki her şeyi kaldırır ve kullanıcı BOŞ/BEYAZ bir ekranla
-// baş başa kalır — hatanın ne olduğuna dair hiçbir bilgi görünmez.
-//
-// Çözüm: AppInternal (yukarıdaki, eskiden "App" olan asıl uygulama) artık bu
-// ErrorBoundary ile sarmalanıyor. Bir hata oluştuğunda ekran BEYAZ KALMAZ;
-// yerine hatanın mesajını ve "Sayfayı Yenile" butonunu gösteren bir ekran
-// çıkar. Böylece mobilde (veya herhangi bir cihazda) bu sorun tekrar
-// yaşanırsa, ekrandaki mesaj bize (veya bana) tam olarak neyin patladığını
-// gösterir; artık kör tahmin yapmaya gerek kalmaz.
-//
-// ÖNEMLİ: AppInternal'in içeriğine (state, useEffect, JSX) TEK SATIR
-// dokunulmadı; sadece fonksiyonun adı değiştirildi ve buraya bir sarmalayıcı
-// eklendi. Uygulamanın normal çalışma mantığı BİREBİR AYNI.
-// ============================================================================
-class SembolErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hataVar: false, hata: null, hataDetay: null };
-  }
-  static getDerivedStateFromError(hata) {
-    return { hataVar: true, hata };
-  }
-  componentDidCatch(hata, hataDetay) {
-    // Hatayı tarayıcı konsoluna da yazdır (uzaktan hata ayıklama için)
-    console.error('Sembol CRM - Yakalanan Hata:', hata, hataDetay);
-    this.setState({ hataDetay });
-  }
-  handleYenile = () => {
-    // Bozuk bir sekme hafızası (sessionStorage) sorunun kaynağıysa temizler
-    try { sessionStorage.removeItem('sembolAktifSekme'); } catch (e) {}
-    window.location.reload();
-  };
-  render() {
-    if (this.state.hataVar) {
-      return (
-        <div style={{
-          minHeight: '100vh', background: '#0a0a0a', color: '#fff', display: 'flex',
-          flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          padding: '24px', fontFamily: 'system-ui, -apple-system, sans-serif', textAlign: 'center'
-        }}>
-          <div style={{ fontSize: '48px', marginBottom: '12px' }}>⚠️</div>
-          <h1 style={{ fontSize: '18px', fontWeight: 900, marginBottom: '8px', color: '#ef4444' }}>Bir şeyler ters gitti</h1>
-          <p style={{ fontSize: '13px', color: '#a3a3a3', maxWidth: '440px', marginBottom: '16px', lineHeight: 1.5 }}>
-            Uygulama beklenmeyen bir hatayla karşılaştı. Aşağıdaki hata mesajını ekran görüntüsü alıp destek ekibine iletebilirsiniz.
-          </p>
-          <div style={{
-            background: '#1a1a1a', border: '1px solid #ef4444', borderRadius: '12px',
-            padding: '14px', maxWidth: '90vw', overflowX: 'auto', marginBottom: '20px'
-          }}>
-            <code style={{ fontSize: '11px', color: '#fca5a5', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {String(this.state.hata?.message || this.state.hata || 'Bilinmeyen hata')}
-            </code>
-          </div>
-          <button onClick={this.handleYenile} style={{
-            background: '#dc2626', color: '#fff', border: 'none', borderRadius: '12px',
-            padding: '12px 24px', fontSize: '14px', fontWeight: 900, cursor: 'pointer'
-          }}>
-            🔄 Sayfayı Yenile
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-// YENİ: Gerçek dışa aktarım (export default) — AppInternal'i ErrorBoundary
-// içinde render eder. Uygulamanın giriş noktası (main.jsx / index.jsx) hiçbir
-// değişiklik gerektirmez; "import App from './App.jsx'" aynen çalışır.
-export default function App() {
-  return (
-    <SembolErrorBoundary>
-      <AppInternal />
-    </SembolErrorBoundary>
-  );
-}
