@@ -1394,3 +1394,47 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
       </div>
     );
   };
+
+// ============================================================================
+// YENİ: TARAYICI BİLDİRİMİ (Browser Notification) YARDIMCI FONKSİYONLARI
+// ----------------------------------------------------------------------------
+// Amaç: Hasarlı işler, Görev Tahtası, Araç Tahtası ve Hatırlatmalar'da yeni
+// bir kayıt oluştuğunda, sayfa arka planda olsa bile kullanıcının tarayıcısı
+// üzerinden (masaüstü bildirimi gibi) uyarı göstermek.
+//
+// Tarayıcı desteği: Bu API tüm ortamlarda desteklenmez (özellikle iOS Safari,
+// PWA olarak ana ekrana eklenmediği sürece desteklemez). Bu yüzden her
+// fonksiyon, önce API'nin var olup olmadığını kontrol eder; yoksa sessizce
+// hiçbir şey yapmaz (hata fırlatmaz, uygulamayı bozmaz).
+// ============================================================================
+
+// Tarayıcı bildirim izni destekleniyor mu? (iOS Safari'de genelde false döner)
+export const bildirimDestekleniyorMu = () => typeof window !== 'undefined' && 'Notification' in window;
+
+// Kullanıcıdan bildirim izni ister. Zaten izin verilmiş/reddedilmişse tekrar sormaz.
+export const bildirimIzniIste = async () => {
+  if (!bildirimDestekleniyorMu()) return 'unsupported';
+  if (Notification.permission === 'granted' || Notification.permission === 'denied') {
+    return Notification.permission;
+  }
+  try { return await Notification.requestPermission(); } catch (e) { return 'denied'; }
+};
+
+// Bir tarayıcı bildirimi gönderir. İzin yoksa veya API desteklenmiyorsa sessizce çıkar.
+// title: başlık, body: mesaj metni, opts: { tag, onClick } gibi ek seçenekler.
+export const bildirimGonder = (title, body, opts = {}) => {
+  if (!bildirimDestekleniyorMu() || Notification.permission !== 'granted') return;
+  try {
+    const bildirim = new Notification(title, {
+      body,
+      icon: '/logo192.png', // Proje kök dizininde bu dosya yoksa tarayıcı varsayılan ikonu kullanır, hata vermez
+      tag: opts.tag, // Aynı 'tag' ile gelen bildirimler üst üste yığılmaz, günceller
+      silent: false,
+    });
+    if (opts.onClick) {
+      bildirim.onclick = () => { window.focus(); opts.onClick(); bildirim.close(); };
+    }
+    // 10 saniye sonra otomatik kapan (ekranda birikmesin)
+    setTimeout(() => { try { bildirim.close(); } catch (e) {} }, 10000);
+  } catch (e) { console.error('Bildirim gönderilemedi:', e); }
+};
