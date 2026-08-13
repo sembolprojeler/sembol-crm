@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Truck, Calendar, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2 } from 'lucide-react';
-import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, where } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, where, orderBy, limit } from 'firebase/firestore';
 import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar } from './shared.jsx';
   export const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -5201,7 +5201,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       if (!personId || !db) return;
       // Tüm denetimler dinlenir, personel filtrelemesi istemci tarafında yapılır
       // (personelPuanlari bir dizi olduğu için Firestore'da doğrudan sorgulanamaz).
-      const unsubSaha = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), snap => {
+      // DÜZELTME (Firestore okuma denetimi): Limitsiz tam koleksiyon okuması
+      // yerine güvenlik limiti + en güncel kayıtlar önceliklendirildi.
+      const unsubSaha = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), orderBy('denetimTarihi', 'desc'), limit(2000)), snap => {
         const hepsi = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         setSahaDenetimleri(hepsi.filter(dn => (dn.personelPuanlari || []).some(pp => String(pp.personelId) === String(personId))));
       }, console.error);
@@ -12815,6 +12817,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
     useEffect(() => {
       if (!db) return;
+      // NOT: Bu sayfa "Tüm Zamanlar" raporlama seçeneği sunduğu için (ay filtresi
+      // 'tum' olabilir) buraya limit KONULMADI — limit koymak eski dönemlerin
+      // raporunu sessizce eksik gösterebilirdi. Sayfa yalnızca ziyaret edildiğinde
+      // açık olduğu için (arka planda sürekli çalışan bir maliyet değil) bu risk
+      // kabul edilebilir düzeyde.
       const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), snap => {
         setDenetimler(snap.docs.map(d => ({ id: d.id, ...d.data() })));
         setYukleniyor(false);
