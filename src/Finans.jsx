@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Truck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, Tag, History} from 'lucide-react';
+import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, Tag, History} from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './shared.jsx';
 
@@ -118,12 +118,38 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
       const mesaiUcreti = mesaiUcretiToplam - primTL;       // primden arındırılmış saf mesai ücreti
       const netMaas = (maas / 30) * mesaiGunSayisi;
       const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcretiToplam;
-      const maliyet = netMaas + mesaiUcretiToplam + yol + yemek; // toplam işveren maliyeti
+
+      // ====================================================================
+      // YENİ: SİGORTA MALİYETİ
+      // Personel kartındaki (Personel Ekle / Düzenle) "Sigorta Maliyeti"
+      // alanından okunur. Bu tutar personele ÖDENMEZ — devlete/SGK'ya
+      // ödenir. Bu yüzden işveren maliyetine DAHİL edilir, ama personele
+      // ödenecek tutara DAHİL EDİLMEZ.
+      // ====================================================================
+      const sigortaMaliyeti = parseFloat(person.sigortaMaliyeti) || 0;
+
+      // PERSONELE ÖDENECEK brüt tutar (sigorta hariç — bu para personelin eline/bankasına geçer)
+      const personeleOdenecek = netMaas + mesaiUcretiToplam + yol + yemek;
+      // TOPLAM İŞVEREN MALİYETİ (sigorta dahil)
+      const maliyet = personeleOdenecek + sigortaMaliyeti;
+
       // Ödeme tikleriyle GİDERE işlenmiş (fiilen ödenmiş) tutarlar
       const odenen = (parseFloat(row.yemekOdenenTutar) || 0) + (parseFloat(row.yolOdenenTutar) || 0)
         + (parseFloat(row.bankaOdenenTutar) || 0) + (parseFloat(row.nakitOdenenTutar) || 0)
         + (parseFloat(row.icraOdenenTutar) || 0);
-      return { netMaas, mesaiUcreti, primTL, yol, yemek, nakitAvans, resmiAvans, icraKesintisi, hesaplananBanka, bankaKalan, kalanNakit, maliyet, odenen };
+
+      // ====================================================================
+      // YENİ: AVANSLAR ARTIK "ÖDENMİŞ" SAYILIR
+      // Nakit avans ve resmi (banka) avans, personele PEŞİN verilmiş
+      // paradır. Eskiden bu tutarlar "Kalan" hesabına hiç girmiyordu; bu
+      // yüzden tüm ödemeler tiklenmiş olsa bile Kalan sıfırlanmıyordu.
+      // Artık toplam avans, ödenen tutara eklenir ve Kalan'dan düşülür.
+      // ====================================================================
+      const toplamAvans = nakitAvans + resmiAvans;
+      const odenenToplam = odenen + toplamAvans;       // fiilen personele geçen toplam para
+      const kalan = personeleOdenecek - odenenToplam;   // hâlâ ödenmesi gereken (eksi olabilir = fazla ödeme)
+
+      return { netMaas, mesaiUcreti, primTL, yol, yemek, nakitAvans, resmiAvans, toplamAvans, icraKesintisi, hesaplananBanka, bankaKalan, kalanNakit, sigortaMaliyeti, personeleOdenecek, maliyet, odenen, odenenToplam, kalan };
     };
 
     // ------------------------------------------------------------------
@@ -132,7 +158,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
     // ------------------------------------------------------------------
     const hedefAylar = raporDonem === 'year' ? Array.from({ length: 12 }, (_, i) => i + 1) : [raporAy];
     const kisiSatirlari = {}; // personId -> birikimli toplamlar
-    const bosToplam = () => ({ netMaas: 0, mesaiUcreti: 0, primTL: 0, yol: 0, yemek: 0, nakitAvans: 0, resmiAvans: 0, icraKesintisi: 0, kalanNakit: 0, bankaKalan: 0, maliyet: 0, odenen: 0 });
+    const bosToplam = () => ({ netMaas: 0, mesaiUcreti: 0, primTL: 0, yol: 0, yemek: 0, nakitAvans: 0, resmiAvans: 0, toplamAvans: 0, icraKesintisi: 0, kalanNakit: 0, bankaKalan: 0, sigortaMaliyeti: 0, personeleOdenecek: 0, maliyet: 0, odenen: 0, odenenToplam: 0, kalan: 0 });
 
     personnelList.filter(p => p.position !== 'Firma Sahibi').forEach(person => {
       const yaka = yakaTipi(person);
@@ -161,7 +187,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
         if (s.yaka === 'Mavi Yaka') mavi[k] += s[k]; else beyaz[k] += s[k];
       });
     });
-    const kalanOdeme = Math.max(0, genel.maliyet - genel.odenen); // Henüz ödenmemiş kısım
+    // YENİ: Kalan ödeme artık doğrudan kişi bazlı "kalan" toplamından gelir.
+    // Böylece hem AVANSLAR düşülmüş olur hem de SİGORTA maliyeti (personele
+    // ödenmeyen, SGK'ya giden kısım) yanlışlıkla "ödenecek" gibi görünmez.
+    const kalanOdeme = genel.kalan;
     const tl = (n) => `₺${(n || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
 
     // Özet kartlarında gösterilecek kalemler (etiket, tutar, renk sınıfları)
@@ -171,9 +200,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
       { etiket: 'Prim Ücreti Toplamı', tutar: genel.primTL, ikon: TrendingUp, renk: 'bg-amber-50 text-amber-600' },
       { etiket: 'Yemek Toplamı', tutar: genel.yemek, ikon: Package, renk: 'bg-orange-50 text-orange-600' },
       { etiket: 'Yol Toplamı', tutar: genel.yol, ikon: Truck, renk: 'bg-blue-50 text-blue-600' },
-      { etiket: 'Avanslar (Nakit+Resmi)', tutar: genel.nakitAvans + genel.resmiAvans, ikon: Wallet, renk: 'bg-yellow-50 text-yellow-700' },
+      // YENİ: Sigorta (SGK) maliyeti — personele ödenmez, işveren maliyetine dahildir
+      { etiket: 'Sigorta Maliyeti Toplamı', tutar: genel.sigortaMaliyeti, ikon: ShieldCheck, renk: 'bg-cyan-50 text-cyan-700' },
+      { etiket: 'Avanslar (Nakit+Banka)', tutar: genel.toplamAvans, ikon: Wallet, renk: 'bg-yellow-50 text-yellow-700' },
       { etiket: 'İcra Kesintileri', tutar: genel.icraKesintisi, ikon: Ban, renk: 'bg-red-50 text-red-600' },
-      { etiket: 'Ödenen (Tikli Kalemler)', tutar: genel.odenen, ikon: CheckCircle, renk: 'bg-emerald-50 text-emerald-600' },
+      // YENİ: Ödenen artık avansları da içerir (fiilen personele geçen toplam para)
+      { etiket: 'Ödenen (Tik + Avans)', tutar: genel.odenenToplam, ikon: CheckCircle, renk: 'bg-emerald-50 text-emerald-600' },
     ];
 
     return (
@@ -220,23 +252,28 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                 <div>
                   <p className="text-neutral-500 text-sm font-bold mb-1">Dönem İçi Toplam Personel Maliyeti</p>
                   <p className="text-3xl font-black text-green-600">{tl(genel.maliyet)}</p>
-                  <p className="text-[11px] font-bold text-neutral-400 mt-1">Net Maaş + Mesai + Prim + Yemek + Yol</p>
+                  {/* YENİ: Sigorta maliyeti de toplama dahil edildi */}
+                  <p className="text-[11px] font-bold text-neutral-400 mt-1">Net Maaş + Mesai + Prim + Yemek + Yol + Sigorta</p>
+                  <p className="text-[11px] font-bold text-cyan-700 mt-0.5">Bunun {tl(genel.sigortaMaliyeti)}'si sigorta (SGK) maliyeti</p>
                 </div>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 flex items-center gap-4">
                 <div className="p-4 bg-emerald-50 text-emerald-600 rounded-2xl shrink-0"><CheckCircle className="w-8 h-8" /></div>
                 <div>
-                  <p className="text-neutral-500 text-sm font-bold mb-1">Fiilen Ödenen (Tikli)</p>
-                  <p className="text-3xl font-black text-emerald-600">{tl(genel.odenen)}</p>
-                  <p className="text-[11px] font-bold text-neutral-400 mt-1">Maaş tablosunda tik atılmış kalemler</p>
+                  <p className="text-neutral-500 text-sm font-bold mb-1">Fiilen Ödenen</p>
+                  {/* YENİ: Avanslar da fiilen ödenmiş sayılır */}
+                  <p className="text-3xl font-black text-emerald-600">{tl(genel.odenenToplam)}</p>
+                  <p className="text-[11px] font-bold text-neutral-400 mt-1">Tikli ödemeler {tl(genel.odenen)} + Avanslar {tl(genel.toplamAvans)}</p>
                 </div>
               </div>
               <div className="bg-white p-6 rounded-2xl shadow-sm border border-neutral-200 flex items-center gap-4">
-                <div className="p-4 bg-red-50 text-red-600 rounded-2xl shrink-0"><Wallet className="w-8 h-8" /></div>
+                <div className={`p-4 rounded-2xl shrink-0 ${kalanOdeme < -0.5 ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'}`}><Wallet className="w-8 h-8" /></div>
                 <div>
-                  <p className="text-neutral-500 text-sm font-bold mb-1">Kalan Ödenecek</p>
-                  <p className="text-3xl font-black text-red-600">{tl(kalanOdeme)}</p>
-                  <p className="text-[11px] font-bold text-neutral-400 mt-1">Toplam Maliyet − Ödenen</p>
+                  <p className="text-neutral-500 text-sm font-bold mb-1">{kalanOdeme < -0.5 ? 'Fazla Ödeme (Alacak)' : 'Kalan Ödenecek'}</p>
+                  <p className={`text-3xl font-black ${kalanOdeme < -0.5 ? 'text-blue-600' : 'text-red-600'}`}>{tl(Math.abs(kalanOdeme))}</p>
+                  {/* YENİ: Formül netleştirildi — sigorta hariç, avanslar düşülmüş */}
+                  <p className="text-[11px] font-bold text-neutral-400 mt-1">Personele Ödenecek {tl(genel.personeleOdenecek)} − Ödenen {tl(genel.odenenToplam)}</p>
+                  <p className="text-[10px] font-bold text-neutral-400 mt-0.5">(Sigorta maliyeti hariç — personele ödenmez)</p>
                 </div>
               </div>
             </div>
@@ -258,9 +295,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                       <span className="text-neutral-500">Prim Ücreti</span><span className="text-right text-amber-700">{tl(y.t.primTL)}</span>
                       <span className="text-neutral-500">Yemek</span><span className="text-right text-black">{tl(y.t.yemek)}</span>
                       <span className="text-neutral-500">Yol</span><span className="text-right text-black">{tl(y.t.yol)}</span>
-                      <span className="text-neutral-500">Avanslar</span><span className="text-right text-yellow-700">{tl(y.t.nakitAvans + y.t.resmiAvans)}</span>
-                      <span className="text-neutral-500">Ödenen</span><span className="text-right text-emerald-700">{tl(y.t.odenen)}</span>
-                      <span className="text-neutral-500">Kalan</span><span className="text-right text-red-600">{tl(Math.max(0, y.t.maliyet - y.t.odenen))}</span>
+                      {/* YENİ: Sigorta maliyeti yaka kırılımında da görünür */}
+                      <span className="text-neutral-500">Sigorta (SGK)</span><span className="text-right text-cyan-700">{tl(y.t.sigortaMaliyeti)}</span>
+                      <span className="text-neutral-500">Nakit Avans</span><span className="text-right text-yellow-700">{tl(y.t.nakitAvans)}</span>
+                      <span className="text-neutral-500">Banka Avans</span><span className="text-right text-orange-700">{tl(y.t.resmiAvans)}</span>
+                      <span className="text-neutral-500">Ödenen (tik+avans)</span><span className="text-right text-emerald-700">{tl(y.t.odenenToplam)}</span>
+                      <span className="text-neutral-500">Kalan</span>
+                      <span className={`text-right ${y.t.kalan < -0.5 ? 'text-blue-600' : 'text-red-600'}`}>
+                        {y.t.kalan < -0.5 ? `+${tl(Math.abs(y.t.kalan))}` : tl(Math.max(0, y.t.kalan))}
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -301,9 +344,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                       <th className="p-3 font-bold text-right">Prim</th>
                       <th className="p-3 font-bold text-right">Yemek</th>
                       <th className="p-3 font-bold text-right">Yol</th>
-                      <th className="p-3 font-bold text-right">Avans</th>
+                      {/* YENİ: Sigorta (SGK) maliyeti sütunu — personele ödenmez, işveren maliyetine dahildir */}
+                      <th className="p-3 font-bold text-right">Sigorta</th>
+                      {/* YENİ: Avans sütunu artık TEK SÜTUNDA ÇİFT SATIR — Nakit ve Banka ayrı görünür */}
+                      <th className="p-3 font-bold text-right">Avans<br /><span className="text-[9px] font-medium normal-case text-neutral-400">Nakit / Banka</span></th>
                       <th className="p-3 font-bold text-right">Toplam Maliyet</th>
-                      <th className="p-3 font-bold text-right">Ödenen</th>
+                      <th className="p-3 font-bold text-right">Ödenen<br /><span className="text-[9px] font-medium normal-case text-neutral-400">tik + avans</span></th>
                       <th className="p-3 font-bold text-right">Kalan</th>
                     </tr>
                   </thead>
@@ -326,15 +372,25 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                         <td className="p-3 text-right font-bold text-amber-700">{tl(s.primTL)}</td>
                         <td className="p-3 text-right">{tl(s.yemek)}</td>
                         <td className="p-3 text-right">{tl(s.yol)}</td>
-                        <td className="p-3 text-right text-yellow-700">{tl(s.nakitAvans + s.resmiAvans)}</td>
+                        {/* YENİ: Sigorta maliyeti */}
+                        <td className="p-3 text-right font-bold text-cyan-700">{tl(s.sigortaMaliyeti)}</td>
+                        {/* YENİ: Avans — tek sütunda iki satır (Nakit üstte, Banka altta) */}
+                        <td className="p-3 text-right leading-tight">
+                          <span className="block font-bold text-yellow-700">{tl(s.nakitAvans)}<span className="text-[9px] font-medium text-neutral-400 ml-1">N</span></span>
+                          <span className="block font-bold text-orange-700">{tl(s.resmiAvans)}<span className="text-[9px] font-medium text-neutral-400 ml-1">B</span></span>
+                        </td>
                         <td className="p-3 text-right font-black text-black">{tl(s.maliyet)}</td>
-                        <td className="p-3 text-right font-black text-emerald-600">{tl(s.odenen)}</td>
-                        <td className="p-3 text-right font-black text-red-600">{tl(Math.max(0, s.maliyet - s.odenen))}</td>
+                        <td className="p-3 text-right font-black text-emerald-600">{tl(s.odenenToplam)}</td>
+                        {/* YENİ: Kalan artık avanslar düşülmüş ve sigorta hariç tutulmuş halde;
+                            fazla ödeme yapıldıysa (eksi değer) mavi renkle "fazla" olarak gösterilir */}
+                        <td className={`p-3 text-right font-black ${s.kalan > 0.5 ? 'text-red-600' : s.kalan < -0.5 ? 'text-blue-600' : 'text-neutral-400'}`}>
+                          {s.kalan < -0.5 ? `+${tl(Math.abs(s.kalan))}` : tl(Math.max(0, s.kalan))}
+                        </td>
                       </tr>
                     ))}
                     {satirlar.length === 0 && (
                       <tr>
-                        <td colSpan="11" className="p-8 text-center text-neutral-500 font-medium">Bu döneme ait maaş kaydı bulunamadı. Maaş Tablosu'na veri girildikçe rapor burada oluşur.</td>
+                        <td colSpan="13" className="p-8 text-center text-neutral-500 font-medium">Bu döneme ait maaş kaydı bulunamadı. Maaş Tablosu'na veri girildikçe rapor burada oluşur.</td>
                       </tr>
                     )}
                   </tbody>
@@ -348,10 +404,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                         <td className="p-3 text-right text-amber-300">{tl(genel.primTL)}</td>
                         <td className="p-3 text-right">{tl(genel.yemek)}</td>
                         <td className="p-3 text-right">{tl(genel.yol)}</td>
-                        <td className="p-3 text-right text-yellow-300">{tl(genel.nakitAvans + genel.resmiAvans)}</td>
+                        {/* YENİ: Sigorta maliyeti toplamı */}
+                        <td className="p-3 text-right text-cyan-300">{tl(genel.sigortaMaliyeti)}</td>
+                        {/* YENİ: Avans toplamı — nakit ve banka ayrı satırlarda */}
+                        <td className="p-3 text-right leading-tight">
+                          <span className="block text-yellow-300">{tl(genel.nakitAvans)}<span className="text-[9px] font-medium opacity-70 ml-1">N</span></span>
+                          <span className="block text-orange-300">{tl(genel.resmiAvans)}<span className="text-[9px] font-medium opacity-70 ml-1">B</span></span>
+                        </td>
                         <td className="p-3 text-right text-green-400">{tl(genel.maliyet)}</td>
-                        <td className="p-3 text-right text-emerald-400">{tl(genel.odenen)}</td>
-                        <td className="p-3 text-right text-red-400">{tl(kalanOdeme)}</td>
+                        <td className="p-3 text-right text-emerald-400">{tl(genel.odenenToplam)}</td>
+                        <td className={`p-3 text-right ${kalanOdeme < -0.5 ? 'text-blue-300' : 'text-red-400'}`}>
+                          {kalanOdeme < -0.5 ? `+${tl(Math.abs(kalanOdeme))}` : tl(Math.max(0, kalanOdeme))}
+                        </td>
                       </tr>
                     </tfoot>
                   )}
@@ -1932,17 +1996,41 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
               return p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position));
             });
 
+            // ================================================================
+            // BEYAZ YAKA OTOMATİK DOLDURMA
+            // DÜZELTME: Eskiden ayın TÜM günleri (1–31) baştan "G" (Geldi) olarak
+            // işaretleniyordu — henüz YAŞANMAMIŞ günler bile. Bu yüzden ayın
+            // başında tablo tamamen "Geldi" görünüyor, gerçeği yansıtmıyordu.
+            // Artık yalnızca BUGÜNE KADARKİ (bugün dahil) günler doldurulur;
+            // gelecek günler BOŞ bırakılır ve gün geldikçe otomatik "G" olur.
+            // Pazar günleri (yaşanmış olsun ya da olmasın) haftalık izin olduğu
+            // için "Hİ" olarak işaretlenir — takvim planı baştan görünsün.
+            // NOT: Elle girilmiş hiçbir değer EZİLMEZ (yalnızca boş hücreler
+            // doldurulur); mevcut davranış aynen korunmuştur.
+            // ================================================================
+            const busun = new Date(); busun.setHours(0, 0, 0, 0);
+
             beyazYakaList.forEach(person => {
               if (!fetchedRecords[person.id]) fetchedRecords[person.id] = {};
               for (let d = 1; d <= daysInMonth; d++) {
                 const existingValObj = fetchedRecords[person.id][d];
                 const existingStatus = typeof existingValObj === 'object' && existingValObj !== null ? existingValObj.status : existingValObj;
-                
+
                 // Eğer o güne ait bir mesai girişi yapılmamışsa (boşsa) otomatik doldur
                 if (!existingStatus) {
                   const dateObj = new Date(currentYear, currentMonth - 1, d);
+                  dateObj.setHours(0, 0, 0, 0);
                   const isSunday = dateObj.getDay() === 0; // 0 = Pazar
-                  fetchedRecords[person.id][d] = { status: isSunday ? 'Hİ' : 'G', hours: '' };
+
+                  if (isSunday) {
+                    // Pazar = haftalık izin. Gelecekteki pazarlar da işaretlenir ki
+                    // izin günleri takvimde baştan planlı görünsün.
+                    fetchedRecords[person.id][d] = { status: 'Hİ', hours: '' };
+                  } else if (dateObj <= busun) {
+                    // Yalnızca BUGÜN ve GEÇMİŞ günler "Geldi" sayılır.
+                    fetchedRecords[person.id][d] = { status: 'G', hours: '' };
+                  }
+                  // else: GELECEK günler boş bırakılır — o gün geldiğinde dolar.
                 }
               }
             });
