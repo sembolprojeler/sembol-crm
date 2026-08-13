@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
-import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF } from './shared.jsx';
+import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
@@ -2585,6 +2585,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // sebep oluyordu. Buraya taşınarak sorun kalıcı olarak çözüldü.)
     // ========================================================================
     const [hatirlatmaBildirim, setHatirlatmaBildirim] = useState(0);
+    // ========================================================================
+    // DÜZELTME (Firestore okuma patlaması denetimi): Bu koleksiyon ('hatirlatmalar')
+    // eskiden İKİ AYRI onSnapshot ile dinleniyordu (biri sadece rozet sayısı için,
+    // biri sadece tarayıcı bildirimi için) — bu, aynı veriyi iki kat okutuyordu.
+    // Artık TEK bir dinleyici hem rozet sayısını hem bildirimleri üretiyor.
+    // ========================================================================
+    const hatirlatmaIlkYuklemeRef = useRef(true);
     useEffect(() => {
       if (!isAuthenticated) return;
       const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), (snap) => {
@@ -2592,14 +2599,72 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         const bugunStr = `${bugunTarih.getFullYear()}-${String(bugunTarih.getMonth() + 1).padStart(2, '0')}-${String(bugunTarih.getDate()).padStart(2, '0')}`;
         const sayi = snap.docs.filter(d => {
           const k = d.data();
-          return !k.tamamlandi && k.tarih && k.tarih <= bugunStr; // bugünkü + geciken
+          return !k.tamamlandi && k.tarih && k.tarih <= bugunStr;
         }).length;
         setHatirlatmaBildirim(sayi);
+
+        // Bildirimler: yalnızca ilk yüklemeden SONRAKİ değişikliklerde (sayfa
+        // ilk açıldığında mevcut kayıtlar için bildirim üretilmez).
+        if (!hatirlatmaIlkYuklemeRef.current) {
+          snap.docChanges().forEach(chg => {
+            const h = chg.doc.data();
+            if ((chg.type === 'added' || chg.type === 'modified') && !h.tamamlandi && h.tarih && h.tarih <= bugunStr) {
+              bildirimGonder('🗓️ Hatırlatma', h.aciklama || 'Bugüne ait bir hatırlatmanız var.', { tag: `hatirlatma-${chg.doc.id}` });
+            }
+          });
+        }
+        hatirlatmaIlkYuklemeRef.current = false;
       }, () => {});
       return () => unsub();
     }, [isAuthenticated]);
 
     const [loginError, setLoginError] = useState('');
+
+    // ========================================================================
+    // YENİ: TARAYICI BİLDİRİMİ — YETKİ KONTROLLERİ VE İZİN İSTEME
+    // ----------------------------------------------------------------------
+    // ÖNEMLİ (Hook Kuralları): Bu blok erken return'lerden ÖNCE durur; sadece
+    // en başta tanımlı currentUser/positionModules kullanır.
+    //
+    // DÜZELTME (Firestore okuma patlaması denetimi — 13 Ağustos 2026):
+    // Önceki sürümde burada 'jobs', 'tasks', 'vehicles' koleksiyonları için
+    // AYRICA birer onSnapshot dinleyicisi açılıyordu — oysa bu üç koleksiyon
+    // zaten aşağıdaki ana veri yükleme useEffect'i (bkz. "qJobs/qTasks/vehicles")
+    // tarafından dinlenip jobs/tasks/vehicles state'lerine yazılıyordu. Yani
+    // aynı koleksiyonlar İKİ KEZ dinleniyordu — 'jobs' özelinde ayrıca bir de
+    // hasar sorgusu vardı, yani ÜÇ kez. 19 kullanıcı x her oturum açılışında
+    // bu üç fazladan dinleyicinin İLK anlık görüntüsü TÜM koleksiyonu yeniden
+    // okutuyordu. Bu, muhtemelen 38 milyon okumanın başlıca sebebiydi.
+    // ÇÖZÜM: O üç ayrı dinleyici tamamen kaldırıldı. Bildirimler artık
+    // aşağıda (jobs/tasks/vehicles state'leri tanımlandıktan hemen sonra)
+    // MEVCUT state'lerin üzerinde fark (diff) alınarak üretiliyor — SIFIR
+    // ek Firestore okuması ile.
+    // ========================================================================
+    const jobBildirimYetkisiVarMi = () => {
+      if (currentUser?.employmentStatus === 'Pasif') return false;
+      if (currentUser?.position === 'Firma Sahibi') return true;
+      if (currentUser?.rank === 'Müdür') return true;
+      if (currentUser?.position === 'Operasyon' || currentUser?.position === 'Satış Personeli') return true;
+      return false;
+    };
+    const opYetkisiVarMi = () => {
+      if (currentUser?.employmentStatus === 'Pasif') return false;
+      if (currentUser?.fullName === 'Sistem Yöneticisi' || currentUser?.position === 'Firma Sahibi') return true;
+      if (currentUser?.permissions?.modules && typeof currentUser.permissions.modules['operasyon'] === 'boolean') {
+        return currentUser.permissions.modules['operasyon'];
+      }
+      const posAccess = positionModules?.[currentUser?.position];
+      if (posAccess && typeof posAccess['operasyon'] === 'boolean') return posAccess['operasyon'];
+      const rankAccess = positionModules?.[currentUser?.rank];
+      if (rankAccess && typeof rankAccess['operasyon'] === 'boolean') return rankAccess['operasyon'];
+      return false;
+    };
+
+    // Giriş yapıldıktan kısa süre sonra tarayıcıdan bildirim izni ister.
+    useEffect(() => {
+      if (!isAuthenticated || !bildirimDestekleniyorMu()) return;
+      bildirimIzniIste();
+    }, [isAuthenticated]);
 
     // ========================================================================
     // YENİ: SAYFA YENİLENSE BİLE AYNI BÖLÜMDE KALMA
@@ -2729,6 +2794,112 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [positions, setPositions] = useState([]);
     const [ranks, setRanks] = useState([]);
     const [positionModules, setPositionModules] = useState({});
+
+    // ========================================================================
+    // YENİ: İŞ / GÖREV / ARAÇ BİLDİRİMLERİ — MEVCUT STATE ÜZERİNDEN DIFF
+    // ----------------------------------------------------------------------
+    // Bu üç effect, jobs/tasks/vehicles için AYRI bir onSnapshot AÇMAZ.
+    // Onun yerine, zaten ana veri yükleme effect'i tarafından doldurulan
+    // jobs/tasks/vehicles state'lerinin bir önceki render'daki haliyle
+    // şimdiki halini karşılaştırır (useRef önbelleği ile). Böylece:
+    //   • Yeni iş kaydı / iptal / tarih değişikliği / hasar bildirimi
+    //   • Yeni görev (Görev Tahtası)
+    //   • Yeni araç (Araç Tahtası)
+    // olayları için SIFIR EK FIRESTORE OKUMASI ile bildirim üretilir.
+    //
+    // Kimler görür (iş kayıtları): Operasyon, Satış Personeli, Müdür, Firma Sahibi.
+    // Kimler görür (görev/araç): Operasyon yetkisi olanlar.
+    // ========================================================================
+    const jobOnbellekRef = useRef({});
+    const jobIlkYuklemeRef = useRef(true);
+    useEffect(() => {
+      if (jobs.length === 0) return; // Henüz veri gelmedi
+      const yetkiliMi = jobBildirimYetkisiVarMi();
+      const tarihGunAdi = (tarihStr) => {
+        if (!tarihStr) return 'Tarih belirtilmemiş';
+        try { return new Date(tarihStr + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' }); }
+        catch (e) { return tarihStr; }
+      };
+      const fiyatGoster = (p) => { const n = parseFloat(p); return isNaN(n) || n === 0 ? 'Belirtilmemiş' : `₺${n.toLocaleString('tr-TR')}`; };
+
+      if (jobIlkYuklemeRef.current) {
+        // İlk dolduruşta bildirim ÜRETME — sadece önbelleği doldur (kıyas tabanı)
+        jobs.forEach(j => { jobOnbellekRef.current[j.id] = { status: j.status, date: j.date, hasar: j.endJobDetails?.damageStatus }; });
+        jobIlkYuklemeRef.current = false;
+        return;
+      }
+
+      jobs.forEach(j => {
+        const onceki = jobOnbellekRef.current[j.id];
+        if (!onceki) {
+          // Yeni eklenen iş (önbellekte hiç yoktu)
+          if (yetkiliMi) {
+            const otomatikAsansorMu = j.contractDetails === 'Otomatik Oluşturulan Asansör Kurulum Kaydı';
+            const cokGunluDevamKaydiMi = (j.price === '0' || j.price === 0) && j.type !== 'Asansör';
+            if (!otomatikAsansorMu && !cokGunluDevamKaydiMi) {
+              bildirimGonder('🆕 Yeni İş Kaydı',
+                `${tarihGunAdi(j.date)}\n${j.type} Kaydı • ${j.customerName || 'İsimsiz müşteri'}\nAçan: ${j.createdBy || 'Bilinmiyor'} • Fiyat: ${fiyatGoster(j.price)}`,
+                { tag: `is-yeni-${j.id}` });
+            }
+          }
+        } else {
+          if (yetkiliMi) {
+            if (j.status === 'cancelled' && onceki.status !== 'cancelled') {
+              bildirimGonder('❌ İş İptal Edildi',
+                `${tarihGunAdi(j.date)}\n${j.type} Kaydı • ${j.customerName || 'İsimsiz müşteri'}\nİptal eden: ${j.cancelledBy || 'Bilinmiyor'}`,
+                { tag: `is-iptal-${j.id}` });
+            } else if (j.date !== onceki.date && j.status !== 'cancelled') {
+              bildirimGonder('📅 İş Tarihi Değiştirildi',
+                `${j.customerName || 'İsimsiz müşteri'} (${j.type})\nYeni tarih: ${tarihGunAdi(j.date)}\nDeğiştiren: ${j.updatedBy || 'Bilinmiyor'}`,
+                { tag: `is-tarih-${j.id}` });
+            }
+          }
+          if (opYetkisiVarMi() && j.endJobDetails?.damageStatus === 'Hasar var' && onceki.hasar !== 'Hasar var') {
+            bildirimGonder('⚠️ Hasarlı İş Bildirimi', `${j.customerName || 'Bir müşteri'} işinde hasar bildirimi yapıldı.`, { tag: `hasar-${j.id}` });
+          }
+        }
+        jobOnbellekRef.current[j.id] = { status: j.status, date: j.date, hasar: j.endJobDetails?.damageStatus };
+      });
+    }, [jobs]);
+
+    const taskOnbellekRef = useRef(new Set());
+    const taskIlkYuklemeRef = useRef(true);
+    useEffect(() => {
+      if (tasks.length === 0) return;
+      if (taskIlkYuklemeRef.current) {
+        tasks.forEach(t => taskOnbellekRef.current.add(t.id));
+        taskIlkYuklemeRef.current = false;
+        return;
+      }
+      if (opYetkisiVarMi()) {
+        tasks.forEach(t => {
+          if (!taskOnbellekRef.current.has(t.id)) {
+            bildirimGonder('📋 Yeni Görev', t.title || t.description || 'Görev Tahtası\'na yeni bir görev eklendi.', { tag: `gorev-${t.id}` });
+          }
+        });
+      }
+      tasks.forEach(t => taskOnbellekRef.current.add(t.id));
+    }, [tasks]);
+
+    const vehicleOnbellekRef = useRef(new Set());
+    const vehicleIlkYuklemeRef = useRef(true);
+    useEffect(() => {
+      if (vehicles.length === 0) return;
+      if (vehicleIlkYuklemeRef.current) {
+        vehicles.forEach(v => vehicleOnbellekRef.current.add(v.id));
+        vehicleIlkYuklemeRef.current = false;
+        return;
+      }
+      if (opYetkisiVarMi()) {
+        vehicles.forEach(v => {
+          if (!vehicleOnbellekRef.current.has(v.id)) {
+            bildirimGonder('🚚 Yeni Araç', `${v.plate || 'Yeni araç'} Araç Tahtası'na eklendi.`, { tag: `arac-${v.id}` });
+          }
+        });
+      }
+      vehicles.forEach(v => vehicleOnbellekRef.current.add(v.id));
+    }, [vehicles]);
+
     // YENİ: Sayfa kataloğu (Ana Şema) — kişiye özel yetki ekranında listelenen sayfalar
     const [moduleCatalog, setModuleCatalog] = useState(VARSAYILAN_MODUL_KATALOGU);
     // YENİ: Logo önbelleği — Firebase'den marka ayarları gelene kadar (özellikle
@@ -2863,7 +3034,30 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       historyStartDate.setFullYear(historyStartDate.getFullYear() - 8);
       const startDateStr = historyStartDate.toISOString().split('T')[0];
 
-      const qJobs = query(getCol('jobs'), where('date', '>=', startDateStr));
+      // ========================================================================
+      // DÜZELTME (Firestore okuma patlaması denetimi — 13 Ağustos 2026):
+      // Bu sorgu 8 YIL geriye giden TÜM iş kayıtlarını, HİÇBİR limit OLMADAN,
+      // canlı (realtime) dinliyordu. Aktif bir nakliye firması için 8 yıllık
+      // kayıt kolayca on binlerce doküman demektir; bu sayı, HER kullanıcının
+      // HER oturum açılışında/sayfa yenilemesinde YENİDEN baştan okunuyordu.
+      // 19 kullanıcı x günde birkaç kez x on binlerce doküman = milyonlarca
+      // okuma. Bu, muhtemelen 38 milyon okumanın EN BÜYÜK tek kaynağıydı.
+      // ÇÖZÜM: 8 yıllık tarih filtresi AYNEN korunuyor (mevcut raporlama
+      // ekranlarının ihtiyacı olabilir diye iş mantığına dokunulmadı), ama
+      // üstüne bir GÜVENLİK LİMİTİ eklendi. Bu limit normal kullanımda hiçbir
+      // şeyi etkilemez (günlük birkaç iş kaydı olan bir firma için 8000
+      // kayıt çok geniş bir pay), ama veri beklenmedik şekilde şişerse
+      // maliyetin sınırsız büyümesini engeller.
+      // NOT: Eğer firmanızda gerçekten 8000'den fazla iş kaydı bu tarih
+      // aralığında varsa (çok yüksek hacim), bu limiti artırmak yerine,
+      // eski/tamamlanmış yılların raporlamasını CANLI DİNLEME yerine
+      // "bir kereye mahsus getDocs ile sayfalama" şekline taşımanızı öneririz.
+      // ========================================================================
+      // NOT: orderBy('date','desc') eklendi ki 8000 sınırı aşılırsa (olası
+      // değil ama garanti altına alalım) rastgele değil, EN GÜNCEL kayıtlar
+      // tutulsun. where + orderBy AYNI alan (date) üzerinde olduğu için
+      // Firestore'da ek bir composite index gerektirmez.
+      const qJobs = query(getCol('jobs'), where('date', '>=', startDateStr), orderBy('date', 'desc'), limit(8000));
       const qTrans = query(getCol('transactions'), limit(300));
       const qTasks = query(getCol('tasks'), limit(100));
 
@@ -2953,7 +3147,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         setIsAuthChecking(false);
       }, console.error));
 
-      unsubs.push(onSnapshot(getCol('personnelActions'), snap => {
+      // DÜZELTME: personnelActions (personel hareket/aksiyon kayıtları) zamanla
+      // sürekli büyüyen bir günlük (log) koleksiyonudur; limitsiz dinlemek
+      // ileride tehlikeli büyüyebilir. En güncel 3000 kayıt yeterlidir;
+      // orderBy ile taşma durumunda ESKİ değil YENİ kayıtlar tutulur.
+      unsubs.push(onSnapshot(query(getCol('personnelActions'), orderBy('createdAt', 'desc'), limit(3000)), snap => {
         setAllPersonnelActions(snap.docs.map(d => ({ ...d.data(), id: d.id })));
       }, console.error));
 
@@ -2977,8 +3175,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         setAllMesaiRecords(flat);
       }, console.error));
 
-      // YENİ: Saha denetimleri (şef puanlama + raporlama) canlı dinlenir
-      unsubs.push(onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), snap => {
+      // DÜZELTME: sahaDenetimleri de zamanla büyüyen bir koleksiyon; güvenlik
+      // limiti eklendi (en güncel 2000 denetim yeterli, iş listelerinde
+      // "kim denetledi" rozeti için kullanılıyor).
+      unsubs.push(onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), orderBy('denetimTarihi', 'desc'), limit(2000)), snap => {
         setSahaDenetimleri(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }, console.error));
 
@@ -4949,9 +5149,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-3 rounded-xl bg-gradient-to-r from-teal-400 via-cyan-300 to-teal-500 shadow-lg shadow-teal-400/40 hover:scale-[1.02] ${activeTab === 'calendar' ? 'ring-2 ring-teal-800/70' : ''}`}
               >
-                <CalendarDays className="w-5 h-5 shrink-0 text-white" />
-                {/* YENİ: Menü adı "Takvim" → "Randevular" olarak değiştirildi (sayfa/rota aynı) */}
-                <span className="whitespace-nowrap font-black text-white">Randevular</span>
+                <CalendarDays className="w-5 h-5 shrink-0 text-black" />
+                {/* YENİ: Menü adı "Takvim" → "Randevular" olarak değiştirildi (sayfa/rota aynı)
+                    YENİ: Yazı rengi siyah yapıldı (önceden beyazdı) */}
+                <span className="whitespace-nowrap font-black text-black">Randevular</span>
               </button>
             )}
 
@@ -4980,10 +5181,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
             {/* ================================================================
                 YENİ: HATIRLATMALAR — Profilim'in hemen altında.
-                Takvim mantığıyla görev/not takibi (bkz. Hatirlatmalar.jsx).
-                Bekleyen hatırlatma varsa (bugünkü + geciken) menü öğesi AÇIK
-                KIRMIZI ARKA PLANLI ÇERÇEVEYE bürünür ve ismin yanında yanıp
-                sönen bildirim ışığı + sayı rozeti görünür.
+                Takvim mantığıyla görev/not takibi (bkz. Operasyon.jsx).
+                YENİ: Artık "Randevular" (Takvim) butonuyla aynı çerçeve
+                mantığında, HER ZAMAN GÖRÜNÜR bordo (koyu kırmızı) renk
+                geçişli bir arka plana sahip. Bekleyen hatırlatma varsa
+                (bugünkü + geciken) daha canlı kırmızıya döner ve ismin
+                yanında yanıp sönen bildirim ışığı + sayı rozeti görünür;
+                seçili sekmedeyken tek renk kırmızıya döner.
                 ================================================================ */}
             <button
               onClick={() => { setActiveTab('hatirlatmalar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
@@ -4992,7 +5196,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   ? 'bg-red-600 text-white shadow-md shadow-red-600/20'
                   : hatirlatmaBildirim > 0
                     ? 'bg-red-50 text-red-700 border-2 border-red-300 shadow-sm hover:border-red-500'
-                    : 'text-neutral-400 hover:text-white hover:bg-neutral-900'
+                    : 'bg-gradient-to-r from-red-950 via-red-900 to-red-800 text-white shadow-lg shadow-red-900/40 hover:scale-[1.02]'
               }`}
             >
               <div className="flex items-center gap-3">
@@ -5039,7 +5243,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-yellow-400 to-yellow-600 text-white shadow-lg shadow-yellow-500/30 hover:scale-[1.02]`}
                 >
                   <div className="flex items-center gap-3">
-                    <PlusCircle className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Satış Bölümü</span>
+                    <PlusCircle className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Satış</span>
                   </div>
                   {isAddJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -5095,7 +5299,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-lg shadow-red-600/30 hover:scale-[1.02]`}
                 >
                   <div className="flex items-center gap-3">
-                    <Activity className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Operasyon Bölümü</span>
+                    <Activity className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Operasyon</span>
                   </div>
                   <div className="flex items-center gap-2">
                     {dueMaintenanceCount > 0 && !isOperasyonSubMenuOpen && (
@@ -5216,7 +5420,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-sky-500 to-blue-700 text-white shadow-lg shadow-blue-600/30 hover:scale-[1.02]`}
                 >
                   <div className="flex items-center gap-3">
-                    <Wallet className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Finans Bölümü</span>
+                    <Wallet className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Finans</span>
                   </div>
                   {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
