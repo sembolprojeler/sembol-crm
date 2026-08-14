@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2 } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw, Power } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, where, orderBy, limit } from 'firebase/firestore';
 import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar } from './shared.jsx';
   export const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
@@ -14694,6 +14694,888 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+// ============================================================================
+// ============================================================================
+// MESAİ TAKİP MODÜLÜ (Operasyon Bölümü'ne entegre edildi)
+// NOT: Bu bölüm daha önce ayrı bir MesaiTakip.jsx dosyasındaydı; kullanıcı
+// isteğiyle Operasyon Bölümü'nün parçası olarak buraya taşındı.
+// - Ana sayfadaki "Mesai Giriş Onayla" (yeşil) / "Mesai Çıkış Onayla" (kırmızı)
+//   butonları: MesaiOnayButonlari
+// - İK > Mesai Takip sayfası: MesaiTakipView
+// - Sol menüdeki Aktif/Pasif anahtarı: MesaiModulSwitch + useMesaiModulAktif
+// - Veri modeli:
+//     artifacts/{appId}/public/data/mesaiQrAyarlari/qrConfig  -> 10 QR + aktif QR + modulAktif
+//     artifacts/{appId}/public/data/mesaiQrKayitlari          -> tüm giriş/çıkış kayıtları
+//   Mevcut puantaj sistemi 'mesai' koleksiyonunu kullandığı için çakışmaması
+//   adına burada bilerek FARKLI koleksiyon adları kullanıldı.
+// ============================================================================
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// YARDIMCILAR
+// ---------------------------------------------------------------------------
+
+// Harici script yükleyici: QR üretme (qrcode) ve QR okuma (jsQR) kütüphaneleri
+// paket eklemeden, yalnızca ihtiyaç anında CDN'den bir kez yüklenir.
+const mesaiScriptYukle = (src, globalAd) => new Promise((resolve, reject) => {
+  if (typeof window !== 'undefined' && window[globalAd]) return resolve(window[globalAd]); // Zaten yüklüyse tekrar yükleme
+  const s = document.createElement('script');
+  s.src = src; s.async = true;
+  s.onload = () => resolve(window[globalAd]);
+  s.onerror = () => reject(new Error(globalAd + ' kütüphanesi yüklenemedi'));
+  document.head.appendChild(s);
+});
+const qrUretKutuphanesi = () => mesaiScriptYukle('https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js', 'QRCode');
+const qrOkuKutuphanesi = () => mesaiScriptYukle('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js', 'jsQR');
+
+// 15 haneli QR içeriği üretir (karışıklık yaratan 0/O, 1/I gibi karakterler hariç)
+const rastgeleQrDegeri = () => {
+  const havuz = 'ABCDEFGHJKLMNPRSTUVYZ23456789';
+  let s = '';
+  for (let i = 0; i < 15; i++) s += havuz[Math.floor(Math.random() * havuz.length)];
+  return s;
+};
+
+// Kamerası bozuk personelin ELLE gireceği seri kod: SMB-XXXX-XXXX (harf + rakam)
+const rastgeleManuelKod = () => {
+  const havuz = 'ABCDEFGHJKLMNPRSTUVYZ23456789';
+  const blok = (n) => Array.from({ length: n }, () => havuz[Math.floor(Math.random() * havuz.length)]).join('');
+  return `SMB-${blok(4)}-${blok(4)}`;
+};
+
+// Bugünün ve dünün tarihi (YYYY-AA-GG) + şu anki saat (SS:DD)
+const mesaiBugunStr = () => new Date().toISOString().split('T')[0];
+const mesaiDunStr = () => { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString().split('T')[0]; };
+const mesaiSuankiSaat = () => new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
+
+// Personelin yakasını belirler (uygulamanın diğer bölümlerindeki mantıkla birebir aynı)
+export const mesaiYakaTipi = (p) => (p?.collarType === 'Mavi Yaka' || (!p?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p?.position))) ? 'Mavi Yaka' : 'Beyaz Yaka';
+
+// Cihaz tipi tespiti: kayıtlarda hangi cihazdan (iOS/Android/Bilgisayar) girildiğini görürüz
+const mesaiCihazTipi = () => {
+  const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : '') || '';
+  if (/iPhone|iPad|iPod/i.test(ua)) return 'iOS';
+  if (/Android/i.test(ua)) return 'Android';
+  return 'Bilgisayar';
+};
+
+// Firestore referansları
+const qrConfigRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'mesaiQrAyarlari', 'qrConfig');
+const mesaiKayitlarColRef = () => collection(db, 'artifacts', appId, 'public', 'data', 'mesaiQrKayitlari');
+
+// ---------------------------------------------------------------------------
+// QR AYARLARI KANCASI (HOOK)
+// 10 adet QR kod ilk kullanımda otomatik oluşturulur ve Firebase'de saklanır.
+// 'modulAktif' alanı modülün açık/kapalı durumunu tutar (varsayılan: aktif).
+// ---------------------------------------------------------------------------
+const useMesaiQrAyarlari = () => {
+  const [ayarlar, setAyarlar] = useState(null);
+  useEffect(() => {
+    let kurulumYapildi = false; // Yarış koşulunu engelleyen kilit (aynı anda 2 kez kurulum olmasın)
+    const unsub = onSnapshot(qrConfigRef(), async (snap) => {
+      if (snap.exists()) { setAyarlar(snap.data()); return; }
+      if (kurulumYapildi) return;
+      kurulumYapildi = true;
+      // İLK KURULUM: 10 farklı QR + her birine ait manuel seri kod üret
+      const liste = Array.from({ length: 10 }, (_, i) => ({
+        id: `qr${i + 1}`,
+        ad: `QR Kod ${i + 1}`,
+        qrDeger: rastgeleQrDegeri(),      // Kameranın okuyacağı 15 haneli kod
+        manuelKod: rastgeleManuelKod(),   // Elle girilecek seri kod
+        olusturma: new Date().toLocaleString('tr-TR')
+      }));
+      await setDoc(qrConfigRef(), { qrList: liste, aktifQrId: 'qr1', modulAktif: true });
+    });
+    return () => unsub();
+  }, []);
+  const aktifQr = ayarlar?.qrList?.find(q => q.id === ayarlar?.aktifQrId) || null;
+  return { ayarlar, aktifQr };
+};
+
+// ---------------------------------------------------------------------------
+// YENİ: MODÜL AKTİF/PASİF KANCASI
+// Sol menüdeki anahtardan yönetilir. PASİF iken ana sayfadaki butonlar ve
+// Mesai Takip sayfasının içeriği gözükmez; veriler silinmediği için "Aktif Et"
+// denildiğinde her şey kaldığı yerden devam eder.
+// Dönen değer: null = henüz yükleniyor, true/false = modül durumu
+// ---------------------------------------------------------------------------
+export const useMesaiModulAktif = () => {
+  const [aktif, setAktif] = useState(null);
+  useEffect(() => {
+    const unsub = onSnapshot(qrConfigRef(), (snap) => {
+      // Ayar dokümanı henüz yoksa varsayılan AKTİF kabul edilir
+      setAktif(snap.exists() ? (snap.data().modulAktif !== false) : true);
+    }, () => setAktif(true));
+    return () => unsub();
+  }, []);
+  return aktif;
+};
+
+// ---------------------------------------------------------------------------
+// YENİ: SOL MENÜ AKTİF/PASİF ANAHTARI
+// İnsan Kaynakları > Mesai Takip satırının yanında durur.
+// ---------------------------------------------------------------------------
+export const MesaiModulSwitch = ({ aktif }) => {
+  const [islemde, setIslemde] = useState(false);
+  const degistir = async (e) => {
+    e.stopPropagation(); // Menüdeki sayfa geçişini tetiklemesin
+    if (islemde) return;
+    const yeniDurum = !aktif;
+    if (!yeniDurum && !window.confirm('Mesai Takip modülü PASİFE alınacak. Ana sayfadaki mesai butonları ve mesai takip sayfası gizlenecek. Kayıtlar silinmez, tekrar aktif ettiğinizde kaldığı yerden devam eder. Onaylıyor musunuz?')) return;
+    setIslemde(true);
+    try {
+      // Ayar dokümanı henüz oluşmamış olabilir; setDoc + merge ile güvenli yazma
+      await setDoc(qrConfigRef(), { modulAktif: yeniDurum }, { merge: true });
+    } catch (err) { console.error('Mesai modülü durumu değiştirilemedi:', err); }
+    setIslemde(false);
+  };
+  return (
+    <button
+      onClick={degistir}
+      title={aktif ? 'Mesai Takip modülünü pasife al' : 'Mesai Takip modülünü aktif et'}
+      className={`shrink-0 flex items-center gap-1.5 px-2 py-1 rounded-full text-[9px] font-black transition ${aktif ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30' : 'bg-neutral-700/60 text-neutral-300 hover:bg-neutral-600'}`}
+    >
+      {islemde ? <Loader2 className="w-3 h-3 animate-spin" /> : <Power className="w-3 h-3" />}
+      {aktif ? 'AKTİF' : 'AKTİF ET'}
+      {/* Küçük anahtar görseli: doluysa aktif, boşsa pasif */}
+      <span className={`w-6 h-3 rounded-full relative transition ${aktif ? 'bg-emerald-500' : 'bg-neutral-500'}`}>
+        <span className={`absolute top-0.5 w-2 h-2 bg-white rounded-full transition-all ${aktif ? 'left-3.5' : 'left-0.5'}`}></span>
+      </span>
+    </button>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// HARİTA MODALI — kaydın alındığı konumu OpenStreetMap üzerinde gösterir
+// ---------------------------------------------------------------------------
+const MesaiHaritaModal = ({ kayit, onKapat }) => {
+  if (!kayit || !kayit.lat) return null;
+  const d = 0.003; // Harita yakınlık penceresi
+  const bbox = `${kayit.lng - d},${kayit.lat - d},${kayit.lng + d},${kayit.lat + d}`;
+  return (
+    <div className="fixed inset-0 bg-black/70 z-[120] flex items-center justify-center p-4" onClick={onKapat}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+        <div className="p-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white flex justify-between items-center">
+          <div>
+            <h3 className="font-black flex items-center gap-2"><MapPin className="w-5 h-5" /> Mesai Konumu</h3>
+            <p className="text-xs font-bold opacity-90">{kayit.personnelName} • {kayit.type === 'giris' ? 'GİRİŞ' : 'ÇIKIŞ'} • {kayit.dateStr?.split('-').reverse().join('.')} {kayit.timeStr}</p>
+          </div>
+          <button onClick={onKapat} className="p-2 bg-white/20 rounded-full hover:bg-white/30"><X className="w-5 h-5" /></button>
+        </div>
+        {/* Konum haritası: ek paket gerektirmeyen OpenStreetMap gömme çerçevesi */}
+        <iframe title="Mesai Konumu" className="w-full h-72 border-0" src={`https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${kayit.lat},${kayit.lng}`} />
+        <div className="p-3 flex justify-between items-center text-xs font-bold text-neutral-600">
+          <span>Hassasiyet: ±{Math.round(kayit.accuracy || 0)} m • Cihaz: {kayit.cihaz || '-'}</span>
+          <a href={`https://www.google.com/maps?q=${kayit.lat},${kayit.lng}`} target="_blank" rel="noreferrer" className="px-3 py-1.5 bg-emerald-600 text-white rounded-lg shadow-sm hover:bg-emerald-700">Google Haritalar'da Aç</a>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// QR TARAYICI MODALI
+// Buton açılır açılmaz: 1) Konum izni istenir 2) SEÇİM EKRANI çıkar:
+//    "QR Tarat" (kamera açılır) veya "Kod Gir" (seri kod elle girilir).
+// ---------------------------------------------------------------------------
+export const QrTarayiciModal = ({ tip, currentUser, onKapat }) => {
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const donguRef = useRef(null);
+  const [asama, setAsama] = useState('secim');         // secim | kamera | manuel | kaydediliyor | basarili | hata
+  const [mesaj, setMesaj] = useState('');
+  const [konum, setKonum] = useState(null);            // { lat, lng, accuracy }
+  const [konumDurum, setKonumDurum] = useState('aliniyor'); // aliniyor | alindi | reddedildi
+  const [manuelGirdi, setManuelGirdi] = useState('');
+  const [sonKayit, setSonKayit] = useState(null);
+  const okunduRef = useRef(false);                     // Aynı QR'ın art arda 2 kez işlenmesini engeller
+
+  // 1) KONUM: modal açılır açılmaz konum alınır — kayıt konumla birlikte tutulur
+  useEffect(() => {
+    if (!navigator.geolocation) { setKonumDurum('reddedildi'); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { setKonum({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }); setKonumDurum('alindi'); },
+      () => setKonumDurum('reddedildi'),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  }, []);
+
+  // 2) KAMERA: arka kamera açılır, QR bulunana kadar kare kare taranır
+  useEffect(() => {
+    if (asama !== 'kamera') return;
+    let iptal = false;
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        if (iptal) { stream.getTracks().forEach(t => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+
+        // Öncelik: tarayıcının yerleşik BarcodeDetector'ı (Android/Chrome'da çok hızlı).
+        // Desteklemeyen cihazlarda (çoğu iOS Safari) jsQR kütüphanesine düşülür.
+        let dedektor = null;
+        if ('BarcodeDetector' in window) {
+          try { dedektor = new window.BarcodeDetector({ formats: ['qr_code'] }); } catch (e) { dedektor = null; }
+        }
+        const jsQR = dedektor ? null : await qrOkuKutuphanesi().catch(() => null);
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+        const tara = async () => {
+          if (iptal || okunduRef.current || !videoRef.current || videoRef.current.readyState < 2) return;
+          try {
+            if (dedektor) {
+              const kodlar = await dedektor.detect(videoRef.current);
+              if (kodlar && kodlar.length > 0) return kodBulundu(kodlar[0].rawValue);
+            } else if (jsQR) {
+              canvas.width = videoRef.current.videoWidth; canvas.height = videoRef.current.videoHeight;
+              ctx.drawImage(videoRef.current, 0, 0);
+              const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+              const sonuc = jsQR(img.data, img.width, img.height);
+              if (sonuc && sonuc.data) return kodBulundu(sonuc.data);
+            }
+          } catch (e) { /* Tek karedeki hata taramayı durdurmaz */ }
+        };
+        donguRef.current = setInterval(tara, 350); // ~Saniyede 3 kare tarama: pil dostu
+      } catch (e) {
+        // Kamera açılamadı (izin yok / cihaz bozuk) -> otomatik olarak elle giriş moduna geç
+        setMesaj('Kamera açılamadı. Seri kodu elle girebilirsiniz.');
+        setAsama('manuel');
+      }
+    })();
+    return () => { iptal = true; kamerayiKapat(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asama === 'kamera']);
+
+  const kamerayiKapat = () => {
+    if (donguRef.current) { clearInterval(donguRef.current); donguRef.current = null; }
+    if (streamRef.current) { streamRef.current.getTracks().forEach(t => t.stop()); streamRef.current = null; }
+  };
+
+  // Kameradan okunan kod -> doğrula ve kaydet (yöntem: kamera)
+  const kodBulundu = (deger) => {
+    if (okunduRef.current) return;
+    okunduRef.current = true;
+    kamerayiKapat();
+    dogrulaVeKaydet(String(deger || '').trim(), 'kamera');
+  };
+
+  // Elle girilen seri kod -> doğrula ve kaydet (yöntem: manuel)
+  const manuelGonder = () => {
+    const temiz = manuelGirdi.toLocaleUpperCase('tr-TR').replace(/[\s-]/g, '');
+    if (temiz.length < 6) { setMesaj('Lütfen QR kodun altındaki seri kodu eksiksiz girin.'); return; }
+    dogrulaVeKaydet(temiz, 'manuel');
+  };
+
+  // ORTAK DOĞRULAMA + KAYIT
+  const dogrulaVeKaydet = async (kod, yontem) => {
+    setAsama('kaydediliyor');
+    try {
+      // Aktif QR'ı Firebase'den taze oku (yönetici az önce değiştirmiş olabilir)
+      const snap = await getDoc(qrConfigRef());
+      const veri = snap.exists() ? snap.data() : null;
+      // Modül pasife alınmışsa kayıt kabul edilmez
+      if (veri && veri.modulAktif === false) throw new Error('Mesai Takip modülü şu anda pasif durumda. Lütfen yöneticinizle iletişime geçin.');
+      const aktif = veri?.qrList?.find(q => q.id === veri?.aktifQrId);
+      if (!aktif) throw new Error('Aktif QR kod tanımlı değil. İK > Mesai Takip > QR Yönetimi bölümünden bir QR aktifleştirin.');
+
+      // Kod karşılaştırma: kamera QR içeriğiyle, elle giriş seri kodla eşleşmeli
+      const eslesti = yontem === 'kamera'
+        ? kod === aktif.qrDeger
+        : kod === (aktif.manuelKod || '').replace(/[\s-]/g, '');
+      if (!eslesti) throw new Error(yontem === 'kamera' ? 'Okutulan QR kod aktif mesai koduyla eşleşmiyor. Ofis girişindeki güncel kodu okutun.' : 'Girilen seri kod hatalı. QR kodun altındaki kodu kontrol edin.');
+
+      const kayit = {
+        personnelId: String(currentUser?.id || ''),
+        personnelName: currentUser?.fullName || 'Bilinmiyor',
+        position: currentUser?.position || '',
+        collarType: mesaiYakaTipi(currentUser),             // Mavi Yaka / Beyaz Yaka ayrımı raporda kullanılır
+        type: tip,                                          // 'giris' veya 'cikis'
+        method: yontem,                                     // 'kamera' veya 'manuel' -> takibi yapılır
+        qrId: aktif.id, qrAd: aktif.ad,
+        dateStr: mesaiBugunStr(), timeStr: mesaiSuankiSaat(), timestamp: Date.now(),
+        lat: konum?.lat ?? null, lng: konum?.lng ?? null, accuracy: konum?.accuracy ?? null,
+        konumDurumu: konumDurum === 'alindi' ? 'alindi' : 'alinamadi',
+        cihaz: mesaiCihazTipi()
+      };
+
+      // Aynı gün mükerrer kontrolü: giriş varsa tekrar giriş yazılmaz,
+      // çıkış varsa yeni çıkışla GÜNCELLENİR (son çıkış saati geçerlidir).
+      const bugunku = await new Promise((resolve) => {
+        const unsub = onSnapshot(query(mesaiKayitlarColRef(), where('personnelId', '==', kayit.personnelId), where('dateStr', '==', kayit.dateStr)), s => { unsub(); resolve(s.docs.map(d => ({ id: d.id, ...d.data() }))); });
+      });
+      const mevcut = bugunku.find(k => k.type === tip);
+      if (tip === 'giris' && mevcut) {
+        setSonKayit(mevcut);
+        setMesaj(`Bugün ${mevcut.timeStr} itibarıyla zaten mesai GİRİŞİ yaptınız. Yeni kayıt oluşturulmadı.`);
+        setAsama('basarili');
+        return;
+      }
+      if (tip === 'cikis' && mevcut) {
+        await updateDoc(doc(mesaiKayitlarColRef(), mevcut.id), { timeStr: kayit.timeStr, timestamp: kayit.timestamp, lat: kayit.lat, lng: kayit.lng, accuracy: kayit.accuracy, method: yontem, konumDurumu: kayit.konumDurumu, cihaz: kayit.cihaz });
+        setSonKayit({ ...mevcut, ...kayit });
+        setMesaj(`Mesai ÇIKIŞINIZ ${kayit.timeStr} olarak güncellendi.`);
+        setAsama('basarili');
+        return;
+      }
+      const ref = await addDoc(mesaiKayitlarColRef(), kayit);
+      setSonKayit({ id: ref.id, ...kayit });
+      setMesaj(`Mesai ${tip === 'giris' ? 'GİRİŞİNİZ' : 'ÇIKIŞINIZ'} ${kayit.timeStr} olarak kaydedildi. İyi çalışmalar!`);
+      setAsama('basarili');
+    } catch (e) {
+      setMesaj(e.message || 'Kayıt sırasında bir hata oluştu.');
+      setAsama('hata');
+    }
+  };
+
+  const kapat = () => { kamerayiKapat(); onKapat(); };
+  const giris = tip === 'giris';
+
+  return (
+    <div className="fixed inset-0 bg-black/80 z-[110] flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95">
+        {/* Başlık: girişte yeşil, çıkışta kırmızı */}
+        <div className={`p-4 text-white flex justify-between items-center bg-gradient-to-r ${giris ? 'from-green-600 to-emerald-700' : 'from-red-600 to-rose-700'}`}>
+          <h3 className="font-black flex items-center gap-2">{giris ? <LogIn className="w-5 h-5" /> : <LogOut className="w-5 h-5" />} Mesai {giris ? 'Giriş' : 'Çıkış'} Onayı</h3>
+          <button onClick={kapat} className="p-2 bg-white/20 rounded-full hover:bg-white/30"><X className="w-5 h-5" /></button>
+        </div>
+
+        {/* Konum durumu şeridi */}
+        <div className={`px-4 py-2 text-xs font-black flex items-center gap-2 ${konumDurum === 'alindi' ? 'bg-emerald-50 text-emerald-700' : konumDurum === 'aliniyor' ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
+          <MapPin className="w-4 h-4 shrink-0" />
+          {konumDurum === 'alindi' && `Konum alındı (±${Math.round(konum?.accuracy || 0)} m) — kayıtla birlikte saklanacak`}
+          {konumDurum === 'aliniyor' && 'Konumunuz alınıyor... (lütfen konum iznini onaylayın)'}
+          {konumDurum === 'reddedildi' && 'Konum alınamadı — kayıt konumsuz olarak işaretlenecek'}
+        </div>
+
+        <div className="p-4">
+          {/* SEÇİM EKRANI: butona basınca önce bu pencere çıkar */}
+          {asama === 'secim' && (
+            <div className="space-y-3">
+              <p className="text-center text-sm font-black text-neutral-700">Mesai {giris ? 'girişinizi' : 'çıkışınızı'} nasıl onaylamak istersiniz?</p>
+              {/* Seçenek 1: Kamerayla QR okutma */}
+              <button onClick={() => { okunduRef.current = false; setMesaj(''); setAsama('kamera'); }} className={`w-full p-4 rounded-2xl text-white font-black text-sm flex items-center gap-3 shadow-lg hover:scale-[1.02] active:scale-95 transition bg-gradient-to-r ${giris ? 'from-green-500 to-emerald-700 shadow-green-600/30' : 'from-red-500 to-rose-700 shadow-red-600/30'}`}>
+                <span className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center shrink-0"><Camera className="w-6 h-6" /></span>
+                <span className="text-left">QR TARAT<span className="block text-[10px] font-bold opacity-80">Kamera açılır, ofisteki QR kodu okutun</span></span>
+                <QrCode className="w-6 h-6 ml-auto opacity-70" />
+              </button>
+              {/* Seçenek 2: Seri kodu elle girme (kamerası bozuk personel için) */}
+              <button onClick={() => { setMesaj(''); setAsama('manuel'); }} className="w-full p-4 rounded-2xl bg-gradient-to-r from-neutral-800 to-black text-white font-black text-sm flex items-center gap-3 shadow-lg hover:scale-[1.02] active:scale-95 transition">
+                <span className="w-12 h-12 bg-white/15 rounded-xl flex items-center justify-center shrink-0"><Keyboard className="w-6 h-6" /></span>
+                <span className="text-left">KOD GİR<span className="block text-[10px] font-bold opacity-70">QR kodun altındaki seri kodu elle yazın</span></span>
+              </button>
+            </div>
+          )}
+
+          {asama === 'kamera' && (
+            <div>
+              {/* Kamera görüntüsü + nişangah çerçevesi */}
+              <div className="relative rounded-xl overflow-hidden bg-black aspect-square">
+                <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className={`w-56 h-56 border-4 rounded-2xl ${giris ? 'border-green-400' : 'border-red-400'} shadow-[0_0_0_9999px_rgba(0,0,0,0.35)] animate-pulse`}></div>
+                </div>
+                <p className="absolute bottom-3 inset-x-0 text-center text-white text-xs font-bold drop-shadow">Ofis girişindeki QR kodu çerçeveye hizalayın</p>
+              </div>
+              {/* Kamerası bozuk personel için elle giriş yolu */}
+              <button onClick={() => { kamerayiKapat(); setMesaj(''); setAsama('manuel'); }} className="mt-3 w-full py-3 rounded-xl bg-neutral-900 text-white font-black text-sm flex items-center justify-center gap-2 hover:bg-neutral-800">
+                <Keyboard className="w-4 h-4" /> Kameram Bozuk — Seri Kodu Elle Gir
+              </button>
+            </div>
+          )}
+
+          {asama === 'manuel' && (
+            <div className="space-y-3">
+              {mesaj && <p className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /> {mesaj}</p>}
+              <label className="text-xs font-black text-neutral-600 uppercase">QR kodun altındaki seri kodu girin</label>
+              <input value={manuelGirdi} onChange={e => setManuelGirdi(e.target.value)} placeholder="SMB-XXXX-XXXX" className="w-full p-3 border-2 border-neutral-300 rounded-xl font-black tracking-widest text-center uppercase focus:border-black outline-none" autoFocus />
+              <button onClick={manuelGonder} className={`w-full py-3 rounded-xl text-white font-black flex items-center justify-center gap-2 ${giris ? 'bg-green-600 hover:bg-green-700' : 'bg-red-600 hover:bg-red-700'}`}>
+                <CheckCircle className="w-5 h-5" /> Onayla
+              </button>
+              <button onClick={() => { okunduRef.current = false; setAsama('kamera'); }} className="w-full py-2.5 rounded-xl bg-neutral-100 text-neutral-700 font-bold text-sm flex items-center justify-center gap-2 hover:bg-neutral-200"><Camera className="w-4 h-4" /> Kamerayla Okutmayı Dene</button>
+            </div>
+          )}
+
+          {asama === 'kaydediliyor' && (
+            <div className="py-10 flex flex-col items-center gap-3 text-neutral-600">
+              <Loader2 className="w-10 h-10 animate-spin" />
+              <p className="font-black text-sm">Kod doğrulanıyor ve kaydediliyor...</p>
+            </div>
+          )}
+
+          {(asama === 'basarili' || asama === 'hata') && (
+            <div className="py-6 flex flex-col items-center gap-3 text-center">
+              {asama === 'basarili' ? <CheckCircle className="w-14 h-14 text-green-600" /> : <AlertTriangle className="w-14 h-14 text-red-600" />}
+              <p className={`font-black text-sm ${asama === 'basarili' ? 'text-green-700' : 'text-red-700'}`}>{mesaj}</p>
+              {asama === 'basarili' && sonKayit?.lat && (
+                <p className="text-xs font-bold text-neutral-500 flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> Konum kayda işlendi ({sonKayit.method === 'kamera' ? 'Kamera ile okutuldu' : 'Seri kod ile elle girildi'})</p>
+              )}
+              {asama === 'hata' && (
+                <button onClick={() => { okunduRef.current = false; setMesaj(''); setAsama('secim'); }} className="px-4 py-2.5 bg-neutral-900 text-white rounded-xl font-black text-sm flex items-center gap-2"><RefreshCw className="w-4 h-4" /> Tekrar Dene</button>
+              )}
+              <button onClick={kapat} className="px-6 py-2.5 bg-neutral-100 text-neutral-700 rounded-xl font-bold text-sm hover:bg-neutral-200">Kapat</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// ANA SAYFA BUTONLARI — "Hoş Geldiniz" kartının hemen altında görünür.
+// Yeşil = Mesai Giriş Onayla, Kırmızı = Mesai Çıkış Onayla.
+// Altında Bugün/Dün mesai özeti (geldi / gelmedi / izinli) gösterilir.
+// MODÜL PASİF ise bu bileşen HİÇBİR ŞEY göstermez (null döner).
+// ---------------------------------------------------------------------------
+export const MesaiOnayButonlari = ({ currentUser }) => {
+  const modulAktif = useMesaiModulAktif();            // Aktif/Pasif durumu
+  const [modalTipi, setModalTipi] = useState(null);   // 'giris' | 'cikis' | null
+  const [kayitlarim, setKayitlarim] = useState([]);   // Bugün + dün kendi QR kayıtları
+  const [puantajDurum, setPuantajDurum] = useState({ bugun: null, dun: null }); // Puantajdaki durum kodu (izin/devamsız vb.)
+
+  // Sadece BUGÜN + DÜNE ait kendi kayıtlarını dinle (veri tasarrufu için filtreli sorgu)
+  useEffect(() => {
+    if (!currentUser?.id || modulAktif === false) return; // Pasifken boşuna dinleme yapılmaz
+    const q = query(mesaiKayitlarColRef(), where('personnelId', '==', String(currentUser.id)), where('dateStr', 'in', [mesaiBugunStr(), mesaiDunStr()]));
+    const unsub = onSnapshot(q, snap => setKayitlarim(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => unsub();
+  }, [currentUser?.id, modulAktif]);
+
+  // Puantaj tahtasındaki mesai durumunu (İzinli / Raporlu / Devamsız...) oku.
+  // Uygulamanın mevcut 'mesai' (puantaj) koleksiyonundan SADECE OKUMA yapılır.
+  useEffect(() => {
+    if (!currentUser?.id || modulAktif === false) return;
+    (async () => {
+      try {
+        const oku = async (tarih) => {
+          const [y, a, g] = tarih.split('-').map(Number);
+          const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${y}_${a}`));
+          if (!snap.exists()) return null;
+          const hucre = (snap.data().records || {})[currentUser.id]?.[g];
+          if (!hucre) return null;
+          return typeof hucre === 'object' ? hucre.status : hucre; // Kod: G, D, Yİ, R...
+        };
+        setPuantajDurum({ bugun: await oku(mesaiBugunStr()), dun: await oku(mesaiDunStr()) });
+      } catch (e) { /* Puantaj okunamazsa özet sadece QR kayıtlarına göre çalışır */ }
+    })();
+  }, [currentUser?.id, modulAktif]);
+
+  // MODÜL PASİF (veya durum henüz yüklenmemiş) ise hiçbir şey gösterilmez
+  if (modulAktif !== true) return null;
+
+  const bugunku = kayitlarim.filter(k => k.dateStr === mesaiBugunStr());
+  const dunku = kayitlarim.filter(k => k.dateStr === mesaiDunStr());
+  const giris = bugunku.find(k => k.type === 'giris');
+  const cikis = bugunku.find(k => k.type === 'cikis');
+
+  // GÜN DURUMU HESABI — kullanıcı isteğiyle ŞU AN sadece basit bildirimler:
+  // "İşe Geldi", "Gelmedi (Devamsızlık)" ve "İzinli / Raporlu".
+  // Fazla mesai / ekstra mesai hesabı BİLİNÇLİ olarak yazılmıyor (ileride eklenecek).
+  const gunDurumu = (qrGiris, qrCikis, kod, bugunMu) => {
+    const izinKodlari = ['Hİ', 'Yİ', 'Bİ', 'Üİ']; // Haftalık / Yıllık / Bayram / Ücretsiz izin
+    const kodEtiketi = MESAI_STATUS_OPTIONS.find(o => o.code === kod)?.label || kod;
+    // 1) QR ile giriş yaptıysa her durumda "işe geldi" sayılır (en güvenilir kaynak)
+    if (qrGiris) return { baslik: 'İşe Geldin ✓', detay: `Giriş ${qrGiris.timeStr}${qrCikis ? ` • Çıkış ${qrCikis.timeStr}` : ''}`, stil: 'bg-green-50 border-green-300 text-green-800', ikon: <CheckCircle className="w-5 h-5 text-green-600" /> };
+    // 2) Puantajda izin/rapor işaretliyse
+    if (izinKodlari.includes(kod)) return { baslik: 'İzinlisin 🏖', detay: kodEtiketi, stil: 'bg-purple-50 border-purple-300 text-purple-800', ikon: <Calendar className="w-5 h-5 text-purple-600" /> };
+    if (kod === 'R') return { baslik: 'Raporlusun', detay: 'Geçmiş olsun!', stil: 'bg-orange-50 border-orange-300 text-orange-800', ikon: <AlertTriangle className="w-5 h-5 text-orange-600" /> };
+    // 3) Puantajda devamsız işaretliyse
+    if (kod === 'D') return { baslik: 'Devamsızlık ✗', detay: 'Bu gün için mesai kaydın yok', stil: 'bg-red-50 border-red-300 text-red-800', ikon: <X className="w-5 h-5 text-red-600" /> };
+    // 4) Puantajda başka bir "geldi" kodu varsa (G, FG, FM...) geldi sayılır
+    if (kod) return { baslik: 'İşe Geldin ✓', detay: `Puantaj: ${kodEtiketi}`, stil: 'bg-green-50 border-green-300 text-green-800', ikon: <CheckCircle className="w-5 h-5 text-green-600" /> };
+    // 5) Hiç kayıt yoksa: bugün için "henüz giriş yok", dün için "gelmedi"
+    return bugunMu
+      ? { baslik: 'Henüz Giriş Yapılmadı', detay: 'Yeşil butonla mesai girişini onayla', stil: 'bg-amber-50 border-amber-300 text-amber-800', ikon: <Clock className="w-5 h-5 text-amber-600" /> }
+      : { baslik: 'Gelmedin (Devamsızlık)', detay: 'Dün için mesai kaydı bulunamadı', stil: 'bg-red-50 border-red-300 text-red-800', ikon: <X className="w-5 h-5 text-red-600" /> };
+  };
+  const bugunOzet = gunDurumu(giris, cikis, puantajDurum.bugun, true);
+  const dunOzet = gunDurumu(dunku.find(k => k.type === 'giris'), dunku.find(k => k.type === 'cikis'), puantajDurum.dun, false);
+
+  return (
+    <div className="bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-neutral-200 animate-in fade-in slide-in-from-top-2">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <p className="text-[10px] font-black uppercase tracking-wider text-neutral-500 flex items-center gap-1.5"><QrCode className="w-4 h-4 text-black" /> QR Mesai Onayı • Konum + Kamera</p>
+        {/* Bugünkü durum rozeti */}
+        <p className="text-[11px] font-black text-neutral-600 flex items-center gap-2 bg-neutral-100 px-3 py-1 rounded-full">
+          <Clock className="w-3.5 h-3.5" />
+          Bugün: <span className={giris ? 'text-green-700' : 'text-neutral-400'}>Giriş {giris?.timeStr || '—'}</span> • <span className={cikis ? 'text-red-700' : 'text-neutral-400'}>Çıkış {cikis?.timeStr || '—'}</span>
+        </p>
+      </div>
+      {/* Yan yana iki dikkat çekici buton */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <button onClick={() => setModalTipi('giris')} className="py-4 px-4 rounded-2xl text-white font-black text-sm flex items-center justify-center gap-2 bg-gradient-to-r from-green-500 via-green-600 to-emerald-700 shadow-lg shadow-green-600/40 hover:scale-[1.02] active:scale-95 transition">
+          <span className="w-9 h-9 bg-white/20 rounded-full flex items-center justify-center"><LogIn className="w-5 h-5" /></span>
+          MESAİ GİRİŞ ONAYLA
+          <QrCode className="w-5 h-5 opacity-80" />
+        </button>
+        <button onClick={() => setModalTipi('cikis')} className="py-4 px-4 rounded-2xl text-white font-black text-sm flex items-center justify-center gap-2 bg-gradient-to-r from-red-500 via-red-600 to-rose-700 shadow-lg shadow-red-600/40 hover:scale-[1.02] active:scale-95 transition">
+          <span className="w-9 h-9 bg-white/20 rounded-full flex items-center justify-center"><LogOut className="w-5 h-5" /></span>
+          MESAİ ÇIKIŞ ONAYLA
+          <QrCode className="w-5 h-5 opacity-80" />
+        </button>
+      </div>
+      {/* BUGÜN / DÜN MESAİ ÖZETİ — QR mesaisine ve puantaja göre basit durum bildirimi
+          (Şu anlık sadece: geldi / gelmedi-devamsızlık / izinli-raporlu gösterilir) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
+        {[{ etiket: 'BUGÜN', o: bugunOzet }, { etiket: 'DÜN', o: dunOzet }].map(({ etiket, o }) => (
+          <div key={etiket} className={`flex items-center gap-3 p-3 rounded-2xl border-2 ${o.stil} animate-in fade-in`}>
+            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shrink-0 shadow-sm">{o.ikon}</div>
+            <div className="min-w-0">
+              <p className="text-[9px] font-black uppercase tracking-wider opacity-60">{etiket}KÜ MESAİ</p>
+              <p className="text-sm font-black leading-tight">{o.baslik}</p>
+              <p className="text-[11px] font-bold opacity-80 truncate">{o.detay}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* Butona basılınca önce "QR Tarat / Kod Gir" seçim penceresi açılır */}
+      {modalTipi && <QrTarayiciModal tip={modalTipi} currentUser={currentUser} onKapat={() => setModalTipi(null)} />}
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
+// QR KODU PDF OLARAK İNDİR
+// Uygulamadaki mevcut PDF desenine (generateContractPDF) uygun: yazdırma
+// penceresi açılır, sayfa başlığı dosya adı olur, "PDF olarak kaydet" ile
+// orijinal PDF formatında indirilir. iOS/Android/masaüstünde çalışır.
+// ---------------------------------------------------------------------------
+const qrPdfIndir = async (qr) => {
+  const QRCodeLib = await qrUretKutuphanesi();
+  // Yüksek çözünürlüklü QR görseli (baskıda net çıksın diye 600px)
+  const dataUrl = await QRCodeLib.toDataURL(qr.qrDeger, { width: 600, margin: 2, errorCorrectionLevel: 'H' });
+  const w = window.open('', '_blank');
+  if (!w) { alert('Açılır pencere engellendi. Lütfen tarayıcıda açılır pencerelere izin verin.'); return; }
+  w.document.write(`<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>Sembol-Mesai-${qr.ad.replace(/\s+/g, '-')}</title>
+    <style>
+      body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:40px;text-align:center;color:#111}
+      .kart{border:4px solid #111;border-radius:24px;padding:36px;max-width:520px;margin:0 auto}
+      h1{font-size:26px;letter-spacing:2px;margin:0}.alt{color:#b91c1c;font-weight:800;letter-spacing:4px;font-size:13px;margin:6px 0 24px}
+      img{width:360px;height:360px}
+      .seri{margin-top:20px;font-size:26px;font-weight:900;letter-spacing:6px;border:3px dashed #111;border-radius:14px;padding:14px}
+      .not{margin-top:16px;font-size:12px;color:#555;line-height:1.6}
+      @media print{body{padding:0}}
+    </style></head><body>
+    <div class="kart">
+      <h1>SEMBOL NAKLİYAT</h1>
+      <div class="alt">MESAİ TAKİP • ${qr.ad.toLocaleUpperCase('tr-TR')}</div>
+      <img src="${dataUrl}" alt="QR" />
+      <div class="seri">${qr.manuelKod}</div>
+      <p class="not">Mesai giriş/çıkışınızı onaylamak için uygulamadaki yeşil/kırmızı butona basıp bu QR kodu kameraya okutun.<br/>Kameranız çalışmıyorsa yukarıdaki seri kodu elle girebilirsiniz.</p>
+    </div>
+    <script>window.onload=function(){setTimeout(function(){window.print();},400);};<\/script>
+    </body></html>`);
+  w.document.close();
+};
+
+// Küçük yardımcı: bir QR değerinin görselini üretip <img> olarak gösterir
+const QrGorsel = ({ deger, boyut = 140 }) => {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    let aktif = true;
+    qrUretKutuphanesi().then(lib => lib.toDataURL(deger, { width: boyut * 2, margin: 1, errorCorrectionLevel: 'H' })).then(u => { if (aktif) setUrl(u); }).catch(() => {});
+    return () => { aktif = false; };
+  }, [deger, boyut]);
+  return url ? <img src={url} alt="QR" style={{ width: boyut, height: boyut }} className="rounded-lg" /> : <div style={{ width: boyut, height: boyut }} className="bg-neutral-100 rounded-lg flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-neutral-400" /></div>;
+};
+
+// ---------------------------------------------------------------------------
+// İK > MESAİ TAKİP SAYFASI (4 sekme)
+// 1) Bugünkü Durum  2) Tüm Kayıtlar  3) QR Yönetimi  4) Raporlama
+// Her sekmede Mavi Yaka / Beyaz Yaka ayrımı vardır.
+// MODÜL PASİF ise sayfa içeriği gizlenir, sadece bilgi ekranı gösterilir.
+// ---------------------------------------------------------------------------
+export const MesaiTakipView = ({ personnelList = [], currentUser }) => {
+  const modulAktif = useMesaiModulAktif();
+  const { ayarlar, aktifQr } = useMesaiQrAyarlari();
+  const [sekme, setSekme] = useState('bugun');
+  const [kayitlar, setKayitlar] = useState([]);
+  const [haritaKaydi, setHaritaKaydi] = useState(null);
+  const [modalTipi, setModalTipi] = useState(null); // İK sayfasından da giriş/çıkış yapılabilsin
+
+  // Filtreler (Tüm Kayıtlar sekmesi)
+  const [fBas, setFBas] = useState(mesaiBugunStr());
+  const [fBit, setFBit] = useState(mesaiBugunStr());
+  const [fYaka, setFYaka] = useState('hepsi');
+  const [fPersonel, setFPersonel] = useState('hepsi');
+  const [fTip, setFTip] = useState('hepsi');
+  const [fYontem, setFYontem] = useState('hepsi');
+  const [raporAy, setRaporAy] = useState(mesaiBugunStr().slice(0, 7)); // YYYY-AA
+
+  // Tüm mesai kayıtlarını canlı dinle (modül pasifken dinleme yapılmaz)
+  useEffect(() => {
+    if (modulAktif === false) return;
+    const unsub = onSnapshot(mesaiKayitlarColRef(), snap => setKayitlar(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    return () => unsub();
+  }, [modulAktif]);
+
+  // Aktif (Pasif olmayan) personel listesi, yakaya göre ayrılmış
+  const aktifPersonel = useMemo(() => personnelList.filter(p => p.employmentStatus !== 'Pasif'), [personnelList]);
+  const maviYaka = aktifPersonel.filter(p => mesaiYakaTipi(p) === 'Mavi Yaka');
+  const beyazYaka = aktifPersonel.filter(p => mesaiYakaTipi(p) === 'Beyaz Yaka');
+
+  const bugun = mesaiBugunStr();
+  const bugunkuKayitlar = kayitlar.filter(k => k.dateStr === bugun);
+
+  // Filtrelenmiş kayıtlar (Tüm Kayıtlar sekmesi) — en yeni üstte, ilk 300 kayıt
+  const filtreli = useMemo(() => kayitlar
+    .filter(k => (!fBas || k.dateStr >= fBas) && (!fBit || k.dateStr <= fBit))
+    .filter(k => fYaka === 'hepsi' || k.collarType === fYaka)
+    .filter(k => fPersonel === 'hepsi' || k.personnelName === fPersonel)
+    .filter(k => fTip === 'hepsi' || k.type === fTip)
+    .filter(k => fYontem === 'hepsi' || k.method === fYontem)
+    .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
+    .slice(0, 300), [kayitlar, fBas, fBit, fYaka, fPersonel, fTip, fYontem]);
+
+  // RAPORLAMA: seçilen aydaki kayıtlardan kişi bazlı özet çıkarır
+  const rapor = useMemo(() => {
+    const aylik = kayitlar.filter(k => (k.dateStr || '').startsWith(raporAy));
+    const kisiler = new Map();
+    aylik.forEach(k => {
+      if (!kisiler.has(k.personnelName)) kisiler.set(k.personnelName, { ad: k.personnelName, yaka: k.collarType, gunler: new Map(), kamera: 0, manuel: 0 });
+      const kisi = kisiler.get(k.personnelName);
+      if (k.method === 'manuel') kisi.manuel++; else kisi.kamera++;
+      if (!kisi.gunler.has(k.dateStr)) kisi.gunler.set(k.dateStr, {});
+      kisi.gunler.get(k.dateStr)[k.type] = k.timeStr;
+    });
+    return Array.from(kisiler.values()).map(kisi => {
+      let toplamDk = 0, girisDkToplam = 0, girisSay = 0;
+      kisi.gunler.forEach(g => {
+        if (g.giris) { // Ortalama giriş saati için dakikaya çevir
+          const [s, d] = g.giris.split(':').map(Number); girisDkToplam += s * 60 + d; girisSay++;
+          if (g.cikis) { // Çalışılan süre = çıkış - giriş
+            const [cs, cd] = g.cikis.split(':').map(Number);
+            const fark = (cs * 60 + cd) - (s * 60 + d);
+            if (fark > 0) toplamDk += fark;
+          }
+        }
+      });
+      const ortGiris = girisSay ? `${String(Math.floor(girisDkToplam / girisSay / 60)).padStart(2, '0')}:${String(Math.round(girisDkToplam / girisSay) % 60).padStart(2, '0')}` : '—';
+      return { ...kisi, gunSayisi: kisi.gunler.size, toplamSaat: (toplamDk / 60).toFixed(1).replace('.', ','), ortGiris };
+    }).sort((a, b) => b.gunSayisi - a.gunSayisi);
+  }, [kayitlar, raporAy]);
+
+  // MODÜL PASİF: sayfa içeriği tamamen gizlenir, sadece bilgilendirme gösterilir
+  if (modulAktif === false) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-10 text-center animate-in fade-in">
+        <div className="w-16 h-16 bg-neutral-100 rounded-full flex items-center justify-center mx-auto mb-4"><Power className="w-8 h-8 text-neutral-400" /></div>
+        <h2 className="text-lg font-black text-neutral-700">Mesai Takip Modülü Pasif</h2>
+        <p className="text-sm font-bold text-neutral-500 mt-2 max-w-md mx-auto">Bu modül şu anda kapalı. Sol menüdeki <b>İnsan Kaynakları &gt; Mesai Takip</b> satırındaki <b>AKTİF ET</b> anahtarına basarak yeniden açabilirsiniz. Mevcut mesai kayıtlarınız silinmedi; aktif edildiğinde kaldığı yerden devam eder.</p>
+      </div>
+    );
+  }
+  if (modulAktif === null) {
+    return <div className="py-16 flex justify-center"><Loader2 className="w-8 h-8 animate-spin text-neutral-400" /></div>;
+  }
+
+  // "Kiminle mesai yaptı": aynı gün giriş yapan diğer personeller
+  const bugunkuKayitlarVeya = (tarih) => kayitlar.filter(k => k.dateStr === tarih);
+  const birlikteMesai = (kayit) => bugunkuKayitlarVeya(kayit.dateStr).filter(k => k.type === 'giris' && k.personnelName !== kayit.personnelName).map(k => k.personnelName);
+
+  // QR YÖNETİMİ işlemleri
+  const qrAktifYap = async (id) => { await updateDoc(qrConfigRef(), { aktifQrId: id }); };
+  const qrYenile = async (id) => {
+    if (!window.confirm('Bu QR kodun içeriği ve seri kodu YENİLENECEK. Duvardaki eski çıktı geçersiz olur. Devam edilsin mi?')) return;
+    const yeniListe = (ayarlar?.qrList || []).map(q => q.id === id ? { ...q, qrDeger: rastgeleQrDegeri(), manuelKod: rastgeleManuelKod(), olusturma: new Date().toLocaleString('tr-TR') } : q);
+    await updateDoc(qrConfigRef(), { qrList: yeniListe });
+  };
+  const kayitSil = async (k) => {
+    if (!window.confirm(`${k.personnelName} — ${k.dateStr?.split('-').reverse().join('.')} ${k.timeStr} (${k.type === 'giris' ? 'Giriş' : 'Çıkış'}) kaydı silinsin mi?`)) return;
+    await deleteDoc(doc(mesaiKayitlarColRef(), k.id));
+  };
+
+  // Tek personel satırı (Bugünkü Durum panosu için)
+  const PersonelSatiri = ({ p }) => {
+    const g = bugunkuKayitlar.find(k => String(k.personnelId) === String(p.id) && k.type === 'giris');
+    const c = bugunkuKayitlar.find(k => String(k.personnelId) === String(p.id) && k.type === 'cikis');
+    const durum = c ? { t: 'ÇIKTI', renk: 'bg-neutral-800 text-white' } : g ? { t: 'İÇERİDE', renk: 'bg-green-600 text-white' } : { t: 'GELMEDİ', renk: 'bg-neutral-200 text-neutral-500' };
+    const Hucre = ({ k, etiket, renk }) => k ? (
+      <button onClick={() => k.lat && setHaritaKaydi(k)} className={`flex items-center gap-1.5 text-xs font-black ${renk} ${k.lat ? 'hover:underline' : ''}`} title={k.lat ? 'Konumu haritada gör' : 'Konum alınamadı'}>
+        {k.method === 'manuel' ? <Keyboard className="w-3.5 h-3.5" /> : <Camera className="w-3.5 h-3.5" />} {k.timeStr}
+        {k.lat ? <MapPin className="w-3.5 h-3.5" /> : <span className="text-[9px] text-neutral-400">(konumsuz)</span>}
+      </button>
+    ) : <span className="text-xs font-bold text-neutral-300">{etiket} —</span>;
+    return (
+      <div className="flex items-center justify-between gap-2 p-2.5 bg-neutral-50 rounded-xl border border-neutral-100">
+        <div className="min-w-0">
+          <p className="text-sm font-black text-black truncate">{p.fullName}</p>
+          <p className="text-[10px] font-bold text-neutral-400">{p.position}</p>
+        </div>
+        <div className="flex items-center gap-3 shrink-0">
+          <Hucre k={g} etiket="Giriş" renk="text-green-700" />
+          <Hucre k={c} etiket="Çıkış" renk="text-red-700" />
+          <span className={`text-[9px] font-black px-2 py-1 rounded-full ${durum.renk}`}>{durum.t}</span>
+        </div>
+      </div>
+    );
+  };
+
+  const sekmeler = [
+    { id: 'bugun', ad: 'Bugünkü Durum', ikon: Clock },
+    { id: 'kayitlar', ad: 'Tüm Kayıtlar', ikon: FileText },
+    { id: 'qr', ad: 'QR Yönetimi', ikon: QrCode },
+    { id: 'rapor', ad: 'Raporlama', ikon: Users }
+  ];
+
+  return (
+    <div className="space-y-5 animate-in fade-in">
+      {/* SAYFA BAŞLIĞI */}
+      <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-700 p-5 md:p-6 rounded-2xl shadow-lg text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+          <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><QrCode className="w-7 h-7" /> Mesai Takip Bölümü</h2>
+          <p className="text-white/80 text-xs md:text-sm font-bold mt-1">QR kod + konum doğrulamalı personel mesai giriş/çıkış takibi • Mavi Yaka &amp; Beyaz Yaka</p>
+          {aktifQr && <p className="mt-2 inline-flex items-center gap-2 text-[11px] font-black bg-white/15 px-3 py-1 rounded-full"><Shield className="w-3.5 h-3.5" /> Aktif Kod: {aktifQr.ad} • Seri: {aktifQr.manuelKod}</p>}
+        </div>
+        {/* İK sayfasından da hızlı giriş/çıkış yapılabilir */}
+        <div className="flex gap-2 shrink-0">
+          <button onClick={() => setModalTipi('giris')} className="px-4 py-3 rounded-xl bg-green-500 hover:bg-green-400 font-black text-xs flex items-center gap-2 shadow-lg"><LogIn className="w-4 h-4" /> GİRİŞ ONAYLA</button>
+          <button onClick={() => setModalTipi('cikis')} className="px-4 py-3 rounded-xl bg-red-500 hover:bg-red-400 font-black text-xs flex items-center gap-2 shadow-lg"><LogOut className="w-4 h-4" /> ÇIKIŞ ONAYLA</button>
+        </div>
+      </div>
+
+      {/* SEKMELER */}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {sekmeler.map(s => (
+          <button key={s.id} onClick={() => setSekme(s.id)} className={`px-4 py-2.5 rounded-xl text-xs font-black flex items-center gap-2 whitespace-nowrap transition ${sekme === s.id ? 'bg-black text-white shadow-md' : 'bg-white text-neutral-500 border border-neutral-200 hover:bg-neutral-100'}`}>
+            <s.ikon className="w-4 h-4" /> {s.ad}
+          </button>
+        ))}
+      </div>
+
+      {/* 1) BUGÜNKÜ DURUM — Mavi Yaka / Beyaz Yaka iki pano */}
+      {sekme === 'bugun' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {[{ baslik: 'Mavi Yaka', liste: maviYaka, renk: 'from-blue-600 to-indigo-700' }, { baslik: 'Beyaz Yaka', liste: beyazYaka, renk: 'from-neutral-700 to-neutral-900' }].map(grup => {
+            const iceride = grup.liste.filter(p => bugunkuKayitlar.some(k => String(k.personnelId) === String(p.id) && k.type === 'giris') && !bugunkuKayitlar.some(k => String(k.personnelId) === String(p.id) && k.type === 'cikis')).length;
+            return (
+              <div key={grup.baslik} className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
+                <div className={`p-4 bg-gradient-to-r ${grup.renk} text-white flex justify-between items-center`}>
+                  <h3 className="font-black text-sm flex items-center gap-2"><Users className="w-5 h-5" /> {grup.baslik} ({grup.liste.length})</h3>
+                  <span className="text-[10px] font-black bg-white/20 px-3 py-1 rounded-full">Şu an içeride: {iceride}</span>
+                </div>
+                <div className="p-3 space-y-2 max-h-[420px] overflow-y-auto custom-scrollbar">
+                  {grup.liste.length === 0 && <p className="text-xs font-bold text-neutral-400 text-center py-6">Bu grupta aktif personel yok.</p>}
+                  {grup.liste.map(p => <PersonelSatiri key={p.id} p={p} />)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 2) TÜM KAYITLAR — filtreli tablo */}
+      {sekme === 'kayitlar' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
+          {/* Filtre çubuğu */}
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mb-4">
+            <input type="date" value={fBas} onChange={e => setFBas(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold" />
+            <input type="date" value={fBit} onChange={e => setFBit(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold" />
+            <select value={fYaka} onChange={e => setFYaka(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold"><option value="hepsi">Tüm Yakalar</option><option>Mavi Yaka</option><option>Beyaz Yaka</option></select>
+            <select value={fPersonel} onChange={e => setFPersonel(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold"><option value="hepsi">Tüm Personel</option>{aktifPersonel.map(p => <option key={p.id}>{p.fullName}</option>)}</select>
+            <select value={fTip} onChange={e => setFTip(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold"><option value="hepsi">Giriş + Çıkış</option><option value="giris">Sadece Giriş</option><option value="cikis">Sadece Çıkış</option></select>
+            <select value={fYontem} onChange={e => setFYontem(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold"><option value="hepsi">Tüm Yöntemler</option><option value="kamera">Kamera (QR)</option><option value="manuel">Elle (Seri Kod)</option></select>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead><tr className="text-[10px] font-black text-neutral-400 uppercase border-b border-neutral-200">
+                <th className="py-2 pr-3">Personel</th><th className="py-2 pr-3">Yaka</th><th className="py-2 pr-3">Tarih</th><th className="py-2 pr-3">Saat</th><th className="py-2 pr-3">Tip</th><th className="py-2 pr-3">Yöntem</th><th className="py-2 pr-3">Cihaz</th><th className="py-2 pr-3">Konum</th><th className="py-2 pr-3">Birlikte</th><th className="py-2"></th>
+              </tr></thead>
+              <tbody>
+                {filtreli.length === 0 && <tr><td colSpan={10} className="py-8 text-center text-xs font-bold text-neutral-400">Seçilen filtrelerde kayıt bulunamadı.</td></tr>}
+                {filtreli.map(k => (
+                  <tr key={k.id} className="border-b border-neutral-100 hover:bg-neutral-50">
+                    <td className="py-2.5 pr-3 text-xs font-black text-black">{k.personnelName}<p className="text-[9px] font-bold text-neutral-400">{k.position}</p></td>
+                    <td className="py-2.5 pr-3"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${k.collarType === 'Mavi Yaka' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-200 text-neutral-700'}`}>{k.collarType}</span></td>
+                    <td className="py-2.5 pr-3 text-xs font-bold">{k.dateStr?.split('-').reverse().join('.')}</td>
+                    <td className="py-2.5 pr-3 text-xs font-black">{k.timeStr}</td>
+                    <td className="py-2.5 pr-3"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${k.type === 'giris' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{k.type === 'giris' ? 'GİRİŞ' : 'ÇIKIŞ'}</span></td>
+                    {/* Yöntem takibi: kamera ile mi okutmuş, seri kodu elle mi girmiş */}
+                    <td className="py-2.5 pr-3 text-xs font-bold">{k.method === 'manuel' ? <span className="flex items-center gap-1 text-amber-700"><Keyboard className="w-3.5 h-3.5" /> Elle</span> : <span className="flex items-center gap-1 text-emerald-700"><Camera className="w-3.5 h-3.5" /> Kamera</span>}</td>
+                    <td className="py-2.5 pr-3 text-xs font-bold text-neutral-500">{k.cihaz || '-'}</td>
+                    <td className="py-2.5 pr-3">{k.lat ? <button onClick={() => setHaritaKaydi(k)} className="text-[10px] font-black text-emerald-700 flex items-center gap-1 hover:underline"><MapPin className="w-3.5 h-3.5" /> Haritada Gör</button> : <span className="text-[10px] font-bold text-neutral-300">Konumsuz</span>}</td>
+                    <td className="py-2.5 pr-3 text-[10px] font-bold text-neutral-500" title={birlikteMesai(k).join(', ')}>{birlikteMesai(k).length} kişi</td>
+                    <td className="py-2.5"><button onClick={() => kayitSil(k)} className="p-1.5 text-neutral-300 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* 3) QR YÖNETİMİ — 10 QR, aktif seçimi, yenileme, PDF indirme */}
+      {sekme === 'qr' && (
+        <div>
+          <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4 text-xs font-bold text-amber-800 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>Aşağıdaki 10 koddan yalnızca <b>AKTİF</b> olan geçerlidir. Ofis girişine astığınız kodu değiştirmek isterseniz başka bir kodu "Aktif Yap" ile seçin ve yeni çıktısını asın. Her kodun altındaki seri numara, kamerası bozuk personelin elle gireceği koddur.</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+            {(ayarlar?.qrList || []).map(q => {
+              const aktif = ayarlar?.aktifQrId === q.id;
+              return (
+                <div key={q.id} className={`bg-white rounded-2xl border-2 p-4 flex flex-col items-center gap-3 transition ${aktif ? 'border-emerald-500 shadow-lg shadow-emerald-500/20' : 'border-neutral-200'}`}>
+                  <div className="w-full flex justify-between items-center">
+                    <h4 className="font-black text-sm">{q.ad}</h4>
+                    {aktif ? <span className="text-[9px] font-black bg-emerald-600 text-white px-2.5 py-1 rounded-full flex items-center gap-1"><CheckCircle className="w-3 h-3" /> AKTİF</span> : <span className="text-[9px] font-black bg-neutral-100 text-neutral-400 px-2.5 py-1 rounded-full">PASİF</span>}
+                  </div>
+                  <QrGorsel deger={q.qrDeger} />
+                  {/* Seri numara: elle giriş için */}
+                  <p className="text-sm font-black tracking-[0.2em] border-2 border-dashed border-neutral-300 rounded-lg px-3 py-1.5">{q.manuelKod}</p>
+                  <p className="text-[9px] font-bold text-neutral-400">15 haneli kod: {q.qrDeger} • {q.olusturma}</p>
+                  <div className="w-full grid grid-cols-3 gap-1.5">
+                    <button onClick={() => qrAktifYap(q.id)} disabled={aktif} className={`py-2 rounded-lg text-[10px] font-black ${aktif ? 'bg-neutral-100 text-neutral-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>Aktif Yap</button>
+                    <button onClick={() => qrPdfIndir(q)} className="py-2 rounded-lg text-[10px] font-black bg-black text-white hover:bg-neutral-800 flex items-center justify-center gap-1"><Download className="w-3 h-3" /> PDF İndir</button>
+                    <button onClick={() => qrYenile(q.id)} className="py-2 rounded-lg text-[10px] font-black bg-neutral-100 text-neutral-600 hover:bg-neutral-200 flex items-center justify-center gap-1"><RefreshCw className="w-3 h-3" /> Yenile</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* 4) RAPORLAMA — aylık kişi bazlı özet */}
+      {sekme === 'rapor' && (
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <label className="text-xs font-black text-neutral-500 flex items-center gap-2"><Calendar className="w-4 h-4" /> Rapor Ayı:</label>
+            <input type="month" value={raporAy} onChange={e => setRaporAy(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-black" />
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead><tr className="text-[10px] font-black text-neutral-400 uppercase border-b border-neutral-200">
+                <th className="py-2 pr-3">Personel</th><th className="py-2 pr-3">Yaka</th><th className="py-2 pr-3">Mesai Günü</th><th className="py-2 pr-3">Toplam Saat</th><th className="py-2 pr-3">Ort. Giriş</th><th className="py-2 pr-3">Kamera</th><th className="py-2 pr-3">Elle Giriş</th>
+              </tr></thead>
+              <tbody>
+                {rapor.length === 0 && <tr><td colSpan={7} className="py-8 text-center text-xs font-bold text-neutral-400">Bu ay için kayıt yok.</td></tr>}
+                {rapor.map(r => (
+                  <tr key={r.ad} className="border-b border-neutral-100 hover:bg-neutral-50">
+                    <td className="py-2.5 pr-3 text-xs font-black">{r.ad}</td>
+                    <td className="py-2.5 pr-3"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${r.yaka === 'Mavi Yaka' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-200 text-neutral-700'}`}>{r.yaka}</span></td>
+                    <td className="py-2.5 pr-3 text-xs font-black">{r.gunSayisi} gün</td>
+                    <td className="py-2.5 pr-3 text-xs font-black text-emerald-700">{r.toplamSaat} saat</td>
+                    <td className="py-2.5 pr-3 text-xs font-bold">{r.ortGiris}</td>
+                    <td className="py-2.5 pr-3 text-xs font-bold text-emerald-700 flex items-center gap-1"><Camera className="w-3.5 h-3.5" /> {r.kamera}</td>
+                    {/* Elle giriş sayısı yüksekse personelin kamerası kontrol edilebilir */}
+                    <td className="py-2.5 pr-3 text-xs font-bold text-amber-700"><span className="flex items-center gap-1"><Keyboard className="w-3.5 h-3.5" /> {r.manuel}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Ortak modallar */}
+      {haritaKaydi && <MesaiHaritaModal kayit={haritaKaydi} onKapat={() => setHaritaKaydi(null)} />}
+      {modalTipi && <QrTarayiciModal tip={modalTipi} currentUser={currentUser} onKapat={() => setModalTipi(null)} />}
     </div>
   );
 };
