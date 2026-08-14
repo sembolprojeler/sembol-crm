@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
@@ -2611,7 +2611,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       // OKUMA SINIRI: 'hatirlatmalar' zamanla büyüyen bir koleksiyondur ve
       // sınırsız dinlenirse her oturum açılışında tüm geçmiş kayıtlar okunur.
       // Rozet sayısı için 1000 kayıt fazlasıyla yeterlidir (gerçekçi üst sınır).
-      const qHatirlatma = query(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), limit(1000));
+      // CANLI LİMİT 1000 -> 200 (rozet sayımı için yeterli)
+      const qHatirlatma = query(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), limit(200));
       const unsub = onSnapshot(qHatirlatma, (snap) => {
         const bugunTarih = new Date();
         const bugunStr = `${bugunTarih.getFullYear()}-${String(bugunTarih.getMonth() + 1).padStart(2, '0')}-${String(bugunTarih.getDate()).padStart(2, '0')}`;
@@ -2810,7 +2811,111 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       jobs: false, trans: false, tasks: false, notif: false, msg: false, logs: false, veh: false, mat: false, pers: false, settings: false, contacts: false, todos: false
     });
     
-    const [jobs, setJobs] = useState([]);
+    // ========================================================================
+    // İKİ KATMANLI İŞ (jobs) YÜKLEME — OKUMA MALİYETİ OPTİMİZASYONU
+    // SORUN: 'jobs' sorgusu 8 YIL geriye giden kayıtları limit(8000) ile CANLI
+    // dinliyordu. 19 kullanıcı sayfayı her yenilediğinde on binlerce okuma
+    // oluşuyordu. Limit koymak yeterli değildi; PENCEREYİ daraltmak gerekti.
+    //
+    // ÇÖZÜM:
+    //  1) CANLI KATMAN (canliIsler): yalnızca SON 30 GÜN, limit 200. Anlık akış,
+    //     rozetler, bugünün işleri ve arama bu katmandan beslenir.
+    //  2) ARŞİV KATMANI (arsivIsler): geçmiş veriler CANLI DİNLENMEZ. Geçmiş
+    //     gerektiren ekranlar açıldığında getDocs ile 3 AYLIK PARÇALAR halinde
+    //     bir kereye mahsus okunur ("Daha Fazla Yükle").
+    //  3) Aşağıdaki 'jobs' değişkeni iki katmanın BİRLEŞİMİdir; bu sayede
+    //     mevcut tüm ekranlar, istatistikler ve arama kartları hiç
+    //     değiştirilmeden aynı şekilde çalışmaya devam eder.
+    // ========================================================================
+    const [canliIsler, setCanliIsler] = useState([]);   // Son 30 gün (realtime)
+    const [arsivIsler, setArsivIsler] = useState([]);   // Geçmiş (getDocs, isteğe bağlı)
+    // Arşivin nereye kadar yüklendiği ve durum bilgisi
+    const [arsivDurum, setArsivDurum] = useState({ sinirTarihi: null, yukleniyor: false, bitti: false, parcaSayisi: 0 });
+
+    // BİRLEŞİK LİSTE: aynı id iki katmanda varsa canlı olan (güncel) kazanır
+    const jobs = useMemo(() => {
+      if (arsivIsler.length === 0) return canliIsler;
+      const harita = new Map();
+      arsivIsler.forEach(j => harita.set(j.id, j));
+      canliIsler.forEach(j => harita.set(j.id, j)); // Canlı veri arşivi ezer
+      return [...harita.values()];
+    }, [canliIsler, arsivIsler]);
+
+    // ========================================================================
+    // ARŞİV YÜKLEYİCİ (getDocs + sayfalama)
+    // Geçmiş işler CANLI DİNLENMEZ. Bu fonksiyon her çağrıldığında 3 AYLIK bir
+    // parçayı bir kereye mahsus okur ve arşive ekler. Tarih ARALIĞI ile
+    // sayfalandığı için mükerrer okuma veya atlanan kayıt olmaz.
+    // ========================================================================
+    const ARSIV_PARCA_AY = 3;    // Her "Daha Fazla Yükle" 3 ay geriye gider
+    const ARSIV_PARCA_LIMIT = 500; // Bir parçada okunacak en fazla doküman
+    const arsivYukleniyorRef = useRef(false); // Çift tıklama/çift çağrı koruması
+
+    const arsivParcaYukle = useCallback(async () => {
+      if (!firebaseUser) return;
+      if (arsivYukleniyorRef.current || arsivDurum.yukleniyor || arsivDurum.bitti) return;
+      const ustSinir = arsivDurum.sinirTarihi;
+      if (!ustSinir) return; // Canlı katman henüz kurulmadı
+
+      arsivYukleniyorRef.current = true;
+      setArsivDurum(prev => ({ ...prev, yukleniyor: true }));
+      try {
+        const alt = new Date(ustSinir);
+        alt.setMonth(alt.getMonth() - ARSIV_PARCA_AY);
+        const altSinir = alt.toISOString().split('T')[0];
+
+        const snap = await getDocs(query(
+          collection(db, 'artifacts', appId, 'public', 'data', 'jobs'),
+          where('date', '>=', altSinir),
+          where('date', '<', ustSinir),
+          orderBy('date', 'desc'),
+          limit(ARSIV_PARCA_LIMIT)
+        ));
+        const parca = snap.docs.map(d => ({ ...d.data(), id: d.id }));
+
+        // Aynı id'yi iki kez eklememek için birleştirme
+        setArsivIsler(prev => {
+          const harita = new Map(prev.map(j => [j.id, j]));
+          parca.forEach(j => harita.set(j.id, j));
+          return [...harita.values()];
+        });
+
+        // 8 yıldan daha geriye gitmeye gerek yok; o noktada arşiv bitmiş sayılır
+        const enEski = new Date();
+        enEski.setFullYear(enEski.getFullYear() - 8);
+        const bittiMi = new Date(altSinir) <= enEski;
+
+        setArsivDurum(prev => ({
+          sinirTarihi: altSinir,
+          yukleniyor: false,
+          bitti: bittiMi,
+          parcaSayisi: prev.parcaSayisi + 1
+        }));
+      } catch (e) {
+        console.error('Arşiv işleri yüklenemedi:', e);
+        setArsivDurum(prev => ({ ...prev, yukleniyor: false }));
+      } finally {
+        arsivYukleniyorRef.current = false;
+      }
+    }, [firebaseUser, arsivDurum.sinirTarihi, arsivDurum.yukleniyor, arsivDurum.bitti]);
+
+    // GEÇMİŞ GEREKTİREN EKRANLAR: bu sekmeler açıldığında ilk arşiv parçası
+    // otomatik yüklenir (kullanıcı "Daha Fazla Yükle" ile daha geriye gidebilir).
+    const GECMIS_GEREKTIREN_SEKMELER = useMemo(() => [
+      'allJobs', 'completedJobs', 'cancelledJobs', 'damagedJobs',
+      'reporting', 'advancedReporting', 'finance', 'financeDefter',
+      'personnelProfile', 'personelTahtasi', 'ekipKurmaTahtasi',
+      'personelMuhasebe', 'personelOdeme', 'calendar'
+    ], []);
+    // GEÇMİŞ VERİ TETİKLEYİCİSİ: geçmiş gerektiren bir sekme açıldığında ve
+    // arşiv henüz boşsa İLK parça (3 ay) bir kereye mahsus yüklenir.
+    // Böylece raporlar/finans/profil ekranları veri bulur, ana sayfa ise
+    // yalnızca 30 günlük hafif pencereyle çalışmaya devam eder.
+    useEffect(() => {
+      if (!GECMIS_GEREKTIREN_SEKMELER.includes(activeTab)) return;
+      if (arsivDurum.parcaSayisi > 0 || arsivDurum.yukleniyor || arsivDurum.bitti) return;
+      arsivParcaYukle();
+    }, [activeTab, arsivDurum.parcaSayisi, arsivDurum.yukleniyor, arsivDurum.bitti, arsivParcaYukle, GECMIS_GEREKTIREN_SEKMELER]);
     // YENİ: Şeflerin saha denetimleri — merkezi olarak dinlenir ve iş listelerine prop
     // olarak geçilir; böylece her işte "kim denetledi" bilgisi gösterilebilir.
     const [sahaDenetimleri, setSahaDenetimleri] = useState([]);
@@ -3064,9 +3169,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
       const unsubs = [];
 
-      const historyStartDate = new Date();
-      historyStartDate.setFullYear(historyStartDate.getFullYear() - 8);
-      const startDateStr = historyStartDate.toISOString().split('T')[0];
+      // CANLI PENCERE: yalnızca SON 30 GÜN. Geçmiş veriler arşiv katmanından
+      // (getDocs + "Daha Fazla Yükle") gelir; canlı olarak dinlenmez.
+      const canliBaslangic = new Date();
+      canliBaslangic.setDate(canliBaslangic.getDate() - 30);
+      const startDateStr = canliBaslangic.toISOString().split('T')[0];
 
       // ========================================================================
       // DÜZELTME (Firestore okuma patlaması denetimi — 13 Ağustos 2026):
@@ -3091,11 +3198,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       // değil ama garanti altına alalım) rastgele değil, EN GÜNCEL kayıtlar
       // tutulsun. where + orderBy AYNI alan (date) üzerinde olduğu için
       // Firestore'da ek bir composite index gerektirmez.
-      const qJobs = query(getCol('jobs'), where('date', '>=', startDateStr), orderBy('date', 'desc'), limit(8000));
+      // Son 30 günün işleri, en güncel üstte, en fazla 200 doküman.
+      const qJobs = query(getCol('jobs'), where('date', '>=', startDateStr), orderBy('date', 'desc'), limit(200));
       const qTrans = query(getCol('transactions'), limit(300));
       const qTasks = query(getCol('tasks'), limit(100));
 
-      unsubs.push(onSnapshot(qJobs, snap => { setJobs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
+      unsubs.push(onSnapshot(qJobs, snap => { setCanliIsler(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
+      // Arşiv okumaları bu tarihten GERİYE doğru parça parça yapılacak
+      setArsivDurum(prev => prev.sinirTarihi ? prev : { ...prev, sinirTarihi: startDateStr });
       unsubs.push(onSnapshot(qTrans, snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
       unsubs.push(onSnapshot(qTasks, snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
             
@@ -3185,13 +3295,18 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       // sürekli büyüyen bir günlük (log) koleksiyonudur; limitsiz dinlemek
       // ileride tehlikeli büyüyebilir. En güncel 3000 kayıt yeterlidir;
       // orderBy ile taşma durumunda ESKİ değil YENİ kayıtlar tutulur.
-      unsubs.push(onSnapshot(query(getCol('personnelActions'), orderBy('createdAt', 'desc'), limit(3000)), snap => {
+      // CANLI LİMİT 3000 -> 200: anlık akış için son kayıtlar yeterli.
+      // Personel profilindeki kişiye ait geçmiş, o sayfanın kendi sorgusuyla gelir.
+      unsubs.push(onSnapshot(query(getCol('personnelActions'), orderBy('createdAt', 'desc'), limit(200)), snap => {
         setAllPersonnelActions(snap.docs.map(d => ({ ...d.data(), id: d.id })));
       }, console.error));
 
       // OKUMA SINIRI: her belge bir AY'ı temsil eder; 36 belge = 3 yıl geçmiş.
       // Sınırsız bırakılırsa yıllar geçtikçe her açılışta hepsi okunur.
-      unsubs.push(onSnapshot(query(getCol('mesai'), limit(36)), snap => {
+      // CANLI LİMİT 36 -> 12: her belge bir AY'dır ve içinde tüm personelin
+      // günlük kayıtları vardır (büyük belgeler). Daha eski aylar puantaj/maaş
+      // ekranlarında ay seçilerek zaten ayrıca okunuyor.
+      unsubs.push(onSnapshot(query(getCol('mesai'), limit(12)), snap => {
         const flat = [];
         snap.docs.forEach(d => {
           const m = d.id.match(/(\d{4})_(\d{1,2})/);
@@ -3214,7 +3329,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       // DÜZELTME: sahaDenetimleri de zamanla büyüyen bir koleksiyon; güvenlik
       // limiti eklendi (en güncel 2000 denetim yeterli, iş listelerinde
       // "kim denetledi" rozeti için kullanılıyor).
-      unsubs.push(onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), orderBy('denetimTarihi', 'desc'), limit(2000)), snap => {
+      // CANLI LİMİT 2000 -> 200: kişi bazlı geçmiş profil sayfasında getDocs ile okunur.
+      unsubs.push(onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), orderBy('denetimTarihi', 'desc'), limit(200)), snap => {
         setSahaDenetimleri(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       }, console.error));
 
@@ -5032,6 +5148,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const insanKaynaklariToplamBildirim = okunmamisSikayetSayisi;
 
 
+
     return (
       <div className="flex h-screen bg-neutral-50 font-sans text-neutral-900 overflow-hidden">
         
@@ -6040,6 +6157,40 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     </div>
                   );
                 })()}
+              </div>
+            )}
+
+            {/* ====================================================================
+                GEÇMİŞ VERİ (ARŞİV) ÇUBUĞU
+                Geçmiş gerektiren ekranlarda görünür. Kaç aylık verinin yüklü
+                olduğunu gösterir ve "Daha Fazla Yükle" ile 3 ay daha geriye
+                gider. Böylece binlerce iş kaydı canlı dinlenmek zorunda kalmaz.
+                ==================================================================== */}
+            {GECMIS_GEREKTIREN_SEKMELER.includes(activeTab) && (
+              <div className="mb-4 bg-white border border-neutral-200 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-sm">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Database className="w-4 h-4 text-neutral-400 shrink-0" />
+                  <p className="text-[11px] font-bold text-neutral-600">
+                    {arsivDurum.yukleniyor
+                      ? 'Geçmiş kayıtlar yükleniyor...'
+                      : arsivDurum.parcaSayisi === 0
+                        ? 'Şu an yalnızca son 30 günün kayıtları yüklü.'
+                        : <>Yüklü geçmiş: <b className="text-black">son {30 + arsivDurum.parcaSayisi * 90} gün</b> • {jobs.length} iş kaydı</>}
+                    {arsivDurum.bitti && <span className="text-green-600"> • Tüm geçmiş yüklendi</span>}
+                  </p>
+                </div>
+                {!arsivDurum.bitti && (
+                  <button
+                    onClick={arsivParcaYukle}
+                    disabled={arsivDurum.yukleniyor}
+                    className="px-4 py-2 rounded-xl bg-black text-white text-[11px] font-black hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shrink-0 transition"
+                    title="3 ay daha geriye giden kayıtları yükle"
+                  >
+                    {arsivDurum.yukleniyor
+                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Yükleniyor</>
+                      : <><Download className="w-3.5 h-3.5" /> Daha Fazla Yükle (3 ay)</>}
+                  </button>
+                )}
               </div>
             )}
 

@@ -5328,6 +5328,67 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       return () => unsub();
     }, [personId, db, appId, cikisYil, cikisAy, cikisBeyazMi]);
 
+    // ======================================================================
+    // HOOK SIRASI DÜZELTMESİ (React hata #310)
+    // Aşağıdaki iki hook ESKİDEN "if (!person) return" satırından SONRA
+    // çağrılıyordu. Personel listesi henüz yüklenmemişken profil açılırsa
+    // hook sayısı render'lar arasında değişiyor ve React
+    // "Rendered more hooks than during the previous render" hatası veriyordu.
+    // Her iki hook da 'person' nesnesine ihtiyaç duymadığı için (biri yalnızca
+    // personId, diğeri sabit bir yıl kullanıyor) koşullu return'ün ÖNÜNE alındı.
+    // ======================================================================
+    const [sahaDenetimleri, setSahaDenetimleri] = useState([]);
+    // ======================================================================
+    // OKUMA OPTİMİZASYONU (saha denetimleri)
+    // ESKİ HALİ: onSnapshot ile limit(2000) — profil her açıldığında 2000'e
+    // kadar denetim CANLI dinleniyordu; 19 kullanıcı için ciddi okuma yükü.
+    // YENİ HALİ: canlı dinleyici YOK. Yalnızca bu personele ait kayıtlar
+    // getDocs ile BİR KEZ okunur:
+    //   1) Önce array-contains ile SUNUCU TARAFINDA filtreleme denenir
+    //      (yeni kayıtlarda 'personelIdListesi' alanı bulunur) -> genelde
+    //      sadece o kişinin 10-50 kaydı okunur.
+    //   2) Bu alanı içermeyen ESKİ kayıtlar için, son 12 aylık pencerede
+    //      sınırlı bir yedek okuma yapılır ve istemcide filtrelenir.
+    // ======================================================================
+    useEffect(() => {
+      if (!personId || !db) return;
+      let iptal = false; // Bileşen kapanırsa state güncellemesi yapılmaz
+      (async () => {
+        const kol = collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri');
+        const birlestir = (liste) => {
+          const harita = new Map();
+          liste.forEach(d => harita.set(d.id, d));
+          return [...harita.values()];
+        };
+        let sonuc = [];
+        // 1) SUNUCU TARAFI FİLTRE (yeni kayıtlar)
+        try {
+          const snap = await getDocs(query(kol, where('personelIdListesi', 'array-contains', String(personId)), limit(200)));
+          sonuc = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (e) { /* Alan/indeks yoksa yedek yola geçilir */ }
+
+        // 2) YEDEK: eski kayıtlar için son 12 ay penceresi (sınırlı okuma)
+        try {
+          const oniki = new Date();
+          oniki.setMonth(oniki.getMonth() - 12);
+          const snapEski = await getDocs(query(
+            kol,
+            where('denetimTarihi', '>=', oniki.toISOString()),
+            orderBy('denetimTarihi', 'desc'),
+            limit(300)
+          ));
+          const eskiler = snapEski.docs.map(d => ({ id: d.id, ...d.data() }))
+            .filter(dn => (dn.personelPuanlari || []).some(pp => String(pp.personelId) === String(personId)));
+          sonuc = birlestir([...sonuc, ...eskiler]);
+        } catch (e) { console.warn('Saha denetimi yedek okuması yapılamadı:', e); }
+
+        if (!iptal) setSahaDenetimleri(sonuc);
+      })();
+      return () => { iptal = true; }; // Cleanup
+    }, [personId, db, appId]);
+
+    const [selectedLeaveYear, setSelectedLeaveYear] = useState(String(currentYear));
+
     if (!person) {
       return (
         <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-8 text-center animate-in fade-in">
@@ -5419,19 +5480,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     // YENİ: SAHA PUANI — Şeflerin "Şef Denetimi" ekranından bu personele verdiği
     // 1-5 arası puanların ortalaması. Hiç puan verilmemişse her zaman 0 gösterilir.
     // ======================================================================
-    const [sahaDenetimleri, setSahaDenetimleri] = useState([]);
-    useEffect(() => {
-      if (!personId || !db) return;
-      // Tüm denetimler dinlenir, personel filtrelemesi istemci tarafında yapılır
-      // (personelPuanlari bir dizi olduğu için Firestore'da doğrudan sorgulanamaz).
-      // DÜZELTME (Firestore okuma denetimi): Limitsiz tam koleksiyon okuması
-      // yerine güvenlik limiti + en güncel kayıtlar önceliklendirildi.
-      const unsubSaha = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), orderBy('denetimTarihi', 'desc'), limit(2000)), snap => {
-        const hepsi = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setSahaDenetimleri(hepsi.filter(dn => (dn.personelPuanlari || []).some(pp => String(pp.personelId) === String(personId))));
-      }, console.error);
-      return () => unsubSaha();
-    }, [personId, db, appId]);
+
 
     // Bu personele ait puan satırlarını denetim kaydıyla birlikte döndürür
     const sahaPuanKayitlari = sahaDenetimleri.map(dn => {
@@ -6470,7 +6519,6 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       if (kidemYili <= 15) return 20;
       return 26;
     };
-    const [selectedLeaveYear, setSelectedLeaveYear] = useState(String(currentYear));
     const leaveYearOptions = React.useMemo(() => {
       if (!person?.startDate) return [currentYear];
       const startYear = new Date(person.startDate).getFullYear();
@@ -8905,6 +8953,11 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         kayitDogrulugu: denetimDogruluk,
         genelRapor: denetimRapor.trim(),
         personelPuanlari: puanlananlar,
+        // YENİ (okuma optimizasyonu): 'personelPuanlari' bir NESNE dizisi olduğu
+        // için Firestore'da doğrudan sorgulanamıyordu ve personel profili tüm
+        // denetimleri okumak zorunda kalıyordu. Bu düz id dizisi sayesinde
+        // artık array-contains ile SUNUCU TARAFINDA filtreleme yapılabiliyor.
+        personelIdListesi: puanlananlar.map(pp => String(pp.personelId)),
         medya: denetimMedya,                       // Sahada çekilen fotoğraf/video listesi
         ortalamaPuan: Math.round(ortalama * 100) / 100,
         sefId: currentUser?.id ? String(currentUser.id) : '',
