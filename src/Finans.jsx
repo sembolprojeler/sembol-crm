@@ -2025,12 +2025,41 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
                   if (isSunday) {
                     // Pazar = haftalık izin. Gelecekteki pazarlar da işaretlenir ki
                     // izin günleri takvimde baştan planlı görünsün.
-                    fetchedRecords[person.id][d] = { status: 'Hİ', hours: '' };
+                    fetchedRecords[person.id][d] = { status: 'Hİ', hours: '', auto: true };
                   } else if (dateObj <= busun) {
                     // Yalnızca BUGÜN ve GEÇMİŞ günler "Geldi" sayılır.
-                    fetchedRecords[person.id][d] = { status: 'G', hours: '' };
+                    // auto:true -> bu hücrenin ELLE değil OTOMATİK dolduğunu belirtir.
+                    fetchedRecords[person.id][d] = { status: 'G', hours: '', auto: true };
                   }
                   // else: GELECEK günler boş bırakılır — o gün geldiğinde dolar.
+                }
+              }
+
+              // ================================================================
+              // DÜZELTME (GERİYE DÖNÜK TEMİZLİK):
+              // Uygulamanın ESKİ sürümü ayın tüm günlerini (gelecek günler dahil)
+              // "G" olarak Firebase'e KAYDETMİŞTİ. Yukarıdaki doldurma mantığı
+              // yalnızca BOŞ hücrelere dokunduğu için, o eski kayıtlar ekranda
+              // kalıyor ve tablo hâlâ ileri tarihleri "Geldi" gösteriyordu.
+              // Bu döngü, GELECEK günlerdeki otomatik "G" işaretlerini temizler.
+              // ELLE girilmiş değerler (manual:true) ve planlı izinler (Hİ, Yİ,
+              // Bİ, Üİ, R, D vb.) KORUNUR; sadece anlamsız olan ileri tarihli
+              // "Geldi" kaydı silinir. Temizlenen veri otomatik kaydetme ile
+              // Firebase'e de yazılır, böylece sorun kalıcı olarak çözülür.
+              // ================================================================
+              for (let d = 1; d <= daysInMonth; d++) {
+                const dateObj = new Date(currentYear, currentMonth - 1, d);
+                dateObj.setHours(0, 0, 0, 0);
+                if (dateObj <= busun) continue; // Bugün ve geçmiş günlere dokunulmaz
+
+                const valObj = fetchedRecords[person.id][d];
+                if (!valObj) continue;
+                const status = typeof valObj === 'object' && valObj !== null ? valObj.status : valObj;
+                const elleGirilmis = typeof valObj === 'object' && valObj !== null && valObj.manual === true;
+
+                // Gelecek bir gün "Geldi" olarak duruyorsa ve elle girilmediyse temizle
+                if (status === 'G' && !elleGirilmis) {
+                  delete fetchedRecords[person.id][d];
                 }
               }
             });
@@ -2134,7 +2163,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
         ...prev,
         [personId]: {
           ...(prev[personId] || {}),
-          [day]: { status: value, hours: '' } // Sadece status değiştirirken saati sıfırla
+          // manual:true -> bu hücre ELLE girildi; ileri tarihli otomatik temizlik bunu silmez
+          [day]: { status: value, hours: '', manual: true } // Sadece status değiştirirken saati sıfırla
         }
       }));
     };
