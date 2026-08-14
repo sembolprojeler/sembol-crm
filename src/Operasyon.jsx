@@ -14719,28 +14719,235 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
 // YARDIMCILAR
 // ---------------------------------------------------------------------------
 
-// Harici script yükleyici: QR üretme (qrcode) ve QR okuma (jsQR) kütüphaneleri
-// paket eklemeden, yalnızca ihtiyaç anında CDN'den bir kez yüklenir.
-const mesaiScriptYukle = (src, globalAd) => new Promise((resolve, reject) => {
-  if (typeof window !== 'undefined' && window[globalAd]) return resolve(window[globalAd]); // Zaten yüklüyse tekrar yükleme
-  const s = document.createElement('script');
-  s.src = src; s.async = true;
-  s.onload = () => resolve(window[globalAd]);
-  s.onerror = () => reject(new Error(globalAd + ' kütüphanesi yüklenemedi'));
-  document.head.appendChild(s);
-});
-const qrUretKutuphanesi = () => mesaiScriptYukle('https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js', 'QRCode');
-const qrOkuKutuphanesi = () => mesaiScriptYukle('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js', 'jsQR');
+// ---------------------------------------------------------------------------
+// DAHİLİ QR KOD ÜRETİCİ (harici kütüphane / CDN GEREKTİRMEZ)
+// ÖNEMLİ DÜZELTME: Eskiden QR görselleri CDN'den yüklenen "qrcode" kütüphanesi
+// ile üretiliyordu. Kütüphane yüklenemediğinde (ağ engeli, CDN erişimi vb.)
+// kutular sonsuza kadar dönen bir yükleme çemberi olarak kalıyordu.
+// Artık QR matrisi tamamen bu dosyanın içinde, standarda (ISO/IEC 18004)
+// uygun şekilde üretiliyor: Byte modu, hata düzeltme seviyesi M, versiyon 1-10
+// otomatik seçimi, Reed-Solomon hata düzeltmesi ve standart maske seçimi.
+// Böylece internet bağlantısı olmasa bile QR kodlar her zaman görünür.
+// ---------------------------------------------------------------------------
+  // Test amaçlı: JSX'e gömülecek QR motorunun aynısı
+  const qrKareKodMatris = (metin) => {
+    const ECC_M = { seviyeBiti: 0, blokEcc: [0,10,16,26,18,24,16,18,22,22,26], blokSayisi: [0,1,1,1,2,2,4,4,4,5,5] };
+    const T = ECC_M;
+    const carp = (x, y) => { let z = 0; for (let i = 7; i >= 0; i--) { z = (z << 1) ^ ((z >>> 7) * 0x11D); z ^= ((y >>> i) & 1) * x; } return z & 0xFF; };
+    const bolen = (derece) => { const r = new Array(derece).fill(0); r[derece-1]=1; let kok=1;
+      for (let i=0;i<derece;i++){ for(let j=0;j<derece;j++){ r[j]=carp(r[j],kok); if(j+1<derece) r[j]^=r[j+1]; } kok=carp(kok,0x02); } return r; };
+    const kalan = (veri, bol) => { const r = new Array(bol.length).fill(0);
+      for (const b of veri){ const f = b ^ r.shift(); r.push(0); for (let i=0;i<bol.length;i++) r[i]^=carp(bol[i],f); } return r; };
+    const hamModul = (v) => { let r=(16*v+128)*v+64; if(v>=2){ const n=Math.floor(v/7)+2; r-=(25*n-10)*n-55; if(v>=7) r-=36; } return r; };
+    const hizaKonum = (v) => { if(v===1) return []; const n=Math.floor(v/7)+2; const adim=Math.ceil((v*4+4)/(n*2-2))*2;
+      const s=(v*4+17)-7; const res=[6]; for(let pos=s; res.length<n; pos-=adim) res.splice(1,0,pos); return res; };
 
-// 15 haneli QR içeriği üretir (karışıklık yaratan 0/O, 1/I gibi karakterler hariç)
-const rastgeleQrDegeri = () => {
-  const havuz = 'ABCDEFGHJKLMNPRSTUVYZ23456789';
-  let s = '';
-  for (let i = 0; i < 15; i++) s += havuz[Math.floor(Math.random() * havuz.length)];
-  return s;
-};
+    const bytes = []; // UTF-8 byte mod
+    for (const ch of unescape(encodeURIComponent(metin))) bytes.push(ch.charCodeAt(0));
 
-// Kamerası bozuk personelin ELLE gireceği seri kod: SMB-XXXX-XXXX (harf + rakam)
+    let versiyon = 0;
+    for (let v = 1; v <= 10; v++) {
+      const toplam = Math.floor(hamModul(v)/8);
+      const veriKod = toplam - T.blokEcc[v]*T.blokSayisi[v];
+      const sayacBit = v < 10 ? 8 : 16;
+      if (4 + sayacBit + bytes.length*8 <= veriKod*8) { versiyon = v; break; }
+    }
+    if (!versiyon) return null;
+
+    const boyut = versiyon*4 + 17;
+    const toplamKod = Math.floor(hamModul(versiyon)/8);
+    const veriKodSayi = toplamKod - T.blokEcc[versiyon]*T.blokSayisi[versiyon];
+    const sayacBit = versiyon < 10 ? 8 : 16;
+
+    // Bit dizisi oluştur
+    const bitler = [];
+    const ekle = (deger, uzunluk) => { for (let i = uzunluk-1; i >= 0; i--) bitler.push((deger >>> i) & 1); };
+    ekle(0b0100, 4); ekle(bytes.length, sayacBit);
+    for (const b of bytes) ekle(b, 8);
+    while (bitler.length < veriKodSayi*8 && bitler.length % 8 !== 0 === false && bitler.length < veriKodSayi*8) break;
+    const bitirici = Math.min(4, veriKodSayi*8 - bitler.length);
+    ekle(0, bitirici);
+    ekle(0, (8 - bitler.length % 8) % 8);
+    for (let dolgu = 0xEC; bitler.length < veriKodSayi*8; dolgu ^= 0xEC ^ 0x11) ekle(dolgu, 8);
+
+    const veriKodlari = [];
+    for (let i = 0; i < bitler.length; i += 8) { let b = 0; for (let j = 0; j < 8; j++) b = (b<<1)|bitler[i+j]; veriKodlari.push(b); }
+
+    // ECC ekle + araya serpiştir
+    const blokSayisi = T.blokSayisi[versiyon], blokEccUzunluk = T.blokEcc[versiyon];
+    const kisaBlokSayisi = blokSayisi - toplamKod % blokSayisi;
+    const kisaBlokUzunluk = Math.floor(toplamKod / blokSayisi);
+    const bol = bolen(blokEccUzunluk);
+    const bloklar = [], eccler = [];
+    for (let i = 0, k = 0; i < blokSayisi; i++) {
+      const uz = kisaBlokUzunluk - blokEccUzunluk + (i < kisaBlokSayisi ? 0 : 1);
+      const dat = veriKodlari.slice(k, k + uz); k += uz;
+      eccler.push(kalan(dat, bol));
+      if (i < kisaBlokSayisi) dat.push(0);
+      bloklar.push(dat);
+    }
+    const sonuc = [];
+    for (let i = 0; i < bloklar[0].length; i++)
+      for (let j = 0; j < bloklar.length; j++)
+        if (i !== kisaBlokUzunluk - blokEccUzunluk || j >= kisaBlokSayisi) sonuc.push(bloklar[j][i]);
+    for (let i = 0; i < blokEccUzunluk; i++)
+      for (let j = 0; j < bloklar.length; j++) sonuc.push(eccler[j][i]);
+
+    // Modül ızgarası
+    const M = Array.from({length: boyut}, () => new Array(boyut).fill(false));
+    const F = Array.from({length: boyut}, () => new Array(boyut).fill(false));
+    const setF = (x, y, koyu) => { M[y][x] = koyu; F[y][x] = true; };
+
+    const desenCiz = (cx, cy) => { // Bulucu + ayırıcı
+      for (let dy = -4; dy <= 4; dy++) for (let dx = -4; dx <= 4; dx++) {
+        const d = Math.max(Math.abs(dx), Math.abs(dy)), x = cx+dx, y = cy+dy;
+        if (x >= 0 && x < boyut && y >= 0 && y < boyut) setF(x, y, d !== 2 && d !== 4);
+      }
+    };
+    for (let i = 0; i < boyut; i++) { setF(6, i, i % 2 === 0); setF(i, 6, i % 2 === 0); } // Zamanlama
+    desenCiz(3, 3); desenCiz(boyut-4, 3); desenCiz(3, boyut-4);
+    const hizalar = hizaKonum(versiyon);
+    for (let i = 0; i < hizalar.length; i++) for (let j = 0; j < hizalar.length; j++) {
+      if ((i===0&&j===0)||(i===0&&j===hizalar.length-1)||(i===hizalar.length-1&&j===0)) continue;
+      for (let dy=-2; dy<=2; dy++) for (let dx=-2; dx<=2; dx++) setF(hizalar[j]+dx, hizalar[i]+dy, Math.max(Math.abs(dx),Math.abs(dy)) !== 1);
+    }
+    // Format ve versiyon alanlarını rezerve et
+    const formatCiz = (maske) => {
+      const veri = T.seviyeBiti << 3 | maske;
+      let rem = veri; for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+      const bits = ((veri << 10 | rem) ^ 0x5412) & 0x7FFF;
+      const bit = (i) => (bits >>> i) & 1 ? true : false;
+      for (let i = 0; i <= 5; i++) setF(8, i, bit(i));
+      setF(8, 7, bit(6)); setF(8, 8, bit(7)); setF(7, 8, bit(8));
+      for (let i = 9; i < 15; i++) setF(14 - i, 8, bit(i));
+      for (let i = 0; i < 8; i++) setF(boyut-1-i, 8, bit(i));
+      for (let i = 8; i < 15; i++) setF(8, boyut-15+i, bit(i));
+      setF(8, boyut-8, true);
+    };
+    formatCiz(0);
+    if (versiyon >= 7) {
+      let rem = versiyon; for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1F25);
+      const bits = versiyon << 12 | rem;
+      for (let i = 0; i < 18; i++) { const b = ((bits >>> i) & 1) === 1; const a = boyut-11+i%3, c = Math.floor(i/3); setF(a, c, b); setF(c, a, b); }
+    }
+
+    // Veri bitlerini zikzak yerleştir
+    let bi = 0;
+    for (let sag = boyut-1; sag >= 1; sag -= 2) {
+      if (sag === 6) sag = 5;
+      for (let dikey = 0; dikey < boyut; dikey++) for (let j = 0; j < 2; j++) {
+        const x = sag - j, yukari = ((sag + 1) & 2) === 0, y = yukari ? boyut-1-dikey : dikey;
+        if (!F[y][x] && bi < sonuc.length * 8) { M[y][x] = ((sonuc[bi >>> 3] >>> (7 - (bi & 7))) & 1) === 1; bi++; }
+      }
+    }
+
+    const maskeUygula = (grid, maske) => {
+      const g = grid.map(r => r.slice());
+      for (let y = 0; y < boyut; y++) for (let x = 0; x < boyut; x++) {
+        if (F[y][x]) continue;
+        let ters;
+        switch (maske) {
+          case 0: ters = (x + y) % 2 === 0; break;
+          case 1: ters = y % 2 === 0; break;
+          case 2: ters = x % 3 === 0; break;
+          case 3: ters = (x + y) % 3 === 0; break;
+          case 4: ters = (Math.floor(x/3) + Math.floor(y/2)) % 2 === 0; break;
+          case 5: ters = x*y % 2 + x*y % 3 === 0; break;
+          case 6: ters = (x*y % 2 + x*y % 3) % 2 === 0; break;
+          case 7: ters = ((x + y) % 2 + x*y % 3) % 2 === 0; break;
+        }
+        if (ters) g[y][x] = !g[y][x];
+      }
+      return g;
+    };
+
+    const ceza = (g) => {
+      let p = 0;
+      for (let y = 0; y < boyut; y++) { let renk = g[y][0], say = 1;
+        for (let x = 1; x < boyut; x++) { if (g[y][x] === renk) { say++; if (say === 5) p += 3; else if (say > 5) p++; } else { renk = g[y][x]; say = 1; } } }
+      for (let x = 0; x < boyut; x++) { let renk = g[0][x], say = 1;
+        for (let y = 1; y < boyut; y++) { if (g[y][x] === renk) { say++; if (say === 5) p += 3; else if (say > 5) p++; } else { renk = g[y][x]; say = 1; } } }
+      for (let y = 0; y < boyut-1; y++) for (let x = 0; x < boyut-1; x++)
+        if (g[y][x] === g[y][x+1] && g[y][x] === g[y+1][x] && g[y][x] === g[y+1][x+1]) p += 3;
+      // Bulucu desen benzeri 1:1:3:1:1 kalıbı (iki yanından biri 4 açık modül ise ceza)
+      const kalip = [true,false,true,true,true,false,true];
+      const esles = (arr) => {
+        let c = 0;
+        const acikMi = (i) => (i < 0 || i >= arr.length) ? true : !arr[i]; // Sınır dışı = açık kabul
+        for (let i = 0; i + 7 <= arr.length; i++) {
+          let ok = true;
+          for (let k = 0; k < 7; k++) if (arr[i+k] !== kalip[k]) { ok = false; break; }
+          if (!ok) continue;
+          let sol = true, sag = true;
+          for (let k = 1; k <= 4; k++) { if (!acikMi(i-k)) sol = false; if (!acikMi(i+6+k)) sag = false; }
+          if (sol || sag) c++;
+        }
+        return c;
+      };
+      for (let y = 0; y < boyut; y++) p += 40 * esles(g[y]);
+      for (let x = 0; x < boyut; x++) p += 40 * esles(g.map(r => r[x]));
+      let koyu = 0; g.forEach(r => r.forEach(v => { if (v) koyu++; }));
+      p += 10 * Math.floor(Math.abs(koyu * 20 - boyut*boyut*10) / (boyut*boyut));
+      return p;
+    };
+
+    // Format bitlerini verilen ızgaraya, verilen maske numarası için yazar
+    const formatYaz = (g, maske) => {
+      const veri = T.seviyeBiti << 3 | maske;
+      let rem = veri; for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537);
+      const bits = ((veri << 10 | rem) ^ 0x5412) & 0x7FFF;
+      const bit = (i) => ((bits >>> i) & 1) === 1;
+      for (let i = 0; i <= 5; i++) g[i][8] = bit(i);
+      g[7][8] = bit(6); g[8][8] = bit(7); g[8][7] = bit(8);
+      for (let i = 9; i < 15; i++) g[8][14 - i] = bit(i);
+      for (let i = 0; i < 8; i++) g[8][boyut-1-i] = bit(i);
+      for (let i = 8; i < 15; i++) g[boyut-15+i][8] = bit(i);
+      g[boyut-8][8] = true; // Sabit koyu modül
+    };
+
+    // STANDARDA UYGUN MASKE SEÇİMİ: her maske için TAM matris (maske + o maskeye
+    // ait format bitleri) kurulur, ceza puanı hesaplanır ve en düşük olan seçilir.
+    let enIyi = null, enIyiMaske = 0, enAzCeza = Infinity;
+    for (let m = 0; m < 8; m++) {
+      const g = maskeUygula(M, m);
+      formatYaz(g, m);
+      const c = ceza(g);
+      if (c < enAzCeza) { enAzCeza = c; enIyi = g; enIyiMaske = m; }
+    }
+    return { matris: enIyi, boyut, versiyon, maske: enIyiMaske };
+
+  };
+
+  // QR okuma kütüphanesi (jsQR) yalnızca KAMERA ile okuma için gereklidir.
+  // Tek bir CDN'e bağlı kalmamak için sırayla birden fazla adres denenir.
+  const qrOkuKutuphanesi = async () => {
+    if (typeof window !== 'undefined' && window.jsQR) return window.jsQR;
+    const adresler = [
+      'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js',
+      'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js'
+    ];
+    for (const src of adresler) {
+      try {
+        await new Promise((resolve, reject) => {
+          const el = document.createElement('script');
+          el.src = src; el.async = true;
+          el.onload = resolve; el.onerror = () => reject(new Error('yuklenemedi'));
+          document.head.appendChild(el);
+        });
+        if (window.jsQR) return window.jsQR; // Başarılı
+      } catch (e) { /* Sıradaki adresi dene */ }
+    }
+    return null; // Hiçbiri yüklenemedi -> kullanıcı elle kod girebilir
+  };
+
+// ÖNEMLİ DEĞİŞİKLİK: Eskiden her QR için ayrıca 15 haneli bir iç kod (qrDeger)
+// üretilip ekranda gösteriliyordu. Kullanıcı isteğiyle bu TAMAMEN KALDIRILDI.
+// Artık TEK bir kod vardır: SMB-XXXX-XXXX seri kodu. Bu kod hem QR karekodun
+// İÇERİĞİDİR (kamerayla okutulur) hem de kamerası bozuk personelin ELLE
+// gireceği koddur. Böylece takip tek kod üzerinden yürür.
+
+// Seri kod üreticisi: SMB-XXXX-XXXX (karışan 0/O, 1/I karakterleri hariç)
 const rastgeleManuelKod = () => {
   const havuz = 'ABCDEFGHJKLMNPRSTUVYZ23456789';
   const blok = (n) => Array.from({ length: n }, () => havuz[Math.floor(Math.random() * havuz.length)]).join('');
@@ -14775,20 +14982,61 @@ const mesaiKayitlarColRef = () => collection(db, 'artifacts', appId, 'public', '
 const useMesaiQrAyarlari = () => {
   const [ayarlar, setAyarlar] = useState(null);
   useEffect(() => {
-    let kurulumYapildi = false; // Yarış koşulunu engelleyen kilit (aynı anda 2 kez kurulum olmasın)
+    let islemYapildi = false; // Yarış koşulunu engelleyen kilit (aynı anda 2 kez yazma olmasın)
+
+    // Yeni QR kaydı üretir (tek kod: seri kod hem QR içeriği hem elle giriş kodu)
+    const yeniQr = (i) => ({
+      id: `qr${i + 1}`,
+      ad: `QR Kod ${i + 1}`,
+      manuelKod: rastgeleManuelKod(),
+      olusturma: new Date().toLocaleString('tr-TR')
+    });
+
     const unsub = onSnapshot(qrConfigRef(), async (snap) => {
-      if (snap.exists()) { setAyarlar(snap.data()); return; }
-      if (kurulumYapildi) return;
-      kurulumYapildi = true;
-      // İLK KURULUM: 10 farklı QR + her birine ait manuel seri kod üret
-      const liste = Array.from({ length: 10 }, (_, i) => ({
-        id: `qr${i + 1}`,
-        ad: `QR Kod ${i + 1}`,
-        qrDeger: rastgeleQrDegeri(),      // Kameranın okuyacağı 15 haneli kod
-        manuelKod: rastgeleManuelKod(),   // Elle girilecek seri kod
-        olusturma: new Date().toLocaleString('tr-TR')
-      }));
-      await setDoc(qrConfigRef(), { qrList: liste, aktifQrId: 'qr1', modulAktif: true });
+      // İLK KURULUM: 5 adet QR üret (kullanıcı isteğiyle 10 yerine 5 adet)
+      if (!snap.exists()) {
+        if (islemYapildi) return;
+        islemYapildi = true;
+        const liste = Array.from({ length: 5 }, (_, i) => yeniQr(i));
+        await setDoc(qrConfigRef(), { qrList: liste, aktifQrId: 'qr1', modulAktif: true });
+        return;
+      }
+
+      const veri = snap.data();
+      const liste = Array.isArray(veri.qrList) ? veri.qrList : [];
+
+      // ================================================================
+      // GÖÇ (MIGRATION): Eski sürümde 10 QR vardı ve her kayıtta 15 haneli
+      // qrDeger alanı tutuluyordu. Kullanıcı isteğiyle artık 5 QR ve tek
+      // kod (seri kod) kullanılıyor. Aşağıdaki blok mevcut kayıtları BİR
+      // KEZ sadeleştirir: fazla QR'lar silinir, qrDeger alanı kaldırılır.
+      // Kayıtlar korunur, sadece yapı sadeleşir.
+      // ================================================================
+      const fazlaVar = liste.length > 5;
+      const eskiAlanVar = liste.some(q => q && q.qrDeger !== undefined);
+      const eksikKod = liste.length < 5 || liste.some(q => !q || !q.manuelKod);
+
+      if (fazlaVar || eskiAlanVar || eksikKod) {
+        if (islemYapildi) { setAyarlar(veri); return; }
+        islemYapildi = true;
+        const temiz = liste.slice(0, 5).map((q, i) => ({
+          id: q?.id || `qr${i + 1}`,
+          ad: q?.ad || `QR Kod ${i + 1}`,
+          manuelKod: q?.manuelKod || rastgeleManuelKod(), // qrDeger alanı bilinçli olarak yazılmaz
+          olusturma: q?.olusturma || new Date().toLocaleString('tr-TR')
+        }));
+        while (temiz.length < 5) temiz.push(yeniQr(temiz.length));
+        // Aktif QR, kalan 5 kodun dışında kaldıysa ilk koda dönülür
+        const aktifGecerli = temiz.some(q => q.id === veri.aktifQrId);
+        await setDoc(qrConfigRef(), {
+          qrList: temiz,
+          aktifQrId: aktifGecerli ? veri.aktifQrId : temiz[0].id,
+          modulAktif: veri.modulAktif !== false
+        });
+        return; // Yazma sonrası onSnapshot yeniden tetiklenir
+      }
+
+      setAyarlar(veri);
     });
     return () => unsub();
   }, []);
@@ -15011,10 +15259,11 @@ export const QrTarayiciModal = ({ tip, currentUser, onKapat }) => {
       const aktif = veri?.qrList?.find(q => q.id === veri?.aktifQrId);
       if (!aktif) throw new Error('Aktif QR kod tanımlı değil. İK > Mesai Takip > QR Yönetimi bölümünden bir QR aktifleştirin.');
 
-      // Kod karşılaştırma: kamera QR içeriğiyle, elle giriş seri kodla eşleşmeli
-      const eslesti = yontem === 'kamera'
-        ? kod === aktif.qrDeger
-        : kod === (aktif.manuelKod || '').replace(/[\s-]/g, '');
+      // TEK KOD DOĞRULAMASI: Artık 15 haneli ayrı bir kod yok. QR karekodun
+      // içeriği de, elle girilen kod da aynı seri koddur (SMB-XXXX-XXXX).
+      // Karşılaştırma tire ve boşluklardan bağımsız, büyük harfe çevrilerek yapılır.
+      const sadelestir = (d) => String(d || '').toLocaleUpperCase('tr-TR').replace(/[\s-]/g, '');
+      const eslesti = sadelestir(kod) === sadelestir(aktif.manuelKod);
       if (!eslesti) throw new Error(yontem === 'kamera' ? 'Okutulan QR kod aktif mesai koduyla eşleşmiyor. Ofis girişindeki güncel kodu okutun.' : 'Girilen seri kod hatalı. QR kodun altındaki kodu kontrol edin.');
 
       const kayit = {
@@ -15273,10 +15522,11 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
 // penceresi açılır, sayfa başlığı dosya adı olur, "PDF olarak kaydet" ile
 // orijinal PDF formatında indirilir. iOS/Android/masaüstünde çalışır.
 // ---------------------------------------------------------------------------
-const qrPdfIndir = async (qr) => {
-  const QRCodeLib = await qrUretKutuphanesi();
-  // Yüksek çözünürlüklü QR görseli (baskıda net çıksın diye 600px)
-  const dataUrl = await QRCodeLib.toDataURL(qr.qrDeger, { width: 600, margin: 2, errorCorrectionLevel: 'H' });
+const qrPdfIndir = (qr) => {
+  // DÜZELTME: QR görseli artık CDN'den değil, dahili motordan SVG olarak üretilir.
+  // SVG vektörel olduğu için A4 baskıda kenarları tamamen keskin çıkar.
+  const qrSvg = qrSvgUret(qr.manuelKod);
+  if (!qrSvg) { alert('QR kod üretilemedi. Lütfen kodu yenileyip tekrar deneyin.'); return; }
   const w = window.open('', '_blank');
   if (!w) { alert('Açılır pencere engellendi. Lütfen tarayıcıda açılır pencerelere izin verin.'); return; }
   w.document.write(`<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>Sembol-Mesai-${qr.ad.replace(/\s+/g, '-')}</title>
@@ -15284,7 +15534,7 @@ const qrPdfIndir = async (qr) => {
       body{font-family:Arial,Helvetica,sans-serif;margin:0;padding:40px;text-align:center;color:#111}
       .kart{border:4px solid #111;border-radius:24px;padding:36px;max-width:520px;margin:0 auto}
       h1{font-size:26px;letter-spacing:2px;margin:0}.alt{color:#b91c1c;font-weight:800;letter-spacing:4px;font-size:13px;margin:6px 0 24px}
-      img{width:360px;height:360px}
+      .qr{width:360px;height:360px;margin:0 auto}
       .seri{margin-top:20px;font-size:26px;font-weight:900;letter-spacing:6px;border:3px dashed #111;border-radius:14px;padding:14px}
       .not{margin-top:16px;font-size:12px;color:#555;line-height:1.6}
       @media print{body{padding:0}}
@@ -15292,7 +15542,7 @@ const qrPdfIndir = async (qr) => {
     <div class="kart">
       <h1>SEMBOL NAKLİYAT</h1>
       <div class="alt">MESAİ TAKİP • ${qr.ad.toLocaleUpperCase('tr-TR')}</div>
-      <img src="${dataUrl}" alt="QR" />
+      <div class="qr">${qrSvg}</div>
       <div class="seri">${qr.manuelKod}</div>
       <p class="not">Mesai giriş/çıkışınızı onaylamak için uygulamadaki yeşil/kırmızı butona basıp bu QR kodu kameraya okutun.<br/>Kameranız çalışmıyorsa yukarıdaki seri kodu elle girebilirsiniz.</p>
     </div>
@@ -15301,15 +15551,31 @@ const qrPdfIndir = async (qr) => {
   w.document.close();
 };
 
-// Küçük yardımcı: bir QR değerinin görselini üretip <img> olarak gösterir
+// QR matrisini <svg> koduna çevirir. SVG kullanıldığı için kod her ekran
+// boyutunda ve baskıda net görünür, ayrıca hiçbir dış kaynak gerektirmez.
+const qrSvgUret = (deger, kenarModul = 2) => {
+  const q = qrKareKodMatris(deger);
+  if (!q) return null;
+  const tam = q.boyut + kenarModul * 2; // Sessiz alan (quiet zone) eklenir
+  let kareler = '';
+  for (let y = 0; y < q.boyut; y++) {
+    for (let x = 0; x < q.boyut; x++) {
+      if (q.matris[y][x]) kareler += `<rect x="${x + kenarModul}" y="${y + kenarModul}" width="1" height="1"/>`;
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${tam} ${tam}" shape-rendering="crispEdges" width="100%" height="100%"><rect width="${tam}" height="${tam}" fill="#ffffff"/><g fill="#000000">${kareler}</g></svg>`;
+};
+
+// Küçük yardımcı: seri kodun QR görselini ekranda gösterir.
+// DÜZELTME: Artık CDN beklenmediği için yükleme çemberinde takılı kalmaz.
 const QrGorsel = ({ deger, boyut = 140 }) => {
-  const [url, setUrl] = useState(null);
-  useEffect(() => {
-    let aktif = true;
-    qrUretKutuphanesi().then(lib => lib.toDataURL(deger, { width: boyut * 2, margin: 1, errorCorrectionLevel: 'H' })).then(u => { if (aktif) setUrl(u); }).catch(() => {});
-    return () => { aktif = false; };
-  }, [deger, boyut]);
-  return url ? <img src={url} alt="QR" style={{ width: boyut, height: boyut }} className="rounded-lg" /> : <div style={{ width: boyut, height: boyut }} className="bg-neutral-100 rounded-lg flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-neutral-400" /></div>;
+  const svg = useMemo(() => qrSvgUret(deger), [deger]);
+  if (!svg) return (
+    <div style={{ width: boyut, height: boyut }} className="bg-red-50 border border-red-200 rounded-lg flex items-center justify-center text-center p-2">
+      <span className="text-[10px] font-black text-red-600">QR üretilemedi</span>
+    </div>
+  );
+  return <div style={{ width: boyut, height: boyut }} className="rounded-lg overflow-hidden bg-white" dangerouslySetInnerHTML={{ __html: svg }} />;
 };
 
 // ---------------------------------------------------------------------------
@@ -15410,7 +15676,8 @@ export const MesaiTakipView = ({ personnelList = [], currentUser }) => {
   const qrAktifYap = async (id) => { await updateDoc(qrConfigRef(), { aktifQrId: id }); };
   const qrYenile = async (id) => {
     if (!window.confirm('Bu QR kodun içeriği ve seri kodu YENİLENECEK. Duvardaki eski çıktı geçersiz olur. Devam edilsin mi?')) return;
-    const yeniListe = (ayarlar?.qrList || []).map(q => q.id === id ? { ...q, qrDeger: rastgeleQrDegeri(), manuelKod: rastgeleManuelKod(), olusturma: new Date().toLocaleString('tr-TR') } : q);
+    // Yalnızca seri kod yenilenir (15 haneli ayrı kod artık yok)
+    const yeniListe = (ayarlar?.qrList || []).map(q => q.id === id ? { id: q.id, ad: q.ad, manuelKod: rastgeleManuelKod(), olusturma: new Date().toLocaleString('tr-TR') } : q);
     await updateDoc(qrConfigRef(), { qrList: yeniListe });
   };
   const kayitSil = async (k) => {
@@ -15542,7 +15809,7 @@ export const MesaiTakipView = ({ personnelList = [], currentUser }) => {
         <div>
           <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-4 text-xs font-bold text-amber-800 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>Aşağıdaki 10 koddan yalnızca <b>AKTİF</b> olan geçerlidir. Ofis girişine astığınız kodu değiştirmek isterseniz başka bir kodu "Aktif Yap" ile seçin ve yeni çıktısını asın. Her kodun altındaki seri numara, kamerası bozuk personelin elle gireceği koddur.</span>
+            <span>Aşağıdaki 5 koddan yalnızca <b>AKTİF</b> olan geçerlidir. Ofis girişine astığınız kodu değiştirmek isterseniz başka bir kodu "Aktif Yap" ile seçin ve yeni çıktısını asın. Her kodun altındaki seri numara, kamerası bozuk personelin elle gireceği koddur.</span>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {(ayarlar?.qrList || []).map(q => {
@@ -15553,10 +15820,12 @@ export const MesaiTakipView = ({ personnelList = [], currentUser }) => {
                     <h4 className="font-black text-sm">{q.ad}</h4>
                     {aktif ? <span className="text-[9px] font-black bg-emerald-600 text-white px-2.5 py-1 rounded-full flex items-center gap-1"><CheckCircle className="w-3 h-3" /> AKTİF</span> : <span className="text-[9px] font-black bg-neutral-100 text-neutral-400 px-2.5 py-1 rounded-full">PASİF</span>}
                   </div>
-                  <QrGorsel deger={q.qrDeger} />
+                  <QrGorsel deger={q.manuelKod} />
                   {/* Seri numara: elle giriş için */}
                   <p className="text-sm font-black tracking-[0.2em] border-2 border-dashed border-neutral-300 rounded-lg px-3 py-1.5">{q.manuelKod}</p>
-                  <p className="text-[9px] font-bold text-neutral-400">15 haneli kod: {q.qrDeger} • {q.olusturma}</p>
+                  {/* NOT: Eski "15 haneli kod: ... • tarih" satırı kullanıcı isteğiyle
+                      TAMAMEN kaldırıldı. Kartta yalnızca QR karekod ve altındaki
+                      seri kod (elle giriş kodu) gösterilir. */}
                   <div className="w-full grid grid-cols-3 gap-1.5">
                     <button onClick={() => qrAktifYap(q.id)} disabled={aktif} className={`py-2 rounded-lg text-[10px] font-black ${aktif ? 'bg-neutral-100 text-neutral-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>Aktif Yap</button>
                     <button onClick={() => qrPdfIndir(q)} className="py-2 rounded-lg text-[10px] font-black bg-black text-white hover:bg-neutral-800 flex items-center justify-center gap-1"><Download className="w-3 h-3" /> PDF İndir</button>
