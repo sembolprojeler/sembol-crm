@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale } from 'lucide-react';
+import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
-import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu } from './Operasyon.jsx';
+import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
 // NOT: Mesai Takip modülü artık ayrı bir dosya değil; kullanıcı isteğiyle
 // Operasyon Bölümü'nün parçası olarak Operasyon.jsx içine taşındı
@@ -58,7 +58,8 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     { id: 'globalSearchPersonnel', label: 'Arama: Personel' },
     { id: 'davaDosyalari', label: 'Dava Dosyaları' },
     { id: 'companyContacts', label: 'Şirket İletişimi Yönetimi' },
-    { id: 'mesaiTakip', label: 'Mesai Takip' } // YENİ: QR + konumlu mesai takip sayfası
+    { id: 'mesaiTakip', label: 'Mesai Takip' }, // YENİ: QR + konumlu mesai takip sayfası
+    { id: 'hatirlatmalar', label: 'Hatırlatmalar' } // YENİ: sol menüdeki Hatırlatmalar sayfası
   ];
 
 
@@ -3218,7 +3219,21 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           setRanks(data.ranks || []);
           setPositionModules(data.positionModules || {});
           // YENİ: Sayfa kataloğu (Ana Şema) — Firebase'de kayıtlıysa onu, yoksa varsayılan listeyi kullan
-          setModuleCatalog(Array.isArray(data.moduleCatalog) && data.moduleCatalog.length > 0 ? data.moduleCatalog : VARSAYILAN_MODUL_KATALOGU);
+          // ============================================================
+          // KATALOG BİRLEŞTİRME:
+          // Firebase'deki kayıtlı katalog varsayılan listeyi ezdiği için,
+          // yazılıma sonradan eklenen sayfalar (ör. Hatırlatmalar) katalogda
+          // görünmüyordu. Aşağıdaki blok, kayıtlı katalogda EKSİK olan
+          // varsayılan sayfaları listenin sonuna ekler. Yöneticinin elle
+          // eklediği/kaldırdığı diğer sayfalara dokunulmaz.
+          // ============================================================
+          if (Array.isArray(data.moduleCatalog) && data.moduleCatalog.length > 0) {
+            const mevcutIdler = new Set(data.moduleCatalog.map(m => m?.id));
+            const eksikler = VARSAYILAN_MODUL_KATALOGU.filter(m => !mevcutIdler.has(m.id));
+            setModuleCatalog(eksikler.length > 0 ? [...data.moduleCatalog, ...eksikler] : data.moduleCatalog);
+          } else {
+            setModuleCatalog(VARSAYILAN_MODUL_KATALOGU);
+          }
         } else {
           const defaultPos = ['Şoför', 'Taşıma Elemanı', 'Muhasebe', 'Mobilya Ustası', 'Satış Personeli', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operasyon', 'Operatör', 'Firma Sahibi'];
           const defaultRanks = ['Müdür', 'Ekip Şefi', 'Asistan', 'Standart', 'Heryerden Usta', 'Kalfa'];
@@ -3886,15 +3901,35 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         const snap = await getDoc(mesaiRef);
         let records = snap.exists() ? snap.data().records : {};
 
+        // ============================================================
+        // YENİ: QR MESAİ ÖNERİSİ (yalnızca Mavi Yaka)
+        // O güne ait QR giriş/çıkış kayıtları çekilir ve her personelin
+        // çalışma programıyla karşılaştırılarak durum + saat HAZIR gelir.
+        // Fazla mesai ekip bazlıdır: ekipteki EN ERKEN çıkış esas alınır.
+        // Puantaja yazılmaz; yalnızca ekranda öneri olarak gösterilir,
+        // yönetici "Mesaileri Kaydet" dediğinde işlenir.
+        // ============================================================
+        const tarihStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+        let oneriler = {};
+        try {
+          const qrKayitlari = await gunlukQrKayitlariGetir(tarihStr);
+          const ekip = validTeamIds.map(id => personnelList.find(pers => String(pers.id) === String(id))).filter(Boolean);
+          oneriler = mesaiOnerileriHesapla(ekip, qrKayitlari, tarihStr);
+        } catch (qrErr) {
+          console.warn('QR mesai önerileri hesaplanamadı, varsayılan kullanılacak:', qrErr);
+        }
+
         const initialModalData = {};
         validTeamIds.forEach(pId => {
           const valObj = records[pId] && records[pId][day];
           const val = typeof valObj === 'object' && valObj !== null ? valObj.status : valObj || '';
           const hours = typeof valObj === 'object' && valObj !== null ? valObj.hours : '';
-          initialModalData[pId] = {
-             status: val || 'G',
-             hours: hours || ''
-          };
+          const oneri = oneriler[pId];
+          // Puantajda ELLE girilmiş bir kayıt varsa ona dokunulmaz; yoksa QR önerisi kullanılır
+          const elleGirilmis = typeof valObj === 'object' && valObj !== null && valObj.manual === true;
+          initialModalData[pId] = elleGirilmis || !oneri
+            ? { status: val || 'G', hours: hours || '', oneri: oneri || null }
+            : { status: oneri.status, hours: oneri.hours, oneri };
         });
 
         setMesaiModalData(initialModalData);
@@ -3921,7 +3956,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
         Object.keys(mesaiModalData).forEach(pId => {
           if (!records[pId]) records[pId] = {};
-          records[pId][day] = mesaiModalData[pId];
+          // 'oneri' yalnızca ekranda gösterim içindir; puantaja yazılmaz
+          const { status, hours } = mesaiModalData[pId];
+          records[pId][day] = { status, hours: hours || '' };
         });
 
         await setDoc(mesaiRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
@@ -4882,6 +4919,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const showGlobalSearchPersonnel = checkAccess('globalSearchPersonnel');
     // YENİ: Dava Dosyaları modül yetkisi — Yetkilendirme'den kişiye/pozisyona göre açılıp kapatılır
     const showDavaDosyalari = checkAccess('davaDosyalari');
+    // YENİ: Hatırlatmalar modül yetkisi. checkAccess varsayılan olarak false
+    // döndüğü için bu bölüm BAŞLANGIÇTA HERKESTE KAPALIDIR; Yetkilendirme
+    // ekranından kişiye/pozisyona göre açılır.
+    const showHatirlatmalar = checkAccess('hatirlatmalar');
     // YENİ: Şirket İletişimi listesini düzenleme yetkisi.
     // Yöneticiler her zaman yetkilidir; ayrıca Yetkilendirme'den başka kişilere de verilebilir.
     const canManageContacts = isManager || checkAccess('companyContacts');
@@ -5277,6 +5318,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 yanında yanıp sönen bildirim ışığı + sayı rozeti görünür;
                 seçili sekmedeyken tek renk kırmızıya döner.
                 ================================================================ */}
+            {/* YETKİ: Hatırlatmalar artık modüler yetkiye bağlı. Yetkisi olmayan
+                kullanıcıda bu buton hiç görünmez (başlangıçta herkeste kapalı). */}
+            {showHatirlatmalar && (
             <button
               onClick={() => { setActiveTab('hatirlatmalar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
               className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl ${
@@ -5302,6 +5346,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 </span>
               )}
             </button>
+            )}
 
             {/* NOT: "Bilgilendirme Ekle" sol menüden kaldırıldı — artık Bildirim Merkezi'nin
                 (Bell simgesi) sağ üstünde buton olarak erişiliyor. Sayfa rotası (activeTab
@@ -6132,7 +6177,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
             {/* YENİ: HATIRLATMALAR EKRANI — takvim mantığıyla görev/not takibi.
                 jobs/personnelList/vehicles, konuya göre "İlgili" seçimi için geçilir. */}
-            {activeTab === 'hatirlatmalar' &&
+            {activeTab === 'hatirlatmalar' && showHatirlatmalar &&
               <HatirlatmalarView jobs={jobs} personnelList={personnelList} vehicles={vehicles} currentUser={currentUser} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
 
             {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
@@ -6253,7 +6298,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {/* YENİ: Saha Raporlaması — şef denetimlerinin yönetim ekranı */}
             {activeTab === 'sahaRaporlamasi' && showPersonnel && <SahaRaporlamasiView personnelList={personnelList} db={db} appId={appId} setViewingImage={setViewingImage} />}
             {/* YENİ: İK > Mesai Takip sayfası (QR + konum doğrulamalı giriş/çıkış) */}
-            {activeTab === 'mesaiTakip' && showPersonnel && <MesaiTakipView personnelList={personnelList} currentUser={currentUser} />}
+            {activeTab === 'mesaiTakip' && showPersonnel && <MesaiTakipView personnelList={personnelList} currentUser={currentUser} jobs={jobs} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {/* YENİ: Şirket Evrakları sayfası */}
             {activeTab === 'sirketEvraklari' && showPersonnel && <SirketEvraklariView db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
@@ -7644,7 +7689,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                             const person = personnelList.find(p => String(p.id) === String(pId));
                             const data = mesaiModalData[pId];
                             return (
-                               <div key={pId} className="flex flex-col sm:flex-row sm:items-center gap-3 bg-white p-3 rounded-xl border border-neutral-200 shadow-sm">
+                               <div key={pId} className="flex flex-col gap-2 bg-white p-3 rounded-xl border border-neutral-200 shadow-sm">
+                                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
                                   <div className="flex-1 font-bold text-sm text-black flex items-center gap-2">
                                      <User className="w-4 h-4 text-neutral-400 shrink-0" />
                                      <span className="truncate">{person?.fullName || 'Bilinmeyen Personel'}</span>
@@ -7670,6 +7716,35 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                                         />
                                      )}
                                   </div>
+                                  </div>
+
+                                  {/* YENİ: QR MESAİ ÖZETİ — giriş/çıkış saatleri ve önerinin gerekçesi.
+                                      Yönetici neyin neden önerildiğini tek bakışta görür. */}
+                                  {data.oneri && (
+                                    <div className={`rounded-lg px-2.5 py-2 border text-[11px] font-bold flex flex-col gap-1 ${data.oneri.status === 'D' ? 'bg-red-50 border-red-200 text-red-700' : data.oneri.status === 'EM' ? 'bg-yellow-50 border-yellow-200 text-yellow-800' : (data.oneri.status === 'FM' || data.oneri.status === 'FGM' || data.oneri.status === 'FG') ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-green-50 border-green-200 text-green-800'}`}>
+                                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                                        <span className="flex items-center gap-1">
+                                          <QrCode className="w-3 h-3" />
+                                          Giriş: <b>{data.oneri.girisSaati || '—'}</b>
+                                          {data.oneri.kaynak && data.oneri.kaynak !== 'yok' && (
+                                            <span className="text-[9px] opacity-70">({data.oneri.kaynak === 'manuel' ? 'elle kod' : 'kamera'})</span>
+                                          )}
+                                        </span>
+                                        <span>Çıkış: <b>{data.oneri.cikisSaati || '—'}</b></span>
+                                        {data.oneri.ekipCikis && (
+                                          <span className="flex items-center gap-1"><Users className="w-3 h-3" /> Ekip çıkışı (en erken): <b>{data.oneri.ekipCikis}</b></span>
+                                        )}
+                                      </div>
+                                      <p className="opacity-90">{data.oneri.aciklama}</p>
+                                      {/* Öneri değiştirildiyse uyar; yönetici son sözü söyler */}
+                                      {(data.status !== data.oneri.status || String(data.hours || '') !== String(data.oneri.hours || '')) && (
+                                        <p className="text-[10px] text-neutral-500 italic">Öneri elle değiştirildi (öneri: {data.oneri.status}{data.oneri.hours ? ` ${data.oneri.hours} sa` : ''}).</p>
+                                      )}
+                                    </div>
+                                  )}
+                                  {!data.oneri && (
+                                    <p className="text-[10px] font-bold text-neutral-400 italic">Bu personel için o güne ait QR mesai kaydı bulunamadı — durumu elle seçin.</p>
+                                  )}
                                </div>
                             )
                          })}
