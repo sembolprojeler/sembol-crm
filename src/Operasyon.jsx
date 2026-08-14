@@ -14850,6 +14850,34 @@ export const MesaiModulSwitch = ({ aktif }) => {
 };
 
 // ---------------------------------------------------------------------------
+// YENİ: SOL MENÜDEKİ "MESAİ TAKİP" SATIRI (kendi kendine yeten bileşen)
+// ÖNEMLİ DÜZELTME: Modülün aktif/pasif durumu ÖNCEDEN App.jsx içinde
+// useMesaiModulAktif() ile okunuyordu. Ancak App.jsx'te bu satırdan ÖNCE
+// koşullu return'ler (login ekranı, pasif kullanıcı ekranı) bulunduğu için
+// hook her render'da çalışmıyor, React "Rendered more hooks than during the
+// previous render" (hata #310) veriyordu. Çözüm: hook artık App.jsx'te değil,
+// yalnızca bu bileşenin içinde çağrılıyor. Bu bileşen koşulsuz render
+// edildiği için hook sırası her zaman aynı kalır.
+// ---------------------------------------------------------------------------
+export const MesaiTakipMenuButonu = ({ activeTab, setActiveTab, setIsSidebarOpen }) => {
+  const modulAktif = useMesaiModulAktif() !== false; // null (yükleniyor) = aktif kabul edilir
+  const secili = activeTab === 'mesaiTakip';
+  return (
+    <div className={`w-full py-2 px-4 text-sm font-bold transition flex justify-between items-center gap-2 rounded-xl ${secili ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}>
+      <button
+        onClick={() => { setActiveTab('mesaiTakip'); if (setIsSidebarOpen) setIsSidebarOpen(false); }}
+        className="flex-1 flex justify-start items-center gap-3 py-0.5 text-left"
+      >
+        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${secili ? 'bg-white' : modulAktif ? 'bg-green-500' : 'bg-neutral-600'}`}></div>
+        <span className={modulAktif ? '' : 'opacity-60 line-through'}>Mesai Takip</span>
+      </button>
+      {/* Aktif/Pasif anahtarı */}
+      <MesaiModulSwitch aktif={modulAktif} />
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // HARİTA MODALI — kaydın alındığı konumu OpenStreetMap üzerinde gösterir
 // ---------------------------------------------------------------------------
 const MesaiHaritaModal = ({ kayit, onKapat }) => {
