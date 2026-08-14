@@ -2608,7 +2608,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const hatirlatmaIlkYuklemeRef = useRef(true);
     useEffect(() => {
       if (!isAuthenticated) return;
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), (snap) => {
+      // OKUMA SINIRI: 'hatirlatmalar' zamanla büyüyen bir koleksiyondur ve
+      // sınırsız dinlenirse her oturum açılışında tüm geçmiş kayıtlar okunur.
+      // Rozet sayısı için 1000 kayıt fazlasıyla yeterlidir (gerçekçi üst sınır).
+      const qHatirlatma = query(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), limit(1000));
+      const unsub = onSnapshot(qHatirlatma, (snap) => {
         const bugunTarih = new Date();
         const bugunStr = `${bugunTarih.getFullYear()}-${String(bugunTarih.getMonth() + 1).padStart(2, '0')}-${String(bugunTarih.getDate()).padStart(2, '0')}`;
         const sayi = snap.docs.filter(d => {
@@ -3185,7 +3189,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         setAllPersonnelActions(snap.docs.map(d => ({ ...d.data(), id: d.id })));
       }, console.error));
 
-      unsubs.push(onSnapshot(getCol('mesai'), snap => {
+      // OKUMA SINIRI: her belge bir AY'ı temsil eder; 36 belge = 3 yıl geçmiş.
+      // Sınırsız bırakılırsa yıllar geçtikçe her açılışta hepsi okunur.
+      unsubs.push(onSnapshot(query(getCol('mesai'), limit(36)), snap => {
         const flat = [];
         snap.docs.forEach(d => {
           const m = d.id.match(/(\d{4})_(\d{1,2})/);
@@ -6298,7 +6304,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {/* YENİ: Saha Raporlaması — şef denetimlerinin yönetim ekranı */}
             {activeTab === 'sahaRaporlamasi' && showPersonnel && <SahaRaporlamasiView personnelList={personnelList} db={db} appId={appId} setViewingImage={setViewingImage} />}
             {/* YENİ: İK > Mesai Takip sayfası (QR + konum doğrulamalı giriş/çıkış) */}
-            {activeTab === 'mesaiTakip' && showPersonnel && <MesaiTakipView personnelList={personnelList} currentUser={currentUser} jobs={jobs} />}
+            {activeTab === 'mesaiTakip' && showPersonnel && <MesaiTakipView personnelList={personnelList} currentUser={currentUser} jobs={jobs} onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {/* YENİ: Şirket Evrakları sayfası */}
             {activeTab === 'sirketEvraklari' && showPersonnel && <SirketEvraklariView db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
