@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw } from 'lucide-react';
-import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, where, orderBy, limit } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, getDocs, where, orderBy, limit } from 'firebase/firestore';
 import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar } from './shared.jsx';
   export const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -14321,7 +14321,6 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
   const [ay, setAy] = useState(bugun.getMonth());       // 0-11
   const [yil, setYil] = useState(bugun.getFullYear());
   const [secilenGun, setSecilenGun] = useState(bugunStr());
-  const [kayitlar, setKayitlar] = useState([]);
   const [modalAcik, setModalAcik] = useState(false);
   const [duzenlenenId, setDuzenlenenId] = useState(null); // null = yeni kayıt
   const [kaydediliyor, setKaydediliyor] = useState(false);
@@ -15397,9 +15396,15 @@ export const QrTarayiciModal = ({ tip, currentUser, onKapat }) => {
 
       // Aynı gün mükerrer kontrolü: giriş varsa tekrar giriş yazılmaz,
       // çıkış varsa yeni çıkışla GÜNCELLENİR (son çıkış saati geçerlidir).
-      const bugunku = await new Promise((resolve) => {
-        const unsub = onSnapshot(query(mesaiKayitlarColRef(), where('personnelId', '==', kayit.personnelId), where('dateStr', '==', kayit.dateStr)), s => { unsub(); resolve(s.docs.map(d => ({ id: d.id, ...d.data() }))); });
-      });
+      // OKUMA OPTİMİZASYONU: tek seferlik veri için onSnapshot yerine getDocs
+      // kullanılır (dinleyici kurulup kapatılmaz, yalnızca 1-2 doküman okunur).
+      const bugunkuSnap = await getDocs(query(
+        mesaiKayitlarColRef(),
+        where('personnelId', '==', kayit.personnelId),
+        where('dateStr', '==', kayit.dateStr),
+        limit(5)
+      ));
+      const bugunku = bugunkuSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const mevcut = bugunku.find(k => k.type === tip);
       if (tip === 'giris' && mevcut) {
         setSonKayit(mevcut);
@@ -15631,11 +15636,19 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr) => {
 
 // O güne ait QR mesai kayıtlarını çeker (Mesai/Devamsızlık ekranı için)
 export const gunlukQrKayitlariGetir = async (tarihStr) => {
-  const snap = await new Promise((resolve) => {
-    const unsub = onSnapshot(query(mesaiKayitlarColRef(), where('dateStr', '==', tarihStr)), s => { unsub(); resolve(s); }, () => resolve(null));
-  });
-  if (!snap) return [];
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  // OKUMA OPTİMİZASYONU: tek seferlik okuma için getDocs + gün filtresi + limit.
+  // (Önceden onSnapshot ile dinleyici kurulup hemen kapatılıyordu.)
+  try {
+    const snap = await getDocs(query(
+      mesaiKayitlarColRef(),
+      where('dateStr', '==', tarihStr), // Yalnızca o gün
+      limit(500)                        // Güvenlik sınırı
+    ));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.warn('Günlük QR kayıtları okunamadı:', e);
+    return [];
+  }
 };
 
 // ============================================================================
@@ -15683,30 +15696,64 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
   // Sadece BUGÜN + DÜNE ait kendi kayıtlarını dinle (veri tasarrufu için filtreli sorgu)
   useEffect(() => {
     if (!currentUser?.id) return;
-    const q = query(mesaiKayitlarColRef(), where('personnelId', '==', String(currentUser.id)), where('dateStr', 'in', [mesaiBugunStr(), mesaiDunStr()]));
-    const unsub = onSnapshot(q, snap => setKayitlarim(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    return () => unsub();
+    // Kapsam: yalnızca KENDİ kayıtları + yalnızca bugün/dün + limit.
+    // (En fazla 4 doküman: 2 gün x giriş/çıkış)
+    const q = query(
+      mesaiKayitlarColRef(),
+      where('personnelId', '==', String(currentUser.id)),
+      where('dateStr', 'in', [mesaiBugunStr(), mesaiDunStr()]),
+      limit(10)
+    );
+    const unsub = onSnapshot(q, snap => setKayitlarim(snap.docs.map(d => ({ id: d.id, ...d.data() }))), () => setKayitlarim([]));
+    return () => unsub(); // Cleanup: bileşen kapanınca dinleyici durur
   }, [currentUser?.id]);
 
   // Puantaj tahtasındaki mesai durumunu (İzinli / Raporlu / Devamsız...) oku.
   // Uygulamanın mevcut 'mesai' (puantaj) koleksiyonundan SADECE OKUMA yapılır.
   useEffect(() => {
     if (!currentUser?.id) return;
+    let iptal = false; // Bileşen kapanırsa state güncellemesi yapılmaz (memory leak önlemi)
     (async () => {
-      try {
-        const oku = async (tarih) => {
-          const [y, a, g] = tarih.split('-').map(Number);
-          const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${y}_${a}`));
-          if (!snap.exists()) return null;
-          const hucre = (snap.data().records || {})[currentUser.id]?.[g];
-          if (!hucre) return null;
-          return typeof hucre === 'object' ? hucre.status : hucre; // Kod: G, D, Yİ, R...
-        };
-        setPuantajDurum({ bugun: await oku(mesaiBugunStr()), dun: await oku(mesaiDunStr()) });
-      } catch (e) { /* Puantaj okunamazsa özet sadece QR kayıtlarına göre çalışır */ }
-      // İZİN KONTROLÜ: izinliyse mesai butonları gösterilmez
-      try { setIzinBilgisi(await izinDurumuGetir(currentUser, mesaiBugunStr())); } catch (e) { setIzinBilgisi({ izinli: false }); }
+      // ====================================================================
+      // OKUMA OPTİMİZASYONU:
+      // ESKİ HALİ: puantaj ay belgesi 3 KEZ okunuyordu (bugün, dün ve ayrıca
+      // izin kontrolü için). Aynı belge tekrar tekrar indiriliyordu.
+      // YENİ HALİ: gerekli ay belgesi (genelde 1, ay başıysa 2) BİR KEZ okunur
+      // ve hem durum hem izin bilgisi bu tek okumadan türetilir.
+      // ====================================================================
+      const bugunT = mesaiBugunStr(), dunT = mesaiDunStr();
+      const ayAnahtari = (t) => { const [y, a] = t.split('-').map(Number); return `${y}_${a}`; };
+      const gerekenAylar = [...new Set([ayAnahtari(bugunT), ayAnahtari(dunT)])]; // Genelde tek ay
+      const aylikVeri = {};
+      for (const anahtar of gerekenAylar) {
+        try {
+          const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'mesai', anahtar));
+          aylikVeri[anahtar] = snap.exists() ? (snap.data().records || {}) : {};
+        } catch (e) { aylikVeri[anahtar] = {}; }
+      }
+      if (iptal) return;
+
+      // Tek okumadan durum kodunu çöz
+      const kodAl = (tarih) => {
+        const [, , g] = tarih.split('-').map(Number);
+        const hucre = aylikVeri[ayAnahtari(tarih)]?.[currentUser.id]?.[g];
+        if (!hucre) return null;
+        return typeof hucre === 'object' ? hucre.status : hucre; // G, D, Yİ, R...
+      };
+      const bugunKod = kodAl(bugunT);
+      setPuantajDurum({ bugun: bugunKod, dun: kodAl(dunT) });
+
+      // İZİN KONTROLÜ: aynı veriden hesaplanır, EK OKUMA YAPILMAZ
+      if (IZIN_KODLARI.includes(bugunKod)) {
+        setIzinBilgisi({ izinli: true, kod: bugunKod, etiket: MESAI_STATUS_OPTIONS.find(o => o.code === bugunKod)?.label || bugunKod, kaynak: 'puantaj' });
+      } else {
+        const prog = gununProgrami(currentUser, bugunT); // Yerel hesap, okuma yok
+        setIzinBilgisi(prog.izinli
+          ? { izinli: true, kod: 'Hİ', etiket: 'Haftalık İzin', kaynak: 'program', gun: prog.gun }
+          : { izinli: false });
+      }
     })();
+    return () => { iptal = true; }; // Cleanup
   }, [currentUser?.id]);
 
   // ŞU AN YALNIZCA MAVİ YAKA: Beyaz Yaka personelde QR mesai hiç yazılmamış
@@ -15873,7 +15920,9 @@ const QrGorsel = ({ deger, boyut = 140 }) => {
 export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onViewProfile }) => {
   const { ayarlar, aktifQr } = useMesaiQrAyarlari();
   const [sekme, setSekme] = useState('kayitlar'); // "Bugünkü Durum" kaldırıldı, varsayılan Tüm Kayıtlar
-  const [kayitlar, setKayitlar] = useState([]);
+  // OKUMA OPTİMİZASYONU: kayıtlar artık kapsamı daraltılmış iki ayrı state'te tutulur
+  const [gunlukKayitlar, setGunlukKayitlar] = useState([]); // Seçili günün kayıtları
+  const [aylikKayitlar, setAylikKayitlar] = useState([]);   // Rapor ayının kayıtları (yalnızca sekme açıkken)
   const [haritaKaydi, setHaritaKaydi] = useState(null);
   // Pano filtresi: null | 'devamsiz' | 'izinli' — grup adına göre bağımsız tutulur
 
@@ -15897,11 +15946,45 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   const [fPersonel, setFPersonel] = useState('hepsi');
   const [raporAy, setRaporAy] = useState(mesaiBugunStr().slice(0, 7)); // YYYY-AA
 
-  // Tüm mesai kayıtlarını canlı dinle (modül pasifken dinleme yapılmaz)
+  // ============================================================================
+  // FIRESTORE OKUMA OPTİMİZASYONU (ÖNEMLİ)
+  // ESKİ HALİ: onSnapshot(mesaiKayitlarColRef()) -> TÜM koleksiyon limitsiz
+  // dinleniyordu. Sayfa her açıldığında geçmişteki BÜTÜN mesai kayıtları
+  // (aylar/yıllar birikimi) yeniden okunuyordu; okuma faturasının ana kaynağı buydu.
+  //
+  // YENİ HALİ: iki AYRI ve KAPSAMI DARALTILMIŞ dinleyici:
+  //  1) Seçili GÜNÜN kayıtları  -> where('dateStr','==',fTarih) + limit
+  //     (Tüm Kayıtlar sekmesi tek gün gösterdiği için yeterli)
+  //  2) Rapor AYININ kayıtları  -> tarih aralığı + limit, YALNIZCA Raporlama
+  //     sekmesi açıkken bağlanır. Sekme kapalıyken hiç okuma yapılmaz.
+  // Her iki dinleyicinin de cleanup'ı vardır ve bağımlılıkları sabittir
+  // (state güncellemesi dinleyiciyi yeniden kurmaz -> sonsuz döngü yok).
+  // ============================================================================
+
+  // 1) SEÇİLİ GÜNÜN KAYITLARI (Tüm Kayıtlar sekmesi için)
   useEffect(() => {
-    const unsub = onSnapshot(mesaiKayitlarColRef(), snap => setKayitlar(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    if (!fTarih) return;
+    const q = query(
+      mesaiKayitlarColRef(),
+      where('dateStr', '==', fTarih), // Yalnızca o güne ait kayıtlar
+      limit(500)                      // Güvenlik sınırı: bir günde bundan fazla kayıt beklenmez
+    );
+    const unsub = onSnapshot(q, snap => setGunlukKayitlar(snap.docs.map(d => ({ id: d.id, ...d.data() }))), () => setGunlukKayitlar([]));
+    return () => unsub(); // Tarih değişince veya sayfadan çıkınca dinleyici kapanır
+  }, [fTarih]);
+
+  // 2) RAPOR AYININ KAYITLARI (yalnızca Raporlama sekmesi açıkken)
+  useEffect(() => {
+    if (sekme !== 'rapor' || !raporAy) { setAylikKayitlar([]); return; }
+    const q = query(
+      mesaiKayitlarColRef(),
+      where('dateStr', '>=', `${raporAy}-01`), // Ayın başı
+      where('dateStr', '<=', `${raporAy}-31`), // Ayın sonu (metin karşılaştırması yeterli)
+      limit(3000)                              // 30 gün x ~50 personel x 2 kayıt payı
+    );
+    const unsub = onSnapshot(q, snap => setAylikKayitlar(snap.docs.map(d => ({ id: d.id, ...d.data() }))), () => setAylikKayitlar([]));
     return () => unsub();
-  }, []);
+  }, [sekme, raporAy]);
 
   // Aktif (Pasif olmayan) personel listesi, yakaya göre ayrılmış
   const aktifPersonel = useMemo(() => personnelList.filter(p => p.employmentStatus !== 'Pasif'), [personnelList]);
@@ -15909,41 +15992,40 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   const beyazYaka = aktifPersonel.filter(p => mesaiYakaTipi(p) === 'Beyaz Yaka');
 
   const bugun = mesaiBugunStr();
-  const bugunkuKayitlar = kayitlar.filter(k => k.dateStr === bugun);
 
   // Filtrelenmiş kayıtlar (Tüm Kayıtlar sekmesi) — en yeni üstte, ilk 300 kayıt
-  const filtreli = useMemo(() => kayitlar
+  const filtreli = useMemo(() => gunlukKayitlar
     .filter(k => k.collarType === 'Mavi Yaka') // Şu an yalnızca Mavi Yaka aktif
-    .filter(k => k.dateStr === fTarih) // Yalnızca seçilen günün kayıtları
     .filter(k => fYaka === 'hepsi' || k.collarType === fYaka)
     // NOT: Mesai durumu filtresi burada uygulanmaz; durum bilgisi puantaj ve
     // öneri hesabından geldiği için tablo çizilirken (aşağıda) uygulanır.
 
     .filter(k => fPersonel === 'hepsi' || String(k.personnelId) === String(fPersonel))
     .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-    .slice(0, 300), [kayitlar, fTarih, fYaka, fPersonel]);
+    .slice(0, 300), [gunlukKayitlar, fYaka, fPersonel]); // fTarih zaten sorguda filtreli
 
   // YENİ: Görünen kayıtların ait olduğu AYLARIN puantaj belgelerini yükler.
   // "Mesai Durumu" sütunu, muhasebedeki (Personel Muhasebe) günlük durumu gösterir.
+  // OKUMA OPTİMİZASYONU:
+  // ESKİ HALİ: bağımlılık dizisi `filtreli` üzerinden türetilmiş bir metne
+  // bağlıydı; kayıtlar her değiştiğinde dinleyiciler kapatılıp yeniden kuruluyor,
+  // her kurulumda puantaj belgesi baştan okunuyordu (gereksiz okuma + titreme).
+  // YENİ HALİ: tablo tek gün gösterdiği için SADECE o günün ayına ait TEK belge
+  // dinlenir ve bağımlılık yalnızca ayın kendisidir (fTarih değişse bile ay
+  // aynıysa dinleyici yeniden kurulmaz).
+  const raporAyAnahtari = useMemo(() => {
+    const [y, a] = String(fTarih || '').split('-');
+    return (y && a) ? `${Number(y)}_${Number(a)}` : null;
+  }, [fTarih]);
+
   useEffect(() => {
-    // Hem kayıtların hem de SEÇİLEN TARİH ARALIĞININ ayları yüklenir; böylece
-    // hiç QR kaydı olmayan personelin puantaj durumu da okunabilir.
-    const tumTarihler = [...filtreli.map(k => k.dateStr), fTarih].filter(Boolean);
-    const aylar = new Set(tumTarihler.map(t => {
-      const [y, a] = String(t).split('-');
-      return `${Number(y)}_${Number(a)}`;
-    }).filter(x => !x.includes('NaN')));
-    if (aylar.size === 0) return;
-    const unsubler = [];
-    aylar.forEach(anahtar => {
-      const ref = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', anahtar);
-      unsubler.push(onSnapshot(ref, snap => {
-        setPuantajlar(prev => ({ ...prev, [anahtar]: snap.exists() ? (snap.data().records || {}) : {} }));
-      }, () => {}));
-    });
-    return () => unsubler.forEach(u => u());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtreli.map(k => k.dateStr).join(','), fTarih]);
+    if (!raporAyAnahtari) return;
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', raporAyAnahtari);
+    const unsub = onSnapshot(ref, snap => {
+      setPuantajlar(prev => ({ ...prev, [raporAyAnahtari]: snap.exists() ? (snap.data().records || {}) : {} }));
+    }, () => {});
+    return () => unsub(); // Ay değişince veya sayfadan çıkınca kapanır
+  }, [raporAyAnahtari]);
 
   // YENİ: Görünen her tarih için QR'a dayalı ÖNERİLERİ hesaplar.
   // Böylece muhasebeye henüz yazılmamış günlerde de "önerilen durum" görünür.
@@ -15951,7 +16033,7 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     const tarihler = [...new Set(filtreli.map(k => k.dateStr))];
     const sonuc = {};
     tarihler.forEach(tarih => {
-      const oGunkuKayitlar = kayitlar.filter(k => k.dateStr === tarih && k.collarType === 'Mavi Yaka');
+      const oGunkuKayitlar = gunlukKayitlar.filter(k => k.dateStr === tarih && k.collarType === 'Mavi Yaka');
       const kisiIdler = [...new Set(oGunkuKayitlar.map(k => String(k.personnelId)))];
       const ekip = kisiIdler.map(id => personnelList.find(p => String(p.id) === id)).filter(Boolean);
       if (ekip.length === 0) return;
@@ -15959,11 +16041,13 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     });
     return sonuc;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtreli.map(k => k.dateStr).join(','), kayitlar, personnelList]);
+    // Bağımlılık sadeleştirildi: filtreli zaten gunlukKayitlar'dan türüyor
+  }, [gunlukKayitlar, personnelList]);
 
   // RAPORLAMA: seçilen aydaki kayıtlardan kişi bazlı özet çıkarır
   const rapor = useMemo(() => {
-    const aylik = kayitlar.filter(k => k.collarType === 'Mavi Yaka' && (k.dateStr || '').startsWith(raporAy)); // Şu an yalnızca Mavi Yaka
+    // Rapor ayının kayıtları ayrı ve kapsamı daraltılmış sorgudan gelir
+    const aylik = aylikKayitlar.filter(k => k.collarType === 'Mavi Yaka');
     const kisiler = new Map();
     aylik.forEach(k => {
       if (!kisiler.has(k.personnelName)) kisiler.set(k.personnelName, { ad: k.personnelName, yaka: k.collarType, gunler: new Map(), kamera: 0, manuel: 0 });
@@ -15987,7 +16071,7 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       const ortGiris = girisSay ? `${String(Math.floor(girisDkToplam / girisSay / 60)).padStart(2, '0')}:${String(Math.round(girisDkToplam / girisSay) % 60).padStart(2, '0')}` : '—';
       return { ...kisi, gunSayisi: kisi.gunler.size, toplamSaat: (toplamDk / 60).toFixed(1).replace('.', ','), ortGiris };
     }).sort((a, b) => b.gunSayisi - a.gunSayisi);
-  }, [kayitlar, raporAy]);
+  }, [aylikKayitlar]);
 
   // ---------------------------------------------------------------------------
   // "BİRLİKTE" SÜTUNU — EKİP BAZLI (yalnızca Mavi Yaka)
@@ -15996,7 +16080,6 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   // diğer mavi yaka personeller listelenir. Birden fazla işe atanmışsa hepsi
   // birleştirilir ve mükerrer isimler tekilleştirilir.
   // ---------------------------------------------------------------------------
-  const bugunkuKayitlarVeya = (tarih) => kayitlar.filter(k => k.dateStr === tarih);
 
   // Bir işin ekip kimlikleri (hem çoklu hem tekil atama alanı desteklenir)
   const isinEkipIdleri = (is) => {
