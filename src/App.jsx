@@ -4,7 +4,7 @@ import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'fi
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
-import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiModulSwitch, useMesaiModulAktif } from './Operasyon.jsx';
+import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
 // NOT: Mesai Takip modülü artık ayrı bir dosya değil; kullanıcı isteğiyle
 // Operasyon Bölümü'nün parçası olarak Operasyon.jsx içine taşındı
@@ -4984,9 +4984,6 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const okunmamisSikayetSayisi = complaints.filter(c => !c.read).length;
     const insanKaynaklariToplamBildirim = okunmamisSikayetSayisi;
 
-    // YENİ: Mesai Takip modülünün Aktif/Pasif durumu (sol menüdeki anahtar için).
-    // null = yükleniyor kabul edilir; menüde anahtar yine gösterilir.
-    const mesaiModulAktif = useMesaiModulAktif() !== false;
 
     return (
       <div className="flex h-screen bg-neutral-50 font-sans text-neutral-900 overflow-hidden">
@@ -5686,16 +5683,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                         Sağdaki anahtar modülü AKTİF/PASİF yapar. Pasifken ana sayfadaki mesai
                         butonları ve bu sayfanın içeriği gizlenir; kayıtlar silinmediği için
                         "AKTİF ET" denildiğinde kaldığı yerden devam eder. */}
-                    <div className={`w-full py-2 px-4 text-sm font-bold transition flex justify-between items-center gap-2 rounded-xl ${activeTab === 'mesaiTakip' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}>
-                      <button 
-                        onClick={() => { setActiveTab('mesaiTakip'); setIsSidebarOpen(false); }}
-                        className="flex-1 flex justify-start items-center gap-3 py-0.5 text-left"
-                      >
-                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeTab === 'mesaiTakip' ? 'bg-white' : mesaiModulAktif ? 'bg-green-500' : 'bg-neutral-600'}`}></div>
-                        <span className={mesaiModulAktif ? '' : 'opacity-60 line-through'}>Mesai Takip</span>
-                      </button>
-                      <MesaiModulSwitch aktif={mesaiModulAktif} />
-                    </div>
+                    <MesaiTakipMenuButonu activeTab={activeTab} setActiveTab={setActiveTab} setIsSidebarOpen={setIsSidebarOpen} />
                     {/* NOT: İK altındaki eski "Şirket Evrakları" (sirketEvraklari) menüden kaldırıldı —
                         aynı işlev artık "Şirket Dosyaları" ana menüsü altında (sirketBelgeleri) yönetiliyor. */}
                   </div>
