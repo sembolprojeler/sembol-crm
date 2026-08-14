@@ -16103,22 +16103,51 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   // Kayıt silinmez; yalnızca saat güncellenir ve kimin düzelttiği iz olarak kalır.
   const saatKaydet = async () => {
     if (!saatDuzenle) return;
-    const { kayit, saat } = saatDuzenle;
+    const { kayit, saat, yeniKayit } = saatDuzenle;
     // Saat biçimi ve aralık kontrolü: yalnızca 00:00 - 23:59 kabul edilir.
     // (Tarayıcının time alanı zaten kısıtlar; bu kontrol ikinci güvenlik katmanıdır.)
     const es = /^(\d{2}):(\d{2})$/.exec(saat || '');
     if (!es || Number(es[1]) > 23 || Number(es[2]) > 59) { alert('Lütfen geçerli bir saat girin (00:00 - 23:59).'); return; }
     try {
-      await updateDoc(doc(mesaiKayitlarColRef(), kayit.id), {
-        timeStr: saat,
-        saatDuzenlendi: true,                                  // Bir daha düzenlenemez
-        eskiSaat: kayit.timeStr,                               // Önceki saat iz olarak saklanır
-        saatDuzenleyen: currentUser?.fullName || 'Bilinmiyor',
-        saatDuzenlemeTarihi: new Date().toLocaleString('tr-TR')
-      });
+      if (!kayit && yeniKayit) {
+        // ============================================================
+        // ELLE YENİ KAYIT: Personel QR/kod basmayı unuttuysa yönetici
+        // saati elle girer. Kayıt, QR kayıtlarıyla aynı yapıda oluşturulur
+        // ancak 'elleEklendi' ile işaretlenir ve konumsuz olur.
+        // saatDuzenlendi:true olduğu için bir daha değiştirilemez.
+        // ============================================================
+        const { grup, tip } = yeniKayit;
+        await addDoc(mesaiKayitlarColRef(), {
+          personnelId: String(grup.personnelId),
+          personnelName: grup.personnelName,
+          position: grup.position || '',
+          collarType: grup.collarType,
+          type: tip,                                  // 'giris' veya 'cikis'
+          method: 'manuel',                           // Elle girildi
+          dateStr: grup.dateStr,
+          timeStr: saat,
+          timestamp: new Date(`${grup.dateStr}T${saat}:00`).getTime() || Date.now(),
+          lat: null, lng: null, accuracy: null,
+          konumDurumu: 'alinamadi',                   // QR basılmadığı için konum yok
+          cihaz: '-',
+          elleEklendi: true,                          // Yönetici tarafından eklendi
+          saatDuzenlendi: true,                       // Bir daha düzenlenemez
+          saatDuzenleyen: currentUser?.fullName || 'Bilinmiyor',
+          saatDuzenlemeTarihi: new Date().toLocaleString('tr-TR')
+        });
+      } else if (kayit) {
+        // MEVCUT KAYDIN SAATİNİ DÜZELT (bir kez)
+        await updateDoc(doc(mesaiKayitlarColRef(), kayit.id), {
+          timeStr: saat,
+          saatDuzenlendi: true,                                  // Bir daha düzenlenemez
+          eskiSaat: kayit.timeStr,                               // Önceki saat iz olarak saklanır
+          saatDuzenleyen: currentUser?.fullName || 'Bilinmiyor',
+          saatDuzenlemeTarihi: new Date().toLocaleString('tr-TR')
+        });
+      }
       setSaatDuzenle(null);
     } catch (e) {
-      console.error('Saat düzenlenemedi:', e);
+      console.error('Saat kaydedilemedi:', e);
       alert('Saat kaydedilirken bir hata oluştu.');
     }
   };
@@ -16168,40 +16197,43 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       {sekme === 'kayitlar' && (
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
           {/* Filtre çubuğu */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-2 mb-4">
+          {/* FİLTRE ÇUBUĞU — 4 filtre TEK SATIRDA.
+              12 kolonluk ızgara kullanılır: tarih 4, yaka 2, durum 3, personel 3 = 12.
+              Küçük ekranlarda (mobil) alt alta iner. */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2 mb-4 items-stretch">
             {/* TEK TARİH SEÇİCİ + GÜN OKLARI
                 Sol ok bir gün geri, sağ ok bir gün ileri gider. Sayfa her
                 açıldığında bugünle başlar. "Bugün" düğmesi hızlı dönüş sağlar. */}
-            <div className="flex items-stretch gap-1 md:col-span-2">
+            <div className="flex items-stretch gap-1 min-w-0 lg:col-span-4">
               <button
                 onClick={() => { const d = new Date(fTarih); d.setDate(d.getDate() - 1); setFTarih(d.toISOString().split('T')[0]); }}
-                className="px-3 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 transition text-neutral-600"
+                className="px-2 shrink-0 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 transition text-neutral-600"
                 title="Bir gün geri"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
-              <input type="date" value={fTarih} onChange={e => setFTarih(e.target.value || mesaiBugunStr())} className="flex-1 p-2.5 border border-neutral-300 rounded-xl text-xs font-black text-center" />
+              <input type="date" value={fTarih} onChange={e => setFTarih(e.target.value || mesaiBugunStr())} className="flex-1 min-w-0 px-1.5 py-2.5 border border-neutral-300 rounded-xl text-xs font-black text-center" />
               <button
                 onClick={() => { const d = new Date(fTarih); d.setDate(d.getDate() + 1); setFTarih(d.toISOString().split('T')[0]); }}
-                className="px-3 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 transition text-neutral-600"
+                className="px-2 shrink-0 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 transition text-neutral-600"
                 title="Bir gün ileri"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
               {/* Bugün değilse hızlı dönüş düğmesi görünür */}
               {fTarih !== mesaiBugunStr() && (
-                <button onClick={() => setFTarih(mesaiBugunStr())} className="px-3 rounded-xl bg-black text-white text-[10px] font-black hover:bg-neutral-800 transition whitespace-nowrap" title="Bugüne dön">BUGÜN</button>
+                <button onClick={() => setFTarih(mesaiBugunStr())} className="px-2 shrink-0 rounded-xl bg-black text-white text-[9px] font-black hover:bg-neutral-800 transition whitespace-nowrap" title="Bugüne dön">BUGÜN</button>
               )}
             </div>
-            <select value={fYaka} onChange={e => setFYaka(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold"><option value="hepsi">Tüm Yakalar</option><option>Mavi Yaka</option><option>Beyaz Yaka</option></select>
+            <select value={fYaka} onChange={e => setFYaka(e.target.value)} className="min-w-0 truncate px-2 py-2.5 border border-neutral-300 rounded-xl text-xs font-bold lg:col-span-2"><option value="hepsi">Tüm Yakalar</option><option>Mavi Yaka</option><option>Beyaz Yaka</option></select>
             {/* YENİ: MESAİ DURUMU FİLTRESİ — Geldi / Fazla Mesai / Devamsız vb. */}
-            <select value={fDurum} onChange={e => setFDurum(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold" title="Mesai durumuna göre filtrele">
+            <select value={fDurum} onChange={e => setFDurum(e.target.value)} className="min-w-0 truncate px-2 py-2.5 border border-neutral-300 rounded-xl text-xs font-bold lg:col-span-3" title="Mesai durumuna göre filtrele">
               <option value="hepsi">Tüm Mesai Durumları</option>
               {MESAI_STATUS_OPTIONS.map(o => <option key={o.code} value={o.code}>{o.label}</option>)}
               <option value="yok">Durumu Girilmemiş</option>
             </select>
             {/* YENİ: PERSONEL SEÇ — seçilen personelin kayıtları filtrelenir */}
-            <select value={fPersonel} onChange={e => setFPersonel(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold" title="Tek bir personeli seçerek yalnızca onun kayıtlarını görün">
+            <select value={fPersonel} onChange={e => setFPersonel(e.target.value)} className="min-w-0 truncate px-2 py-2.5 border border-neutral-300 rounded-xl text-xs font-bold lg:col-span-3" title="Tek bir personeli seçerek yalnızca onun kayıtlarını görün">
               <option value="hepsi">Personel Seç (Tümü)</option>
               {/* Alfabetik sıra (Türkçe harf düzenine göre) */}
               {[...maviYaka].sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'tr')).map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}
@@ -16295,8 +16327,28 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                   }
 
                   // 4) Giriş/Çıkış hücresi: saat + yöntem ikonu + konum bağlantısı
-                  const SaatHucresi = ({ kayit, renk, etiket }) => {
-                    if (!kayit) return <span className="text-xs font-bold text-neutral-300">—</span>;
+                  const SaatHucresi = ({ kayit, renk, etiket, grup, tip }) => {
+                    // KAYIT YOK: personel basmayı unuttuysa yönetici saati ELLE girebilir.
+                    // Buton bir kez kullanılır; kaydedildikten sonra "Elle eklendi" yazar.
+                    if (!kayit) {
+                      return (
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-bold text-neutral-300">—</span>
+                          <button
+                            onClick={() => setSaatDuzenle({
+                              kayit: null,                 // Mevcut kayıt yok -> yenisi oluşturulacak
+                              etiket,
+                              saat: '',
+                              yeniKayit: { grup, tip }     // Hangi personel/gün/tip için ekleneceği
+                            })}
+                            className="p-0.5 rounded text-neutral-300 hover:text-blue-600 hover:bg-blue-50 transition"
+                            title={`${etiket} saatini elle gir (personel basmayı unuttuysa)`}
+                          >
+                            <Edit className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    }
                     const kilitli = kayit.saatDuzenlendi === true; // Bir kez düzenlenmiş
                     return (
                       <div className="flex flex-col gap-0.5">
@@ -16319,9 +16371,11 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                         </span>
                         {/* Düzenlenmişse bilgi satırı: eski saat ve düzenleyen ipucuyla */}
                         {kilitli && (
-                          <span className="text-[9px] font-black text-neutral-400 flex items-center gap-0.5 whitespace-nowrap cursor-help"
-                                title={`Eski saat: ${kayit.eskiSaat || '-'} • Düzenleyen: ${kayit.saatDuzenleyen || '-'} • ${kayit.saatDuzenlemeTarihi || ''}`}>
-                            <CheckCircle className="w-2.5 h-2.5 text-green-600" /> Düzenlendi
+                          <span className={`text-[9px] font-black flex items-center gap-0.5 whitespace-nowrap cursor-help ${kayit.elleEklendi ? 'text-amber-600' : 'text-neutral-400'}`}
+                                title={kayit.elleEklendi
+                                  ? `QR/kod basılmamış, saat elle eklendi • Ekleyen: ${kayit.saatDuzenleyen || '-'} • ${kayit.saatDuzenlemeTarihi || ''}`
+                                  : `Eski saat: ${kayit.eskiSaat || '-'} • Düzenleyen: ${kayit.saatDuzenleyen || '-'} • ${kayit.saatDuzenlemeTarihi || ''}`}>
+                            <CheckCircle className={`w-2.5 h-2.5 ${kayit.elleEklendi ? 'text-amber-500' : 'text-green-600'}`} /> {kayit.elleEklendi ? 'Elle eklendi' : 'Düzenlendi'}
                           </span>
                         )}
                         {/* Konum: varsa haritada açılır, yoksa uyarı */}
@@ -16350,8 +16404,8 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                       <td className="py-2.5 pr-3"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full whitespace-nowrap ${g.collarType === 'Mavi Yaka' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-200 text-neutral-700'}`}>{g.collarType}</span></td>
                       <td className="py-2.5 pr-3 text-xs font-bold whitespace-nowrap">{g.dateStr?.split('-').reverse().join('.')}</td>
                       {/* GİRİŞ ve ÇIKIŞ ayrı sütunlar — basılmayan taraf boş kalır */}
-                      <td className="py-2.5 pr-3"><SaatHucresi kayit={g.giris} renk="text-green-700" etiket="Giriş" /></td>
-                      <td className="py-2.5 pr-3"><SaatHucresi kayit={g.cikis} renk="text-red-700" etiket="Çıkış" /></td>
+                      <td className="py-2.5 pr-3"><SaatHucresi kayit={g.giris} renk="text-green-700" etiket="Giriş" grup={g} tip="giris" /></td>
+                      <td className="py-2.5 pr-3"><SaatHucresi kayit={g.cikis} renk="text-red-700" etiket="Çıkış" grup={g} tip="cikis" /></td>
                       {/* MESAİ DURUMU — muhasebedeki günlük durum, tam adıyla */}
                       <td className="py-2.5 pr-3">
                         {(() => {
@@ -16544,7 +16598,7 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
               <div className="flex gap-2">
                 <button onClick={() => setDurumDuzenle(null)} className="flex-1 py-3 rounded-xl bg-neutral-100 text-neutral-700 font-black text-sm hover:bg-neutral-200">Vazgeç</button>
                 <button onClick={durumKaydet} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700 flex items-center justify-center gap-2 shadow-lg">
-                  <Save className="w-4 h-4" /> Kaydet ve Kilitle
+                  <Save className="w-4 h-4" /> {saatDuzenle.kayit ? 'Kaydet ve Kilitle' : 'Elle Ekle ve Kilitle'}
                 </button>
               </div>
             </div>
@@ -16559,20 +16613,31 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
             <div className={`p-4 text-white flex justify-between items-center bg-gradient-to-r ${saatDuzenle.etiket === 'Giriş' ? 'from-green-600 to-emerald-700' : 'from-red-600 to-rose-700'}`}>
               <div>
-                <h3 className="font-black flex items-center gap-2"><Clock className="w-5 h-5" /> {saatDuzenle.etiket} Saatini Düzenle</h3>
-                <p className="text-xs font-bold opacity-90">{saatDuzenle.kayit.personnelName} • {saatDuzenle.kayit.dateStr?.split('-').reverse().join('.')}</p>
+                <h3 className="font-black flex items-center gap-2"><Clock className="w-5 h-5" /> {saatDuzenle.etiket} Saatini {saatDuzenle.kayit ? 'Düzenle' : 'Elle Gir'}</h3>
+                {/* Kayıt yoksa bilgiler gruptan okunur */}
+                <p className="text-xs font-bold opacity-90">
+                  {(saatDuzenle.kayit || saatDuzenle.yeniKayit?.grup)?.personnelName} • {(saatDuzenle.kayit || saatDuzenle.yeniKayit?.grup)?.dateStr?.split('-').reverse().join('.')}
+                </p>
               </div>
               <button onClick={() => setSaatDuzenle(null)} className="p-2 bg-white/20 rounded-full hover:bg-white/30"><X className="w-5 h-5" /></button>
             </div>
 
             <div className="p-4 space-y-3">
-              <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-[11px] font-bold text-neutral-600">
-                QR ile basılan saat: <b className="text-black">{saatDuzenle.kayit.timeStr}</b>
-                <span className="block mt-0.5">Yöntem: {saatDuzenle.kayit.method === 'manuel' ? 'Seri kod (elle)' : 'Kamera (QR)'}</span>
-              </div>
+              {saatDuzenle.kayit ? (
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-[11px] font-bold text-neutral-600">
+                  QR ile basılan saat: <b className="text-black">{saatDuzenle.kayit.timeStr}</b>
+                  <span className="block mt-0.5">Yöntem: {saatDuzenle.kayit.method === 'manuel' ? 'Seri kod (elle)' : 'Kamera (QR)'}</span>
+                </div>
+              ) : (
+                /* KAYIT YOK: personel basmayı unutmuş, saat elle ekleniyor */
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] font-bold text-amber-800">
+                  Bu personel o gün <b>{saatDuzenle.etiket.toLocaleLowerCase('tr')}</b> için QR okutmamış veya kod girmemiş.
+                  <span className="block mt-0.5">Saati elle girdiğinizde kayıt <b>konumsuz</b> oluşturulur ve "Elle eklendi" olarak işaretlenir.</span>
+                </div>
+              )}
 
               <div>
-                <label className="block text-xs font-black text-neutral-600 uppercase mb-1.5">Yeni {saatDuzenle.etiket} Saati</label>
+                <label className="block text-xs font-black text-neutral-600 uppercase mb-1.5">{saatDuzenle.kayit ? 'Yeni' : ''} {saatDuzenle.etiket} Saati</label>
                 <input
                   type="time"
                   value={saatDuzenle.saat}
@@ -16583,7 +16648,9 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
 
               <p className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5 flex items-start gap-2">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                Bu saat YALNIZCA BİR KEZ düzenlenebilir. Kaydettikten sonra kilitlenir ve hücrede "Düzenlendi" yazar. Eski saat, düzenleyen kişi ve tarih iz olarak saklanır.
+                {saatDuzenle.kayit
+                  ? 'Bu saat YALNIZCA BİR KEZ düzenlenebilir. Kaydettikten sonra kilitlenir ve hücrede "Düzenlendi" yazar. Eski saat, düzenleyen kişi ve tarih iz olarak saklanır.'
+                  : 'Bu saat YALNIZCA BİR KEZ girilebilir. Kaydettikten sonra kilitlenir ve hücrede "Elle eklendi" yazar. Ekleyen kişi ve tarih iz olarak saklanır.'}
               </p>
 
               <div className="flex gap-2">
