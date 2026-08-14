@@ -4,8 +4,11 @@ import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'fi
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
-import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView } from './Operasyon.jsx';
+import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiModulSwitch, useMesaiModulAktif } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
+// NOT: Mesai Takip modülü artık ayrı bir dosya değil; kullanıcı isteğiyle
+// Operasyon Bölümü'nün parçası olarak Operasyon.jsx içine taşındı
+// (yukarıdaki Operasyon.jsx import satırından geliyor).
 // NOT: MusteriHavuzuView ve SahaPortfoyView artık ayrı dosyalar değil;
 // kullanıcı isteğiyle Satış Bölümü'nün parçası olarak Satis.jsx içine taşındı
 // (yukarıdaki Satis.jsx import satırından geliyorlar).
@@ -54,7 +57,8 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     { id: 'globalSearchVehicle', label: 'Arama: Araç' },
     { id: 'globalSearchPersonnel', label: 'Arama: Personel' },
     { id: 'davaDosyalari', label: 'Dava Dosyaları' },
-    { id: 'companyContacts', label: 'Şirket İletişimi Yönetimi' }
+    { id: 'companyContacts', label: 'Şirket İletişimi Yönetimi' },
+    { id: 'mesaiTakip', label: 'Mesai Takip' } // YENİ: QR + konumlu mesai takip sayfası
   ];
 
 
@@ -503,6 +507,11 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
             </div>
           )}
         </div>
+
+        {/* YENİ: MESAİ GİRİŞ / ÇIKIŞ ONAY BUTONLARI — Hoş Geldiniz'in hemen altında.
+            Yeşil buton = Mesai Giriş, Kırmızı buton = Mesai Çıkış. Butona basınca
+            QR okuma kamerası direkt açılır ve konum kayda işlenir (MesaiTakip.jsx). */}
+        <MesaiOnayButonlari currentUser={currentUser} />
 
         {/* GÜNLÜK MOTİVASYON — artık hem Beyaz Yaka hem Mavi Yaka'da (pozisyona/rütbeye göre) */}
         <div className={`bg-gradient-to-r ${motivationColor} border-2 p-5 rounded-2xl shadow-sm flex items-center gap-4 animate-in fade-in slide-in-from-top-2`}>
@@ -2585,6 +2594,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // sebep oluyordu. Buraya taşınarak sorun kalıcı olarak çözüldü.)
     // ========================================================================
     const [hatirlatmaBildirim, setHatirlatmaBildirim] = useState(0);
+    // YENİ: Bu kullanıcıya ATANMIŞ ve henüz TAMAMLANMAMIŞ görev sayısı.
+    // Zil ikonundaki rozet, görev tamamlanana kadar yanıp sönmeye devam eder
+    // (bildirim okunsa bile — çünkü iş bitmediyse hatırlatma sürmelidir).
+    const [atanmisGorevSayisi, setAtanmisGorevSayisi] = useState(0);
     // ========================================================================
     // DÜZELTME (Firestore okuma patlaması denetimi): Bu koleksiyon ('hatirlatmalar')
     // eskiden İKİ AYRI onSnapshot ile dinleniyordu (biri sadece rozet sayısı için,
@@ -2603,6 +2616,18 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         }).length;
         setHatirlatmaBildirim(sayi);
 
+        // YENİ: Bu kullanıcıya atanmış, tamamlanmamış görevleri say.
+        // AYNI snapshot kullanılır — ek Firestore okuması YOKTUR.
+        if (currentUser?.id) {
+          const benimGorevler = snap.docs.filter(d => {
+            const k = d.data();
+            return k.tur === 'gorev' && !k.tamamlandi && String(k.atananPersonelId || '') === String(currentUser.id);
+          }).length;
+          setAtanmisGorevSayisi(benimGorevler);
+        } else {
+          setAtanmisGorevSayisi(0);
+        }
+
         // Bildirimler: yalnızca ilk yüklemeden SONRAKİ değişikliklerde (sayfa
         // ilk açıldığında mevcut kayıtlar için bildirim üretilmez).
         if (!hatirlatmaIlkYuklemeRef.current) {
@@ -2616,7 +2641,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         hatirlatmaIlkYuklemeRef.current = false;
       }, () => {});
       return () => unsub();
-    }, [isAuthenticated]);
+      // NOT: currentUser?.id İLKEL bir değerdir (string) — dizi/nesne referansı
+      // değil. Bu yüzden bağımlılığa eklenmesi, dinleyicinin gereksiz yere
+      // yeniden kurulmasına ve Firestore okuma maliyetinin artmasına yol açmaz.
+      // Atanmış görev sayacı doğru kullanıcıya göre hesaplansın diye gereklidir.
+    }, [isAuthenticated, currentUser?.id]);
 
     const [loginError, setLoginError] = useState('');
 
@@ -4931,6 +4960,34 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         }
     });
 
+    // ========================================================================
+    // YENİ: OPERASYON BAŞLIĞI TOPLAM BİLDİRİM SAYISI
+    // "Operasyon" ana menü başlığındaki rozet, artık yalnızca araç bakımını
+    // değil, ALT MENÜLERİNDEKİ TÜM BİLDİRİM SAYILARININ TOPLAMINI gösterir:
+    //   • Hasarlı İşler   → çözülmemiş hasar kaydı sayısı
+    //   • Görev Tahtası   → tamamlanmamış görev sayısı
+    //   • Araç Bakım      → zamanı gelmiş bakım sayısı
+    // Böylece menü kapalıyken bile içeride kaç iş beklediği tek bakışta görülür.
+    // ========================================================================
+    const unresolvedDamageCountTotal = jobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var' && !j.endJobDetails?.damageResolved).length;
+    const operasyonToplamBildirim = unresolvedDamageCountTotal + generalTodoTasksCount + dueMaintenanceCount;
+
+    // ========================================================================
+    // YENİ: İNSAN KAYNAKLARI BAŞLIĞI TOPLAM BİLDİRİM SAYISI
+    // "İnsan Kaynakları" ana menü başlığındaki rozet, alt menülerindeki tüm
+    // bildirim sayılarının TOPLAMINI gösterir. Şu an İK altında bildirim
+    // üreten tek bölüm "Şikayet Bildirimleri" (okunmamış şikayetler); ileride
+    // başka bir alt menüye sayaç eklenirse buraya da eklenmesi yeterlidir.
+    // Hatırlatmalar/Operasyon başlıklarıyla aynı görsel dili kullanır:
+    // beyaz zemin+siyah yazı ile kırmızı zemin+beyaz yazı arasında yanıp söner.
+    // ========================================================================
+    const okunmamisSikayetSayisi = complaints.filter(c => !c.read).length;
+    const insanKaynaklariToplamBildirim = okunmamisSikayetSayisi;
+
+    // YENİ: Mesai Takip modülünün Aktif/Pasif durumu (sol menüdeki anahtar için).
+    // null = yükleniyor kabul edilir; menüde anahtar yine gösterilir.
+    const mesaiModulAktif = useMesaiModulAktif() !== false;
+
     return (
       <div className="flex h-screen bg-neutral-50 font-sans text-neutral-900 overflow-hidden">
         
@@ -5109,12 +5166,28 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 </div>
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
+                {/* ========================================================
+                    YENİ: YENİ PERSONEL — İŞ KILAVUZU DİKKAT IŞIĞI
+                    İşe başlama tarihinden itibaren 1 AY boyunca (30 gün),
+                    personelin kendi İş Kılavuzu simgesi dikkat çekici
+                    şekilde yanıp söner — pozisyonuna göre hazırlanmış
+                    kılavuzu okumasını hatırlatır. 30 gün dolunca buton
+                    kendiliğinden normal görünümüne döner (aşağıdaki tarih
+                    farkı hesabına göre).
+                    ======================================================== */}
                 {/* YENİ: İŞ KILAVUZU VE İŞ ŞEMASI — kaldırılan "Takip ve Yapılacak İşler"
                     butonunun yerine geçti. Personel buradan kendi pozisyonunun görev
                     kılavuzunu ve iş akış şemasını görür. */}
                 <button
                   onClick={() => { setActiveTab('isKilavuzu'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
-                  className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'isKilavuzu' ? 'bg-red-600 text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
+                  className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'isKilavuzu' ? 'bg-red-600 text-white' : (() => {
+                    // YENİ: İlk 30 gün boyunca ikon kırmızı zeminle yanıp söner
+                    if (!currentUser?.startDate) return 'text-neutral-400 hover:text-white hover:bg-neutral-800';
+                    const baslangic = new Date(currentUser.startDate + 'T00:00:00');
+                    if (isNaN(baslangic.getTime())) return 'text-neutral-400 hover:text-white hover:bg-neutral-800';
+                    const gecenGun = Math.floor((new Date().setHours(0, 0, 0, 0) - baslangic.getTime()) / (1000 * 60 * 60 * 24));
+                    return (gecenGun >= 0 && gecenGun <= 30) ? 'yeni-personel-isik-yanson text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800';
+                  })()}`}
                   title="İş Kılavuzu ve İş Şeması"
                 >
                   <ClipboardList className="w-5 h-5" />
@@ -5125,9 +5198,27 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   title="Bildirimler"
                 >
                   <Bell className="w-5 h-5" />
-                  {unreadNotifCount > 0 && (
-                    <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-neutral-900"></span>
-                  )}
+                  {/* ============================================================
+                      YENİ: Eskiden yalnızca küçük bir kırmızı nokta vardı.
+                      Artık rozet bir SAYI gösterir ve yanıp söner.
+                      Sayı = okunmamış bildirimler + BU KULLANICIYA ATANMIŞ,
+                      henüz TAMAMLANMAMIŞ görevler.
+                      Atanmış görev kısmı önemlidir: kullanıcı bildirimi okusa
+                      bile, GÖREV TAMAMLANANA KADAR rozet yanıp sönmeye devam
+                      eder — böylece iş unutulmaz.
+                      ============================================================ */}
+                  {(() => {
+                    const zilSayisi = unreadNotifCount + atanmisGorevSayisi;
+                    if (zilSayisi <= 0) return null;
+                    return (
+                      <span className="absolute -top-1 -right-1 flex items-center justify-center">
+                        <span className="relative flex w-4 h-4">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex items-center justify-center rounded-full w-4 h-4 bg-red-500 text-white text-[9px] font-black">{zilSayisi > 9 ? '9+' : zilSayisi}</span>
+                        </span>
+                      </span>
+                    );
+                  })()}
                 </button>
               </div>
             </div>
@@ -5208,7 +5299,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                     <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-500"></span>
                   </span>
-                  <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{hatirlatmaBildirim}</span>
+                  {/* YENİ: Rozet artık sabit kırmızı değil; beyaz zemin+siyah yazı ile
+                      kırmızı zemin+beyaz yazı arasında geçiş yaparak yanıp söner. */}
+                  <span className="menu-rozet-yansonen text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm border border-red-300">{hatirlatmaBildirim}</span>
                 </span>
               )}
             </button>
@@ -5302,8 +5395,20 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     <Activity className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Operasyon</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    {dueMaintenanceCount > 0 && !isOperasyonSubMenuOpen && (
-                      <span className="bg-white text-red-600 text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-sm animate-pulse">{dueMaintenanceCount}</span>
+                    {/* YENİ: Rozet artık alt menülerdeki TÜM bildirimlerin TOPLAMINI
+                        gösterir (Hasarlı İşler + Görev Tahtası + Araç Bakım) ve
+                        beyaz zemin+siyah yazı ile kırmızı zemin+beyaz yazı arasında
+                        geçiş yaparak yanıp söner. Menü açıkken gizlenir (alt
+                        menülerde kırılımı ayrı ayrı görüldüğü için). */}
+                    {operasyonToplamBildirim > 0 && !isOperasyonSubMenuOpen && (
+                      <span className="flex items-center gap-1.5 shrink-0">
+                        {/* YENİ: Hatırlatmalar/İK ile aynı görsel dil — yanıp sönen ışık */}
+                        <span className="relative flex w-2.5 h-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-500"></span>
+                        </span>
+                        <span className="menu-rozet-yansonen text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm border border-white/60">{operasyonToplamBildirim}</span>
+                      </span>
                     )}
                     {isOperasyonSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </div>
@@ -5518,7 +5623,22 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   <div className="flex items-center gap-3">
                     <Briefcase className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">İnsan Kaynakları</span>
                   </div>
-                  {isPersonnelSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  <div className="flex items-center gap-2">
+                    {/* YENİ: Alt menülerdeki bildirimlerin TOPLAMI. Hatırlatmalar ve
+                        Operasyon başlıklarıyla aynı görsel dil: yanıp sönen ışık +
+                        beyaz/siyah ↔ kırmızı/beyaz geçişli rozet. Menü açıkken gizlenir
+                        (alt menülerde kırılımı ayrı ayrı görüldüğü için). */}
+                    {insanKaynaklariToplamBildirim > 0 && !isPersonnelSubMenuOpen && (
+                      <span className="flex items-center gap-1.5 shrink-0">
+                        <span className="relative flex w-2.5 h-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-500"></span>
+                        </span>
+                        <span className="menu-rozet-yansonen text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm border border-white/60">{insanKaynaklariToplamBildirim}</span>
+                      </span>
+                    )}
+                    {isPersonnelSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </div>
                 </button>
                 
                 {isPersonnelSubMenuOpen && (
@@ -5562,6 +5682,20 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                         <span className="absolute right-4 bg-red-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">{complaints.filter(c => !c.read).length}</span>
                       )}
                     </button>
+                    {/* YENİ: Mesai Takip — QR + konum doğrulamalı giriş/çıkış takibi (en altta).
+                        Sağdaki anahtar modülü AKTİF/PASİF yapar. Pasifken ana sayfadaki mesai
+                        butonları ve bu sayfanın içeriği gizlenir; kayıtlar silinmediği için
+                        "AKTİF ET" denildiğinde kaldığı yerden devam eder. */}
+                    <div className={`w-full py-2 px-4 text-sm font-bold transition flex justify-between items-center gap-2 rounded-xl ${activeTab === 'mesaiTakip' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}>
+                      <button 
+                        onClick={() => { setActiveTab('mesaiTakip'); setIsSidebarOpen(false); }}
+                        className="flex-1 flex justify-start items-center gap-3 py-0.5 text-left"
+                      >
+                        <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${activeTab === 'mesaiTakip' ? 'bg-white' : mesaiModulAktif ? 'bg-green-500' : 'bg-neutral-600'}`}></div>
+                        <span className={mesaiModulAktif ? '' : 'opacity-60 line-through'}>Mesai Takip</span>
+                      </button>
+                      <MesaiModulSwitch aktif={mesaiModulAktif} />
+                    </div>
                     {/* NOT: İK altındaki eski "Şirket Evrakları" (sirketEvraklari) menüden kaldırıldı —
                         aynı işlev artık "Şirket Dosyaları" ana menüsü altında (sirketBelgeleri) yönetiliyor. */}
                   </div>
@@ -6130,6 +6264,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
             {/* YENİ: Saha Raporlaması — şef denetimlerinin yönetim ekranı */}
             {activeTab === 'sahaRaporlamasi' && showPersonnel && <SahaRaporlamasiView personnelList={personnelList} db={db} appId={appId} setViewingImage={setViewingImage} />}
+            {/* YENİ: İK > Mesai Takip sayfası (QR + konum doğrulamalı giriş/çıkış) */}
+            {activeTab === 'mesaiTakip' && showPersonnel && <MesaiTakipView personnelList={personnelList} currentUser={currentUser} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {/* YENİ: Şirket Evrakları sayfası */}
             {activeTab === 'sirketEvraklari' && showPersonnel && <SirketEvraklariView db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
@@ -7767,6 +7903,51 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         )}
         
         <style dangerouslySetInnerHTML={{__html: `
+          /* ================================================================
+             YENİ: TAKVİMDE "BUGÜN" HÜCRESİNİN YANIP SÖNEN ÇERÇEVESİ
+             Hatırlatmalar takviminde bugünün hücresi artık kırmızı DOLGU
+             değil; çerçevesi yumuşak şekilde yanıp söner. Böylece hücrenin
+             içindeki gün numarası ve durum simgeleri okunabilir kalır.
+             ================================================================ */
+          @keyframes hatirlatmaBugunCerceve {
+            0%, 100% { border-color: #ef4444; box-shadow: 0 0 0 0 rgba(239,68,68,0.45); }
+            50%      { border-color: #fca5a5; box-shadow: 0 0 0 4px rgba(239,68,68,0.12); }
+          }
+          .hatirlatma-bugun-cerceve {
+            animation: hatirlatmaBugunCerceve 1.6s ease-in-out infinite;
+          }
+
+          /* ================================================================
+             YENİ: SOL MENÜ BİLDİRİM ROZETİ — RENK DEĞİŞTİREREK YANIP SÖNME
+             Rozet iki durum arasında geçiş yapar:
+               • Beyaz arka plan + siyah yazı
+               • Kırmızı arka plan + beyaz yazı
+             "Operasyon" başlığında (alt menülerin toplamı) ve
+             "Hatırlatmalar" menüsünde kullanılır.
+             ================================================================ */
+          @keyframes menuRozetYanSon {
+            0%, 49%   { background-color: #ffffff; color: #000000; }
+            50%, 100% { background-color: #dc2626; color: #ffffff; }
+          }
+          .menu-rozet-yansonen {
+            animation: menuRozetYanSon 1.2s steps(1, end) infinite;
+          }
+
+          /* ================================================================
+             YENİ: YENİ PERSONEL — İŞ KILAVUZU İKONU DİKKAT ÇEKİCİ YANIP SÖNME
+             İşe başlayan personelin ilk 30 günü boyunca, ismin yanındaki
+             İş Kılavuzu simgesi (ClipboardList) kırmızı zemin + hafif
+             büyüyüp küçülme (nabız) efektiyle dikkat çeker. 30 gün dolunca
+             bu sınıf artık uygulanmaz, ikon normal görünümüne döner.
+             ================================================================ */
+          @keyframes yeniPersonelIsikYanson {
+            0%, 100% { background-color: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,0.6); transform: scale(1); }
+            50%      { background-color: #f87171; box-shadow: 0 0 0 6px rgba(220,38,38,0.15); transform: scale(1.08); }
+          }
+          .yeni-personel-isik-yanson {
+            animation: yeniPersonelIsikYanson 1s ease-in-out infinite;
+          }
+
           /* ================================================================
              YENİ: MOBİLDE "AŞAĞI ÇEKİNCE SAYFA YENİLEME" (pull-to-refresh) KAPALI
              Sayfanın en üstündeyken parmakla aşağı çekildiğinde tarayıcının
