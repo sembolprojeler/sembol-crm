@@ -15957,7 +15957,8 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [] }) =
   const [fBas, setFBas] = useState(mesaiBugunStr());
   const [fBit, setFBit] = useState(mesaiBugunStr());
   const [fYaka, setFYaka] = useState('hepsi');
-  const [fPersonel, setFPersonel] = useState('hepsi');
+  // DEĞİŞİKLİK: "Tüm Personel" filtresi kaldırıldı, yerine MESAİ DURUMU filtresi geldi
+  const [fDurum, setFDurum] = useState('hepsi');
   const [fTip, setFTip] = useState('hepsi');
   const [fYontem, setFYontem] = useState('hepsi');
   const [raporAy, setRaporAy] = useState(mesaiBugunStr().slice(0, 7)); // YYYY-AA
@@ -15982,11 +15983,13 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [] }) =
     .filter(k => k.collarType === 'Mavi Yaka') // Şu an yalnızca Mavi Yaka aktif
     .filter(k => (!fBas || k.dateStr >= fBas) && (!fBit || k.dateStr <= fBit))
     .filter(k => fYaka === 'hepsi' || k.collarType === fYaka)
-    .filter(k => fPersonel === 'hepsi' || k.personnelName === fPersonel)
+    // NOT: Mesai durumu filtresi burada uygulanmaz; durum bilgisi puantaj ve
+    // öneri hesabından geldiği için tablo çizilirken (aşağıda) uygulanır.
+
     .filter(k => fTip === 'hepsi' || k.type === fTip)
     .filter(k => fYontem === 'hepsi' || k.method === fYontem)
     .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-    .slice(0, 300), [kayitlar, fBas, fBit, fYaka, fPersonel, fTip, fYontem]);
+    .slice(0, 300), [kayitlar, fBas, fBit, fYaka, fTip, fYontem]);
 
   // Bugünün puantajını dinler — "İzinliler" panosu bu kodlara göre çalışır
   useEffect(() => {
@@ -16137,6 +16140,14 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [] }) =
   const oneriDurumu = (k) => gunlukOneriler[k.dateStr]?.[k.personnelId] || null;
   // Durum kodunun etiket ve rengini verir
   const durumStili = (kod) => MESAI_STATUS_OPTIONS.find(o => o.code === kod) || { code: kod, label: kod, color: 'bg-neutral-100 text-neutral-600' };
+  // Satırın EKİN durum kodu: önce muhasebe kaydı, yoksa QR önerisi, o da yoksa null.
+  // Mesai Durumu filtresi bu değere göre çalışır.
+  const satirDurumKodu = (k) => {
+    const pd = puantajDurumu(k);
+    if (pd?.status) return pd.status;
+    const on = oneriDurumu(k);
+    return on?.status || null;
+  };
 
   // Düzenlemeyi puantaja (Personel Muhasebe ile AYNI koleksiyona) yazar.
   // manual:true işaretlenir; böylece bu satır bir daha düzenlenemez ve
@@ -16346,7 +16357,12 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [] }) =
             <input type="date" value={fBas} onChange={e => setFBas(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold" />
             <input type="date" value={fBit} onChange={e => setFBit(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold" />
             <select value={fYaka} onChange={e => setFYaka(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold"><option value="hepsi">Tüm Yakalar</option><option>Mavi Yaka</option><option>Beyaz Yaka</option></select>
-            <select value={fPersonel} onChange={e => setFPersonel(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold"><option value="hepsi">Tüm Personel</option>{aktifPersonel.map(p => <option key={p.id}>{p.fullName}</option>)}</select>
+            {/* YENİ: MESAİ DURUMU FİLTRESİ — Geldi / Fazla Mesai / Devamsız vb. */}
+            <select value={fDurum} onChange={e => setFDurum(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold" title="Mesai durumuna göre filtrele">
+              <option value="hepsi">Tüm Mesai Durumları</option>
+              {MESAI_STATUS_OPTIONS.map(o => <option key={o.code} value={o.code}>{o.label}</option>)}
+              <option value="yok">Durumu Girilmemiş</option>
+            </select>
             <select value={fTip} onChange={e => setFTip(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold"><option value="hepsi">Giriş + Çıkış</option><option value="giris">Sadece Giriş</option><option value="cikis">Sadece Çıkış</option></select>
             <select value={fYontem} onChange={e => setFYontem(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold"><option value="hepsi">Tüm Yöntemler</option><option value="kamera">Kamera (QR)</option><option value="manuel">Elle (Seri Kod)</option></select>
           </div>
@@ -16356,8 +16372,17 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [] }) =
                 <th className="py-2 pr-3">Personel</th><th className="py-2 pr-3">Yaka</th><th className="py-2 pr-3">Tarih</th><th className="py-2 pr-3">Saat</th><th className="py-2 pr-3">Tip</th>{/* YENİ SÜTUN: muhasebedeki günlük mesai durumu + düzenleme */}<th className="py-2 pr-3">Mesai Durumu</th><th className="py-2 pr-3">Yöntem</th><th className="py-2 pr-3">Cihaz</th><th className="py-2 pr-3">Konum</th><th className="py-2 pr-3" title="Aynı gün mesai girişi yapan diğer personel sayısı — üzerine gelince isimleri görürsünüz">Birlikte</th><th className="py-2"></th>
               </tr></thead>
               <tbody>
-                {filtreli.length === 0 && <tr><td colSpan={11} className="py-8 text-center text-xs font-bold text-neutral-400">Seçilen filtrelerde kayıt bulunamadı.</td></tr>}
-                {filtreli.map(k => (
+                {/* MESAİ DURUMU filtresi burada uygulanır ('yok' = durumu hiç girilmemiş) */}
+                {(() => {
+                  const gorunenler = filtreli.filter(k => {
+                    if (fDurum === 'hepsi') return true;
+                    const kod = satirDurumKodu(k);
+                    return fDurum === 'yok' ? !kod : kod === fDurum;
+                  });
+                  if (gorunenler.length === 0) {
+                    return <tr><td colSpan={11} className="py-8 text-center text-xs font-bold text-neutral-400">Seçilen filtrelerde kayıt bulunamadı.</td></tr>;
+                  }
+                  return gorunenler.map(k => (
                   <tr key={k.id} className="border-b border-neutral-100 hover:bg-neutral-50">
                     <td className="py-2.5 pr-3 text-xs font-black text-black">{k.personnelName}<p className="text-[9px] font-bold text-neutral-400">{k.position}</p></td>
                     <td className="py-2.5 pr-3"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${k.collarType === 'Mavi Yaka' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-200 text-neutral-700'}`}>{k.collarType}</span></td>
@@ -16374,9 +16399,11 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [] }) =
                         if (pd && pd.manual) {
                           const st = durumStili(pd.status);
                           return (
-                            <div className="flex flex-col gap-0.5">
-                              <span className={`text-[9px] font-black px-2 py-0.5 rounded-full w-fit ${st.color}`}>{st.code}{pd.hours ? ` ${pd.hours} sa` : ''}</span>
-                              <span className="text-[9px] font-black text-neutral-400 flex items-center gap-1"><CheckCircle className="w-2.5 h-2.5 text-green-600" /> Düzenleme yapıldı</span>
+                            <div className="flex flex-col gap-0.5 min-w-[120px]">
+                              {/* Kod harfi yerine durumun TAM ADI yazılır; satıra taşmaması
+                                  için tek satırda tutulur (whitespace-nowrap). */}
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full w-fit whitespace-nowrap ${st.color}`}>{st.label}{pd.hours ? ` • ${pd.hours} sa` : ''}</span>
+                              <span className="text-[9px] font-black text-neutral-400 flex items-center gap-1 whitespace-nowrap"><CheckCircle className="w-2.5 h-2.5 text-green-600" /> Düzenleme yapıldı</span>
                             </div>
                           );
                         }
@@ -16384,13 +16411,14 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [] }) =
                         const gosterilen = pd || on;
                         const st = gosterilen ? durumStili(gosterilen.status) : null;
                         return (
-                          <div className="flex items-center gap-1.5">
+                          <div className="flex items-center gap-1.5 min-w-[120px]">
                             {st ? (
-                              <span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${st.color}`} title={on?.aciklama || ''}>
-                                {st.code}{gosterilen.hours ? ` ${gosterilen.hours} sa` : ''}
+                              /* Kod harfi yerine durumun TAM ADI (Geldi, Fazla Mesai, Devamsız...) */
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full whitespace-nowrap ${st.color}`} title={on?.aciklama || ''}>
+                                {st.label}{gosterilen.hours ? ` • ${gosterilen.hours} sa` : ''}
                               </span>
-                            ) : <span className="text-[9px] font-bold text-neutral-300">—</span>}
-                            {!pd && on && <span className="text-[8px] font-black text-blue-500" title="Henüz muhasebeye yazılmadı, QR'a göre önerilen durum">ÖNERİ</span>}
+                            ) : <span className="text-[10px] font-bold text-neutral-300 whitespace-nowrap">Girilmemiş</span>}
+                            {!pd && on && <span className="text-[8px] font-black text-blue-500 whitespace-nowrap" title="Henüz muhasebeye yazılmadı, QR'a göre önerilen durum">ÖNERİ</span>}
                             <button
                               onClick={() => setDurumDuzenle({ kayit: k, status: gosterilen?.status || 'G', hours: gosterilen?.hours || '' })}
                               className="p-1 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition"
@@ -16421,7 +16449,8 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [] }) =
                     </td>
                     <td className="py-2.5"><button onClick={() => kayitSil(k)} className="p-1.5 text-neutral-300 hover:text-red-600"><Trash2 className="w-4 h-4" /></button></td>
                   </tr>
-                ))}
+                  ));
+                })()}
               </tbody>
             </table>
           </div>
