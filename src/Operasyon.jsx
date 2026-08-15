@@ -15835,7 +15835,7 @@ const MesaiHaritaModal = ({ kayit, onKapat }) => {
 // Buton açılır açılmaz: 1) Konum izni istenir 2) SEÇİM EKRANI çıkar:
 //    "QR Tarat" (kamera açılır) veya "Kod Gir" (seri kod elle girilir).
 // ---------------------------------------------------------------------------
-export const QrTarayiciModal = ({ tip, currentUser, onKapat }) => {
+export const QrTarayiciModal = ({ tip, currentUser, onKapat, hedefTarih }) => {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const donguRef = useRef(null);
@@ -15999,7 +15999,9 @@ export const QrTarayiciModal = ({ tip, currentUser, onKapat }) => {
         type: tip,                                          // 'giris' veya 'cikis'
         method: yontem,                                     // 'kamera' veya 'manuel' -> takibi yapılır
         qrId: aktif.id, qrAd: aktif.ad,
-        dateStr: mesaiBugunStr(), timeStr: mesaiSuankiSaat(), timestamp: Date.now(),
+        // GECEYİ AŞAN İŞLER: Çıkış ertesi gün 07:00'a kadar basılabildiği için
+        // kaydın hangi güne yazılacağı dışarıdan (hedefTarih) belirlenebilir.
+        dateStr: hedefTarih || mesaiBugunStr(), timeStr: mesaiSuankiSaat(), timestamp: Date.now(),
         lat: konum?.lat ?? null, lng: konum?.lng ?? null, accuracy: konum?.accuracy ?? null,
         konumDurumu: konumDurum === 'alindi' ? 'alindi' : 'alinamadi',
         cihaz: mesaiCihazTipi()
@@ -16401,6 +16403,26 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
   // Bugünün giriş ve çıkış kayıtları — butonların açık/kapalı olmasını belirler
   const giris = bugunku.find(k => k.type === 'giris') || null;
   const cikis = bugunku.find(k => k.type === 'cikis') || null;
+
+  // ==========================================================================
+  // SAAT KURALLARI
+  //  • GİRİŞ: her gün 07:00'dan itibaren basılabilir. Öncesinde buton pasiftir.
+  //    (Erken basılsa bile mesai hesabı 08:00 kabul eder; bu kural öneri
+  //     motorunda zaten uygulanıyor, burada yalnızca butonun açılma saati var.)
+  //  • ÇIKIŞ: iş gece yarısını aşabildiği için, DÜN giriş yapıp çıkış
+  //    yapmamış personel ertesi gün 07:00'a kadar çıkışını basabilir.
+  //    Bu durumda kayıt DÜNÜN tarihine yazılır, bugüne değil.
+  // ==========================================================================
+  const suAnDk = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
+  const GUN_BASLANGIC_DK = 7 * 60; // 07:00
+
+  const dunkuKayitlar = kayitlarim.filter(k => k.dateStr === mesaiDunStr());
+  const dunGiris = dunkuKayitlar.find(k => k.type === 'giris') || null;
+  const dunCikis = dunkuKayitlar.find(k => k.type === 'cikis') || null;
+  // Dün girmiş, çıkmamış ve saat henüz 07:00 olmamışsa "dünün çıkışı" bekleniyor
+  const bekleyenDunCikisi = !!dunGiris && !dunCikis && suAnDk < GUN_BASLANGIC_DK;
+
+  const girisAcik = suAnDk >= GUN_BASLANGIC_DK; // 07:00 öncesi giriş yapılamaz
   // NOT: "BUGÜN / DÜN ÖZETİ" kartları kullanıcı isteğiyle kaldırıldığı için
   // dunku / gunDurumu / bugunOzet / dunOzet hesapları temizlendi.
 
@@ -16449,9 +16471,16 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
             </div>
           </div>
         ) : (
-          <button onClick={() => setModalTipi('giris')} className="py-4 px-4 rounded-2xl text-white font-black text-sm flex items-center justify-center gap-2 bg-gradient-to-r from-green-500 via-green-600 to-emerald-700 shadow-lg shadow-green-600/40 hover:scale-[1.02] active:scale-95 transition">
-            <span className="w-9 h-9 bg-white/20 rounded-full flex items-center justify-center"><LogIn className="w-5 h-5" /></span>
-            MESAİ GİRİŞ ONAYLA
+          <button
+            onClick={() => setModalTipi('giris')}
+            disabled={!girisAcik}
+            title={!girisAcik ? 'Mesai girişi her gün 07:00’dan itibaren yapılabilir' : ''}
+            className={`py-4 px-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition ${girisAcik
+              ? 'text-white bg-gradient-to-r from-green-500 via-green-600 to-emerald-700 shadow-lg shadow-green-600/40 hover:scale-[1.02] active:scale-95'
+              : 'text-neutral-400 bg-neutral-100 border-2 border-dashed border-neutral-300 cursor-not-allowed'}`}
+          >
+            <span className={`w-9 h-9 rounded-full flex items-center justify-center ${girisAcik ? 'bg-white/20' : 'bg-neutral-200'}`}><LogIn className="w-5 h-5" /></span>
+            {girisAcik ? 'MESAİ GİRİŞ ONAYLA' : 'GİRİŞ 07:00’DA AÇILIR'}
             <QrCode className="w-5 h-5 opacity-80" />
           </button>
         )}
@@ -16471,14 +16500,14 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
         ) : (
           <button
             onClick={() => setModalTipi('cikis')}
-            disabled={!giris}
-            title={!giris ? 'Önce mesai girişini onaylamalısın' : ''}
-            className={`py-4 px-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition ${giris
+            disabled={!giris && !bekleyenDunCikisi}
+            title={!giris && !bekleyenDunCikisi ? 'Önce mesai girişini onaylamalısın' : (bekleyenDunCikisi ? 'Dün gece biten işin çıkışını basıyorsunuz' : '')}
+            className={`py-4 px-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition ${(giris || bekleyenDunCikisi)
               ? 'text-white bg-gradient-to-r from-red-500 via-red-600 to-rose-700 shadow-lg shadow-red-600/40 hover:scale-[1.02] active:scale-95'
               : 'text-neutral-400 bg-neutral-100 border-2 border-dashed border-neutral-300 cursor-not-allowed'}`}
           >
-            <span className={`w-9 h-9 rounded-full flex items-center justify-center ${giris ? 'bg-white/20' : 'bg-neutral-200'}`}><LogOut className="w-5 h-5" /></span>
-            MESAİ ÇIKIŞ ONAYLA
+            <span className={`w-9 h-9 rounded-full flex items-center justify-center ${(giris || bekleyenDunCikisi) ? 'bg-white/20' : 'bg-neutral-200'}`}><LogOut className="w-5 h-5" /></span>
+            {bekleyenDunCikisi ? 'DÜNÜN ÇIKIŞINI ONAYLA' : 'MESAİ ÇIKIŞ ONAYLA'}
             <QrCode className="w-5 h-5 opacity-80" />
           </button>
         )}
@@ -16487,7 +16516,15 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
       {/* NOT: "DÜN ÖZETİ" bölümü kullanıcı isteğiyle KALDIRILDI.
           Bugünün durumu zaten yukarıdaki kartlarda görünüyor. */}
       {/* Butona basılınca önce "QR Tarat / Kod Gir" seçim penceresi açılır */}
-      {modalTipi && <QrTarayiciModal tip={modalTipi} currentUser={currentUser} onKapat={() => setModalTipi(null)} />}
+      {/* Gece yarısını aşan işlerde çıkış DÜNÜN tarihine yazılır */}
+      {modalTipi && (
+        <QrTarayiciModal
+          tip={modalTipi}
+          currentUser={currentUser}
+          hedefTarih={(modalTipi === 'cikis' && bekleyenDunCikisi) ? mesaiDunStr() : mesaiBugunStr()}
+          onKapat={() => setModalTipi(null)}
+        />
+      )}
     </div>
   );
 };
@@ -16796,11 +16833,24 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     return typeof hucre === 'object' ? hucre : { status: hucre, hours: '', manual: false };
   };
   // QR'a dayalı öneri
-  // Kaydı HİÇ OLMAYAN personel için de durum üretir: o gün izin günüyse
-  // "Haftalık İzin", değilse "Devamsız". Gelecek tarihlerde hüküm verilmez.
+  // ==========================================================================
+  // ÖNERİ (Mesai Takip tablosu için SADELEŞTİRİLMİŞ)
+  // KULLANICI KURALI: Bu tablo yalnızca QR/kod okutma gerçeğini gösterir:
+  //   • Okuttuysa  -> "Geldi"
+  //   • Okutmadıysa -> "Devamsız" (veya o gün izinliyse izin kodu)
+  // FAZLA MESAİ / EKSİK MESAİ burada ÖNERİ olarak GÖSTERİLMEZ; bu durumlar
+  // ancak İş Onaylama Tahtası'ndan mesai onaylandıktan sonra (puantaja
+  // yazıldıktan sonra) bu sütunda görünür.
+  // NOT: Onay ekranındaki (App.tsx) hesap DEĞİŞMEDİ; orada fazla/eksik mesai
+  // önerisi tüm ayrıntısıyla gelmeye devam eder.
+  // ==========================================================================
+  const SADE_ONERI_ESLEME = { FM: 'G', EM: 'G', FGM: 'G', FG: 'G' };
   const oneriDurumu = (k) => {
     const dogal = gunlukOneriler[k.dateStr]?.[k.personnelId];
-    if (dogal) return dogal;
+    if (dogal) {
+      const sadeKod = SADE_ONERI_ESLEME[dogal.status] || dogal.status;
+      return sadeKod === dogal.status ? dogal : { ...dogal, status: sadeKod, hours: '' };
+    }
     if (!k.dateStr || k.dateStr > mesaiBugunStr()) return null; // Gelecek gün -> boş bırak
     const person = personnelList.find(pp => String(pp.id) === String(k.personnelId));
     if (!person) return null;
@@ -17161,20 +17211,55 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                     .sort((a, b) => {
                       const grupNo = (satir) => {
                         const kod = satirDurumKodu(satir);
-                        // Giriş basmışsa her hâlükârda "gelenler" grubuna girer
                         if (satir.giris) return 1;
-                        if (['G', 'FM', 'EM', 'FG', 'FGM'].includes(kod)) return 1; // Geldi sayılan durumlar
-                        if (kod === 'D') return 2;                                   // Devamsız
-                        if (kod === 'Hİ') return 3;                                  // Haftalık izin
-                        if (['Yİ', 'Bİ', 'Üİ', 'R', 'İB'].includes(kod)) return 4;   // Diğer izinler/rapor
-                        return 5;                                                    // Durumu girilmemiş
+                        if (['G', 'FM', 'EM', 'FG', 'FGM'].includes(kod)) return 1;
+                        if (kod === 'D') return 2;
+                        if (kod === 'Hİ') return 3;
+                        if (['Yİ', 'Bİ', 'Üİ', 'R', 'İB'].includes(kod)) return 4;
+                        return 5;
                       };
                       const fark = grupNo(a) - grupNo(b);
                       if (fark !== 0) return fark;
-                      // Aynı grup içinde: Türkçe alfabetik, eşitse en yeni tarih üstte
+                      // GELENLER grubunda: önce ARACA göre kümelen (aynı ekip alt alta),
+                      // araçsızlar en sona; sonra ekip içinde Türkçe alfabetik.
+                      if (grupNo(a) === 1) {
+                        const pa = personelAraci(a.personnelId, a.dateStr).plakalar[0] || 'zzz_aracsiz';
+                        const pb = personelAraci(b.personnelId, b.dateStr).plakalar[0] || 'zzz_aracsiz';
+                        const plakaFark = pa.localeCompare(pb, 'tr');
+                        if (plakaFark !== 0) return plakaFark;
+                      }
                       const ad = (a.personnelName || '').localeCompare(b.personnelName || '', 'tr');
                       return ad !== 0 ? ad : (b.dateStr || '').localeCompare(a.dateStr || '');
                     });
+
+                  // ====================================================================
+                  // BLOK AYIRICI: Her ekip (araç) ve her durum grubu arasına kalın
+                  // ayırıcı satır konur; blok başlığında araç plakası / durum yazar.
+                  // ====================================================================
+                  const blokAnahtari = (g) => {
+                    const kod = satirDurumKodu(g);
+                    if (g.giris || ['G', 'FM', 'EM', 'FG', 'FGM'].includes(kod)) {
+                      const plaka = personelAraci(g.personnelId, g.dateStr).plakalar[0];
+                      return plaka ? `arac:${plaka}` : 'arac:yok';
+                    }
+                    if (kod === 'D') return 'durum:D';
+                    if (kod === 'Hİ') return 'durum:Hİ';
+                    if (['Yİ', 'Bİ', 'Üİ', 'R', 'İB'].includes(kod)) return 'durum:izin';
+                    return 'durum:bos';
+                  };
+                  const blokBasligi = (anahtar) => {
+                    if (anahtar.startsWith('arac:')) {
+                      const plaka = anahtar.slice(5);
+                      return plaka === 'yok'
+                        ? { metin: 'İŞE GİTTİ — ARAÇ ATANMAMIŞ', stil: 'bg-neutral-100 text-neutral-600' }
+                        : { metin: `EKİP — ${plaka}`, stil: aracRengi(plaka).rozet };
+                    }
+                    if (anahtar === 'durum:D') return { metin: 'DEVAMSIZLIK', stil: 'bg-red-100 text-red-700' };
+                    if (anahtar === 'durum:Hİ') return { metin: 'HAFTALIK İZİN', stil: 'bg-blue-100 text-blue-700' };
+                    if (anahtar === 'durum:izin') return { metin: 'DİĞER İZİNLER (Yıllık / Bayram / Ücretsiz / Raporlu)', stil: 'bg-purple-100 text-purple-700' };
+                    return { metin: 'DURUMU GİRİLMEMİŞ', stil: 'bg-neutral-100 text-neutral-500' };
+                  };
+                  let oncekiBlok = null;
 
                   if (gorunenler.length === 0) {
                     return <tr><td colSpan={8} className="py-8 text-center text-xs font-bold text-neutral-400">Bu tarihte kayıt bulunamadı.</td></tr>;
@@ -17244,9 +17329,26 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                     );
                   };
 
-                  return gorunenler.map(g => (
+                  return gorunenler.map(g => {
+                    const buBlok = blokAnahtari(g);
+                    const yeniBlok = buBlok !== oncekiBlok;
+                    oncekiBlok = buBlok;
+                    const baslik = yeniBlok ? blokBasligi(buBlok) : null;
+                    return (
+                    <React.Fragment key={g.anahtar}>
+                    {/* BLOK BAŞLIĞI: yeni ekip/durum bloğu başlıyorsa ayırıcı satır */}
+                    {yeniBlok && (
+                      <tr>
+                        <td colSpan={9} className="pt-4 pb-1">
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[9px] font-black px-2.5 py-1 rounded-full whitespace-nowrap ${baslik.stil}`}>{baslik.metin}</span>
+                            <div className="flex-1 h-px bg-neutral-300"></div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     // Hiç QR/kod girişi olmayan satırlar hafif kırmızı zeminle işaretlenir
-                    <tr key={g.anahtar} className={`border-b border-neutral-100 transition ${g.kayitYok ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-neutral-50'}`}>
+                    <tr className={`border-b border-neutral-100 transition ${g.kayitYok ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-neutral-50'}`}>
                       {/* PERSONEL: isme tıklanınca personel profiline gidilir */}
                       <td className="py-2.5 pr-3">
                         <button
@@ -17340,7 +17442,9 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                         })()}
                       </td>
                     </tr>
-                  ));
+                    </React.Fragment>
+                    );
+                  });
                 })()}
               </tbody>
             </table>
