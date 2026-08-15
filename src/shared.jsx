@@ -9,7 +9,7 @@ import { FileText, CheckCircle, Camera, Upload, Copy, FolderOpen, X } from 'luci
   // kalanında HİÇBİR SATIR değiştirilmesine gerek kalmadı.
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limit, where } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, onSnapshot, doc, query, orderBy, limit, where } from "firebase/firestore";
   // GERÇEK FIREBASE PROJE AYARLARI (sembol-operasyon-merkezi)
   // NOT: apiKey gizli bir sır değildir (Firebase güvenliği Firestore Security
   // Rules ve Auth ile sağlanır), bu yüzden client tarafında bulunması normaldir.
@@ -30,7 +30,27 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
 
   export const app = initializeApp(firebaseConfig);
   export const auth = getAuth(app);
-  export const db = getFirestore(app);
+  // ==========================================================================
+  // KALICI YEREL ÖNBELLEK (IndexedDB)
+  // AMAÇ: "Tüm geçmiş her zaman görünsün" isteğini, Firestore okuma faturasını
+  // patlatmadan karşılamak. Önbellek açıkken geçmiş kayıtlar CİHAZA BİR KEZ
+  // indirilir; sonraki açılışlarda aynı veri diskten okunur ve Firestore'dan
+  // TEKRAR ÜCRETLİ OKUMA YAPILMAZ.
+  // 'persistentMultipleTabManager' aynı tarayıcıda birden fazla sekme açıkken
+  // önbelleğin bozulmasını engeller.
+  // Eski tarayıcılarda (veya gizli sekmede) IndexedDB kullanılamazsa hata
+  // vermemesi için normal başlatmaya geri dönülür.
+  // ==========================================================================
+  let _db;
+  try {
+    _db = initializeFirestore(app, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+    });
+  } catch (e) {
+    console.warn('Kalıcı önbellek başlatılamadı, normal moda geçiliyor:', e);
+    _db = getFirestore(app);
+  }
+  export const db = _db;
   export const appId = typeof __app_id !== 'undefined' ? __app_id : 'sembol-crm-lokal';
 
   // --- YENİDEN EKLENDİ: TÜRKİYE İL/İLÇE, DEPO KONUMLARI, MESAİ DURUM KODLARI ---
