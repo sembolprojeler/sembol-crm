@@ -812,9 +812,33 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       (job.customerPhone && job.customerPhone.includes(searchQuery))
     );
 
+    // ========================================================================
+    // SIRALAMA: "en yeni kayıttan en eskiye"
+    // ÖNCEKİ HALİ: taşıma tarihine (job.date) göre sıralanıyordu. Eski sistemden
+    // aktarılan bazı işlerde taşıma tarihi 2029/2030/2032 gibi ileri tarihler
+    // olduğu için, gerçekte aylar önce girilmiş bu kayıtlar listenin en üstünde
+    // kalıyor, asıl yeni kayıtlar aşağıda kayboluyordu.
+    // YENİ HALİ: gerçek KAYIT (oluşturulma) zamanı esas alınır. Kayıt zamanı
+    // bilinmeyen veya gelecek tarihli (güvenilmez) olanlar listenin sonuna düşer.
+    // ========================================================================
+    const isKayitZamani = (job) => {
+      const ham = job?.createdAt || job?.createdDate || job?.kayitTarihi || job?.timestamp;
+      if (!ham) return null;
+      const t = (typeof ham === 'object' && ham.seconds) ? new Date(ham.seconds * 1000) : new Date(ham);
+      if (isNaN(t.getTime())) return null;
+      // Bir kayıt gelecekte oluşturulmuş olamaz (saat dilimi için 1 gün pay)
+      const ustSinir = new Date(); ustSinir.setDate(ustSinir.getDate() + 1);
+      if (t > ustSinir) return null;
+      return t.getTime();
+    };
+
     const sortedJobs = [...filteredJobs].sort((a, b) => {
-      if (sortOrder === 'newest') return new Date(b.date) - new Date(a.date);
-      return new Date(a.date) - new Date(b.date);
+      const ka = isKayitZamani(a), kb = isKayitZamani(b);
+      // Kayıt zamanı bilinmeyenler her iki sıralamada da EN SONA
+      if (ka === null && kb === null) return 0;
+      if (ka === null) return 1;
+      if (kb === null) return -1;
+      return sortOrder === 'newest' ? kb - ka : ka - kb;
     });
 
     // Arama veya sıralama değişince ilk sayfaya dön
@@ -846,8 +870,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 onChange={(e) => setSortOrder(e.target.value)}
                 className="p-2 border-none bg-transparent text-sm font-bold text-black outline-none cursor-pointer"
               >
-                <option value="newest">Tarihe Göre (Yeniden Eskiye)</option>
-                <option value="oldest">Tarihe Göre (Eskiden Yeniye)</option>
+                <option value="newest">Kayıt Tarihine Göre (Yeniden Eskiye)</option>
+                <option value="oldest">Kayıt Tarihine Göre (Eskiden Yeniye)</option>
               </select>
             </div>
           </div>
@@ -9155,6 +9179,12 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         jobDate: denetimJob.date || '',
         jobTime: denetimJob.time || '',
         jobRoute: `${denetimJob.fromDistrict || '?'} → ${denetimJob.toDistrict || '?'}`,
+        // YENİ: Saha Raporlaması ekranında denetlenen işin aracı, tutarı ve
+        // müşteri iletişimi de görünsün diye kayda işlenir.
+        jobVehiclePlate: denetimJob.assignedVehiclePlate || '',
+        jobPrice: denetimJob.price || '',
+        jobCustomerPhone: denetimJob.customerPhone || '',
+        jobTeamNames: (denetimJob.teamNames || []),
         kayitAcan: denetimJob.createdBy || 'Bilinmiyor',
         kayitDogrulugu: denetimDogruluk,
         genelRapor: denetimRapor.trim(),
@@ -13432,12 +13462,15 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
   // ortalama puan, kayıt doğruluğu dağılımı), şef bazlı performans ve puanlanan
   // personel dökümü bir arada sunulur.
   // ==========================================================================
-  export const SahaRaporlamasiView = ({ personnelList = [], db, appId, setViewingImage }) => {
+  export const SahaRaporlamasiView = ({ personnelList = [], db, appId, setViewingImage, jobs = [], onViewCari }) => {
     const aylarTR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
     const buAy = new Date().toISOString().substring(0, 7); // YYYY-MM
 
+    const bugunStr = new Date().toISOString().split('T')[0];
     const [denetimler, setDenetimler] = useState([]);
-    const [ay, setAy] = useState(buAy);                 // 'tum' = tüm zamanlar
+    // DEĞİŞİKLİK: Ay filtresi yerine GÜNLÜK takip. Sayfa her zaman BUGÜN ile açılır,
+    // sağ/sol oklarla gün değiştirilir.
+    const [tarih, setTarih] = useState(bugunStr);
     const [sefFiltre, setSefFiltre] = useState('Tümü');
     const [arama, setArama] = useState('');
     const [acikId, setAcikId] = useState(null);         // Detayı açık olan rapor
@@ -13462,8 +13495,11 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     const sefler = [...new Set(denetimler.map(d => d.sefAdi).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'tr-TR'));
 
     // Filtrelenmiş + EN YENİDEN ESKİYE sıralı liste
+    // Denetim GÜNÜ: kaydın oluşturulma tarihi (şefin sahaya gittiği gün) esas alınır;
+    // yoksa işin tarihine düşülür.
+    const denetimGunu = (d) => (d.denetimTarihi || '').substring(0, 10) || (d.jobDate || '');
     const filtreli = denetimler
-      .filter(d => ay === 'tum' || (d.jobDate || '').substring(0, 7) === ay)
+      .filter(d => denetimGunu(d) === tarih)
       .filter(d => sefFiltre === 'Tümü' || d.sefAdi === sefFiltre)
       .filter(d => {
         const q = arama.trim().toLocaleLowerCase('tr-TR');
@@ -13505,6 +13541,54 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     }).filter(x => x.denetim > 0).sort((a, b) => b.denetim - a.denetim);
 
     // Personel bazlı saha puanı sıralaması (en düşük puanlılar üstte — dikkat gerektirenler)
+    // ==========================================================================
+    // GÜNLÜK ŞEF TAKİBİ
+    // Her şefin o gün yaptığı denetimler; her denetimde hangi işe gittiği,
+    // hangi plakalı araçla, işin tutarı, müşteri bilgisi ve kime kaç puan
+    // verdiği tek bakışta görünür.
+    // Eski kayıtlarda plaka/fiyat alanı bulunmadığı için, iş listesinden
+    // (jobs) tamamlanmaya çalışılır.
+    // ==========================================================================
+    const isBul = (jobId) => jobs.find(j => String(j.id) === String(jobId)) || null;
+    const denetimDetay = (d) => {
+      const is = isBul(d.jobId);
+      return {
+        plaka: d.jobVehiclePlate || is?.assignedVehiclePlate || '',
+        fiyat: d.jobPrice || is?.price || '',
+        telefon: d.jobCustomerPhone || is?.customerPhone || '',
+        musteri: d.jobCustomerName || is?.customerName || 'Bilinmiyor',
+        rota: d.jobRoute || (is ? `${is.fromDistrict || '?'} → ${is.toDistrict || '?'}` : ''),
+        tur: d.jobType || is?.type || '',
+        saat: d.jobTime || is?.time || '',
+      };
+    };
+
+    const sefGunlukTakip = [...new Set(filtreli.map(d => d.sefAdi).filter(Boolean))]
+      .map(sef => {
+        const kendi = filtreli
+          .filter(d => d.sefAdi === sef)
+          .sort((a, b) => new Date(a.denetimTarihi || 0) - new Date(b.denetimTarihi || 0));
+        const puanlar = kendi.flatMap(d => (d.personelPuanlari || []).map(pp => parseInt(pp.puan) || 0)).filter(n => n > 0);
+        const toplamCiro = kendi.reduce((t, d) => t + (parseFloat(denetimDetay(d).fiyat) || 0), 0);
+        return {
+          ad: sef,
+          denetimler: kendi,
+          denetimSayisi: kendi.length,
+          puanlananPersonel: puanlar.length,
+          ortalama: puanlar.length ? Math.round((puanlar.reduce((t, n) => t + n, 0) / puanlar.length) * 10) / 10 : 0,
+          toplamCiro,
+        };
+      })
+      .sort((a, b) => b.denetimSayisi - a.denetimSayisi);
+
+    // Gün gezinme yardımcıları
+    const gunKaydir = (adet) => {
+      const d = new Date(tarih);
+      d.setDate(d.getDate() + adet);
+      setTarih(d.toISOString().split('T')[0]);
+    };
+    const tarihEtiketi = new Date(tarih).toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric', weekday: 'long' });
+
     const personelPuanOzet = (() => {
       const harita = {};
       filtreli.forEach(d => (d.personelPuanlari || []).forEach(p => {
@@ -13520,7 +13604,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       })).sort((a, b) => a.ortalama - b.ortalama);
     })();
 
-    const ayEtiketi = ay === 'tum' ? 'Tüm Zamanlar' : `${aylarTR[parseInt(ay.split('-')[1]) - 1]} ${ay.split('-')[0]}`;
+    // NOT: Aylık etiket kaldırıldı; sayfa artık GÜNLÜK çalışıyor (tarihEtiketi).
     const puanRenk = (p) => p >= 4.5 ? 'text-green-600' : p >= 3.5 ? 'text-lime-600' : p >= 2.5 ? 'text-orange-500' : 'text-red-600';
 
     return (
@@ -13531,7 +13615,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
             <ClipboardCheck className="w-6 h-6" />
             <h2 className="text-xl font-black">Saha Raporlaması</h2>
           </div>
-          <p className="text-xs font-bold text-purple-200 mb-4">Şeflerin sahada yaptığı denetimler, personel puanlamaları ve saha notları — {ayEtiketi}</p>
+          <p className="text-xs font-bold text-purple-200 mb-4">Şeflerin sahada yaptığı denetimler, personel puanlamaları ve saha notları — <b className="text-white">{tarihEtiketi}</b></p>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="bg-white/10 rounded-xl p-3 border border-white/10">
               <div className="text-[10px] font-black uppercase text-purple-200">Yapılan Denetim</div>
@@ -13559,10 +13643,23 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
             <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Rapor, müşteri, personel veya şef adı ara..."
               className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-purple-600 transition" />
           </div>
-          <select value={ay} onChange={e => setAy(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-sm font-bold bg-white outline-none focus:ring-2 focus:ring-purple-600">
-            <option value="tum">Tüm Zamanlar</option>
-            {mevcutAylar.map(m => <option key={m} value={m}>{aylarTR[parseInt(m.split('-')[1]) - 1]} {m.split('-')[0]}</option>)}
-          </select>
+          {/* GÜN SEÇİCİ: sol/sağ ok + tarih + BUGÜN kısayolu (açılış her zaman bugün) */}
+          <div className="flex items-stretch gap-1">
+            <button onClick={() => gunKaydir(-1)} title="Önceki gün"
+              className="px-2.5 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 text-neutral-600 transition">
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <input type="date" value={tarih} onChange={e => setTarih(e.target.value || bugunStr)}
+              className="px-2 py-2.5 border border-neutral-300 rounded-xl text-sm font-black outline-none focus:ring-2 focus:ring-purple-600" />
+            <button onClick={() => gunKaydir(1)} title="Sonraki gün"
+              className="px-2.5 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 text-neutral-600 transition">
+              <ChevronRight className="w-4 h-4" />
+            </button>
+            {tarih !== bugunStr && (
+              <button onClick={() => setTarih(bugunStr)} title="Bugüne dön"
+                className="px-3 rounded-xl bg-purple-700 text-white text-[10px] font-black hover:bg-purple-800 transition whitespace-nowrap">BUGÜN</button>
+            )}
+          </div>
           <select value={sefFiltre} onChange={e => setSefFiltre(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-sm font-bold bg-white outline-none focus:ring-2 focus:ring-purple-600">
             <option value="Tümü">Tüm Şefler</option>
             {sefler.map(s => <option key={s} value={s}>{s}</option>)}
@@ -13592,6 +13689,147 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                 );
               })}
             </div>
+          </div>
+        )}
+
+        {/* ====================================================================
+            GÜNLÜK ŞEF DENETİM DÖKÜMÜ (yeni)
+            Seçili günde her şefin kaç denetim yaptığı; her denetimde hangi işe
+            gittiği, plaka, tutar, müşteri ve kime kaç puan verdiği.
+            ==================================================================== */}
+        {sefGunlukTakip.length > 0 && (
+          <div className="space-y-4">
+            {sefGunlukTakip.map(sef => (
+              <div key={sef.ad} className="bg-white rounded-2xl border border-neutral-200 overflow-hidden shadow-sm">
+                {/* ŞEF BAŞLIĞI + günün özeti */}
+                <div className="bg-gradient-to-r from-purple-700 to-purple-900 text-white p-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center font-black text-lg shrink-0">
+                      {sef.ad.charAt(0).toLocaleUpperCase('tr-TR')}
+                    </div>
+                    <div className="min-w-0">
+                      <h3 className="font-black text-base truncate">{sef.ad}</h3>
+                      <p className="text-[11px] font-bold text-purple-200">Bu gün sahada yaptığı denetimler</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <div className="bg-white/15 rounded-lg px-3 py-1.5 text-center">
+                      <div className="text-lg font-black leading-none">{sef.denetimSayisi}</div>
+                      <div className="text-[9px] font-black text-purple-200 uppercase">denetim</div>
+                    </div>
+                    <div className="bg-white/15 rounded-lg px-3 py-1.5 text-center">
+                      <div className="text-lg font-black leading-none">{sef.puanlananPersonel}</div>
+                      <div className="text-[9px] font-black text-purple-200 uppercase">personel</div>
+                    </div>
+                    <div className="bg-white/15 rounded-lg px-3 py-1.5 text-center">
+                      <div className="text-lg font-black leading-none">{String(sef.ortalama).replace('.', ',')}</div>
+                      <div className="text-[9px] font-black text-purple-200 uppercase">ort. puan</div>
+                    </div>
+                    {sef.toplamCiro > 0 && (
+                      <div className="bg-white/15 rounded-lg px-3 py-1.5 text-center">
+                        <div className="text-lg font-black leading-none">₺{sef.toplamCiro.toLocaleString('tr-TR')}</div>
+                        <div className="text-[9px] font-black text-purple-200 uppercase">gidilen iş tutarı</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* DENETİM DÖKÜMÜ */}
+                <div className="divide-y divide-neutral-100">
+                  {sef.denetimler.map((d, sira) => {
+                    const bilgi = denetimDetay(d);
+                    const saat = d.denetimTarihi ? new Date(d.denetimTarihi).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '';
+                    return (
+                      <div key={d.id} className="p-4 hover:bg-neutral-50/70 transition">
+                        {/* İŞ BİLGİSİ */}
+                        <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="w-5 h-5 rounded-md bg-neutral-800 text-white text-[10px] font-black flex items-center justify-center shrink-0">{sira + 1}</span>
+                              {/* Müşteri kartı: cari profiline gidilebilir */}
+                              <button
+                                onClick={() => onViewCari && d.jobCustomerName && onViewCari(bilgi.telefon)}
+                                disabled={!onViewCari || !bilgi.telefon}
+                                className={`font-black text-sm text-black truncate text-left ${onViewCari && bilgi.telefon ? 'hover:text-purple-700 hover:underline' : ''}`}
+                                title={onViewCari && bilgi.telefon ? 'Cari profiline git' : ''}
+                              >
+                                {bilgi.musteri}
+                              </button>
+                              {bilgi.tur && <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600">{bilgi.tur}</span>}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 pl-7 text-[11px] font-bold text-neutral-500">
+                              {bilgi.telefon && <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {bilgi.telefon}</span>}
+                              {bilgi.rota && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {bilgi.rota}</span>}
+                              {bilgi.saat && <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> İş saati {bilgi.saat}</span>}
+                              {saat && <span className="flex items-center gap-1 text-purple-600"><ClipboardCheck className="w-3 h-3" /> Denetim {saat}</span>}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 shrink-0">
+                            {/* Araç plakası */}
+                            {bilgi.plaka ? (
+                              <span className="flex items-center gap-1.5 text-[11px] font-black bg-purple-50 text-purple-700 border border-purple-200 px-2.5 py-1 rounded-lg">
+                                <Truck className="w-3.5 h-3.5" /> {bilgi.plaka}
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-bold text-neutral-300 px-2 py-1">Araç bilgisi yok</span>
+                            )}
+                            {/* İş tutarı */}
+                            {bilgi.fiyat ? (
+                              <span className="text-[11px] font-black bg-green-50 text-green-700 border border-green-200 px-2.5 py-1 rounded-lg">
+                                ₺{(parseFloat(bilgi.fiyat) || 0).toLocaleString('tr-TR')}
+                              </span>
+                            ) : null}
+                            {/* Kayıt doğruluğu */}
+                            {d.kayitDogrulugu && (
+                              <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg border ${(DOGRULUK_STIL[d.kayitDogrulugu] || {}).kutu || 'bg-neutral-50 border-neutral-200'} ${(DOGRULUK_STIL[d.kayitDogrulugu] || {}).yazi || 'text-neutral-600'}`}>
+                                {d.kayitDogrulugu}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* PERSONEL PUANLARI: kime kaç verdi */}
+                        {(d.personelPuanlari || []).length > 0 && (
+                          <div className="pl-7 flex flex-wrap gap-1.5 mb-2">
+                            {d.personelPuanlari.map((pp, i) => {
+                              const puan = parseInt(pp.puan) || 0;
+                              const renk = puan >= 5 ? 'bg-green-100 text-green-800 border-green-300'
+                                : puan === 4 ? 'bg-lime-100 text-lime-800 border-lime-300'
+                                : puan === 3 ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
+                                : 'bg-red-100 text-red-800 border-red-300';
+                              return (
+                                <span key={i} className={`inline-flex items-center gap-1.5 text-[11px] font-black px-2.5 py-1 rounded-lg border ${renk}`}
+                                      title={pp.ozelNot ? `Not: ${pp.ozelNot}` : ''}>
+                                  {pp.personelAdi}
+                                  <span className="flex items-center gap-0.5">{puan}<Star className="w-3 h-3 fill-current" /></span>
+                                  {pp.ozelNot ? <MessageSquareText className="w-3 h-3 opacity-70" /> : null}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {/* Şefin genel raporu */}
+                        {(d.genelRapor || '').trim() && (
+                          <p className="pl-7 text-[11px] font-bold text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-lg p-2.5">
+                            {d.genelRapor}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Seçili günde hiç denetim yoksa */}
+        {!yukleniyor && sefGunlukTakip.length === 0 && (
+          <div className="bg-white rounded-2xl border border-dashed border-neutral-300 p-10 text-center">
+            <ClipboardCheck className="w-10 h-10 text-neutral-300 mx-auto mb-2" />
+            <p className="text-sm font-black text-neutral-500">Bu gün için saha denetimi kaydı yok</p>
+            <p className="text-[11px] font-bold text-neutral-400 mt-1">Oklarla başka bir güne geçebilirsiniz.</p>
           </div>
         )}
 
@@ -16489,6 +16727,34 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     return on?.status || null;
   };
 
+  // ==========================================================================
+  // GÜNLÜK TAKİP GÖSTERGESİ (başlığın sağında)
+  // Seçili gün için tüm Mavi Yaka personeli durum gruplarına ayırır:
+  // gelenler / devamsızlar / haftalık izinliler / diğer izinliler.
+  // Tablodaki sıralama gruplarıyla BİREBİR aynı mantığı kullanır ki
+  // ekrandaki liste ile rozetlerdeki sayılar birbirini tutsun.
+  // ==========================================================================
+  const gunlukOzet = useMemo(() => {
+    const ozet = { geldi: 0, devamsiz: 0, haftalikIzin: 0, digerIzin: 0, belirsiz: 0, toplam: 0 };
+    if (!fTarih) return ozet;
+    maviYaka.forEach(p => {
+      const satir = {
+        personnelId: String(p.id),
+        dateStr: fTarih,
+        giris: gunlukKayitlar.find(k => String(k.personnelId) === String(p.id) && k.type === 'giris') || null
+      };
+      ozet.toplam += 1;
+      const kod = satirDurumKodu(satir);
+      if (satir.giris || ['G', 'FM', 'EM', 'FG', 'FGM'].includes(kod)) ozet.geldi += 1;
+      else if (kod === 'D') ozet.devamsiz += 1;
+      else if (kod === 'Hİ') ozet.haftalikIzin += 1;
+      else if (['Yİ', 'Bİ', 'Üİ', 'R', 'İB'].includes(kod)) ozet.digerIzin += 1;
+      else ozet.belirsiz += 1;
+    });
+    return ozet;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fTarih, maviYaka, gunlukKayitlar, puantajlar, gunlukOneriler]);
+
   // Düzenlemeyi puantaja (Personel Muhasebe ile AYNI koleksiyona) yazar.
   // manual:true işaretlenir; böylece bu satır bir daha düzenlenemez ve
   // otomatik öneriler bu kaydı ezmez.
@@ -16621,8 +16887,28 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
             </div>
           )}
         </div>
-        {/* NOT: Buradaki "GİRİŞ ONAYLA / ÇIKIŞ ONAYLA" butonları kullanıcı isteğiyle
-            KALDIRILDI. Personel mesai onayını yalnızca ANA SAYFADAN yapar. */}
+        {/* GÜNLÜK TAKİP GÖSTERGESİ — seçili günün özeti */}
+        <div className="flex flex-wrap gap-2 shrink-0 md:justify-end">
+          {[
+            { sayi: gunlukOzet.geldi, etiket: 'kişi geldi', renk: 'bg-white text-emerald-700', ikon: CheckCircle },
+            { sayi: gunlukOzet.devamsiz, etiket: 'devamsız', renk: 'bg-red-500/90 text-white', ikon: AlertTriangle },
+            { sayi: gunlukOzet.haftalikIzin, etiket: 'haftalık izin', renk: 'bg-blue-500/90 text-white', ikon: Calendar },
+            { sayi: gunlukOzet.digerIzin, etiket: 'diğer izin', renk: 'bg-purple-500/90 text-white', ikon: FileText },
+          ].map((k, i) => (
+            // Sıfır olan gruplar gizlenir; ekran gereksiz kalabalıklaşmasın
+            k.sayi > 0 ? (
+              <div key={i} className={`flex items-center gap-1.5 px-3 py-2 rounded-xl shadow-sm ${k.renk}`}>
+                <k.ikon className="w-4 h-4 shrink-0" />
+                <span className="text-base font-black leading-none">{k.sayi}</span>
+                <span className="text-[10px] font-black opacity-80 whitespace-nowrap">{k.etiket}</span>
+              </div>
+            ) : null
+          ))}
+          {/* Hiç veri yoksa kullanıcı boş alana bakmasın */}
+          {gunlukOzet.toplam === 0 && (
+            <span className="text-[11px] font-bold bg-white/15 px-3 py-2 rounded-xl">Bu gün için personel kaydı yok</span>
+          )}
+        </div>
       </div>
 
       {/* SEKMELER */}
