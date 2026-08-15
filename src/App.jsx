@@ -226,7 +226,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
 
     // YENİ: Aylık puan + Bugün/Dün mesai ve yorum(puan) durumu
     const [myScore, setMyScore] = useState(0);
-    const [dailyData, setDailyData] = useState({ today: null, yesterday: null });
+    // NOT: dailyData state'i, "Bugün/Dün Özeti" kartları kaldırıldığı için silindi.
     const [isRefreshing, setIsRefreshing] = useState(false);
 
     const fetchMyScoreAndStatus = async () => {
@@ -252,51 +252,13 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           setMyScore(total);
         }
 
-        let todayPuan = parseFloat(currentMonthPuantajRecords[currentUser.id]?.[currentDay]) || 0;
-        let yesterdayPuan = 0;
-
-        if (currentMonth === yMonth && currentYear === yYear) {
-          yesterdayPuan = parseFloat(currentMonthPuantajRecords[currentUser.id]?.[yDay]) || 0;
-        } else {
-          const docRefPuantajYest = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${yYear}_${yMonth}`);
-          const snapPuantajYest = await getDoc(docRefPuantajYest);
-          if (snapPuantajYest.exists()) {
-            const yRecords = snapPuantajYest.data().records || {};
-            yesterdayPuan = parseFloat(yRecords[currentUser.id]?.[yDay]) || 0;
-          }
-        }
-
-        const docRefMesaiToday = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${currentYear}_${currentMonth}`);
-        const snapMesaiToday = await getDoc(docRefMesaiToday);
-        let todayStatus = null;
-        let currentMonthMesaiRecords = {};
-        if (snapMesaiToday.exists()) {
-          currentMonthMesaiRecords = snapMesaiToday.data().records || {};
-          const myRecord = currentMonthMesaiRecords[currentUser.id] || {};
-          const tData = myRecord[currentDay];
-          if (tData) todayStatus = typeof tData === 'object' ? tData.status : tData;
-        }
-
-        let yesterdayStatus = null;
-        if (currentMonth === yMonth && currentYear === yYear) {
-          const myRecord = currentMonthMesaiRecords[currentUser.id] || {};
-          const yData = myRecord[yDay];
-          if (yData) yesterdayStatus = typeof yData === 'object' ? yData.status : yData;
-        } else {
-          const docRefMesaiYesterday = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${yYear}_${yMonth}`);
-          const snapMesaiYesterday = await getDoc(docRefMesaiYesterday);
-          if (snapMesaiYesterday.exists()) {
-            const records = snapMesaiYesterday.data().records || {};
-            const myRecord = records[currentUser.id] || {};
-            const yData = myRecord[yDay];
-            if (yData) yesterdayStatus = typeof yData === 'object' ? yData.status : yData;
-          }
-        }
-
-        setDailyData({
-          today: { mesai: todayStatus, puan: todayPuan },
-          yesterday: { mesai: yesterdayStatus, puan: yesterdayPuan }
-        });
+        // ====================================================================
+        // OKUMA TASARRUFU: "BUGÜN / DÜN ÖZETİ" kartları kaldırıldığı için
+        // yalnızca o kartlar için yapılan 3 ek Firestore okuması (dünün puantaj
+        // belgesi + bugünün ve dünün mesai belgeleri) de kaldırıldı.
+        // Aylık puan rozeti (myScore) yukarıdaki TEK okumadan hesaplanmaya
+        // devam ediyor.
+        // ====================================================================
       } catch (error) {
         console.error('Veriler yüklenemedi', error);
       }
@@ -325,69 +287,7 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
       scoreMessage = 'Birinciliğe göz dikmişsin! Çok iyisin, en iyisi olacaksın! 🏆'; scoreIcon = <CheckCircle className="w-6 h-6 text-green-600" />;
     }
 
-    const renderDailySummary = (data, dayLabel) => {
-      if (!data || (!data.mesai && data.puan === 0)) return null;
-      const boxes = [];
-
-      if (data.puan > 0) {
-        let pTitle = '', pMsg = '', pBg = 'bg-yellow-50', pBorder = 'border-yellow-200', pTextCol = 'text-yellow-800';
-        let pIcon = <Star className="w-6 h-6 text-yellow-500 fill-yellow-500" />;
-        if (data.puan === 0.5) {
-          pTitle = `${dayLabel} Destek Puanı!`; pMsg = 'Takım arkadaşlarına yardımcı olduğun için 0.5 puan kazandın. Harika bir takım oyuncususun!';
-          pBg = 'bg-blue-50'; pBorder = 'border-blue-200'; pTextCol = 'text-blue-800'; pIcon = <Users className="w-6 h-6 text-blue-600" />;
-        } else if (data.puan === 1) {
-          pTitle = `${dayLabel} Müşteri Puanı!`; pMsg = 'Müşteri memnuniyetini sağladığın için 1 tam puan kazandın. Tebrikler!';
-        } else if (data.puan > 1) {
-          pTitle = `${dayLabel} Harika Performans!`; pMsg = `Hem müşteri memnuniyeti hem de takım desteği ile toplam ${data.puan} puan kazandın!`;
-          pBg = 'bg-emerald-50'; pBorder = 'border-emerald-200'; pTextCol = 'text-emerald-800'; pIcon = <Sparkles className="w-6 h-6 text-emerald-600" />;
-        }
-        boxes.push(
-          <div key="puan" className={`p-4 rounded-2xl border ${pBg} ${pBorder} shadow-sm flex items-start gap-4 mb-3 w-full`}>
-            <div className="bg-white p-3 rounded-full shadow-sm shrink-0 border border-white/50">{pIcon}</div>
-            <div>
-              <h3 className={`font-black text-base md:text-lg ${pTextCol} mb-0.5`}>{pTitle}</h3>
-              <p className={`text-xs md:text-sm font-medium ${pTextCol} opacity-90`}>{pMsg}</p>
-            </div>
-          </div>
-        );
-      }
-
-      if (data.mesai) {
-        let bg = '', textCol = '', border = '', icon = null, title = '', msg = '';
-        switch (data.mesai) {
-          case 'G': bg = 'bg-green-50'; border = 'border-green-200'; textCol = 'text-green-800'; title = `${dayLabel} Mesain Onaylandı`; msg = 'Mesain sisteme eksiksiz olarak işlendi. Harika!'; icon = <CheckCircle className="w-6 h-6 text-green-600" />; break;
-          case 'FM': bg = 'bg-blue-50'; border = 'border-blue-200'; textCol = 'text-blue-800'; title = `${dayLabel} Fazla Mesai`; msg = 'Harika efor! Emeklerinin karşılığını göreceksin, aynen devam! 💪'; icon = <Clock className="w-6 h-6 text-blue-600" />; break;
-          case 'EM': bg = 'bg-yellow-50'; border = 'border-yellow-200'; textCol = 'text-yellow-800'; title = `${dayLabel} Eksik Mesai`; msg = 'Biraz eksik çalıştın gibi görünüyor. Bir dahaki sefere telafi edeceğinden eminiz!'; icon = <Clock className="w-6 h-6 text-yellow-600" />; break;
-          case 'D': bg = 'bg-red-50'; border = 'border-red-200'; textCol = 'text-red-800'; title = `${dayLabel} İşe Gelmedin`; msg = 'Aramızda değildin. Umarım her şey yolundadır, seni dinlenmiş olarak bekliyoruz.'; icon = <AlertTriangle className="w-6 h-6 text-red-600" />; break;
-          case 'Hİ': bg = 'bg-blue-50'; border = 'border-blue-200'; textCol = 'text-blue-800'; title = `${dayLabel} İzinlisin`; msg = 'Haftalık iznini iyi değerlendir, dinlenmek en doğal hakkın. İyi tatiller! 🌴'; icon = <Clock className="w-6 h-6 text-blue-600" />; break;
-          case 'Yİ': bg = 'bg-purple-50'; border = 'border-purple-200'; textCol = 'text-purple-800'; title = `${dayLabel} Yıllık İzindesin`; msg = 'Uzun bir tatil zamanı! Kendine bolca vakit ayır ve iyice dinlen. 🏖️'; icon = <CalendarDays className="w-6 h-6 text-purple-600" />; break;
-          case 'Bİ': bg = 'bg-pink-50'; border = 'border-pink-200'; textCol = 'text-pink-800'; title = `${dayLabel} Bayram İznindesin`; msg = 'İyi bayramlar! Sevdiklerinle birlikte güzel vakit geçir. 🍬'; icon = <Star className="w-6 h-6 text-pink-600" />; break;
-          case 'FG': bg = 'bg-teal-50'; border = 'border-teal-200'; textCol = 'text-teal-800'; title = `${dayLabel} Fazla Gün`; msg = 'Ekstra bir gün çalışarak gücünü gösterdin! Harikasın! 🚀'; icon = <Activity className="w-6 h-6 text-teal-600" />; break;
-          case 'FGM': bg = 'bg-cyan-50'; border = 'border-cyan-200'; textCol = 'text-cyan-800'; title = `${dayLabel} Fazla Gün + Mesai`; msg = 'İzin gününde hem çalışıp hem de mesaiye kaldın! Harika bir efor! 🚀💪'; icon = <Activity className="w-6 h-6 text-cyan-600" />; break;
-          case 'Üİ': bg = 'bg-neutral-100'; border = 'border-neutral-300'; textCol = 'text-neutral-700'; title = `${dayLabel} Ücretsiz İzin`; msg = 'İzindesin, dinlenmene bak. Tekrar aramızda görmek için sabırsızlanıyoruz.'; icon = <Ban className="w-6 h-6 text-neutral-500" />; break;
-          case 'R': bg = 'bg-orange-50'; border = 'border-orange-200'; textCol = 'text-orange-800'; title = `${dayLabel} Raporlusun`; msg = 'Geçmiş olsun! Lütfen sağlığına dikkat et, seni sağlıklı olarak tekrar görmek istiyoruz. 🏥'; icon = <Activity className="w-6 h-6 text-orange-600" />; break;
-          default: break;
-        }
-        if (title) {
-          boxes.push(
-            <div key="mesai" className={`p-4 rounded-2xl border ${bg} ${border} shadow-sm flex items-start gap-4 mb-3 w-full`}>
-              <div className="bg-white p-3 rounded-full shadow-sm shrink-0 border border-white/50">{icon}</div>
-              <div>
-                <h3 className={`font-black text-base md:text-lg ${textCol} mb-0.5`}>{title}</h3>
-                <p className={`text-xs md:text-sm font-medium ${textCol} opacity-90`}>{msg}</p>
-              </div>
-            </div>
-          );
-        }
-      }
-
-      return (
-        <div className="flex-1 animate-in fade-in slide-in-from-top-4 flex flex-col">
-          <h3 className="text-sm font-bold text-neutral-500 uppercase tracking-wider mb-3 pl-1 border-b border-neutral-200 pb-2">{dayLabel} Özeti</h3>
-          <div className="flex flex-col flex-1">{boxes}</div>
-        </div>
-      );
-    };
+    // NOT: renderDailySummary fonksiyonu da kaldırıldı (artık çağrılmıyor).
 
     // GÜNCELLENDİ: Pozisyona/rütbeye göre günlük motive edici mesaj — hem Beyaz Yaka hem Mavi Yaka için
     const getDailyMotivation = () => {
@@ -598,13 +498,11 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
           </div>
         )}
 
-        {/* BUGÜN / DÜN MESAİ VE YORUM(PUAN) DURUMU — sadece Mavi Yaka */}
-        {isMaviYaka && (dailyData.today || dailyData.yesterday) && (
-          <div className="flex flex-col md:flex-row gap-4 mb-6">
-            {dailyData.today && <div className="flex-1">{renderDailySummary(dailyData.today, 'Bugün')}</div>}
-            {dailyData.yesterday && <div className="flex-1">{renderDailySummary(dailyData.yesterday, 'Dün')}</div>}
-          </div>
-        )}
+        {/* NOT: "BUGÜN ÖZETİ" ve "DÜN ÖZETİ" blokları (mesai/puan durum kartları)
+            kullanıcı isteğiyle Mavi Yaka ana sayfasından KALDIRILDI.
+            Personel bugünkü mesai durumunu zaten üstteki QR Mesai kartında
+            (Giriş 07:33 / Çıkış 19:26) görüyor.
+            Ayrıca üretici fonksiyon renderDailySummary de artık çağrılmıyor. */}
 
         {/* ALINAN YORUMLAR — sadece Mavi Yaka */}
         {isMaviYaka && (allJobs || jobs).filter(j => j.pointsApproved && j.reviewImage).length > 0 && (
