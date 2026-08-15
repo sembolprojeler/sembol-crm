@@ -15847,14 +15847,52 @@ export const QrTarayiciModal = ({ tip, currentUser, onKapat }) => {
   const [sonKayit, setSonKayit] = useState(null);
   const okunduRef = useRef(false);                     // Aynı QR'ın art arda 2 kez işlenmesini engeller
 
-  // 1) KONUM: modal açılır açılmaz konum alınır — kayıt konumla birlikte tutulur
+  // ==========================================================================
+  // 1) KONUM
+  // DAHA ÖNCE İZİN VERMİŞ PERSONELİ TEKRAR RAHATSIZ ETMEME:
+  //  • Tarayıcının izin durumu önce Permissions API ile SORULUR.
+  //    - 'granted' (daha önce izin verilmiş) -> izin penceresi HİÇ çıkmaz,
+  //      konum doğrudan alınır. maximumAge sayesinde son 5 dakika içinde
+  //      alınmış konum varsa yeniden GPS'e gidilmez (hızlı + pil dostu).
+  //    - 'denied' (kalıcı reddetmiş) -> boşuna beklenmez, hemen 'reddedildi'.
+  //    - 'prompt' (ilk kez) -> izin penceresi gösterilir.
+  //  • Permissions API desteklenmeyen tarayıcılarda eski davranışa dönülür.
+  // ==========================================================================
   useEffect(() => {
     if (!navigator.geolocation) { setKonumDurum('reddedildi'); return; }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => { setKonum({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy }); setKonumDurum('alindi'); },
-      () => setKonumDurum('reddedildi'),
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
-    );
+    let iptal = false;
+
+    const konumIste = (dahaOnceIzinli) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (iptal) return;
+          setKonum({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: pos.coords.accuracy });
+          setKonumDurum('alindi');
+        },
+        () => { if (!iptal) setKonumDurum('reddedildi'); },
+        {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          // İzin zaten varsa son 5 dakikalık konum yeterlidir; yoksa taze konum istenir
+          maximumAge: dahaOnceIzinli ? 300000 : 0
+        }
+      );
+    };
+
+    (async () => {
+      try {
+        if (navigator.permissions?.query) {
+          const durum = await navigator.permissions.query({ name: 'geolocation' });
+          if (iptal) return;
+          if (durum.state === 'denied') { setKonumDurum('reddedildi'); return; }
+          konumIste(durum.state === 'granted');
+          return;
+        }
+      } catch (e) { /* Permissions API yoksa aşağıdaki yola düşülür */ }
+      konumIste(false);
+    })();
+
+    return () => { iptal = true; };
   }, []);
 
   // 2) KAMERA: arka kamera açılır, QR bulunana kadar kare kare taranır
@@ -15985,10 +16023,13 @@ export const QrTarayiciModal = ({ tip, currentUser, onKapat }) => {
         setAsama('basarili');
         return;
       }
+      // GÜNDE TEK KEZ (kullanıcı kuralı): Çıkış da tıpkı giriş gibi bir kez
+      // basılır. Eskiden ikinci çıkış mevcut kaydı GÜNCELLİYORDU; artık
+      // reddediliyor. Hatalı saat girildiyse yönetici, İK > Mesai Takip
+      // ekranındaki kalem simgesiyle düzeltebilir.
       if (tip === 'cikis' && mevcut) {
-        await updateDoc(doc(mesaiKayitlarColRef(), mevcut.id), { timeStr: kayit.timeStr, timestamp: kayit.timestamp, lat: kayit.lat, lng: kayit.lng, accuracy: kayit.accuracy, method: yontem, konumDurumu: kayit.konumDurumu, cihaz: kayit.cihaz });
-        setSonKayit({ ...mevcut, ...kayit });
-        setMesaj(`Mesai ÇIKIŞINIZ ${kayit.timeStr} olarak güncellendi.`);
+        setSonKayit(mevcut);
+        setMesaj(`Bugün ${mevcut.timeStr} itibarıyla zaten mesai ÇIKIŞI yaptınız. Yeni kayıt oluşturulmadı.`);
         setAsama('basarili');
         return;
       }
@@ -16123,7 +16164,10 @@ const yukariYarim = (dk) => Math.max(0, Math.ceil(dk / 30) / 2);
 // Tarihten gün adını verir (Pazartesi, Salı...)
 const gunAdi = (tarihStr) => HAFTA_GUNLERI[(new Date(tarihStr).getDay() + 6) % 7];
 
-const GEC_GELIS_TOLERANS_DK = 10; // Bu süreye kadar geç gelişler eksik yazılmaz
+// GEÇ GELİŞ TOLERANSI (kullanıcı kuralı): 08:00 programlı personel 08:15'e
+// kadar gelirse eksik mesai YAZILMAZ. 08:16'dan itibaren yarım saate YUKARI
+// yuvarlanarak düşülür (08:16-08:30 -> 0,5 sa | 08:31-09:00 -> 1 sa).
+const GEC_GELIS_TOLERANS_DK = 15;
 
 
 
@@ -16175,16 +16219,36 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr) => {
       return;
     }
 
-    // KURAL 3: Geç geliş (tolerans düşülerek, yarım saate yukarı yuvarlanır)
+    // ======================================================================
+    // KURAL 3: GEÇ GELİŞ
+    //  • ERKEN gelen hiçbir zaman ödüllendirilmez/cezalandırılmaz: 07:40'ta
+    //    basan da 08:00'de basmış sayılır (mesaisinden DÜŞÜLMEZ).
+    //  • 15 dakika tolerans: 08:00-08:15 arası temiz.
+    //  • 08:16'dan sonrası yarım saate YUKARI yuvarlanır:
+    //    08:16-08:30 -> 0,5 sa | 08:31-09:00 -> 1 sa | 09:01-09:30 -> 1,5 sa
+    // ======================================================================
     const gecDk = Math.max(0, mesaiDk(giris.timeStr) - mesaiDk(prog.baslangic));
     const eksikGiris = gecDk > GEC_GELIS_TOLERANS_DK ? yukariYarim(gecDk) : 0;
 
-    // KURAL 2: Fazla mesai — EKİP çıkışına göre, yarım saate aşağı yuvarlanır
+    // ======================================================================
+    // KURAL 2: ÇIKIŞ
+    //  • FAZLA MESAİ ekip bazlıdır: ekip birlikte döndüğü için EN ERKEN çıkış
+    //    esas alınır ve yarım saate AŞAĞI yuvarlanır.
+    //  • ERKEN ÇIKIŞ CEZASI ise KİŞİNİN KENDİ çıkışına göre hesaplanır.
+    //    DÜZELTME: Eskiden bu ceza da ekip çıkışına bakıyordu; ekipten biri
+    //    erken ayrıldığında 21:00'de çıkan personele bile "eksik mesai"
+    //    yazılıyordu. Artık kimse başkasının erken çıkışından ceza almaz.
+    //  • Erken çıkışta da 15 dakikalık tolerans uygulanır (17:55'te çıkan
+    //    kişiye 0,5 saat kesmek gerçekçi değil).
+    // ======================================================================
     let fazlaCikis = 0, eksikCikis = 0;
     if (ekipCikisDk !== null) {
-      const fark = ekipCikisDk - mesaiDk(prog.bitis);
-      if (fark > 0) fazlaCikis = asagiYarim(fark);
-      else if (fark < 0) eksikCikis = yukariYarim(-fark); // Erken çıkış da eksik sayılır
+      const ekipFark = ekipCikisDk - mesaiDk(prog.bitis);
+      if (ekipFark > 0) fazlaCikis = asagiYarim(ekipFark); // Yalnızca FAZLA için ekip esas
+    }
+    if (cikis?.timeStr) {
+      const kendiFark = mesaiDk(prog.bitis) - mesaiDk(cikis.timeStr); // + ise erken çıkmış
+      if (kendiFark > GEC_GELIS_TOLERANS_DK) eksikCikis = yukariYarim(kendiFark);
     }
 
     // KURAL 4: NET = fazla - eksik
@@ -16334,42 +16398,20 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
   if (mesaiYakaTipi(currentUser) !== 'Mavi Yaka') return null;
 
   const bugunku = kayitlarim.filter(k => k.dateStr === mesaiBugunStr());
-  const dunku = kayitlarim.filter(k => k.dateStr === mesaiDunStr());
-  const giris = bugunku.find(k => k.type === 'giris');
-  const cikis = bugunku.find(k => k.type === 'cikis');
-
-  // GÜN DURUMU HESABI — kullanıcı isteğiyle ŞU AN sadece basit bildirimler:
-  // "İşe Geldi", "Gelmedi (Devamsızlık)" ve "İzinli / Raporlu".
-  // Fazla mesai / ekstra mesai hesabı BİLİNÇLİ olarak yazılmıyor (ileride eklenecek).
-  const gunDurumu = (qrGiris, qrCikis, kod, bugunMu) => {
-    const izinKodlari = ['Hİ', 'Yİ', 'Bİ', 'Üİ']; // Haftalık / Yıllık / Bayram / Ücretsiz izin
-    const kodEtiketi = MESAI_STATUS_OPTIONS.find(o => o.code === kod)?.label || kod;
-    // 1) QR ile giriş yaptıysa her durumda "işe geldi" sayılır (en güvenilir kaynak)
-    if (qrGiris) return { baslik: 'İşe Geldin ✓', detay: `Giriş ${qrGiris.timeStr}${qrCikis ? ` • Çıkış ${qrCikis.timeStr}` : ''}`, stil: 'bg-green-50 border-green-300 text-green-800', ikon: <CheckCircle className="w-5 h-5 text-green-600" /> };
-    // 2) Puantajda izin/rapor işaretliyse
-    if (izinKodlari.includes(kod)) return { baslik: 'İzinlisin 🏖', detay: kodEtiketi, stil: 'bg-purple-50 border-purple-300 text-purple-800', ikon: <Calendar className="w-5 h-5 text-purple-600" /> };
-    if (kod === 'R') return { baslik: 'Raporlusun', detay: 'Geçmiş olsun!', stil: 'bg-orange-50 border-orange-300 text-orange-800', ikon: <AlertTriangle className="w-5 h-5 text-orange-600" /> };
-    // 3) Puantajda devamsız işaretliyse
-    if (kod === 'D') return { baslik: 'Devamsızlık ✗', detay: 'Bu gün için mesai kaydın yok', stil: 'bg-red-50 border-red-300 text-red-800', ikon: <X className="w-5 h-5 text-red-600" /> };
-    // 4) Puantajda başka bir "geldi" kodu varsa (G, FG, FM...) geldi sayılır
-    if (kod) return { baslik: 'İşe Geldin ✓', detay: `Puantaj: ${kodEtiketi}`, stil: 'bg-green-50 border-green-300 text-green-800', ikon: <CheckCircle className="w-5 h-5 text-green-600" /> };
-    // 5) Hiç kayıt yoksa: bugün için "henüz giriş yok", dün için "gelmedi"
-    return bugunMu
-      ? { baslik: 'Henüz Giriş Yapılmadı', detay: 'Yeşil butonla mesai girişini onayla', stil: 'bg-amber-50 border-amber-300 text-amber-800', ikon: <Clock className="w-5 h-5 text-amber-600" /> }
-      : { baslik: 'Gelmedin (Devamsızlık)', detay: 'Dün için mesai kaydı bulunamadı', stil: 'bg-red-50 border-red-300 text-red-800', ikon: <X className="w-5 h-5 text-red-600" /> };
-  };
-  const bugunOzet = gunDurumu(giris, cikis, puantajDurum.bugun, true);
-  const dunOzet = gunDurumu(dunku.find(k => k.type === 'giris'), dunku.find(k => k.type === 'cikis'), puantajDurum.dun, false);
+  // Bugünün giriş ve çıkış kayıtları — butonların açık/kapalı olmasını belirler
+  const giris = bugunku.find(k => k.type === 'giris') || null;
+  const cikis = bugunku.find(k => k.type === 'cikis') || null;
+  // NOT: "BUGÜN / DÜN ÖZETİ" kartları kullanıcı isteğiyle kaldırıldığı için
+  // dunku / gunDurumu / bugunOzet / dunOzet hesapları temizlendi.
 
   return (
     <div className="bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-neutral-200 animate-in fade-in slide-in-from-top-2">
+      {/* ======================================================================
+          BAŞLIK: Üstteki "Bugün: Giriş .. • Çıkış .." rozeti KALDIRILDI.
+          Aynı bilgi artık butonların yerinde, çok daha görünür şekilde duruyor.
+          ====================================================================== */}
       <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <p className="text-[10px] font-black uppercase tracking-wider text-neutral-500 flex items-center gap-1.5"><QrCode className="w-4 h-4 text-black" /> QR Mesai Onayı • Konum + Kamera</p>
-        {/* Bugünkü durum rozeti */}
-        <p className="text-[11px] font-black text-neutral-600 flex items-center gap-2 bg-neutral-100 px-3 py-1 rounded-full">
-          <Clock className="w-3.5 h-3.5" />
-          Bugün: <span className={giris ? 'text-green-700' : 'text-neutral-400'}>Giriş {giris?.timeStr || '—'}</span> • <span className={cikis ? 'text-red-700' : 'text-neutral-400'}>Çıkış {cikis?.timeStr || '—'}</span>
-        </p>
       </div>
       {/* İZİNLİ/RAPORLU İSE: butonlar gösterilmez, durum bildirilir */}
       {izinBilgisi?.izinli ? (
@@ -16388,34 +16430,62 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
           </div>
         </div>
       ) : (
-      /* Yan yana iki dikkat çekici buton */
+      /* ======================================================================
+         GÜNDE TEK KEZ: Giriş basıldıysa yeşil buton kapanır ve yerini
+         "Giriş 07:33 • Mesaiye Başladın" kartı alır. Çıkış için de aynısı.
+         Böylece personel ikinci kez basmayı deneyemez, ne yaptığını da görür.
+         ====================================================================== */
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <button onClick={() => setModalTipi('giris')} className="py-4 px-4 rounded-2xl text-white font-black text-sm flex items-center justify-center gap-2 bg-gradient-to-r from-green-500 via-green-600 to-emerald-700 shadow-lg shadow-green-600/40 hover:scale-[1.02] active:scale-95 transition">
-          <span className="w-9 h-9 bg-white/20 rounded-full flex items-center justify-center"><LogIn className="w-5 h-5" /></span>
-          MESAİ GİRİŞ ONAYLA
-          <QrCode className="w-5 h-5 opacity-80" />
-        </button>
-        <button onClick={() => setModalTipi('cikis')} className="py-4 px-4 rounded-2xl text-white font-black text-sm flex items-center justify-center gap-2 bg-gradient-to-r from-red-500 via-red-600 to-rose-700 shadow-lg shadow-red-600/40 hover:scale-[1.02] active:scale-95 transition">
-          <span className="w-9 h-9 bg-white/20 rounded-full flex items-center justify-center"><LogOut className="w-5 h-5" /></span>
-          MESAİ ÇIKIŞ ONAYLA
-          <QrCode className="w-5 h-5 opacity-80" />
-        </button>
-      </div>
-      )}
-      {/* BUGÜN / DÜN MESAİ ÖZETİ — QR mesaisine ve puantaja göre basit durum bildirimi
-          (Şu anlık sadece: geldi / gelmedi-devamsızlık / izinli-raporlu gösterilir) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
-        {[{ etiket: 'BUGÜN', o: bugunOzet }, { etiket: 'DÜN', o: dunOzet }].map(({ etiket, o }) => (
-          <div key={etiket} className={`flex items-center gap-3 p-3 rounded-2xl border-2 ${o.stil} animate-in fade-in`}>
-            <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shrink-0 shadow-sm">{o.ikon}</div>
+        {/* --- GİRİŞ --- */}
+        {giris ? (
+          <div className="py-4 px-4 rounded-2xl border-2 border-green-300 bg-green-50 flex items-center gap-3 animate-in fade-in">
+            <span className="w-11 h-11 bg-white rounded-full flex items-center justify-center shrink-0 shadow-sm">
+              <CheckCircle className="w-6 h-6 text-green-600" />
+            </span>
             <div className="min-w-0">
-              <p className="text-[9px] font-black uppercase tracking-wider opacity-60">{etiket}KÜ MESAİ</p>
-              <p className="text-sm font-black leading-tight">{o.baslik}</p>
-              <p className="text-[11px] font-bold opacity-80 truncate">{o.detay}</p>
+              <p className="text-[9px] font-black uppercase tracking-wider text-green-700/70">Mesai Girişi Onaylandı</p>
+              <p className="text-lg font-black text-green-800 leading-tight">Giriş {giris.timeStr}</p>
+              <p className="text-[11px] font-bold text-green-700">Mesaiye başladın 💪</p>
             </div>
           </div>
-        ))}
+        ) : (
+          <button onClick={() => setModalTipi('giris')} className="py-4 px-4 rounded-2xl text-white font-black text-sm flex items-center justify-center gap-2 bg-gradient-to-r from-green-500 via-green-600 to-emerald-700 shadow-lg shadow-green-600/40 hover:scale-[1.02] active:scale-95 transition">
+            <span className="w-9 h-9 bg-white/20 rounded-full flex items-center justify-center"><LogIn className="w-5 h-5" /></span>
+            MESAİ GİRİŞ ONAYLA
+            <QrCode className="w-5 h-5 opacity-80" />
+          </button>
+        )}
+
+        {/* --- ÇIKIŞ --- */}
+        {cikis ? (
+          <div className="py-4 px-4 rounded-2xl border-2 border-red-300 bg-red-50 flex items-center gap-3 animate-in fade-in">
+            <span className="w-11 h-11 bg-white rounded-full flex items-center justify-center shrink-0 shadow-sm">
+              <CheckCircle className="w-6 h-6 text-red-600" />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[9px] font-black uppercase tracking-wider text-red-700/70">Mesai Çıkışı Onaylandı</p>
+              <p className="text-lg font-black text-red-800 leading-tight">Çıkış {cikis.timeStr}</p>
+              <p className="text-[11px] font-bold text-red-700">İşten ayrıldın, iyi dinlenmeler 👋</p>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={() => setModalTipi('cikis')}
+            disabled={!giris}
+            title={!giris ? 'Önce mesai girişini onaylamalısın' : ''}
+            className={`py-4 px-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition ${giris
+              ? 'text-white bg-gradient-to-r from-red-500 via-red-600 to-rose-700 shadow-lg shadow-red-600/40 hover:scale-[1.02] active:scale-95'
+              : 'text-neutral-400 bg-neutral-100 border-2 border-dashed border-neutral-300 cursor-not-allowed'}`}
+          >
+            <span className={`w-9 h-9 rounded-full flex items-center justify-center ${giris ? 'bg-white/20' : 'bg-neutral-200'}`}><LogOut className="w-5 h-5" /></span>
+            MESAİ ÇIKIŞ ONAYLA
+            <QrCode className="w-5 h-5 opacity-80" />
+          </button>
+        )}
       </div>
+      )}
+      {/* NOT: "DÜN ÖZETİ" bölümü kullanıcı isteğiyle KALDIRILDI.
+          Bugünün durumu zaten yukarıdaki kartlarda görünüyor. */}
       {/* Butona basılınca önce "QR Tarat / Kod Gir" seçim penceresi açılır */}
       {modalTipi && <QrTarayiciModal tip={modalTipi} currentUser={currentUser} onKapat={() => setModalTipi(null)} />}
     </div>
@@ -16517,6 +16587,8 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   const [fDurum, setFDurum] = useState('hepsi');
   // DEĞİŞİKLİK: "Tüm Yöntemler" filtresi kaldırıldı, yerine PERSONEL SEÇ filtresi geldi
   const [fPersonel, setFPersonel] = useState('hepsi');
+  // YENİ: Araç/Ekip filtresi — seçilen araçla sahaya çıkan personeller listelenir
+  const [fArac, setFArac] = useState('hepsi');
   const [raporAy, setRaporAy] = useState(mesaiBugunStr().slice(0, 7)); // YYYY-AA
 
   // ============================================================================
@@ -16662,36 +16734,56 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   };
 
   // Kayıt sahibinin o gün birlikte çalıştığı MAVİ YAKA ekip arkadaşları
-  const birlikteMesai = (kayit) => {
-    const pid = String(kayit.personnelId);
-    // O güne ait ve bu personelin atandığı işler
-    const oGunkuIsler = (jobs || []).filter(is => is.date === kayit.dateStr && isinEkipIdleri(is).includes(pid));
-    const arkadaslar = new Set();
-    oGunkuIsler.forEach(is => {
-      isinEkipIdleri(is).forEach(id => {
-        if (id === pid) return; // Kendisi sayılmaz
-        const kisi = personnelList.find(p => String(p.id) === id);
-        // Yalnızca Mavi Yaka ekip arkadaşları listelenir
-        if (kisi && mesaiYakaTipi(kisi) === 'Mavi Yaka') arkadaslar.add(kisi.fullName);
-      });
-    });
-    return [...arkadaslar];
+  // ==========================================================================
+  // "İŞE GİTTİ / ARAÇ" SÜTUNU (eski "Birlikte" sütununun yerine)
+  // Personelin o gün atandığı işin ARACINI (plaka) bulur. Aynı araçla giden
+  // ekibin hem plakası hem personel adı AYNI RENKTE gösterilir; böylece
+  // listede hangi ekibin birlikte gittiği tek bakışta ayırt edilir.
+  // ==========================================================================
+  const personelAraci = (personelId, tarih) => {
+    const pid = String(personelId);
+    const oGunkuIsler = (jobs || []).filter(is => is.date === tarih && isinEkipIdleri(is).includes(pid));
+    // Bir personel aynı gün birden fazla işe/araca çıkmış olabilir
+    const plakalar = [...new Set(oGunkuIsler.map(is => is.assignedVehiclePlate).filter(Boolean))];
+    return {
+      plakalar,
+      isler: oGunkuIsler,
+      // Ekip arkadaşları (yalnızca Mavi Yaka), ipucu metninde gösterilir
+      ekip: [...new Set(oGunkuIsler.flatMap(is => isinEkipIdleri(is)
+        .filter(id => id !== pid)
+        .map(id => personnelList.find(pp => String(pp.id) === id))
+        .filter(k => k && mesaiYakaTipi(k) === 'Mavi Yaka')
+        .map(k => k.fullName)))]
+    };
   };
 
-  // Sütunun ipucu metni: hangi işte kimlerle gittiği
-  const birlikteDetay = (kayit) => {
-    const pid = String(kayit.personnelId);
-    const oGunkuIsler = (jobs || []).filter(is => is.date === kayit.dateStr && isinEkipIdleri(is).includes(pid));
-    if (oGunkuIsler.length === 0) return 'Bu personel o gün hiçbir işe atanmamış (ekip kaydı yok)';
-    return oGunkuIsler.map(is => {
-      const ekip = isinEkipIdleri(is)
-        .filter(id => id !== pid)
-        .map(id => personnelList.find(p => String(p.id) === id))
-        .filter(k => k && mesaiYakaTipi(k) === 'Mavi Yaka')
-        .map(k => k.fullName);
-      return `${is.customerName || 'İş'}: ${ekip.length ? ekip.join(', ') : 'tek başına'}`;
-    }).join('  |  ');
-  };
+  // O GÜNÜN ARAÇ RENK HARİTASI: her plakaya sabit bir renk atanır.
+  // Aynı gün içinde plaka sırası değişse bile renk kaymasın diye plakalar
+  // alfabetik sıralanır.
+  const ARAC_RENKLERI = [
+    { yazi: 'text-orange-600', rozet: 'bg-orange-100 text-orange-700 border-orange-300' },
+    { yazi: 'text-blue-600', rozet: 'bg-blue-100 text-blue-700 border-blue-300' },
+    { yazi: 'text-purple-600', rozet: 'bg-purple-100 text-purple-700 border-purple-300' },
+    { yazi: 'text-emerald-600', rozet: 'bg-emerald-100 text-emerald-700 border-emerald-300' },
+    { yazi: 'text-pink-600', rozet: 'bg-pink-100 text-pink-700 border-pink-300' },
+    { yazi: 'text-cyan-600', rozet: 'bg-cyan-100 text-cyan-700 border-cyan-300' },
+    { yazi: 'text-amber-700', rozet: 'bg-amber-100 text-amber-800 border-amber-300' },
+    { yazi: 'text-indigo-600', rozet: 'bg-indigo-100 text-indigo-700 border-indigo-300' },
+    { yazi: 'text-teal-600', rozet: 'bg-teal-100 text-teal-700 border-teal-300' },
+    { yazi: 'text-rose-600', rozet: 'bg-rose-100 text-rose-700 border-rose-300' },
+  ];
+  const gununAraclari = useMemo(() => {
+    const plakalar = [...new Set((jobs || [])
+      .filter(is => is.date === fTarih)
+      .map(is => is.assignedVehiclePlate)
+      .filter(Boolean))].sort((a, b) => a.localeCompare(b, 'tr'));
+    const harita = {};
+    plakalar.forEach((plaka, i) => { harita[plaka] = ARAC_RENKLERI[i % ARAC_RENKLERI.length]; });
+    return { plakalar, harita };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jobs, fTarih]);
+
+  const aracRengi = (plaka) => gununAraclari.harita[plaka] || { yazi: 'text-neutral-500', rozet: 'bg-neutral-100 text-neutral-600 border-neutral-300' };
 
   // ---------------------------------------------------------------------------
   // MESAİ DURUMU (PUANTAJ) YARDIMCILARI — "Tüm Kayıtlar" sütunu için
@@ -16927,11 +17019,12 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
           {/* FİLTRE ÇUBUĞU — 4 filtre TEK SATIRDA.
               12 kolonluk ızgara kullanılır: tarih 4, yaka 2, durum 3, personel 3 = 12.
               Küçük ekranlarda (mobil) alt alta iner. */}
+          {/* 5 FİLTRE TEK SATIRDA: tarih 3 + yaka 2 + durum 3 + personel 2 + araç 2 = 12 */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-2 mb-4 items-stretch">
             {/* TEK TARİH SEÇİCİ + GÜN OKLARI
                 Sol ok bir gün geri, sağ ok bir gün ileri gider. Sayfa her
                 açıldığında bugünle başlar. "Bugün" düğmesi hızlı dönüş sağlar. */}
-            <div className="flex items-stretch gap-1 min-w-0 lg:col-span-4">
+            <div className="flex items-stretch gap-1 min-w-0 lg:col-span-3">
               <button
                 onClick={() => { const d = new Date(fTarih); d.setDate(d.getDate() - 1); setFTarih(d.toISOString().split('T')[0]); }}
                 className="px-2 shrink-0 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 transition text-neutral-600"
@@ -16960,10 +17053,17 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
               <option value="yok">Durumu Girilmemiş</option>
             </select>
             {/* YENİ: PERSONEL SEÇ — seçilen personelin kayıtları filtrelenir */}
-            <select value={fPersonel} onChange={e => setFPersonel(e.target.value)} className="min-w-0 truncate px-2 py-2.5 border border-neutral-300 rounded-xl text-xs font-bold lg:col-span-3" title="Tek bir personeli seçerek yalnızca onun kayıtlarını görün">
+            <select value={fPersonel} onChange={e => setFPersonel(e.target.value)} className="min-w-0 truncate px-2 py-2.5 border border-neutral-300 rounded-xl text-xs font-bold lg:col-span-2" title="Tek bir personeli seçerek yalnızca onun kayıtlarını görün">
               <option value="hepsi">Personel Seç (Tümü)</option>
               {/* Alfabetik sıra (Türkçe harf düzenine göre) */}
               {[...maviYaka].sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'tr')).map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+            </select>
+
+            {/* YENİ: ARAÇ / EKİP FİLTRESİ — seçilen araçla giden ekibi gösterir */}
+            <select value={fArac} onChange={e => setFArac(e.target.value)} className="min-w-0 truncate px-2 py-2.5 border border-neutral-300 rounded-xl text-xs font-bold lg:col-span-2" title="Bir araç seçerek o araçla sahaya çıkan ekibi görün">
+              <option value="hepsi">Araç / Ekip (Tümü)</option>
+              {gununAraclari.plakalar.map(pl => <option key={pl} value={pl}>{pl}</option>)}
+              <option value="aracsiz">Araç atanmamış</option>
             </select>
           </div>
           <div className="overflow-x-auto">
@@ -16971,7 +17071,7 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
               <thead><tr className="text-[10px] font-black text-neutral-400 uppercase border-b border-neutral-200">
                 {/* DEĞİŞİKLİK: Artık her QR kaydı ayrı satır değil; her PERSONEL-GÜN tek satır.
                     Giriş ve Çıkış ayrı sütunlarda gösterilir, basılmayan taraf boş kalır. */}
-                <th className="py-2 pr-3">Personel</th><th className="py-2 pr-3">Yaka</th><th className="py-2 pr-3">Tarih</th><th className="py-2 pr-3">Giriş</th><th className="py-2 pr-3">Çıkış</th><th className="py-2 pr-3">Mesai Durumu</th><th className="py-2 pr-3">Cihaz</th><th className="py-2 pr-3" title="O gün aynı işe atanmış diğer Mavi Yaka ekip arkadaşları — üzerine gelince isimleri görürsünüz">Birlikte</th>
+                <th className="py-2 pr-3">Personel</th><th className="py-2 pr-3">Yaka</th><th className="py-2 pr-3">Tarih</th><th className="py-2 pr-3">Giriş</th><th className="py-2 pr-3">Çıkış</th><th className="py-2 pr-3">Mesai Durumu</th><th className="py-2 pr-3">Cihaz</th><th className="py-2 pr-3" title="Personelin o gün hangi araçla sahaya çıktığı. Aynı renk = aynı ekip.">İşe Gitti / Araç</th>
               </tr></thead>
               <tbody>
                 {/* ============================================================
@@ -17043,6 +17143,13 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                       const kod = satirDurumKodu(g);
                       return fDurum === 'yok' ? !kod : kod === fDurum;
                     })
+                    // ARAÇ / EKİP FİLTRESİ
+                    .filter(g => {
+                      if (fArac === 'hepsi') return true;
+                      const plakalar = personelAraci(g.personnelId, g.dateStr).plakalar;
+                      if (fArac === 'aracsiz') return plakalar.length === 0;
+                      return plakalar.includes(fArac);
+                    })
                     // ==================================================================
                     // SIRALAMA: önce DURUM GRUBU, her grubun içinde ALFABETİK (Türkçe)
                     //   1) İşe gelenler      (giriş basmış veya durumu G/FM/EM/FG/FGM)
@@ -17080,7 +17187,11 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                     if (!kayit) {
                       return (
                         <div className="flex items-center gap-1.5">
-                          <span className="text-xs font-bold text-neutral-300">—</span>
+                          {/* BASILMAMIŞ: yanıp sönen kırmızı ünlem (eski "—" yerine) */}
+                          <span className="flex items-center gap-1 text-red-600 animate-pulse" title={`${etiket} basılmamış`}>
+                            <AlertTriangle className="w-4 h-4" />
+                            <span className="text-[10px] font-black">Basılmadı</span>
+                          </span>
                           <button
                             onClick={() => setSaatDuzenle({
                               kayit: null,                 // Mevcut kayıt yok -> yenisi oluşturulacak
@@ -17144,7 +17255,12 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                           className="text-left group"
                           title="Personel profilini aç"
                         >
-                          <span className="text-xs font-black text-black group-hover:text-blue-600 group-hover:underline transition">{g.personnelName}</span>
+                          {/* İsim rengi, gittiği aracın rengiyle AYNI — aynı ekip aynı renk */}
+                          {(() => {
+                            const pl = personelAraci(g.personnelId, g.dateStr).plakalar[0];
+                            const renk = pl ? aracRengi(pl).yazi : 'text-black';
+                            return <span className={`text-xs font-black ${renk} group-hover:underline transition`}>{g.personnelName}</span>;
+                          })()}
                           <p className="text-[9px] font-bold text-neutral-400">{g.position}</p>
                         </button>
                       </td>
@@ -17161,9 +17277,14 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                           // Elle düzenlenmiş -> kilitli
                           if (pd && pd.manual) {
                             const st = durumStili(pd.status);
+                            // "Geldi" olarak kaydedilmiş ama SAAT girilmişse bu aslında
+                            // fazla mesaidir; mavi "Fazla Mesai" olarak gösterilir.
+                            const fazlaGibi = pd.status === 'G' && parseFloat(String(pd.hours).replace(',', '.')) > 0;
+                            const etiketMetni = fazlaGibi ? 'Fazla Mesai' : st.label;
+                            const etiketRenk = fazlaGibi ? 'bg-blue-100 text-blue-700' : st.color;
                             return (
                               <div className="flex flex-col gap-0.5 min-w-[120px]">
-                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full w-fit whitespace-nowrap ${st.color}`}>{st.label}{pd.hours ? ` • ${pd.hours} sa` : ''}</span>
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full w-fit whitespace-nowrap ${etiketRenk}`}>{etiketMetni}{pd.hours ? ` • ${pd.hours} sa` : ''}</span>
                                 <span className="text-[9px] font-black text-neutral-400 flex items-center gap-1 whitespace-nowrap"><CheckCircle className="w-2.5 h-2.5 text-green-600" /> Düzenleme yapıldı</span>
                               </div>
                             );
@@ -17172,11 +17293,15 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                           const st = gosterilen ? durumStili(gosterilen.status) : null;
                           return (
                             <div className="flex items-center gap-1.5 min-w-[120px]">
-                              {st ? (
-                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full whitespace-nowrap ${st.color}`} title={on?.aciklama || ''}>
-                                  {st.label}{gosterilen.hours ? ` • ${gosterilen.hours} sa` : ''}
-                                </span>
-                              ) : <span className="text-[10px] font-bold text-neutral-300 whitespace-nowrap">Girilmemiş</span>}
+                              {st ? (() => {
+                                // Saat girilmiş "Geldi" kaydı = fazla mesai (mavi)
+                                const fazlaGibi = gosterilen.status === 'G' && parseFloat(String(gosterilen.hours).replace(',', '.')) > 0;
+                                return (
+                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full whitespace-nowrap ${fazlaGibi ? 'bg-blue-100 text-blue-700' : st.color}`} title={on?.aciklama || ''}>
+                                    {fazlaGibi ? 'Fazla Mesai' : st.label}{gosterilen.hours ? ` • ${gosterilen.hours} sa` : ''}
+                                  </span>
+                                );
+                              })() : <span className="text-[10px] font-bold text-neutral-300 whitespace-nowrap">Girilmemiş</span>}
                               {!pd && on && <span className="text-[8px] font-black text-blue-500 whitespace-nowrap" title="Henüz muhasebeye yazılmadı, QR'a göre önerilen durum">ÖNERİ</span>}
                               <button
                                 onClick={() => setDurumDuzenle({ kayit: g, status: gosterilen?.status || 'G', hours: gosterilen?.hours || '' })}
@@ -17193,15 +17318,24 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                       <td className="py-2.5 pr-3 text-xs font-bold text-neutral-500 whitespace-nowrap">
                         {g.giris?.cihaz || g.cikis?.cihaz || (g.kayitYok ? <span className="text-[10px] font-black text-red-400">Okutmadı</span> : '-')}
                       </td>
-                      {/* BİRLİKTE: o gün aynı işe atanmış Mavi Yaka ekip arkadaşları */}
-                      <td className="py-2.5 pr-3 cursor-help" title={birlikteDetay(g)}>
+                      {/* İŞE GİTTİ / ARAÇ: plaka, ekip rengiyle */}
+                      <td className="py-2.5 pr-3">
                         {(() => {
-                          const ekip = birlikteMesai(g);
-                          if (ekip.length === 0) return <span className="text-[10px] font-bold text-neutral-300 whitespace-nowrap">Tek başına</span>;
+                          const bilgi = personelAraci(g.personnelId, g.dateStr);
+                          if (bilgi.plakalar.length === 0) {
+                            return <span className="text-[10px] font-bold text-neutral-300 whitespace-nowrap">İşe gitmedi</span>;
+                          }
+                          const ipucu = bilgi.isler.map(is =>
+                            `${is.assignedVehiclePlate || 'Araçsız'} — ${is.customerName || 'İş'}${bilgi.ekip.length ? ` (ekip: ${bilgi.ekip.join(', ')})` : ''}`
+                          ).join('  |  ');
                           return (
-                            <span className="text-[10px] font-black text-indigo-600 flex items-center gap-1 underline decoration-dotted whitespace-nowrap">
-                              <Users className="w-3 h-3" /> {ekip.length} kişi
-                            </span>
+                            <div className="flex flex-wrap gap-1 cursor-help" title={ipucu}>
+                              {bilgi.plakalar.map(pl => (
+                                <span key={pl} className={`text-[10px] font-black px-2 py-0.5 rounded-lg border whitespace-nowrap flex items-center gap-1 ${aracRengi(pl).rozet}`}>
+                                  <Truck className="w-3 h-3" /> {pl}
+                                </span>
+                              ))}
+                            </div>
                           );
                         })()}
                       </td>
