@@ -1059,7 +1059,7 @@ import { getFirestore, collection, addDoc, onSnapshot, doc, query, orderBy, limi
           19. Hasar ve eksik bildirimlerinin teslimat anında yapılması zorunludur; adres terk edildikten sonraki talepler için sorumluluk alınmaz.<br/>
 
           <div class="terms-group-title">ÖDEME, İPTAL VE DEPOLAMA HÜKÜMLERİ</div>
-          20. Hizmet bedelinin %10'u kapora olarak alınır; kalan bakiye teslim edilecek adreste tahsil edilir.<br/>
+          20. Hizmet bedelinin %20'si kapora olarak alınır; kalan bakiye teslim edilecek adreste tahsil edilir.<br/>
           21. Anlaşılan nakliye fiyatına KDV dahil değildir.<br/>
           22. Şehirler arası taşımalarda eşya araca yüklendikten sonra %50 ödemeye tamamlanmaktadır.<br/>
           23. Taşıma gününe 72 saatten az süre kala yapılan iptal ve değişikliklerde toplam bedelin %50'si cayma tazminatı olarak fatura edilir.<br/>
