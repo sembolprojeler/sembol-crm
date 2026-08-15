@@ -483,27 +483,30 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     return (
       <div className="space-y-6 animate-in fade-in">
         {/* HOŞ GELDİNİZ + (Mavi Yaka için) AYLIK PUAN */}
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 bg-white p-6 rounded-2xl shadow-sm border border-neutral-200">
-          <div className="flex items-start lg:items-center gap-4 w-full lg:w-auto">
-            <div>
-              <h2 className="text-2xl font-black text-black">Hoş Geldiniz, {currentUser?.fullName}</h2>
-              <p className="text-neutral-500 font-medium">Sistemdeki genel operasyon özetini aşağıdan takip edebilirsiniz.</p>
+        {/* BOYUT: Kart yaklaşık %20 küçültüldü (p-6 -> p-5, başlık 2xl -> xl,
+            açıklama 14px -> 12px). Ad-soyad ve açıklama TEK SATIRDA tutulur;
+            uzun isimlerde satır kırılmak yerine üç nokta ile kısalır. */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-neutral-200">
+          <div className="flex items-center gap-3 w-full lg:w-auto min-w-0">
+            <div className="min-w-0">
+              <h2 className="text-lg md:text-xl font-black text-black whitespace-nowrap overflow-hidden text-ellipsis">Hoş Geldiniz, {currentUser?.fullName}</h2>
+              <p className="text-neutral-500 font-medium text-xs whitespace-nowrap overflow-hidden text-ellipsis">Sistemdeki genel operasyon özetini aşağıdan takip edebilirsiniz.</p>
             </div>
             {isMaviYaka && (
-              <button onClick={handleRefresh} disabled={isRefreshing} className="ml-auto p-2.5 bg-neutral-100 text-neutral-600 rounded-full hover:bg-neutral-200 transition shrink-0 shadow-sm border border-neutral-200" title="Günlük Özeti Yenile">
-                <Loader2 className={`w-5 h-5 ${isRefreshing ? 'animate-spin text-red-600' : ''}`} />
+              <button onClick={handleRefresh} disabled={isRefreshing} className="ml-auto p-2 bg-neutral-100 text-neutral-600 rounded-full hover:bg-neutral-200 transition shrink-0 shadow-sm border border-neutral-200" title="Günlük Özeti Yenile">
+                <Loader2 className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-red-600' : ''}`} />
               </button>
             )}
           </div>
           {isMaviYaka && (
-            <div className={`flex items-center gap-4 p-3 pr-5 rounded-2xl border ${scoreColor} shadow-sm shrink-0 w-full lg:w-auto animate-in slide-in-from-right-4`}>
-              <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center shrink-0 shadow-sm border border-white/50">{scoreIcon}</div>
-              <div>
-                <div className="flex items-end gap-2 mb-0.5">
-                  <span className={`text-2xl font-black leading-none ${scoreTextColor}`}>{myScore.toString().replace('.', ',')}</span>
-                  <span className="text-xs font-bold text-neutral-600 mb-0.5 uppercase tracking-wider">Aylık Puan</span>
+            <div className={`flex items-center gap-3 p-2.5 pr-4 rounded-2xl border ${scoreColor} shadow-sm shrink-0 w-full lg:w-auto animate-in slide-in-from-right-4`}>
+              <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shrink-0 shadow-sm border border-white/50">{scoreIcon}</div>
+              <div className="min-w-0">
+                <div className="flex items-end gap-1.5 mb-0.5">
+                  <span className={`text-xl font-black leading-none ${scoreTextColor}`}>{myScore.toString().replace('.', ',')}</span>
+                  <span className="text-[10px] font-bold text-neutral-600 mb-0.5 uppercase tracking-wider">Aylık Puan</span>
                 </div>
-                <p className={`text-xs font-bold ${scoreTextColor} opacity-90`}>{scoreMessage}</p>
+                <p className={`text-[11px] font-bold ${scoreTextColor} opacity-90 truncate`}>{scoreMessage}</p>
               </div>
             </div>
           )}
@@ -5441,7 +5444,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 <CalendarDays className="w-5 h-5 shrink-0 text-black" />
                 {/* YENİ: Menü adı "Takvim" → "Randevular" olarak değiştirildi (sayfa/rota aynı)
                     YENİ: Yazı rengi siyah yapıldı (önceden beyazdı) */}
-                <span className="whitespace-nowrap font-black text-black">Randevular</span>
+                {/* MAVİ YAKA'da bu sayfa puan takvimi olarak kullanıldığı için
+                    menü adı "Puan Tablosu" olarak görünür. Sayfa/rota aynı. */}
+                <span className="whitespace-nowrap font-black text-black">{isMaviYakaUser ? 'Puan Tablosu' : 'Randevular'}</span>
               </button>
             )}
 
