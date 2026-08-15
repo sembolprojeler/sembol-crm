@@ -5387,7 +5387,11 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       return () => { iptal = true; }; // Cleanup
     }, [personId, db, appId]);
 
-    const [selectedLeaveYear, setSelectedLeaveYear] = useState(String(currentYear));
+    // DÜZELTME (TDZ çökmesi): 'currentYear' bu satırdan SONRA (aşağıda)
+    // tanımlandığı için burada kullanılamazdı; profil sayfası açılır açılmaz
+    // "Cannot access 'currentYear' before initialization" hatası veriyordu.
+    // Değer doğrudan hesaplanarak bağımlılık kaldırıldı.
+    const [selectedLeaveYear, setSelectedLeaveYear] = useState(() => String(new Date().getFullYear()));
 
     if (!person) {
       return (
@@ -14374,6 +14378,10 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
   const [ay, setAy] = useState(bugun.getMonth());       // 0-11
   const [yil, setYil] = useState(bugun.getFullYear());
   const [secilenGun, setSecilenGun] = useState(bugunStr());
+  // DÜZELTME ("kayitlar is not defined" hatası): Bu state, bir önceki okuma
+  // optimizasyonu sırasında yanlışlıkla silinmişti; sayfa açılır açılmaz
+  // uygulama çöküyordu. Geri eklendi.
+  const [kayitlar, setKayitlar] = useState([]);
   const [modalAcik, setModalAcik] = useState(false);
   const [duzenlenenId, setDuzenlenenId] = useState(null); // null = yeni kayıt
   const [kaydediliyor, setKaydediliyor] = useState(false);
@@ -14393,7 +14401,8 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
 
   // ---------------------------------------------------- VERİ DİNLEME ---
   useEffect(() => {
-    const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), (snap) => {
+    // OKUMA SINIRI: zamanla büyüyen koleksiyon; 500 kayıt görüntüleme için yeterli
+    const unsub = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), limit(500)), (snap) => {
       setKayitlar(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     }, (err) => console.error('Hatırlatmalar yüklenemedi:', err));
     return () => unsub();
