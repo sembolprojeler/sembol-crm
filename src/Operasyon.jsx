@@ -1233,13 +1233,29 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
       </div>
     );
   };
-  export const CalendarView = ({ jobs, handleEditJob, currentUser, setJobToChangeDate, setNewJobDate, setShowChangeDateModal, setCancelJobId }) => {
+  export const CalendarView = ({ jobs, handleEditJob, currentUser, setJobToChangeDate, setNewJobDate, setShowChangeDateModal, setCancelJobId, onDonemGerekli, donemYukleniyor }) => {
     const canAssign = currentUser?.position?.includes('Operasyon') || currentUser?.position?.includes('Firma Sahibi') || currentUser?.permissions?.canEdit;
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
     const [currentYear, setCurrentYear] = useState(today.getFullYear());
     const [selectedDate, setSelectedDate] = useState(today.toISOString().split('T')[0]); 
     const [myPuantaj, setMyPuantaj] = useState({});
+
+    // ======================================================================
+    // GEÇMİŞ AY VERİSİ (okuma optimizasyonu sonrası gerekli)
+    // Uygulama açılışta yalnızca son 30 günü canlı tutar. Kullanıcı takvimde
+    // geçmiş bir aya giderse o ayın işleri görünmüyordu. Bu etki, görüntülenen
+    // ay değiştiğinde o AYIN verisini bir kereye mahsus istemekle çözülür.
+    // Aynı ay ikinci kez açılırsa tekrar okuma yapılmaz.
+    // ======================================================================
+    useEffect(() => {
+      if (!onDonemGerekli) return;
+      const iki = (n) => String(n).padStart(2, '0');
+      const ayBasi = `${currentYear}-${iki(currentMonth + 1)}-01`;
+      const sonGun = new Date(currentYear, currentMonth + 1, 0).getDate();
+      const aySonu = `${currentYear}-${iki(currentMonth + 1)}-${iki(sonGun)}`;
+      onDonemGerekli(ayBasi, aySonu);
+    }, [currentYear, currentMonth, onDonemGerekli]);
 
     const isOperator = currentUser?.position === 'Operatör';
     const isMaviYaka = (currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position))) && !isOperator;
@@ -1595,10 +1611,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                                 if (phone.startsWith('0')) phone = '90' + phone.substring(1);
                                 else if (!phone.startsWith('90')) phone = '90' + phone;
 
-                                const kapora = parseInt(job.price || 0) * 0.10;
+                                const kapora = parseInt(job.price || 0) * 0.20; // Sözleşme 20. madde: %20 kapora
                                 const kaporaText = kapora > 0 ? kapora.toLocaleString('tr-TR') : '...';
 
-                                const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %10'u olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Denizbank\nAlıcı: Şenol Beşinci\nIBAN: TR 94 0013 4000 0262 9671 7000 01\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
+                                const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %20'si olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Denizbank\nAlıcı: Şenol Beşinci\nIBAN: TR 94 0013 4000 0262 9671 7000 01\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
                               window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
                             }} 
                             className="flex-1 min-w-0 px-1 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 shadow-sm whitespace-nowrap overflow-hidden"
@@ -2262,7 +2278,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col md:flex-row justify-between items-center gap-4 mb-4 shrink-0">
           <div>
             <h2 className="text-2xl font-black text-black flex items-center gap-2">
-              <Star className="w-7 h-7 text-yellow-500 fill-yellow-500" /> Haftalık Puantaj Tahtası
+              <Star className="w-7 h-7 text-yellow-500 fill-yellow-500" /> Haftalık Puantaj Takip
             </h2>
             <p className="text-sm font-medium text-neutral-500 mt-1">Mavi yaka personellerinin haftalık kazandığı puanları buradan takip edebilirsiniz.</p>
           </div>
@@ -3311,8 +3327,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
   export const AddVehicleView = ({ onAdd, onCancel }) => {
     const [formData, setFormData] = useState({
-      plate: '', type: 'Kamyon', capacity: [], volume: '', km: '', model: '', color: 'Beyaz', transmission: 'Manuel', ruhsatFoto: '', vehiclePhoto: '', requiredLicense: 'Küçük Ehliyet', tonnage: ''
+      plate: '', type: 'Kamyon', capacity: [], volume: '', km: '', model: '', color: 'Beyaz', transmission: 'Manuel', ruhsatFoto: '', vehiclePhoto: '', requiredLicense: 'Küçük Ehliyet', tonnage: '',
+      // YENİ: Sigorta (trafik) ve Kasko maliyet + yenileme tarihi bilgileri
+      sigortaTutari: '', sigortaBitis: '', sigortaSirketi: '',
+      kaskoTutari: '', kaskoBitis: '', kaskoSirketi: '',
+      // YENİ: Araca ait birden fazla belge (ruhsat, poliçe, muayene, fatura...)
+      belgeler: []
     });
+    const [belgeYukleniyor, setBelgeYukleniyor] = useState(false);
 
     const handleRuhsatUpload = async (e) => {
       const file = e.target.files[0];
@@ -3330,6 +3352,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
         console.error('Ruhsat yükleme hatası:', err);
         setFormData(prev => ({ ...prev, ruhsatFoto: '' }));
       }
+    };
+
+    // YENİ: Birden fazla belge (fotoğraf/PDF) aynı anda yüklenebilir.
+    // Hatırlatmalar bölümündeki belge altyapısıyla aynı yöntemi kullanır.
+    const handleBelgeYukle = async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      setBelgeYukleniyor(true);
+      const yeniler = [];
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+          const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
+          const text = await res.text();
+          let url = file.name;
+          try { const json = JSON.parse(text); url = json.url || json.fileName || json.file || text; } catch (err) { url = text.trim(); }
+          const uzanti = (file.name.split('.').pop() || '').toLowerCase();
+          const tip = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'].includes(uzanti) ? 'image' : (uzanti === 'pdf' ? 'pdf' : 'file');
+          yeniler.push({ url, name: file.name, type: tip, eklenme: new Date().toISOString() });
+        } catch (err) {
+          console.error('Belge yüklenemedi:', file.name, err);
+          alert(`"${file.name}" yüklenemedi.`);
+        }
+      }
+      setFormData(prev => ({ ...prev, belgeler: [...(prev.belgeler || []), ...yeniler] }));
+      setBelgeYukleniyor(false);
+      e.target.value = ''; // Aynı dosya tekrar seçilebilsin
+    };
+
+    // Yüklenen belgeyi listeden kaldırır
+    const belgeSil = (idx) => {
+      setFormData(prev => ({ ...prev, belgeler: (prev.belgeler || []).filter((_, i) => i !== idx) }));
     };
 
     const handleVehiclePhotoUpload = async (e) => {
@@ -3466,6 +3521,140 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
             )}
             <MediaCaptureMenu onChange={handleRuhsatUpload} buttonLabel="Ruhsat Fotoğrafı / Videosu Ekle" />
             {formData.ruhsatFoto === 'Yükleniyor...' && <p className="text-xs text-neutral-400 mt-1">Yükleniyor...</p>}
+          </div>
+
+          {/* ====================================================================
+              YENİ: SİGORTA (TRAFİK) VE KASKO MALİYETLERİ
+              Yıllık tutar, bitiş tarihi ve şirket bilgisi tutulur. Bitiş
+              tarihine 30 günden az kaldıysa uyarı rozeti gösterilir.
+              ==================================================================== */}
+          <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 space-y-4">
+            <label className="block text-sm font-bold text-black flex items-center gap-2">
+              <Shield className="w-4 h-4 text-red-600" /> Sigorta ve Kasko Maliyeti
+            </label>
+
+            {/* TRAFİK SİGORTASI */}
+            <div>
+              <p className="text-[11px] font-black text-neutral-500 uppercase mb-1.5">Trafik Sigortası</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-500 mb-1">Yıllık Tutar (₺)</label>
+                  <input type="number" step="0.01" min="0" value={formData.sigortaTutari}
+                    onChange={e => setFormData({ ...formData, sigortaTutari: e.target.value })}
+                    placeholder="Örn: 12500" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-500 mb-1">Bitiş Tarihi</label>
+                  <input type="date" value={formData.sigortaBitis}
+                    onChange={e => setFormData({ ...formData, sigortaBitis: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-500 mb-1">Sigorta Şirketi</label>
+                  <input value={formData.sigortaSirketi}
+                    onChange={e => setFormData({ ...formData, sigortaSirketi: e.target.value })}
+                    placeholder="Örn: Anadolu Sigorta" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+              </div>
+            </div>
+
+            {/* KASKO */}
+            <div>
+              <p className="text-[11px] font-black text-neutral-500 uppercase mb-1.5">Kasko</p>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-500 mb-1">Yıllık Tutar (₺)</label>
+                  <input type="number" step="0.01" min="0" value={formData.kaskoTutari}
+                    onChange={e => setFormData({ ...formData, kaskoTutari: e.target.value })}
+                    placeholder="Örn: 28000" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-500 mb-1">Bitiş Tarihi</label>
+                  <input type="date" value={formData.kaskoBitis}
+                    onChange={e => setFormData({ ...formData, kaskoBitis: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-500 mb-1">Kasko Şirketi</label>
+                  <input value={formData.kaskoSirketi}
+                    onChange={e => setFormData({ ...formData, kaskoSirketi: e.target.value })}
+                    placeholder="Örn: Axa Sigorta" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+              </div>
+            </div>
+
+            {/* TOPLAM + YENİLEME UYARISI */}
+            {(() => {
+              const sig = parseFloat(formData.sigortaTutari) || 0;
+              const kas = parseFloat(formData.kaskoTutari) || 0;
+              const toplam = sig + kas;
+              // Bitiş tarihine kalan gün sayısı
+              const kalanGun = (tarih) => {
+                if (!tarih) return null;
+                const fark = Math.ceil((new Date(tarih) - new Date()) / (1000 * 60 * 60 * 24));
+                return isNaN(fark) ? null : fark;
+              };
+              const sg = kalanGun(formData.sigortaBitis);
+              const kg = kalanGun(formData.kaskoBitis);
+              const uyarilar = [];
+              if (sg !== null && sg <= 30) uyarilar.push(sg < 0 ? `Trafik sigortası ${Math.abs(sg)} gün önce doldu` : `Trafik sigortası ${sg} gün sonra bitiyor`);
+              if (kg !== null && kg <= 30) uyarilar.push(kg < 0 ? `Kasko ${Math.abs(kg)} gün önce doldu` : `Kasko ${kg} gün sonra bitiyor`);
+              if (toplam === 0 && uyarilar.length === 0) return null;
+              return (
+                <div className="pt-3 border-t border-neutral-200 space-y-2">
+                  {toplam > 0 && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-bold text-neutral-600">Yıllık toplam sigorta gideri</span>
+                      <span className="text-sm font-black text-black">{toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ₺</span>
+                    </div>
+                  )}
+                  {uyarilar.map((u, i) => (
+                    <p key={i} className="text-[11px] font-black text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> {u}
+                    </p>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* ====================================================================
+              YENİ: ARAÇ BELGELERİ (BİRDEN FAZLA)
+              Poliçe, muayene, fatura vb. fotoğraf veya PDF olarak toplu eklenir.
+              ==================================================================== */}
+          <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+            <label className="block text-sm font-bold text-black mb-2 flex items-center gap-2">
+              <FolderOpen className="w-4 h-4 text-red-600" /> Araç Belgeleri
+              <span className="text-[10px] font-medium text-neutral-400">(fotoğraf / PDF — birden fazla seçilebilir)</span>
+            </label>
+
+            {/* Yüklenen belgelerin listesi */}
+            {(formData.belgeler || []).length > 0 && (
+              <div className="space-y-1.5 mb-3">
+                {formData.belgeler.map((b, i) => (
+                  <div key={i} className="flex items-center gap-2 bg-white border border-neutral-200 rounded-xl p-2">
+                    {b.type === 'image'
+                      ? <img src={b.url} alt={b.name} className="w-10 h-10 rounded-lg object-cover border border-neutral-200 shrink-0" />
+                      : <div className="w-10 h-10 rounded-lg bg-red-50 border border-red-100 flex items-center justify-center shrink-0"><FileText className="w-5 h-5 text-red-500" /></div>}
+                    <a href={b.url} target="_blank" rel="noopener noreferrer" className="flex-1 min-w-0 text-xs font-bold text-black hover:text-red-600 hover:underline truncate" title={b.name}>
+                      {b.name}
+                    </a>
+                    <button type="button" onClick={() => belgeSil(i)} className="p-1.5 text-neutral-300 hover:text-red-600 transition shrink-0" title="Belgeyi kaldır">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Çoklu dosya seçici */}
+            <label className={`w-full py-2.5 rounded-xl border-2 border-dashed cursor-pointer flex items-center justify-center gap-2 text-sm font-black transition ${belgeYukleniyor ? 'border-neutral-200 text-neutral-300 cursor-wait' : 'border-red-300 text-red-600 hover:bg-red-50'}`}>
+              {belgeYukleniyor ? <><Loader2 className="w-4 h-4 animate-spin" /> Yükleniyor...</> : <><PlusCircle className="w-4 h-4" /> Belge Ekle</>}
+              <input type="file" multiple accept="image/*,application/pdf" onChange={handleBelgeYukle} disabled={belgeYukleniyor} className="hidden" />
+            </label>
+            {(formData.belgeler || []).length > 0 && (
+              <p className="text-[10px] font-bold text-neutral-400 mt-1.5 text-center">{formData.belgeler.length} belge eklendi</p>
+            )}
           </div>
 
           {/* YENİ: Araç Fotoğrafı */}
@@ -5049,6 +5238,12 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
   };
 
   export const SkillScoreBadge = ({ person, skillsMap }) => {
+    // KULLANICI İSTEĞİ (15.08.2026): "Özellikler" puan sistemi tamamen
+    // kaldırıldı — hiç yapılmamış gibi davranılır. Bileşen, çağrıldığı hiçbir
+    // yerde (Personel Tahtası, Ekip Kurma Tahtası, iş kartları) görünmez.
+    // Çağıran satırlara dokunulmadığı için hiçbir ekran bozulmaz.
+    return null;
+    // eslint-disable-next-line no-unreachable
     const [showPopup, setShowPopup] = useState(false);
     const personSkills = (skillsMap && skillsMap[String(person.id)]) || {};
     const visibleDefs = PERSONNEL_SKILL_DEFS.filter(s => isSkillVisibleForPerson(s, person));
@@ -5233,6 +5428,10 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     const [skillAdjustments, setSkillAdjustments] = useState([]);
     useEffect(() => {
       if (!personId || !db) return;
+      // Özellikler bölümü kaldırıldığı için bu veriye artık gerek yok;
+      // dinleyici hiç kurulmaz (gereksiz Firestore okuması yapılmaz).
+      return;
+      // eslint-disable-next-line no-unreachable
       const unsubAdj = onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'personnelSkillAdjustments'), where('personnelId', '==', String(personId))), snap => {
         setSkillAdjustments(snap.docs.map(d => ({ ...d.data(), id: d.id })).sort((a, b) => new Date(b.date) - new Date(a.date)));
       }, console.error);
@@ -5599,7 +5798,10 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     // Asansör Operatörü hariç.
     const isMaviYakaPerson = person && (person.collarType === 'Mavi Yaka' || (!person.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Operatör'].includes(person.position)));
     const skillsHiddenPositions = ['Temizlik Görevlisi', 'Operatör'];
-    const showSkillsSection = isMaviYakaPerson && !skillsHiddenPositions.includes(person?.position);
+    // KULLANICI İSTEĞİ (15.08.2026): "Özellikler" bölümü kaldırıldı — hiç
+    // yapılmamış gibi. Panel, "Personeli Değerlendir" butonu ve modalı hiçbir
+    // personelde gösterilmez. (Eski hesap kodu zararsız şekilde dosyada durur.)
+    const showSkillsSection = false;
     const visibleSkillDefs = PERSONNEL_SKILL_DEFS.filter(s => isSkillVisibleForPerson(s, person));
     const avgSkill = visibleSkillDefs.length > 0
       ? Math.round(visibleSkillDefs.reduce((sum, s) => sum + (typeof skills[s.key] === 'number' ? skills[s.key] : 50), 0) / visibleSkillDefs.length)
@@ -8594,8 +8796,8 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
 
     const getColumnPersonnel = (matches) => {
        return filteredList.filter(p => matches.includes(p.position)).sort((a, b) => {
-           const skillDiff = computeAvgSkillForPerson(b, skillsMap) - computeAvgSkillForPerson(a, skillsMap);
-           if (skillDiff !== 0) return skillDiff;
+           // Özellik puanı kaldırıldığı için puana göre sıralama da kaldırıldı;
+           // sıralama sonraki kriterlerle (isim vb.) devam eder.
            // Rütbeye göre sıralama (Müdür > Ekip Şefi > Heryerden Usta/Kalfa > Standart)
            const rankOrder = { 'Müdür': 1, 'Ekip Şefi': 2, 'Heryerden Usta': 3, 'Kalfa': 3, 'Asistan': 4, 'Standart': 5 };
            return (rankOrder[a.rank] || 99) - (rankOrder[b.rank] || 99);
@@ -10170,8 +10372,8 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         const orderA = posOrder[a.position] || 99;
         const orderB = posOrder[b.position] || 99;
         if (orderA !== orderB) return orderA - orderB;
-        const skillDiff = computeAvgSkillForPerson(b, skillsMap) - computeAvgSkillForPerson(a, skillsMap);
-        if (skillDiff !== 0) return skillDiff;
+        // Özellik puanı kaldırıldı; puana göre sıralama yapılmaz,
+        // sıralama sonraki kriterle (isim) devam eder.
         return a.fullName.localeCompare(b.fullName);
     });
     
@@ -13772,11 +13974,11 @@ export const KILAVUZ_VARSAYILAN = [
           'Konuştuğun her müşteriyi (isim, telefon, cevaplar) not defterine/CRM\'e yazmak, tek bir kayıtsız arama bırakmamak',
           'Saat 10:30\'dan sonra tüm cevapsız aramaları tek tek geri aramak',
           'WhatsApp (hem cep hem sabit hat) ve Instagram mesajlarını yanıtlamak, günde 3 Instagram paylaşımı yapmak',
-          'Video gelince net fiyatı verip Sembol CRM\'de kaydı açmak, %10 kapora isteyip sözleşmeyi PDF olarak göndermek',
+          'Video gelince net fiyatı verip Sembol CRM\'de kaydı açmak, %20 kapora isteyip sözleşmeyi PDF olarak göndermek',
         ],
         kurallar: [
           '7 soru fiyatın kalbidir — video/foto gelmeden KESİN fiyat asla verilmez, sadece "ortalama" denir',
-          'Kayıt taşımadan 15 gün öncesine kadar açılabilir; kayıt açan müşteriden iş fiyatının %10\'u kapora alınır',
+          'Kayıt taşımadan 15 gün öncesine kadar açılabilir; kayıt açan müşteriden iş fiyatının %20\'si kapora alınır',
           'Sözleşmedeki güvenlik/teslim kodunu müşteriye anlat — eşya ancak bu kodla teslim edilir',
           'Taşımaya 72 saatten fazla varsa iptal/erteleme kapora hariç ücretsizdir; 72 saatten az kalan iptalde toplam bedelin %50\'si cayma tazminatıdır',
           'Yapılmayan hizmetleri baştan söyle: klima söküm-montajı, duvar montajı, elektrik işleri yapılmaz; avize/perde/ankastre sökülür ama montajı yapılmaz',
@@ -13791,7 +13993,7 @@ export const KILAVUZ_VARSAYILAN = [
           { baslik: '5. Ortalama Fiyat Ver + Video İste', detay: '"Video atarsanız fiyatta yardımcı oluruz" — kesin fiyat videoya bağlıdır.' },
           { baslik: '6. Kaydet', detay: 'İsim, telefon ve verdiğin cevapları not defterine/CRM\'e yaz, bilgilendirme mesajı gönder.' },
           { baslik: '7. Teyit + Kapat', detay: 'Özetle, ofise davet et, kibarca kapat.' },
-          { baslik: '8. Takip + Sözleşme', detay: 'Video gelince net fiyatı ver, %10 kapora al, sözleşmeyi PDF olarak gönder.' },
+          { baslik: '8. Takip + Sözleşme', detay: 'Video gelince net fiyatı ver, %20 kapora al, sözleşmeyi PDF olarak gönder.' },
         ],
         avantajlar: [
           'Ekibin tamamı kadrolu — günübirlik/dışarıdan işçi yok; eşyaya kimin dokunduğunu biliyoruz',
@@ -13804,7 +14006,7 @@ export const KILAVUZ_VARSAYILAN = [
           { baslik: 'Karşılama', metin: '"Sembol Nakliyat, ben [adın], hayırlı günler, nasıl yardımcı olabilirim?"' },
           { baslik: 'Fiyat Verme', metin: '"Bu taşıma için ortalama fiyatımız [X] TL. Eşyanın videosunu/fotoğrafını atarsanız fiyatı netleştirebiliriz."' },
           { baslik: 'Video İsteme', metin: '"Fiyatta yardımcı olabilmemiz için eşyaların videosunu/fotoğrafını WhatsApp\'tan gönderin."' },
-          { baslik: 'Kapora', metin: '"Tarihinizi kesinleştirmek için %10 kapora alıyoruz, kalanı iş bitiminde."' },
+          { baslik: 'Kapora', metin: '"Tarihinizi kesinleştirmek için %20 kapora alıyoruz, kalanı iş bitiminde."' },
           { baslik: 'Kapatma', metin: '"Aradığınız için teşekkürler, iyi günler dilerim."' },
         ],
         itirazlar: [
@@ -13842,7 +14044,7 @@ export const KILAVUZ_VARSAYILAN = [
           'Video istemek (hem hangi depoya sığacağını hem nakliye fiyatını netleştirir) ve depoya ziyarete davet etmek',
           'Konuştuğun her müşteriyi not defterine/CRM\'e yazmak; özellikle süresi dolmak üzere olan depolama müşterilerini takip etmek',
           'Saat 10:30\'dan sonra cevapsız aramaları geri aramak, WhatsApp/Instagram yönetmek',
-          'Video onaylanınca Depoevim CRM\'de NAKLİYE kaydı açmak, %10 kapora almak (depo sözleşmesi eşya depoya konduktan SONRA yapılır)',
+          'Video onaylanınca Depoevim CRM\'de NAKLİYE kaydı açmak, %20 kapora almak (depo sözleşmesi eşya depoya konduktan SONRA yapılır)',
         ],
         kurallar: [
           'Aylık depo fiyatı İLK 2 soruda (eşya cinsi + kaç+1) hemen söylenir — nakliye soruları yalnızca müşteri nakliyeyi bizden isterse sorulur',
@@ -14390,6 +14592,17 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
   const [silinecekId, setSilinecekId] = useState(null);
   // YENİ: Görev atanacak personeli aramak için arama kutusu metni
   const [personelArama, setPersonelArama] = useState('');
+  // YENİ: "İlgili" alanındaki (Personel / Müşteri / Araç) arama kutusu.
+  // Uzun listelerde aranan kaydı yazarak bulmayı sağlar.
+  const [ilgiliArama, setIlgiliArama] = useState('');
+  // Türkçe karakter duyarsız arama: kullanıcı "sen" yazınca "Şenol",
+  // "ınan" yazınca "İnan" da bulunsun diye harfleri sadeleştirir.
+  const aramaNormalize = (metin) => String(metin || '')
+    .toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i').replace(/İ/g, 'i')
+    .replace(/ş/g, 's').replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u').replace(/ö/g, 'o').replace(/ç/g, 'c')
+    .replace(/â/g, 'a').replace(/î/g, 'i').replace(/û/g, 'u');
 
   const bosForm = {
     tarih: bugunStr(), saat: '', tur: 'gorev', konu: 'Şirket',
@@ -14508,7 +14721,7 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
       }
 
       setSecilenGun(form.tarih); // Kaydedilen güne odaklan
-      setModalAcik(false); setDuzenlenenId(null); setForm(bosForm); setPersonelArama('');
+      setModalAcik(false); setDuzenlenenId(null); setForm(bosForm); setPersonelArama(''); setIlgiliArama('');
     } catch (e) { console.error('Hatırlatma kaydedilemedi:', e); alert('Kaydedilemedi, tekrar deneyin.'); }
     setKaydediliyor(false);
   };
@@ -14537,6 +14750,7 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
       atananPersonelId: kayit.atananPersonelId || '', atananPersonelAdi: kayit.atananPersonelAdi || '' });
     setDuzenlenenId(kayit.id);
     setPersonelArama('');
+    setIlgiliArama('');
     setModalAcik(true);
   };
 
@@ -14811,9 +15025,9 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
                       </div>
                       {/* Arama sonuçları — yazmaya başlayınca eşleşen personeller listelenir */}
                       {personelArama.trim().length > 0 && (() => {
-                        const q = personelArama.trim().toLowerCase();
+                        const q = aramaNormalize(personelArama.trim());
                         const sonuclar = personnelList
-                          .filter(p => p.employmentStatus !== 'Pasif' && (p.fullName || '').toLowerCase().includes(q))
+                          .filter(p => p.employmentStatus !== 'Pasif' && aramaNormalize(p.fullName).includes(q))
                           .slice(0, 8); // Uzun listeyi kısalt (performans + okunabilirlik)
                         return sonuclar.length > 0 ? (
                           <div className="mt-1.5 border border-neutral-200 rounded-xl overflow-hidden max-h-44 overflow-y-auto divide-y divide-neutral-100">
@@ -14846,7 +15060,7 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
                   {HATIRLATMA_KONULARI.map(kk => {
                     const Ikon = kk.ikon;
                     return (
-                      <button key={kk.id} type="button" onClick={() => setForm({ ...form, konu: kk.id, ilgili: '' })}
+                      <button key={kk.id} type="button" onClick={() => { setForm({ ...form, konu: kk.id, ilgili: '' }); setIlgiliArama(''); }}
                         className={`py-2 rounded-xl text-xs font-black border-2 transition flex items-center justify-center gap-1.5 ${form.konu === kk.id ? 'bg-black text-white border-black' : kk.renk}`}>
                         <Ikon className="w-3.5 h-3.5" /> {kk.id}
                       </button>
@@ -14861,10 +15075,54 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
                   <div>
                     <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">İlgili {form.konu === 'Personel' ? 'Personel' : form.konu === 'Müşteri' ? 'Müşteri' : form.konu === 'Araç' ? 'Araç' : ''} (Ops.)</label>
                     {secenekler ? (
-                      <select value={form.ilgili} onChange={e => setForm({ ...form, ilgili: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600 bg-white">
-                        <option value="">— Seç (opsiyonel) —</option>
-                        {secenekler.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
+                      /* ARANABİLİR SEÇİM: düz açılır liste yerine arama kutusu.
+                         Yazdıkça eşleşenler listelenir, tıklayınca seçilir. */
+                      form.ilgili ? (
+                        // Seçim yapıldıysa: seçileni göster + kaldır butonu
+                        <div className="flex items-center justify-between gap-2 bg-red-50 border-2 border-red-300 rounded-xl p-2.5">
+                          <span className="font-black text-sm text-red-800 truncate min-w-0">{form.ilgili}</span>
+                          <button type="button" onClick={() => { setForm({ ...form, ilgili: '' }); setIlgiliArama(''); }}
+                            className="text-red-400 hover:text-red-700 transition shrink-0" title="Seçimi kaldır">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="relative">
+                            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                            <input
+                              value={ilgiliArama}
+                              onChange={e => setIlgiliArama(e.target.value)}
+                              placeholder={`${form.konu === 'Personel' ? 'Personel' : form.konu === 'Müşteri' ? 'Müşteri' : form.konu === 'Araç' ? 'Araç/plaka' : 'Kayıt'} ara...`}
+                              className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600"
+                            />
+                          </div>
+                          {(() => {
+                            // Arama boşsa ilk 8 kayıt, doluysa eşleşenler gösterilir
+                            const q = aramaNormalize(ilgiliArama.trim());
+                            const sonuclar = (q ? secenekler.filter(x => aramaNormalize(x).includes(q)) : secenekler).slice(0, 8);
+                            if (sonuclar.length === 0) {
+                              return <p className="mt-1.5 text-[11px] font-bold text-neutral-400 px-1">Eşleşen kayıt bulunamadı.</p>;
+                            }
+                            return (
+                              <div className="mt-1.5 border border-neutral-200 rounded-xl overflow-hidden max-h-44 overflow-y-auto divide-y divide-neutral-100">
+                                {sonuclar.map(x => (
+                                  <button key={x} type="button"
+                                    onClick={() => { setForm({ ...form, ilgili: x }); setIlgiliArama(''); }}
+                                    className="w-full text-left px-3 py-2.5 hover:bg-red-50 transition text-sm font-bold text-black truncate">
+                                    {x}
+                                  </button>
+                                ))}
+                                {!q && secenekler.length > 8 && (
+                                  <p className="px-3 py-2 text-[10px] font-bold text-neutral-400 bg-neutral-50">
+                                    {secenekler.length} kayıttan ilk 8'i • aramak için yazın
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </>
+                      )
                     ) : (
                       <input value={form.ilgili} onChange={e => setForm({ ...form, ilgili: e.target.value })} placeholder="Örn: Paraşüt faturası, koli siparişi..." className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
                     )}
@@ -15230,7 +15488,7 @@ const useMesaiQrAyarlari = () => {
         if (islemYapildi) return;
         islemYapildi = true;
         const liste = Array.from({ length: 5 }, (_, i) => yeniQr(i));
-        await setDoc(qrConfigRef(), { qrList: liste, aktifQrId: 'qr1' });
+        await setDoc(qrConfigRef(), { qrList: liste, aktifQrIdler: ['qr1'] });
         return;
       }
 
@@ -15259,10 +15517,12 @@ const useMesaiQrAyarlari = () => {
         }));
         while (temiz.length < 5) temiz.push(yeniQr(temiz.length));
         // Aktif QR, kalan 5 kodun dışında kaldıysa ilk koda dönülür
-        const aktifGecerli = temiz.some(q => q.id === veri.aktifQrId);
+        // Eski tekil 'aktifQrId' alanı çoklu 'aktifQrIdler' dizisine taşınır
+        const eskiAktifler = Array.isArray(veri.aktifQrIdler) ? veri.aktifQrIdler : (veri.aktifQrId ? [veri.aktifQrId] : []);
+        const gecerliler = eskiAktifler.filter(id => temiz.some(q => q.id === id));
         await setDoc(qrConfigRef(), {
           qrList: temiz,
-          aktifQrId: aktifGecerli ? veri.aktifQrId : temiz[0].id
+          aktifQrIdler: gecerliler.length > 0 ? gecerliler : [temiz[0].id]
         });
         return; // Yazma sonrası onSnapshot yeniden tetiklenir
       }
@@ -15271,8 +15531,14 @@ const useMesaiQrAyarlari = () => {
     });
     return () => unsub();
   }, []);
-  const aktifQr = ayarlar?.qrList?.find(q => q.id === ayarlar?.aktifQrId) || null;
-  return { ayarlar, aktifQr };
+  // ÇOKLU AKTİF QR: Artık birden fazla kod aynı anda geçerli olabilir.
+  // Eski kayıtlarda yalnızca tekil 'aktifQrId' bulunduğu için ona da bakılır.
+  const aktifIdler = Array.isArray(ayarlar?.aktifQrIdler)
+    ? ayarlar.aktifQrIdler
+    : (ayarlar?.aktifQrId ? [ayarlar.aktifQrId] : []);
+  const aktifQrlar = (ayarlar?.qrList || []).filter(q => aktifIdler.includes(q.id));
+  const aktifQr = aktifQrlar[0] || null; // Geriye dönük uyumluluk (başlıkta ilk kod)
+  return { ayarlar, aktifQr, aktifQrlar, aktifIdler };
 };
 
 // NOT: Modül Aktif/Pasif anahtarı (useMesaiModulAktif + MesaiModulSwitch)
@@ -15432,14 +15698,21 @@ export const QrTarayiciModal = ({ tip, currentUser, onKapat }) => {
       const izin = await izinDurumuGetir(currentUser, mesaiBugunStr());
       if (izin.izinli) throw new Error(`Bugün ${izin.etiket.toLocaleUpperCase('tr-TR')} olduğunuz için mesai kaydı oluşturulamaz. Bir hata olduğunu düşünüyorsanız yöneticinizle görüşün.`);
 
-      const aktif = veri?.qrList?.find(q => q.id === veri?.aktifQrId);
-      if (!aktif) throw new Error('Aktif QR kod tanımlı değil. İK > Mesai Takip > QR Yönetimi bölümünden bir QR aktifleştirin.');
+      // ÇOKLU AKTİF QR: okutulan kod, aktif kodlardan HERHANGİ biriyle eşleşirse geçerlidir.
+      const aktifIdListesi = Array.isArray(veri?.aktifQrIdler)
+        ? veri.aktifQrIdler
+        : (veri?.aktifQrId ? [veri.aktifQrId] : []);
+      const aktifKodlar = (veri?.qrList || []).filter(q => aktifIdListesi.includes(q.id));
+      if (aktifKodlar.length === 0) throw new Error('Aktif QR kod tanımlı değil. İK > Mesai Takip > QR Yönetimi bölümünden en az bir QR aktifleştirin.');
 
       // TEK KOD DOĞRULAMASI: Artık 15 haneli ayrı bir kod yok. QR karekodun
       // içeriği de, elle girilen kod da aynı seri koddur (SMB-XXXX-XXXX).
       // Karşılaştırma tire ve boşluklardan bağımsız, büyük harfe çevrilerek yapılır.
       const sadelestir = (d) => String(d || '').toLocaleUpperCase('tr-TR').replace(/[\s-]/g, '');
-      const eslesti = sadelestir(kod) === sadelestir(aktif.manuelKod);
+      // Hangi aktif kodun okutulduğu da kayda yazılabilsin diye eşleşen kod bulunur
+      const eslesenKod = aktifKodlar.find(q => sadelestir(kod) === sadelestir(q.manuelKod)) || null;
+      const eslesti = !!eslesenKod;
+      const aktif = eslesenKod || aktifKodlar[0];
       if (!eslesti) throw new Error(yontem === 'kamera' ? 'Okutulan QR kod aktif mesai koduyla eşleşmiyor. Ofis girişindeki güncel kodu okutun.' : 'Girilen seri kod hatalı. QR kodun altındaki kodu kontrol edin.');
 
       const kayit = {
@@ -15980,7 +16253,7 @@ const QrGorsel = ({ deger, boyut = 140 }) => {
 // MODÜL PASİF ise sayfa içeriği gizlenir, sadece bilgi ekranı gösterilir.
 // ---------------------------------------------------------------------------
 export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onViewProfile }) => {
-  const { ayarlar, aktifQr } = useMesaiQrAyarlari();
+  const { ayarlar, aktifQr, aktifQrlar, aktifIdler } = useMesaiQrAyarlari();
   const [sekme, setSekme] = useState('kayitlar'); // "Bugünkü Durum" kaldırıldı, varsayılan Tüm Kayıtlar
   // OKUMA OPTİMİZASYONU: kayıtlar artık kapsamı daraltılmış iki ayrı state'te tutulur
   const [gunlukKayitlar, setGunlukKayitlar] = useState([]); // Seçili günün kayıtları
@@ -16298,7 +16571,18 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   };
 
   // QR YÖNETİMİ işlemleri
-  const qrAktifYap = async (id) => { await updateDoc(qrConfigRef(), { aktifQrId: id }); };
+  // ÇOKLU AKTİF: bir kodu aktif/pasif yapar. Güvenlik gereği en az BİR kod
+  // aktif kalmalıdır; son aktif kodu kapatmaya çalışılırsa uyarı verilir.
+  const qrAktifDegistir = async (id) => {
+    const mevcut = Array.isArray(aktifIdler) ? [...aktifIdler] : [];
+    const acik = mevcut.includes(id);
+    if (acik && mevcut.length === 1) {
+      alert('En az bir QR kod aktif kalmalıdır. Önce başka bir kodu aktif edin.');
+      return;
+    }
+    const yeni = acik ? mevcut.filter(x => x !== id) : [...mevcut, id];
+    await updateDoc(qrConfigRef(), { aktifQrIdler: yeni });
+  };
   const qrYenile = async (id) => {
     if (!window.confirm('Bu QR kodun içeriği ve seri kodu YENİLENECEK. Duvardaki eski çıktı geçersiz olur. Devam edilsin mi?')) return;
     // Yalnızca seri kod yenilenir (15 haneli ayrı kod artık yok)
@@ -16323,7 +16607,19 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
         <div>
           <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><QrCode className="w-7 h-7" /> Mesai Takip Bölümü</h2>
           <p className="text-white/80 text-xs md:text-sm font-bold mt-1">QR kod + konum doğrulamalı personel mesai giriş/çıkış takibi • Mavi Yaka &amp; Beyaz Yaka</p>
-          {aktifQr && <p className="mt-2 inline-flex items-center gap-2 text-[11px] font-black bg-white/15 px-3 py-1 rounded-full"><Shield className="w-3.5 h-3.5" /> Aktif Kod: {aktifQr.ad} • Seri: {aktifQr.manuelKod}</p>}
+          {/* ÇOKLU AKTİF: aktif kodların tamamı listelenir */}
+          {(aktifQrlar || []).length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {aktifQrlar.map(q => (
+                <span key={q.id} className="inline-flex items-center gap-2 text-[11px] font-black bg-white/15 px-3 py-1 rounded-full">
+                  <Shield className="w-3.5 h-3.5" /> {q.ad} • {q.manuelKod}
+                </span>
+              ))}
+              {aktifQrlar.length > 1 && (
+                <span className="inline-flex items-center text-[10px] font-black bg-white/25 px-2.5 py-1 rounded-full">{aktifQrlar.length} kod aktif</span>
+              )}
+            </div>
+          )}
         </div>
         {/* NOT: Buradaki "GİRİŞ ONAYLA / ÇIKIŞ ONAYLA" butonları kullanıcı isteğiyle
             KALDIRILDI. Personel mesai onayını yalnızca ANA SAYFADAN yapar. */}
@@ -16461,8 +16757,28 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                       const kod = satirDurumKodu(g);
                       return fDurum === 'yok' ? !kod : kod === fDurum;
                     })
-                    // ALFABETİK SIRA: Türkçe harf sırasına göre ada göre, eşitse tarihe göre
+                    // ==================================================================
+                    // SIRALAMA: önce DURUM GRUBU, her grubun içinde ALFABETİK (Türkçe)
+                    //   1) İşe gelenler      (giriş basmış veya durumu G/FM/EM/FG/FGM)
+                    //   2) Devamsızlar       (D)
+                    //   3) Haftalık izinliler (Hİ)
+                    //   4) Diğer izinliler   (Yİ / Bİ / Üİ / R / İB)
+                    //   5) Durumu belirsizler (en sonda)
+                    // ==================================================================
                     .sort((a, b) => {
+                      const grupNo = (satir) => {
+                        const kod = satirDurumKodu(satir);
+                        // Giriş basmışsa her hâlükârda "gelenler" grubuna girer
+                        if (satir.giris) return 1;
+                        if (['G', 'FM', 'EM', 'FG', 'FGM'].includes(kod)) return 1; // Geldi sayılan durumlar
+                        if (kod === 'D') return 2;                                   // Devamsız
+                        if (kod === 'Hİ') return 3;                                  // Haftalık izin
+                        if (['Yİ', 'Bİ', 'Üİ', 'R', 'İB'].includes(kod)) return 4;   // Diğer izinler/rapor
+                        return 5;                                                    // Durumu girilmemiş
+                      };
+                      const fark = grupNo(a) - grupNo(b);
+                      if (fark !== 0) return fark;
+                      // Aynı grup içinde: Türkçe alfabetik, eşitse en yeni tarih üstte
                       const ad = (a.personnelName || '').localeCompare(b.personnelName || '', 'tr');
                       return ad !== 0 ? ad : (b.dateStr || '').localeCompare(a.dateStr || '');
                     });
@@ -16621,7 +16937,7 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
             {(ayarlar?.qrList || []).map(q => {
-              const aktif = ayarlar?.aktifQrId === q.id;
+              const aktif = (aktifIdler || []).includes(q.id);
               return (
                 <div key={q.id} className={`bg-white rounded-2xl border-2 p-4 flex flex-col items-center gap-3 transition ${aktif ? 'border-emerald-500 shadow-lg shadow-emerald-500/20' : 'border-neutral-200'}`}>
                   <div className="w-full flex justify-between items-center">
@@ -16635,7 +16951,8 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                       TAMAMEN kaldırıldı. Kartta yalnızca QR karekod ve altındaki
                       seri kod (elle giriş kodu) gösterilir. */}
                   <div className="w-full grid grid-cols-3 gap-1.5">
-                    <button onClick={() => qrAktifYap(q.id)} disabled={aktif} className={`py-2 rounded-lg text-[10px] font-black ${aktif ? 'bg-neutral-100 text-neutral-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>Aktif Yap</button>
+                    {/* AÇ/KAPA: aktifse "Pasif Yap", değilse "Aktif Yap" */}
+                    <button onClick={() => qrAktifDegistir(q.id)} className={`py-2 rounded-lg text-[10px] font-black transition ${aktif ? 'bg-neutral-200 text-neutral-700 hover:bg-neutral-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{aktif ? 'Pasif Yap' : 'Aktif Yap'}</button>
                     <button onClick={() => qrPdfIndir(q)} className="py-2 rounded-lg text-[10px] font-black bg-black text-white hover:bg-neutral-800 flex items-center justify-center gap-1"><Download className="w-3 h-3" /> PDF İndir</button>
                     <button onClick={() => qrYenile(q.id)} className="py-2 rounded-lg text-[10px] font-black bg-neutral-100 text-neutral-600 hover:bg-neutral-200 flex items-center justify-center gap-1"><RefreshCw className="w-3 h-3" /> Yenile</button>
                   </div>
@@ -16688,7 +17005,7 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
             <div className="p-4 bg-gradient-to-r from-blue-600 to-indigo-700 text-white flex justify-between items-center">
               <div>
                 <h3 className="font-black flex items-center gap-2"><Edit className="w-5 h-5" /> Mesai Durumu Düzenle</h3>
-                <p className="text-xs font-bold opacity-90">{durumDuzenle.kayit.personnelName} • {durumDuzenle.kayit.dateStr?.split('-').reverse().join('.')}</p>
+                <p className="text-xs font-bold opacity-90">{durumDuzenle.kayit?.personnelName} • {durumDuzenle.kayit?.dateStr?.split('-').reverse().join('.')}</p>
               </div>
               <button onClick={() => setDurumDuzenle(null)} className="p-2 bg-white/20 rounded-full hover:bg-white/30"><X className="w-5 h-5" /></button>
             </div>
@@ -16742,8 +17059,13 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
 
               <div className="flex gap-2">
                 <button onClick={() => setDurumDuzenle(null)} className="flex-1 py-3 rounded-xl bg-neutral-100 text-neutral-700 font-black text-sm hover:bg-neutral-200">Vazgeç</button>
+                {/* DÜZELTME ("Cannot read properties of null (reading 'kayit')"):
+                    Bu buton yanlışlıkla SAAT düzenleme modalının state'ini
+                    (saatDuzenle) okuyordu; o pencere kapalıyken değeri null
+                    olduğu için düzenle butonuna basınca uygulama çöküyordu.
+                    Metin artık sabit ve doğru state'e bağlı. */}
                 <button onClick={durumKaydet} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-black text-sm hover:bg-blue-700 flex items-center justify-center gap-2 shadow-lg">
-                  <Save className="w-4 h-4" /> {saatDuzenle.kayit ? 'Kaydet ve Kilitle' : 'Elle Ekle ve Kilitle'}
+                  <Save className="w-4 h-4" /> Kaydet ve Kilitle
                 </button>
               </div>
             </div>
