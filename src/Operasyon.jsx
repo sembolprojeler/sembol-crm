@@ -17347,7 +17347,7 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                         </td>
                       </tr>
                     )}
-                    // Hiç QR/kod girişi olmayan satırlar hafif kırmızı zeminle işaretlenir
+                    {/* Hiç QR/kod girişi olmayan satırlar hafif kırmızı zeminle işaretlenir */}
                     <tr className={`border-b border-neutral-100 transition ${g.kayitYok ? 'bg-red-50/40 hover:bg-red-50' : 'hover:bg-neutral-50'}`}>
                       {/* PERSONEL: isme tıklanınca personel profiline gidilir */}
                       <td className="py-2.5 pr-3">
