@@ -868,6 +868,19 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
   };
 
 
+  // Bir işin GERÇEK kayıt (oluşturulma) zamanı. Eski aktarımlarda taşıma tarihi
+  // 2029/2030/2032 gibi ileri tarihler olabildiği için sıralamada taşıma tarihi
+  // yerine bu değer kullanılır. Gelecek tarihli/eksik değerler güvenilmez sayılır.
+  const musteriKayitZamani = (job) => {
+    const ham = job?.createdAt || job?.createdDate || job?.kayitTarihi || job?.timestamp;
+    if (!ham) return null;
+    const t = (typeof ham === 'object' && ham.seconds) ? new Date(ham.seconds * 1000) : new Date(ham);
+    if (isNaN(t.getTime())) return null;
+    const ustSinir = new Date(); ustSinir.setDate(ustSinir.getDate() + 1);
+    if (t > ustSinir) return null;
+    return t.getTime();
+  };
+
   export const CustomerListView = ({ jobs, title, handleEditJob, onViewCari }) => {
     const [searchQuery, setSearchQuery] = useState('');
     // YENİ: Kategori sekmesi — "Özel Müşteriler" ve "Kara Liste" artık sol menüde değil,
@@ -916,7 +929,9 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
             jobCount: 1,
             totalRevenue: Number(job.price) || 0,
             lastJobDate: job.date,
-            latestJob: job
+            latestJob: job,
+            // YENİ: sıralama için müşterinin EN SON KAYDEDİLEN işinin kayıt zamanı
+            sonKayitZamani: musteriKayitZamani(job)
         });
       } else {
         const c = customersMap.get(phoneKey);
@@ -932,13 +947,25 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
             c.lastJobDate = job.date;
             c.latestJob = job;
         }
+        // Sıralama ölçütü ayrı tutulur: en YENİ KAYIT zamanı
+        const kz = musteriKayitZamani(job);
+        if (kz !== null && (c.sonKayitZamani === null || kz > c.sonKayitZamani)) {
+            c.sonKayitZamani = kz;
+        }
         if (job.isSpecial) c.isSpecial = true;
       }
     });
 
     const customers = Array.from(customersMap.values())
       .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.phone.includes(searchQuery))
-      .sort((a, b) => new Date(b.lastJobDate) - new Date(a.lastJobDate));
+      // SIRALAMA: en yeni KAYITTAN en eskiye. Kayıt zamanı bilinmeyenler en sonda.
+      .sort((a, b) => {
+        const ka = a.sonKayitZamani, kb = b.sonKayitZamani;
+        if (ka === null && kb === null) return new Date(b.lastJobDate) - new Date(a.lastJobDate);
+        if (ka === null) return 1;
+        if (kb === null) return -1;
+        return kb - ka;
+      });
 
     // Arama veya kategori değişince ilk sayfaya dön; yalnızca aktif sayfa render edilir
     useEffect(() => { setSayfa(1); }, [searchQuery, kategori]);
