@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './Operasyon.jsx';
@@ -2820,9 +2820,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // ÇÖZÜM:
     //  1) CANLI KATMAN (canliIsler): yalnızca SON 30 GÜN, limit 200. Anlık akış,
     //     rozetler, bugünün işleri ve arama bu katmandan beslenir.
-    //  2) ARŞİV KATMANI (arsivIsler): geçmiş veriler CANLI DİNLENMEZ. Geçmiş
-    //     gerektiren ekranlar açıldığında getDocs ile 3 AYLIK PARÇALAR halinde
-    //     bir kereye mahsus okunur ("Daha Fazla Yükle").
+    //  2) ARŞİV KATMANI (arsivIsler): TÜM geçmiş, oturum açılınca arka planda
+    //     bir kez yüklenir. Kalıcı yerel önbellek sayesinde sonraki açılışlarda
+    //     ücretli okuma yapılmaz (ayrıntı: "TAM GEÇMİŞ YÜKLEYİCİ" bölümü).
     //  3) Aşağıdaki 'jobs' değişkeni iki katmanın BİRLEŞİMİdir; bu sayede
     //     mevcut tüm ekranlar, istatistikler ve arama kartları hiç
     //     değiştirilmeden aynı şekilde çalışmaya devam eder.
@@ -2830,7 +2830,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [canliIsler, setCanliIsler] = useState([]);   // Son 30 gün (realtime)
     const [arsivIsler, setArsivIsler] = useState([]);   // Geçmiş (getDocs, isteğe bağlı)
     // Arşivin nereye kadar yüklendiği ve durum bilgisi
-    const [arsivDurum, setArsivDurum] = useState({ sinirTarihi: null, yukleniyor: false, bitti: false, parcaSayisi: 0 });
+    // NOT: Eski parçalı arşiv durumu kaldırıldı (artık tüm geçmiş otomatik yükleniyor).
 
     // BİRLEŞİK LİSTE: aynı id iki katmanda varsa canlı olan (güncel) kazanır
     const jobs = useMemo(() => {
@@ -2842,78 +2842,79 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     }, [canliIsler, arsivIsler]);
 
     // ========================================================================
-    // ARŞİV YÜKLEYİCİ (getDocs + sayfalama)
-    // Geçmiş işler CANLI DİNLENMEZ. Bu fonksiyon her çağrıldığında 3 AYLIK bir
-    // parçayı bir kereye mahsus okur ve arşive ekler. Tarih ARALIĞI ile
-    // sayfalandığı için mükerrer okuma veya atlanan kayıt olmaz.
+    // TAM GEÇMİŞ YÜKLEYİCİ (önbellek öncelikli)
+    //
+    // İSTEK: "Daha Fazla Yükle" düğmeleri olmasın; tüm işler, müşteriler ve
+    // cariler her zaman görünsün.
+    //
+    // SORUN: Tüm geçmişi (~17.000 kayıt) HER sayfa açılışında sunucudan çekmek
+    // 19 kullanıcı için aylık ~97 MİLYON okuma demekti — daha önce düzelttiğimiz
+    // fatura sorunundan bile büyük.
+    //
+    // ÇÖZÜM: Firestore'un KALICI YEREL ÖNBELLEĞİ (IndexedDB, shared.tsx'te açıldı)
+    //   1) Önce ÖNBELLEKTEN okunur -> ücretli okuma YOK, veri anında gelir.
+    //   2) Önbellek boşsa (ilk giriş) sunucudan bir kez indirilip diske yazılır.
+    //   3) Günde bir kez sunucudan sessizce tazelenir (başka kullanıcıların
+    //      değişiklikleri yansısın diye). Son tazeleme localStorage'da tutulur.
+    //   4) Son 30 günün canlı dinleyicisi zaten açık; güncel işler anında yansır.
     // ========================================================================
-    const ARSIV_PARCA_AY = 3;    // Her "Daha Fazla Yükle" 3 ay geriye gider
-    const ARSIV_PARCA_LIMIT = 500; // Bir parçada okunacak en fazla doküman
-    const arsivYukleniyorRef = useRef(false); // Çift tıklama/çift çağrı koruması
+    const [gecmisDurum, setGecmisDurum] = useState({ yukleniyor: false, kaynak: null, adet: 0 });
+    const gecmisYuklendiRef = useRef(false);
 
-    const arsivParcaYukle = useCallback(async () => {
-      if (!firebaseUser) return;
-      if (arsivYukleniyorRef.current || arsivDurum.yukleniyor || arsivDurum.bitti) return;
-      const ustSinir = arsivDurum.sinirTarihi;
-      if (!ustSinir) return; // Canlı katman henüz kurulmadı
+    const tumGecmisiYukle = useCallback(async () => {
+      if (!firebaseUser || gecmisYuklendiRef.current) return;
+      gecmisYuklendiRef.current = true;
+      setGecmisDurum(prev => ({ ...prev, yukleniyor: true }));
 
-      arsivYukleniyorRef.current = true;
-      setArsivDurum(prev => ({ ...prev, yukleniyor: true }));
-      try {
-        const alt = new Date(ustSinir);
-        alt.setMonth(alt.getMonth() - ARSIV_PARCA_AY);
-        const altSinir = alt.toISOString().split('T')[0];
+      const TAZELEME_ANAHTARI = 'sembol_tumGecmis_sonTazeleme';
+      const TAZELEME_ARALIGI = 24 * 60 * 60 * 1000; // 24 saat
+      const isColRef = collection(db, 'artifacts', appId, 'public', 'data', 'jobs');
+      const tumIslerSorgu = query(isColRef, orderBy('date', 'desc'));
 
-        const snap = await getDocs(query(
-          collection(db, 'artifacts', appId, 'public', 'data', 'jobs'),
-          where('date', '>=', altSinir),
-          where('date', '<', ustSinir),
-          orderBy('date', 'desc'),
-          limit(ARSIV_PARCA_LIMIT)
-        ));
-        const parca = snap.docs.map(d => ({ ...d.data(), id: d.id }));
-
-        // Aynı id'yi iki kez eklememek için birleştirme
+      const yaz = (snap, kaynak) => {
+        const gelen = snap.docs.map(d => ({ ...d.data(), id: d.id }));
         setArsivIsler(prev => {
           const harita = new Map(prev.map(j => [j.id, j]));
-          parca.forEach(j => harita.set(j.id, j));
+          gelen.forEach(j => harita.set(j.id, j));
           return [...harita.values()];
         });
+        setGecmisDurum({ yukleniyor: false, kaynak, adet: gelen.length });
+      };
 
-        // 8 yıldan daha geriye gitmeye gerek yok; o noktada arşiv bitmiş sayılır
-        const enEski = new Date();
-        enEski.setFullYear(enEski.getFullYear() - 8);
-        const bittiMi = new Date(altSinir) <= enEski;
+      const sonTazeleme = Number(localStorage.getItem(TAZELEME_ANAHTARI) || 0);
+      const tazelemeGerekli = (Date.now() - sonTazeleme) > TAZELEME_ARALIGI;
 
-        setArsivDurum(prev => ({
-          sinirTarihi: altSinir,
-          yukleniyor: false,
-          bitti: bittiMi,
-          parcaSayisi: prev.parcaSayisi + 1
-        }));
+      // 1) ÖNBELLEK (ücretsiz, anında)
+      try {
+        const cacheSnap = await getDocsFromCache(tumIslerSorgu);
+        if (!cacheSnap.empty) {
+          yaz(cacheSnap, 'önbellek');
+          if (tazelemeGerekli) {
+            try {
+              const serverSnap = await getDocs(tumIslerSorgu);
+              yaz(serverSnap, 'güncellendi');
+              localStorage.setItem(TAZELEME_ANAHTARI, String(Date.now()));
+            } catch (e) { console.warn('Geçmiş tazelenemedi:', e); }
+          }
+          return;
+        }
+      } catch (e) { /* Önbellek yok -> sunucuya düşülür */ }
+
+      // 2) SUNUCU (yalnızca ilk kez veya önbellek temizlenmişse)
+      try {
+        const serverSnap = await getDocs(tumIslerSorgu);
+        yaz(serverSnap, 'ilk yükleme');
+        localStorage.setItem(TAZELEME_ANAHTARI, String(Date.now()));
       } catch (e) {
-        console.error('Arşiv işleri yüklenemedi:', e);
-        setArsivDurum(prev => ({ ...prev, yukleniyor: false }));
-      } finally {
-        arsivYukleniyorRef.current = false;
+        console.error('Tüm geçmiş yüklenemedi:', e);
+        setGecmisDurum({ yukleniyor: false, kaynak: 'hata', adet: 0 });
+        gecmisYuklendiRef.current = false; // Tekrar denenebilsin
       }
-    }, [firebaseUser, arsivDurum.sinirTarihi, arsivDurum.yukleniyor, arsivDurum.bitti]);
+    }, [firebaseUser]);
 
-    // GEÇMİŞ GEREKTİREN EKRANLAR: bu sekmeler açıldığında ilk arşiv parçası
-    // otomatik yüklenir (kullanıcı "Daha Fazla Yükle" ile daha geriye gidebilir).
-    const GECMIS_GEREKTIREN_SEKMELER = useMemo(() => [
-      'allJobs', 'completedJobs', 'cancelledJobs', 'damagedJobs',
-      'reporting', 'advancedReporting', 'finance', 'financeDefter',
-      'personnelProfile', 'personelTahtasi', 'ekipKurmaTahtasi',
-      'personelMuhasebe', 'personelOdeme', 'calendar',
-      // EKLENDİ: Müşteri adları ayrı bir koleksiyonda değil, İŞ kayıtlarından
-      // türetiliyor. Canlı pencere 30 güne indirildiği için bu ekranlarda eski
-      // müşteriler görünmüyordu; arşiv otomatik yüklenerek liste tamamlanır.
-      'customers', 'specialCustomers', 'customerProfile',
-      'musteriHavuzu', 'sahaPortfoy',
-      'addJob',         // Satış Bölümü: müşteri adı/telefon otomatik tamamlama
-      'hatirlatmalar'   // Hatırlatma penceresindeki "İlgili Müşteri" listesi
-    ], []);
+    // Oturum açılır açılmaz tüm geçmiş arka planda yüklenir (tek sefer)
+    useEffect(() => { if (firebaseUser) tumGecmisiYukle(); }, [firebaseUser, tumGecmisiYukle]);
+
     // ========================================================================
     // DÖNEM YÜKLEYİCİ (takvim, cari/müşteri profili gibi ekranlar için)
     // Kullanıcı geçmiş bir AYA giderse o dönemin işleri getDocs ile BİR KEZ
@@ -2953,15 +2954,6 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       }
     }, [firebaseUser]);
 
-    // GEÇMİŞ VERİ TETİKLEYİCİSİ: geçmiş gerektiren bir sekme açıldığında ve
-    // arşiv henüz boşsa İLK parça (3 ay) bir kereye mahsus yüklenir.
-    // Böylece raporlar/finans/profil ekranları veri bulur, ana sayfa ise
-    // yalnızca 30 günlük hafif pencereyle çalışmaya devam eder.
-    useEffect(() => {
-      if (!GECMIS_GEREKTIREN_SEKMELER.includes(activeTab)) return;
-      if (arsivDurum.parcaSayisi > 0 || arsivDurum.yukleniyor || arsivDurum.bitti) return;
-      arsivParcaYukle();
-    }, [activeTab, arsivDurum.parcaSayisi, arsivDurum.yukleniyor, arsivDurum.bitti, arsivParcaYukle, GECMIS_GEREKTIREN_SEKMELER]);
     // YENİ: Şeflerin saha denetimleri — merkezi olarak dinlenir ve iş listelerine prop
     // olarak geçilir; böylece her işte "kim denetledi" bilgisi gösterilebilir.
     const [sahaDenetimleri, setSahaDenetimleri] = useState([]);
@@ -3216,8 +3208,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       const getCol = (name) => collection(db, 'artifacts', appId, 'public', 'data', name);
       const unsubs = [];
 
-      // CANLI PENCERE: yalnızca SON 30 GÜN. Geçmiş veriler arşiv katmanından
-      // (getDocs + "Daha Fazla Yükle") gelir; canlı olarak dinlenmez.
+      // CANLI PENCERE: yalnızca SON 30 GÜN canlı dinlenir. Daha eski kayıtlar
+      // arşiv katmanından (önbellek öncelikli tam geçmiş) gelir.
       const canliBaslangic = new Date();
       canliBaslangic.setDate(canliBaslangic.getDate() - 30);
       const startDateStr = canliBaslangic.toISOString().split('T')[0];
@@ -3251,8 +3243,6 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       const qTasks = query(getCol('tasks'), limit(100));
 
       unsubs.push(onSnapshot(qJobs, snap => { setCanliIsler(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, jobs: true})); }, console.error));
-      // Arşiv okumaları bu tarihten GERİYE doğru parça parça yapılacak
-      setArsivDurum(prev => prev.sinirTarihi ? prev : { ...prev, sinirTarihi: startDateStr });
       unsubs.push(onSnapshot(qTrans, snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
       unsubs.push(onSnapshot(qTasks, snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
             
@@ -6227,52 +6217,16 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             )}
 
             {/* ====================================================================
-                GEÇMİŞ VERİ (ARŞİV) ÇUBUĞU
-                Geçmiş gerektiren ekranlarda görünür. Kaç aylık verinin yüklü
-                olduğunu gösterir ve "Daha Fazla Yükle" ile 3 ay daha geriye
-                gider. Böylece binlerce iş kaydı canlı dinlenmek zorunda kalmaz.
+                GEÇMİŞ DURUM SATIRI
+                Düğme yoktur; tüm geçmiş otomatik yüklenir. Bu satır yalnızca
+                ilk yükleme sürerken görünür ve tamamlanınca kaybolur.
                 ==================================================================== */}
-            {GECMIS_GEREKTIREN_SEKMELER.includes(activeTab) && (
-              <div className="mb-4 bg-white border border-neutral-200 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-2 shadow-sm">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Database className="w-4 h-4 text-neutral-400 shrink-0" />
-                  <p className="text-[11px] font-bold text-neutral-600">
-                    {arsivDurum.yukleniyor
-                      ? 'Geçmiş kayıtlar yükleniyor...'
-                      : arsivDurum.parcaSayisi === 0
-                        ? 'Şu an yalnızca son 30 günün kayıtları yüklü.'
-                        : <>Yüklü geçmiş: <b className="text-black">son {30 + arsivDurum.parcaSayisi * 90} gün</b> • {jobs.length} iş kaydı</>}
-                    {arsivDurum.bitti && <span className="text-green-600"> • Tüm geçmiş yüklendi</span>}
-                  </p>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                {/* HIZLI SEÇENEK: müşteri/cari geçmişi gibi uzun dönem gerektiren
-                    ekranlarda tek tıkla son 1 yılı getirir (3'er ay tıklamak yerine). */}
-                <button
-                  onClick={() => {
-                    const bit = new Date(); const bas = new Date();
-                    bas.setFullYear(bas.getFullYear() - 1);
-                    donemIsleriYukle(bas.toISOString().split('T')[0], bit.toISOString().split('T')[0], 2000);
-                  }}
-                  disabled={donemYukleniyor}
-                  className="px-3 py-2 rounded-xl bg-neutral-100 text-neutral-700 text-[11px] font-black hover:bg-neutral-200 disabled:opacity-50 flex items-center gap-1.5 transition"
-                  title="Son 1 yılın tüm işlerini tek seferde yükle"
-                >
-                  {donemYukleniyor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Calendar className="w-3.5 h-3.5" />} 1 Yıl Yükle
-                </button>
-                {!arsivDurum.bitti && (
-                  <button
-                    onClick={arsivParcaYukle}
-                    disabled={arsivDurum.yukleniyor}
-                    className="px-4 py-2 rounded-xl bg-black text-white text-[11px] font-black hover:bg-neutral-800 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shrink-0 transition"
-                    title="3 ay daha geriye giden kayıtları yükle"
-                  >
-                    {arsivDurum.yukleniyor
-                      ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Yükleniyor</>
-                      : <><Download className="w-3.5 h-3.5" /> Daha Fazla Yükle (3 ay)</>}
-                  </button>
-                )}
-                </div>
+            {/* GEÇMİŞ DURUMU: Artık düğme YOK — tüm geçmiş otomatik yüklenir.
+                Bu satır yalnızca ilk yükleme sırasında bilgi verir, sonra kaybolur. */}
+            {gecmisDurum.yukleniyor && (
+              <div className="mb-4 bg-white border border-neutral-200 rounded-2xl p-3 flex items-center gap-2 shadow-sm">
+                <Loader2 className="w-4 h-4 text-neutral-400 animate-spin shrink-0" />
+                <p className="text-[11px] font-bold text-neutral-600">Tüm geçmiş kayıtlar yükleniyor...</p>
               </div>
             )}
 
@@ -6537,7 +6491,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} allPersonnelActions={allPersonnelActions} vehicles={vehicles} currentUser={currentUser} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
             {/* YENİ: Saha Raporlaması — şef denetimlerinin yönetim ekranı */}
-            {activeTab === 'sahaRaporlamasi' && showPersonnel && <SahaRaporlamasiView personnelList={personnelList} db={db} appId={appId} setViewingImage={setViewingImage} />}
+            {activeTab === 'sahaRaporlamasi' && showPersonnel && <SahaRaporlamasiView personnelList={personnelList} db={db} appId={appId} setViewingImage={setViewingImage} jobs={jobs} onViewCari={(tel) => { setViewingCariKey(normalizeCariPhone(tel)); setActiveTab('customerProfile'); }} />}
             {/* YENİ: İK > Mesai Takip sayfası (QR + konum doğrulamalı giriş/çıkış) */}
             {activeTab === 'mesaiTakip' && showPersonnel && <MesaiTakipView personnelList={personnelList} currentUser={currentUser} jobs={jobs} onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
