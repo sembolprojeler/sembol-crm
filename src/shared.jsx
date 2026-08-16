@@ -216,7 +216,18 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
     };
 
     // --- PERSONEL GÖRÜNÜRLÜK KONTROLÜ (Mevcut ay / Gelecek ay pasiflik kontrolü) ---
+    // ==========================================================================
+    // ÇALIŞMA ŞEKLİ: 'Özgün' (kadrolu) | 'Uzaktan' (dışarıdan / panel kullanıcısı)
+    // UZAKTAN çalışanlar (avukat, danışman, firma sahibi vb.) yalnızca panele
+    // erişir; maaş / puantaj / mesai / prim / yıllık izin süreçlerine HİÇ dahil
+    // edilmezler. Tüm bu ekranlar isPersonnelVisibleInMonth'u kullandığı için
+    // kontrolü tek noktadan yapmak yeterlidir.
+    // ==========================================================================
+    export const isUzaktanCalisan = (person) => person?.calismaSekli === 'Uzaktan';
+
     export const isPersonnelVisibleInMonth = (person, year, month) => {
+      // UZAKTAN çalışanlar puantaj / mesai / maaş / prim tablolarında görünmez
+      if (isUzaktanCalisan(person)) return false;
       if (person.employmentStatus !== 'Pasif') return true;
       
       if (person.passiveDate) {
@@ -786,10 +797,87 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
         <p class="note">Not: Bu dilekçe ile birlikte "Sulh ve İbraname" ve gerekiyorsa "Zimmet İade Tutanağı" ayrıca düzenlenmelidir.</p>
       `;
       }
+    },
+    {
+      // ======================================================================
+      // YENİ ŞABLON: Ücretsiz Saatlik İzin Dilekçesi
+      // Kullanıcının gönderdiği Word dilekçesinden uyarlandı; şirket adı,
+      // departman/unvan ve personel bilgileri sistemden OTOMATİK doldurulur.
+      // Diğer şablonlarla aynı tablo/başlık düzenini kullanır.
+      // ======================================================================
+      key: 'ucretsiz_saatlik_izin',
+      title: 'Ücretsiz Saatlik İzin Dilekçesi',
+      body: (p, f) => `
+        <div class="main-title">ÜCRETSİZ SAATLİK İZİN DİLEKÇESİ</div>
+        <div class="paragraph" style="text-align:center; font-weight:bold; margin-bottom:14px;">
+          SEMBOL NAKLİYAT DEPOCULUK TİC. LTD. ŞTİ. MÜDÜRLÜĞÜ'NE<br/>
+          <span style="font-weight:normal; font-size:11px;">İNSAN KAYNAKLARI DEPARTMANI'NA</span>
+        </div>
+        <table>
+          <tr><td class="label">Tarih</td><td>${f.date || '..... / ..... / 202...'}</td>
+              <td class="label">Konu</td><td>Saatlik Ücretsiz İzin Talebi</td></tr>
+        </table>
+
+        <div class="section-title">1. Talep</div>
+        <div class="paragraph">
+          Şirketinizde <b>${p.position || '..............................'}</b> görevi ile
+          <b>${p.collarType || '..............................'}</b> kadrosunda çalışmaktayım.
+        </div>
+        <div class="paragraph">
+          Özel/şahsi mazeretim nedeniyle <b>${f.date || '..... / ..... / 202...'}</b> tarihinde
+          saat <b>..... : .....</b> ile <b>..... : .....</b> arasında ücretsiz izinli sayılmayı talep ediyorum.
+          Söz konusu saatler için şahsıma ücret tahakkuk ettirilmemesini ve bu sürenin puantajıma
+          <b>Ücretsiz İzin (Üİ)</b> olarak işlenmesini kabul ederim.
+        </div>
+        ${f.note ? `<div class="section-title">2. Mazeret Açıklaması</div><div class="desc-box">${f.note}</div>` : ''}
+        <div class="paragraph">Gereğini bilgilerinize arz ederim.</div>
+
+        <div class="section-title">Personel Bilgileri</div>
+        <table>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${p.tcNo || ''}</td></tr>
+          <tr><td class="label">Görevi / Unvanı</td><td>${p.position || ''}</td></tr>
+          <tr><td class="label">İşe Giriş Tarihi</td><td>${p.startDate || ''}</td></tr>
+          <tr><td class="label">İmza</td><td style="height:38px;"></td></tr>
+        </table>
+
+        <div class="section-title">İşveren / Yönetici Onayı</div>
+        <div class="paragraph">
+          Yukarıda bilgileri bulunan personelin belirtilen tarih ve saatler arasında ücretsiz izin kullanması:
+        </div>
+        <div class="paragraph" style="font-weight:bold;">
+          [ &nbsp; ] UYGUNDUR &nbsp;&nbsp;&nbsp;&nbsp; [ &nbsp; ] UYGUN DEĞİLDİR
+        </div>
+        <table>
+          <tr><td class="label">Onaylayan Yönetici (Adı Soyadı / Unvanı)</td><td>...................................... &nbsp; İmza:</td></tr>
+          <tr><td class="label">İnsan Kaynakları</td><td>...................................... &nbsp; İmza:</td></tr>
+        </table>
+        <p class="note">Not: Onaylanan saatler, ilgili günün puantajına "Üİ – Ücretsiz İzin" olarak işlenir ve maaş hesabından düşülür. Bu dilekçenin imzalı bir örneği personelin özlük dosyasında saklanır.</p>
+      `
     }
   ];
 
-    export const calculateMaterials = (roomCount, packingType) => {
+    // ==========================================================================
+    // DEPO PATPATI ADEDİ (yalnızca DEPO işlerinde kullanılır)
+    // Kural: oda sayısı + 1  ->  1+0:1 | 1+1:2 | 2+1:3 | 3+1:4 | 4+1:5 ...
+    // Villa/Ofis gibi büyük mekânlarda aynı oran korunarak 7 adet öngörülür.
+    // Parça eşya / tesis içi taşımalarda 1 adet yeterlidir.
+    // ==========================================================================
+    export const depoPatpatiAdedi = (roomCount) => {
+      if (!roomCount) return 1;
+      if (roomCount === 'Villa' || roomCount === 'Ofis') return 7;
+      if (roomCount === 'Parça Eşya' || roomCount === 'Depoevim Tesisleri') return 1;
+      // "3+1" gibi değerlerde oda + salon toplamı esas alınır:
+      //   1+0 -> 1 | 1+1 -> 2 | 2+1 -> 3 | 3+1 -> 4 | 4+1 -> 5 ...
+      const parcalar = String(roomCount).split('+');
+      const oda = parseInt(parcalar[0], 10);
+      const salon = parseInt(parcalar[1] ?? '0', 10);
+      if (isNaN(oda)) return 1;
+      return oda + (isNaN(salon) ? 0 : salon);
+    };
+
+    // jobType: 'Depo' ise sonuca depoPatpati eklenir (diğer iş tiplerinde eklenmez)
+    export const calculateMaterials = (roomCount, packingType, jobType) => {
     let multiplier = 1;
     if (roomCount === '1+0' || roomCount === 'Parça Eşya' || roomCount === 'Depoevim Tesisleri') multiplier = 0.5;
     else if (roomCount === '1+1') multiplier = 1;
@@ -825,6 +913,13 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
           koli: Math.round(5 * multiplier) 
         };
     }
+
+    // YALNIZCA DEPO İŞLERİ: depo patpatı ihtiyacı hesaba eklenir.
+    // Nakliye/Asansör işlerinde bu kalem hiç oluşturulmaz.
+    if (jobType === 'Depo') {
+      est.depoPatpati = depoPatpatiAdedi(roomCount);
+    }
+
     return est;
   };
 
