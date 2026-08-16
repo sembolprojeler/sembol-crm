@@ -5361,6 +5361,10 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
 
     // YENİ: "İşi Bırakma" modalı için state
     const [showResignModal, setShowResignModal] = useState(false);
+    // YENİ: İşi bırakan personeli tekrar işe başlatma penceresi
+    const [showRestartModal, setShowRestartModal] = useState(false);
+    const [restartForm, setRestartForm] = useState({ date: new Date().toISOString().split('T')[0], mod: 'yeni', araKod: 'Üİ' });
+    const [restartKaydediliyor, setRestartKaydediliyor] = useState(false);
     const [resignForm, setResignForm] = useState({ date: new Date().toISOString().split('T')[0], reason: '' });
 
     // YENİ: İşten çıkış HESAP DÖKÜMÜ / kesin hesap kapama akışı için state'ler
@@ -6118,6 +6122,123 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       setShowLeaveModal(false);
     };
 
+    // ========================================================================
+    // YENİ: İŞE TEKRAR BAŞLATMA (iki seçenekli)
+    //
+    // SEÇENEK A — "Yeni giriş gibi başlat" (mod: 'yeni')
+    //   Personel yeni işe alınmış gibi devam eder. İşe başlama tarihi seçilen
+    //   tarih olur, ayrılış bilgileri geçmişe not olarak taşınır. Aradaki boşluk
+    //   günlerine HİÇBİR ŞEY yazılmaz (personel o dönemde şirkette değildi).
+    //
+    // SEÇENEK B — "Hiç ayrılmamış gibi devam et" (mod: 'kesintisiz')
+    //   İlk işe başlama tarihi KORUNUR (kıdem devam eder). Ayrılış ile dönüş
+    //   arasındaki günler seçilen kodla (Ücretsiz İzin / Devamsız) doldurulur.
+    //
+    // Her iki seçenekte de ayrılışta yazılan "İB" kayıtları temizlenir ve
+    // personel yeniden Aktif yapılır.
+    // ========================================================================
+    const handleRestartPersonnel = async (e) => {
+      e.preventDefault();
+      if (!restartForm.date || restartKaydediliyor) return;
+      setRestartKaydediliyor(true);
+
+      const ayrilisStr = person.resignationDate;
+      const donusStr = restartForm.date;
+      if (ayrilisStr && new Date(donusStr) < new Date(ayrilisStr)) {
+        alert('Dönüş tarihi, ayrılış tarihinden önce olamaz.');
+        setRestartKaydediliyor(false);
+        return;
+      }
+
+      const isBeyazYaka = person.collarType === 'Beyaz Yaka' || (person.collarType !== 'Mavi Yaka' && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(person.position));
+      const docPrefix = isBeyazYaka ? 'beyaz_' : '';
+
+      // Ayrılış ile dönüş arasındaki AY belgelerinde gün gün işlem yapar.
+      // mod='yeni'      -> aradaki günler TEMİZLENİR (İB kayıtları silinir)
+      // mod='kesintisiz'-> aradaki günlere seçilen kod (Üİ / D) yazılır
+      const araGunleriDuzenle = async () => {
+        if (!ayrilisStr) return;
+        const bas = new Date(ayrilisStr);
+        const bit = new Date(donusStr);
+        // Ay ay ilerle
+        const imlec = new Date(bas.getFullYear(), bas.getMonth(), 1);
+        while (imlec <= bit) {
+          const y = imlec.getFullYear(), m = imlec.getMonth() + 1;
+          const ref = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${docPrefix}${y}_${m}`);
+          try {
+            const snap = await getDoc(ref);
+            if (snap.exists()) {
+              const records = snap.data().records || {};
+              if (records[personId]) {
+                const sonGun = new Date(y, m, 0).getDate();
+                for (let g = 1; g <= sonGun; g++) {
+                  const gunTarih = new Date(y, m - 1, g);
+                  // Yalnızca ayrılış SONRASI ve dönüş ÖNCESİ günlere dokun
+                  if (gunTarih <= bas || gunTarih >= bit) continue;
+                  if (restartForm.mod === 'kesintisiz') {
+                    records[personId][g] = { status: restartForm.araKod, hours: '' };
+                  } else {
+                    delete records[personId][g]; // Yeni giriş: o dönem şirkette değildi
+                  }
+                }
+                // Dönüş günü ve sonrasındaki "İB" izlerini temizle
+                for (let g = 1; g <= new Date(y, m, 0).getDate(); g++) {
+                  const gunTarih = new Date(y, m - 1, g);
+                  const hucre = records[personId][g];
+                  const kod = typeof hucre === 'object' && hucre !== null ? hucre.status : hucre;
+                  if (gunTarih >= bit && kod === 'İB') delete records[personId][g];
+                }
+                await setDoc(ref, { records, updatedAt: new Date().toISOString() }, { merge: true });
+              }
+            }
+          } catch (err) { console.warn('Ara ay düzenlenemedi:', y, m, err); }
+          imlec.setMonth(imlec.getMonth() + 1);
+        }
+      };
+
+      try {
+        await araGunleriDuzenle();
+
+        // Geçmiş kaydı: bu ayrılış-dönüş döngüsü profilde saklanır
+        const doneme = {
+          ayrilis: ayrilisStr || '-',
+          neden: person.resignationReason || 'Belirtilmedi',
+          donus: donusStr,
+          mod: restartForm.mod === 'kesintisiz' ? 'Kesintisiz (kıdem korundu)' : 'Yeni giriş',
+          araKod: restartForm.mod === 'kesintisiz' ? restartForm.araKod : null
+        };
+        const olay = {
+          id: Date.now().toString(),
+          date: new Date().toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          type: restartForm.mod === 'kesintisiz' ? 'İşe Geri Döndü (kesintisiz)' : 'İşe Yeniden Başladı'
+        };
+
+        const guncelleme = {
+          employmentStatus: 'Aktif',
+          passiveDate: null,
+          resignationDate: null,
+          resignationReason: null,
+          cikisOnaylandi: false,
+          cikisHesapDetay: null,
+          leaveHistory: [...(person.leaveHistory || []), olay],
+          calismaGecmisi: [...(person.calismaGecmisi || []), doneme]
+        };
+        // Yeni giriş modunda işe başlama tarihi güncellenir; kesintisizde KORUNUR
+        if (restartForm.mod === 'yeni') guncelleme.startDate = donusStr;
+
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(personId)), guncelleme);
+
+        if (addSystemLog) addSystemLog('Personel İşe Geri Döndü',
+          `${person.fullName}, ${donusStr} tarihinde işe geri döndü. Yöntem: ${doneme.mod}${doneme.araKod ? ` (ara günler: ${doneme.araKod})` : ''}.`);
+        setShowRestartModal(false);
+      } catch (err) {
+        console.error('İşe geri başlatma hatası:', err);
+        alert('İşe geri başlatma sırasında bir hata oluştu.');
+      } finally {
+        setRestartKaydediliyor(false);
+      }
+    };
+
     // --- YENİ: İŞİ BIRAKMA İŞLEMİ ---
     // Mevcut "Pasif" yapma mantığına (handleUpdatePersonnel) hiç dokunulmadan,
     // TAMAMEN AYRI bir akış olarak eklendi. Bu fonksiyon:
@@ -6824,6 +6945,15 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                     <Wallet className="w-3.5 h-3.5" /> Çıkış Hesap Dökümünü Aç / Tamamla
                   </button>
                 )}
+
+                {/* YENİ: TEKRAR İŞE BAŞLAT — ayrılmış personeli geri alma */}
+                <button
+                  type="button"
+                  onClick={() => { setRestartForm({ date: new Date().toISOString().split('T')[0], mod: 'yeni', araKod: 'Üİ' }); setShowRestartModal(true); }}
+                  className="mt-2 px-3 py-2 bg-green-600 text-white text-xs font-black rounded-lg hover:bg-green-700 transition flex items-center gap-1.5"
+                >
+                  <UserPlus className="w-3.5 h-3.5" /> Tekrar İşe Başlat
+                </button>
               </div>
             </div>
           )}
@@ -7667,6 +7797,97 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         )}
 
         {/* YENİ: İşi Bırakma Modalı */}
+        {/* ====================================================================
+            YENİ: TEKRAR İŞE BAŞLATMA PENCERESİ (iki seçenekli)
+            ==================================================================== */}
+        {showRestartModal && (
+          <div className="fixed inset-0 bg-black/70 z-[130] flex items-center justify-center p-4" onClick={() => setShowRestartModal(false)}>
+            <form onSubmit={handleRestartPersonnel} className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <div className="p-4 bg-gradient-to-r from-green-600 to-emerald-700 text-white flex justify-between items-center sticky top-0">
+                <div>
+                  <h3 className="font-black flex items-center gap-2"><UserPlus className="w-5 h-5" /> Tekrar İşe Başlat</h3>
+                  <p className="text-xs font-bold opacity-90">{person.fullName}</p>
+                </div>
+                <button type="button" onClick={() => setShowRestartModal(false)} className="p-2 bg-white/20 rounded-full hover:bg-white/30"><X className="w-5 h-5" /></button>
+              </div>
+
+              <div className="p-4 space-y-4">
+                {/* Mevcut ayrılış bilgisi */}
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-[11px] font-bold text-neutral-600">
+                  Ayrılış: <b className="text-black">{person.resignationDate || '-'}</b> • Neden: <b className="text-black">{person.resignationReason || 'Belirtilmedi'}</b>
+                </div>
+
+                {/* Dönüş tarihi */}
+                <div>
+                  <label className="block text-xs font-black text-neutral-600 uppercase mb-1.5">İşe Dönüş Tarihi *</label>
+                  <input type="date" required value={restartForm.date}
+                    onChange={e => setRestartForm({ ...restartForm, date: e.target.value })}
+                    className="w-full p-3 border-2 border-neutral-300 rounded-xl font-black text-sm outline-none focus:border-green-600" />
+                </div>
+
+                {/* İKİ SEÇENEK */}
+                <div>
+                  <label className="block text-xs font-black text-neutral-600 uppercase mb-2">Nasıl devam edilsin?</label>
+                  <div className="space-y-2">
+                    <button type="button" onClick={() => setRestartForm({ ...restartForm, mod: 'yeni' })}
+                      className={`w-full text-left p-3 rounded-xl border-2 transition ${restartForm.mod === 'yeni' ? 'border-green-600 bg-green-50' : 'border-neutral-200 hover:bg-neutral-50'}`}>
+                      <p className="font-black text-sm text-black flex items-center gap-2">
+                        <span className={`w-4 h-4 rounded-full border-2 shrink-0 ${restartForm.mod === 'yeni' ? 'border-green-600 bg-green-600' : 'border-neutral-300'}`}></span>
+                        Yeni giriş gibi başlat
+                      </p>
+                      <p className="text-[11px] font-bold text-neutral-500 mt-1 pl-6">
+                        İşe başlama tarihi <b>seçtiğiniz tarih</b> olur. Ayrılış ile dönüş arasındaki günlere hiçbir şey yazılmaz;
+                        o dönemde personel şirkette değildi. Kıdem yeniden başlar.
+                      </p>
+                    </button>
+
+                    <button type="button" onClick={() => setRestartForm({ ...restartForm, mod: 'kesintisiz' })}
+                      className={`w-full text-left p-3 rounded-xl border-2 transition ${restartForm.mod === 'kesintisiz' ? 'border-green-600 bg-green-50' : 'border-neutral-200 hover:bg-neutral-50'}`}>
+                      <p className="font-black text-sm text-black flex items-center gap-2">
+                        <span className={`w-4 h-4 rounded-full border-2 shrink-0 ${restartForm.mod === 'kesintisiz' ? 'border-green-600 bg-green-600' : 'border-neutral-300'}`}></span>
+                        Hiç ayrılmamış gibi devam et
+                      </p>
+                      <p className="text-[11px] font-bold text-neutral-500 mt-1 pl-6">
+                        İlk işe başlama tarihi <b>korunur</b> (kıdem devam eder). Gelmediği günler aşağıda seçtiğiniz kodla doldurulur.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Kesintisiz seçilirse: ara günlere hangi kod yazılacak */}
+                {restartForm.mod === 'kesintisiz' && (
+                  <div className="animate-in fade-in">
+                    <label className="block text-xs font-black text-neutral-600 uppercase mb-1.5">Gelmediği günlere ne yazılsın?</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[{ kod: 'Üİ', ad: 'Ücretsiz İzin', not: 'Maaş hesabına dahil edilmez' },
+                        { kod: 'D', ad: 'Devamsız', not: 'Devamsızlık olarak işlenir' }].map(o => (
+                        <button key={o.kod} type="button" onClick={() => setRestartForm({ ...restartForm, araKod: o.kod })}
+                          className={`p-3 rounded-xl border-2 text-left transition ${restartForm.araKod === o.kod ? 'border-green-600 bg-green-50' : 'border-neutral-200 hover:bg-neutral-50'}`}>
+                          <p className="font-black text-sm text-black">{o.ad}</p>
+                          <p className="text-[10px] font-bold text-neutral-500 mt-0.5">{o.not}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2.5 flex items-start gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  Personel <b>Aktif</b> yapılacak, ayrılış kaydı ve otomatik yazılmış "İB (İşi Bıraktı)" günleri temizlenecek.
+                  Bu ayrılış-dönüş bilgisi personelin çalışma geçmişine not olarak eklenir.
+                </p>
+
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setShowRestartModal(false)} className="flex-1 py-3 rounded-xl bg-neutral-100 text-neutral-700 font-black text-sm hover:bg-neutral-200">Vazgeç</button>
+                  <button type="submit" disabled={restartKaydediliyor} className="flex-1 py-3 rounded-xl bg-green-600 text-white font-black text-sm hover:bg-green-700 disabled:opacity-60 flex items-center justify-center gap-2 shadow-lg">
+                    {restartKaydediliyor ? <><Loader2 className="w-4 h-4 animate-spin" /> Kaydediliyor</> : <><UserPlus className="w-4 h-4" /> İşe Başlat</>}
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        )}
+
         {showResignModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
@@ -16313,10 +16534,19 @@ export const izinDurumuGetir = async (person, tarihStr) => {
         return { izinli: true, kod, etiket: MESAI_STATUS_OPTIONS.find(o => o.code === kod)?.label || kod, kaynak: 'puantaj' };
       }
     }
-  } catch (e) { /* Puantaj okunamazsa yalnızca programa bakılır */ }
-  // 2) Çalışma programındaki haftalık izin günü mü?
-  const prog = gununProgrami(person, tarihStr);
-  if (prog.izinli) return { izinli: true, kod: 'Hİ', etiket: 'Haftalık İzin', kaynak: 'program', gun: prog.gun };
+  } catch (e) { /* Puantaj okunamazsa engelleme yapılmaz, personel mesai basabilir */ }
+
+  // ==========================================================================
+  // DEĞİŞİKLİK (kullanıcı kuralı):
+  // Çalışma programındaki SABİT haftalık izin günü (ör. "Pazar") artık QR/kod
+  // girişini ENGELLEMEZ. Sebep: şirkette her gün iş var ve personel haftanın
+  // herhangi bir gününde izin yapabiliyor; Pazar günü çalışan personelin mesai
+  // basamaması gerçek hayata uymuyordu.
+  // Artık YALNIZCA İzin Tahtası / puantaj üzerinden izinli-raporlu işaretlenen
+  // personel engellenir (yukarıdaki 1. adım).
+  // NOT: Program bilgisi mesai HESABINDA (geç geliş/fazla mesai) kullanılmaya
+  // devam ediyor; yalnızca giriş engeli kaldırıldı.
+  // ==========================================================================
   return { izinli: false };
 };
 
@@ -16382,14 +16612,15 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
       const bugunKod = kodAl(bugunT);
       setPuantajDurum({ bugun: bugunKod, dun: kodAl(dunT) });
 
-      // İZİN KONTROLÜ: aynı veriden hesaplanır, EK OKUMA YAPILMAZ
+      // İZİN KONTROLÜ: aynı veriden hesaplanır, EK OKUMA YAPILMAZ.
+      // YALNIZCA İzin Tahtası/puantaj kaynaklı izinler mesai girişini engeller.
+      // Çalışma programındaki sabit haftalık izin günü (ör. Pazar) ARTIK
+      // engellemez — şirkette her gün iş var ve personel istediği gün izin
+      // yapabiliyor. Program bilgisi yalnızca mesai HESABINDA kullanılır.
       if (IZIN_KODLARI.includes(bugunKod)) {
         setIzinBilgisi({ izinli: true, kod: bugunKod, etiket: MESAI_STATUS_OPTIONS.find(o => o.code === bugunKod)?.label || bugunKod, kaynak: 'puantaj' });
       } else {
-        const prog = gununProgrami(currentUser, bugunT); // Yerel hesap, okuma yok
-        setIzinBilgisi(prog.izinli
-          ? { izinli: true, kod: 'Hİ', etiket: 'Haftalık İzin', kaynak: 'program', gun: prog.gun }
-          : { izinli: false });
+        setIzinBilgisi({ izinli: false });
       }
     })();
     return () => { iptal = true; }; // Cleanup
@@ -16443,10 +16674,9 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
           </div>
           <div className="min-w-0">
             <p className="text-sm font-black text-purple-900">Bugün {izinBilgisi.etiket.toLocaleUpperCase('tr-TR')}</p>
+            {/* Artık yalnızca İzin Tahtası/puantaj kaynaklı izinler engelleme yapar */}
             <p className="text-[11px] font-bold text-purple-700">
-              {izinBilgisi.kaynak === 'program'
-                ? `Çalışma programınıza göre ${izinBilgisi.gun} günleri izinlisiniz. Mesai kaydı gerekmez.`
-                : 'İnsan Kaynakları tarafından izinli/raporlu olarak işaretlendiniz. Mesai kaydı gerekmez.'}
+              İzin Tahtası'nda bugün için izinli/raporlu olarak işaretlendiniz. Mesai kaydı gerekmez.
             </p>
             <p className="text-[10px] font-bold text-purple-500 mt-1">Bir hata olduğunu düşünüyorsanız yöneticinizle görüşün.</p>
           </div>
@@ -16854,9 +17084,11 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     if (!k.dateStr || k.dateStr > mesaiBugunStr()) return null; // Gelecek gün -> boş bırak
     const person = personnelList.find(pp => String(pp.id) === String(k.personnelId));
     if (!person) return null;
-    const prog = gununProgrami(person, k.dateStr);
-    if (prog.izinli) return { status: 'Hİ', hours: '', girisSaati: null, cikisSaati: null, aciklama: `Çalışma programına göre ${prog.gun} izin günü → Haftalık İzin önerildi.` };
-    return { status: 'D', hours: '', girisSaati: null, cikisSaati: null, aciklama: 'QR veya seri kod ile giriş kaydı yok → Devamsız önerildi.' };
+    // NOT: Eskiden çalışma programındaki sabit izin gününe (ör. Pazar) bakılıp
+    // "Haftalık İzin" öneriliyordu. Artık izinler İzin Tahtası'ndan belirlendiği
+    // için burada program'a bakılmaz; puantajda izin kodu varsa zaten
+    // puantajDurumu() onu gösterir, yoksa devamsız önerilir.
+    return { status: 'D', hours: '', girisSaati: null, cikisSaati: null, aciklama: 'QR veya seri kod ile giriş kaydı yok → Devamsız önerildi. (İzinliyse İzin Tahtası’ndan işaretleyin.)' };
   };
   // Durum kodunun etiket ve rengini verir
   const durumStili = (kod) => MESAI_STATUS_OPTIONS.find(o => o.code === kod) || { code: kod, label: kod, color: 'bg-neutral-100 text-neutral-600' };
