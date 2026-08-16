@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, getDocs, where, orderBy, limit } from 'firebase/firestore';
-import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar } from './shared.jsx';
+import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar } from './shared.jsx';
   export const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [mesaiData, setMesaiData] = useState({});
@@ -686,7 +686,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                 <div className="flex items-center gap-1.5 shrink-0"><Package className="w-4 h-4 text-amber-600" /> <b className="text-amber-900">Sistem Malzeme Tahmini:</b></div>
                 <div className="flex gap-3 flex-wrap flex-1">
                   {(() => {
-                    const est = calculateMaterials(job.fromRoomCount, job.fromPacking);
+                    const est = calculateMaterials(job.fromRoomCount, job.fromPacking, job.type);
                     return (
                       <>
                         <span><b>{est.strec}</b> Streç</span>
@@ -694,6 +694,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
                         <span><b>{est.poset}</b> Poşet</span>
                         <span><b>{est.kagit}kg</b> Kağıt</span>
                         <span><b>{est.koli}</b> Koli</span>
+                        {/* Depo patpatı yalnızca depo işlerinde görünür */}
+                        {job.type === 'Depo' && est.depoPatpati > 0 && <span className="text-blue-700"><b>{est.depoPatpati}</b> Depo Patpatı</span>}
                       </>
                     );
                   })()}
@@ -1724,6 +1726,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
     // Mavi yaka ve aktif olanları filtrele, pozisyona göre sırala
     const maviYakaList = personnelList.filter(p => {
+      if (isUzaktanCalisan(p)) return false; // UZAKTAN çalışanlar izin tahtasında yer almaz
       if (p.position === 'Firma Sahibi') return false;
       return p.employmentStatus === 'Aktif' && 
              (p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operatör'].includes(p.position)));
@@ -3017,8 +3020,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     const [searchQuery, setSearchQuery] = useState('');
     // YENİ: İş tipi filtresi — 'Tümü' | 'Nakliye' | 'Depo' | 'Asansör'
     const [tipFiltre, setTipFiltre] = useState('Tümü');
-    // YENİ: Çözülmüş hasarlar VARSAYILAN OLARAK GİZLİDİR. Sağ üstteki
-    // "Çözülen İşler" butonuna basıldığında listeye dahil edilirler.
+    // GÖRÜNÜM MODU (kullanıcı kuralı):
+    //   false -> YALNIZCA çözüm bekleyen hasarlar (varsayılan)
+    //   true  -> YALNIZCA çözülmüş hasarlar
+    // Buton artık "çözülenleri listeye ekleyip çıkarmaz"; iki liste arasında
+    // GEÇİŞ yapar. Böylece çözülenlere bakarken bekleyenler karışmaz.
     const [cozulenGoster, setCozulenGoster] = useState(false);
 
     // Kaydın çözülmüş sayılıp sayılmadığını belirleyen tek nokta
@@ -3029,7 +3035,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
     // durumunu dikkate alır — böylece rozetlerdeki sayı ekrandaki kart sayısıyla uyuşur.
     const tumHasarli = jobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var');
     const cozulenSayisi = tumHasarli.filter(cozuldu).length;     // Butonun rozetinde gösterilir
-    const sayimListesi = cozulenGoster ? tumHasarli : tumHasarli.filter(j => !cozuldu(j));
+    const bekleyenSayisi = tumHasarli.filter(j => !cozuldu(j)).length; // Geri dönüş rozetinde gösterilir
+    // Sayaçlar yalnızca AKTİF moddaki kayıtları sayar
+    const sayimListesi = cozulenGoster ? tumHasarli.filter(cozuldu) : tumHasarli.filter(j => !cozuldu(j));
     const tipSayaclari = {
       'Tümü': sayimListesi.length,
       'Nakliye': sayimListesi.filter(j => !j.type || j.type === 'Nakliye').length,
@@ -3039,8 +3047,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
 
     const damagedJobs = jobs.filter(j => {
       if (j.endJobDetails?.damageStatus !== 'Hasar var') return false;
-      // YENİ: Çözülmüş kayıtlar, düğme açılmadıkça listede GÖSTERİLMEZ
-      if (!cozulenGoster && cozuldu(j)) return false;
+      // MOD FİLTRESİ: açıkken yalnızca ÇÖZÜLENLER, kapalıyken yalnızca BEKLEYENLER
+      if (cozulenGoster ? !cozuldu(j) : cozuldu(j)) return false;
       // YENİ: Seçili iş tipine göre süz ("Nakliye" seçiliyse tipi boş olan eski kayıtlar da dahildir)
       if (tipFiltre !== 'Tümü') {
         const jobTipi = j.type || 'Nakliye';
@@ -3061,20 +3069,33 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isVideoUrl,
               <AlertTriangle className="w-6 h-6 text-red-600" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-black">Hasarlı İşler</h2>
-              <p className="text-sm font-medium text-neutral-500">Operasyon sırasında hasar bildirimi yapılmış kayıtlar.</p>
+              <h2 className="text-xl font-bold text-black flex items-center gap-2 flex-wrap">
+                Hasarlı İşler
+                {/* Hangi listeye bakıldığı başlıkta da açıkça yazar */}
+                <span className={`text-[10px] font-black px-2.5 py-1 rounded-full ${cozulenGoster ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  {cozulenGoster ? 'ÇÖZÜLENLER' : 'ÇÖZÜM BEKLEYENLER'}
+                </span>
+              </h2>
+              <p className="text-sm font-medium text-neutral-500">
+                {cozulenGoster
+                  ? 'Çözüme kavuşturulmuş hasar kayıtları listeleniyor.'
+                  : 'Operasyon sırasında hasar bildirimi yapılmış, henüz çözülmemiş kayıtlar.'}
+              </p>
             </div>
           </div>
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 w-full md:w-auto shrink-0">
-            {/* YENİ: ÇÖZÜLEN İŞLER DÜĞMESİ — çözülmüş hasar kayıtları varsayılan olarak
-                gizlidir; bu düğmeyle listeye dahil edilip tekrar gizlenebilir.
-                Rozetteki sayı, sistemdeki toplam çözülmüş hasar adedini gösterir. */}
+            {/* LİSTE GEÇİŞ DÜĞMESİ: iki liste arasında gidip gelir.
+                Kapalıyken "Çözülen İşler (11)" -> tıklayınca çözülenler listelenir.
+                Açıkken  "Çözüm Bekleyenler (8)" -> tıklayınca bekleyenlere dönülür.
+                Rozetteki sayı her zaman GİDİLECEK listenin adedini gösterir. */}
             <button type="button" onClick={() => setCozulenGoster(v => !v)}
-              className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition flex items-center justify-center gap-2 whitespace-nowrap ${cozulenGoster ? 'bg-green-600 text-white border-green-600 shadow-sm' : 'bg-green-50 text-green-700 border-green-200 hover:border-green-400'}`}
-              title={cozulenGoster ? 'Çözülen işleri listeden gizle' : 'Çözülen işleri de listede göster'}>
-              {cozulenGoster ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              {cozulenGoster ? 'Çözülenleri Gizle' : 'Çözülen İşler'}
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${cozulenGoster ? 'bg-white/25' : 'bg-white/80'}`}>{cozulenSayisi}</span>
+              className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition flex items-center justify-center gap-2 whitespace-nowrap ${cozulenGoster
+                ? 'bg-red-50 text-red-700 border-red-200 hover:border-red-400'
+                : 'bg-green-50 text-green-700 border-green-200 hover:border-green-400'}`}
+              title={cozulenGoster ? 'Çözüm bekleyen hasarlara dön' : 'Yalnızca çözülmüş hasarları göster'}>
+              {cozulenGoster ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+              {cozulenGoster ? 'Çözüm Bekleyenler' : 'Çözülen İşler'}
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${cozulenGoster ? 'bg-white/25' : 'bg-white/80'}`}>{cozulenGoster ? bekleyenSayisi : cozulenSayisi}</span>
             </button>
             <div className="relative w-full md:w-72 shrink-0">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
@@ -4432,7 +4453,9 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '', birthDate: '',
       bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', startDate: new Date().toISOString().split('T')[0],
       // YENİ: Haftalık çalışma programı (gün sayısı, günlük saat, izin günü, erken çıkış)
-      calismaProgrami: varsayilanCalismaProgrami('Mavi Yaka')
+      calismaProgrami: varsayilanCalismaProgrami('Mavi Yaka'),
+      // YENİ: Çalışma şekli — 'Özgün' (kadrolu) | 'Uzaktan' (panel kullanıcısı)
+      calismaSekli: 'Özgün'
     });
     const [isUploading, setIsUploading] = useState(false);
 
@@ -4532,15 +4555,30 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
               </select>
               {/* Yaka tipi değişince çalışma programı o yakanın tipik düzenine döner */}
             </div>
-            <div className="hidden md:block"></div> {/* Boşluk için */}
+            <div>
+              {/* YENİ: ÇALIŞMA ŞEKLİ */}
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Çalışma Şekli *</label>
+              <select value={formData.calismaSekli} onChange={e => setFormData({ ...formData, calismaSekli: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
+                <option value="Özgün">Özgün (Kadrolu Personel)</option>
+                <option value="Uzaktan">Uzaktan (Sadece Panel Kullanıcısı)</option>
+              </select>
+              {formData.calismaSekli === 'Uzaktan' && (
+                <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-1.5 flex items-start gap-1.5 animate-in fade-in">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  Bu kişi maaş, puantaj, mesai, prim ve yıllık izin ekranlarında görünmez; özlük dosyası oluşturulmaz. Yalnızca panele erişir.
+                </p>
+              )}
+            </div>
           </div>
 
-          {/* YENİ: ÇALIŞMA PROGRAMI — Mesai Takip bu bilgilere göre değerlendirme yapacak */}
+          {/* ÇALIŞMA PROGRAMI — yalnızca kadrolu (Özgün) personelde anlamlıdır */}
+          {formData.calismaSekli !== 'Uzaktan' && (
           <CalismaProgramiBolumu
             program={formData.calismaProgrami}
             yakaTipi={formData.collarType}
             guncelle={(yeni) => setFormData({ ...formData, calismaProgrami: yeni })}
           />
+          )}
 
           <div>
             <label className="block text-sm font-bold text-neutral-700 mb-1">Banka IBAN Numarası</label>
@@ -4862,16 +4900,30 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                       <option value="Beyaz Yaka">Beyaz Yaka</option>
                     </select>
                   </div>
-                  <div className="hidden md:block"></div>
+                  <div className="md:col-span-1">
+                    {/* YENİ: ÇALIŞMA ŞEKLİ (eski kayıtlarda varsayılan 'Özgün') */}
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Çalışma Şekli *</label>
+                    <select value={editingUser.calismaSekli || 'Özgün'} onChange={e => setEditingUser({...editingUser, calismaSekli: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-medium text-neutral-700 cursor-pointer">
+                      <option value="Özgün">Özgün (Kadrolu Personel)</option>
+                      <option value="Uzaktan">Uzaktan (Sadece Panel Kullanıcısı)</option>
+                    </select>
+                    {editingUser.calismaSekli === 'Uzaktan' && (
+                      <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-1.5 flex items-start gap-1.5 animate-in fade-in">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                        Maaş, puantaj, mesai, prim ve yıllık izin ekranlarında görünmez; özlük dosyası oluşturulmaz.
+                      </p>
+                    )}
+                  </div>
                 </div>
 
-                {/* YENİ: ÇALIŞMA PROGRAMI — mevcut personellerin haftalık düzeni buradan girilir.
-                    Programı olmayan eski kayıtlarda yaka tipine göre varsayılan gösterilir. */}
+                {/* ÇALIŞMA PROGRAMI — yalnızca kadrolu (Özgün) personelde anlamlıdır */}
+                {(editingUser.calismaSekli || 'Özgün') !== 'Uzaktan' && (
                 <CalismaProgramiBolumu
                   program={editingUser.calismaProgrami}
                   yakaTipi={editingUser.collarType || 'Mavi Yaka'}
                   guncelle={(yeni) => setEditingUser({ ...editingUser, calismaProgrami: yeni })}
                 />
+                )}
 
                 <div>
                   <label className="block text-sm font-bold text-neutral-700 mb-1">Banka IBAN Numarası</label>
@@ -6917,7 +6969,15 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
             </div>
             <div>
               <h3 className="text-2xl font-black text-black">{person.fullName}</h3>
-              <p className="text-neutral-500 text-sm font-bold">{person.position} • {person.rank}</p>
+              <p className="text-neutral-500 text-sm font-bold flex items-center gap-2 flex-wrap">
+                {person.position} • {person.rank}
+                {/* UZAKTAN çalışan rozeti: bordro/puantaj dışı olduğu açıkça belli olsun */}
+                {isUzaktanCalisan(person) && (
+                  <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-300" title="Maaş, puantaj, mesai, prim ve yıllık izin süreçlerine dahil değildir">
+                    UZAKTAN
+                  </span>
+                )}
+              </p>
               <p className="text-neutral-400 text-xs font-medium mt-0.5">Başlama: {person.startDate || '-'}</p>
             </div>
           </div>
@@ -8457,6 +8517,8 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     const [extraLabel, setExtraLabel] = useState('');
 
     const filteredList = personnelList.filter(p => {
+      // UZAKTAN çalışanların özlük dosyası tutulmaz
+      if (isUzaktanCalisan(p)) return false;
       const matchesSearch = p.fullName.toLowerCase().includes(searchQuery.toLowerCase()) || (p.position && p.position.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCollar = collarFilter === 'Tümü' ? true : p.collarType === collarFilter;
       // YENİ: employmentStatus 'Pasif' olanlar işten ayrılmış sayılır; alanı hiç
@@ -10018,7 +10080,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     const licenseWarning = !!(driverPerson && assignedVehicle && assignedVehicle.requiredLicense === 'Büyük Ehliyet' && driverPerson.ehliyet !== 'Büyük Ehliyet');
     const isNakliye = job.type === 'Nakliye' || !job.type;
     const isAsansor = job.type === 'Asansör';
-    const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking);
+    const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking, job.type);
 
     const handleNoteBlur = async () => {
         if (note !== job.notes) {
@@ -10379,9 +10441,10 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         <div className="p-2 border-t border-neutral-200 bg-amber-50/30 shrink-0">
           <span className="text-[9px] font-bold text-amber-800 uppercase tracking-wider mb-1 block flex items-center gap-1"><Package className="w-3 h-3"/> Malzemeler</span>
           <div className="grid grid-cols-2 gap-1 mb-1">
-            {['strec', 'bant', 'poset', 'kagit', 'koli'].map(key => (
-              <div key={key} className="flex items-center justify-between bg-white border border-neutral-200 p-1 rounded shadow-sm text-[9px]">
-                 <span className="font-bold text-neutral-700 capitalize">{key === 'strec' ? 'Streç' : key === 'kagit' ? 'Kağıt' : key}</span>
+            {/* Depo patpatı YALNIZCA depo işlerinde listelenir */}
+            {['strec', 'bant', 'poset', 'kagit', 'koli', ...(job.type === 'Depo' ? ['depoPatpati'] : [])].map(key => (
+              <div key={key} className={`flex items-center justify-between border p-1 rounded shadow-sm text-[9px] ${key === 'depoPatpati' ? 'bg-blue-50 border-blue-300' : 'bg-white border-neutral-200'}`}>
+                 <span className={`font-bold capitalize ${key === 'depoPatpati' ? 'text-blue-800' : 'text-neutral-700'}`}>{key === 'strec' ? 'Streç' : key === 'kagit' ? 'Kağıt' : key === 'depoPatpati' ? 'Depo Patpatı' : key}</span>
                  <div className="flex items-center gap-1">
                     <button onClick={() => handleMaterialChange(key, -1)} className="bg-red-50 text-red-600 rounded w-3.5 h-3.5 flex items-center justify-center font-bold">-</button>
                     <span className="w-3 text-center font-black">{est[key]}</span>
@@ -11292,7 +11355,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                     <div className="flex items-center gap-1.5 shrink-0"><Package className="w-4 h-4 text-amber-600" /> <b className="text-amber-900">Operasyon Malzemeleri:</b></div>
                     <div className="flex gap-3 flex-wrap flex-1">
                       {(() => {
-                        const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking);
+                        const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking, job.type);
                         return (
                           <>
                             <span><b>{est.strec}</b> Streç</span>
@@ -11300,6 +11363,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                             <span><b>{est.poset}</b> Poşet</span>
                             <span><b>{est.kagit}kg</b> Kağıt</span>
                             <span><b>{est.koli}</b> Koli</span>
+                            {job.type === 'Depo' && est.depoPatpati > 0 && <span className="text-blue-700"><b>{est.depoPatpati}</b> Depo Patpatı</span>}
                           </>
                         );
                       })()}
@@ -13694,7 +13758,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     const [tarih, setTarih] = useState(bugunStr);
     const [sefFiltre, setSefFiltre] = useState('Tümü');
     const [arama, setArama] = useState('');
-    const [acikId, setAcikId] = useState(null);         // Detayı açık olan rapor
+    // NOT: acikId state'i, alttaki "Denetim Yapılan İşler" açılır listesi kaldırıldığı için silindi.
     const [yukleniyor, setYukleniyor] = useState(true);
 
     useEffect(() => {
@@ -14036,6 +14100,38 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                             {d.genelRapor}
                           </p>
                         )}
+
+                        {/* ============================================================
+                            SAHADA ÇEKİLEN FOTOĞRAFLAR
+                            Şefin denetim sırasında yüklediği görseller. Tıklayınca
+                            büyük önizleme açılır. Video ise kamera simgesi gösterilir.
+                            ============================================================ */}
+                        {(() => {
+                          const medya = (d.medya || []).filter(Boolean);
+                          if (medya.length === 0) return null;
+                          return (
+                            <div className="pl-7 mt-2">
+                              <p className="text-[9px] font-black text-neutral-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                                <Camera className="w-3 h-3" /> Sahada çekilen görseller ({medya.length})
+                              </p>
+                              <div className="flex flex-wrap gap-1.5">
+                                {medya.map((url, i) => (
+                                  <button
+                                    key={url + i}
+                                    type="button"
+                                    onClick={() => setViewingImage?.({ title: `${bilgi.musteri} — Saha Görseli ${i + 1}`, name: url })}
+                                    className="w-16 h-16 rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 shrink-0 cursor-pointer hover:ring-2 hover:ring-purple-500 transition flex items-center justify-center"
+                                    title="Büyütmek için tıklayın"
+                                  >
+                                    {isVideoUrl(url)
+                                      ? <Camera className="w-5 h-5 text-neutral-500" />
+                                      : <img src={url} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })}
@@ -14102,147 +14198,9 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
           </div>
         )}
 
-        {/* DENETİM YAPILAN İŞLER — EN YENİDEN ESKİYE.
-            Solda iş bilgileri ve kim denetledi, sağda şefin raporu + sahada çekilen görseller. */}
-        <div className="bg-white rounded-2xl border border-neutral-200 p-4">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <h3 className="font-black text-black flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-purple-600" /> Denetim Yapılan İşler</h3>
-            <span className="text-[11px] font-bold text-neutral-400">{filtreli.length} denetim • en yeni en üstte</span>
-          </div>
-
-          {yukleniyor ? (
-            <div className="py-10 text-center text-sm font-bold text-neutral-400 flex items-center justify-center gap-2">
-              <Loader2 className="w-4 h-4 animate-spin" /> Raporlar yükleniyor...
-            </div>
-          ) : filtreli.length === 0 ? (
-            <div className="py-10 text-center text-sm font-bold text-neutral-400">
-              {denetimler.length === 0
-                ? 'Henüz saha denetimi yapılmamış. İş Onaylama Tahtası\u2019ndaki "Şef Denetimi" butonuyla ilk denetimi kaydedin.'
-                : 'Bu filtrelere uygun rapor bulunamadı.'}
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {filtreli.map(d => {
-                const acik = acikId === d.id;
-                const st = DOGRULUK_STIL[d.kayitDogrulugu] || DOGRULUK_STIL['Hepsi doğru'];
-                const medya = (d.medya || []).filter(Boolean);
-                return (
-                  <div key={d.id} className="border border-neutral-200 rounded-xl overflow-hidden">
-                    {/* SOL: iş + denetleyen | SAĞ: rapor özeti + görsel sayısı */}
-                    <button onClick={() => setAcikId(acik ? null : d.id)} className="w-full text-left hover:bg-neutral-50 transition">
-                      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto] gap-3 p-3 items-start">
-                        {/* SOL KOLON — iş bilgileri ve denetimi yapan şef */}
-                        <div className="flex items-start gap-3 min-w-0">
-                          <div className="w-10 h-10 rounded-xl bg-purple-600 text-white flex flex-col items-center justify-center shrink-0 leading-none">
-                            <span className="text-sm font-black">{d.ortalamaPuan ? String(d.ortalamaPuan).replace('.', ',') : '-'}</span>
-                            <span className="text-[8px] font-bold opacity-80">PUAN</span>
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-black text-sm text-black truncate">{d.jobCustomerName || 'İş'}</span>
-                              <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200">{d.jobType}</span>
-                            </div>
-                            <div className="text-[11px] font-bold text-neutral-400">{d.jobDate} {d.jobTime} • {d.jobRoute}</div>
-                            {/* KİM DENETLEDİ */}
-                            <div className="mt-1 inline-flex items-center gap-1 text-[10px] font-black px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 border border-purple-200">
-                              <Shield className="w-2.5 h-2.5" /> Denetleyen: {d.sefAdi || '—'}
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* ORTA KOLON — şefin raporu (özet) + kayıt doğruluğu */}
-                        <div className="min-w-0">
-                          <span className={`inline-block text-[9px] font-black px-1.5 py-0.5 rounded border mb-1 ${st.kutu} ${st.yazi}`}>{d.kayitDogrulugu}</span>
-                          <p className={`text-xs text-neutral-600 font-medium break-words ${acik ? '' : 'line-clamp-3'}`}>{d.genelRapor || '—'}</p>
-                          <div className="text-[10px] font-bold text-neutral-400 mt-1">{(d.personelPuanlari || []).length} personel puanlandı</div>
-                        </div>
-
-                        {/* SAĞ KOLON — sahada çekilen görsellerin küçük önizlemesi */}
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {medya.slice(0, 3).map((url, i) => (
-                            <div key={url + i} onClick={(e) => { e.stopPropagation(); setViewingImage?.({ title: `${d.jobCustomerName} — Saha Görseli ${i + 1}`, name: url }); }}
-                              className="w-11 h-11 rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 shrink-0 cursor-pointer hover:ring-2 hover:ring-purple-500 transition flex items-center justify-center">
-                              {isVideoUrl(url)
-                                ? <Camera className="w-4 h-4 text-neutral-500" />
-                                : <img src={url} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
-                            </div>
-                          ))}
-                          {medya.length > 3 && (
-                            <span className="text-[10px] font-black text-neutral-500 bg-neutral-100 rounded-lg px-1.5 py-2 border border-neutral-200">+{medya.length - 3}</span>
-                          )}
-                          {medya.length === 0 && <span className="text-[10px] font-bold text-neutral-300">Görsel yok</span>}
-                          <ChevronRight className={`w-4 h-4 text-neutral-400 shrink-0 transition ${acik ? 'rotate-90' : ''}`} />
-                        </div>
-                      </div>
-                    </button>
-
-                    {/* Detay */}
-                    {acik && (
-                      <div className="border-t border-neutral-200 p-3 space-y-3 bg-neutral-50">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-                          <div className="bg-white rounded-lg p-2.5 border border-neutral-200">
-                            <span className="text-[9px] font-black text-neutral-400 uppercase block">Kaydı Açan</span>
-                            <span className="font-black text-black">{d.kayitAcan || '—'}</span>
-                          </div>
-                          <div className="bg-white rounded-lg p-2.5 border border-purple-200">
-                            <span className="text-[9px] font-black text-purple-500 uppercase block">Denetimi Yapan Şef</span>
-                            <span className="font-black text-black">{d.sefAdi || '—'}</span>
-                          </div>
-                          <div className="bg-white rounded-lg p-2.5 border border-neutral-200">
-                            <span className="text-[9px] font-black text-neutral-400 uppercase block">Denetim Zamanı</span>
-                            <span className="font-black text-black">{d.denetimTarihi ? new Date(d.denetimTarihi).toLocaleString('tr-TR') : '—'}</span>
-                          </div>
-                        </div>
-
-                        {/* Sahada çekilen tüm görseller */}
-                        {medya.length > 0 && (
-                          <div className="bg-white rounded-lg p-3 border border-orange-200">
-                            <span className="text-[9px] font-black text-orange-500 uppercase block mb-2">Sahada Çekilen Fotoğraf / Video ({medya.length})</span>
-                            <div className="flex flex-wrap gap-2">
-                              {medya.map((url, i) => (
-                                <button key={url + i} type="button" onClick={() => setViewingImage?.({ title: `${d.jobCustomerName} — Saha Görseli ${i + 1}`, name: url })}
-                                  className="w-20 h-20 rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 hover:ring-2 hover:ring-orange-500 transition flex items-center justify-center relative">
-                                  {isVideoUrl(url)
-                                    ? <><Camera className="w-6 h-6 text-neutral-500" /><span className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[8px] font-black py-0.5">VİDEO</span></>
-                                    : <img src={url} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Şefin saha raporu (tam metin) */}
-                        <div className="bg-white rounded-lg p-3 border border-blue-200">
-                          <span className="text-[9px] font-black text-blue-500 uppercase block mb-1">Saha Raporu</span>
-                          <p className="text-xs font-medium text-neutral-700 whitespace-pre-wrap break-words">{d.genelRapor || '—'}</p>
-                        </div>
-
-                        {/* Personel puanları ve şefin özel notları */}
-                        <div className="space-y-1.5">
-                          <span className="text-[9px] font-black text-neutral-400 uppercase block">Personel Puanları ve Notlar</span>
-                          {(d.personelPuanlari || []).map((p, i) => (
-                            <div key={p.personelId + i} className="bg-white rounded-lg p-2.5 border border-neutral-200 flex items-start gap-2">
-                              <div className="flex items-center gap-1 shrink-0">
-                                <span className={`text-base font-black ${puanRenk(p.puan)}`}>{p.puan}</span>
-                                <Star className="w-3 h-3 text-yellow-500" />
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <span className="font-bold text-xs text-black block truncate">{p.personelAdi}</span>
-                                {p.ozelNot
-                                  ? <span className="text-[11px] text-neutral-600 font-medium block break-words">{p.ozelNot}</span>
-                                  : <span className="text-[10px] text-neutral-300 font-bold">Not girilmemiş</span>}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        {/* NOT: Alttaki "Denetim Yapılan İşler" listesi kullanıcı isteğiyle KALDIRILDI.
+            Aynı bilgiler (iş, plaka, tutar, personel puanları, şef raporu ve sahada
+            çekilen fotoğraflar) yukarıdaki günlük şef denetim dökümünde gösteriliyor. */}
       </div>
     );
   };
@@ -14685,7 +14643,19 @@ export const IsKilavuzuView = ({ currentUser, personnelList = [], addSystemLog }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, ozelIcerikler]);
 
-  const listedekiler = tumIcerik.filter(k => k.yaka === yakaSekme);
+  // ==========================================================================
+  // ERİŞİM KURALI (kullanıcı isteği):
+  // Normal personel YALNIZCA kendi pozisyonunun kılavuzunu görür; diğer
+  // pozisyonların kartları ve yaka sekmeleri gösterilmez.
+  // Yöneticiler (Firma Sahibi / Müdür / düzenleme yetkisi olanlar) tüm
+  // pozisyonları görmeye devam eder — içerikleri onlar yönetiyor.
+  // ==========================================================================
+  const tumunuGorebilir = duzenleyebilir;
+  const benimKilavuzum = tumIcerik.find(k => k.pozisyon === currentUser?.position) || null;
+
+  const listedekiler = tumunuGorebilir
+    ? tumIcerik.filter(k => k.yaka === yakaSekme)
+    : (benimKilavuzum ? [benimKilavuzum] : []);
   const secili = tumIcerik.find(k => k.id === secilenId) || listedekiler[0];
 
   // ========================================================================
@@ -14771,7 +14741,8 @@ export const IsKilavuzuView = ({ currentUser, personnelList = [], addSystemLog }
         )}
       </div>
 
-      {/* YAKA SEKMELERİ */}
+      {/* YAKA SEKMELERİ — yalnızca tüm kılavuzları görebilen yöneticilerde */}
+      {tumunuGorebilir && (
       <div className="flex bg-neutral-100 p-1.5 rounded-2xl w-fit gap-1">
         {['Mavi Yaka', 'Beyaz Yaka'].map(y => (
           <button key={y} type="button"
@@ -14781,8 +14752,18 @@ export const IsKilavuzuView = ({ currentUser, personnelList = [], addSystemLog }
           </button>
         ))}
       </div>
+      )}
 
-      {/* POZİSYON KARTLARI */}
+      {/* Kılavuzu bulunmayan pozisyonlarda bilgilendirme */}
+      {!tumunuGorebilir && !benimKilavuzum && (
+        <div className="bg-white rounded-2xl border border-dashed border-neutral-300 p-8 text-center">
+          <BookOpen className="w-10 h-10 text-neutral-300 mx-auto mb-2" />
+          <p className="text-sm font-black text-neutral-500">Pozisyonunuz için henüz kılavuz tanımlanmamış</p>
+          <p className="text-[11px] font-bold text-neutral-400 mt-1">İnsan Kaynakları ile görüşebilirsiniz.</p>
+        </div>
+      )}
+
+      {/* POZİSYON KARTLARI — personelde yalnızca kendi pozisyonu listelenir */}
       <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
         {listedekiler.map(k => {
           const Ikon = k.ikon;
