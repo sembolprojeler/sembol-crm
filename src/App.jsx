@@ -5377,7 +5377,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {showCalendar && (
               <button 
                 onClick={() => { setActiveTab('calendar'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
-                className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-3 rounded-xl bg-gradient-to-r from-teal-400 via-cyan-300 to-teal-500 shadow-lg shadow-teal-400/40 hover:scale-[1.02] ${activeTab === 'calendar' ? 'ring-2 ring-teal-800/70' : ''}`}
+                // DEĞİŞİKLİK: Bu buton İKİ farklı isimle kullanılıyor —
+                // Mavi Yaka'da "Puan Tablosu", Beyaz Yaka'da "Randevular".
+                // İstek yalnızca Puan Tablosu içindi, bu yüzden renk isMaviYakaUser'a bağlandı:
+                //   Mavi Yaka  -> SARI geçiş (yeni)
+                //   Beyaz Yaka -> turkuaz geçiş (eskisi aynen korundu)
+                // NOT: Ternary'nin her dalı TAM sınıf metni içerir; Tailwind sınıf adlarını
+                // kaynak kodda birleştirilmemiş hâliyle taradığı için parça parça yazılmadı.
+                className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-3 rounded-xl hover:scale-[1.02] ${isMaviYakaUser ? 'bg-gradient-to-r from-yellow-300 via-amber-300 to-yellow-500 shadow-lg shadow-yellow-400/40' : 'bg-gradient-to-r from-teal-400 via-cyan-300 to-teal-500 shadow-lg shadow-teal-400/40'} ${activeTab === 'calendar' ? (isMaviYakaUser ? 'ring-2 ring-yellow-800/70' : 'ring-2 ring-teal-800/70') : ''}`}
               >
                 <CalendarDays className="w-5 h-5 shrink-0 text-black" />
                 {/* YENİ: Menü adı "Takvim" → "Randevular" olarak değiştirildi (sayfa/rota aynı)
@@ -5399,11 +5406,23 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 </div>
                 {/* YENİ: "Özel Görevlerim" artık Profilim sayfasının içinde; yeni/bitmemiş
                     görev varsa burada yanıp sönen ışık ve sayı rozeti gösterilir. */}
-                {showMySpecialTasks && unreadTasksCount > 0 && (
+                {/* DEĞİŞİKLİK: Işık artık "mySpecialTasks" modül yetkisine bağlı DEĞİL.
+                    Görev kişiye atandıysa yetki ayarından bağımsız olarak uyarı görünür;
+                    tek koşul bitmemiş görev sayısının 0'dan büyük olmasıdır. Böylece tüm
+                    görevler "completed" olduğunda unreadTasksCount 0'a düşer ve ışık söner. */}
+                {unreadTasksCount > 0 && (
                   <span className="flex items-center gap-1.5 shrink-0">
-                    <span className="relative flex w-2.5 h-2.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-500"></span>
+                    {/* GÖREV SAYISI KADAR IŞIK: her bitmemiş görev için bir yanıp sönen nokta
+                        basılır. Sol menü dar olduğu için en fazla 4 nokta gösterilir; gerçek
+                        sayı zaten yanındaki rozette yazar. animationDelay ile noktalar sırayla
+                        yanar, hepsi aynı anda değil (daha okunaklı bir uyarı efekti). */}
+                    <span className="flex items-center gap-1">
+                      {Array.from({ length: Math.min(unreadTasksCount, 4) }).map((_, i) => (
+                        <span key={i} className="relative flex w-2.5 h-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" style={{ animationDelay: `${i * 250}ms` }}></span>
+                          <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-500"></span>
+                        </span>
+                      ))}
                     </span>
                     <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{unreadTasksCount}</span>
                   </span>
@@ -5463,10 +5482,18 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 {isMaviYakaUser && (
                 <button 
                   onClick={() => { setActiveTab('myAssignedJobs'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'myAssignedJobs' ? 'bg-red-600 text-white shadow-md shadow-red-600/20' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                  // DEĞİŞİKLİK: Buton artık "Profilim" ile BİREBİR AYNI yapıda; tek fark renk paleti.
+                  // Profilim kahverengi geçiş kullanır (from-[#8B5E34] via-[#B98A55] to-[#5C3B1E]);
+                  // burada aynı üç duraklı yapı MAVİ tonlarıyla kuruldu.
+                  // font-black + shadow-lg + hover:scale-[1.02] ve aktifken ring-2 ring-white/70
+                  // değerleri Profilim butonundan aynen alındı ki iki buton görsel olarak eş dursun.
+                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-[#1D4ED8] via-[#60A5FA] to-[#1E3A8A] text-white shadow-lg shadow-[#1E3A8A]/40 hover:scale-[1.02] ${activeTab === 'myAssignedJobs' ? 'ring-2 ring-white/70' : ''}`}
                 >
                   <div className="flex items-center gap-3">
-                    <ClipboardList className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Bana Atanan Görevler</span>
+                    {/* DEĞİŞİKLİK: Sol menü etiketi "Bana Atanan Görevler" -> "Bana Atanan İşler".
+                        Sadece görünen yazı değişti; activeTab anahtarı ('myAssignedJobs') ve
+                        yönlendirme mantığı aynı kaldı, hiçbir rota bozulmadı. */}
+                    <ClipboardList className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Bana Atanan İşler</span>
                   </div>
                   {unreadJobCount > 0 && (
                     <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{unreadJobCount}</span>
@@ -5657,102 +5684,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               </div>
             )}
 
-            {showFinance && (
-              <div className="flex flex-col gap-1">
-                <button 
-                  onClick={() => { setIsFinanceSubMenuOpen(!isFinanceSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-sky-500 to-blue-700 text-white shadow-lg shadow-blue-600/30 hover:scale-[1.02]`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Wallet className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Finans</span>
-                  </div>
-                  {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-                
-                {isFinanceSubMenuOpen && (
-                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
-                    <button 
-                      onClick={() => { setActiveTab('financeDashboard'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'financeDashboard' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'financeDashboard' ? 'bg-white' : 'bg-blue-500'}`}></div> Kasa Özeti
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('reporting'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'reporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'reporting' ? 'bg-white' : 'bg-blue-500'}`}></div> Genel Ciro Raporu
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('advancedReporting'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'advancedReporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'advancedReporting' ? 'bg-white' : 'bg-blue-500'}`}></div> Analiz & İstatistik
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('personelMuhasebe'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelMuhasebe' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelMuhasebe' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Muhasebe
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('personelOdeme'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelOdeme' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelOdeme' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Ödemeleri
-                    </button>
-                    {/* YENİ: Defter — kasa/cari alacak-verecek takip sayfası */}
-                    <button 
-                      onClick={() => { setActiveTab('finansDefter'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'finansDefter' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'finansDefter' ? 'bg-white' : 'bg-blue-500'}`}></div> Defter
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* YENİ: "İş Listesi" ve "Müşteri Listesi" başlıkları kaldırıldı; ikisi "MÜŞTERİ PORTFÖYÜ" başlığında birleştirildi. */}
-            {(showJobList || showCustomers) && (
-              <div className="flex flex-col gap-1">
-                <button 
-                  onClick={() => { setIsJobSubMenuOpen(!isJobSubMenuOpen); setIsCustomerSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-amber-700 via-amber-800 to-amber-950 text-white shadow-lg shadow-amber-900/40 hover:scale-[1.02]`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Users className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Müşteri Portföyü</span>
-                  </div>
-                  {isJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-                
-                {isJobSubMenuOpen && (
-                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
-                    {/* İş Listesi alt menüsü — "Mevcut / Tamamlanan / İptal Edilen İşler" sol menüden
-                        kaldırıldı; artık "Tüm İşler" sayfasının en üstündeki butonlardan seçiliyor. */}
-                    {showJobList && (<>
-                    <button 
-                      onClick={() => { setActiveTab('allJobs'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allJobs' ? 'bg-amber-700 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allJobs' ? 'bg-white' : 'bg-amber-700'}`}></div> Tüm İşler
-                    </button>
-                    </>)}
-                    {/* Müşteri Listesi alt menüsü — "Özel Müşteriler / Kara Liste" sol menüden
-                        kaldırıldı; artık "Tüm Müşteriler" sayfasının en üstündeki butonlardan seçiliyor. */}
-                    {showCustomers && (<>
-                    <button 
-                      onClick={() => { setActiveTab('allCustomers'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allCustomers' ? 'bg-amber-700 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allCustomers' ? 'bg-white' : 'bg-amber-700'}`}></div> Tüm Müşteriler
-                    </button>
-                    </>)}
-                  </div>
-                )}
-              </div>
-            )}
-
+            {/* DEĞİŞİKLİK: "İnsan Kaynakları" menüsü sıralamada YUKARI alındı.
+                Eski sıra: Satış > Operasyon > Finans > Müşteri Portföyü > İnsan Kaynakları
+                Yeni sıra: Satış > Operasyon > İNSAN KAYNAKLARI > Finans > Müşteri Portföyü
+                Blok satır satır aynen taşındı; içindeki hiçbir buton, yetki (showPersonnel)
+                veya alt menü mantığı değiştirilmedi. Sadece JSX içindeki konumu değişti. */}
             {showPersonnel && (
               <div className="flex flex-col gap-1">
                 <button 
@@ -5850,6 +5786,102 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     </button>
                     {/* NOT: İK altındaki eski "Şirket Evrakları" (sirketEvraklari) menüden kaldırıldı —
                         aynı işlev artık "Şirket Dosyaları" ana menüsü altında (sirketBelgeleri) yönetiliyor. */}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {showFinance && (
+              <div className="flex flex-col gap-1">
+                <button 
+                  onClick={() => { setIsFinanceSubMenuOpen(!isFinanceSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-sky-500 to-blue-700 text-white shadow-lg shadow-blue-600/30 hover:scale-[1.02]`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Wallet className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Finans</span>
+                  </div>
+                  {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+                
+                {isFinanceSubMenuOpen && (
+                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    <button 
+                      onClick={() => { setActiveTab('financeDashboard'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'financeDashboard' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'financeDashboard' ? 'bg-white' : 'bg-blue-500'}`}></div> Kasa Özeti
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('reporting'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'reporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'reporting' ? 'bg-white' : 'bg-blue-500'}`}></div> Genel Ciro Raporu
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('advancedReporting'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'advancedReporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'advancedReporting' ? 'bg-white' : 'bg-blue-500'}`}></div> Analiz & İstatistik
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('personelMuhasebe'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelMuhasebe' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelMuhasebe' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Muhasebe
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('personelOdeme'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelOdeme' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelOdeme' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Ödemeleri
+                    </button>
+                    {/* YENİ: Defter — kasa/cari alacak-verecek takip sayfası */}
+                    <button 
+                      onClick={() => { setActiveTab('finansDefter'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'finansDefter' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'finansDefter' ? 'bg-white' : 'bg-blue-500'}`}></div> Defter
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* YENİ: "İş Listesi" ve "Müşteri Listesi" başlıkları kaldırıldı; ikisi "MÜŞTERİ PORTFÖYÜ" başlığında birleştirildi. */}
+            {(showJobList || showCustomers) && (
+              <div className="flex flex-col gap-1">
+                <button 
+                  onClick={() => { setIsJobSubMenuOpen(!isJobSubMenuOpen); setIsCustomerSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-amber-700 via-amber-800 to-amber-950 text-white shadow-lg shadow-amber-900/40 hover:scale-[1.02]`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Users className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Müşteri Portföyü</span>
+                  </div>
+                  {isJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+                
+                {isJobSubMenuOpen && (
+                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    {/* İş Listesi alt menüsü — "Mevcut / Tamamlanan / İptal Edilen İşler" sol menüden
+                        kaldırıldı; artık "Tüm İşler" sayfasının en üstündeki butonlardan seçiliyor. */}
+                    {showJobList && (<>
+                    <button 
+                      onClick={() => { setActiveTab('allJobs'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allJobs' ? 'bg-amber-700 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allJobs' ? 'bg-white' : 'bg-amber-700'}`}></div> Tüm İşler
+                    </button>
+                    </>)}
+                    {/* Müşteri Listesi alt menüsü — "Özel Müşteriler / Kara Liste" sol menüden
+                        kaldırıldı; artık "Tüm Müşteriler" sayfasının en üstündeki butonlardan seçiliyor. */}
+                    {showCustomers && (<>
+                    <button 
+                      onClick={() => { setActiveTab('allCustomers'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'allCustomers' ? 'bg-amber-700 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'allCustomers' ? 'bg-white' : 'bg-amber-700'}`}></div> Tüm Müşteriler
+                    </button>
+                    </>)}
                   </div>
                 )}
               </div>
