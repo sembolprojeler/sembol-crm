@@ -4,7 +4,7 @@ import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'fi
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
-import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaviMesaiTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './Operasyon.jsx';
+import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
 // NOT: Mesai Takip modülü artık ayrı bir dosya değil; kullanıcı isteğiyle
 // Operasyon Bölümü'nün parçası olarak Operasyon.jsx içine taşındı
@@ -2469,6 +2469,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
   // Sebep: aşağıda tanımlanan ErrorBoundary ile sarmalanabilmesi için.
   // Dosyanın en altındaki "export default function App()" gerçek giriş
   // noktasıdır ve AppInternal'i ErrorBoundary içinde render eder.
+  // ==========================================================================
+  // İŞ KILAVUZU — ÖZELLİK YAYIN TARİHİ
+  // Üst çubuktaki kılavuz simgesi, bu tarihten itibaren 30 GÜN boyunca
+  // "YENİ" rozetiyle yanıp söner; süre dolunca kendiliğinden normale döner.
+  // Yeni bir duyuru yapmak isterseniz bu tarihi güncellemeniz yeterlidir.
+  // ==========================================================================
+  const KILAVUZ_YAYIN_TARIHI = '2026-08-16';
+
   function AppInternal() {
     const [firebaseUser, setFirebaseUser] = useState(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -4534,13 +4542,15 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       }
       setManualExtraAssignees(manual);
 
-      const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking);
+      const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking, job.type);
       setAssignedMaterials({
         strec: est.strec || 0,
         bant: est.bant || 0,
         poset: est.poset || 0,
         kagit: est.kagit || 0,
-        koli: est.koli || 0
+        koli: est.koli || 0,
+        // Depo patpatı yalnızca depo işlerinde taşınır
+        ...(job.type === 'Depo' ? { depoPatpati: est.depoPatpati || 0 } : {})
       });
       setCustomMaterials(job.customMaterials || []);
       setNewCustomMaterial({ name: '', amount: 1 });
@@ -4718,7 +4728,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       setEndJobError('');
 
       if (!jobToEnd.materialsDeducted && jobToEnd.type !== 'Asansör') {
-        const estData = jobToEnd.assignedMaterials || calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking);
+        const estData = jobToEnd.assignedMaterials || calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking, jobToEnd.type);
         const customMats = jobToEnd.customMaterials || [];
         let deductedList = [];
 
@@ -4728,7 +4738,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           { key: 'bant', amount: estData.bant || 0 },
           { key: 'poşet', amount: estData.poset || 0 },
           { key: 'kağıt', amount: estData.kagit || 0 },
-          { key: 'koli', amount: estData.koli || 0 }
+          { key: 'koli', amount: estData.koli || 0 },
+          // YENİ: Depo patpatı YALNIZCA depo işlerinde stoktan düşülür.
+          // (calculateMaterials bu kalemi zaten sadece jobType==='Depo' iken üretir;
+          //  ayrıca burada da iş tipi kontrol edilerek çift güvence sağlanır.)
+          { key: 'patpat', amount: (jobToEnd.type === 'Depo' ? (estData.depoPatpati || 0) : 0) }
         ];
 
         // YENİ: Aynı malzeme birden fazla kez düşülecekse TEK kalemde toplanır.
@@ -4781,8 +4795,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     };
 
     const handleEstimateMaterials = (job) => {
-      const est = calculateMaterials(job.fromRoomCount, job.fromPacking);
-      const content = `Tahmini Gerekli Malzemeler:\n\n- ${est.strec} Rulo Streç\n- ${est.bant} Adet Bant\n- ${est.poset} Adet Poşet\n- ${est.kagit} Kg Kağıt\n- ${est.koli} Adet Koli`;
+      const est = calculateMaterials(job.fromRoomCount, job.fromPacking, job.type);
+      const content = `Tahmini Gerekli Malzemeler:\n\n- ${est.strec} Rulo Streç\n- ${est.bant} Adet Bant\n- ${est.poset} Adet Poşet\n- ${est.kagit} Kg Kağıt\n- ${est.koli} Adet Koli${job.type === 'Depo' && est.depoPatpati ? `\n- ${est.depoPatpati} Adet Depo Patpatı` : ''}`;
       setAiModal({ isOpen: true, loading: false, content, title: '📦 Malzeme Tahmini', type: 'material', jobId: job.id, estData: est, alreadyDeducted: job.materialsDeducted });
     };
 
@@ -4990,7 +5004,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const isAvukatUser = (currentUser?.position || '').toLocaleLowerCase('tr').includes('avukat');
     // YENİ: Maaş/mesai/puantaj/muhasebe ekranlarına AVUKAT pozisyonu dahil edilmez.
     // Avukat, personel değerlendirme ve bordro süreçlerinin tamamen dışında tutulur.
-    const personnelListMuhasebe = personnelList.filter(p => !((p.position || '').toLocaleLowerCase('tr').includes('avukat')));
+    // MUHASEBE/PUANTAJ LİSTESİ: avukatlar zaten hariçti; artık ÇALIŞMA ŞEKLİ
+    // "Uzaktan" olan herkes (danışman, firma sahibi vb.) de hariç tutulur.
+    // Bu kişiler maaş / puantaj / mesai / prim süreçlerine dahil değildir.
+    const personnelListMuhasebe = personnelList.filter(p =>
+      !((p.position || '').toLocaleLowerCase('tr').includes('avukat')) && p.calismaSekli !== 'Uzaktan'
+    );
     
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
     const isStandardBlueCollarApp = isMaviYakaUser && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Heryerden Usta' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
@@ -5280,16 +5299,37 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 <button
                   onClick={() => { setActiveTab('isKilavuzu'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
                   className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'isKilavuzu' ? 'bg-red-600 text-white' : (() => {
-                    // YENİ: İlk 30 gün boyunca ikon kırmızı zeminle yanıp söner
-                    if (!currentUser?.startDate) return 'text-neutral-400 hover:text-white hover:bg-neutral-800';
-                    const baslangic = new Date(currentUser.startDate + 'T00:00:00');
-                    if (isNaN(baslangic.getTime())) return 'text-neutral-400 hover:text-white hover:bg-neutral-800';
-                    const gecenGun = Math.floor((new Date().setHours(0, 0, 0, 0) - baslangic.getTime()) / (1000 * 60 * 60 * 24));
-                    return (gecenGun >= 0 && gecenGun <= 30) ? 'yeni-personel-isik-yanson text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800';
+                    // İki durumda ikon kırmızı zeminle yanıp söner:
+                    //  1) ÖZELLİK YENİ: İş Kılavuzu yayına alındıktan sonraki 30 gün
+                    //     boyunca HERKESTE yanar (aşağıdaki KILAVUZ_YAYIN_TARIHI).
+                    //  2) YENİ PERSONEL: işe başlayalı 30 günü geçmemiş personelde yanar.
+                    const bugun00 = new Date().setHours(0, 0, 0, 0);
+                    const gunFarki = (tarihStr) => {
+                      const t = new Date(tarihStr + 'T00:00:00');
+                      if (isNaN(t.getTime())) return null;
+                      return Math.floor((bugun00 - t.getTime()) / (1000 * 60 * 60 * 24));
+                    };
+                    const ozellikGun = gunFarki(KILAVUZ_YAYIN_TARIHI);
+                    const ozellikYeni = ozellikGun !== null && ozellikGun >= 0 && ozellikGun <= 30;
+                    const personelGun = currentUser?.startDate ? gunFarki(currentUser.startDate) : null;
+                    const personelYeni = personelGun !== null && personelGun >= 0 && personelGun <= 30;
+                    return (ozellikYeni || personelYeni) ? 'yeni-personel-isik-yanson text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800';
                   })()}`}
                   title="İş Kılavuzu ve İş Şeması"
                 >
                   <ClipboardList className="w-5 h-5" />
+                  {/* YENİ rozeti: özellik yayına alındıktan sonraki 30 gün boyunca görünür */}
+                  {(() => {
+                    const t = new Date(KILAVUZ_YAYIN_TARIHI + 'T00:00:00');
+                    if (isNaN(t.getTime())) return null;
+                    const gun = Math.floor((new Date().setHours(0, 0, 0, 0) - t.getTime()) / (1000 * 60 * 60 * 24));
+                    if (gun < 0 || gun > 30) return null;
+                    return (
+                      <span className="absolute -top-1 -right-1 bg-yellow-400 text-black text-[8px] font-black px-1.5 py-0.5 rounded-full shadow-md animate-pulse border border-yellow-500">
+                        YENİ
+                      </span>
+                    );
+                  })()}
                 </button>
                 <button 
                   onClick={() => { setActiveTab('notifications'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
@@ -5575,12 +5615,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     {/* NOT: "Puantaj Tahtası" buradan KALDIRILDI — artık İnsan
                         Kaynakları altında "Puantaj Takip" adıyla, Mesai Takip'in
                         hemen altında yer alıyor. Sayfa rotası ('puantajTahtasi') aynı. */}
-                    <button 
-                      onClick={() => { setActiveTab('maviMesaiTahtasi'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'maviMesaiTahtasi' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'maviMesaiTahtasi' ? 'bg-white' : 'bg-orange-500'}`}></div> Mavi Mesai Tahtası
-                    </button>
+                    {/* NOT: "Mavi Mesai Tahtası" menü maddesi kullanıcı isteğiyle KALDIRILDI.
+                        Aynı bilgi Finans > Personel Muhasebe > Mavi Yaka Mesai ekranında
+                        ve İK > Mesai Takip bölümünde zaten mevcut. */}
                     <button 
                       onClick={() => { setActiveTab('taskList'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'taskList' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -6149,7 +6186,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {/* YETKİ: Menü İnsan Kaynakları altına taşındığı için İK yetkisi olan
                 kullanıcılar da bu sayfayı açabilir (Operasyon yetkisi korunur). */}
             {activeTab === 'puantajTahtasi' && (showOperasyon || showPersonnel) && <PuantajTahtasiView personnelList={personnelListMuhasebe} db={db} appId={appId} />}
-            {activeTab === 'maviMesaiTahtasi' && showOperasyon && <MaviMesaiTahtasiView personnelList={personnelListMuhasebe} db={db} appId={appId} />}
+            {/* NOT: "Mavi Mesai Tahtası" sayfası menüden kaldırıldığı için render edilmiyor. */}
             
             {/* YENİ: Kayıt sonrası alttan açılan başarı paneli — WhatsApp bilgilendirme ve Sözleşme indirme seçenekleri */}
             {savedJobInfo && (
