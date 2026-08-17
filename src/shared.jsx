@@ -1244,7 +1244,9 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
   //   Ödeme Yapmadı -> Borçlu        (eski kayıtlarda 'Diğer')
   // ==========================================================================
   export const ODEME_DEFTER_TUR_ESLEME = {
-    'Nakit': ['Kasa'],
+    // DEĞİŞİKLİK: Defter türü 'Kasa' -> 'Nakit' olarak yeniden adlandırıldı.
+    // Eski defterler 'Kasa' türüyle kayıtlı kalabileceği için ikisi de eşleşir.
+    'Nakit': ['Nakit', 'Kasa'],
     'Havale/EFT': ['Banka'],
     'Kredi Kartı': ['Kredi Kartı', 'Cari (Kişi/Firma)'],
     'Ödeme Yapmadı': ['Borçlu', 'Diğer'],
@@ -1281,7 +1283,9 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
   // Hata durumunda istisna FIRLATILMAZ, sadece false döner: defter kaydı
   // başarısız olsa bile işin kapanması engellenmemeli.
   // ------------------------------------------------------------------
-  export const defterGelirKaydet = async ({ db, appId, job, endJobDetails, currentUser, addSystemLog }) => {
+  // ekipSefiAdi ve aracId çağıran taraftan (App.jsx) geçilir: personel ve
+  // araç listeleri orada, burada erişim yok.
+  export const defterGelirKaydet = async ({ db, appId, job, endJobDetails, currentUser, addSystemLog, ekipSefiAdi, aracId }) => {
     try {
       const odemeYontemi = endJobDetails?.paymentMethod || 'Nakit';
       const tutar = kalanBakiyeHesapla(job);
@@ -1302,21 +1306,47 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
         return false;
       }
 
+      // DEĞİŞİKLİK: Müşteri adı ve plaka artık AÇIKLAMA METNİNE yazılmıyor.
+      // İkisi de ayrı alanlarda (musteriAdi/musteriTel, plaka/aracId) tutuluyor
+      // ve defter satırında tıklanabilir rozet olarak gösteriliyor. Metne gömülü
+      // olsalardı ne aranabilir ne tıklanabilir olurlardı.
+      // Açıklamada artık TESLİM KODU ve EKİP ŞEFİ yer alıyor — tahsilatı
+      // eşleştirirken en çok bu ikisine bakılıyor.
       const plaka = job?.assignedVehiclePlate || '';
-      const aciklama = `${job.customerName || 'Müşteri'}${plaka ? ` — ${plaka}` : ''} | ${job.type || 'İş'} tahsilatı (kapora hariç kalan)`;
+      const teslimKodu = job?.deliveryCode || '';
+      const ekipSefi = ekipSefiAdi || '';
+      const aciklama = [
+        `${job.type || 'İş'} tahsilatı (kapora hariç kalan)`,
+        teslimKodu ? `Teslim kodu: ${teslimKodu}` : '',
+        ekipSefi ? `Ekip şefi: ${ekipSefi}` : ''
+      ].filter(Boolean).join(' | ');
 
       const kayit = {
         tip: 'giris',
         tutar,
         aciklama,
-        kategori: 'İş Geliri',
-        // Plaka etiket olarak da eklenir; defterde plakaya göre filtrelenebilsin.
-        etiketler: [plaka, job.type].filter(Boolean),
+        // DEĞİŞİKLİK: Kategori artık işi yapan ARACIN PLAKASI. Plakalar hazır
+        // kategori ağacında (KAMYONLAR/ARAÇ grupları) zaten var; böylece defter
+        // kategori filtresinde araç bazlı ciro doğrudan görünür. Araç atanmadıysa
+        // genel 'İŞ GELİRİ' kategorisine düşer.
+        kategori: plaka || 'İŞ GELİRİ',
+        // DEĞİŞİKLİK: Plaka artık ETİKET olarak eklenmiyor — kendi alanı var.
+        // İkisinde de durması plakanın iki yerde görünmesine yol açıyordu.
+        etiketler: [job.type].filter(Boolean),
         odemeYontemi,
         tarih: (job.completedAt || new Date().toISOString()).split('T')[0],
         defterId: defter.id,
         kaynak: 'İş Sonlandırma (Oto)',
         isId: job.id,
+        // YENİ: Defter satırından MÜŞTERİ CARİSİNE ve ARAÇ PROFİLİNE tıklanarak
+        // gidilebilmesi için kimlik alanları ayrıca saklanır. Bu bilgiler açıklama
+        // metninin içinde de geçiyor ama metinden ayrıştırmak kırılgan olurdu.
+        musteriAdi: job.customerName || '',
+        musteriTel: job.customerPhone || '',
+        plaka: plaka,
+        aracId: aracId || '',
+        teslimKodu,
+        ekipSefi,
         by: currentUser?.fullName || 'Sistem'
       };
 
@@ -1365,9 +1395,9 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
   // iki satır oluşmaz ve bakiye her zaman maaş tablosuyla tutarlı kalır.
   // ==========================================================================
   export const MAAS_KALEM_DEFTER_TUR = {
-    nakitAvans:        ['Kasa'],
+    nakitAvans:        ['Nakit', 'Kasa'],
     resmiAvans:        ['Banka'],
-    nakitOdenenTutar:  ['Kasa'],
+    nakitOdenenTutar:  ['Nakit', 'Kasa'],
     bankaOdenenTutar:  ['Banka']
   };
 
