@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, Tag, History} from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
-import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './shared.jsx';
+// DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
+// Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
+// hem Operasyon.jsx (form) hem Finans.jsx (bordro) aynı kaynaktan okur.
+import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas } from './shared.jsx';
 
   // ==========================================================================
   // YENİ BİLEŞEN: MAAŞ RAPORU (Genel Ciro Raporu sayfasındaki 2. sekme)
@@ -102,7 +105,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
         }
       }
       const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzin - iseGirisGun);
-      const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : person.maas) || 0;
+      // DEĞİŞİKLİK: person.maas yerine gecerliMaas() kullanılır. Bu fonksiyon,
+      // ilgili ay deneme süresi içindeyse person.denemeMaasi, değilse person.maas
+      // döndürür. Elle girilen satır değeri (row.maas) her ikisini de EZER —
+      // muhasebenin tek bir ay için manuel düzeltme yapma imkânı korunur.
+      const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : gecerliMaas(person, yil, ay)) || 0;
       const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
       const nakitAvans = parseFloat(row.nakitAvans) || 0;
       const resmiAvans = parseFloat(row.resmiAvans) || 0;
@@ -2978,7 +2985,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth } from './sh
       const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzinSayisi - iseGirisGunSayisi);
       const odenecekGun = mesaiGunSayisi;
       
-      const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : person.maas) || 0;
+      // DEĞİŞİKLİK: person.maas yerine gecerliMaas() kullanılır. Bu fonksiyon,
+      // ilgili ay deneme süresi içindeyse person.denemeMaasi, değilse person.maas
+      // döndürür. Elle girilen satır değeri (row.maas) her ikisini de EZER —
+      // muhasebenin tek bir ay için manuel düzeltme yapma imkânı korunur.
+      const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : gecerliMaas(person, currentYear, currentMonth)) || 0;
       const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
       
       const hesaplananBanka = (bankaParasiBase / 30) * odenecekGun;
