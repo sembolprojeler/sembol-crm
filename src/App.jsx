@@ -7,7 +7,11 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
   // Sözleşme PDF'i ve WhatsApp mesajları da aynı kaynaktan okuyacağı için
   // bu tanımlar shared.jsx içinde tek noktada tutuluyor.
   VARSAYILAN_SOZLESME_GRUPLARI, VARSAYILAN_SOZLESME_KAPANIS, VARSAYILAN_BANKA_HESAPLARI,
-  ibanBicimle, ibanGecerliMi, maddeSayisi, bankaBilgiMetni, resmiAyarlarRef } from './shared.jsx';
+  ibanBicimle, ibanGecerliMi, maddeSayisi, bankaBilgiMetni, resmiAyarlarRef,
+  // YENİ: Resmi Ayarları'ndaki GÜNCEL banka bilgisini döndürür (canlı önbellek).
+  aktifBankaBilgiMetni,
+  // YENİ: İş kapandığında kalan bakiyeyi ilgili deftere gelir olarak yazar.
+  defterGelirKaydet } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
@@ -2081,6 +2085,32 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
   // ============================================================================
   const SirketIbanEditor = ({ hesaplar, setHesaplar, varsayilanId, setVarsayilanId }) => {
     const [kopyalandi, setKopyalandi] = useState('');
+    // Hangi hesabın QR'ı yükleniyor? (hesap id'si tutulur, aynı anda tek yükleme)
+    const [qrYukleniyor, setQrYukleniyor] = useState('');
+
+    // QR görselini sunucuya yükler ve dönen URL'i hesaba yazar.
+    // Yükleme yöntemi mevcut logo yükleme akışıyla birebir aynı (upload.php).
+    const handleQrYukle = async (e, index, hesapId) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setQrYukleniyor(hesapId);
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
+        const text = await res.text();
+        // Sunucu bazen JSON bazen düz metin dönüyor; iki durumu da karşılıyoruz.
+        let url = text.trim();
+        try { const json = JSON.parse(text); url = json.url || json.fileName || json.file || url; } catch (err) { /* düz metin */ }
+        hesapGuncelle(index, { qrUrl: url });
+      } catch (err) {
+        console.error('QR yükleme hatası:', err);
+        alert('QR görseli yüklenemedi. Bağlantınızı kontrol edin.');
+      }
+      setQrYukleniyor('');
+      // Aynı dosyayı tekrar seçebilmek için input sıfırlanır.
+      e.target.value = '';
+    };
 
     const hesapGuncelle = (index, alanlar) => {
       setHesaplar(hesaplar.map((h, i) => i === index ? { ...h, ...alanlar } : h));
@@ -2161,13 +2191,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   <div>
                     <label className="block text-sm font-bold text-neutral-700 mb-1">Banka Adı</label>
                     <input value={hesap.banka} onChange={(e) => hesapGuncelle(i, { banka: e.target.value })}
-                      placeholder="Denizbank"
+                      placeholder="Garanti Bankası"
                       className="w-full p-3 text-sm border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-neutral-700 mb-1">Alıcı / Hesap Sahibi</label>
                     <input value={hesap.aliciAdi} onChange={(e) => hesapGuncelle(i, { aliciAdi: e.target.value })}
-                      placeholder="Şenol Beşinci"
+                      placeholder="Sembol Nakliyat Depoculuk Tic. Ltd. Şti."
                       className="w-full p-3 text-sm border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
                   </div>
 
@@ -2199,6 +2229,46 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     <input value={hesap.not || ''} onChange={(e) => hesapGuncelle(i, { not: e.target.value })}
                       placeholder="Örn: Kurumsal tahsilat hesabı"
                       className="w-full p-3 text-sm border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+
+                  {/* YENİ: BANKA QR KODU
+                      Ekip şefinin "IBAN Paylaş" penceresinde gösterilir.
+                      NEDEN YÜKLEME: Banka QR'ı IBAN'dan ÜRETİLEMEZ — bankanın kendi
+                      ödeme formatını taşır. Bu yüzden bankadan alınan görsel yüklenir. */}
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Banka QR Kodu</label>
+                    <p className="text-xs text-neutral-500 mb-2">
+                      Bankanızın mobil uygulamasından aldığınız QR görselini yükleyin. Ekip şefi
+                      müşteriyle paylaşırken bu kod gösterilir. QR, IBAN'dan üretilemediği için elle yüklenmesi gerekir.
+                    </p>
+                    <div className="flex items-start gap-3">
+                      {hesap.qrUrl ? (
+                        <div className="relative shrink-0">
+                          <img src={hesap.qrUrl} alt="Banka QR kodu" className="w-24 h-24 object-contain border border-neutral-200 rounded-xl bg-white p-1" />
+                          <button type="button" onClick={() => hesapGuncelle(i, { qrUrl: '' })} title="QR kodunu kaldır"
+                            className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-600 text-white flex items-center justify-center hover:bg-red-700 transition">
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-24 h-24 shrink-0 border-2 border-dashed border-neutral-300 rounded-xl flex items-center justify-center text-neutral-300">
+                          <QrCode className="w-8 h-8" />
+                        </div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <label className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black cursor-pointer transition ${
+                          qrYukleniyor === hesap.id ? 'bg-neutral-200 text-neutral-500' : 'bg-neutral-900 text-white hover:bg-neutral-800'
+                        }`}>
+                          {qrYukleniyor === hesap.id
+                            ? <><Loader2 className="w-4 h-4 animate-spin" /> Yükleniyor...</>
+                            : <><QrCode className="w-4 h-4" /> QR görseli seç</>}
+                          <input type="file" accept="image/*" className="hidden"
+                            disabled={qrYukleniyor === hesap.id}
+                            onChange={(e) => handleQrYukle(e, i, hesap.id)} />
+                        </label>
+                        <p className="text-[11px] text-neutral-400 mt-2">PNG veya JPG. Kare görseller en iyi sonucu verir.</p>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -5392,6 +5462,20 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       // YENİ: İlk tamamlanma zamanını kaydediyoruz. 3 saatlik düzenleme penceresi bu zamandan
       // itibaren ölçülür. Sonradan düzenleyip tekrar kaydedildiğinde eski zaman korunur (süre uzamaz).
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobToEnd.id), { status: 'completed', endJobDetails: endJobData, materialsDeducted: true, completedAt: jobToEnd.completedAt || new Date().toISOString() });
+
+      // YENİ: İş kapandığında KAPORA HARİÇ KALAN BAKİYE ilgili deftere
+      // "PARA GİRİŞİ (ALDIM)" olarak yazılır. Açıklamaya araç plakası eklenir.
+      // Hangi deftere gideceği ödeme yöntemine göre belirlenir (Nakit->Kasa,
+      // Havale/EFT->Banka, Kredi Kartı->Kredi Kartı, Ödeme Yapmadı->Borçlu).
+      // Bu çağrı işin kapanmasından SONRA yapılır ve hata fırlatmaz; defter
+      // kaydı başarısız olsa bile iş kapanmış kalır.
+      await defterGelirKaydet({
+        db, appId,
+        job: { ...jobToEnd, completedAt: jobToEnd.completedAt || new Date().toISOString() },
+        endJobDetails: endJobData,
+        currentUser,
+        addSystemLog
+      });
       setShowEndJobModal(false); 
       setJobToEnd(null);
     };
@@ -6889,9 +6973,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                               `💰 *Kapora Bilgilendirmesi:*\n` +
                               `İşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %20'si olan *${kaporaStr} TL* kapora ödemenizi rica ederiz.\n\n` +
                               `🏦 *Banka Bilgileri:*\n` +
-                              `Banka: Denizbank\n` +
-                              `Alıcı: Şenol Beşinci\n` +
-                              `IBAN: TR 94 0013 4000 0262 9671 7000 01\n\n` +
+                              // DEĞİŞİKLİK: Banka bilgisi artık sabit değil.
+                              // aktifBankaBilgiMetni() Resmi Ayarları'ndaki VARSAYILAN hesabı
+                              // okur; ayar kaydı yoksa koddaki varsayılana düşer.
+                              // Böylece IBAN panelden değiştirildiğinde mesaj da güncellenir.
+                              `${aktifBankaBilgiMetni()}\n\n` +
                               `⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (*${teslimKodu}*) yazınız.\n\n` +
                               `*Sembol Nakliyat* olarak ${savedJobInfo.date || ''} tarihinde saat ${savedJobInfo.time || ''} sularında planlanan ${isTipi} işleminiz sistemimize başarıyla kaydedilmiştir.\n\n` +
                               `🚚 *Güzergah Bilgisi:*\n` +
@@ -7573,7 +7659,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'financeDashboard' && showFinance && <FinanceDashboardView jobs={jobs} transactions={transactions} transactionType={transactionType} setTransactionType={setTransactionType} newTransaction={newTransaction} setNewTransaction={setNewTransaction} handleAddTransaction={handleAddTransaction} personnelList={personnelList} handleEditJob={handleEditJob} db={db} appId={appId} />}
             {activeTab === 'reporting' && showFinance && <ReportingView jobs={jobs} personnelList={personnelList} />}
             {activeTab === 'advancedReporting' && showFinance && <AdvancedReportingView jobs={jobs} />}
-            {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelListMuhasebe} db={db} appId={appId} addSystemLog={addSystemLog} />}
+            {/* DEĞİŞİKLİK: currentUser eklendi — avans ve maaş ödemeleri deftere
+                yazılırken "işlemi kim yaptı" bilgisinin kayda geçmesi için gerekli. */}
+            {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelListMuhasebe} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
             {activeTab === 'personelOdeme' && showFinance && <PersonelOdemeView personnelList={personnelListMuhasebe} transactions={transactions} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
             {/* YENİ: Defter — kasa/cari alacak-verecek takibi */}
             {activeTab === 'finansDefter' && showFinance && <FinansDefterView currentUser={currentUser} addSystemLog={addSystemLog} />}
