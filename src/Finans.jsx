@@ -3821,16 +3821,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       });
     };
 
-    const emptyIslem = { tip: 'giris', tutar: '', aciklama: '', kategori: 'Diğer', etiketler: [], odemeYontemi: 'Nakit', tarih: bugunStr() };
-    const [showIslemForm, setShowIslemForm] = useState(false);
-    const [islemForm, setIslemForm] = useState(emptyIslem);
-    const [editingIslemId, setEditingIslemId] = useState(null);
-    const [deleteIslemId, setDeleteIslemId] = useState(null);
-
-    // Detay filtreleri
-    const [detayArama, setDetayArama] = useState('');
-    const [kategoriFiltre, setKategoriFiltre] = useState('Tümü');
-
+    // DÜZELTME (TDZ HATASI): Bu tarih yardımcıları önce aşağıda,
+    // emptyIslem'den SONRA tanımlıydı. Ama emptyIslem satırı bugunStr()'i
+    // ÇAĞIRIYOR; const bildirimleri TDZ'de olduğu için tanımlanmadan önce
+    // erişim 'Cannot access before initialization' hatası veriyor ve Defter
+    // sayfası hiç açılmıyordu. Çözüm: yardımcıları kullanıldıkları yerin
+    // ÜSTÜNE taşımak. Fonksiyon gövdeleri değişmedi.
     // YENİ: GÜNLÜK FİLTRE — defter detayında hangi günün hareketleri görünecek.
     // DİKKAT: toISOString() kullanılmıyor; o UTC'ye çevirdiği için Türkiye
     // saatinde gece yarısına yakın saatlerde günü bir gün geriye kaydırabiliyor.
@@ -3855,6 +3851,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         day: 'numeric', month: 'long', year: 'numeric', weekday: 'long'
       });
     };
+
+    const emptyIslem = { tip: 'giris', tutar: '', aciklama: '', kategori: 'Diğer', etiketler: [], odemeYontemi: 'Nakit', tarih: bugunStr() };
+    const [showIslemForm, setShowIslemForm] = useState(false);
+    const [islemForm, setIslemForm] = useState(emptyIslem);
+    const [editingIslemId, setEditingIslemId] = useState(null);
+    const [deleteIslemId, setDeleteIslemId] = useState(null);
+
+    // Detay filtreleri
+    const [detayArama, setDetayArama] = useState('');
+    const [kategoriFiltre, setKategoriFiltre] = useState('Tümü');
+
 
     // Açılışta HER ZAMAN mevcut gün seçilidir.
     const [seciliGun, setSeciliGun] = useState(bugunStr());
