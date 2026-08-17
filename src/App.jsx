@@ -5469,12 +5469,20 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       // Havale/EFT->Banka, Kredi Kartı->Kredi Kartı, Ödeme Yapmadı->Borçlu).
       // Bu çağrı işin kapanmasından SONRA yapılır ve hata fırlatmaz; defter
       // kaydı başarısız olsa bile iş kapanmış kalır.
+      // YENİ: Ekip şefi adı ve araç kimliği burada çözülüp geçiriliyor.
+      // shared.jsx'in personel/araç listelerine erişimi yok; çözümleme burada
+      // yapılmalı. Plaka karşılaştırmasında boşluk ve harf büyüklüğü normalleştirilir.
+      const _plakaTemiz = (x) => (x || '').toString().replace(/\s/g, '').toUpperCase();
+      const _ekipSefi = personnelList.find(pp => pp.id === jobToEnd.assignedPersonnelId);
+      const _arac = vehicles.find(v => _plakaTemiz(v.plate) === _plakaTemiz(jobToEnd.assignedVehiclePlate));
       await defterGelirKaydet({
         db, appId,
         job: { ...jobToEnd, completedAt: jobToEnd.completedAt || new Date().toISOString() },
         endJobDetails: endJobData,
         currentUser,
-        addSystemLog
+        addSystemLog,
+        ekipSefiAdi: _ekipSefi?.fullName || '',
+        aracId: _arac?.id || ''
       });
       setShowEndJobModal(false); 
       setJobToEnd(null);
@@ -7664,7 +7672,19 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelListMuhasebe} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
             {activeTab === 'personelOdeme' && showFinance && <PersonelOdemeView personnelList={personnelListMuhasebe} transactions={transactions} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
             {/* YENİ: Defter — kasa/cari alacak-verecek takibi */}
-            {activeTab === 'finansDefter' && showFinance && <FinansDefterView currentUser={currentUser} addSystemLog={addSystemLog} />}
+            {/* YENİ: Defter satırındaki müşteri adı ve araç plakası tıklanabilir oldu.
+                Gezinme App.jsx'te yapılıyor çünkü cari anahtarı ve araç listesi
+                burada; plakadan araç kimliğine çeviren arama da burada yapılır.
+                Araç bulunamazsa sessiz kalmıyoruz, kullanıcıya bilgi veriyoruz. */}
+            {activeTab === 'finansDefter' && showFinance && <FinansDefterView currentUser={currentUser} addSystemLog={addSystemLog} jobs={jobs} vehicles={vehicles}
+              onViewCari={(tel) => { if (!tel) return; setViewingCariKey(normalizeCariPhone(tel)); setActiveTab('customerProfile'); }}
+              onViewVehicle={(plaka) => {
+                if (!plaka) return;
+                const temiz = (x) => (x || '').toString().replace(/\s/g, '').toUpperCase();
+                const arac = vehicles.find(v => temiz(v.plate) === temiz(plaka));
+                if (arac) { setViewingVehicleProfileId(arac.id); setActiveTab('vehicleProfile'); }
+                else { alert(`"${plaka}" plakalı araç, araç listesinde bulunamadı. Araç kaydı silinmiş olabilir.`); }
+              }} />}
 
             {activeTab === 'addTask' && showOperasyon &&
               <AddTaskFormView 
