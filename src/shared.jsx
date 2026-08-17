@@ -225,6 +225,101 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
     // ==========================================================================
     export const isUzaktanCalisan = (person) => person?.calismaSekli === 'Uzaktan';
 
+    // ==========================================================================
+    // DENEME MAAŞI VE DENEME SÜRESİ
+    // ==========================================================================
+    // Personel işe alınırken bir "deneme maaşı" ve "deneme süresi" (1-10 ay)
+    // girilebilir. Deneme süresi dolana kadar bordroda deneme maaşı, dolduktan
+    // sonra normal maaş (person.maas) kullanılır.
+    //
+    // ÖRNEK:
+    //   İşe giriş : 15 Temmuz 2026
+    //   Deneme    : 50.000 TL / 2 ay
+    //   Normal    : 60.000 TL
+    //   -> Temmuz  : 50.000 (1. deneme ayı)
+    //      Ağustos : 50.000 (2. deneme ayı)
+    //      Eylül   : 60.000 (normal maaşa geçer)
+    //
+    // AY SAYIMI: İŞE GİRİŞ AYI 1. AY SAYILIR. Ayın hangi gününde girildiği ay
+    // sayımını DEĞİŞTİRMEZ - 1'inde de girse 30'unda da girse o ay 1. deneme ayıdır.
+    //
+    // GÜN ORANLAMASI: Giriş ayında personel ayın tamamını çalışmadıysa, ödenecek
+    // tutar mevcut bordro mantığındaki `iseGirisGun` hesabıyla gün gün oranlanır
+    // (Finans.jsx). Yani 10 Temmuz'da giren personel Temmuz ayında 22 gün
+    // üzerinden DENEME maaşıyla hesaplanır: (50.000/30) x 22. Buradaki
+    // fonksiyonlar yalnızca "hangi maaş ORANI geçerli" sorusunu yanıtlar,
+    // gün oranlamasına karışmaz.
+    // ==========================================================================
+
+    // Personel formundaki deneme süresi seçim kutusunun seçenekleri
+    export const DENEME_SURE_SECENEKLERI = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+    // Verilen yıl/ay personelin deneme süresi içinde mi?
+    // ay: 1-12 arası (Ocak = 1) - Finans.jsx bu formatı kullanıyor.
+    export const denemeAyiMi = (person, yil, ay) => {
+      const sure = parseInt(person?.denemeSuresi) || 0;
+      const denemeMaasi = parseFloat(person?.denemeMaasi) || 0;
+
+      // Üç şart da gerekli: süre, deneme maaşı ve işe giriş tarihi.
+      // ESKİ KAYITLARDA bu alanlar hiç bulunmaz; onlar için fonksiyon her zaman
+      // false döner ve bordro davranışı eskisiyle BİREBİR aynı kalır.
+      if (sure <= 0 || denemeMaasi <= 0 || !person?.startDate) return false;
+
+      const giris = new Date(person.startDate + 'T00:00:00');
+      if (isNaN(giris.getTime())) return false;
+
+      // Giriş ayından kaç ay geçti? Giriş ayı = 0.
+      // getMonth() 0 tabanlı olduğu için gelen "ay" değerinden 1 çıkarılır.
+      const gecenAy = (yil - giris.getFullYear()) * 12 + ((ay - 1) - giris.getMonth());
+
+      // gecenAy 0 -> giriş ayı (1. deneme ayı), sure-1 -> son deneme ayı.
+      // Giriş tarihinden ÖNCEKİ aylar (gecenAy < 0) deneme sayılmaz.
+      return gecenAy >= 0 && gecenAy < sure;
+    };
+
+    // O ay için geçerli maaş oranı. Bordroda person.maas yerine bu kullanılır.
+    export const gecerliMaas = (person, yil, ay) =>
+      denemeAyiMi(person, yil, ay)
+        ? (parseFloat(person?.denemeMaasi) || 0)
+        : (parseFloat(person?.maas) || 0);
+
+    // Normal maaşa geçilen ilk ay - "Eylül 2026'dan itibaren" yazısı için.
+    // Dönen değer: { yil, ay, etiket } veya deneme tanımlı değilse null.
+    export const denemeBitisAyi = (person) => {
+      const sure = parseInt(person?.denemeSuresi) || 0;
+      if (sure <= 0 || !person?.startDate) return null;
+
+      const giris = new Date(person.startDate + 'T00:00:00');
+      if (isNaN(giris.getTime())) return null;
+
+      const gecisTarihi = new Date(giris.getFullYear(), giris.getMonth() + sure, 1);
+      const aylar = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+                     'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+
+      return {
+        yil: gecisTarihi.getFullYear(),
+        ay: gecisTarihi.getMonth() + 1,
+        etiket: `${aylar[gecisTarihi.getMonth()]} ${gecisTarihi.getFullYear()}`
+      };
+    };
+
+    // Personel formunun altında gösterilen canlı özet cümlesi.
+    // Ay sayımının giriş ayını kapsaması sezgisel olmadığı için, yönetici
+    // kaydetmeden önce hangi ayda geçiş olacağını görebilsin diye eklendi.
+    export const denemeOzetMetni = (person) => {
+      const sure = parseInt(person?.denemeSuresi) || 0;
+      const denemeMaasi = parseFloat(person?.denemeMaasi) || 0;
+      const normalMaas = parseFloat(person?.maas) || 0;
+
+      if (sure <= 0 || denemeMaasi <= 0) return '';
+      if (!person?.startDate) return 'Deneme süresinin işlemesi için işe giriş tarihi girilmelidir.';
+
+      const bitis = denemeBitisAyi(person);
+      const tl = (n) => n.toLocaleString('tr-TR');
+
+      return `${sure} ay boyunca ${tl(denemeMaasi)} TL, ${bitis.etiket} ayından itibaren ${tl(normalMaas)} TL üzerinden hesaplanır.`;
+    };
+
     export const isPersonnelVisibleInMonth = (person, year, month) => {
       // UZAKTAN çalışanlar puantaj / mesai / maaş / prim tablolarında görünmez
       if (isUzaktanCalisan(person)) return false;
@@ -924,6 +1019,151 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
   };
 
   // --- SÖZLEŞME PDF OLUŞTURUCU ---
+  // ==========================================================================
+  // RESMİ AYARLARI — VERİ VE YARDIMCILAR
+  // ==========================================================================
+  // "Sistem Dosyaları > Resmi Ayarları" ekranı bu veriyi düzenler.
+  // Yardımcılar burada (shared.jsx) tutulur çünkü hem sözleşme PDF'i
+  // (generateContractPDF, aşağıda) hem WhatsApp mesajları (App.jsx ve
+  // Operasyon.jsx) aynı kaynaktan okumalıdır. Ekranın kendisi App.jsx içinde,
+  // kardeşi AppSettingsView'in yanında durur.
+  //
+  // FIRESTORE YOLU (mevcut appBranding deseniyle aynı):
+  //   artifacts/{appId}/public/data/settings/resmiAyarlar
+  // ==========================================================================
+
+  // Aşağıdaki 29 madde, generateContractPDF içinde SABİT yazılı olan maddelerin
+  // BİREBİR aynısıdır. Firestore'da kayıt yoksa bunlar kullanılır; böylece
+  // panel ilk açılışta boş gelmez ve mevcut sözleşme davranışı korunur.
+  export const VARSAYILAN_SOZLESME_GRUPLARI = [
+    {
+      id: 'grup_genel',
+      baslik: 'HİZMET KAPSAMI VE OPERASYONEL ŞARTLAR',
+      maddeler: [
+        'Taşıma işlemi kapalı kasa nakliye aracı ile gerçekleştirilecek olup, aksi belirtmedikçe tek araç icin geçerlidir.',
+        'Eşyaların ambalajlanması, mobilyaların de-montaj ve montaj işlemleri yüklenici firma sorumluluğundadır.',
+        'Şehir içi nakliye hizmetinin, mücbir sebepler haricinde aynı iş günü içerisinde tamamlanması esastır.',
+        'Para kasası, piyano ve özel yapım eşyalar gibi özel taşıma gerektiren yükler önceden bildirilmelidir; aksi halde ek ücret tahakkuk ettirilir.',
+        'Sözleşme yapılan kişinin adreslerde bulunması süreci takip etmesi gerekmektedir.'
+      ]
+    },
+    {
+      id: 'grup_teknik',
+      baslik: 'TEKNİK SINIRLANDIRMALAR VE İSTİSNALAR',
+      maddeler: [
+        'Avize, perde, ankastre ve duvarda takılı eşyaları sökülümü yapılır; ancak montaj işlemleri hizmet kapsamı dışındadır.',
+        'Korniş, klima, aspiratör montajı, duvar montajı ve elektrik işleri firmanın sorumluluğunda değildir.',
+        'Tesisatı hazır olmayan beyaz eşyaların bağlantısı teknik emniyet gerekçesiyle yapılmamaktadır.',
+        'Klima sökülüm ve montajı hizmet kapsamında değildir.',
+        'Toplama hizmeti alındığında yeni adreste kolileri açılıp dizme/yerleştirme hizmeti yoktur.'
+      ]
+    },
+    {
+      id: 'grup_erisim',
+      baslik: 'NAKLİYE VE ERİŞİM KOŞULLARI',
+      maddeler: [
+        'Nakliye aracının yükleme ve boşaltma noktalarına yanaşma imkanı sağlanmalıdır. 30 metreyi aşan mesafelerde ek işçilik maliyeti oluşur.',
+        'Apartman boşluğuna veya kapı ölçülerine sığmayan eşyaların taşınması firmanın sorumluluğu dışındadır.',
+        'Kat farkı veya asansör kullanımı değişiklikleri durumunda fiyatlandırma güncellenebilir.',
+        'Toplama hizmeti alınmadığında küçük eşyaların kolileri taşımaya hazır halde bulunmalıdır.'
+      ]
+    },
+    {
+      id: 'grup_hasar',
+      baslik: 'HASAR, SİGORTA VE SORUMLULUK',
+      maddeler: [
+        'Taşınan emtia, nakliye esnasında oluşabilecek risklere karşı Emtia Sigortası güvencesindedir.',
+        "Olası personel hasarında firma, nakliye bedelinin %10'una kadar doğrudan tazmin sorumluluğunu kabul eder.",
+        'Hasar gören eşyalar için firma imkanlar doğrultusunda teknik tamir destek sağlanmaktadır.',
+        'Fabrika kutusu olmayan elektronik cihazlar, ziynet eşyası, nakit para ve yanıcı/akıcı maddeler sorumluluk dışındadır.',
+        'Hasar ve eksik bildirimlerinin teslimat anında yapılması zorunludur; adres terk edildikten sonraki talepler için sorumluluk alınmaz.'
+      ]
+    },
+    {
+      id: 'grup_odeme',
+      baslik: 'ÖDEME, İPTAL VE DEPOLAMA HÜKÜMLERİ',
+      maddeler: [
+        "Hizmet bedelinin %20'si kapora olarak alınır; kalan bakiye teslim edilecek adreste tahsil edilir.",
+        'Anlaşılan nakliye fiyatına KDV dahil değildir.',
+        'Şehirler arası taşımalarda eşya araca yüklendikten sonra %50 ödemeye tamamlanmaktadır.',
+        "Taşıma gününe 72 saatten az süre kala yapılan iptal ve değişikliklerde toplam bedelin %50'si cayma tazminatı olarak fatura edilir.",
+        'Depolama hizmetinde belirtilen fiyat sadece depoya giriş nakliyesini kapsar; çıkış nakliyesi ayrıca fiyatlandırılır.',
+        'Yüklenici firma, taşıma tarihine 72 saat kalan herhangi bir mazeret bildirmeksizin sözleşmeyi tek tarafli feshetme hakkına sahiptir.'
+      ]
+    },
+    {
+      id: 'grup_gizlilik',
+      baslik: 'GİZLİLİK VE HUKUKİ YETKİ',
+      maddeler: [
+        'Müşteri kişisel verileri KVKK kapsamında gizli tutulur.',
+        'Firmanın ticari itibarini zedeleyici art niyetli kötüyeleyici yorumlar ve paylaşımlar yapılamaz.',
+        'Kaydını yaptırıp kişisel bilgilerini firma ile paylaşmış hizmet alan kişiye firmamız tarafından telefon/internet aracılığıyla tüm maddeleri bildirilmiş veya bahsedilmiştir. Tüm maddeler kabul edilmiştir.',
+        'Firma tarafından hizmet alan kişiler sözleşme maddeleri dahilinde haklarını arayabilirler.'
+      ]
+    }
+  ];
+
+  // {ADET} yer tutucusu madde sayısıyla otomatik dolar. Böylece madde
+  // eklendiğinde "29 maddelik" yazısı elle düzeltilmek zorunda kalmaz.
+  export const VARSAYILAN_SOZLESME_KAPANIS =
+    'İşbu {ADET} maddelik sözleşmeden doğan ihtilaflarda Istanbul (Anadolu) Mahkemeleri ve Icra Daireleri yetkilidir.';
+
+  export const VARSAYILAN_BANKA_HESAPLARI = [
+    { id: 'hesap_1', banka: 'Denizbank', aliciAdi: 'Şenol Beşinci', iban: 'TR 94 0013 4000 0262 9671 7000 01', not: '' }
+  ];
+
+  // IBAN'ı 4'erli gruplara ayırır: "TR940013..." -> "TR94 0013 4000 ..."
+  // Boşluklu girilen IBAN da doğru biçimlenir (önce tüm boşluklar temizlenir).
+  export const ibanBicimle = (iban) => {
+    const temiz = String(iban || '').replace(/\s+/g, '').toUpperCase();
+    return temiz.replace(/(.{4})/g, '$1 ').trim();
+  };
+
+  // TR IBAN doğrulaması: TR + 24 rakam = 26 karakter.
+  // UYARI amaçlıdır, kaydetmeyi ENGELLEMEZ (yurt dışı hesap gerekebilir).
+  export const ibanGecerliMi = (iban) => {
+    const temiz = String(iban || '').replace(/\s+/g, '').toUpperCase();
+    return /^TR\d{24}$/.test(temiz);
+  };
+
+  // Tüm gruplardaki maddelerin toplam sayısı
+  export const maddeSayisi = (gruplar) =>
+    (gruplar || []).reduce((toplam, g) => toplam + (g.maddeler || []).length, 0);
+
+  // Maddeleri PDF için HTML'e çevirir.
+  // ÖNEMLİ: Numaralandırma gruplar boyunca KESİNTİSİZ devam eder (1..29);
+  // grup başlığı sayacı sıfırlamaz — mevcut PDF davranışıyla birebir aynı.
+  // İlk grubun başlığı basılmaz, çünkü mevcut PDF'te de ilk 5 madde başlıksız gelir.
+  export const sozlesmeMaddeleriHTML = (gruplar, kapanis) => {
+    let sayac = 0;
+    let html = '';
+    (gruplar || []).forEach((grup, i) => {
+      if (i > 0 && grup.baslik) {
+        html += `<div class="terms-group-title">${grup.baslik}</div>\n`;
+      }
+      (grup.maddeler || []).forEach(madde => {
+        sayac++;
+        html += `${sayac}. ${madde}<br/>\n`;
+      });
+    });
+    const kapanisMetni = String(kapanis || '').replace('{ADET}', String(sayac));
+    if (kapanisMetni) html += `${kapanisMetni}<br/>\n`;
+    return html;
+  };
+
+  // WhatsApp mesajlarındaki banka bloğunu üretir. Varsayılan hesap bulunamazsa
+  // ilk hesaba düşer; hiç ayar yoksa fabrika değerini kullanır ki mesaj
+  // hiçbir durumda IBAN'sız gitmesin.
+  export const bankaBilgiMetni = (ayarlar) => {
+    const hesaplar = ayarlar?.bankaHesaplari?.length ? ayarlar.bankaHesaplari : VARSAYILAN_BANKA_HESAPLARI;
+    const secili = hesaplar.find(h => h.id === ayarlar?.varsayilanHesapId) || hesaplar[0];
+    return `Banka: ${secili.banka}\nAlıcı: ${secili.aliciAdi}\nIBAN: ${ibanBicimle(secili.iban)}`;
+  };
+
+  // Firestore doküman referansı — tek yerden üretilir ki yol yanlış yazılmasın.
+  export const resmiAyarlarRef = (db, appId) =>
+    doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'resmiAyarlar');
+
   export const generateContractPDF = (job) => {
     const printWindow = window.open('', '_blank');
     
