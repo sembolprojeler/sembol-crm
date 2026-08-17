@@ -1,8 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode } from 'lucide-react';
+import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
-import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder } from './shared.jsx';
+import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
+  // YENİ: Resmi Ayarları ekranının kullandığı veri ve yardımcılar.
+  // Sözleşme PDF'i ve WhatsApp mesajları da aynı kaynaktan okuyacağı için
+  // bu tanımlar shared.jsx içinde tek noktada tutuluyor.
+  VARSAYILAN_SOZLESME_GRUPLARI, VARSAYILAN_SOZLESME_KAPANIS, VARSAYILAN_BANKA_HESAPLARI,
+  ibanBicimle, ibanGecerliMi, maddeSayisi, bankaBilgiMetni, resmiAyarlarRef } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
@@ -1818,6 +1823,612 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             })}
           </div>
         )}
+      </div>
+    );
+  };
+
+  // ==========================================================================
+  // RESMİ AYARLARI EKRANI — Sistem Dosyaları > Resmi Ayarları
+  // ==========================================================================
+  // İki bölümü yönetir:
+  //   1) ŞİRKET IBAN'I      -> WhatsApp bilgilendirme mesajlarındaki banka bilgisi
+  //   2) SÖZLEŞME MADDELERİ -> PDF sözleşmede basılan tüm maddeler
+  //
+  // Ekran burada, kardeşi AppSettingsView'in hemen yanında duruyor: ikisi de
+  // aynı alt menüde (Sistem Dosyaları) ve aynı yetkiye (systemFiles) bağlı.
+  // Veri ve yardımcı fonksiyonlar shared.jsx içinde: sözleşme PDF'i ve
+  // WhatsApp mesajları da aynı kaynaktan okuyacağı için orada tutuldu.
+  //
+  // FIRESTORE: artifacts/{appId}/public/data/settings/resmiAyarlar
+  // ==========================================================================
+
+  // BİLEŞEN: Bölüm başlığı — iki bölümde de aynı görünüm için tek yerden
+  // ============================================================================
+  const BolumBasligi = ({ ikon: Ikon, baslik, aciklama, sag }) => (
+    <div className="flex items-start justify-between gap-4 border-b border-neutral-200 pb-4 mb-5">
+      <div className="flex items-start gap-3">
+        <div className="w-10 h-10 rounded-xl bg-red-50 border border-red-100 flex items-center justify-center shrink-0">
+          <Ikon className="w-5 h-5 text-red-600" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold text-black leading-tight">{baslik}</h3>
+          {aciklama && <p className="text-sm text-neutral-500 mt-1 leading-relaxed">{aciklama}</p>}
+        </div>
+      </div>
+      {sag}
+    </div>
+  );
+
+  // ============================================================================
+  // BİLEŞEN: Tek bir sözleşme maddesi satırı
+  // Numara solda sabit genişlikte durur, metin textarea içinde büyür.
+  // ============================================================================
+  const MaddeSatiri = ({ numara, metin, onChange, onSil, onYukari, onAsagi, ilkMi, sonMu }) => (
+    <div className="flex items-start gap-2 group">
+      {/* Madde numarası — otomatik, elle girilmez */}
+      <span className="w-8 h-8 shrink-0 mt-1 rounded-lg bg-neutral-900 text-white text-xs font-black flex items-center justify-center">
+        {numara}
+      </span>
+
+      {/* Maddenin kendisi — satır sayısına göre büyüyen textarea */}
+      <textarea
+        value={metin}
+        onChange={(e) => onChange(e.target.value)}
+        rows={Math.max(2, Math.ceil((metin || '').length / 70))}
+        className="flex-1 p-3 text-sm border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition resize-none leading-relaxed"
+        placeholder="Madde metnini yazın..."
+      />
+
+      {/* Sıra değiştirme ve silme — masaüstünde hover'da belirir, mobilde her zaman görünür */}
+      <div className="flex flex-col gap-1 shrink-0 mt-1 opacity-100 md:opacity-40 md:group-hover:opacity-100 transition">
+        <button type="button" onClick={onYukari} disabled={ilkMi} title="Yukarı taşı"
+          className="p-1.5 rounded-lg bg-neutral-100 hover:bg-neutral-200 disabled:opacity-30 disabled:cursor-not-allowed transition">
+          <ChevronUp className="w-3.5 h-3.5 text-neutral-700" />
+        </button>
+        <button type="button" onClick={onAsagi} disabled={sonMu} title="Aşağı taşı"
+          className="p-1.5 rounded-lg bg-neutral-100 hover:bg-neutral-200 disabled:opacity-30 disabled:cursor-not-allowed transition">
+          <ChevronDown className="w-3.5 h-3.5 text-neutral-700" />
+        </button>
+        <button type="button" onClick={onSil} title="Maddeyi sil"
+          className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 transition">
+          <Trash2 className="w-3.5 h-3.5 text-red-600" />
+        </button>
+      </div>
+    </div>
+  );
+
+  // ============================================================================
+  // BİLEŞEN: Sözleşme maddeleri editörü
+  // Gruplar (başlıklar) + her grubun altındaki maddeler yönetilir.
+  // ============================================================================
+  const SozlesmeMaddeleriEditor = ({ gruplar, setGruplar, kapanis, setKapanis }) => {
+    const [onizleme, setOnizleme] = useState(false);
+    const toplam = maddeSayisi(gruplar);
+
+    // Numaralandırma gruplar boyunca kesintisiz devam ettiği için her grubun
+    // başlangıç numarasını önceden hesaplıyoruz.
+    const baslangicNumaralari = useMemo(() => {
+      let sayac = 0;
+      return gruplar.map(g => {
+        const bas = sayac + 1;
+        sayac += (g.maddeler || []).length;
+        return bas;
+      });
+    }, [gruplar]);
+
+    // Yardımcı: belirli bir grubu güncelle (React state'i mutasyona uğratmadan)
+    const grupGuncelle = (grupIndex, yeniAlanlar) => {
+      setGruplar(gruplar.map((g, i) => i === grupIndex ? { ...g, ...yeniAlanlar } : g));
+    };
+
+    const maddeGuncelle = (grupIndex, maddeIndex, yeniMetin) => {
+      const yeniMaddeler = [...gruplar[grupIndex].maddeler];
+      yeniMaddeler[maddeIndex] = yeniMetin;
+      grupGuncelle(grupIndex, { maddeler: yeniMaddeler });
+    };
+
+    const maddeEkle = (grupIndex) => {
+      grupGuncelle(grupIndex, { maddeler: [...gruplar[grupIndex].maddeler, ''] });
+    };
+
+    const maddeSil = (grupIndex, maddeIndex) => {
+      if (!window.confirm('Bu madde silinecek. Emin misiniz?')) return;
+      grupGuncelle(grupIndex, { maddeler: gruplar[grupIndex].maddeler.filter((_, i) => i !== maddeIndex) });
+    };
+
+    // Madde sırasını değiştir — yon: -1 yukarı, +1 aşağı
+    const maddeTasi = (grupIndex, maddeIndex, yon) => {
+      const yeniMaddeler = [...gruplar[grupIndex].maddeler];
+      const hedef = maddeIndex + yon;
+      if (hedef < 0 || hedef >= yeniMaddeler.length) return;
+      [yeniMaddeler[maddeIndex], yeniMaddeler[hedef]] = [yeniMaddeler[hedef], yeniMaddeler[maddeIndex]];
+      grupGuncelle(grupIndex, { maddeler: yeniMaddeler });
+    };
+
+    const grupEkle = () => {
+      setGruplar([...gruplar, { id: `grup_${Date.now()}`, baslik: 'YENİ BÖLÜM BAŞLIĞI', maddeler: [''] }]);
+    };
+
+    const grupSil = (grupIndex) => {
+      const adet = gruplar[grupIndex].maddeler.length;
+      if (!window.confirm(`"${gruplar[grupIndex].baslik}" bölümü ve içindeki ${adet} madde silinecek. Emin misiniz?`)) return;
+      setGruplar(gruplar.filter((_, i) => i !== grupIndex));
+    };
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+        <BolumBasligi
+          ikon={Scale}
+          baslik="Sözleşme Maddeleri"
+          aciklama="Buradaki maddeler, müşteriye verilen PDF sözleşmede aynen basılır. Madde numaraları otomatik verilir; bölümler arasında kesintisiz devam eder."
+          sag={
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="px-3 py-1.5 rounded-xl bg-neutral-900 text-white text-xs font-black whitespace-nowrap">
+                {toplam} madde
+              </span>
+              <button type="button" onClick={() => setOnizleme(!onizleme)}
+                className="px-3 py-1.5 rounded-xl border border-neutral-300 text-xs font-bold text-neutral-700 hover:bg-neutral-50 transition flex items-center gap-1.5">
+                <Eye className="w-3.5 h-3.5" /> {onizleme ? 'Düzenle' : 'Önizle'}
+              </button>
+            </div>
+          }
+        />
+
+        {/* ÖNİZLEME: PDF'te nasıl görüneceğini gösterir — yazdırmaya gerek kalmaz */}
+        {onizleme ? (
+          <div className="border border-neutral-200 rounded-xl p-5 bg-neutral-50 max-h-[500px] overflow-y-auto">
+            <p className="text-center text-xs font-black text-neutral-500 tracking-widest mb-4">
+              SÖZLEŞME ŞARTLARI VE MADDELERİ
+            </p>
+            {(() => {
+              // Önizlemede de gerçek numaralandırma mantığı kullanılır.
+              let sayac = 0;
+              return gruplar.map((grup, gi) => (
+                <div key={grup.id} className="mb-4">
+                  {gi > 0 && grup.baslik && (
+                    <p className="text-[11px] font-black text-black mt-4 mb-2 tracking-wide">{grup.baslik}</p>
+                  )}
+                  {grup.maddeler.map((madde, mi) => {
+                    sayac++;
+                    return (
+                      <p key={mi} className="text-[11px] text-neutral-800 leading-relaxed mb-1">
+                        <b>{sayac}.</b> {madde || <i className="text-red-500">(boş madde)</i>}
+                      </p>
+                    );
+                  })}
+                </div>
+              ));
+            })()}
+            <p className="text-[11px] text-neutral-800 leading-relaxed mt-4 pt-3 border-t border-neutral-300 font-bold">
+              {(kapanis || '').replace('{ADET}', String(toplam))}
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {gruplar.map((grup, gi) => (
+              <div key={grup.id} className="border border-neutral-200 rounded-xl overflow-hidden">
+                {/* Grup başlığı — doğrudan düzenlenebilir input */}
+                <div className="bg-neutral-50 border-b border-neutral-200 px-4 py-3 flex items-center gap-3">
+                  <input
+                    value={grup.baslik}
+                    onChange={(e) => grupGuncelle(gi, { baslik: e.target.value })}
+                    className="flex-1 bg-transparent text-sm font-black text-black outline-none focus:bg-white focus:px-2 focus:py-1 focus:rounded-lg transition"
+                    placeholder="BÖLÜM BAŞLIĞI"
+                  />
+                  <span className="text-[11px] font-bold text-neutral-500 whitespace-nowrap">
+                    {baslangicNumaralari[gi]}–{baslangicNumaralari[gi] + grup.maddeler.length - 1}
+                  </span>
+                  <button type="button" onClick={() => grupSil(gi)} title="Bölümü sil"
+                    className="p-1.5 rounded-lg hover:bg-red-100 transition">
+                    <Trash2 className="w-4 h-4 text-red-600" />
+                  </button>
+                </div>
+
+                <div className="p-4 space-y-3">
+                  {grup.maddeler.map((madde, mi) => (
+                    <MaddeSatiri
+                      key={mi}
+                      numara={baslangicNumaralari[gi] + mi}
+                      metin={madde}
+                      onChange={(v) => maddeGuncelle(gi, mi, v)}
+                      onSil={() => maddeSil(gi, mi)}
+                      onYukari={() => maddeTasi(gi, mi, -1)}
+                      onAsagi={() => maddeTasi(gi, mi, 1)}
+                      ilkMi={mi === 0}
+                      sonMu={mi === grup.maddeler.length - 1}
+                    />
+                  ))}
+                  <button type="button" onClick={() => maddeEkle(gi)}
+                    className="w-full py-2.5 rounded-xl border-2 border-dashed border-neutral-300 text-xs font-bold text-neutral-500 hover:border-red-400 hover:text-red-600 transition flex items-center justify-center gap-2">
+                    <Plus className="w-4 h-4" /> Bu bölüme madde ekle
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            <button type="button" onClick={grupEkle}
+              className="w-full py-3 rounded-xl bg-neutral-900 text-white text-sm font-bold hover:bg-neutral-800 transition flex items-center justify-center gap-2">
+              <Plus className="w-4 h-4" /> Yeni bölüm ekle
+            </button>
+
+            {/* Kapanış cümlesi — {ADET} yer tutucusu madde sayısıyla otomatik dolar */}
+            <div className="pt-5 border-t border-neutral-200">
+              <label className="block text-sm font-bold text-neutral-700 mb-1">Kapanış Cümlesi</label>
+              <p className="text-xs text-neutral-500 mb-2">
+                <code className="bg-neutral-100 px-1.5 py-0.5 rounded font-mono">{'{ADET}'}</code> yazdığınız
+                yere toplam madde sayısı otomatik yazılır. Madde eklediğinizde bu cümleyi elle düzeltmeniz gerekmez.
+              </p>
+              <textarea
+                value={kapanis}
+                onChange={(e) => setKapanis(e.target.value)}
+                rows={2}
+                className="w-full p-3 text-sm border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition resize-none"
+              />
+              <p className="text-xs text-neutral-600 mt-2 bg-neutral-50 border border-neutral-200 rounded-lg p-2.5">
+                <b>Sonuç:</b> {(kapanis || '').replace('{ADET}', String(toplam))}
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ============================================================================
+  // BİLEŞEN: Şirket IBAN yönetimi
+  // Birden fazla hesap tutulabilir, biri "varsayılan" seçilir. Mesajlarda
+  // varsayılan hesap kullanılır.
+  // ============================================================================
+  const SirketIbanEditor = ({ hesaplar, setHesaplar, varsayilanId, setVarsayilanId }) => {
+    const [kopyalandi, setKopyalandi] = useState('');
+
+    const hesapGuncelle = (index, alanlar) => {
+      setHesaplar(hesaplar.map((h, i) => i === index ? { ...h, ...alanlar } : h));
+    };
+
+    const hesapEkle = () => {
+      const yeniId = `hesap_${Date.now()}`;
+      setHesaplar([...hesaplar, { id: yeniId, banka: '', aliciAdi: '', iban: '', not: '' }]);
+    };
+
+    const hesapSil = (index) => {
+      const hesap = hesaplar[index];
+      if (hesaplar.length === 1) {
+        window.alert('En az bir banka hesabı bulunmalıdır. Son hesap silinemez.');
+        return;
+      }
+      if (!window.confirm(`"${hesap.banka || 'İsimsiz hesap'}" silinecek. Emin misiniz?`)) return;
+      const kalan = hesaplar.filter((_, i) => i !== index);
+      setHesaplar(kalan);
+      // Silinen hesap varsayılansa varsayılanı ilk hesaba devret — mesajlar boş kalmasın.
+      if (varsayilanId === hesap.id) setVarsayilanId(kalan[0].id);
+    };
+
+    // IBAN'ı panoya kopyala — operasyon ekibi müşteriye elle göndermek isterse
+    const ibanKopyala = (iban, id) => {
+      navigator.clipboard.writeText(ibanBicimle(iban));
+      setKopyalandi(id);
+      setTimeout(() => setKopyalandi(''), 2000);
+    };
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+        <BolumBasligi
+          ikon={Landmark}
+          baslik="Şirket IBAN'ı"
+          aciklama="Müşteriye gönderilen kapora bilgilendirme mesajlarında bu bilgiler kullanılır. Birden fazla hesap tanımlayıp birini varsayılan seçebilirsiniz."
+          sag={
+            <span className="px-3 py-1.5 rounded-xl bg-neutral-900 text-white text-xs font-black whitespace-nowrap shrink-0">
+              {hesaplar.length} hesap
+            </span>
+          }
+        />
+
+        <div className="space-y-4">
+          {hesaplar.map((hesap, i) => {
+            const varsayilanMi = hesap.id === varsayilanId;
+            const ibanUyari = hesap.iban && !ibanGecerliMi(hesap.iban);
+
+            return (
+              <div key={hesap.id}
+                className={`rounded-xl border-2 transition ${varsayilanMi ? 'border-red-600 bg-red-50/40' : 'border-neutral-200 bg-white'}`}>
+
+                {/* Hesap üst şeridi: varsayılan seçimi + kopyala + sil */}
+                <div className="px-4 py-3 flex items-center justify-between gap-3 border-b border-neutral-200">
+                  <button type="button" onClick={() => setVarsayilanId(hesap.id)}
+                    className={`flex items-center gap-2 text-xs font-black px-3 py-1.5 rounded-lg transition ${
+                      varsayilanMi ? 'bg-red-600 text-white' : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                    }`}>
+                    <Star className={`w-3.5 h-3.5 ${varsayilanMi ? 'fill-white' : ''}`} />
+                    {varsayilanMi ? 'VARSAYILAN HESAP' : 'Varsayılan yap'}
+                  </button>
+
+                  <div className="flex items-center gap-1.5">
+                    <button type="button" onClick={() => ibanKopyala(hesap.iban, hesap.id)} title="IBAN'ı kopyala"
+                      className="p-2 rounded-lg bg-neutral-100 hover:bg-neutral-200 transition">
+                      {kopyalandi === hesap.id
+                        ? <CheckCircle className="w-4 h-4 text-green-600" />
+                        : <Copy className="w-4 h-4 text-neutral-700" />}
+                    </button>
+                    <button type="button" onClick={() => hesapSil(i)} title="Hesabı sil"
+                      className="p-2 rounded-lg bg-red-50 hover:bg-red-100 transition">
+                      <Trash2 className="w-4 h-4 text-red-600" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Banka Adı</label>
+                    <input value={hesap.banka} onChange={(e) => hesapGuncelle(i, { banka: e.target.value })}
+                      placeholder="Denizbank"
+                      className="w-full p-3 text-sm border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">Alıcı / Hesap Sahibi</label>
+                    <input value={hesap.aliciAdi} onChange={(e) => hesapGuncelle(i, { aliciAdi: e.target.value })}
+                      placeholder="Şenol Beşinci"
+                      className="w-full p-3 text-sm border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">IBAN</label>
+                    {/* font-mono + tracking: rakamları saymak kolaylaşır, yanlış IBAN riski azalır */}
+                    <input value={hesap.iban} onChange={(e) => hesapGuncelle(i, { iban: e.target.value })}
+                      placeholder="TR00 0000 0000 0000 0000 0000 00"
+                      className={`w-full p-3 text-sm font-mono tracking-wider uppercase border rounded-xl outline-none transition ${
+                        ibanUyari ? 'border-amber-400 bg-amber-50 focus:ring-2 focus:ring-amber-500'
+                                  : 'border-neutral-300 focus:ring-2 focus:ring-red-600'
+                      }`} />
+                    {/* Uyarı KAYDETMEYİ ENGELLEMEZ — yurt dışı hesap gerekebilir */}
+                    {ibanUyari && (
+                      <p className="text-xs text-amber-700 mt-1.5 flex items-center gap-1.5 font-bold">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        TR IBAN'ı 26 karakter olmalı (TR + 24 rakam). Kontrol edin.
+                      </p>
+                    )}
+                    {hesap.iban && !ibanUyari && (
+                      <p className="text-xs text-neutral-500 mt-1.5 font-mono">
+                        Mesajda görünecek hâli: <b className="text-black">{ibanBicimle(hesap.iban)}</b>
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-bold text-neutral-700 mb-1">İç Not (müşteriye gönderilmez)</label>
+                    <input value={hesap.not || ''} onChange={(e) => hesapGuncelle(i, { not: e.target.value })}
+                      placeholder="Örn: Kurumsal tahsilat hesabı"
+                      className="w-full p-3 text-sm border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          <button type="button" onClick={hesapEkle}
+            className="w-full py-3 rounded-xl border-2 border-dashed border-neutral-300 text-sm font-bold text-neutral-500 hover:border-red-400 hover:text-red-600 transition flex items-center justify-center gap-2">
+            <Plus className="w-4 h-4" /> Yeni banka hesabı ekle
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // ============================================================================
+  // BİLEŞEN: WhatsApp mesaj önizlemesi
+  // Varsayılan hesabın müşteriye nasıl gideceğini gerçek mesaj formatında gösterir.
+  // Yanlış IBAN'ın müşteriye gitmesi ciddi bir hata olduğu için bu önizleme önemli.
+  // ============================================================================
+  const MesajOnizleme = ({ ayarlar }) => {
+    const bankaBlogu = bankaBilgiMetni(ayarlar);
+
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+        <BolumBasligi
+          ikon={FileText}
+          baslik="Müşteriye Gidecek Mesaj"
+          aciklama="Kapora bilgilendirme mesajının banka bölümü. Varsayılan hesabı değiştirdiğinizde burası da değişir."
+        />
+        {/* WhatsApp benzeri baloncuk — gerçek görünümü taklit eder */}
+        <div className="bg-[#E7FFDB] border border-green-200 rounded-2xl rounded-tr-sm p-4 max-w-md">
+          <p className="text-xs text-neutral-800 whitespace-pre-line leading-relaxed font-medium">
+            {'💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %20\'si olan *X.XXX TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\n' + bankaBlogu}
+          </p>
+          <p className="text-[10px] text-neutral-500 text-right mt-2">şimdi ✓✓</p>
+        </div>
+      </div>
+    );
+  };
+
+  // ============================================================================
+  // ANA BİLEŞEN: ResmiAyarlarView
+  // App.tsx içinden şu şekilde çağrılır:
+  //   <ResmiAyarlarView db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />
+  // ============================================================================
+  const ResmiAyarlarView = ({ db, appId, addSystemLog, currentUser }) => {
+    const [yukleniyor, setYukleniyor] = useState(true);
+    const [kaydediliyor, setKaydediliyor] = useState(false);
+    const [mesaj, setMesaj] = useState('');
+    const [hata, setHata] = useState('');
+
+    // Düzenlenen taslak state — Firestore'a yalnızca "Kaydet"e basınca yazılır.
+    const [gruplar, setGruplar] = useState(VARSAYILAN_SOZLESME_GRUPLARI);
+    const [kapanis, setKapanis] = useState(VARSAYILAN_SOZLESME_KAPANIS);
+    const [hesaplar, setHesaplar] = useState(VARSAYILAN_BANKA_HESAPLARI);
+    const [varsayilanId, setVarsayilanId] = useState('hesap_1');
+
+    // Kaydedilmemiş değişiklik var mı? Sekmeden çıkarken uyarmak için kullanılır.
+    const [kirli, setKirli] = useState(false);
+
+    // ---------------------------------------------------------------------------
+    // Firestore'dan oku. onSnapshot kullanıldı çünkü iki yönetici aynı anda
+    // düzenlerse diğerinin kaydı anında yansır. Kaydedilmemiş değişiklik varsa
+    // (kirli === true) gelen veri UZAKTAN YAZILMAZ — kullanıcının emeği silinmesin.
+    // ---------------------------------------------------------------------------
+    useEffect(() => {
+      if (!db || !appId) return;
+      const unsub = onSnapshot(resmiAyarlarRef(db, appId), (snap) => {
+        if (snap.exists()) {
+          const d = snap.data();
+          if (!kirli) {
+            if (d.sozlesmeGruplari?.length) setGruplar(d.sozlesmeGruplari);
+            if (d.sozlesmeKapanis) setKapanis(d.sozlesmeKapanis);
+            if (d.bankaHesaplari?.length) setHesaplar(d.bankaHesaplari);
+            if (d.varsayilanHesapId) setVarsayilanId(d.varsayilanHesapId);
+          }
+        }
+        setYukleniyor(false);
+      }, (err) => {
+        console.error('Resmi Ayarları okunamadı:', err);
+        setHata('Ayarlar okunamadı. İnternet bağlantınızı ve yetkilerinizi kontrol edin.');
+        setYukleniyor(false);
+      });
+      return () => unsub();
+    }, [db, appId, kirli]);
+
+    // Alt bileşenlerden gelen her değişiklik "kirli" işaretini kaldırır
+    const izle = (setter) => (deger) => { setter(deger); setKirli(true); setMesaj(''); };
+
+    const ayarlar = { sozlesmeGruplari: gruplar, sozlesmeKapanis: kapanis, bankaHesaplari: hesaplar, varsayilanHesapId: varsayilanId };
+
+    // ---------------------------------------------------------------------------
+    // KAYDET
+    // ---------------------------------------------------------------------------
+    const kaydet = async () => {
+      // Boş madde kaydedilirse PDF'te "12. " gibi boş satır çıkar — önce uyar.
+      const bosMadde = gruplar.some(g => g.maddeler.some(m => !String(m).trim()));
+      if (bosMadde && !window.confirm('Boş madde(ler) var. Bunlar sözleşmede boş satır olarak görünür. Yine de kaydedilsin mi?')) return;
+
+      const varsayilanHesap = hesaplar.find(h => h.id === varsayilanId);
+      if (!varsayilanHesap?.iban?.trim()) {
+        setHata('Varsayılan hesabın IBAN alanı boş. Müşteri mesajları IBAN olmadan gönderilemez.');
+        return;
+      }
+
+      setKaydediliyor(true);
+      setHata('');
+      try {
+        await setDoc(resmiAyarlarRef(db, appId), {
+          sozlesmeGruplari: gruplar,
+          sozlesmeKapanis: kapanis,
+          bankaHesaplari: hesaplar,
+          varsayilanHesapId: varsayilanId,
+          updatedAt: new Date().toISOString(),
+          updatedBy: currentUser?.fullName || 'Bilinmiyor'
+        }, { merge: true });
+
+        // Sistem kaydı — sözleşme ve IBAN kritik alanlar, kim değiştirdi izlenebilsin
+        if (addSystemLog) {
+          addSystemLog(
+            'Resmi Ayarları Güncellendi',
+            `${maddeSayisi(gruplar)} sözleşme maddesi ve ${hesaplar.length} banka hesabı kaydedildi. Varsayılan: ${varsayilanHesap.banka} — ${ibanBicimle(varsayilanHesap.iban)}`
+          );
+        }
+
+        setKirli(false);
+        setMesaj('Kaydedildi. Yeni sözleşmeler ve mesajlar bu bilgilerle oluşturulacak.');
+        setTimeout(() => setMesaj(''), 5000);
+      } catch (err) {
+        console.error('Resmi Ayarları kaydedilemedi:', err);
+        setHata('Kaydedilemedi: ' + (err?.message || 'bilinmeyen hata'));
+      } finally {
+        setKaydediliyor(false);
+      }
+    };
+
+    // Varsayılana dön — yanlış düzenleme sonrası kurtarma yolu
+    const varsayilanaDon = () => {
+      if (!window.confirm('Tüm sözleşme maddeleri ve banka bilgileri fabrika ayarlarına dönecek. Kaydedilmemiş değişiklikleriniz kaybolur. Emin misiniz?')) return;
+      setGruplar(VARSAYILAN_SOZLESME_GRUPLARI);
+      setKapanis(VARSAYILAN_SOZLESME_KAPANIS);
+      setHesaplar(VARSAYILAN_BANKA_HESAPLARI);
+      setVarsayilanId('hesap_1');
+      setKirli(true);
+    };
+
+    if (yukleniyor) {
+      return (
+        <div className="p-6 flex items-center justify-center min-h-[300px]">
+          <div className="flex items-center gap-3 text-neutral-500">
+            <Loader2 className="w-5 h-5 animate-spin" />
+            <span className="text-sm font-bold">Resmi ayarlar yükleniyor...</span>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="p-4 md:p-6 space-y-6 pb-32">
+        {/* SAYFA BAŞLIĞI */}
+        <div>
+          <h2 className="text-2xl font-black text-black flex items-center gap-3">
+            <Building2 className="w-7 h-7 text-red-600" /> Resmi Ayarları
+          </h2>
+          <p className="text-sm text-neutral-500 mt-1.5">
+            Sözleşme maddeleri ve şirket banka bilgileri buradan yönetilir. Yapılan değişiklikler
+            bundan sonra oluşturulan tüm sözleşme ve müşteri mesajlarına uygulanır.
+          </p>
+        </div>
+
+        {/* GEÇMİŞ BELGELERİN DEĞİŞMEDİĞİ UYARISI — hukuki açıdan kritik */}
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-900 leading-relaxed">
+            <b>Geçmiş sözleşmeler değişmez.</b> Sözleşme PDF'i her indirilişte yeniden üretildiği için,
+            burada yaptığınız değişiklik <b>eski işlerin sözleşmesini yeniden indirdiğinizde de</b> geçerli olur.
+            İmzalanmış bir sözleşmenin metnini korumak istiyorsanız imzalı PDF'i özlük/iş dosyasına yükleyin.
+          </p>
+        </div>
+
+        {mesaj && (
+          <div className="p-3.5 bg-green-50 text-green-800 rounded-xl font-bold text-sm border border-green-200 flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 shrink-0" /> {mesaj}
+          </div>
+        )}
+        {hata && (
+          <div className="p-3.5 bg-red-50 text-red-800 rounded-xl font-bold text-sm border border-red-200 flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 shrink-0" /> {hata}
+          </div>
+        )}
+
+        <SirketIbanEditor
+          hesaplar={hesaplar}
+          setHesaplar={izle(setHesaplar)}
+          varsayilanId={varsayilanId}
+          setVarsayilanId={izle(setVarsayilanId)}
+        />
+
+        <MesajOnizleme ayarlar={ayarlar} />
+
+        <SozlesmeMaddeleriEditor
+          gruplar={gruplar}
+          setGruplar={izle(setGruplar)}
+          kapanis={kapanis}
+          setKapanis={izle(setKapanis)}
+        />
+
+        {/* SABİT KAYDET ŞERİDİ — uzun sayfada aşağı kaydırınca da erişilebilir kalır */}
+        <div className="fixed bottom-0 left-0 right-0 md:left-72 bg-white/95 backdrop-blur border-t border-neutral-200 p-4 z-30">
+          <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
+            <div className="text-xs font-bold min-w-0">
+              {kirli
+                ? <span className="text-amber-700 flex items-center gap-1.5"><AlertTriangle className="w-4 h-4 shrink-0" /> Kaydedilmemiş değişiklik var</span>
+                : <span className="text-neutral-400">Tüm değişiklikler kayıtlı</span>}
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button type="button" onClick={varsayilanaDon}
+                className="px-4 py-2.5 rounded-xl border border-neutral-300 text-xs font-bold text-neutral-600 hover:bg-neutral-50 transition flex items-center gap-1.5">
+                <RotateCcw className="w-4 h-4" /> <span className="hidden sm:inline">Varsayılana dön</span>
+              </button>
+              <button type="button" onClick={kaydet} disabled={kaydediliyor || !kirli}
+                className="px-6 py-2.5 rounded-xl bg-red-600 text-white text-sm font-black hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-2 shadow-lg shadow-red-600/20">
+                {kaydediliyor
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Kaydediliyor</>
+                  : <><Save className="w-4 h-4" /> Kaydet</>}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -6003,6 +6614,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'appSettings' ? 'bg-white' : 'bg-red-600'}`}></div> Uygulama Ayarları
                     </button>
+                    {/* YENİ: "Resmi Ayarları" — sözleşme maddeleri ve şirket IBAN'ı
+                        buradan yönetilir. Sistem Dosyaları alt menüsünün EN ALTINDA durur. */}
+                    <button 
+                      onClick={() => { setActiveTab('resmiAyarlar'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'resmiAyarlar' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'resmiAyarlar' ? 'bg-white' : 'bg-red-600'}`}></div> Resmi Ayarları
+                    </button>
                     </>)}
                   </div>
                 )}
@@ -6503,7 +7122,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-100">
-                        {vehicles.map(vehicle => (
+                        {/* DEĞİŞİKLİK: Araçlar artık HACME GÖRE BÜYÜKTEN KÜÇÜĞE sıralanıyor.
+                            ÖNEMLİ: [...vehicles] ile KOPYA alınır; sort() diziyi yerinde
+                            değiştirdiği için doğrudan vehicles.sort() yazmak Firebase'den
+                            gelen state'i bozar ve React'te beklenmedik render sorunlarına yol açar.
+                            volume alanı "number" input'undan METİN olarak kaydedildiği için
+                            parseFloat ile sayıya çevrilir; boş/geçersiz hacim 0 sayılır ve
+                            böyle araçlar listenin en altına düşer. */}
+                        {[...vehicles].sort((a, b) => (parseFloat(b.volume) || 0) - (parseFloat(a.volume) || 0)).map(vehicle => (
                           <tr key={vehicle.id} className="hover:bg-neutral-50 transition">
                             <td className="p-4 font-bold text-black text-lg whitespace-nowrap">
                               <div className="border-2 border-black rounded px-3 py-1.5 inline-flex items-center gap-2 bg-white shadow-sm">
@@ -7017,6 +7643,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'userActivities' && showSystemFiles && <UserActivitiesView personnelList={personnelList} />}
             {activeTab === 'companyPasswords' && showSystemFiles && <CompanyPasswordsView passwords={companyPasswords} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'appSettings' && showSystemFiles && <AppSettingsView db={db} appId={appId} addSystemLog={addSystemLog} appBranding={appBranding} />}
+            {/* YENİ: Resmi Ayarları — sözleşme maddeleri ve şirket IBAN yönetimi.
+                Uygulama Ayarları ile aynı yetkiye (systemFiles) bağlıdır. */}
+            {activeTab === 'resmiAyarlar' && showSystemFiles && <ResmiAyarlarView db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
           </div>
         </main>
 
