@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown , Banknote, UserMinus } from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 // DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
 // Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
@@ -3714,20 +3714,42 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
   // (maaş, iş geliri vb.) otomatik kayıt aktarmak için defterIslemleri
   // koleksiyonuna kaynak etiketiyle addDoc yapmak yeterlidir.
   // ==========================================================================
-  export const FinansDefterView = ({ currentUser, addSystemLog }) => {
+  export const FinansDefterView = ({ currentUser, addSystemLog, onViewCari, onViewVehicle, jobs = [], vehicles = [] }) => {
     // Varsayılan işlem kategorileri (giderler + gelirler bir arada)
-    const DEFTER_KATEGORILER = ['İş Geliri', 'Tahsilat', 'Personel Maaş', 'Avans', 'Yakıt', 'Kira', 'Malzeme', 'Bakım / Onarım', 'Vergi / Resmi', 'Yemek / Yol', 'Borç Ödeme', 'Borç Verme', 'Transfer', 'Diğer'];
+    // DEĞİŞİKLİK: Eski sabit kategori listesi KALDIRILDI. Kategoriler artık
+    // etiket ağacından gelir (VARSAYILAN_ETIKET_GRUPLARI) + kullanıcının
+    // eklediği özel kategoriler (Firestore: settings/defterEtiketleri).
+    // Böylece "etiket" ve "kategori" tek kavrama indirildi; işlem formunda
+    // ayrı etiket alanı yok. 'İş Geliri' otomatik kayıtların geriye dönük
+    // uyumu için korunur (eski kayıtlar bu kategoriyle yazılmıştı).
     // DEĞİŞİKLİK: 'Cari (Kişi/Firma)' -> 'Kredi Kartı', 'Diğer' -> 'Borçlu'.
     // Bu dizi HER İKİ formu da (yeni defter ve defter düzenle) besler; tek
     // yerden değiştirmek yeterlidir.
     // DİKKAT: Bu metinler Firestore'a d.tur alanında DEĞER olarak yazılır.
     // Eski defterlerde hâlâ 'Cari (Kişi/Firma)' / 'Diğer' yazılı olabilir;
     // aşağıdaki ESKI_DEFTER_TURLERI eşlemesi onların rengini ve etiketini korur.
-    const DEFTER_TURLERI = ['Kasa', 'Banka', 'Kredi Kartı', 'Borçlu'];
+    // DEĞİŞİKLİK: 'Kasa' türünün adı 'Nakit' oldu. Eski defter kayıtlarında
+    // d.tur alanında 'Kasa' yazmaya devam eder; defterTuruEtiket eşlemesi
+    // onları da 'Nakit' olarak gösterir, veritabanına dokunulmaz.
+    const DEFTER_TURLERI = ['Nakit', 'Banka', 'Kredi Kartı', 'Borçlu'];
 
     // Eski kayıtları yeni karşılıklarına eşler. Sadece GÖRÜNTÜLEME için kullanılır;
     // Firestore'daki eski veri değiştirilmez, dolayısıyla geçmiş bozulmaz.
+    // YENİ: Defter türüne göre SİMGE ve RENK. İkisi tek yerden veriliyor;
+    // eskiden renk mantığı iki ayrı yerde tekrarlanıyordu ve biri güncellenip
+    // diğeri unutulabiliyordu. Eski tür adları ('Kasa', 'Cari (Kişi/Firma)',
+    // 'Diğer') da eşleşir, geçmiş defterler simgesiz/renksiz kalmaz.
+    const defterTuruGorunum = (tur) => {
+      if (tur === 'Banka') return { Ikon: Landmark, renk: 'bg-blue-600' };
+      if (tur === 'Nakit' || tur === 'Kasa') return { Ikon: Banknote, renk: 'bg-emerald-600' };
+      if (tur === 'Kredi Kartı' || tur === 'Cari (Kişi/Firma)') return { Ikon: CreditCard, renk: 'bg-amber-500' };
+      if (tur === 'Borçlu' || tur === 'Diğer') return { Ikon: UserMinus, renk: 'bg-rose-600' };
+      // Tanınmayan tür: nötr gri + genel defter simgesi
+      return { Ikon: BookOpen, renk: 'bg-neutral-500' };
+    };
+
     const defterTuruEtiket = (tur) => {
+      if (tur === 'Kasa') return 'Nakit';
       if (tur === 'Cari (Kişi/Firma)') return 'Kredi Kartı';
       if (tur === 'Diğer') return 'Borçlu';
       return tur || '-';
@@ -3741,7 +3763,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
     // Defter oluşturma/düzenleme penceresi
     const [showDefterForm, setShowDefterForm] = useState(false);
-    const [defterForm, setDefterForm] = useState({ ad: '', tur: 'Kasa', not: '' });
+    const [defterForm, setDefterForm] = useState({ ad: '', tur: 'Nakit', not: '' });
     const [editingDefterId, setEditingDefterId] = useState(null);
     const [deleteDefterId, setDeleteDefterId] = useState(null);
 
@@ -3779,18 +3801,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const mevcut = [...tumVarsayilanEtiketler(), ...ozelEtiketler].map(e => e.toLocaleUpperCase('tr-TR'));
       if (mevcut.includes(ad)) {
         // Zaten varsa yeni kayıt açmak yerine doğrudan seçili hale getirilir.
-        if (!(islemForm.etiketler || []).includes(ad)) {
-          setIslemForm({ ...islemForm, etiketler: [...(islemForm.etiketler || []), ad] });
-        }
+        // Zaten varsa doğrudan kategori olarak seçilir.
+        setIslemForm({ ...islemForm, kategori: ad });
         setYeniEtiket('');
+        setShowEtiketSecici(false);
         return;
       }
       const yeniListe = [...ozelEtiketler, ad].sort((a, b) => a.localeCompare(b, 'tr-TR'));
       try {
         await setDoc(defterEtiketleriRef(db, appId), { liste: yeniListe, updatedAt: new Date().toISOString() }, { merge: true });
-        // Eklenen etiket otomatik seçilir — kullanıcı ekleyip bir daha aramasın.
-        setIslemForm({ ...islemForm, etiketler: [...(islemForm.etiketler || []), ad] });
+        // Eklenen kategori otomatik seçilir ve pencere kapanır.
+        setIslemForm({ ...islemForm, kategori: ad });
         setYeniEtiket('');
+        setShowEtiketSecici(false);
         addSystemLog?.('Defter Etiketi Eklendi', `"${ad}" etiketi hazır etiketler listesine eklendi.`);
       } catch (e) {
         console.error('Etiket eklenemedi:', e);
@@ -3813,12 +3836,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     };
 
     // Bir etiketi seç / seçimi kaldır
+    // DEĞİŞİKLİK: Çoklu etiket seçimi TEK kategori seçimine dönüştü.
+    // Bir kategoriye tıklanınca alana yazılır ve pencere kapanır; aynı
+    // kategoriye tekrar tıklanırsa seçim kaldırılır.
     const etiketToggle = (ad) => {
-      const mevcut = islemForm.etiketler || [];
-      setIslemForm({
-        ...islemForm,
-        etiketler: mevcut.includes(ad) ? mevcut.filter(e => e !== ad) : [...mevcut, ad]
-      });
+      setIslemForm({ ...islemForm, kategori: islemForm.kategori === ad ? '' : ad });
+      if (islemForm.kategori !== ad) setShowEtiketSecici(false);
     };
 
     // DÜZELTME (TDZ HATASI): Bu tarih yardımcıları önce aşağıda,
@@ -3852,7 +3875,35 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       });
     };
 
-    const emptyIslem = { tip: 'giris', tutar: '', aciklama: '', kategori: 'Diğer', etiketler: [], odemeYontemi: 'Nakit', tarih: bugunStr() };
+    const emptyIslem = { tip: 'giris', tutar: '', aciklama: '', kategori: '', etiketler: [], odemeYontemi: 'Nakit', tarih: bugunStr(),
+      // YENİ: MÜŞTERİ (cari) ve ARAÇ alanları — ikisi de OPSİYONEL.
+      // Eskiden bu bilgiler açıklama metnine gömülüydü; ayrı alan olunca
+      // tıklanabilir, filtrelenebilir ve raporlanabilir hale geliyor.
+      musteriAdi: '', musteriTel: '', plaka: '', aracId: '' };
+
+    // Cari (müşteri) arama penceresi
+    const [showCariSecici, setShowCariSecici] = useState(false);
+    const [cariArama, setCariArama] = useState('');
+
+    // İŞLERDEN benzersiz CARİ listesi. Anahtar telefon numarası; aynı müşteri
+    // farklı isim yazımıyla girilmiş olsa bile tek cari sayılır — uygulamanın
+    // Müşteri Portföyü ekranı da aynı mantığı kullanıyor, tutarlı olsun diye.
+    const cariListesi = useMemo(() => {
+      const harita = new Map();
+      (jobs || []).forEach(j => {
+        const tel = (j.customerPhone || '').replace(/\D/g, '');
+        if (!tel) return;
+        const mevcut = harita.get(tel);
+        if (mevcut) {
+          mevcut.isSayisi++;
+          // En son işteki isim yazımı esas alınır
+          if ((j.date || '') > mevcut.sonTarih) { mevcut.ad = j.customerName || mevcut.ad; mevcut.sonTarih = j.date || ''; }
+        } else {
+          harita.set(tel, { tel, ad: j.customerName || 'İsimsiz', isSayisi: 1, sonTarih: j.date || '' });
+        }
+      });
+      return [...harita.values()].sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+    }, [jobs]);
     const [showIslemForm, setShowIslemForm] = useState(false);
     const [islemForm, setIslemForm] = useState(emptyIslem);
     const [editingIslemId, setEditingIslemId] = useState(null);
@@ -3867,6 +3918,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const [seciliGun, setSeciliGun] = useState(bugunStr());
     // Günlük filtre açık mı? Kapatılırsa defterin tüm geçmişi listelenir.
     const [gunFiltreAktif, setGunFiltreAktif] = useState(true);
+
+    // YENİ: VİRMAN (hesaplar arası transfer) formu.
+    // State'ler kasten BURAYA konuldu: bugunStr/seciliGun tanımlarından SONRA,
+    // handleVirmanKaydet'ten önce. Daha yukarıya alınsa TDZ hatası çıkardı.
+    const [showVirmanForm, setShowVirmanForm] = useState(false);
+    const [virmanKaydediliyor, setVirmanKaydediliyor] = useState(false);
+    const [virmanForm, setVirmanForm] = useState({ hedefDefterId: '', tutar: '', aciklama: '' });
 
     // Firestore canlı dinleme
     useEffect(() => {
@@ -3889,8 +3947,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     };
 
     // Genel toplamlar (tüm defterler)
-    const toplamGiris = islemler.filter(i => i.tip === 'giris').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
-    const toplamCikis = islemler.filter(i => i.tip === 'cikis').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    // DEĞİŞİKLİK: VİRMAN (hesaplar arası transfer) bu toplamlara KATILMAZ.
+    // Virman gerçek bir gelir/gider değil, paranın yer değiştirmesi. Sayılsaydı
+    // 10.000 TL'lik bir transfer hem "toplam giriş" hem "toplam çıkış"a 10.000
+    // eklerdi; net doğru kalsa da iki rakam şişer ve gelir-gider yanlış okunur.
+    // NOT: defterBakiye() virmanı SAYAR — çünkü para o defterden gerçekten çıkıp
+    // diğerine gerçekten girdi, bakiyeler doğru olmak zorunda.
+    const ciroyaGirer = (i) => !i.isVirman;
+    const toplamGiris = islemler.filter(i => i.tip === 'giris' && ciroyaGirer(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    const toplamCikis = islemler.filter(i => i.tip === 'cikis' && ciroyaGirer(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
     const netBakiye = toplamGiris - toplamCikis;
 
     const seciliDefter = defterler.find(d => d.id === seciliDefterId) || null;
@@ -3907,7 +3972,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         });
         addSystemLog?.('Yeni Defter', `"${defterForm.ad}" defteri açıldı.`);
       }
-      setShowDefterForm(false); setEditingDefterId(null); setDefterForm({ ad: '', tur: 'Kasa', not: '' });
+      setShowDefterForm(false); setEditingDefterId(null); setDefterForm({ ad: '', tur: 'Nakit', not: '' });
     };
 
     const handleDeleteDefter = async () => {
@@ -3944,6 +4009,88 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         addSystemLog?.('Defter İşlemi', `${seciliDefter?.ad}: ${kayit.tip === 'giris' ? 'PARA GİRİŞİ' : 'PARA ÇIKIŞI'} ₺${paraFmt(tutar)} (${kayit.kategori}).`);
       }
       setShowIslemForm(false); setEditingIslemId(null); setIslemForm(emptyIslem);
+    };
+
+    // ========================================================================
+    // VİRMAN (HESAPLAR ARASI TRANSFER)
+    // ========================================================================
+    // Bir transfer İKİ kayıt üretir:
+    //   - Kaynak defterde  ÇIKIŞ (cikis)
+    //   - Hedef defterde   GİRİŞ (giris)
+    // İkisi aynı virmanId ile bağlanır; böylece biri silinirse diğeri de
+    // silinebilir ve raporlarda çift kayıt olduğu anlaşılır.
+    //
+    // isVirman: true bayrağı KRİTİK. Gelir/gider toplamları bu bayrağa bakarak
+    // transferleri dışlar (bkz. ciroyaGirer). Bayrak olmasa 10.000 TL'lik bir
+    // transfer hem toplam gelire hem toplam gidere 10.000 eklerdi.
+    //
+    // Etiket ve kategori girişi YOKTUR — transfer bir harcama kalemi değil,
+    // paranın yer değiştirmesi. Açıklama opsiyoneldir.
+    const handleVirmanKaydet = async () => {
+      const tutar = parseFloat(virmanForm.tutar);
+      if (!tutar || tutar <= 0) { alert('Geçerli bir tutar girin.'); return; }
+      if (!virmanForm.hedefDefterId) { alert('Transfer edilecek hedef defteri seçin.'); return; }
+      if (virmanForm.hedefDefterId === seciliDefterId) { alert('Kaynak ve hedef defter aynı olamaz.'); return; }
+
+      const hedefDefter = defterler.find(d => d.id === virmanForm.hedefDefterId);
+      if (!hedefDefter) { alert('Hedef defter bulunamadı.'); return; }
+
+      // Bakiyesi yetmiyorsa uyar ama ENGELLEME: nakit avans gibi durumlarda
+      // defter geçici olarak eksiye düşebilir, bu geçerli bir iş durumu.
+      const mevcutBakiye = defterBakiye(seciliDefterId);
+      if (tutar > mevcutBakiye) {
+        if (!window.confirm(`${seciliDefter.ad} bakiyesi ₺${paraFmt(mevcutBakiye)}. ₺${paraFmt(tutar)} transfer edilirse bakiye eksiye düşer. Devam edilsin mi?`)) return;
+      }
+
+      setVirmanKaydediliyor(true);
+      try {
+        // Aynı transferin iki bacağını bağlayan kimlik
+        const virmanId = `vir_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+        const yapan = currentUser?.fullName || 'Sistem';
+        const not = (virmanForm.aciklama || '').trim();
+        const ortak = {
+          tutar,
+          tarih: gunFiltreAktif ? seciliGun : bugunStr(),
+          kategori: 'Virman (Transfer)',
+          etiketler: [],
+          odemeYontemi: 'Virman',
+          isVirman: true,
+          virmanId,
+          kaynak: 'Virman',
+          createdAt: new Date().toISOString(),
+          by: yapan
+        };
+
+        // Kaynak defter: ÇIKIŞ. Açıklamada NEREYE gittiği yazar.
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak,
+          defterId: seciliDefterId,
+          tip: 'cikis',
+          aciklama: `Transfer → ${hedefDefter.ad}${not ? ` | ${not}` : ''}`,
+          virmanKarsiDefterId: virmanForm.hedefDefterId,
+          virmanKarsiDefterAd: hedefDefter.ad
+        });
+
+        // Hedef defter: GİRİŞ. Açıklamada NEREDEN geldiği yazar.
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak,
+          defterId: virmanForm.hedefDefterId,
+          tip: 'giris',
+          aciklama: `Transfer ← ${seciliDefter.ad}${not ? ` | ${not}` : ''}`,
+          virmanKarsiDefterId: seciliDefterId,
+          virmanKarsiDefterAd: seciliDefter.ad
+        });
+
+        addSystemLog?.('Virman (Transfer)',
+          `${seciliDefter.ad} → ${hedefDefter.ad} arasında ₺${paraFmt(tutar)} transfer edildi. İşlemi yapan: ${yapan}.`);
+
+        setShowVirmanForm(false);
+        setVirmanForm({ hedefDefterId: '', tutar: '', aciklama: '' });
+      } catch (err) {
+        console.error('Virman kaydedilemedi:', err);
+        alert('Transfer kaydedilemedi: ' + (err?.message || 'bilinmeyen hata'));
+      }
+      setVirmanKaydediliyor(false);
     };
 
     const handleDeleteIslem = async () => {
@@ -3990,7 +4137,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Defter ara (kasa, kişi, firma adı)..."
                 className="w-full pl-9 pr-3 py-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 bg-white transition" />
             </div>
-            <button onClick={() => { setDefterForm({ ad: '', tur: 'Kasa', not: '' }); setEditingDefterId(null); setShowDefterForm(true); }}
+            <button onClick={() => { setDefterForm({ ad: '', tur: 'Nakit', not: '' }); setEditingDefterId(null); setShowDefterForm(true); }}
               className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black rounded-xl transition flex items-center gap-2 shadow-md shadow-emerald-600/20 shrink-0">
               <PlusCircle className="w-4 h-4" /> Yeni Defter
             </button>
@@ -4017,12 +4164,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               return (
                 <button key={d.id} onClick={() => { setSeciliDefterId(d.id); setDetayArama(''); setKategoriFiltre('Tümü'); setSeciliGun(bugunStr()); setGunFiltreAktif(true); }}
                   className="w-full bg-white rounded-2xl border border-neutral-200 p-4 flex items-center gap-3 hover:border-emerald-400 hover:shadow-md transition text-left">
-                  {/* DEĞİŞİKLİK: Renk eşlemesine yeni türler eklendi. Eski kayıtlardaki
-                      'Cari (Kişi/Firma)' ve 'Diğer' değerleri de listede tutuluyor ki
-                      geçmiş defterler renksiz kalmasın. */}
-                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 font-black text-white ${d.tur === 'Banka' ? 'bg-blue-600' : d.tur === 'Kasa' ? 'bg-emerald-600' : (d.tur === 'Kredi Kartı' || d.tur === 'Cari (Kişi/Firma)') ? 'bg-amber-500' : (d.tur === 'Borçlu' || d.tur === 'Diğer') ? 'bg-rose-600' : 'bg-neutral-500'}`}>
-                    {(d.ad || '?').charAt(0).toLocaleUpperCase('tr-TR')}
-                  </div>
+                  {/* DEĞİŞİKLİK: Defter adının ilk HARFİ yerine TÜRE UYGUN SİMGE.
+                      Tüm defterler "NAKLİYE (...)" ile başladığı için hepsinde aynı
+                      "N" harfi çıkıyordu ve ayırt edici bir bilgi vermiyordu.
+                      Simge + renk defterTuruGorunum() ile tek yerden geliyor. */}
+                  {(() => {
+                    const { Ikon, renk } = defterTuruGorunum(d.tur);
+                    return (
+                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-white ${renk}`}>
+                        <Ikon className="w-5 h-5" />
+                      </div>
+                    );
+                  })()}
                   <div className="flex-1 min-w-0">
                     <div className="font-black text-black truncate">{d.ad}</div>
                     {/* DEĞİŞİKLİK: Ham d.tur yerine defterTuruEtiket() — eski kayıtlar da
@@ -4084,9 +4237,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // YENİ: SEÇİLİ GÜNÜN toplamları. Arama/kategori filtresinden BAĞIMSIZ
     // hesaplanır; o günün gerçek gelir-gider tablosunu göstermesi gerekiyor.
     const gunIslemleri = defterIslemleri(seciliDefterId).filter(i => i.tarih === seciliGun);
-    const gunGiris = gunIslemleri.filter(i => i.tip === 'giris').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
-    const gunCikis = gunIslemleri.filter(i => i.tip === 'cikis').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    // Günün GELİR / GİDER rakamlarında da virman sayılmaz (yukarıdaki gerekçe).
+    // Transferler listede görünür ama bu üç rakamı bozmaz.
+    const gunGiris = gunIslemleri.filter(i => i.tip === 'giris' && ciroyaGirer(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    const gunCikis = gunIslemleri.filter(i => i.tip === 'cikis' && ciroyaGirer(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
     const gunNet = gunGiris - gunCikis;
+    // O gün yapılan transfer toplamı — ayrı bir bilgi olarak gösterilir.
+    const gunVirman = gunIslemleri.filter(i => i.isVirman && i.tip === 'cikis').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
 
     // Hangi günlerde hareket var? Ok tuşlarının yanında ipucu göstermek için.
     const hareketliGunler = new Set(defterIslemleri(seciliDefterId).map(i => i.tarih));
@@ -4121,9 +4278,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           </div>
           <div className="flex items-end justify-between gap-3 flex-wrap">
             <div>
-              <h2 className="text-2xl font-black">{seciliDefter.ad}</h2>
-              {/* DEĞİŞİKLİK: Defter detay başlığında da defterTuruEtiket() kullanılır,
-                  böylece kart listesiyle aynı ismi gösterir. */}
+              {/* DEĞİŞİKLİK: Detay başlığına da TÜR SİMGESİ eklendi; liste kartlarıyla
+                  aynı simgeyi gösterir, böylece hangi defterde olduğunuz belli olur.
+                  Koyu yeşil zemin üzerinde durduğu için renk kutusu yerine sade
+                  beyaz simge kullanıldı. */}
+              <h2 className="text-2xl font-black flex items-center gap-2.5">
+                {(() => { const { Ikon } = defterTuruGorunum(seciliDefter.tur); return <Ikon className="w-6 h-6 shrink-0 text-white/80" />; })()}
+                <span className="truncate">{seciliDefter.ad}</span>
+              </h2>
               <div className="text-xs font-bold text-white/60">{defterTuruEtiket(seciliDefter.tur)}{seciliDefter.not ? ` • ${seciliDefter.not}` : ''}</div>
             </div>
             <div className="text-right">
@@ -4237,6 +4399,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               </div>
             </div>
           )}
+
+          {/* YENİ: O gün transfer yapıldıysa ayrı satırda gösterilir.
+              Üstteki üç rakama katılmıyor; buraya yazılmasa kullanıcı
+              "para nereye gitti" diye toplamları sorgulardı. */}
+          {gunFiltreAktif && gunVirman > 0 && (
+            <div className="border-t border-neutral-200 px-3 py-2 flex items-center justify-between bg-slate-50">
+              <span className="text-[10px] font-black uppercase text-slate-600 flex items-center gap-1.5">
+                <ArrowRightLeft className="w-3.5 h-3.5" /> Hesaplar arası transfer
+              </span>
+              <span className="text-xs font-black text-slate-700">₺{paraFmt(gunVirman)}</span>
+            </div>
+          )}
         </div>
 
         {/* ARAMA */}
@@ -4269,13 +4443,52 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     <span className="text-[11px] font-black text-neutral-400">{new Date(i.tarih).toLocaleDateString('tr-TR')}</span>
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 border border-neutral-200">{i.kategori}</span>
                     {i.odemeYontemi && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100">{i.odemeYontemi}</span>}
+                    {/* DEĞİŞİKLİK: Etiketlerdeki plaka-tıklama mantığı KALDIRILDI.
+                        Araç artık kendi alanında (aracId/plaka) tutuluyor ve
+                        aşağıda ayrı rozet olarak gösteriliyor. Etiketten de
+                        tıklanabilir olsaydı aynı bilgi iki yerde çıkardı. */}
                     {(i.etiketler || []).map(e => <span key={e} className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">#{e}</span>)}
                     {i.kaynak && i.kaynak !== 'Manuel' && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 border border-purple-100">{i.kaynak}</span>}
                   </div>
+                  {/* DEĞİŞİKLİK: Müşteri adı artık AÇIKLAMA METNİNİN İÇİNDE değil.
+                      Açıklama düz metin basılır; müşteri ve araç altta ayrı ROZET
+                      olarak gösterilir. Böylece hangi bilginin gerçek bir kayda
+                      bağlı olduğu görsel olarak ayrışır. */}
                   {i.aciklama && <div className="text-sm font-bold text-neutral-700 truncate mt-0.5">{i.aciklama}</div>}
+
+                  {/* MÜŞTERİ ve ARAÇ ROZETLERİ — tıklanınca ilgili profile gider */}
+                  {(i.musteriAdi || i.plaka) && (
+                    <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                      {i.musteriAdi && (onViewCari ? (
+                        <button type="button"
+                          onClick={(ev) => { ev.stopPropagation(); onViewCari(i.musteriTel || i.musteriAdi); }}
+                          title={`${i.musteriAdi} carisine git`}
+                          className="text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 hover:border-emerald-400 transition inline-flex items-center gap-1">
+                          <User className="w-3 h-3" /> {i.musteriAdi}
+                        </button>
+                      ) : (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1">
+                          <User className="w-3 h-3" /> {i.musteriAdi}
+                        </span>
+                      ))}
+                      {i.plaka && ((onViewVehicle && i.aracId) ? (
+                        <button type="button"
+                          onClick={(ev) => { ev.stopPropagation(); onViewVehicle(i.plaka); }}
+                          title={`${i.plaka} araç profiline git`}
+                          className="text-[10px] font-black px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 hover:border-orange-400 transition inline-flex items-center gap-1">
+                          <Truck className="w-3 h-3" /> {i.plaka}
+                        </button>
+                      ) : (
+                        /* Araç kimliği yoksa (kayıt silinmiş) tıklanamaz rozet */
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200 inline-flex items-center gap-1">
+                          <Truck className="w-3 h-3" /> {i.plaka}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                   <div className="text-[10px] font-bold text-neutral-300">{i.by}</div>
                   <div className="hidden group-hover:flex items-center gap-1 mt-1">
-                    <button onClick={() => { setIslemForm({ tip: i.tip, tutar: String(i.tutar), aciklama: i.aciklama || '', kategori: i.kategori || 'Diğer', etiketler: (i.etiketler || []), odemeYontemi: i.odemeYontemi || 'Nakit', tarih: i.tarih }); setEditingIslemId(i.id); setShowIslemForm(true); }}
+                    <button onClick={() => { setIslemForm({ tip: i.tip, tutar: String(i.tutar), aciklama: i.aciklama || '', kategori: i.kategori || 'Diğer', etiketler: (i.etiketler || []), odemeYontemi: i.odemeYontemi || 'Nakit', tarih: i.tarih, musteriAdi: i.musteriAdi || '', musteriTel: i.musteriTel || '', plaka: i.plaka || '', aracId: i.aracId || '' }); setEditingIslemId(i.id); setShowIslemForm(true); }}
                       className="text-[10px] font-black text-blue-600 hover:underline flex items-center gap-0.5"><Edit className="w-3 h-3" /> Düzenle</button>
                     <button onClick={() => setDeleteIslemId(i.id)} className="text-[10px] font-black text-red-500 hover:underline flex items-center gap-0.5 ml-2"><X className="w-3 h-3" /> Sil</button>
                   </div>
@@ -4290,18 +4503,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         {/* YENİ: ETİKET SEÇME PENCERESİ
             Hazır etiketler gruplar hâlinde listelenir. Gruplar VARSAYILAN olarak
             KAPALI gelir — 88 etiket birden açılırsa pencere okunamaz. Arama
-            yazıldığında gruplar göz ardı edilip düz sonuç listesi gösterilir. */}
+            yazıldığında gruplar göz ardı edilip düz sonuç listesi gösterilir.
+            KATMAN NOTU: z-[9999] kullanılıyor. Bu pencereyi açan İŞLEM FORMU
+            z-[9997] olduğu için, daha düşük bir değerde (z-50) formun ARKASINDA
+            kalıyor ve ekranda hiç görünmüyordu. 9999 dosyadaki en yüksek değer. */}
         {showEtiketSecici && (
-          <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="fixed inset-0 bg-black/70 z-[9999] flex items-end sm:items-center justify-center p-0 sm:p-4">
             <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[85vh] flex flex-col overflow-hidden">
 
               {/* PENCERE BAŞLIĞI */}
               <div className="flex items-center justify-between p-4 border-b border-neutral-200 shrink-0">
                 <div className="font-black text-black flex items-center gap-2">
-                  <Tag className="w-5 h-5 text-emerald-600" /> Etiket Seç
-                  {(islemForm.etiketler || []).length > 0 && (
-                    <span className="text-[10px] font-black bg-emerald-600 text-white rounded-full px-2 py-0.5">
-                      {(islemForm.etiketler || []).length}
+                  <Tag className="w-5 h-5 text-emerald-600" /> Kategori Seç
+                  {islemForm.kategori && (
+                    <span className="text-[10px] font-black bg-emerald-600 text-white rounded-full px-2 py-0.5 max-w-[140px] truncate">
+                      {islemForm.kategori}
                     </span>
                   )}
                 </div>
@@ -4314,7 +4530,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <div className="p-3 border-b border-neutral-200 shrink-0">
                 <div className="relative">
                   <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input value={etiketArama} onChange={e => setEtiketArama(e.target.value)} placeholder="Etiket ara..."
+                  <input value={etiketArama} onChange={e => setEtiketArama(e.target.value)} placeholder="Kategori ara..."
                     className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600" />
                 </div>
               </div>
@@ -4323,7 +4539,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <div className="flex-1 overflow-y-auto p-3 space-y-2">
                 {(() => {
                   const q = etiketArama.trim().toLocaleLowerCase('tr-TR');
-                  const secili = islemForm.etiketler || [];
+                  // Tek seçim: seçili dizi, mevcut kategoriden türetilir ki
+                  // penceredeki includes() kontrolleri değişmeden çalışsın.
+                  const secili = [islemForm.kategori].filter(Boolean);
 
                   // ARAMA MODU: gruplar göz ardı edilir, düz sonuç listesi çıkar.
                   if (q) {
@@ -4332,7 +4550,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       .sort((a, b) => a.localeCompare(b, 'tr-TR'));
                     if (tumu.length === 0) {
                       return <p className="text-center text-sm font-bold text-neutral-400 py-8">
-                        "{etiketArama}" bulunamadı. Aşağıdan yeni etiket olarak ekleyebilirsiniz.
+                        "{etiketArama}" bulunamadı. Aşağıdan yeni kategori olarak ekleyebilirsiniz.
                       </p>;
                     }
                     return (
@@ -4410,7 +4628,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       {ozelEtiketler.length > 0 && (
                         <div className="border-2 border-emerald-200 rounded-xl overflow-hidden">
                           <div className="px-3 py-2.5 bg-emerald-50 text-xs font-black text-emerald-900">
-                            EKLEDİĞİNİZ ETİKETLER ({ozelEtiketler.length})
+                            EKLEDİĞİNİZ KATEGORİLER ({ozelEtiketler.length})
                           </div>
                           <div className="p-2.5 flex flex-wrap gap-1.5">
                             {ozelEtiketler.map(e => (
@@ -4440,7 +4658,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <div className="flex gap-2">
                   <input value={yeniEtiket} onChange={e => setYeniEtiket(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); etiketEkle(); } }}
-                    placeholder="Yeni etiket adı..."
+                    placeholder="Yeni kategori adı..."
                     className="flex-1 min-w-0 p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 uppercase" />
                   <button type="button" onClick={etiketEkle} disabled={!yeniEtiket.trim()}
                     className="shrink-0 px-4 rounded-xl bg-neutral-900 text-white text-xs font-black hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1.5">
@@ -4449,7 +4667,204 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 </div>
                 <button type="button" onClick={() => setShowEtiketSecici(false)}
                   className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl transition">
-                  Tamam ({(islemForm.etiketler || []).length} etiket seçili)
+                  {islemForm.kategori ? `Tamam — ${islemForm.kategori}` : 'Kategorisiz kapat'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: CARİ ARAMA PENCERESİ
+            İşlere kayıtlı müşteriler arasında isim veya telefonla arama.
+            Katman z-[9999]: işlem formunun (9997) üstünde kalmalı, yoksa
+            etiket seçicide yaşadığımız "arkada kalma" sorunu tekrarlar. */}
+        {showCariSecici && (
+          <div className="fixed inset-0 bg-black/70 z-[9999] flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[85vh] flex flex-col overflow-hidden">
+
+              <div className="flex items-center justify-between p-4 border-b border-neutral-200 shrink-0">
+                <div className="font-black text-black flex items-center gap-2">
+                  <User className="w-5 h-5 text-emerald-600" /> Cari Seç
+                </div>
+                <button onClick={() => setShowCariSecici(false)} className="p-1.5 rounded-lg hover:bg-neutral-100 transition">
+                  <X className="w-5 h-5 text-neutral-500" />
+                </button>
+              </div>
+
+              <div className="p-3 border-b border-neutral-200 shrink-0">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input value={cariArama} onChange={e => setCariArama(e.target.value)}
+                    placeholder="Müşteri adı veya telefon ara..." autoFocus
+                    className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600" />
+                </div>
+                <p className="text-[11px] font-bold text-neutral-400 mt-2">
+                  {cariListesi.length} cari kayıtlı. Aramak için en az 2 harf yazın.
+                </p>
+              </div>
+
+              <div className="flex-1 overflow-y-auto divide-y divide-neutral-100">
+                {(() => {
+                  const q = cariArama.trim().toLocaleLowerCase('tr-TR');
+                  // 2 harften kısa aramada TÜM listeyi basmıyoruz; yüzlerce cari
+                  // olabilir, pencere kilitlenir. En son iş yapılanları gösteriyoruz.
+                  const kaynak = q.length < 2
+                    ? [...cariListesi].sort((a, b) => (b.sonTarih || '').localeCompare(b.sonTarih ? (a.sonTarih || '') : '')).slice(0, 20)
+                    : cariListesi.filter(c =>
+                        (c.ad || '').toLocaleLowerCase('tr-TR').includes(q) ||
+                        (c.tel || '').includes(q.replace(/\D/g, '')));
+
+                  if (kaynak.length === 0) {
+                    return <p className="p-8 text-center text-sm font-bold text-neutral-400">
+                      "{cariArama}" ile eşleşen cari bulunamadı.
+                    </p>;
+                  }
+                  return kaynak.map(c => (
+                    <button key={c.tel} type="button"
+                      onClick={() => {
+                        setIslemForm({ ...islemForm, musteriAdi: c.ad, musteriTel: c.tel });
+                        setShowCariSecici(false);
+                      }}
+                      className="w-full text-left px-4 py-3 hover:bg-emerald-50 transition flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-neutral-100 flex items-center justify-center text-xs font-black text-neutral-500 shrink-0">
+                        {(c.ad || '?').charAt(0).toLocaleUpperCase('tr-TR')}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-black text-black truncate">{c.ad}</div>
+                        <div className="text-[11px] font-bold text-neutral-500">{c.tel} • {c.isSayisi} iş</div>
+                      </div>
+                    </button>
+                  ));
+                })()}
+              </div>
+
+              
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: TRANSFER (VİRMAN) PENCERESİ
+            Sadece üç alan var: hedef defter, tutar, opsiyonel açıklama.
+            Etiket ve kategori BİLEREK yok — transfer bir harcama kalemi değil.
+            Katman z-[9998]: işlem formunun (9997) üstünde, etiket seçicinin
+            (9999) altında kalır. */}
+        {showVirmanForm && (
+          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto">
+
+              <div className="flex items-center justify-between p-4 border-b border-neutral-200 sticky top-0 bg-white">
+                <div className="font-black text-black flex items-center gap-2">
+                  <ArrowRightLeft className="w-5 h-5 text-slate-700" /> TRANSFER (Virman)
+                </div>
+                <button onClick={() => setShowVirmanForm(false)} className="p-1.5 rounded-lg hover:bg-neutral-100 transition">
+                  <X className="w-5 h-5 text-neutral-500" />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-4">
+
+                {/* CİROYU ETKİLEMEZ bilgisi — muhasebe açısından en kritik nokta */}
+                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-slate-600 shrink-0 mt-0.5" />
+                  <p className="text-[11px] font-bold text-slate-700 leading-relaxed">
+                    Transfer <b>gelir veya gider olarak sayılmaz</b>; sadece para bir hesaptan
+                    diğerine geçer. Ciro, toplam gelir ve toplam gider rakamları değişmez.
+                  </p>
+                </div>
+
+                {/* NEREDEN — değiştirilemez, içinde bulunduğumuz defter */}
+                <div>
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">Nereden (kaynak hesap)</label>
+                  <div className="p-3 bg-neutral-100 border border-neutral-200 rounded-xl">
+                    <div className="text-sm font-black text-black">{seciliDefter.ad}</div>
+                    <div className="text-[11px] font-bold text-neutral-500">
+                      {defterTuruEtiket(seciliDefter.tur)} • Bakiye: ₺{paraFmt(defterBakiye(seciliDefterId))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* NEREYE — kaynak defter listeden çıkarılır, kendine transfer engellenir */}
+                <div>
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">Nereye (hedef hesap) *</label>
+                  <select value={virmanForm.hedefDefterId}
+                    onChange={e => setVirmanForm({ ...virmanForm, hedefDefterId: e.target.value })}
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-slate-700 text-sm bg-white">
+                    <option value="">Hedef hesap seçin...</option>
+                    {defterler
+                      .filter(d => d.id !== seciliDefterId)
+                      .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
+                      .map(d => (
+                        <option key={d.id} value={d.id}>
+                          {d.ad} — {defterTuruEtiket(d.tur)} (₺{paraFmt(defterBakiye(d.id))})
+                        </option>
+                      ))}
+                  </select>
+                  {defterler.length < 2 && (
+                    <p className="text-[11px] font-bold text-red-600 mt-1.5">
+                      Transfer için en az iki defter gerekiyor. Defterler ekranından yeni bir hesap açın.
+                    </p>
+                  )}
+                </div>
+
+                {/* TUTAR */}
+                <div>
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">Tutar (₺) *</label>
+                  <input type="number" step="0.01" value={virmanForm.tutar}
+                    onChange={e => setVirmanForm({ ...virmanForm, tutar: e.target.value })}
+                    placeholder="0,00" autoFocus
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-slate-700 text-lg font-black" />
+                </div>
+
+                {/* AÇIKLAMA — opsiyonel */}
+                <div>
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">
+                    Açıklama <span className="text-neutral-400 font-normal">(opsiyonel)</span>
+                  </label>
+                  <input value={virmanForm.aciklama}
+                    onChange={e => setVirmanForm({ ...virmanForm, aciklama: e.target.value })}
+                    placeholder="Örn: Kasadan bankaya yatırıldı"
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-slate-700 text-sm" />
+                </div>
+
+                {/* ÖNİZLEME — iki kayıt oluşacağı ve bakiyelerin ne olacağı gösterilir.
+                    Yanlış hesaba transfer geri alınması zahmetli olduğu için önemli. */}
+                {virmanForm.hedefDefterId && parseFloat(virmanForm.tutar) > 0 && (() => {
+                  const hedef = defterler.find(d => d.id === virmanForm.hedefDefterId);
+                  const t = parseFloat(virmanForm.tutar) || 0;
+                  const kaynakSonra = defterBakiye(seciliDefterId) - t;
+                  const hedefSonra = defterBakiye(virmanForm.hedefDefterId) + t;
+                  return (
+                    <div className="border border-neutral-200 rounded-xl overflow-hidden">
+                      <div className="bg-neutral-900 text-white px-3 py-2 text-[10px] font-black uppercase tracking-wider">
+                        İşlem sonrası bakiyeler
+                      </div>
+                      <div className="divide-y divide-neutral-100">
+                        <div className="px-3 py-2.5 flex justify-between items-center gap-2">
+                          <span className="text-[11px] font-bold text-neutral-600 truncate">{seciliDefter.ad}</span>
+                          <span className={`text-xs font-black shrink-0 ${kaynakSonra < 0 ? 'text-red-600' : 'text-neutral-800'}`}>
+                            ₺{paraFmt(kaynakSonra)}
+                          </span>
+                        </div>
+                        <div className="px-3 py-2.5 flex justify-between items-center gap-2">
+                          <span className="text-[11px] font-bold text-neutral-600 truncate">{hedef?.ad}</span>
+                          <span className="text-xs font-black text-emerald-700 shrink-0">₺{paraFmt(hedefSonra)}</span>
+                        </div>
+                      </div>
+                      {kaynakSonra < 0 && (
+                        <div className="px-3 py-2 bg-red-50 text-[11px] font-bold text-red-700">
+                          Kaynak hesap eksiye düşecek. Kaydetmeden önce onay istenecek.
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                <button onClick={handleVirmanKaydet}
+                  disabled={virmanKaydediliyor || defterler.length < 2}
+                  className="w-full py-3.5 bg-slate-800 hover:bg-slate-900 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                  {virmanKaydediliyor
+                    ? <><Loader2 className="w-4 h-4 animate-spin" /> Aktarılıyor...</>
+                    : <><ArrowRightLeft className="w-4 h-4" /> Transferi Yap</>}
                 </button>
               </div>
             </div>
@@ -4469,6 +4884,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           <button onClick={() => { setIslemForm({ ...emptyIslem, tip: 'giris', tarih: gunFiltreAktif ? seciliGun : bugunStr() }); setEditingIslemId(null); setShowIslemForm(true); }}
             className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-2xl shadow-emerald-600/40 transition flex items-center justify-center gap-2 text-base">
             <ArrowDownRight className="w-5 h-5" /> ALDIM (Giriş)
+          </button>
+          {/* YENİ: ÜÇÜNCÜ BUTON — TRANSFER (VİRMAN)
+              Diğer ikisi flex-1 ile eşit bölüşüyor; bu buton sabit genişlikte
+              tutuldu (shrink-0 + px) ki VERDİM/ALDIM daralıp okunmaz hale gelmesin.
+              Nötr lacivert seçildi: yeşil/kırmızı gelir-gideri işaret ediyor,
+              transfer ikisi de olmadığı için o renklerden uzak durmalı. */}
+          <button onClick={() => { setVirmanForm({ hedefDefterId: '', tutar: '', aciklama: '' }); setShowVirmanForm(true); }}
+            title="Hesaplar arası transfer"
+            className="shrink-0 px-4 py-4 bg-slate-800 hover:bg-slate-900 text-white font-black rounded-2xl shadow-2xl shadow-slate-800/40 transition flex items-center justify-center gap-2 text-base">
+            <ArrowRightLeft className="w-5 h-5" /> <span className="hidden sm:inline">Transfer</span>
           </button>
         </div>
 
@@ -4499,39 +4924,94 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       {ODEME_YONTEMLERI.map(y => <option key={y}>{y}</option>)}
                     </select></div>
                 </div>
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Kategori</label>
-                  <select value={islemForm.kategori} onChange={e => setIslemForm({ ...islemForm, kategori: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
-                    {DEFTER_KATEGORILER.map(k => <option key={k}>{k}</option>)}
-                  </select></div>
-                {/* DEĞİŞİKLİK: Serbest metin kutusu yerine ETİKET SEÇME arayüzü.
-                    Seçili etiketler rozet olarak görünür, her rozetin ✕'i ile
-                    tek tek kaldırılabilir. "Etiket seç" düğmesi hazır etiket
-                    penceresini açar. */}
+                {/* DEĞİŞİKLİK: Eski sabit kategori listesi (İş Geliri, Tahsilat, ...)
+                    KALDIRILDI. Kategori artık hazır etiket ağacından seçilir; eski
+                    "Etiketler" alanı da kaldırıldı çünkü ikisi tek kavramda birleşti.
+                    NOT: Kayıtlardaki "etiketler" alanı veritabanında duruyor; eski
+                    kayıtların araması bozulmaz, yalnızca formdan girişi kalktı. */}
                 <div>
-                  <label className="text-xs font-bold text-neutral-600 block mb-1">
-                    Etiketler <span className="text-neutral-400 font-normal">(aramada ve raporda kullanılır)</span>
-                  </label>
-                  <div className="border border-neutral-300 rounded-xl p-2 bg-white">
-                    {(islemForm.etiketler || []).length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5 mb-2">
-                        {(islemForm.etiketler || []).map(e => (
-                          <span key={e} className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
-                            #{e}
-                            <button type="button" onClick={() => etiketToggle(e)} className="hover:text-red-600 transition" title="Etiketi kaldır">
-                              <X className="w-3 h-3" />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-[11px] text-neutral-400 font-bold mb-2 px-1">Henüz etiket seçilmedi.</p>
-                    )}
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">Kategori</label>
+                  <div className="flex items-stretch gap-2">
+                    {/* Seçili kategori kutusu — tıklayınca seçim penceresi açılır */}
                     <button type="button" onClick={() => { setShowEtiketSecici(true); setEtiketArama(''); }}
-                      className="w-full py-2 rounded-lg border-2 border-dashed border-neutral-300 text-[11px] font-black text-neutral-500 hover:border-emerald-400 hover:text-emerald-700 transition flex items-center justify-center gap-1.5">
-                      <Tag className="w-3.5 h-3.5" /> Etiket seç
+                      className={`flex-1 min-w-0 p-2.5 border rounded-xl text-sm text-left transition flex items-center justify-between gap-2 ${
+                        islemForm.kategori ? 'border-neutral-300 bg-white text-black font-bold' : 'border-dashed border-neutral-300 bg-neutral-50 text-neutral-400 font-bold'
+                      }`}>
+                      <span className="truncate">{islemForm.kategori || 'Kategori seçin...'}</span>
+                      <ChevronDown className="w-4 h-4 shrink-0 text-neutral-400" />
+                    </button>
+                    {/* + YENİ KATEGORİ: pencereyi açar; en alttaki ekleme kutusuyla
+                        yeni kategori yazılır, kaydedilir ve otomatik seçilir. */}
+                    <button type="button" onClick={() => { setShowEtiketSecici(true); setEtiketArama(''); }}
+                      title="Yeni kategori ekle"
+                      className="shrink-0 w-10 rounded-xl bg-neutral-900 text-white hover:bg-neutral-800 transition flex items-center justify-center">
+                      <Plus className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
+                {/* YENİ: MÜŞTERİ (CARİ) — opsiyonel.
+                    Serbest metin değil, mevcut carilerden seçilir. Böylece
+                    işlem gerçek bir müşteri kaydıyla EŞLEŞİR ve satırdan
+                    carisine gidilebilir. Yeni bir isim yazılmasına izin
+                    verilmiyor; yoksa aynı müşteri iki farklı yazımla kaydolur. */}
+                <div>
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">
+                    Müşteri / Cari <span className="text-neutral-400 font-normal">(opsiyonel)</span>
+                  </label>
+                  {islemForm.musteriTel || islemForm.musteriAdi ? (
+                    <div className="flex items-center gap-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+                      <User className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-black text-emerald-900 truncate">{islemForm.musteriAdi}</div>
+                        {islemForm.musteriTel && <div className="text-[11px] font-bold text-emerald-700">{islemForm.musteriTel}</div>}
+                      </div>
+                      <button type="button" onClick={() => setIslemForm({ ...islemForm, musteriAdi: '', musteriTel: '' })}
+                        title="Müşteri eşleşmesini kaldır"
+                        className="p-1.5 rounded-lg hover:bg-emerald-100 transition shrink-0">
+                        <X className="w-4 h-4 text-emerald-700" />
+                      </button>
+                    </div>
+                  ) : (
+                    <button type="button" onClick={() => { setShowCariSecici(true); setCariArama(''); }}
+                      className="w-full py-2.5 rounded-xl border-2 border-dashed border-neutral-300 text-[11px] font-black text-neutral-500 hover:border-emerald-400 hover:text-emerald-700 transition flex items-center justify-center gap-1.5">
+                      <Search className="w-3.5 h-3.5" /> Cari ara ve seç
+                    </button>
+                  )}
+                </div>
+
+                {/* YENİ: ARAÇ PLAKASI — opsiyonel, mevcut araçlardan seçilir.
+                    Etiket listesinden değil kendi alanından; böylece plaka hem
+                    araç profiline bağlanır hem etiketlerle karışmaz. */}
+                <div>
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">
+                    Araç Plakası <span className="text-neutral-400 font-normal">(opsiyonel)</span>
+                  </label>
+                  <select
+                    value={islemForm.aracId || ''}
+                    onChange={e => {
+                      const arac = (vehicles || []).find(v => v.id === e.target.value);
+                      // Hem kimlik hem plaka yazılır: kimlik profile gitmek için,
+                      // plaka ise araç kaydı sonradan silinse bile bilginin kalması için.
+                      setIslemForm({ ...islemForm, aracId: arac?.id || '', plaka: arac?.plate || '' });
+                    }}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
+                    <option value="">Araç seçilmedi</option>
+                    {[...(vehicles || [])]
+                      .sort((a, b) => (a.plate || '').localeCompare((b.plate || ''), 'tr-TR'))
+                      .map(v => (
+                        <option key={v.id} value={v.id}>
+                          {v.plate}{v.type ? ` — ${v.type}` : ''}
+                        </option>
+                      ))}
+                  </select>
+                  {/* Araç kaydı silinmiş eski işlemlerde plaka metni kalır, kimlik boş olur */}
+                  {islemForm.plaka && !islemForm.aracId && (
+                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">
+                      Kayıtlı plaka: {islemForm.plaka} — bu plakayla eşleşen araç listede yok.
+                    </p>
+                  )}
+                </div>
+
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Açıklama / Not</label>
                   <textarea value={islemForm.aciklama} onChange={e => setIslemForm({ ...islemForm, aciklama: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm h-16 resize-none" placeholder="İşleme dair not..." /></div>
                 <button onClick={handleSaveIslem} className={`w-full py-3.5 text-white font-black rounded-xl transition flex items-center justify-center gap-2 ${islemForm.tip === 'giris' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}>
