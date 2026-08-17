@@ -9,7 +9,9 @@ import { FileText, CheckCircle, Camera, Upload, Copy, FolderOpen, X } from 'luci
   // kalanında HİÇBİR SATIR değiştirilmesine gerek kalmadı.
 import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, onSnapshot, doc, query, orderBy, limit, where } from "firebase/firestore";
+// DEĞİŞİKLİK: getDocs, updateDoc ve deleteDoc eklendi — defter kayıtlarını
+// okuyup güncellemek ve geri alınan kalemleri silmek için gerekli.
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, onSnapshot, doc, query, orderBy, limit, where, getDocs, updateDoc, deleteDoc } from "firebase/firestore";
   // GERÇEK FIREBASE PROJE AYARLARI (sembol-operasyon-merkezi)
   // NOT: apiKey gizli bir sır değildir (Firebase güvenliği Firestore Security
   // Rules ve Auth ile sağlanır), bu yüzden client tarafında bulunması normaldir.
@@ -1108,8 +1110,10 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
   export const VARSAYILAN_SOZLESME_KAPANIS =
     'İşbu {ADET} maddelik sözleşmeden doğan ihtilaflarda Istanbul (Anadolu) Mahkemeleri ve Icra Daireleri yetkilidir.';
 
+  // DEĞİŞİKLİK: Şirketin güncel hesap bilgisi. Eski Denizbank / Şenol Beşinci
+  // bilgisi kaldırıldı; artık kurumsal Garanti hesabı varsayılan.
   export const VARSAYILAN_BANKA_HESAPLARI = [
-    { id: 'hesap_1', banka: 'Denizbank', aliciAdi: 'Şenol Beşinci', iban: 'TR 94 0013 4000 0262 9671 7000 01', not: '' }
+    { id: 'hesap_1', banka: 'Garanti Bankası', aliciAdi: 'Sembol Nakliyat Depoculuk Tic. Ltd. Şti.', iban: 'TR42 0006 2001 1760 0006 2953 02', not: 'Kurumsal tahsilat hesabı' }
   ];
 
   // IBAN'ı 4'erli gruplara ayırır: "TR940013..." -> "TR94 0013 4000 ..."
@@ -1163,6 +1167,358 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
   // Firestore doküman referansı — tek yerden üretilir ki yol yanlış yazılmasın.
   export const resmiAyarlarRef = (db, appId) =>
     doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'resmiAyarlar');
+
+
+  // ==========================================================================
+  // RESMİ AYARLARI CANLI ÖNBELLEĞİ
+  // ==========================================================================
+  // SORUN: "Resmi Ayarları" ekranından IBAN veya sözleşme maddesi
+  // değiştirildiğinde hiçbir yere yansımıyordu. Çünkü banka bilgisi ve
+  // sözleşme maddeleri ÜÇ AYRI YERDE koda SABİT yazılıydı:
+  //   - generateContractPDF (aşağıda)  -> 29 madde
+  //   - App.jsx kayıt sonrası WhatsApp mesajı
+  //   - Operasyon.jsx takvim WhatsApp mesajı
+  //
+  // ÇÖZÜM: Modül seviyesinde TEK bir onSnapshot dinleyicisi açılır ve ayarlar
+  // burada önbelleğe alınır. Üç çağrı noktası da bu önbellekten okur.
+  //
+  // NEDEN PROP DEĞİL ÖNBELLEK: generateContractPDF senkron bir fonksiyon ve
+  // dört ayrı yerden çağrılıyor; Operasyon.jsx'teki mesaj ise derin bir
+  // bileşenin içinde. Ayarları prop olarak geçirmek onlarca dosya/bileşen
+  // imzasını değiştirmeyi gerektirirdi. Tek dinleyici + önbellek en az
+  // müdahaleyle çalışan çözüm.
+  //
+  // GÜVENLİ BAŞLANGIÇ: Önbellek dolmadan (ilk saniye) veya Firestore hatası
+  // durumunda null kalır; okuma fonksiyonları bu durumda VARSAYILAN değerlere
+  // düşer. Yani mesaj hiçbir zaman IBAN'sız gitmez.
+  // ==========================================================================
+  let _resmiAyarlarOnbellek = null;
+
+  try {
+    onSnapshot(
+      resmiAyarlarRef(db, appId),
+      (snap) => { if (snap.exists()) _resmiAyarlarOnbellek = snap.data(); },
+      (err) => console.error('Resmi Ayarları dinlenemedi, varsayılanlar kullanılacak:', err)
+    );
+  } catch (err) {
+    console.error('Resmi Ayarları dinleyicisi başlatılamadı:', err);
+  }
+
+  // Önbellekteki ayarları döndürür (yoksa null).
+  export const resmiAyarlariAl = () => _resmiAyarlarOnbellek;
+
+  // WhatsApp mesajlarında kullanılacak GÜNCEL banka bloğu.
+  // Kayıt yoksa VARSAYILAN_BANKA_HESAPLARI üzerinden üretilir.
+  export const aktifBankaBilgiMetni = () => bankaBilgiMetni(_resmiAyarlarOnbellek);
+
+
+  // Varsayılan banka hesabını NESNE olarak döndürür.
+  // Sözleşme PDF'inde banka / alıcı / IBAN ayrı satırlar hâlinde basıldığı için
+  // metin bloğu değil, alanlara tek tek erişilebilen nesne gerekiyor.
+  export const aktifBankaHesabi = () => {
+    const hesaplar = _resmiAyarlarOnbellek?.bankaHesaplari?.length
+      ? _resmiAyarlarOnbellek.bankaHesaplari
+      : VARSAYILAN_BANKA_HESAPLARI;
+    return hesaplar.find(h => h.id === _resmiAyarlarOnbellek?.varsayilanHesapId) || hesaplar[0];
+  };
+
+  // Sözleşme PDF'inde basılacak GÜNCEL madde HTML'i.
+  export const aktifSozlesmeMaddeleriHTML = () => sozlesmeMaddeleriHTML(
+    _resmiAyarlarOnbellek?.sozlesmeGruplari?.length ? _resmiAyarlarOnbellek.sozlesmeGruplari : VARSAYILAN_SOZLESME_GRUPLARI,
+    _resmiAyarlarOnbellek?.sozlesmeKapanis || VARSAYILAN_SOZLESME_KAPANIS
+  );
+
+  // ==========================================================================
+  // İŞ SONLANDIRMA -> DEFTERE OTOMATİK GELİR KAYDI
+  // ==========================================================================
+  // Personel işi kapattığında, KAPORA HARİÇ KALAN BAKİYE ilgili deftere
+  // "PARA GİRİŞİ (ALDIM)" olarak yazılır. Açıklamaya araç plakası eklenir.
+  // Tüm iş tiplerinde (Nakliye / Depo / Asansör) aynı şekilde çalışır.
+  //
+  // HANGİ DEFTERE YAZILIR: Ödeme yöntemi, defterin TÜRÜ ile eşleştirilir.
+  // Defter ADI ile eşleştirmedim; yönetici defteri yeniden adlandırdığında
+  // eşleşme bozulmasın diye tür üzerinden gidiliyor.
+  //   Nakit         -> Kasa
+  //   Havale/EFT    -> Banka
+  //   Kredi Kartı   -> Kredi Kartı   (eski kayıtlarda 'Cari (Kişi/Firma)')
+  //   Ödeme Yapmadı -> Borçlu        (eski kayıtlarda 'Diğer')
+  // ==========================================================================
+  export const ODEME_DEFTER_TUR_ESLEME = {
+    'Nakit': ['Kasa'],
+    'Havale/EFT': ['Banka'],
+    'Kredi Kartı': ['Kredi Kartı', 'Cari (Kişi/Firma)'],
+    'Ödeme Yapmadı': ['Borçlu', 'Diğer'],
+    'Ödeme Alınmadı': ['Borçlu', 'Diğer']
+  };
+
+  // Kapora hariç kalan bakiye. Negatif çıkarsa 0 döner (fazla kapora alınmışsa
+  // deftere eksi gelir yazmak yanlış olur).
+  export const kalanBakiyeHesapla = (job) => {
+    const fiyat = parseFloat(job?.price) || 0;
+    const kapora = parseFloat(job?.deposit) || 0;
+    return Math.max(0, fiyat - kapora);
+  };
+
+  // Ödeme yöntemine uyan defteri bulur. Birden fazla uygun defter varsa
+  // adına göre ilk sıradaki seçilir (tutarlı davranış için sabit bir kural).
+  export const odemeIcinDefterBul = (defterler, odemeYontemi) => {
+    const hedefTurler = ODEME_DEFTER_TUR_ESLEME[odemeYontemi] || [];
+    if (!hedefTurler.length) return null;
+    const uygun = (defterler || [])
+      .filter(d => hedefTurler.includes(d.tur))
+      .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+    return uygun[0] || null;
+  };
+
+  // ------------------------------------------------------------------
+  // Deftere gelir kaydını yazar / günceller.
+  //
+  // ÖNEMLİ - MÜKERRER KAYIT KORUMASI: İş tamamlandıktan sonra 3 saat içinde
+  // tekrar düzenlenip kaydedilebiliyor. Her kaydetmede yeni satır atılsa
+  // defter şişer ve bakiye yanlış çıkar. Bu yüzden önce aynı işe ait kayıt
+  // (isId === job.id) aranır; varsa GÜNCELLENİR, yoksa yeni eklenir.
+  //
+  // Hata durumunda istisna FIRLATILMAZ, sadece false döner: defter kaydı
+  // başarısız olsa bile işin kapanması engellenmemeli.
+  // ------------------------------------------------------------------
+  export const defterGelirKaydet = async ({ db, appId, job, endJobDetails, currentUser, addSystemLog }) => {
+    try {
+      const odemeYontemi = endJobDetails?.paymentMethod || 'Nakit';
+      const tutar = kalanBakiyeHesapla(job);
+
+      // Bakiye sıfırsa (tamamı kapora olarak alınmış) kayıt atılmaz.
+      if (tutar <= 0) return false;
+
+      // Defterleri oku — bileşenden prop geçmek yerine burada okunuyor ki
+      // fonksiyon her yerden tek satırla çağrılabilsin.
+      const defterSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'defterler'));
+      const defterler = defterSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+
+      const defter = odemeIcinDefterBul(defterler, odemeYontemi);
+      if (!defter) {
+        // Uygun defter yoksa sessiz kalmıyoruz; yönetici defteri açsın diye log atılır.
+        addSystemLog?.('Defter Kaydı Atlandı',
+          `${job.customerName} işi için "${odemeYontemi}" ödemesine uygun defter bulunamadı. Finans > Defter bölümünden ilgili türde bir defter açın.`);
+        return false;
+      }
+
+      const plaka = job?.assignedVehiclePlate || '';
+      const aciklama = `${job.customerName || 'Müşteri'}${plaka ? ` — ${plaka}` : ''} | ${job.type || 'İş'} tahsilatı (kapora hariç kalan)`;
+
+      const kayit = {
+        tip: 'giris',
+        tutar,
+        aciklama,
+        kategori: 'İş Geliri',
+        // Plaka etiket olarak da eklenir; defterde plakaya göre filtrelenebilsin.
+        etiketler: [plaka, job.type].filter(Boolean),
+        odemeYontemi,
+        tarih: (job.completedAt || new Date().toISOString()).split('T')[0],
+        defterId: defter.id,
+        kaynak: 'İş Sonlandırma (Oto)',
+        isId: job.id,
+        by: currentUser?.fullName || 'Sistem'
+      };
+
+      // Aynı işe ait kayıt var mı? (mükerrer koruması)
+      const mevcutSnap = await getDocs(query(
+        collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'),
+        where('isId', '==', job.id)
+      ));
+
+      if (!mevcutSnap.empty) {
+        const hedef = mevcutSnap.docs[0];
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', hedef.id), kayit);
+        addSystemLog?.('Defter Geliri Güncellendi',
+          `${defter.ad}: ${job.customerName} işi güncellendi, tutar ₺${tutar.toLocaleString('tr-TR')} (${odemeYontemi}).`);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...kayit, createdAt: new Date().toISOString()
+        });
+        addSystemLog?.('Defter Geliri (Oto)',
+          `${defter.ad}: ${job.customerName}${plaka ? ` (${plaka})` : ''} işinden ₺${tutar.toLocaleString('tr-TR')} giriş yapıldı (${odemeYontemi}).`);
+      }
+      return true;
+    } catch (err) {
+      // Defter kaydı başarısız olsa bile iş kapanmalı; bu yüzden yalnızca loglanır.
+      console.error('Deftere gelir kaydedilemedi:', err);
+      addSystemLog?.('Defter Kaydı Hatası', `${job?.customerName} işi için defter kaydı yapılamadı: ${err?.message || 'bilinmeyen hata'}`);
+      return false;
+    }
+  };
+
+  // ==========================================================================
+  // MAAŞ / AVANS -> DEFTERE OTOMATİK GİDER KAYDI
+  // ==========================================================================
+  // Maaş tablosunda bir kalem girildiğinde veya ödeme tiki atıldığında,
+  // ilgili deftere "PARA ÇIKIŞI (VERDİM)" olarak personel bazlı gider yazılır.
+  // İşlemi yapan kullanıcı bilgisi de kayda geçer.
+  //
+  //   Nakit Avans          -> Kasa defteri
+  //   Resmi Avans          -> Banka defteri
+  //   Kalan Nakit (tik)    -> Kasa defteri
+  //   Kalan Banka (tik)    -> Banka defteri
+  //
+  // MÜKERRER KORUMASI: Her kalem için sabit bir kaynakId üretilir
+  // (ay_personel_kalem). Tutar değişirse kayıt GÜNCELLENİR, sıfırlanır veya
+  // tik kaldırılırsa kayıt SİLİNİR. Böylece tutar düzeltildiğinde defterde
+  // iki satır oluşmaz ve bakiye her zaman maaş tablosuyla tutarlı kalır.
+  // ==========================================================================
+  export const MAAS_KALEM_DEFTER_TUR = {
+    nakitAvans:        ['Kasa'],
+    resmiAvans:        ['Banka'],
+    nakitOdenenTutar:  ['Kasa'],
+    bankaOdenenTutar:  ['Banka']
+  };
+
+  export const MAAS_KALEM_BILGI = {
+    nakitAvans:       { etiket: 'Nakit avans',           kategori: 'Avans' },
+    resmiAvans:       { etiket: 'Resmi avans (banka)',   kategori: 'Avans' },
+    nakitOdenenTutar: { etiket: 'Kalan nakit ödemesi',   kategori: 'Personel Maaş' },
+    bankaOdenenTutar: { etiket: 'Kalan banka ödemesi',   kategori: 'Personel Maaş' }
+  };
+
+  const AY_ADLARI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran',
+                     'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+
+  // Yerel tarih (YYYY-AA-GG). toISOString() UTC verdiği için kullanılmıyor:
+  // Türkiye'de gece 00:00-03:00 arası işlem dünün tarihine düşerdi.
+  const yerelBugun = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  // ------------------------------------------------------------------
+  // Bir maaş kalemini deftere gider olarak yazar / günceller / siler.
+  // Hata fırlatmaz; maaş tablosunun kaydedilmesi asla engellenmemeli.
+  // ------------------------------------------------------------------
+  export const defterPersonelGiderKaydet = async ({
+    db, appId, kalem, kaynakId, personelAdi, tutar, yil, ay, currentUser, addSystemLog
+  }) => {
+    try {
+      const hedefTurler = MAAS_KALEM_DEFTER_TUR[kalem];
+      const bilgi = MAAS_KALEM_BILGI[kalem];
+      if (!hedefTurler || !bilgi) return false;
+
+      const miktar = parseFloat(tutar) || 0;
+
+      // Aynı kaleme ait mevcut kayıt (varsa) bulunur.
+      const mevcutSnap = await getDocs(query(
+        collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'),
+        where('maasKaynakId', '==', kaynakId)
+      ));
+
+      // Tutar sıfır/negatifse: kalem geri alınmış demektir, kayıt SİLİNİR.
+      // Aksi halde defterde ₺0 satırı kalır ve gider yanlış görünür.
+      if (miktar <= 0) {
+        for (const d of mevcutSnap.docs) {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', d.id));
+        }
+        if (!mevcutSnap.empty) {
+          addSystemLog?.('Defter Gideri Kaldırıldı',
+            `${personelAdi} — ${bilgi.etiket} kaydı geri alındı (${AY_ADLARI[ay - 1]} ${yil}).`);
+        }
+        return true;
+      }
+
+      // Defterleri oku ve türe göre uygun olanı seç.
+      const defterSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'defterler'));
+      const uygun = defterSnap.docs
+        .map(d => ({ ...d.data(), id: d.id }))
+        .filter(d => hedefTurler.includes(d.tur))
+        .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+      const defter = uygun[0];
+
+      if (!defter) {
+        addSystemLog?.('Defter Kaydı Atlandı',
+          `${personelAdi} — ${bilgi.etiket} için "${hedefTurler.join(' / ')}" türünde defter bulunamadı. Finans > Defter bölümünden açın.`);
+        return false;
+      }
+
+      const yapanKisi = currentUser?.fullName || 'Sistem';
+      const kayit = {
+        tip: 'cikis',
+        tutar: miktar,
+        // Açıklamada personel adı, kalem, dönem ve İŞLEMİ YAPAN kullanıcı yer alır.
+        aciklama: `${personelAdi} — ${bilgi.etiket} (${AY_ADLARI[ay - 1]} ${yil}) • İşlemi yapan: ${yapanKisi}`,
+        kategori: bilgi.kategori,
+        etiketler: [personelAdi, bilgi.etiket, `${AY_ADLARI[ay - 1]} ${yil}`].filter(Boolean),
+        odemeYontemi: hedefTurler.includes('Banka') ? 'Banka / Havale' : 'Nakit',
+        // İşlemin YAPILDIĞI gün yazılır; günlük defter filtresi bu tarihi kullanır.
+        tarih: yerelBugun(),
+        defterId: defter.id,
+        kaynak: 'Maaş Tablosu (Oto)',
+        maasKaynakId: kaynakId,
+        personelAdi,
+        by: yapanKisi
+      };
+
+      if (!mevcutSnap.empty) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', mevcutSnap.docs[0].id), kayit);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...kayit, createdAt: new Date().toISOString()
+        });
+        addSystemLog?.('Defter Gideri (Oto)',
+          `${defter.ad}: ${personelAdi} — ${bilgi.etiket} ₺${miktar.toLocaleString('tr-TR')} çıkış yazıldı. İşlemi yapan: ${yapanKisi}.`);
+      }
+      return true;
+    } catch (err) {
+      console.error('Deftere personel gideri yazılamadı:', err);
+      addSystemLog?.('Defter Kaydı Hatası',
+        `${personelAdi} — ${kalem} defter kaydı yapılamadı: ${err?.message || 'bilinmeyen hata'}`);
+      return false;
+    }
+  };
+
+  // ==========================================================================
+  // DEFTER ETİKETLERİ — hazır etiket ağacı
+  // ==========================================================================
+  // Defter işlemlerinde (para girişi / çıkışı) kullanılacak hazır etiketler.
+  // Kullanıcının mevcut muhasebe uygulamasındaki kategori listesinden aynen
+  // alındı. Bazı grupların ALT ETİKETLERİ var (örn. KAMYONLAR > plakalar);
+  // seçim penceresi bu ağacı katlanır gruplar hâlinde gösterir.
+  //
+  // Kullanıcının SONRADAN eklediği etiketler burada DEĞİL, Firestore'da
+  // (settings/defterEtiketleri) tutulur; böylece bu liste kod tarafında sabit
+  // kalır, kullanıcı eklemeleri ise kalıcı olarak saklanır ve bir daha
+  // hazır olarak gelir.
+  // ==========================================================================
+  export const VARSAYILAN_ETIKET_GRUPLARI = [
+    { baslik: 'ARAÇ', etiketler: ['34 MIA 813', '34 MOB 328', '34 MVA 22', '34 NND 433', '34 RFC 208'] },
+    { baslik: 'KAMYONLAR', etiketler: ['34 HPA 843', '34 KTS 305', '34 KUD 891', '34 NAR 456', '34 NPH 332', '34 PCY 589'] },
+    { baslik: 'KİRALAR', etiketler: ['ALT KAYNARCA DEPO', 'BAŞAKŞEHİR DEPO', 'ÇEKMEKÖY DEPO', 'ÇINARDERE DEPO', 'DERNEK DEPO', 'DUDULLU DEPO', 'KARTAL DEPO', 'KURFALI DEPO', 'MERKEZ DEPO', 'MERKEZ OFİS', 'SAPANBAĞLARI DEPO', 'ÜST KAYNARCA DEPO', 'YEŞİLBAĞLAR DEPO'] },
+    { baslik: 'KREDİ', etiketler: ['ARAÇ KREDİSİ', 'TAKSİTLİ BORÇLAR'] },
+    { baslik: 'KREDİ KARTI', etiketler: ['ALBARAKA KART', 'EN PARA', 'GARANTİ KART', 'KUVEYTTÜRK KART'] },
+    { baslik: 'MAAŞ', etiketler: ['AVANS', 'İCRA KESİNTİ', 'MESAİ', 'MESAİ - PRİM', 'YOL'] },
+    { baslik: 'MALZEME', etiketler: ['BANT', 'KAĞIT', 'KOLİ', 'PAT PAT', 'POŞET', 'STREÇ', 'YATAK KILIFI'] },
+    { baslik: 'REKLAM', etiketler: ['ADWORDS', 'DEPOEVİM.COM', 'HARİTA', 'META', 'SANDIKDEPO', 'SEMBOLEVDENEVE.COM'] },
+    { baslik: 'FATURA', etiketler: ['ELEKTRİK', 'ISINMA', 'İNTERNET', 'SU', 'TELEFON', 'TV'] },
+    { baslik: 'KİŞİLER', etiketler: ['ABDULLAH BEŞİNCİ', 'ELMAS BEŞİNCİ', 'MUSTAFA BEŞİNCİ', 'ŞENOL BEŞİNCİ'] },
+    { baslik: 'GENEL', etiketler: [
+      'AİDAT', 'ARAÇ ALIMI', 'ASANSÖR KİRALAMA', 'BAĞIŞ', 'CEZALAR', 'DEPO TADİLAT',
+      'DEPOEVİM', 'EKİPMAN', 'FON', 'HARİCİ ALICAKLAR', 'HASAR MASRAF', 'HUKUK',
+      'İŞ GÜVENLİĞİ', 'KAMYON BAKIM', 'KAPORA', 'KOMİSYON', 'MAAŞ KESİNTİ', 'MAZOT',
+      'MİA MASRAF', 'MUHASEBE', 'OFİS TADİLAT', 'PERSONEL GİYİM', 'SAĞLIK / SİGORTA',
+      'SATIŞ', 'SEYAHAT', 'TEREA', 'ULAŞIM / ARABA', 'UZUN YOL MASRAF', 'VERGİ',
+      'YAKIT', 'YAZILIM CRM', 'YEMEK / MARKET', 'YEVMİYECİ', 'YIKAMA', 'YILLIK İZİN'
+    ] }
+  ];
+
+  // Ağacı düz listeye çevirir — arama ve "bu etiket zaten var mı" kontrolü için.
+  export const tumVarsayilanEtiketler = () => {
+    const liste = [];
+    VARSAYILAN_ETIKET_GRUPLARI.forEach(g => {
+      liste.push(g.baslik);
+      g.etiketler.forEach(e => liste.push(e));
+    });
+    // KİŞİLER ve GENEL yapay gruplama başlıkları; etiket olarak kullanılmaz.
+    return liste.filter(e => e !== 'KİŞİLER' && e !== 'GENEL');
+  };
+
+  // Kullanıcının eklediği özel etiketlerin Firestore referansı.
+  export const defterEtiketleriRef = (db, appId) =>
+    doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'defterEtiketleri');
 
   export const generateContractPDF = (job) => {
     const printWindow = window.open('', '_blank');
@@ -1352,6 +1708,18 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
           <tr><td class="label">Kalan Bakiye (TL):</td><td><b>${bakiye} TL</b></td></tr>
         </table>
 
+        ${/* YENİ: IBAN BİLGİLERİ bölümü. Ödeme detaylarının hemen altında yer alır.
+             Bilgiler Resmi Ayarları ekranındaki VARSAYILAN hesaptan okunur; panelden
+             IBAN değiştirildiğinde sözleşme de otomatik güncellenir. Sabit yazılmadı.
+             escapeHtml: banka/alıcı adında & < > geçerse PDF bozulmasın diye. */ ''}
+        <table>
+          <tr><th colspan="2">IBAN BİLGİLERİ</th></tr>
+          <tr><td class="label">Banka:</td><td>${escapeHtml(aktifBankaHesabi().banka)}</td></tr>
+          <tr><td class="label">Alıcı / Hesap Sahibi:</td><td>${escapeHtml(aktifBankaHesabi().aliciAdi)}</td></tr>
+          <tr><td class="label">IBAN:</td><td><b style="font-family: monospace; letter-spacing: 0.5px;">${escapeHtml(ibanBicimle(aktifBankaHesabi().iban))}</b></td></tr>
+          <tr><td class="label">Ödeme Açıklaması:</td><td>Lütfen açıklama kısmına teslim kodunuzu (<b>${escapeHtml(job.deliveryCode || '-')}</b>) yazınız.</td></tr>
+        </table>
+
         <div class="signatures">
           <div class="sign-box">
             <div class="sign-title">HİZMET VEREN (KAŞE / İMZA)</div>
@@ -1387,46 +1755,11 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
         <div class="main-title">HİZMET KAPSAMI VE OPERASYONEL ŞARTLAR<br/><span style="font-size: 11px; color: #555;">SÖZLEŞME ŞARTLARI VE MADDELERİ</span></div>
 
         <div class="terms-list">
-          1. Taşıma işlemi kapalı kasa nakliye aracı ile gerçekleştirilecek olup, aksi belirtmedikçe tek araç icin geçerlidir.<br/>
-          2. Eşyaların ambalajlanması, mobilyaların de-montaj ve montaj işlemleri yüklenici firma sorumluluğundadır.<br/>
-          3. Şehir içi nakliye hizmetinin, mücbir sebepler haricinde aynı iş günü içerisinde tamamlanması esastır.<br/>
-          4. Para kasası, piyano ve özel yapım eşyalar gibi özel taşıma gerektiren yükler önceden bildirilmelidir; aksi halde ek ücret tahakkuk ettirilir.<br/>
-          5. Sözleşme yapılan kişinin adreslerde bulunması süreci takip etmesi gerekmektedir.<br/>
-
-          <div class="terms-group-title">TEKNİK SINIRLANDIRMALAR VE İSTİSNALAR</div>
-          6. Avize, perde, ankastre ve duvarda takılı eşyaları sökülümü yapılır; ancak montaj işlemleri hizmet kapsamı dışındadır.<br/>
-          7. Korniş, klima, aspiratör montajı, duvar montajı ve elektrik işleri firmanın sorumluluğunda değildir.<br/>
-          8. Tesisatı hazır olmayan beyaz eşyaların bağlantısı teknik emniyet gerekçesiyle yapılmamaktadır.<br/>
-          9. Klima sökülüm ve montajı hizmet kapsamında değildir.<br/>
-          10. Toplama hizmeti alındığında yeni adreste kolileri açılıp dizme/yerleştirme hizmeti yoktur.<br/>
-
-          <div class="terms-group-title">NAKLİYE VE ERİŞİM KOŞULLARI</div>
-          11. Nakliye aracının yükleme ve boşaltma noktalarına yanaşma imkanı sağlanmalıdır. 30 metreyi aşan mesafelerde ek işçilik maliyeti oluşur.<br/>
-          12. Apartman boşluğuna veya kapı ölçülerine sığmayan eşyaların taşınması firmanın sorumluluğu dışındadır.<br/>
-          13. Kat farkı veya asansör kullanımı değişiklikleri durumunda fiyatlandırma güncellenebilir.<br/>
-          14. Toplama hizmeti alınmadığında küçük eşyaların kolileri taşımaya hazır halde bulunmalıdır.<br/>
-
-          <div class="terms-group-title">HASAR, SİGORTA VE SORUMLULUK</div>
-          15. Taşınan emtia, nakliye esnasında oluşabilecek risklere karşı Emtia Sigortası güvencesindedir.<br/>
-          16. Olası personel hasarında firma, nakliye bedelinin %10'una kadar doğrudan tazmin sorumluluğunu kabul eder.<br/>
-          17. Hasar gören eşyalar için firma imkanlar doğrultusunda teknik tamir destek sağlanmaktadır.<br/>
-          18. Fabrika kutusu olmayan elektronik cihazlar, ziynet eşyası, nakit para ve yanıcı/akıcı maddeler sorumluluk dışındadır.<br/>
-          19. Hasar ve eksik bildirimlerinin teslimat anında yapılması zorunludur; adres terk edildikten sonraki talepler için sorumluluk alınmaz.<br/>
-
-          <div class="terms-group-title">ÖDEME, İPTAL VE DEPOLAMA HÜKÜMLERİ</div>
-          20. Hizmet bedelinin %20'si kapora olarak alınır; kalan bakiye teslim edilecek adreste tahsil edilir.<br/>
-          21. Anlaşılan nakliye fiyatına KDV dahil değildir.<br/>
-          22. Şehirler arası taşımalarda eşya araca yüklendikten sonra %50 ödemeye tamamlanmaktadır.<br/>
-          23. Taşıma gününe 72 saatten az süre kala yapılan iptal ve değişikliklerde toplam bedelin %50'si cayma tazminatı olarak fatura edilir.<br/>
-          24. Depolama hizmetinde belirtilen fiyat sadece depoya giriş nakliyesini kapsar; çıkış nakliyesi ayrıca fiyatlandırılır.<br/>
-          25. Yüklenici firma, taşıma tarihine 72 saat kalan herhangi bir mazeret bildirmeksizin sözleşmeyi tek tarafli feshetme hakkına sahiptir.<br/>
-
-          <div class="terms-group-title">GİZLİLİK VE HUKUKİ YETKİ</div>
-          26. Müşteri kişisel verileri KVKK kapsamında gizli tutulur.<br/>
-          27. Firmanın ticari itibarini zedeleyici art niyetli kötüyeleyici yorumlar ve paylaşımlar yapılamaz.<br/>
-          28. Kaydını yaptırıp kişisel bilgilerini firma ile paylaşmış hizmet alan kişiye firmamız tarafından telefon/internet aracılığıyla tüm maddeleri bildirilmiş veya bahsedilmiştir. Tüm maddeler kabul edilmiştir.<br/>
-          29. Firma tarafından hizmet alan kişiler sözleşme maddeleri dahilinde haklarını arayabilirler.<br/>
-          İşbu 29 maddelik sözleşmeden doğan ihtilaflarda Istanbul (Anadolu) Mahkemeleri ve Icra Daireleri yetkilidir.<br/>
+          ${/* DEĞİŞİKLİK: 29 madde artık burada SABİT yazılı DEĞİL.
+               Resmi Ayarları ekranından yönetiliyor. aktifSozlesmeMaddeleriHTML()
+               Firestore'daki güncel maddeleri, kayıt yoksa varsayılanları basar.
+               Numaralandırma ve grup başlıkları eskisiyle birebir aynı üretilir. */ ''}
+          ${aktifSozlesmeMaddeleriHTML()}
         </div>
 
         <div class="signatures">
