@@ -3714,7 +3714,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
   // (maaş, iş geliri vb.) otomatik kayıt aktarmak için defterIslemleri
   // koleksiyonuna kaynak etiketiyle addDoc yapmak yeterlidir.
   // ==========================================================================
-  export const FinansDefterView = ({ currentUser, addSystemLog, onViewCari, onViewVehicle, jobs = [], vehicles = [] }) => {
+  export const FinansDefterView = ({ currentUser, addSystemLog, onViewCari, onViewVehicle, onViewPersonnel, jobs = [], vehicles = [], personnelList = [] }) => {
     // Varsayılan işlem kategorileri (giderler + gelirler bir arada)
     // DEĞİŞİKLİK: Eski sabit kategori listesi KALDIRILDI. Kategoriler artık
     // etiket ağacından gelir (VARSAYILAN_ETIKET_GRUPLARI) + kullanıcının
@@ -3879,7 +3879,41 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       // YENİ: MÜŞTERİ (cari) ve ARAÇ alanları — ikisi de OPSİYONEL.
       // Eskiden bu bilgiler açıklama metnine gömülüydü; ayrı alan olunca
       // tıklanabilir, filtrelenebilir ve raporlanabilir hale geliyor.
-      musteriAdi: '', musteriTel: '', plaka: '', aracId: '' };
+      musteriAdi: '', musteriTel: '', plaka: '', aracId: '', ekipSefi: '', ekipSefiId: '' };
+
+    // ========================================================================
+    // ARAMA NORMALLEŞTİRME — Türkçe karakter toleransı
+    // ========================================================================
+    // Amaç: "ekrem dirikman", "EKREM DİRİKMAN", "ekrem dırıkman" ve
+    // "Ekrem  Dirikman." aynı sonucu vermeli.
+    //
+    // NEDEN toLocaleLowerCase YETMEZ: Türkçe'de I/ı ve İ/i ayrı harfler.
+    // Kullanıcı klavyeden "i" yazarken kayıtta "ı" olabilir (veya tersi).
+    // Bu yüzden ı/İ/i/I hepsi 'i'ye indirgenir. Aynı şekilde ş->s, ğ->g,
+    // ü->u, ö->o, ç->c. Noktalama ve fazla boşluklar da atılır.
+    // DİKKAT — SIRA ÖNEMLİ: Harf dönüşümleri toLowerCase()'den ÖNCE yapılır.
+    // Sebep: JavaScript'te 'İ'.toLowerCase() sonucu 'i' DEĞİL, 'i' + U+0307
+    // (ayrı birleşik nokta) oluyor. Küçültme önce yapılırsa bu nokta geride
+    // kalır, sonraki [^a-z0-9] deseni onu boşluğa çevirir ve kelime bölünür:
+    // 'BEŞİNCİ' -> 'besi nci' gibi. Bu yüzden büyük harfler de doğrudan
+    // eşlenir, ardından küçültme ve kalan birleşik işaretlerin temizliği gelir.
+    const aramaNormalize = (metin) => (metin || '')
+      .toString()
+      .replace(/[ıİI]/g, 'i')
+      .replace(/[şŞ]/g, 's')
+      .replace(/[ğĞ]/g, 'g')
+      .replace(/[üÜ]/g, 'u')
+      .replace(/[öÖ]/g, 'o')
+      .replace(/[çÇ]/g, 'c')
+      .replace(/[âÂ]/g, 'a')
+      .replace(/[îÎ]/g, 'i')
+      .replace(/[ûÛ]/g, 'u')
+      .toLowerCase()
+      // Kalan birleşik aksan işaretleri ayrıştırılıp atılır
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      // Harf ve rakam dışındaki her şey tek boşluğa indirilir (nokta, tire, vs.)
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
 
     // Cari (müşteri) arama penceresi
     const [showCariSecici, setShowCariSecici] = useState(false);
@@ -3902,7 +3936,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           harita.set(tel, { tel, ad: j.customerName || 'İsimsiz', isSayisi: 1, sonTarih: j.date || '' });
         }
       });
-      return [...harita.values()].sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+      // Normalleştirilmiş ad ve telefon ÖNCEDEN hesaplanır. 4400+ cari varken
+      // her tuş vuruşunda yeniden normalize etmek arama kutusunu yavaşlatırdı.
+      return [...harita.values()]
+        .map(c => ({ ...c, adNorm: aramaNormalize(c.ad), telNorm: (c.tel || '').replace(/\D/g, '') }))
+        .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
     }, [jobs]);
     const [showIslemForm, setShowIslemForm] = useState(false);
     const [islemForm, setIslemForm] = useState(emptyIslem);
@@ -4457,7 +4495,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   {i.aciklama && <div className="text-sm font-bold text-neutral-700 truncate mt-0.5">{i.aciklama}</div>}
 
                   {/* MÜŞTERİ ve ARAÇ ROZETLERİ — tıklanınca ilgili profile gider */}
-                  {(i.musteriAdi || i.plaka) && (
+                  {(i.musteriAdi || i.plaka || i.ekipSefi) && (
                     <div className="flex items-center gap-1.5 flex-wrap mt-1">
                       {i.musteriAdi && (onViewCari ? (
                         <button type="button"
@@ -4484,11 +4522,26 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                           <Truck className="w-3 h-3" /> {i.plaka}
                         </span>
                       ))}
+
+                      {/* YENİ: EKİP ŞEFİ ROZETİ — tıklanınca personel profiline gider.
+                          Kimlik yoksa (eski kayıt) tıklanamaz rozet gösterilir. */}
+                      {i.ekipSefi && ((onViewPersonnel && i.ekipSefiId) ? (
+                        <button type="button"
+                          onClick={(ev) => { ev.stopPropagation(); onViewPersonnel(i.ekipSefiId); }}
+                          title={`${i.ekipSefi} personel profiline git`}
+                          className="text-[10px] font-black px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 hover:border-blue-400 transition inline-flex items-center gap-1">
+                          <Briefcase className="w-3 h-3" /> {i.ekipSefi}
+                        </button>
+                      ) : (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200 inline-flex items-center gap-1">
+                          <Briefcase className="w-3 h-3" /> {i.ekipSefi}
+                        </span>
+                      ))}
                     </div>
                   )}
                   <div className="text-[10px] font-bold text-neutral-300">{i.by}</div>
                   <div className="hidden group-hover:flex items-center gap-1 mt-1">
-                    <button onClick={() => { setIslemForm({ tip: i.tip, tutar: String(i.tutar), aciklama: i.aciklama || '', kategori: i.kategori || 'Diğer', etiketler: (i.etiketler || []), odemeYontemi: i.odemeYontemi || 'Nakit', tarih: i.tarih, musteriAdi: i.musteriAdi || '', musteriTel: i.musteriTel || '', plaka: i.plaka || '', aracId: i.aracId || '' }); setEditingIslemId(i.id); setShowIslemForm(true); }}
+                    <button onClick={() => { setIslemForm({ tip: i.tip, tutar: String(i.tutar), aciklama: i.aciklama || '', kategori: i.kategori || 'Diğer', etiketler: (i.etiketler || []), odemeYontemi: i.odemeYontemi || 'Nakit', tarih: i.tarih, musteriAdi: i.musteriAdi || '', musteriTel: i.musteriTel || '', plaka: i.plaka || '', aracId: i.aracId || '', ekipSefi: i.ekipSefi || '', ekipSefiId: i.ekipSefiId || '' }); setEditingIslemId(i.id); setShowIslemForm(true); }}
                       className="text-[10px] font-black text-blue-600 hover:underline flex items-center gap-0.5"><Edit className="w-3 h-3" /> Düzenle</button>
                     <button onClick={() => setDeleteIslemId(i.id)} className="text-[10px] font-black text-red-500 hover:underline flex items-center gap-0.5 ml-2"><X className="w-3 h-3" /> Sil</button>
                   </div>
@@ -4698,8 +4751,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     placeholder="Müşteri adı veya telefon ara..." autoFocus
                     className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600" />
                 </div>
+                {/* İpucu: arama yapılınca kaç sonuç bulunduğunu söyler.
+                    Eskiden sadece toplam cari sayısını yazıyordu; filtre çalışmadığında
+                    kullanıcı bunu fark edemiyordu. */}
                 <p className="text-[11px] font-bold text-neutral-400 mt-2">
-                  {cariListesi.length} cari kayıtlı. Aramak için en az 2 harf yazın.
+                  {aramaNormalize(cariArama).length >= 2 || cariArama.replace(/\D/g, '')
+                    ? `${cariListesi.filter(c => { const kl = aramaNormalize(cariArama).split(' ').filter(Boolean); const qr = cariArama.replace(/\D/g, ''); return (kl.length > 0 && kl.every(k => c.adNorm.includes(k))) || (qr.length >= 3 && c.telNorm.includes(qr)); }).length} sonuç bulundu`
+                    : `${cariListesi.length} cari kayıtlı. Aramak için en az 2 harf yazın.`}
                 </p>
               </div>
 
@@ -4708,11 +4766,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   const q = cariArama.trim().toLocaleLowerCase('tr-TR');
                   // 2 harften kısa aramada TÜM listeyi basmıyoruz; yüzlerce cari
                   // olabilir, pencere kilitlenir. En son iş yapılanları gösteriyoruz.
-                  const kaynak = q.length < 2
-                    ? [...cariListesi].sort((a, b) => (b.sonTarih || '').localeCompare(b.sonTarih ? (a.sonTarih || '') : '')).slice(0, 20)
-                    : cariListesi.filter(c =>
-                        (c.ad || '').toLocaleLowerCase('tr-TR').includes(q) ||
-                        (c.tel || '').includes(q.replace(/\D/g, '')));
+                  // DÜZELTME: Eski filtrede telefon kontrolü şöyleydi:
+                  //   (c.tel || '').includes(q.replace(/\D/g, ''))
+                  // Metin araması yapıldığında q.replace(/\D/g,'') BOŞ STRING
+                  // döner ve includes('') JavaScript'te HER ZAMAN true'dur.
+                  // Sonuç: 4400+ carinin tamamı eşleşiyor, filtre hiç çalışmıyordu.
+                  // Artık telefon kontrolü yalnızca sorguda RAKAM varsa yapılır.
+                  const qNorm = aramaNormalize(cariArama);
+                  const qRakam = cariArama.replace(/\D/g, '');
+                  // Kelime kelime arama: "ekrem dirikman" -> ['ekrem','dirikman'].
+                  // TÜM kelimelerin geçmesi yeterli, SIRA önemli değil; böylece
+                  // "dirikman ekrem" de aynı sonucu bulur.
+                  const kelimeler = qNorm.split(' ').filter(Boolean);
+
+                  const kaynak = qNorm.length < 2 && !qRakam
+                    ? [...cariListesi]
+                        .sort((a, b) => (b.sonTarih || '').localeCompare(a.sonTarih || ''))
+                        .slice(0, 20)
+                    : cariListesi
+                        .filter(c => {
+                          const adEsleme = kelimeler.length > 0 && kelimeler.every(k => c.adNorm.includes(k));
+                          const telEsleme = qRakam.length >= 3 && c.telNorm.includes(qRakam);
+                          return adEsleme || telEsleme;
+                        })
+                        // İsmi sorguyla BAŞLAYANLAR üste alınır; 'Abbas' aranırken
+                        // 'Ali Abbasoğlu' değil 'Abbas Şahin' önce görünsün.
+                        .sort((a, b) => {
+                          const aBas = a.adNorm.startsWith(kelimeler[0] || '') ? 0 : 1;
+                          const bBas = b.adNorm.startsWith(kelimeler[0] || '') ? 0 : 1;
+                          if (aBas !== bBas) return aBas - bBas;
+                          return (a.ad || '').localeCompare((b.ad || ''), 'tr-TR');
+                        })
+                        // Uzun listelerde pencere kilitlenmesin diye üst sınır
+                        .slice(0, 50);
 
                   if (kaynak.length === 0) {
                     return <p className="p-8 text-center text-sm font-bold text-neutral-400">
@@ -4976,6 +5062,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       className="w-full py-2.5 rounded-xl border-2 border-dashed border-neutral-300 text-[11px] font-black text-neutral-500 hover:border-emerald-400 hover:text-emerald-700 transition flex items-center justify-center gap-1.5">
                       <Search className="w-3.5 h-3.5" /> Cari ara ve seç
                     </button>
+                  )}
+                </div>
+
+                {/* YENİ: EKİP ŞEFİ / SORUMLU — opsiyonel, personel listesinden seçilir.
+                    İş sonlandırmadan gelen kayıtlarda otomatik dolar; elle girilen
+                    kayıtlarda buradan seçilir. Ada değil kimliğe bağlanıyor ki
+                    rozetten personel profiline gidilebilsin. */}
+                <div>
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">
+                    Ekip Şefi / Sorumlu <span className="text-neutral-400 font-normal">(opsiyonel)</span>
+                  </label>
+                  <select
+                    value={islemForm.ekipSefiId || ''}
+                    onChange={e => {
+                      const per = (personnelList || []).find(pp => pp.id === e.target.value);
+                      setIslemForm({ ...islemForm, ekipSefiId: per?.id || '', ekipSefi: per?.fullName || '' });
+                    }}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
+                    <option value="">Seçilmedi</option>
+                    {[...(personnelList || [])]
+                      .filter(pp => pp.employmentStatus !== 'Pasif')
+                      .sort((a, b) => (a.fullName || '').localeCompare((b.fullName || ''), 'tr-TR'))
+                      .map(pp => (
+                        <option key={pp.id} value={pp.id}>
+                          {pp.fullName}{pp.position ? ` — ${pp.position}` : ''}
+                        </option>
+                      ))}
+                  </select>
+                  {/* Personel işten ayrılmışsa listede olmaz; kayıtlı ad yine gösterilir */}
+                  {islemForm.ekipSefi && !islemForm.ekipSefiId && (
+                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">
+                      Kayıtlı sorumlu: {islemForm.ekipSefi} — bu personel aktif listede yok.
+                    </p>
                   )}
                 </div>
 
