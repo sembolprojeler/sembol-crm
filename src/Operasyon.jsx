@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, getDocs, where, orderBy, limit } from 'firebase/firestore';
-import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar } from './shared.jsx';
+import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar,
+  // YENİ: Deneme maaşı alanları — süre seçenekleri ve canlı özet metni.
+  // Ayrı dosya yerine shared.jsx içinde tutuluyor; Finans.jsx da aynı
+  // kaynaktan gecerliMaas'ı okur, böylece tek doğru kaynak vardır.
+  DENEME_SURE_SECENEKLERI, denemeOzetMetni } from './shared.jsx';
   export const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [mesaiData, setMesaiData] = useState({});
@@ -4452,6 +4456,8 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       collarType: 'Mavi Yaka', employmentStatus: 'Aktif',
       personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '', birthDate: '',
       bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', startDate: new Date().toISOString().split('T')[0],
+      // YENİ: Deneme maaşı ve deneme süresi (ay). Boş bırakılırsa deneme uygulanmaz.
+      denemeMaasi: '', denemeSuresi: '',
       // YENİ: Haftalık çalışma programı (gün sayısı, günlük saat, izin günü, erken çıkış)
       calismaProgrami: varsayilanCalismaProgrami('Mavi Yaka'),
       // YENİ: Çalışma şekli — 'Özgün' (kadrolu) | 'Uzaktan' (panel kullanıcısı)
@@ -4486,7 +4492,9 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         fullName: '', email: '', password: '', position: positions?.[0] || 'Şoför', rank: ranks?.[0] || 'Standart',
         collarType: 'Mavi Yaka', employmentStatus: 'Aktif',
         personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '', birthDate: '',
-        bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', startDate: new Date().toISOString().split('T')[0]
+        bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', startDate: new Date().toISOString().split('T')[0],
+        // YENİ: Kayıt sonrası deneme alanları da sıfırlanır
+        denemeMaasi: '', denemeSuresi: ''
       });
       alert('Personel başarıyla sisteme eklendi!');
     };
@@ -4591,10 +4599,34 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-4">
+             {/* YENİ: DENEME MAAŞI — normal maaştan ÖNCE gelir.
+                 Deneme süresi dolana kadar bordroda bu tutar kullanılır. */}
+             <div>
+                <label className="block text-sm font-bold text-neutral-700 mb-1">Deneme Maaşı (TL)</label>
+                <input type="number" value={formData.denemeMaasi || ''} onChange={e => setFormData({...formData, denemeMaasi: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Yoksa boş bırakın" />
+             </div>
+             {/* YENİ: DENEME SÜRESİ — 1 ile 10 ay arası seçilir.
+                 İŞE GİRİŞ AYI 1. AY SAYILIR: 15 Temmuz'da giren + 2 ay deneme
+                 => Temmuz ve Ağustos deneme, Eylül'de normal maaşa geçer. */}
+             <div>
+                <label className="block text-sm font-bold text-neutral-700 mb-1">Deneme Süresi</label>
+                <select value={formData.denemeSuresi || ''} onChange={e => setFormData({...formData, denemeSuresi: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition bg-white">
+                  <option value="">Deneme süresi yok</option>
+                  {DENEME_SURE_SECENEKLERI.map(a => <option key={a} value={a}>{a} Ay</option>)}
+                </select>
+             </div>
              <div>
                 <label className="block text-sm font-bold text-neutral-700 mb-1">Maaş Ücreti (TL)</label>
                 <input type="number" value={formData.maas} onChange={e => setFormData({...formData, maas: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
              </div>
+             {/* Canlı özet — yanlış giriş bordroya yansımadan fark edilsin */}
+             {denemeOzetMetni(formData) && (
+               <div className="sm:col-span-3 -mt-1">
+                 <p className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                   {denemeOzetMetni(formData)}
+                 </p>
+               </div>
+             )}
              <div>
                 <label className="block text-sm font-bold text-neutral-700 mb-1">Yol Parası (TL)</label>
                 <input type="number" value={formData.yol} onChange={e => setFormData({...formData, yol: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
@@ -4936,10 +4968,30 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-4">
+                   {/* YENİ: DENEME MAAŞI ve DENEME SÜRESİ — Personel Ekle formuyla
+                       birebir aynı mantık. Sıralama: Deneme Maaşı > Deneme Süresi > Maaş. */}
+                   <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Deneme Maaşı (TL)</label>
+                      <input type="number" value={editingUser.denemeMaasi || ''} onChange={e => setEditingUser({...editingUser, denemeMaasi: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Yoksa boş bırakın" />
+                   </div>
+                   <div>
+                      <label className="block text-sm font-bold text-neutral-700 mb-1">Deneme Süresi</label>
+                      <select value={editingUser.denemeSuresi || ''} onChange={e => setEditingUser({...editingUser, denemeSuresi: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition bg-white">
+                        <option value="">Deneme süresi yok</option>
+                        {DENEME_SURE_SECENEKLERI.map(a => <option key={a} value={a}>{a} Ay</option>)}
+                      </select>
+                   </div>
                    <div>
                       <label className="block text-sm font-bold text-neutral-700 mb-1">Maaş Ücreti (TL)</label>
                       <input type="number" value={editingUser.maas || ''} onChange={e => setEditingUser({...editingUser, maas: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
                    </div>
+                   {denemeOzetMetni(editingUser) && (
+                     <div className="sm:col-span-3 -mt-1">
+                       <p className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                         {denemeOzetMetni(editingUser)}
+                       </p>
+                     </div>
+                   )}
                    <div>
                       <label className="block text-sm font-bold text-neutral-700 mb-1">Yol Parası (TL)</label>
                       <input type="number" value={editingUser.yol || ''} onChange={e => setEditingUser({...editingUser, yol: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" />
@@ -8529,7 +8581,13 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     }).sort((a, b) => (a.fullName || '').localeCompare((b.fullName || ''), 'tr-TR'));
 
     // Sekme rozetlerinde gösterilecek sayılar (yaka filtresi dahil, arama hariç)
+    // DÜZELTME: Bu sayaçta UZAKTAN çalışan filtresi eksikti. filteredList uzaktan
+    // çalışanları listeden çıkarırken (bkz. yukarıdaki isUzaktanCalisan kontrolü)
+    // rozet onları saymaya devam ediyordu; bu yüzden "Çalışan Personel 43" yazıyor
+    // ama ekranda daha az kart görünüyordu. Artık aynı kural burada da uygulanır,
+    // rozetteki sayı ile listelenen özlük dosyası sayısı birebir eşleşir.
     const durumSayisi = (hedefDurum) => personnelList.filter(p => {
+      if (isUzaktanCalisan(p)) return false;
       const matchesCollar = collarFilter === 'Tümü' ? true : p.collarType === collarFilter;
       const durum = p.employmentStatus === 'Pasif' ? 'Pasif' : 'Aktif';
       return matchesCollar && durum === hedefDurum;
