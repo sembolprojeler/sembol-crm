@@ -1,10 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, Tag, History} from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown } from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 // DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
 // Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
 // hem Operasyon.jsx (form) hem Finans.jsx (bordro) aynı kaynaktan okur.
-import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas } from './shared.jsx';
+import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas,
+  // YENİ: Avans ve maaş ödemelerini ilgili deftere gider olarak yazar.
+  defterPersonelGiderKaydet,
+  // YENİ: Hazır etiket ağacı ve kullanıcı etiketlerinin Firestore referansı.
+  VARSAYILAN_ETIKET_GRUPLARI, tumVarsayilanEtiketler, defterEtiketleriRef } from './shared.jsx';
 
   // ==========================================================================
   // YENİ BİLEŞEN: MAAŞ RAPORU (Genel Ciro Raporu sayfasındaki 2. sekme)
@@ -2519,7 +2523,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     { id: 'finans',  label: 'Finans Durumu',   renk: 'bg-green-600',   sayi: 4, cizgi: '#16a34a' },
   ];
 
-  export const MaasView = ({ collarType, personnelList, db, appId, addSystemLog }) => {
+  export const MaasView = ({ collarType, personnelList, db, appId, addSystemLog, currentUser }) => {
     // YENİ: Düzenleme penceresi — hangi kategori düzenleniyorsa onun kimliği tutulur
     const [duzenlemeKategori, setDuzenlemeKategori] = useState(null);
     // YENİ: PRİM hücresi artık TL (tutar) gösterir. Girişin hâlâ SAAT olarak
@@ -2885,6 +2889,67 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       return () => clearTimeout(timeoutId);
     }, [maasData, yearlyData, docPrefix]);
 
+    // ========================================================================
+    // YENİ: MAAŞ / AVANS -> DEFTER ENTEGRASYONU
+    // ========================================================================
+    // Nakit avans, resmi avans ve ödeme tikleri ilgili deftere "PARA ÇIKIŞI
+    // (VERDİM)" olarak personel bazlı yazılır. İşlemi yapan kullanıcı da kayda geçer.
+    //
+    // NEDEN AYRI EFFECT VE 1.5 SANİYE GECİKME: nakitAvans bir metin kutusu.
+    // Her tuş vuruşunda Firestore'a yazmak hem yavaş hem maliyetli olurdu
+    // (50.000 yazarken 5 ayrı kayıt). Gecikme, kullanıcı yazmayı bitirene
+    // kadar bekler. Süre maasData otomatik kaydından (1 sn) biraz UZUN
+    // tutuldu ki maaş satırı deftere yazılmadan önce kaydedilmiş olsun.
+    //
+    // sonSenkronRef: son yazılan tutarları hatırlar. Böylece her effect
+    // çalışmasında TÜM personel için yazma yapılmaz; yalnızca DEĞİŞEN
+    // kalemler deftere gider.
+    const sonSenkronRef = useRef({});
+
+    // Ay/yıl değiştiğinde hafıza sıfırlanır. Aksi halde önceki aya ait
+    // tutarlar "değişmedi" sanılır ve yeni ayın kalemleri deftere yazılmaz.
+    useEffect(() => { sonSenkronRef.current = {}; }, [currentYear, currentMonth, docPrefix]);
+
+    useEffect(() => {
+      if (!isDataLoaded) return;
+      const timeoutId = setTimeout(async () => {
+        // Deftere yazılacak dört kalem. Alan adları maasData içindekilerle aynı.
+        const kalemler = ['nakitAvans', 'resmiAvans', 'nakitOdenenTutar', 'bankaOdenenTutar'];
+
+        for (const person of targetPersonnelList) {
+          const row = maasData[person.id];
+          if (!row) continue;
+
+          for (const kalem of kalemler) {
+            // Ödeme tutarları yalnızca TİK AÇIKKEN geçerlidir. Tik kapalıysa
+            // tutar 0 sayılır ve varsa defter kaydı silinir.
+            let tutar = parseFloat(row[kalem]) || 0;
+            if (kalem === 'nakitOdenenTutar' && !row.nakitOdendi) tutar = 0;
+            if (kalem === 'bankaOdenenTutar' && !row.bankaOdendi) tutar = 0;
+
+            // Kalem kimliği: ay + personel + kalem. Aynı kalem tekrar
+            // yazıldığında yeni satır değil GÜNCELLEME yapılmasını sağlar.
+            const kaynakId = `${docPrefix}${currentYear}_${currentMonth}_${person.id}_${kalem}`;
+
+            // Değişmediyse Firestore'a hiç dokunulmaz.
+            if (sonSenkronRef.current[kaynakId] === tutar) continue;
+            sonSenkronRef.current[kaynakId] = tutar;
+
+            await defterPersonelGiderKaydet({
+              db, appId, kalem, kaynakId,
+              personelAdi: person.fullName || 'Personel',
+              tutar,
+              yil: currentYear,
+              ay: currentMonth,
+              currentUser,
+              addSystemLog
+            });
+          }
+        }
+      }, 1500);
+      return () => clearTimeout(timeoutId);
+    }, [maasData, docPrefix, currentYear, currentMonth, isDataLoaded]);
+
     const handleCellChange = (personId, field, value) => {
       setMaasData(prev => ({
         ...prev,
@@ -3195,7 +3260,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     );
   };
 
-  export const PersonelMuhasebeView = ({ personnelList, db, appId, addSystemLog }) => {
+  export const PersonelMuhasebeView = ({ personnelList, db, appId, addSystemLog, currentUser }) => {
     const [collarType, setCollarType] = useState('Mavi Yaka');
     const [activeSubTab, setActiveSubTab] = useState('puantaj');
 
@@ -3242,7 +3307,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
          <div className="flex-1 w-full relative">
            {activeSubTab === 'puantaj' && <PuantajView collarType={collarType} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
            {activeSubTab === 'mesai' && <MesaiView collarType={collarType} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
-           {activeSubTab === 'maas' && <MaasView collarType={collarType} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} />}
+           {activeSubTab === 'maas' && <MaasView collarType={collarType} personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
          </div>
       </div>
     );
@@ -3652,7 +3717,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
   export const FinansDefterView = ({ currentUser, addSystemLog }) => {
     // Varsayılan işlem kategorileri (giderler + gelirler bir arada)
     const DEFTER_KATEGORILER = ['İş Geliri', 'Tahsilat', 'Personel Maaş', 'Avans', 'Yakıt', 'Kira', 'Malzeme', 'Bakım / Onarım', 'Vergi / Resmi', 'Yemek / Yol', 'Borç Ödeme', 'Borç Verme', 'Transfer', 'Diğer'];
-    const DEFTER_TURLERI = ['Kasa', 'Banka', 'Cari (Kişi/Firma)', 'Diğer'];
+    // DEĞİŞİKLİK: 'Cari (Kişi/Firma)' -> 'Kredi Kartı', 'Diğer' -> 'Borçlu'.
+    // Bu dizi HER İKİ formu da (yeni defter ve defter düzenle) besler; tek
+    // yerden değiştirmek yeterlidir.
+    // DİKKAT: Bu metinler Firestore'a d.tur alanında DEĞER olarak yazılır.
+    // Eski defterlerde hâlâ 'Cari (Kişi/Firma)' / 'Diğer' yazılı olabilir;
+    // aşağıdaki ESKI_DEFTER_TURLERI eşlemesi onların rengini ve etiketini korur.
+    const DEFTER_TURLERI = ['Kasa', 'Banka', 'Kredi Kartı', 'Borçlu'];
+
+    // Eski kayıtları yeni karşılıklarına eşler. Sadece GÖRÜNTÜLEME için kullanılır;
+    // Firestore'daki eski veri değiştirilmez, dolayısıyla geçmiş bozulmaz.
+    const defterTuruEtiket = (tur) => {
+      if (tur === 'Cari (Kişi/Firma)') return 'Kredi Kartı';
+      if (tur === 'Diğer') return 'Borçlu';
+      return tur || '-';
+    };
     const ODEME_YONTEMLERI = ['Nakit', 'Banka / Havale', 'Kredi Kartı', 'Çek / Senet', 'Diğer'];
 
     const [defterler, setDefterler] = useState([]);
@@ -3667,7 +3746,82 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const [deleteDefterId, setDeleteDefterId] = useState(null);
 
     // İşlem ekleme/düzenleme penceresi
-    const emptyIslem = { tip: 'giris', tutar: '', aciklama: '', kategori: 'Diğer', etiketler: '', odemeYontemi: 'Nakit', tarih: new Date().toISOString().split('T')[0] };
+    // DÜZELTME: tarih alanı toISOString() ile üretiliyordu; o UTC verdiği için
+    // Türkiye'de (UTC+3) gece 00:00-03:00 arası girilen işlem DÜNÜN tarihiyle
+    // kaydoluyor ve günlük filtrede bugün altında görünmüyordu. Artık yerel
+    // tarih kullanılıyor (bugunStr yukarıda tanımlı).
+    // DEĞİŞİKLİK: etiketler artık METİN değil DİZİ. Etiketler serbest yazı
+    // yerine seçim penceresinden işaretlendiği için dizi tutmak daha doğru;
+    // virgülle ayırma / birleştirme adımları tamamen kalktı.
+    // YENİ: Etiket seçim penceresi durumu
+    const [showEtiketSecici, setShowEtiketSecici] = useState(false);
+    const [etiketArama, setEtiketArama] = useState('');
+    // Kullanıcının sonradan eklediği etiketler — Firestore'da saklanır ki
+    // bir sonraki işlemde hazır olarak gelsin.
+    const [ozelEtiketler, setOzelEtiketler] = useState([]);
+    // Hangi grupların açık olduğu. Varsayılanda hepsi kapalı; 88 etiket
+    // birden açılırsa pencere okunamaz hale gelir.
+    const [acikGruplar, setAcikGruplar] = useState({});
+    const [yeniEtiket, setYeniEtiket] = useState('');
+
+    // Özel etiketleri oku (canlı dinleme — başka kullanıcı eklerse hemen görünür)
+    useEffect(() => {
+      const unsub = onSnapshot(defterEtiketleriRef(db, appId), snap => {
+        setOzelEtiketler(snap.exists() ? (snap.data().liste || []) : []);
+      }, err => console.error('Etiketler okunamadı:', err));
+      return () => unsub();
+    }, []);
+
+    // Yeni etiket ekle. Hazır listede veya özel listede varsa tekrar eklenmez.
+    const etiketEkle = async () => {
+      const ad = yeniEtiket.trim().toLocaleUpperCase('tr-TR');
+      if (!ad) return;
+      const mevcut = [...tumVarsayilanEtiketler(), ...ozelEtiketler].map(e => e.toLocaleUpperCase('tr-TR'));
+      if (mevcut.includes(ad)) {
+        // Zaten varsa yeni kayıt açmak yerine doğrudan seçili hale getirilir.
+        if (!(islemForm.etiketler || []).includes(ad)) {
+          setIslemForm({ ...islemForm, etiketler: [...(islemForm.etiketler || []), ad] });
+        }
+        setYeniEtiket('');
+        return;
+      }
+      const yeniListe = [...ozelEtiketler, ad].sort((a, b) => a.localeCompare(b, 'tr-TR'));
+      try {
+        await setDoc(defterEtiketleriRef(db, appId), { liste: yeniListe, updatedAt: new Date().toISOString() }, { merge: true });
+        // Eklenen etiket otomatik seçilir — kullanıcı ekleyip bir daha aramasın.
+        setIslemForm({ ...islemForm, etiketler: [...(islemForm.etiketler || []), ad] });
+        setYeniEtiket('');
+        addSystemLog?.('Defter Etiketi Eklendi', `"${ad}" etiketi hazır etiketler listesine eklendi.`);
+      } catch (e) {
+        console.error('Etiket eklenemedi:', e);
+        alert('Etiket eklenemedi. Bağlantınızı kontrol edin.');
+      }
+    };
+
+    // Özel etiketi listeden kaldır. SADECE kullanıcı eklediği etiketler
+    // silinebilir; hazır etiketler kodda tanımlı olduğu için silinmez.
+    // Geçmiş işlemlerdeki etiket metni SİLİNMEZ — o kayıtlar bozulmaz.
+    const etiketKaldir = async (ad) => {
+      if (!window.confirm(`"${ad}" etiketi hazır listeden kaldırılacak. Geçmiş işlemlerdeki etiket yazısı silinmez. Emin misiniz?`)) return;
+      const yeniListe = ozelEtiketler.filter(e => e !== ad);
+      try {
+        await setDoc(defterEtiketleriRef(db, appId), { liste: yeniListe, updatedAt: new Date().toISOString() }, { merge: true });
+        addSystemLog?.('Defter Etiketi Kaldırıldı', `"${ad}" etiketi hazır listeden çıkarıldı.`);
+      } catch (e) {
+        console.error('Etiket kaldırılamadı:', e);
+      }
+    };
+
+    // Bir etiketi seç / seçimi kaldır
+    const etiketToggle = (ad) => {
+      const mevcut = islemForm.etiketler || [];
+      setIslemForm({
+        ...islemForm,
+        etiketler: mevcut.includes(ad) ? mevcut.filter(e => e !== ad) : [...mevcut, ad]
+      });
+    };
+
+    const emptyIslem = { tip: 'giris', tutar: '', aciklama: '', kategori: 'Diğer', etiketler: [], odemeYontemi: 'Nakit', tarih: bugunStr() };
     const [showIslemForm, setShowIslemForm] = useState(false);
     const [islemForm, setIslemForm] = useState(emptyIslem);
     const [editingIslemId, setEditingIslemId] = useState(null);
@@ -3676,6 +3830,36 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // Detay filtreleri
     const [detayArama, setDetayArama] = useState('');
     const [kategoriFiltre, setKategoriFiltre] = useState('Tümü');
+
+    // YENİ: GÜNLÜK FİLTRE — defter detayında hangi günün hareketleri görünecek.
+    // DİKKAT: toISOString() kullanılmıyor; o UTC'ye çevirdiği için Türkiye
+    // saatinde gece yarısına yakın saatlerde günü bir gün geriye kaydırabiliyor.
+    // Bu yüzden yerel tarih parçalarından elle string üretiliyor.
+    const bugunStr = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    // Verilen güne +1 / -1 gün ekler. Ay ve yıl geçişlerini Date nesnesi
+    // kendisi hallettiği için 31 Aralık -> 1 Ocak de doğru çalışır.
+    const gunKaydir = (gunStr, adet) => {
+      const [y, a, g] = gunStr.split('-').map(Number);
+      const d = new Date(y, a - 1, g + adet);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
+    // Tarih etiketi: "17 Ağustos 2026, Pazartesi"
+    const gunEtiketi = (gunStr) => {
+      const [y, a, g] = gunStr.split('-').map(Number);
+      return new Date(y, a - 1, g).toLocaleDateString('tr-TR', {
+        day: 'numeric', month: 'long', year: 'numeric', weekday: 'long'
+      });
+    };
+
+    // Açılışta HER ZAMAN mevcut gün seçilidir.
+    const [seciliGun, setSeciliGun] = useState(bugunStr());
+    // Günlük filtre açık mı? Kapatılırsa defterin tüm geçmişi listelenir.
+    const [gunFiltreAktif, setGunFiltreAktif] = useState(true);
 
     // Firestore canlı dinleme
     useEffect(() => {
@@ -3739,7 +3923,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         ...islemForm,
         tutar,
         // Etiketler virgülle ayrılır, boşluklar temizlenir
-        etiketler: (islemForm.etiketler || '').split(',').map(e => e.trim()).filter(Boolean),
+        // DEĞİŞİKLİK: Artık dizi geldiği için split gerekmez; yalnızca boşlar ayıklanır.
+        etiketler: (islemForm.etiketler || []).filter(Boolean),
         defterId: seciliDefterId,
       };
       if (editingIslemId) {
@@ -3814,15 +3999,28 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             {filtreliDefterler.map(d => {
               const bakiye = defterBakiye(d.id);
               const sonTarih = defterSonIslem(d.id);
+              // DÜZELTME: Bu açıklama önce {/* */} biçiminde return ( ile <button>
+              // arasına yazılmıştı; JSX'te ana elemandan ÖNCE yorum konamaz
+              // (iki ayrı ifade sayılır) ve derleme hatası veriyordu. Artık
+              // normal JS yorumu olarak return'den önce duruyor.
+              //
+              // DEĞİŞİKLİK: Defter açılırken günlük filtre BUGÜNE sıfırlanır.
+              // Başka bir defterde geçmiş bir güne bakıp çıkıldığında, yeni
+              // defter yanlış günde açılmasın diye.
               return (
-                <button key={d.id} onClick={() => { setSeciliDefterId(d.id); setDetayArama(''); setKategoriFiltre('Tümü'); }}
+                <button key={d.id} onClick={() => { setSeciliDefterId(d.id); setDetayArama(''); setKategoriFiltre('Tümü'); setSeciliGun(bugunStr()); setGunFiltreAktif(true); }}
                   className="w-full bg-white rounded-2xl border border-neutral-200 p-4 flex items-center gap-3 hover:border-emerald-400 hover:shadow-md transition text-left">
-                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 font-black text-white ${d.tur === 'Banka' ? 'bg-blue-600' : d.tur === 'Kasa' ? 'bg-emerald-600' : d.tur === 'Cari (Kişi/Firma)' ? 'bg-amber-500' : 'bg-neutral-500'}`}>
+                  {/* DEĞİŞİKLİK: Renk eşlemesine yeni türler eklendi. Eski kayıtlardaki
+                      'Cari (Kişi/Firma)' ve 'Diğer' değerleri de listede tutuluyor ki
+                      geçmiş defterler renksiz kalmasın. */}
+                  <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 font-black text-white ${d.tur === 'Banka' ? 'bg-blue-600' : d.tur === 'Kasa' ? 'bg-emerald-600' : (d.tur === 'Kredi Kartı' || d.tur === 'Cari (Kişi/Firma)') ? 'bg-amber-500' : (d.tur === 'Borçlu' || d.tur === 'Diğer') ? 'bg-rose-600' : 'bg-neutral-500'}`}>
                     {(d.ad || '?').charAt(0).toLocaleUpperCase('tr-TR')}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-black text-black truncate">{d.ad}</div>
-                    <div className="text-[11px] font-bold text-neutral-400">{d.tur} {sonTarih ? `• Son işlem: ${new Date(sonTarih).toLocaleDateString('tr-TR')}` : '• Henüz işlem yok'}</div>
+                    {/* DEĞİŞİKLİK: Ham d.tur yerine defterTuruEtiket() — eski kayıtlar da
+                        yeni isimle görünür (Cari -> Kredi Kartı, Diğer -> Borçlu). */}
+                    <div className="text-[11px] font-bold text-neutral-400">{defterTuruEtiket(d.tur)} {sonTarih ? `• Son işlem: ${new Date(sonTarih).toLocaleDateString('tr-TR')}` : '• Henüz işlem yok'}</div>
                   </div>
                   <div className="text-right shrink-0">
                     <div className={`text-lg font-black ${bakiye > 0 ? 'text-emerald-600' : bakiye < 0 ? 'text-red-600' : 'text-neutral-400'}`}>₺{paraFmt(Math.abs(bakiye))}</div>
@@ -3863,6 +4061,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
     // ======================== DEFTER DETAY GÖRÜNÜMÜ ========================
     const dIslemler = defterIslemleri(seciliDefterId)
+      // YENİ: GÜNLÜK FİLTRE — en başta uygulanır ki arama ve kategori
+      // filtreleri yalnızca o günün hareketleri içinde çalışsın.
+      .filter(i => !gunFiltreAktif || i.tarih === seciliGun)
       .filter(i => kategoriFiltre === 'Tümü' || i.kategori === kategoriFiltre)
       .filter(i => {
         const q = detayArama.trim().toLocaleLowerCase('tr-TR');
@@ -3873,6 +4074,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       })
       .sort((a, b) => new Date(b.tarih) - new Date(a.tarih) || new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
 
+    // YENİ: SEÇİLİ GÜNÜN toplamları. Arama/kategori filtresinden BAĞIMSIZ
+    // hesaplanır; o günün gerçek gelir-gider tablosunu göstermesi gerekiyor.
+    const gunIslemleri = defterIslemleri(seciliDefterId).filter(i => i.tarih === seciliGun);
+    const gunGiris = gunIslemleri.filter(i => i.tip === 'giris').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    const gunCikis = gunIslemleri.filter(i => i.tip === 'cikis').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    const gunNet = gunGiris - gunCikis;
+
+    // Hangi günlerde hareket var? Ok tuşlarının yanında ipucu göstermek için.
+    const hareketliGunler = new Set(defterIslemleri(seciliDefterId).map(i => i.tarih));
+
+    // Toplam (tüm zamanlar) — üst karttaki defter bakiyesi bunu kullanır,
+    // günlük filtre bu rakamları ETKİLEMEZ. Bakiye her zaman defterin
+    // gerçek durumunu göstermeli, yoksa yanlış okunur.
     const dGiris = defterIslemleri(seciliDefterId).filter(i => i.tip === 'giris').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
     const dCikis = defterIslemleri(seciliDefterId).filter(i => i.tip === 'cikis').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
     const dBakiye = dGiris - dCikis;
@@ -3901,7 +4115,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           <div className="flex items-end justify-between gap-3 flex-wrap">
             <div>
               <h2 className="text-2xl font-black">{seciliDefter.ad}</h2>
-              <div className="text-xs font-bold text-white/60">{seciliDefter.tur}{seciliDefter.not ? ` • ${seciliDefter.not}` : ''}</div>
+              {/* DEĞİŞİKLİK: Defter detay başlığında da defterTuruEtiket() kullanılır,
+                  böylece kart listesiyle aynı ismi gösterir. */}
+              <div className="text-xs font-bold text-white/60">{defterTuruEtiket(seciliDefter.tur)}{seciliDefter.not ? ` • ${seciliDefter.not}` : ''}</div>
             </div>
             <div className="text-right">
               <div className={`text-3xl font-black ${dBakiye >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>₺{paraFmt(Math.abs(dBakiye))}</div>
@@ -3947,6 +4163,75 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           </div>
         )}
 
+        {/* YENİ: GÜNLÜK GEZİNME ÇUBUĞU
+            Sol/sağ oklarla düne ve yarına geçilir. Açılışta her zaman bugün seçilidir.
+            "Tüm Geçmiş" düğmesi filtreyi kapatıp defterin tamamını listeler. */}
+        <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
+          <div className="flex items-center gap-2 p-3">
+            {/* DÜN */}
+            <button onClick={() => { setSeciliGun(gunKaydir(seciliGun, -1)); setGunFiltreAktif(true); }}
+              title="Önceki gün"
+              className="w-10 h-10 shrink-0 rounded-xl bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center transition">
+              <ChevronLeft className="w-5 h-5 text-neutral-700" />
+            </button>
+
+            <div className="flex-1 min-w-0 text-center">
+              {/* Tarih etiketi — tıklanınca bugüne döner */}
+              <button onClick={() => { setSeciliGun(bugunStr()); setGunFiltreAktif(true); }}
+                className="w-full group">
+                <div className="text-sm font-black text-black truncate">
+                  {gunFiltreAktif ? gunEtiketi(seciliGun) : 'Tüm Geçmiş'}
+                </div>
+                <div className="text-[10px] font-bold text-neutral-400">
+                  {!gunFiltreAktif ? `${defterIslemleri(seciliDefterId).length} kayıt` :
+                    seciliGun === bugunStr() ? 'Bugün' :
+                    `${gunIslemleri.length} hareket • bugüne dönmek için dokun`}
+                </div>
+              </button>
+            </div>
+
+            {/* YARIN — hareket olan günlerde nokta gösterilir ki ileride kayıt
+                olup olmadığı ok tuşuna basmadan anlaşılsın. */}
+            <button onClick={() => { setSeciliGun(gunKaydir(seciliGun, 1)); setGunFiltreAktif(true); }}
+              title="Sonraki gün"
+              className="w-10 h-10 shrink-0 rounded-xl bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center transition relative">
+              <ChevronRight className="w-5 h-5 text-neutral-700" />
+              {hareketliGunler.has(gunKaydir(seciliGun, 1)) && (
+                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              )}
+            </button>
+
+            {/* TÜM GEÇMİŞ / GÜNLÜK geçişi */}
+            <button onClick={() => { setGunFiltreAktif(!gunFiltreAktif); if (gunFiltreAktif) setKategoriFiltre('Tümü'); }}
+              className={`shrink-0 px-3 h-10 rounded-xl text-[11px] font-black transition ${
+                gunFiltreAktif ? 'bg-neutral-900 text-white hover:bg-neutral-800' : 'bg-emerald-600 text-white hover:bg-emerald-700'
+              }`}>
+              {gunFiltreAktif ? 'Tüm Geçmiş' : 'Günlük'}
+            </button>
+          </div>
+
+          {/* SEÇİLİ GÜNÜN GELİR / GİDER / NET tablosu — yalnızca günlük moddayken */}
+          {gunFiltreAktif && (
+            <div className="grid grid-cols-3 border-t border-neutral-200 divide-x divide-neutral-200">
+              <div className="p-2.5 text-center">
+                <div className="text-[9px] font-black uppercase text-emerald-600">Gelir (Aldım)</div>
+                <div className="text-sm font-black text-emerald-700">₺{paraFmt(gunGiris)}</div>
+              </div>
+              <div className="p-2.5 text-center">
+                <div className="text-[9px] font-black uppercase text-red-500">Gider (Verdim)</div>
+                <div className="text-sm font-black text-red-600">₺{paraFmt(gunCikis)}</div>
+              </div>
+              <div className="p-2.5 text-center">
+                <div className="text-[9px] font-black uppercase text-neutral-500">Günün Neti</div>
+                {/* Net negatifse eksi işaretiyle kırmızı gösterilir */}
+                <div className={`text-sm font-black ${gunNet > 0 ? 'text-emerald-700' : gunNet < 0 ? 'text-red-600' : 'text-neutral-400'}`}>
+                  {gunNet < 0 ? '−' : ''}₺{paraFmt(Math.abs(gunNet))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* ARAMA */}
         <div className="relative">
           <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -3959,7 +4244,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-4 py-2.5 bg-neutral-900 text-white text-[10px] font-black uppercase">
             <span>İşlem</span><span className="text-right w-28">Giriş (Aldım)</span><span className="text-right w-28">Çıkış (Verdim)</span>
           </div>
-          {dIslemler.length === 0 && <div className="p-8 text-center text-sm font-bold text-neutral-400">Kayıt bulunamadı. Alttaki butonlarla ilk işlemi ekleyin.</div>}
+          {/* DEĞİŞİKLİK: Boş liste mesajı artık hangi modda olduğumuzu söylüyor.
+              Günlük moddayken "kayıt yok" demek yanıltıcı olurdu; kullanıcı
+              defterin tamamen boş olduğunu sanabilir. */}
+          {dIslemler.length === 0 && (
+            <div className="p-8 text-center text-sm font-bold text-neutral-400">
+              {gunFiltreAktif
+                ? `${gunEtiketi(seciliGun)} tarihinde hareket yok. Oklarla başka bir güne geçin veya "Tüm Geçmiş"e bakın.`
+                : 'Kayıt bulunamadı. Alttaki butonlarla ilk işlemi ekleyin.'}
+            </div>
+          )}
           <div className="divide-y divide-neutral-100">
             {dIslemler.map(i => (
               <div key={i.id} className="grid grid-cols-[1fr_auto_auto] gap-2 px-4 py-3 items-center group hover:bg-neutral-50 transition">
@@ -3974,7 +4268,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   {i.aciklama && <div className="text-sm font-bold text-neutral-700 truncate mt-0.5">{i.aciklama}</div>}
                   <div className="text-[10px] font-bold text-neutral-300">{i.by}</div>
                   <div className="hidden group-hover:flex items-center gap-1 mt-1">
-                    <button onClick={() => { setIslemForm({ tip: i.tip, tutar: String(i.tutar), aciklama: i.aciklama || '', kategori: i.kategori || 'Diğer', etiketler: (i.etiketler || []).join(', '), odemeYontemi: i.odemeYontemi || 'Nakit', tarih: i.tarih }); setEditingIslemId(i.id); setShowIslemForm(true); }}
+                    <button onClick={() => { setIslemForm({ tip: i.tip, tutar: String(i.tutar), aciklama: i.aciklama || '', kategori: i.kategori || 'Diğer', etiketler: (i.etiketler || []), odemeYontemi: i.odemeYontemi || 'Nakit', tarih: i.tarih }); setEditingIslemId(i.id); setShowIslemForm(true); }}
                       className="text-[10px] font-black text-blue-600 hover:underline flex items-center gap-0.5"><Edit className="w-3 h-3" /> Düzenle</button>
                     <button onClick={() => setDeleteIslemId(i.id)} className="text-[10px] font-black text-red-500 hover:underline flex items-center gap-0.5 ml-2"><X className="w-3 h-3" /> Sil</button>
                   </div>
@@ -3986,13 +4280,186 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           </div>
         </div>
 
+        {/* YENİ: ETİKET SEÇME PENCERESİ
+            Hazır etiketler gruplar hâlinde listelenir. Gruplar VARSAYILAN olarak
+            KAPALI gelir — 88 etiket birden açılırsa pencere okunamaz. Arama
+            yazıldığında gruplar göz ardı edilip düz sonuç listesi gösterilir. */}
+        {showEtiketSecici && (
+          <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[85vh] flex flex-col overflow-hidden">
+
+              {/* PENCERE BAŞLIĞI */}
+              <div className="flex items-center justify-between p-4 border-b border-neutral-200 shrink-0">
+                <div className="font-black text-black flex items-center gap-2">
+                  <Tag className="w-5 h-5 text-emerald-600" /> Etiket Seç
+                  {(islemForm.etiketler || []).length > 0 && (
+                    <span className="text-[10px] font-black bg-emerald-600 text-white rounded-full px-2 py-0.5">
+                      {(islemForm.etiketler || []).length}
+                    </span>
+                  )}
+                </div>
+                <button onClick={() => setShowEtiketSecici(false)} className="p-1.5 rounded-lg hover:bg-neutral-100 transition">
+                  <X className="w-5 h-5 text-neutral-500" />
+                </button>
+              </div>
+
+              {/* ARAMA */}
+              <div className="p-3 border-b border-neutral-200 shrink-0">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input value={etiketArama} onChange={e => setEtiketArama(e.target.value)} placeholder="Etiket ara..."
+                    className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600" />
+                </div>
+              </div>
+
+              {/* ETİKET LİSTESİ */}
+              <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                {(() => {
+                  const q = etiketArama.trim().toLocaleLowerCase('tr-TR');
+                  const secili = islemForm.etiketler || [];
+
+                  // ARAMA MODU: gruplar göz ardı edilir, düz sonuç listesi çıkar.
+                  if (q) {
+                    const tumu = [...tumVarsayilanEtiketler(), ...ozelEtiketler]
+                      .filter(e => e.toLocaleLowerCase('tr-TR').includes(q))
+                      .sort((a, b) => a.localeCompare(b, 'tr-TR'));
+                    if (tumu.length === 0) {
+                      return <p className="text-center text-sm font-bold text-neutral-400 py-8">
+                        "{etiketArama}" bulunamadı. Aşağıdan yeni etiket olarak ekleyebilirsiniz.
+                      </p>;
+                    }
+                    return (
+                      <div className="flex flex-wrap gap-1.5">
+                        {tumu.map(e => (
+                          <button key={e} type="button" onClick={() => etiketToggle(e)}
+                            className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition ${
+                              secili.includes(e)
+                                ? 'bg-emerald-600 text-white border-emerald-600'
+                                : 'bg-white text-neutral-700 border-neutral-300 hover:border-emerald-400'
+                            }`}>
+                            {secili.includes(e) && '✓ '}{e}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  }
+
+                  // NORMAL MOD: katlanır gruplar + en altta özel etiketler
+                  return (
+                    <>
+                      {VARSAYILAN_ETIKET_GRUPLARI.map(grup => {
+                        const acik = !!acikGruplar[grup.baslik];
+                        // Grup başlığı da bir etiket olabilir (örn. KAMYONLAR),
+                        // ama KİŞİLER/GENEL yalnızca gruplama amaçlı sanal başlıklar.
+                        const sanalBaslik = grup.baslik === 'KİŞİLER' || grup.baslik === 'GENEL';
+                        const grupSeciliSayi = grup.etiketler.filter(e => secili.includes(e)).length;
+
+                        return (
+                          <div key={grup.baslik} className="border border-neutral-200 rounded-xl overflow-hidden">
+                            <button type="button" onClick={() => setAcikGruplar({ ...acikGruplar, [grup.baslik]: !acik })}
+                              className="w-full px-3 py-2.5 bg-neutral-50 hover:bg-neutral-100 flex items-center justify-between transition">
+                              <span className="text-xs font-black text-black flex items-center gap-2">
+                                {grup.baslik}
+                                {grupSeciliSayi > 0 && (
+                                  <span className="text-[9px] font-black bg-emerald-600 text-white rounded-full px-1.5">{grupSeciliSayi}</span>
+                                )}
+                              </span>
+                              <span className="flex items-center gap-2">
+                                <span className="text-[10px] font-bold text-neutral-400">{grup.etiketler.length}</span>
+                                {acik ? <ChevronDown className="w-4 h-4 text-neutral-500" /> : <ChevronRight className="w-4 h-4 text-neutral-500" />}
+                              </span>
+                            </button>
+
+                            {acik && (
+                              <div className="p-2.5 flex flex-wrap gap-1.5">
+                                {/* Grup başlığının kendisi de seçilebilir (sanal başlıklar hariç) */}
+                                {!sanalBaslik && (
+                                  <button type="button" onClick={() => etiketToggle(grup.baslik)}
+                                    className={`text-[11px] font-black px-2.5 py-1.5 rounded-lg border transition ${
+                                      secili.includes(grup.baslik)
+                                        ? 'bg-emerald-600 text-white border-emerald-600'
+                                        : 'bg-neutral-900 text-white border-neutral-900 hover:bg-neutral-700'
+                                    }`}>
+                                    {secili.includes(grup.baslik) && '✓ '}{grup.baslik} (tümü)
+                                  </button>
+                                )}
+                                {grup.etiketler.map(e => (
+                                  <button key={e} type="button" onClick={() => etiketToggle(e)}
+                                    className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition ${
+                                      secili.includes(e)
+                                        ? 'bg-emerald-600 text-white border-emerald-600'
+                                        : 'bg-white text-neutral-700 border-neutral-300 hover:border-emerald-400'
+                                    }`}>
+                                    {secili.includes(e) && '✓ '}{e}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* KULLANICI ETİKETLERİ — silme düğmesi yalnızca burada var */}
+                      {ozelEtiketler.length > 0 && (
+                        <div className="border-2 border-emerald-200 rounded-xl overflow-hidden">
+                          <div className="px-3 py-2.5 bg-emerald-50 text-xs font-black text-emerald-900">
+                            EKLEDİĞİNİZ ETİKETLER ({ozelEtiketler.length})
+                          </div>
+                          <div className="p-2.5 flex flex-wrap gap-1.5">
+                            {ozelEtiketler.map(e => (
+                              <span key={e} className={`inline-flex items-center gap-1 text-[11px] font-bold rounded-lg border transition ${
+                                secili.includes(e) ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-neutral-700 border-neutral-300'
+                              }`}>
+                                <button type="button" onClick={() => etiketToggle(e)} className="pl-2.5 py-1.5">
+                                  {secili.includes(e) && '✓ '}{e}
+                                </button>
+                                <button type="button" onClick={() => etiketKaldir(e)} title="Bu etiketi hazır listeden kaldır"
+                                  className={`pr-2 py-1.5 transition ${secili.includes(e) ? 'hover:text-red-200' : 'hover:text-red-600'}`}>
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* EN ALT: YENİ ETİKET EKLE — eklenen etiket kalıcı olarak saklanır
+                  ve bir sonraki işlemde hazır olarak gelir. */}
+              <div className="p-3 border-t border-neutral-200 shrink-0 space-y-2">
+                <div className="flex gap-2">
+                  <input value={yeniEtiket} onChange={e => setYeniEtiket(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); etiketEkle(); } }}
+                    placeholder="Yeni etiket adı..."
+                    className="flex-1 min-w-0 p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 uppercase" />
+                  <button type="button" onClick={etiketEkle} disabled={!yeniEtiket.trim()}
+                    className="shrink-0 px-4 rounded-xl bg-neutral-900 text-white text-xs font-black hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1.5">
+                    <Plus className="w-4 h-4" /> Ekle
+                  </button>
+                </div>
+                <button type="button" onClick={() => setShowEtiketSecici(false)}
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl transition">
+                  Tamam ({(islemForm.etiketler || []).length} etiket seçili)
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ALDIM / VERDİM BÜYÜK BUTONLAR — videodaki gibi sabit altta */}
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-full max-w-xl px-4 flex gap-3 z-40">
-          <button onClick={() => { setIslemForm({ ...emptyIslem, tip: 'cikis' }); setEditingIslemId(null); setShowIslemForm(true); }}
+          {/* DEĞİŞİKLİK: Yeni işlemin tarihi, ekranda BAKILAN güne ayarlanır.
+              Geçmiş bir güne bakarken kayıt eklendiğinde bugüne yazılsaydı,
+              kayıt anında listeden kaybolur ve kullanıcı eklenmedi sanardı.
+              Tüm Geçmiş modunda bugüne yazılır. */}
+          <button onClick={() => { setIslemForm({ ...emptyIslem, tip: 'cikis', tarih: gunFiltreAktif ? seciliGun : bugunStr() }); setEditingIslemId(null); setShowIslemForm(true); }}
             className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white font-black rounded-2xl shadow-2xl shadow-red-600/40 transition flex items-center justify-center gap-2 text-base">
             <ArrowUpRight className="w-5 h-5" /> VERDİM (Çıkış)
           </button>
-          <button onClick={() => { setIslemForm({ ...emptyIslem, tip: 'giris' }); setEditingIslemId(null); setShowIslemForm(true); }}
+          <button onClick={() => { setIslemForm({ ...emptyIslem, tip: 'giris', tarih: gunFiltreAktif ? seciliGun : bugunStr() }); setEditingIslemId(null); setShowIslemForm(true); }}
             className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-2xl shadow-emerald-600/40 transition flex items-center justify-center gap-2 text-base">
             <ArrowDownRight className="w-5 h-5" /> ALDIM (Giriş)
           </button>
@@ -4029,8 +4496,35 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   <select value={islemForm.kategori} onChange={e => setIslemForm({ ...islemForm, kategori: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
                     {DEFTER_KATEGORILER.map(k => <option key={k}>{k}</option>)}
                   </select></div>
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Etiketler <span className="text-neutral-400 font-normal">(virgülle ayırın — aramada ve raporda kullanılır)</span></label>
-                  <input value={islemForm.etiketler} onChange={e => setIslemForm({ ...islemForm, etiketler: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" placeholder="örn: temmuz, şantiye, acil" /></div>
+                {/* DEĞİŞİKLİK: Serbest metin kutusu yerine ETİKET SEÇME arayüzü.
+                    Seçili etiketler rozet olarak görünür, her rozetin ✕'i ile
+                    tek tek kaldırılabilir. "Etiket seç" düğmesi hazır etiket
+                    penceresini açar. */}
+                <div>
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">
+                    Etiketler <span className="text-neutral-400 font-normal">(aramada ve raporda kullanılır)</span>
+                  </label>
+                  <div className="border border-neutral-300 rounded-xl p-2 bg-white">
+                    {(islemForm.etiketler || []).length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {(islemForm.etiketler || []).map(e => (
+                          <span key={e} className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
+                            #{e}
+                            <button type="button" onClick={() => etiketToggle(e)} className="hover:text-red-600 transition" title="Etiketi kaldır">
+                              <X className="w-3 h-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-[11px] text-neutral-400 font-bold mb-2 px-1">Henüz etiket seçilmedi.</p>
+                    )}
+                    <button type="button" onClick={() => { setShowEtiketSecici(true); setEtiketArama(''); }}
+                      className="w-full py-2 rounded-lg border-2 border-dashed border-neutral-300 text-[11px] font-black text-neutral-500 hover:border-emerald-400 hover:text-emerald-700 transition flex items-center justify-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5" /> Etiket seç
+                    </button>
+                  </div>
+                </div>
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Açıklama / Not</label>
                   <textarea value={islemForm.aciklama} onChange={e => setIslemForm({ ...islemForm, aciklama: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm h-16 resize-none" placeholder="İşleme dair not..." /></div>
                 <button onClick={handleSaveIslem} className={`w-full py-3.5 text-white font-black rounded-xl transition flex items-center justify-center gap-2 ${islemForm.tip === 'giris' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700'}`}>
