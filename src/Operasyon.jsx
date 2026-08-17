@@ -5,7 +5,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   // YENİ: Deneme maaşı alanları — süre seçenekleri ve canlı özet metni.
   // Ayrı dosya yerine shared.jsx içinde tutuluyor; Finans.jsx da aynı
   // kaynaktan gecerliMaas'ı okur, böylece tek doğru kaynak vardır.
-  DENEME_SURE_SECENEKLERI, denemeOzetMetni } from './shared.jsx';
+  DENEME_SURE_SECENEKLERI, denemeOzetMetni,
+  // YENİ: Resmi Ayarları'ndaki GÜNCEL banka bilgisi (canlı önbellek).
+  // Eskiden IBAN bu dosyada sabit yazılıydı ve panelden değiştirilemiyordu.
+  aktifBankaBilgiMetni,
+  // YENİ: IBAN Paylaş penceresi için varsayılan hesap nesnesi ve IBAN biçimleyici.
+  aktifBankaHesabi, ibanBicimle } from './shared.jsx';
   export const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
     const [mesaiData, setMesaiData] = useState({});
@@ -1644,7 +1649,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                                 const kapora = parseInt(job.price || 0) * 0.20; // Sözleşme 20. madde: %20 kapora
                                 const kaporaText = kapora > 0 ? kapora.toLocaleString('tr-TR') : '...';
 
-                                const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %20'si olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\nBanka: Denizbank\nAlıcı: Şenol Beşinci\nIBAN: TR 94 0013 4000 0262 9671 7000 01\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
+                                const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %20'si olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\n${aktifBankaBilgiMetni()}\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
                               window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
                             }} 
                             className="flex-1 min-w-0 px-1 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 shadow-sm whitespace-nowrap overflow-hidden"
@@ -11208,6 +11213,11 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
   // --- EKİP KURMA TAHTASI SONU ---
 
   export const MyAssignedJobsView = ({ jobs, currentUser, handleOpenEndJobModal, markNotificationsAsRead }) => {
+    // YENİ: IBAN paylaşım penceresi. Hangi işin müşterisiyle paylaşılacağını tutar.
+    // null ise pencere kapalı.
+    const [ibanPaylasJob, setIbanPaylasJob] = useState(null);
+    const [ibanKopyalandi, setIbanKopyalandi] = useState(false);
+
     useEffect(() => {
       if (currentUser?.id) {
         markNotificationsAsRead(currentUser.id);
@@ -11251,9 +11261,20 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
               <div key={job.id} className="p-5 border border-neutral-200 rounded-xl bg-white shadow-sm flex flex-col gap-3">
                  <div className="flex justify-between items-start">
                     <div>
-                      <h3 className="font-bold text-black text-lg">
-                         {isStandardBlueCollar ? 'Operasyon Görevi' : job.customerName}
-                      </h3>
+                      {/* YENİ: Müşteri ismi + IBAN Paylaş butonu yan yana.
+                          Buton SADECE Ekip Şefi / Usta rütbelerinde görünür; standart
+                          mavi yaka müşteri bilgisini hiç görmediği için ona gösterilmez. */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="font-bold text-black text-lg">
+                           {isStandardBlueCollar ? 'Operasyon Görevi' : job.customerName}
+                        </h3>
+                        {!isStandardBlueCollar && (
+                          <button type="button" onClick={() => { setIbanPaylasJob(job); setIbanKopyalandi(false); }}
+                            className="shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black transition shadow-sm">
+                            <Landmark className="w-3.5 h-3.5" /> IBAN Paylaş
+                          </button>
+                        )}
+                      </div>
                       <p className="text-sm font-medium text-neutral-500 flex items-center gap-1.5 mt-1">
                         <CalendarDays className="w-4 h-4" /> {job.date}
                       </p>
@@ -11508,6 +11529,156 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
               </div>
            )})}
         </div>
+
+        {/* ==================================================================
+            YENİ: IBAN PAYLAŞ PENCERESİ
+            ==================================================================
+            Ekip şefi müşteriye ödeme bilgisini üç yolla iletebilir:
+              1) QR kodu göstererek (müşteri telefonuyla okutur)
+              2) SMS ile
+              3) WhatsApp ile
+            Banka bilgileri Resmi Ayarları'ndaki VARSAYILAN hesaptan okunur;
+            sabit yazılmadı, panelden değiştirilince burası da güncellenir. */}
+        {ibanPaylasJob && (() => {
+          const hesap = aktifBankaHesabi();
+          const telefon = (ibanPaylasJob.customerPhone || '').replace(/\D/g, '');
+          // Türkiye numarası: 0 ile başlıyorsa at, 90 yoksa ekle.
+          const telUlusal = telefon.startsWith('0') ? telefon.slice(1) : telefon;
+          const telWa = telUlusal.startsWith('90') ? telUlusal : `90${telUlusal}`;
+          const kalan = Math.max(0, (parseFloat(ibanPaylasJob.price) || 0) - (parseFloat(ibanPaylasJob.deposit) || 0));
+
+          // Müşteriye gidecek metin. SMS ve WhatsApp aynı metni kullanır ki
+          // müşteri hangi kanaldan alırsa aynı bilgiyi görsün.
+          const mesaj =
+            `Sayın ${ibanPaylasJob.customerName || ''},\n\n` +
+            `Sembol Nakliyat ödeme bilgileriniz:\n\n` +
+            `Banka: ${hesap.banka}\n` +
+            `Alıcı: ${hesap.aliciAdi}\n` +
+            `IBAN: ${ibanBicimle(hesap.iban)}\n\n` +
+            (kalan > 0 ? `Kalan bakiye: ${kalan.toLocaleString('tr-TR')} TL\n\n` : '') +
+            `Ödeme açıklamasına teslim kodunuzu (${ibanPaylasJob.deliveryCode || '-'}) yazmanızı rica ederiz.\n\n` +
+            `İyi günler dileriz.`;
+
+          return (
+            <div className="fixed inset-0 bg-black/70 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+              <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto">
+
+                {/* BAŞLIK */}
+                <div className="flex items-center justify-between p-4 border-b border-neutral-200 sticky top-0 bg-white">
+                  <div className="min-w-0">
+                    <div className="font-black text-black flex items-center gap-2">
+                      <Landmark className="w-5 h-5 text-emerald-600" /> Ödeme Bilgisi Paylaş
+                    </div>
+                    <p className="text-[11px] font-bold text-neutral-500 truncate mt-0.5">{ibanPaylasJob.customerName}</p>
+                  </div>
+                  <button onClick={() => setIbanPaylasJob(null)} className="p-1.5 rounded-lg hover:bg-neutral-100 transition shrink-0">
+                    <X className="w-5 h-5 text-neutral-500" />
+                  </button>
+                </div>
+
+                <div className="p-4 space-y-4">
+
+                  {/* QR KODU — müşteri kendi bankacılık uygulamasıyla okutur */}
+                  {hesap.qrUrl ? (
+                    <div className="bg-neutral-50 border border-neutral-200 rounded-2xl p-4 text-center">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-neutral-500 mb-3">
+                        Müşteriye okutmak için QR
+                      </p>
+                      <img src={hesap.qrUrl} alt="Banka QR kodu"
+                        className="w-48 h-48 mx-auto object-contain bg-white rounded-xl p-2 border border-neutral-200" />
+                      <p className="text-[11px] font-bold text-neutral-600 mt-3 leading-relaxed">
+                        Müşteri kendi bankacılık uygulamasından bu kodu okutarak ödeme yapabilir.
+                      </p>
+                    </div>
+                  ) : (
+                    /* QR yüklenmemişse sessiz kalmıyoruz; nerede tanımlanacağını söylüyoruz. */
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                      <p className="text-[11px] font-bold text-amber-900 leading-relaxed">
+                        QR kodu tanımlı değil. Yönetici, Sistem Dosyaları &gt; Resmi Ayarları bölümünden
+                        banka QR görselini yükleyebilir. IBAN bilgileri aşağıda yine paylaşılabilir.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* HESAP BİLGİLERİ */}
+                  <div className="border border-neutral-200 rounded-2xl overflow-hidden">
+                    <div className="bg-neutral-900 text-white px-4 py-2.5 text-[10px] font-black uppercase tracking-wider">
+                      Hesap Bilgileri
+                    </div>
+                    <div className="divide-y divide-neutral-100">
+                      <div className="px-4 py-2.5 flex justify-between gap-3">
+                        <span className="text-[11px] font-bold text-neutral-500 shrink-0">Banka</span>
+                        <span className="text-xs font-black text-black text-right">{hesap.banka}</span>
+                      </div>
+                      <div className="px-4 py-2.5 flex justify-between gap-3">
+                        <span className="text-[11px] font-bold text-neutral-500 shrink-0">Alıcı</span>
+                        <span className="text-xs font-black text-black text-right">{hesap.aliciAdi}</span>
+                      </div>
+                      <div className="px-4 py-3">
+                        <div className="text-[11px] font-bold text-neutral-500 mb-1">IBAN</div>
+                        {/* font-mono + tracking: rakamlar tek tek okunabilsin */}
+                        <div className="text-sm font-black text-black font-mono tracking-wide break-all">
+                          {ibanBicimle(hesap.iban)}
+                        </div>
+                      </div>
+                      {kalan > 0 && (
+                        <div className="px-4 py-2.5 flex justify-between gap-3 bg-emerald-50">
+                          <span className="text-[11px] font-bold text-emerald-700 shrink-0">Kalan Bakiye</span>
+                          <span className="text-sm font-black text-emerald-800">{kalan.toLocaleString('tr-TR')} TL</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* IBAN'I KOPYALA — şef kendi kanalından iletmek isterse */}
+                  <button type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(ibanBicimle(hesap.iban));
+                      setIbanKopyalandi(true);
+                      setTimeout(() => setIbanKopyalandi(false), 2000);
+                    }}
+                    className="w-full py-3 rounded-xl border border-neutral-300 text-xs font-black text-neutral-700 hover:bg-neutral-50 transition flex items-center justify-center gap-2">
+                    {ibanKopyalandi
+                      ? <><CheckCircle className="w-4 h-4 text-green-600" /> IBAN kopyalandı</>
+                      : <><FileText className="w-4 h-4" /> IBAN'ı kopyala</>}
+                  </button>
+
+                  {/* PAYLAŞIM BUTONLARI */}
+                  {telefon ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      {/* SMS: sms: protokolü. body parametresi iOS ve Android'de
+                          desteklenir; metin encodeURIComponent ile kodlanır ki
+                          Türkçe karakterler ve satır sonları bozulmasın. */}
+                      <a href={`sms:${telefon}?body=${encodeURIComponent(mesaj)}`}
+                        className="py-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs transition flex items-center justify-center gap-2">
+                        <MessageSquareText className="w-4 h-4" /> SMS ile Paylaş
+                      </a>
+                      {/* WhatsApp: numara uluslararası biçimde (90...) gönderilir */}
+                      <a href={`https://api.whatsapp.com/send?phone=${telWa}&text=${encodeURIComponent(mesaj)}`}
+                        target="_blank" rel="noopener noreferrer"
+                        className="py-3.5 rounded-xl bg-green-600 hover:bg-green-700 text-white font-black text-xs transition flex items-center justify-center gap-2">
+                        <MessageCircle className="w-4 h-4" /> WhatsApp ile Paylaş
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-[11px] font-bold text-red-800">
+                      Müşteri telefon numarası kayıtlı değil. SMS veya WhatsApp gönderilemez.
+                    </div>
+                  )}
+
+                  {/* GÖNDERİLECEK METİN ÖNİZLEMESİ — şef ne gittiğini görsün */}
+                  <details className="border border-neutral-200 rounded-xl overflow-hidden">
+                    <summary className="px-4 py-2.5 bg-neutral-50 text-[11px] font-black text-neutral-600 cursor-pointer">
+                      Gönderilecek mesajı gör
+                    </summary>
+                    <pre className="px-4 py-3 text-[11px] text-neutral-700 whitespace-pre-wrap font-sans leading-relaxed">{mesaj}</pre>
+                  </details>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   };
