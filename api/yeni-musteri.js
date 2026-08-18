@@ -1,7 +1,8 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, collection, addDoc } from 'firebase/firestore';
+// YENİ: Güvenlik kapısını geçmek için Auth modülünü ekledik
+import { getAuth, signInAnonymously } from 'firebase/auth';
 
-// ŞİFRELER DİREKT SENİN DOSYANDAN ALINDI, ARTIK HATA VERME ŞANSI YOK!
 const firebaseConfig = {
   apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
   authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
@@ -13,6 +14,7 @@ const firebaseConfig = {
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
+const auth = getAuth(app); // YENİ: Auth tanımlandı
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Credentials', true);
@@ -27,11 +29,12 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     try {
+      // YENİ VE EN ÖNEMLİ KISIM: Güvenlik kurallarını (Permission Denied) aşmak için anonim giriş yapıyoruz!
+      await signInAnonymously(auth);
+
       const crmData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
       
-      // SENİN SİSTEMİNİN GERÇEK HEDEF KLASÖR ADI
       const targetAppId = "sembol-crm-lokal"; 
-      
       const dbPath = collection(db, 'artifacts', targetAppId, 'public', 'data', 'havuzKayitlari');
       
       const suAnkiTarih = new Date().toISOString();
