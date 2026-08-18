@@ -2618,6 +2618,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [yeniHesap, setYeniHesap] = useState({ etiket: '', deger: '', apiAnahtari: '' });
   const [senkronDurum, setSenkronDurum] = useState(''); // '', 'yukleniyor', mesaj
   const [silinecekId, setSilinecekId] = useState(null);
+  
+  // YENİ: Müşteri eşleştirme için state'ler
+  const [duzenleIletisim, setDuzenleIletisim] = useState('');
+  const [duzenleMusteriAdi, setDuzenleMusteriAdi] = useState('');
+
   const bosYeniKayit = { musteriAdi: '', iletisim: '', hesapId: '', hizmetTipi: 'Belirsiz', sonMesaj: '' };
   const [yeniKayit, setYeniKayit] = useState(bosYeniKayit);
 
@@ -2627,13 +2632,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
 
   // ------------------------------------------------------- CANLI VERİLER ---
   useEffect(() => {
-    // Havuz kayıtları canlı dinlenir; tüm kanallar tek koleksiyondadır
     const unsub1 = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari'), snap => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
       setKayitlar(list);
     });
-    // Bağlı hesaplar (santral numaraları, wa hesapları, insta, mailler)
     const unsub2 = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'havuzHesaplari'), snap => {
       setHesaplar(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
@@ -2641,30 +2644,25 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   }, []);
 
   // ------------------------------------------------------- YARDIMCILAR ---
-  // Kayda hareket satırı ekleyerek güncelle (her işlem kim yaptıysa loglanır)
   const hareketliGuncelle = async (kayit, degisiklik, islemMetni) => {
     const hareket = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, islem: islemMetni };
     await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari', kayit.id), {
       ...degisiklik,
       hareketler: [...(kayit.hareketler || []), hareket],
     });
-    // Detay penceresi açıksa ekrandaki kopyayı da tazele
     setDetayKayit(prev => prev && prev.id === kayit.id ? { ...prev, ...degisiklik, hareketler: [...(prev.hareketler || []), hareket] } : prev);
   };
 
-  // Durum değiştir
   const handleDurumDegistir = async (kayit, yeniDurum) => {
     if (kayit.durum === yeniDurum) return;
     await hareketliGuncelle(kayit, { durum: yeniDurum }, `Durum "${kayit.durum || 'Yeni'}" → "${yeniDurum}" olarak değiştirildi`);
     addSystemLog?.('Müşteri Havuzu', `${kayit.musteriAdi || kayit.iletisim}: durum "${yeniDurum}" yapıldı.`);
   };
 
-  // Satışçıya ata
   const handleAta = async (kayit, isim) => {
     await hareketliGuncelle(kayit, { atanan: isim }, isim ? `Kayıt ${isim} adlı satışçıya atandı` : 'Atama kaldırıldı');
   };
 
-  // Not ekle (notlar ayrı dizide tutulur, hareket olarak da düşer)
   const handleNotEkle = async (kayit) => {
     if (!notMetni.trim()) return;
     const not = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, metin: notMetni.trim() };
@@ -2672,13 +2670,22 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     setNotMetni('');
   };
 
-  // Hizmet tipini değiştir (Nakliye / Depo / Belirsiz)
   const handleHizmetDegistir = async (kayit, tip) => {
     if (kayit.hizmetTipi === tip) return;
     await hareketliGuncelle(kayit, { hizmetTipi: tip }, `Hizmet tipi "${tip}" olarak işaretlendi`);
   };
 
-  // Manuel yeni kayıt ekle
+  // YENİ: Anonim web tıklamasını gerçek müşteriye çevirme fonksiyonu
+  const handleMusteriGuncelle = async (kayit) => {
+    const yeniAd = duzenleMusteriAdi.trim() || kayit.musteriAdi;
+    const yeniNo = duzenleIletisim.trim() || kayit.iletisim;
+
+    if (yeniAd === kayit.musteriAdi && yeniNo === kayit.iletisim) return;
+
+    await hareketliGuncelle(kayit, { musteriAdi: yeniAd, iletisim: yeniNo }, `Müşteri bilgileri eşleştirildi: ${yeniAd} - ${yeniNo}`);
+    addSystemLog?.('Müşteri Havuzu', `Web tıklaması gerçek müşteriyle eşleştirildi: ${yeniAd}`);
+  };
+
   const handleYeniKayit = async () => {
     if (!yeniKayit.iletisim.trim()) return;
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari'), {
@@ -2696,17 +2703,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     setYeniKayit(bosYeniKayit); setYeniKayitAcik(false);
   };
 
-  // Hesap ekle (santral numarası / wa hesabı / insta / mail)
   const handleHesapEkle = async () => {
     if (!yeniHesap.deger.trim()) return;
     await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'havuzHesaplari'), {
       kanal: aktifKanal, etiket: yeniHesap.etiket.trim() || yeniHesap.deger.trim(),
       deger: yeniHesap.deger.trim(),
-      // YENİ: API bağlantı bilgileri hesapla birlikte saklanır.
-      // apiYolu: bu kanalın kayıt çektiği sunucu uç noktası (api/ klasörü).
-      // apiAnahtari: sağlayıcı panelinden alınan erişim anahtarı (opsiyonel;
-      // asıl anahtar Vercel ortam değişkeninde tutulur, buradaki alan hangi
-      // anahtarın kullanıldığını hatırlamak/ayırt etmek içindir).
       apiYolu: HAVUZ_API_UCLARI[aktifKanal] || '',
       apiAnahtari: yeniHesap.apiAnahtari.trim(),
       createdAt: new Date().toISOString(),
@@ -2715,10 +2716,6 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     setYeniHesap({ etiket: '', deger: '', apiAnahtari: '' });
   };
 
-  // ---------------------------------------------------- API SENKRONU ---
-  // Kanalın api/ klasöründeki uç noktasından yeni kayıtları çeker.
-  // Uç nokta hazır değilse kullanıcıya anlaşılır bir bilgi gösterilir;
-  // manuel kayıt akışı her durumda çalışmaya devam eder.
   const handleSenkron = async () => {
     setSenkronDurum('yukleniyor');
     try {
@@ -2726,7 +2723,6 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
       if (!res.ok) throw new Error('endpoint');
       const data = await res.json();
       const gelenler = Array.isArray(data?.kayitlar) ? data.kayitlar : [];
-      // Aynı iletişim bilgisi + kanal zaten havuzdaysa tekrar eklenmez
       const mevcutlar = new Set(kayitlar.filter(k => k.kanal === aktifKanal).map(k => (k.iletisim || '').toLowerCase()));
       let eklenen = 0;
       for (const g of gelenler) {
@@ -2749,7 +2745,6 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     setTimeout(() => setSenkronDurum(''), 5000);
   };
 
-  // -------------------------------------------------- FİLTRELİ LİSTE ---
   const kanalHesaplari = hesaplar.filter(h => h.kanal === aktifKanal);
   const kanalKayitlari = kayitlar.filter(k => k.kanal === aktifKanal);
   const filtreli = kanalKayitlari.filter(k => {
@@ -2763,17 +2758,13 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     return true;
   });
 
-  // Durum bazlı sayaçlar (hizmet/hesap filtresinden bağımsız, kanal bazlı)
   const durumSayaclari = { 'Tümü': kanalKayitlari.length };
   DURUMLAR.forEach(d => { durumSayaclari[d.id] = kanalKayitlari.filter(k => (k.durum || 'Yeni') === d.id).length; });
 
-  // Satış personeli listesi (atama menüsü için; Firma Sahibi hariç herkes atanabilir)
   const satiscilar = personnelList.filter(p => p.position !== 'Firma Sahibi');
-
   const hesapAdi = (id) => kanalHesaplari.find(h => h.id === id)?.etiket || '—';
   const durumRenk = (d) => DURUMLAR.find(x => x.id === (d || 'Yeni'))?.renk || DURUMLAR[0].renk;
 
-  // Kanala göre "müşteriye dön" bağlantısı üret (tek tıkla ara / mesaj at / mail at)
   const iletisimLink = (k) => {
     const v = (k.iletisim || '').replace(/\s/g, '');
     if (aktifKanal === 'telefon') return `tel:${v}`;
@@ -2783,14 +2774,34 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   };
   const iletisimBtnMetin = aktifKanal === 'telefon' ? 'Ara' : aktifKanal === 'gmail' ? 'Mail At' : 'Mesaj At';
 
+  // YENİ: GÜNLÜK PERFORMANS İSTATİSTİKLERİ
+  const bugunStr = new Date().toISOString().split('T')[0];
+  const bugunkuTıklamalar = kayitlar.filter(k => k.createdAt && k.createdAt.startsWith(bugunStr));
+  const bugunAdsSayisi = bugunkuTıklamalar.filter(k => k.musteriAdi?.includes('Google Ads')).length;
+  const bugunOrganikSayisi = bugunkuTıklamalar.filter(k => k.musteriAdi?.includes('Organik')).length;
+
   // ================================================================ RENDER ===
   return (
     <div className="max-w-7xl mx-auto animate-in fade-in space-y-4">
 
       {/* BAŞLIK */}
-      <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 rounded-2xl p-5 text-white shadow-lg">
-        <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><Users className="w-6 h-6 text-yellow-400" /> Müşteri Havuzu</h2>
-        <p className="text-neutral-300 text-xs md:text-sm mt-1">Şirketi arayan ve mesaj atan tüm müşteri adayları tek havuzda. Satış ekibi buradan döner, durum ve not işler; her hareket kayıt altındadır.</p>
+      <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 rounded-2xl p-5 text-white shadow-lg flex flex-col md:flex-row justify-between md:items-center gap-4">
+        <div>
+          <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><Users className="w-6 h-6 text-yellow-400" /> Müşteri Havuzu</h2>
+          <p className="text-neutral-300 text-xs md:text-sm mt-1">Şirketi arayan ve mesaj atan tüm müşteri adayları tek havuzda.</p>
+        </div>
+        
+        {/* YENİ: GÜNLÜK PERFORMANS ÖZET KUTULARI */}
+        <div className="flex gap-2">
+          <div className="bg-white/10 border border-white/20 px-4 py-2 rounded-xl backdrop-blur-sm">
+            <p className="text-[10px] font-black text-green-400 uppercase">🟢 Bugün Google Ads</p>
+            <p className="text-lg font-black text-white">{bugunAdsSayisi} Tıklama</p>
+          </div>
+          <div className="bg-white/10 border border-white/20 px-4 py-2 rounded-xl backdrop-blur-sm">
+            <p className="text-[10px] font-black text-blue-400 uppercase">🔵 Bugün Organik</p>
+            <p className="text-lg font-black text-white">{bugunOrganikSayisi} Tıklama</p>
+          </div>
+        </div>
       </div>
 
       {/* KANAL SEKMELERİ — 4 bölüm */}
@@ -2813,7 +2824,6 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
 
       {/* ARAÇ ÇUBUĞU: hesap filtresi + arama + aksiyonlar */}
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex flex-col lg:flex-row gap-2 lg:items-center">
-        {/* Bağlı hesap filtresi — birden fazla numara/hesap bağlanabilir */}
         <select value={hesapFiltre} onChange={e => setHesapFiltre(e.target.value)} className="px-3 py-2 text-xs font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none">
           <option value="Tümü">Tüm Hesaplar ({kanalHesaplari.length})</option>
           {kanalHesaplari.map(h => <option key={h.id} value={h.id}>{h.etiket}</option>)}
@@ -2823,7 +2833,6 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Müşteri adı, numara veya satışçı ara..." className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-neutral-400" />
         </div>
         <div className="flex gap-2 flex-wrap">
-          {/* API senkronu — kanalın api/ dosyasından yeni kayıtları çeker */}
           <button type="button" onClick={handleSenkron} disabled={senkronDurum === 'yukleniyor'}
             className="px-3 py-2 bg-neutral-900 hover:bg-neutral-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition disabled:opacity-60">
             {senkronDurum === 'yukleniyor' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />} Senkronize Et
@@ -2842,7 +2851,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold rounded-xl px-3 py-2">{senkronDurum}</div>
       )}
 
-      {/* HESAP YÖNETİMİ — kanala birden fazla hesap/numara bağlama */}
+      {/* HESAP YÖNETİMİ */}
       {hesapYonetimAcik && (
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 space-y-3 animate-in slide-in-from-top-1">
           <div className="text-xs font-black text-neutral-700 flex items-center gap-1.5"><Settings className="w-4 h-4" /> Bağlı {kanal.hesapEtiket} Listesi</div>
@@ -2859,19 +2868,16 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
             <input value={yeniHesap.etiket} onChange={e => setYeniHesap({ ...yeniHesap, etiket: e.target.value })} placeholder="Etiket (örn: Santral 1)" className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none" />
             <input value={yeniHesap.deger} onChange={e => setYeniHesap({ ...yeniHesap, deger: e.target.value })} placeholder={kanal.hesapOrnek} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none" />
-            {/* YENİ: API anahtarı / kimlik alanı — sağlayıcı panelinden alınan bilgi buraya girilir */}
             <input type="password" value={yeniHesap.apiAnahtari} onChange={e => setYeniHesap({ ...yeniHesap, apiAnahtari: e.target.value })} placeholder="API Anahtarı (opsiyonel)" className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none" autoComplete="off" />
             <button type="button" onClick={handleHesapEkle} disabled={!yeniHesap.deger.trim()} className="p-2.5 bg-neutral-900 text-white rounded-xl text-xs font-black disabled:opacity-40">Hesap Bağla</button>
           </div>
-          {/* YENİ: Bu kanalın veri çektiği API uç noktası — sunucudaki api/ klasörü */}
           <div className="text-[10px] font-bold text-neutral-400 flex items-center gap-1.5 pt-1 border-t border-neutral-100">
             <Zap className="w-3 h-3" /> Bu kanalın API uç noktası: <code className="bg-neutral-100 text-neutral-600 px-1.5 py-0.5 rounded">{HAVUZ_API_UCLARI[aktifKanal]}</code>
-            <span className="hidden sm:inline">— erişim anahtarları Vercel ortam değişkenlerinde tutulur.</span>
           </div>
         </div>
       )}
 
-      {/* YENİ KAYIT FORMU (manuel giriş) */}
+      {/* YENİ KAYIT FORMU */}
       {yeniKayitAcik && (
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 space-y-2 animate-in slide-in-from-top-1">
           <div className="text-xs font-black text-neutral-700 flex items-center gap-1.5"><PlusCircle className="w-4 h-4" /> {kanal.ad} — Yeni Kayıt</div>
@@ -2954,14 +2960,12 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                     </span>
                   </td>
                   <td className="p-3 text-center">
-                    {/* Durum doğrudan tablodan değiştirilebilir */}
                     <select value={k.durum || 'Yeni'} onChange={e => handleDurumDegistir(k, e.target.value)}
                       className={`px-2 py-1 rounded-lg text-[10px] font-black border outline-none cursor-pointer ${durumRenk(k.durum)}`}>
                       {DURUMLAR.map(d => <option key={d.id}>{d.id}</option>)}
                     </select>
                   </td>
                   <td className="p-3">
-                    {/* Satışçı ataması doğrudan tablodan yapılabilir */}
                     <select value={k.atanan || ''} onChange={e => handleAta(k, e.target.value)}
                       className="px-2 py-1 rounded-lg text-[10px] font-bold border border-neutral-200 bg-white outline-none cursor-pointer max-w-[130px]">
                       <option value="">— Atanmadı —</option>
@@ -2977,10 +2981,14 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   </td>
                   <td className="p-3 text-right whitespace-nowrap">
                     <a href={iletisimLink(k)} target={aktifKanal === 'telefon' ? '_self' : '_blank'} rel="noopener noreferrer"
-                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black mr-1.5 ${renk.aktif}`}>
+                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black mr-1.5 ${k.iletisim.includes('Bekleniyor') ? 'opacity-50 pointer-events-none bg-neutral-200 text-neutral-500' : renk.aktif}`}>
                       <kanal.Ikon className="w-3 h-3" /> {iletisimBtnMetin}
                     </a>
-                    <button type="button" onClick={() => setDetayKayit(k)}
+                    <button type="button" onClick={() => { 
+                        setDetayKayit(k); 
+                        setDuzenleIletisim(k.iletisim.includes('Bekleniyor') ? '' : k.iletisim);
+                        setDuzenleMusteriAdi(k.musteriAdi.includes('Ziyaretçi') ? '' : k.musteriAdi);
+                      }}
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg text-[10px] font-black mr-1.5">
                       <StickyNote className="w-3 h-3" /> Detay
                     </button>
@@ -3004,7 +3012,36 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               </div>
               <p className="text-[11px] font-bold opacity-80 mt-1">{hesapAdi(detayKayit.hesapId)} • {tarihSaat(detayKayit.createdAt)} • Kaynak: {detayKayit.kaynak === 'api' ? 'API' : 'Manuel'}</p>
             </div>
+            
             <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+              
+              {/* YENİ: Müşteri Eşleştirme / Bilgi Güncelleme Alanı */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                <p className="text-[10px] font-black text-blue-700 uppercase mb-2">Müşteri Bilgilerini Eşleştir</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                  <input
+                    value={duzenleMusteriAdi}
+                    onChange={e => setDuzenleMusteriAdi(e.target.value)}
+                    placeholder="Gerçek Ad Soyad"
+                    className="p-2.5 border border-blue-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                  <input
+                    value={duzenleIletisim}
+                    onChange={e => setDuzenleIletisim(e.target.value)}
+                    placeholder="Gerçek Telefon No"
+                    className="p-2.5 border border-blue-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleMusteriGuncelle(detayKayit)}
+                  disabled={(!duzenleIletisim.trim() && !duzenleMusteriAdi.trim()) || (duzenleIletisim === detayKayit.iletisim && duzenleMusteriAdi === detayKayit.musteriAdi)}
+                  className="w-full py-2 bg-blue-600 text-white rounded-xl text-xs font-black disabled:opacity-40 transition"
+                >
+                  Bilgileri Güncelle ve Eşleştir
+                </button>
+              </div>
+
               {detayKayit.sonMesaj && (
                 <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
                   <p className="text-[10px] font-black text-neutral-400 uppercase mb-1">İlk Mesaj / Görüşme Özeti</p>
@@ -3049,7 +3086,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   </div>
                 ))}
               </div>
-              {/* Hareket geçmişi — her kullanıcının yaptığı işlem görülür */}
+              {/* Hareket geçmişi */}
               <div>
                 <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5 flex items-center gap-1"><History className="w-3 h-3" /> Hareket Geçmişi</p>
                 <div className="space-y-1.5">
