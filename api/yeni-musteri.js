@@ -10,7 +10,7 @@ const firebaseConfig = {
   appId: process.env.VITE_FIREBASE_APP_ID
 };
 
-// İŞTE SİHİRLİ SATIR BURASI: Firebase zaten açıksa bir daha açmaya çalışma!
+// Çift tetiklenmeyi engelleyen kod
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 
@@ -28,7 +28,10 @@ export default async function handler(req, res) {
   if (req.method === 'POST') {
     try {
       const crmData = req.body;
-      const targetAppId = process.env.VITE_FIREBASE_APP_ID;
+      
+      // SEMBOL İÇİN SABİTLENMİŞ APP ID (Vercel'de undefined hatası vermemesi için)
+      // Not: Eğer shared.jsx dosyasında appId "sembol" yazıyorsa burayı "sembol" yaparsın.
+      const targetAppId = "sembol-crm"; 
       
       const dbPath = collection(db, 'artifacts', targetAppId, 'public', 'data', 'havuzKayitlari');
       
