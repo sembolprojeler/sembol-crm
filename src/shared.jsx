@@ -1283,9 +1283,103 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
   // Hata durumunda istisna FIRLATILMAZ, sadece false döner: defter kaydı
   // başarısız olsa bile işin kapanması engellenmemeli.
   // ------------------------------------------------------------------
+  // ==========================================================================
+  // KAPORA -> DEFTERE OTOMATİK GELİR KAYDI
+  // ==========================================================================
+  // İş kaydı oluşturulurken kapora girildiyse, o tutar BANKA defterine
+  // "PARA GİRİŞİ (ALDIM)" olarak yazılır.
+  //
+  // NEDEN BANKA: Müşteriye gönderilen kapora bilgilendirme mesajında IBAN
+  // veriliyor, yani kapora havale/EFT ile geliyor. Nakit alındığı durumlarda
+  // yönetici kaydı Defter ekranından ilgili deftere taşıyabilir.
+  //
+  // AÇIKLAMA: Sadece teslim kodu. Müşteri ise ayrı alanlarda (musteriAdi /
+  // musteriTel) tutulur ve satırda tıklanabilir cari rozeti olarak görünür.
+  //
+  // MÜKERRER KORUMASI: kaporaKaynakId = job.id. Kapora tutarı sonradan
+  // düzeltilirse kayıt GÜNCELLENİR, sıfırlanırsa SİLİNİR.
+  // DİKKAT: Tahsilat kaydı tahsilatKaynakId, kapora kaydı kaporaKaynakId
+  // kullanır. İkisi ayrı olmak ZORUNDA — aynı alan kullanılsa biri diğerinin
+  // üzerine yazar ve aynı işin iki para hareketinden biri kaybolur.
+  // ==========================================================================
+  export const defterKaporaKaydet = async ({ db, appId, job, currentUser, addSystemLog }) => {
+    try {
+      const tutar = parseFloat(job?.deposit) || 0;
+
+      // Mevcut kapora kaydı (varsa) bulunur
+      const mevcutSnap = await getDocs(query(
+        collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'),
+        where('kaporaKaynakId', '==', job.id)
+      ));
+
+      // Kapora yoksa/sıfırlandıysa varsa kayıt silinir; ₺0 satırı bırakılmaz.
+      if (tutar <= 0) {
+        for (const d of mevcutSnap.docs) {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', d.id));
+        }
+        return true;
+      }
+
+      // BANKA türündeki defter seçilir (birden fazlaysa adına göre ilk sıradaki).
+      const defterSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'defterler'));
+      const uygun = defterSnap.docs
+        .map(d => ({ ...d.data(), id: d.id }))
+        .filter(d => d.tur === 'Banka')
+        .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+      const defter = uygun[0];
+
+      if (!defter) {
+        addSystemLog?.('Kapora Defter Kaydı Atlandı',
+          `${job.customerName} kaporası için "Banka" türünde defter bulunamadı. Finans > Defter bölümünden açın.`);
+        return false;
+      }
+
+      const teslimKodu = job?.deliveryCode || '';
+      const kayit = {
+        tip: 'giris',
+        tutar,
+        aciklama: teslimKodu ? `Teslim kodu: ${teslimKodu}` : '',
+        kategori: 'Kapora',
+        etiketler: ['Kapora', job.type].filter(Boolean),
+        odemeYontemi: 'Havale/EFT',
+        // Kaporanın alındığı gün = işin kaydedildiği gün
+        tarih: (job.createdAt || new Date().toISOString()).split('T')[0],
+        defterId: defter.id,
+        kaynak: 'Kapora (Oto)',
+        kayitTipi: 'kapora',
+        kaporaKaynakId: job.id,
+        isId: job.id,
+        // Cari eşleşmesi — satırda tıklanabilir müşteri rozeti olarak görünür
+        musteriAdi: job.customerName || '',
+        musteriTel: job.customerPhone || '',
+        teslimKodu,
+        by: currentUser?.fullName || 'Sistem'
+      };
+
+      if (!mevcutSnap.empty) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', mevcutSnap.docs[0].id), kayit);
+        addSystemLog?.('Kapora Defter Kaydı Güncellendi',
+          `${defter.ad}: ${job.customerName} kaporası ₺${tutar.toLocaleString('tr-TR')} olarak güncellendi.`);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...kayit, createdAt: new Date().toISOString()
+        });
+        addSystemLog?.('Kapora Defter Kaydı (Oto)',
+          `${defter.ad}: ${job.customerName} kaporası ₺${tutar.toLocaleString('tr-TR')} giriş yazıldı.`);
+      }
+      return true;
+    } catch (err) {
+      // Kapora kaydı başarısız olsa bile iş kaydı oluşmuş kalmalı.
+      console.error('Kapora deftere yazılamadı:', err);
+      addSystemLog?.('Kapora Defter Kaydı Hatası',
+        `${job?.customerName} kaporası için defter kaydı yapılamadı: ${err?.message || 'bilinmeyen hata'}`);
+      return false;
+    }
+  };
+
   // ekipSefiAdi ve aracId çağıran taraftan (App.jsx) geçilir: personel ve
   // araç listeleri orada, burada erişim yok.
-  export const defterGelirKaydet = async ({ db, appId, job, endJobDetails, currentUser, addSystemLog, ekipSefiAdi, aracId }) => {
+  export const defterGelirKaydet = async ({ db, appId, job, endJobDetails, currentUser, addSystemLog, ekipSefiAdi, ekipSefiId, aracId }) => {
     try {
       const odemeYontemi = endJobDetails?.paymentMethod || 'Nakit';
       const tutar = kalanBakiyeHesapla(job);
@@ -1315,11 +1409,10 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
       const plaka = job?.assignedVehiclePlate || '';
       const teslimKodu = job?.deliveryCode || '';
       const ekipSefi = ekipSefiAdi || '';
-      const aciklama = [
-        `${job.type || 'İş'} tahsilatı (kapora hariç kalan)`,
-        teslimKodu ? `Teslim kodu: ${teslimKodu}` : '',
-        ekipSefi ? `Ekip şefi: ${ekipSefi}` : ''
-      ].filter(Boolean).join(' | ');
+      // DEĞİŞİKLİK: Açıklamada artık SADECE teslim kodu yazıyor.
+      // İş tipi zaten etikette, ekip şefi ise ayrı rozette gösteriliyor;
+      // üçünü de metne yazmak satırı gereksiz uzatıyordu.
+      const aciklama = teslimKodu ? `Teslim kodu: ${teslimKodu}` : '';
 
       const kayit = {
         tip: 'giris',
@@ -1338,6 +1431,11 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
         defterId: defter.id,
         kaynak: 'İş Sonlandırma (Oto)',
         isId: job.id,
+        // DEĞİŞİKLİK: Mükerrer koruması artık isId yerine bu alana bakıyor.
+        // Sebep: aynı işin KAPORA kaydı da isId taşıyor; sorgu isId üzerinden
+        // yapılsaydı tahsilat, kapora satırının ÜZERİNE yazardı ve kapora kaybolurdu.
+        tahsilatKaynakId: job.id,
+        kayitTipi: 'tahsilat',
         // YENİ: Defter satırından MÜŞTERİ CARİSİNE ve ARAÇ PROFİLİNE tıklanarak
         // gidilebilmesi için kimlik alanları ayrıca saklanır. Bu bilgiler açıklama
         // metninin içinde de geçiyor ama metinden ayrıştırmak kırılgan olurdu.
@@ -1347,13 +1445,16 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
         aracId: aracId || '',
         teslimKodu,
         ekipSefi,
+        // Ekip şefinin KİMLİĞİ de saklanır; rozet tıklanınca personel
+        // profiline gitmek için ada değil kimliğe ihtiyaç var.
+        ekipSefiId: ekipSefiId || '',
         by: currentUser?.fullName || 'Sistem'
       };
 
       // Aynı işe ait kayıt var mı? (mükerrer koruması)
       const mevcutSnap = await getDocs(query(
         collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'),
-        where('isId', '==', job.id)
+        where('tahsilatKaynakId', '==', job.id)
       ));
 
       if (!mevcutSnap.empty) {
