@@ -5506,6 +5506,15 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     // bileşenin erken "return"lerinden ÖNCE tanımlanmıştır.
     // ========================================================================
     const [cikisAyiMaasRow, setCikisAyiMaasRow] = useState({});
+
+    // YENİ: ÇIKIŞ TARİHİNİ DÜZENLEME
+    // Çıkış tarihi yanlış girildiğinde tüm hakediş hesabı kayar (çalışılan gün,
+    // yemek/yol iadesi, mesai). Bu yüzden tarihi düzeltip hesabı YENİDEN
+    // ÜRETEBİLMEK gerekiyor. computeSettlement(dateStr) zaten tarihi parametre
+    // olarak alıyor; sadece yeni tarihle tekrar çağrılıp sonuç kaydedilir.
+    const [showCikisTarihiDuzenle, setShowCikisTarihiDuzenle] = useState(false);
+    const [yeniCikisTarihi, setYeniCikisTarihi] = useState('');
+    const [cikisTarihiKaydediliyor, setCikisTarihiKaydediliyor] = useState(false);
     const [showTutanakModal, setShowTutanakModal] = useState(false);
     const [tutanakForm, setTutanakForm] = useState({ title: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
     // YENİ: Hazır tutanak şablonu seçimi
@@ -6499,7 +6508,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         iadeKalan -= bankadanDusulen;
       }
 
-      setSettlementData({
+      const dokum = {
         dateStr, year, month, daysInMonth, calışılanGun, calışılmayanGun,
         devamsizGun, raporGun, ucretsizIzinGun, fazlaGunSayisi, odenecekGun, fazlaMesaiUcreti,
         maas, netMaas, netMaasBase, hesaplananBanka, icraKesintisi,
@@ -6507,9 +6516,55 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         nakittenDusulen, bankadanDusulen,
         finalKalanNakit: Math.max(0, kalanNakit),
         finalKalanBanka: Math.max(0, kalanBanka)
-      });
+      };
+      setSettlementData(dokum);
       setSettlementConfirm({ nakitVerildi: false, bankaVerildi: false, belgeUrl: '' });
       setShowSettlementModal(true);
+      // DEĞİŞİKLİK: Üretilen döküm ayrıca DÖNDÜRÜLÜR. Çıkış tarihi güncellemesinde
+      // state'in yenilenmesini beklemek yerine dönen değeri doğrudan Firestore'a
+      // yazabilmek için gerekli (setState eşzamanlı değildir).
+      return dokum;
+    };
+
+    // YENİ: Çıkış tarihini değiştirip hakediş hesabını YENİDEN ÜRETİR.
+    // computeSettlement(dateStr) hesabı yapıp setSettlementData ile state'e yazar;
+    // biz burada state'in güncellenmesini beklemek yerine aynı hesabı Firestore'a
+    // yazmak için computeSettlement'ın bittiğini bekleyip settlementData'yı
+    // okumak zorunda kalmayalım diye, hesap sonrası kısa bir bekleme yerine
+    // doğrudan computeSettlement'ı çağırıp ardından güncel state'i kullanıyoruz.
+    // Bu yüzden computeSettlement artık ürettiği dökümü de DÖNDÜRÜYOR.
+    const handleCikisTarihiGuncelle = async () => {
+      if (!yeniCikisTarihi) { alert('Lütfen yeni çıkış tarihini seçin.'); return; }
+
+      // İşe giriş tarihinden önceki bir çıkış tarihi mantıksız olurdu.
+      if (person?.startDate && yeniCikisTarihi < person.startDate) {
+        alert(`Çıkış tarihi işe giriş tarihinden (${person.startDate}) önce olamaz.`);
+        return;
+      }
+
+      setCikisTarihiKaydediliyor(true);
+      try {
+        const yeniDokum = await computeSettlement(yeniCikisTarihi);
+        if (!yeniDokum) { alert('Hesap yeniden üretilemedi.'); setCikisTarihiKaydediliyor(false); return; }
+
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(personId)), {
+          cikisHesapDetay: yeniDokum,
+          resignDate: yeniCikisTarihi,
+          cikisTarihiGuncellendi: new Date().toISOString(),
+          cikisTarihiGuncelleyen: currentUser?.fullName || 'Sistem'
+        });
+
+        if (addSystemLog) addSystemLog('Çıkış Tarihi Güncellendi',
+          `${person.fullName} çıkış tarihi ${person.cikisHesapDetay?.dateStr || '-'} -> ${yeniCikisTarihi} olarak değiştirildi ve hakediş hesabı yeniden üretildi. İşlemi yapan: ${currentUser?.fullName || 'Sistem'}.`);
+
+        setShowCikisTarihiDuzenle(false);
+        // Hesap modalı da kapatılır; kullanıcı güncel dökümü yeniden açsın.
+        setShowSettlementModal(false);
+      } catch (err) {
+        console.error('Çıkış tarihi güncellenemedi:', err);
+        alert('Çıkış tarihi güncellenemedi: ' + (err?.message || 'bilinmeyen hata'));
+      }
+      setCikisTarihiKaydediliyor(false);
     };
 
     // YENİ: Çıkış için imzalı belge yükleme (3 seçenekli MediaCaptureMenu ile kullanılır)
@@ -8197,8 +8252,27 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                 <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
                   {/* Personel & çıkış tarihi */}
                   <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-sm">
-                    <p className="font-black text-black">{person.fullName}</p>
-                    <p className="text-neutral-500 text-xs mt-0.5">{person.position || person.rank || '-'} • Çıkış Tarihi: <span className="font-bold text-black">{sd.dateStr}</span></p>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-black text-black">{person.fullName}</p>
+                        <p className="text-neutral-500 text-xs mt-0.5">{person.position || person.rank || '-'} • Çıkış Tarihi: <span className="font-bold text-black">{sd.dateStr}</span></p>
+                      </div>
+                      {/* YENİ: ÇIKIŞ TARİHİNİ DÜZENLE
+                          Tarih yanlış girildiğinde çalışılan gün, yemek/yol iadesi ve
+                          mesai hesabının tamamı kayıyor. Bu buton tarihi düzeltip
+                          hakediş dökümünü sıfırdan yeniden üretir. */}
+                      <button type="button"
+                        onClick={() => { setYeniCikisTarihi(sd.dateStr || ''); setShowCikisTarihiDuzenle(true); }}
+                        className="shrink-0 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 text-white text-[11px] font-black transition flex items-center gap-1.5">
+                        <Edit className="w-3.5 h-3.5" /> Tarihi Düzenle
+                      </button>
+                    </div>
+                    {person.cikisTarihiGuncellendi && (
+                      <p className="text-[10px] font-bold text-amber-700 mt-2 pt-2 border-t border-neutral-200">
+                        Bu tarih {new Date(person.cikisTarihiGuncellendi).toLocaleDateString('tr-TR')} tarihinde
+                        {person.cikisTarihiGuncelleyen ? ` ${person.cikisTarihiGuncelleyen}` : ''} tarafından güncellendi.
+                      </p>
+                    )}
                   </div>
 
                   {/* ============================================================
@@ -8320,6 +8394,63 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
             </div>
           );
         })()}
+
+        {/* YENİ: ÇIKIŞ TARİHİ DÜZENLEME PENCERESİ
+            Tarih değiştirilince hakediş dökümü computeSettlement ile SIFIRDAN
+            yeniden üretilir — çalışılan gün, ödenecek gün, mesai etkisi ve
+            yemek/yol iadesi hepsi yeni tarihe göre yeniden hesaplanır. */}
+        {showCikisTarihiDuzenle && (
+          <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden">
+              <div className="flex items-center justify-between p-4 border-b border-neutral-200">
+                <h3 className="font-black text-black flex items-center gap-2">
+                  <CalendarDays className="w-5 h-5 text-red-600" /> Çıkış Tarihini Düzenle
+                </h3>
+                <button onClick={() => setShowCikisTarihiDuzenle(false)} className="p-1.5 rounded-lg hover:bg-neutral-100 transition">
+                  <X className="w-5 h-5 text-neutral-500" />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-[11px] font-bold text-amber-900 leading-relaxed">
+                    Tarih değiştirildiğinde hakediş hesabı <b>sıfırdan yeniden üretilir</b>:
+                    çalışılan gün, ödenecek gün, mesai etkisi ve yemek/yol iadesi
+                    yeni tarihe göre tekrar hesaplanır.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">Mevcut Çıkış Tarihi</label>
+                  <div className="p-2.5 bg-neutral-100 border border-neutral-200 rounded-xl text-sm font-black text-neutral-700">
+                    {person.cikisHesapDetay?.dateStr || '-'}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-neutral-600 block mb-1">Yeni Çıkış Tarihi *</label>
+                  <input type="date" value={yeniCikisTarihi}
+                    onChange={(e) => setYeniCikisTarihi(e.target.value)}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600 text-sm" />
+                  {person.startDate && (
+                    <p className="text-[11px] text-neutral-400 font-bold mt-1.5">
+                      İşe giriş: {person.startDate} — bundan önceki bir tarih seçilemez.
+                    </p>
+                  )}
+                </div>
+
+                <button onClick={handleCikisTarihiGuncelle}
+                  disabled={cikisTarihiKaydediliyor || !yeniCikisTarihi}
+                  className="w-full py-3 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                  {cikisTarihiKaydediliyor
+                    ? <><Loader2 className="w-4 h-4 animate-spin" /> Hesap yeniden üretiliyor...</>
+                    : <><Save className="w-4 h-4" /> Tarihi Güncelle ve Yeniden Hesapla</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* YENİ: Avans Girişi Modalı */}
         {showAvansModal && (
