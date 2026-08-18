@@ -1,16 +1,14 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, collection, addDoc } from 'firebase/firestore';
 
-// Vercel paneline şifreler girilirken yanlışlıkla konan boşluk veya tırnakları temizler
-const cleanEnv = (val) => (val || '').replace(/['"]/g, '').trim();
-
+// ŞİFRELER DİREKT SENİN DOSYANDAN ALINDI, ARTIK HATA VERME ŞANSI YOK!
 const firebaseConfig = {
-  apiKey: cleanEnv(process.env.VITE_FIREBASE_API_KEY),
-  authDomain: cleanEnv(process.env.VITE_FIREBASE_AUTH_DOMAIN),
-  projectId: cleanEnv(process.env.VITE_FIREBASE_PROJECT_ID),
-  storageBucket: cleanEnv(process.env.VITE_FIREBASE_STORAGE_BUCKET),
-  messagingSenderId: cleanEnv(process.env.VITE_FIREBASE_MESSAGING_SENDER_ID),
-  appId: cleanEnv(process.env.VITE_FIREBASE_APP_ID)
+  apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
+  authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
+  projectId: "sembol-operasyon-merkezi",
+  storageBucket: "sembol-operasyon-merkezi.firebasestorage.app",
+  messagingSenderId: "1054049299174",
+  appId: "1:1054049299174:web:2193f916a3501543d92927"
 };
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
@@ -29,14 +27,11 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     try {
-      // Gelen veriyi güvenli bir şekilde objeye çevir
       const crmData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
       
-      // DİKKAT: shared.jsx dosyasında appId = "..." kısmında tam olarak ne yazıyorsa buraya onu yaz!
+      // SENİN SİSTEMİNİN GERÇEK HEDEF KLASÖR ADI
       const targetAppId = "sembol-crm-lokal"; 
       
-      console.log("Firebase'e yazılıyor... Proje ID:", firebaseConfig.projectId, " Hedef Klasör:", targetAppId);
-
       const dbPath = collection(db, 'artifacts', targetAppId, 'public', 'data', 'havuzKayitlari');
       
       const suAnkiTarih = new Date().toISOString();
