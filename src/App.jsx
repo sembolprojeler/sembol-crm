@@ -11,7 +11,9 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
   // YENİ: Resmi Ayarları'ndaki GÜNCEL banka bilgisini döndürür (canlı önbellek).
   aktifBankaBilgiMetni,
   // YENİ: İş kapandığında kalan bakiyeyi ilgili deftere gelir olarak yazar.
-  defterGelirKaydet } from './shared.jsx';
+  defterGelirKaydet,
+  // YENİ: Kaporayı banka defterine gelir olarak yazar.
+  defterKaporaKaydet } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
@@ -5018,6 +5020,17 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             updatedBy: currentUser?.fullName || 'Sistem'
           });
           addSystemLog('Kayıt Güncellendi', `${formData.customerName} müşterisine ait iş güncellendi.`);
+
+          // YENİ: Kapora düzenlendiyse defter kaydı da güncellenir.
+          // defterKaporaKaydet mükerrer korumalıdır: kayıt varsa GÜNCELLER,
+          // kapora sıfırlandıysa SİLER. Bu yüzden koşulsuz çağırmak güvenli —
+          // aksi halde kapora silindiğinde defterde hayalet satır kalırdı.
+          await defterKaporaKaydet({
+            db, appId,
+            job: { ...jobData, id: editingJobId, createdAt: mevcut?.createdAt || jobData.createdAt },
+            currentUser, addSystemLog
+          });
+
           setEditingJobId(null);
         } else {
           const newDeliveryCode = Math.random().toString(36).substring(2, 8).toUpperCase();
@@ -5046,7 +5059,18 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               createdBy: currentUser?.fullName || 'Sistem',
               createdAt: new Date().toISOString()
             };
-            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), primaryJob);
+            const _yeniIsRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), primaryJob);
+            // YENİ: Kapora girildiyse BANKA defterine gelir olarak yazılır.
+            // Yalnızca kaporası olan ilk gün için çalışır: çok günlü kayıtlarda
+            // 2. günden sonrası deposit '0' olarak açıldığı için kayıt atılmaz.
+            // Hata fırlatmaz; defter kaydı başarısız olsa bile iş kaydı durur.
+            if ((parseFloat(currentDeposit) || 0) > 0) {
+              await defterKaporaKaydet({
+                db, appId,
+                job: { ...primaryJob, id: _yeniIsRef.id },
+                currentUser, addSystemLog
+              });
+            }
             
             if(i === 0) {
               addSystemLog('Yeni İş Kaydı', `${formData.customerName} için ${duration} günlük yeni bir ${recordType} kaydı oluşturuldu.`);
@@ -5482,6 +5506,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         currentUser,
         addSystemLog,
         ekipSefiAdi: _ekipSefi?.fullName || '',
+        ekipSefiId: _ekipSefi?.id || '',
         aracId: _arac?.id || ''
       });
       setShowEndJobModal(false); 
@@ -7676,8 +7701,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 Gezinme App.jsx'te yapılıyor çünkü cari anahtarı ve araç listesi
                 burada; plakadan araç kimliğine çeviren arama da burada yapılır.
                 Araç bulunamazsa sessiz kalmıyoruz, kullanıcıya bilgi veriyoruz. */}
-            {activeTab === 'finansDefter' && showFinance && <FinansDefterView currentUser={currentUser} addSystemLog={addSystemLog} jobs={jobs} vehicles={vehicles}
+            {activeTab === 'finansDefter' && showFinance && <FinansDefterView currentUser={currentUser} addSystemLog={addSystemLog} jobs={jobs} vehicles={vehicles} personnelList={personnelList}
               onViewCari={(tel) => { if (!tel) return; setViewingCariKey(normalizeCariPhone(tel)); setActiveTab('customerProfile'); }}
+              onViewPersonnel={(personelId) => {
+                if (!personelId) return;
+                setViewingPersonnelProfileId(personelId); setActiveTab('personnelProfile');
+              }}
               onViewVehicle={(plaka) => {
                 if (!plaka) return;
                 const temiz = (x) => (x || '').toString().replace(/\s/g, '').toUpperCase();
