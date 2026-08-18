@@ -2675,7 +2675,6 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     await hareketliGuncelle(kayit, { hizmetTipi: tip }, `Hizmet tipi "${tip}" olarak işaretlendi`);
   };
 
-  // YENİ: Anonim web tıklamasını gerçek müşteriye çevirme fonksiyonu
   const handleMusteriGuncelle = async (kayit) => {
     const yeniAd = duzenleMusteriAdi.trim() || kayit.musteriAdi;
     const yeniNo = duzenleIletisim.trim() || kayit.iletisim;
@@ -2774,11 +2773,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   };
   const iletisimBtnMetin = aktifKanal === 'telefon' ? 'Ara' : aktifKanal === 'gmail' ? 'Mail At' : 'Mesaj At';
 
-  // YENİ: GÜNLÜK PERFORMANS İSTATİSTİKLERİ
+  // YENİ: AKTİF SEÇİLİ KANALA GÖRE GÜNLÜK PERFORMANS İSTATİSTİKLERİ
   const bugunStr = new Date().toISOString().split('T')[0];
-  const bugunkuTıklamalar = kayitlar.filter(k => k.createdAt && k.createdAt.startsWith(bugunStr));
-  const bugunAdsSayisi = bugunkuTıklamalar.filter(k => k.musteriAdi?.includes('Google Ads')).length;
-  const bugunOrganikSayisi = bugunkuTıklamalar.filter(k => k.musteriAdi?.includes('Organik')).length;
+  const aktifKanalBugun = kayitlar.filter(k => k.kanal === aktifKanal && k.createdAt && k.createdAt.startsWith(bugunStr));
+  const bugunAdsSayisi = aktifKanalBugun.filter(k => k.sonMesaj?.includes('Google reklam') || k.musteriAdi?.includes('Google Ads')).length;
+  const bugunOrganikSayisi = aktifKanalBugun.filter(k => !k.sonMesaj?.includes('Google reklam') && !k.musteriAdi?.includes('Google Ads')).length;
 
   // ================================================================ RENDER ===
   return (
@@ -2791,14 +2790,14 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           <p className="text-neutral-300 text-xs md:text-sm mt-1">Şirketi arayan ve mesaj atan tüm müşteri adayları tek havuzda.</p>
         </div>
         
-        {/* YENİ: GÜNLÜK PERFORMANS ÖZET KUTULARI */}
+        {/* YENİ: SEÇİLİ KANALA GÖRE GÜNLÜK ÖZET KUTULARI */}
         <div className="flex gap-2">
           <div className="bg-white/10 border border-white/20 px-4 py-2 rounded-xl backdrop-blur-sm">
-            <p className="text-[10px] font-black text-green-400 uppercase">🟢 Bugün Google Ads</p>
+            <p className="text-[10px] font-black text-green-400 uppercase">🟢 Bugün {kanal.ad} (Ads)</p>
             <p className="text-lg font-black text-white">{bugunAdsSayisi} Tıklama</p>
           </div>
           <div className="bg-white/10 border border-white/20 px-4 py-2 rounded-xl backdrop-blur-sm">
-            <p className="text-[10px] font-black text-blue-400 uppercase">🔵 Bugün Organik</p>
+            <p className="text-[10px] font-black text-blue-400 uppercase">🔵 Bugün {kanal.ad} (Organik)</p>
             <p className="text-lg font-black text-white">{bugunOrganikSayisi} Tıklama</p>
           </div>
         </div>
@@ -3015,7 +3014,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             
             <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
               
-              {/* YENİ: Müşteri Eşleştirme / Bilgi Güncelleme Alanı */}
+              {/* Müşteri Eşleştirme / Bilgi Güncelleme Alanı */}
               <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
                 <p className="text-[10px] font-black text-blue-700 uppercase mb-2">Müşteri Bilgilerini Eşleştir</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
