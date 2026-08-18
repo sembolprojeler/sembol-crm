@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, collection, addDoc } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -10,7 +10,8 @@ const firebaseConfig = {
   appId: process.env.VITE_FIREBASE_APP_ID
 };
 
-const app = initializeApp(firebaseConfig);
+// İŞTE SİHİRLİ SATIR BURASI: Firebase zaten açıksa bir daha açmaya çalışma!
+const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 
 export default async function handler(req, res) {
@@ -29,24 +30,21 @@ export default async function handler(req, res) {
       const crmData = req.body;
       const targetAppId = process.env.VITE_FIREBASE_APP_ID;
       
-      // Senin Satis.jsx dosyasındaki tam yol (havuzKayitlari)
       const dbPath = collection(db, 'artifacts', targetAppId, 'public', 'data', 'havuzKayitlari');
       
       const suAnkiTarih = new Date().toISOString();
-      // WhatsApp mı yoksa Telefon mu olduğunu tespit edip senin üst sekmelere yönlendiriyoruz
       const kanalTipi = (crmData.islem || "").includes('WhatsApp') ? 'whatsapp' : 'telefon';
 
-      // Satis.jsx'in beklediği birebir değişken isimleri!
       await addDoc(dbPath, {
         musteriAdi: crmData.kaynak === 'google_ads' ? "Google Ads Ziyaretçisi" : "Organik Ziyaretçi",
-        iletisim: "Tıklama (Numara Bekleniyor)", 
-        kanal: kanalTipi, // Sekmelere ayıracak kısım
+        iletisim: "Tıklama (Bekleniyor)", 
+        kanal: kanalTipi,
         hesapId: crmData.site || "Web Sitesi",
-        hizmetTipi: "Belirsiz", // Filtren için
-        durum: "Yeni", // Filtren için
+        hizmetTipi: "Belirsiz",
+        durum: "Yeni",
         sonMesaj: crmData.kaynak === 'google_ads' ? "Google reklamlarından tıklama geldi" : "Normal siteden tıklama geldi",
         createdAt: suAnkiTarih, 
-        hareketler: [ // Sağ tarafta açılan detay penceresindeki "Log" geçmişine sistem mesajı atıyoruz
+        hareketler: [
            { tarih: suAnkiTarih, kullanici: 'Sistem API', islem: `Ziyaretçi siteden ${kanalTipi} butonuna tıkladı.` }
         ]
       });
