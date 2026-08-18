@@ -1,16 +1,18 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getFirestore, collection, addDoc } from 'firebase/firestore';
 
+// Vercel paneline şifreler girilirken yanlışlıkla konan boşluk veya tırnakları temizler
+const cleanEnv = (val) => (val || '').replace(/['"]/g, '').trim();
+
 const firebaseConfig = {
-  apiKey: process.env.VITE_FIREBASE_API_KEY,
-  authDomain: process.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.VITE_FIREBASE_APP_ID
+  apiKey: cleanEnv(process.env.VITE_FIREBASE_API_KEY),
+  authDomain: cleanEnv(process.env.VITE_FIREBASE_AUTH_DOMAIN),
+  projectId: cleanEnv(process.env.VITE_FIREBASE_PROJECT_ID),
+  storageBucket: cleanEnv(process.env.VITE_FIREBASE_STORAGE_BUCKET),
+  messagingSenderId: cleanEnv(process.env.VITE_FIREBASE_MESSAGING_SENDER_ID),
+  appId: cleanEnv(process.env.VITE_FIREBASE_APP_ID)
 };
 
-// Çift tetiklenmeyi engelleyen kod
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 
@@ -27,12 +29,14 @@ export default async function handler(req, res) {
 
   if (req.method === 'POST') {
     try {
-      const crmData = req.body;
+      // Gelen veriyi güvenli bir şekilde objeye çevir
+      const crmData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
       
-      // SEMBOL İÇİN SABİTLENMİŞ APP ID (Vercel'de undefined hatası vermemesi için)
-      // Not: Eğer shared.jsx dosyasında appId "sembol" yazıyorsa burayı "sembol" yaparsın.
-      const targetAppId = "sembol-crm"; 
+      // DİKKAT: shared.jsx dosyasında appId = "..." kısmında tam olarak ne yazıyorsa buraya onu yaz!
+      const targetAppId = "sembol-crm-lokal"; 
       
+      console.log("Firebase'e yazılıyor... Proje ID:", firebaseConfig.projectId, " Hedef Klasör:", targetAppId);
+
       const dbPath = collection(db, 'artifacts', targetAppId, 'public', 'data', 'havuzKayitlari');
       
       const suAnkiTarih = new Date().toISOString();
@@ -54,8 +58,8 @@ export default async function handler(req, res) {
 
       res.status(200).json({ success: true, message: 'Harika, müşteri CRM havuzuna düştü!' });
     } catch (error) {
-      console.error("Hata:", error);
-      res.status(500).json({ success: false, error: 'Sunucu hatası' });
+      console.error("Firebase Yazma Hatası:", error);
+      res.status(500).json({ success: false, error: 'Sunucu hatası', detay: error.message });
     }
   } else {
     res.status(405).json({ message: 'Sadece POST metoduna izin verilir' });
