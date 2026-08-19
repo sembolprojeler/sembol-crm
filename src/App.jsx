@@ -3335,7 +3335,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [cancelJobId, setCancelJobId] = useState(null); 
     const [deleteJobId, setDeleteJobId] = useState(null);
     const [markDamageJobId, setMarkDamageJobId] = useState(null);
-    const [resolveDamageModal, setResolveDamageModal] = useState({ isOpen: false, jobId: null, note: '' });
+    // DEĞİŞTİ: cost (Hasar Tutarı ₺) alanı eklendi — hasar kapatılırken maliyet girilir
+    const [resolveDamageModal, setResolveDamageModal] = useState({ isOpen: false, jobId: null, note: '', cost: '' });
     // YENİ: Hasarlı İşler "Düzenle" — hasar notu ve (varsa) çözüm notunu düzenleme modalı
     const [editDamageModal, setEditDamageModal] = useState({ isOpen: false, jobId: null, damageDetails: '', damageResolutionNote: '', damageResolved: false });
 
@@ -4937,7 +4938,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     };
 
     const handleOpenResolveDamageModal = (id) => {
-      setResolveDamageModal({ isOpen: true, jobId: id, note: '' });
+      setResolveDamageModal({ isOpen: true, jobId: id, note: '', cost: '' });
     };
 
     const handleResolveDamageSubmit = async (e) => {
@@ -4947,18 +4948,69 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       const job = jobs.find(j => j.id === resolveDamageModal.jobId);
       if (!job) return;
 
+      // ======================================================================
+      // YENİ: HASAR TUTARI -> EKİBE EŞİT BÖLÜNEREK "HASAR BORCU" YAZILIR
+      // ======================================================================
+      // Kural (kullanıcı talebi):
+      //  • Hasarın maliyeti (ör. 10.000 TL) işe GİDEN ekibe eşit bölünür
+      //    (5 kişi gittiyse kişi başı 2.000 TL).
+      //  • Bu tutar ASLA maaştan kesilmez; yalnızca PRİM'den kesilir.
+      //    Kesinti işlemi Maaş Tablosu'nda (Finans > Personel Muhasebe) yapılır:
+      //    kişinin o ayki prim TL'si borcundan büyükse borç kapanır, küçükse
+      //    prim sıfırlanır ve KALAN borç sonraki aylara devreder. Prim hiçbir
+      //    zaman eksiye düşmez, saat hesabına da eksi sokulmaz.
+      //  • Personel kartında iki alan tutulur:
+      //      hasarBorcuToplam -> bugüne kadar yazılan toplam hasar payı
+      //      hasarBorcuKalan  -> henüz primlerden kesilmemiş kalan borç
+      //  • Her personelin hareket akışına (personnelActions) kayıt düşülür,
+      //    böylece profildeki "Personel Hareket İşlemleri"nde görünür.
+      // ======================================================================
+      const hasarTutari = parseFloat(resolveDamageModal.cost) || 0;
+      const ekipIdleri = (job.assignedPersonnelIds || []).filter(Boolean);
+      let kisiBasi = 0;
+
+      if (hasarTutari > 0 && ekipIdleri.length > 0) {
+        kisiBasi = Math.round((hasarTutari / ekipIdleri.length) * 100) / 100; // Kuruşa yuvarla
+        for (const pid of ekipIdleri) {
+          const kisi = personnelList.find(p => String(p.id) === String(pid));
+          if (!kisi) continue; // Kayıttan silinmiş personel atlanır
+          try {
+            // 1) Personel kartındaki borç sayaçları artırılır (kümülatif)
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(pid)), {
+              hasarBorcuToplam: (parseFloat(kisi.hasarBorcuToplam) || 0) + kisiBasi,
+              hasarBorcuKalan: (parseFloat(kisi.hasarBorcuKalan) || 0) + kisiBasi
+            });
+            // 2) Hareket akışına düşülür (profilde görünür)
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelActions'), {
+              personnelId: String(pid),
+              type: 'hasarBorcu',
+              title: 'Hasar Borcu Eklendi',
+              amount: kisiBasi,
+              note: `${job.customerName} işindeki hasar: ₺${hasarTutari.toLocaleString('tr-TR')} / ${ekipIdleri.length} kişi. Priminden kesilecek.`,
+              jobId: job.id,
+              date: new Date().toISOString().split('T')[0],
+              createdAt: new Date().toISOString()
+            });
+          } catch (err) { console.error('Hasar borcu yazılamadı:', pid, err); }
+        }
+      }
+
       const updatedEndJobDetails = {
         ...(job.endJobDetails || {}),
         damageResolved: true,
-        damageResolutionNote: resolveDamageModal.note
+        damageResolutionNote: resolveDamageModal.note,
+        // YENİ: Maliyet bilgisi işin üzerinde de saklanır (raporlama/iz için)
+        damageCost: hasarTutari,
+        damageCostPerPerson: kisiBasi,
+        damageCostTeamCount: ekipIdleri.length
       };
 
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), {
         endJobDetails: updatedEndJobDetails
       });
 
-      addSystemLog('Hasar Çözüldü', `${job.customerName} müşterisinin hasar kaydı çözüldü olarak işaretlendi.`);
-      setResolveDamageModal({ isOpen: false, jobId: null, note: '' });
+      addSystemLog('Hasar Çözüldü', `${job.customerName} müşterisinin hasar kaydı çözüldü olarak işaretlendi.${hasarTutari > 0 ? ` Maliyet ₺${hasarTutari.toLocaleString('tr-TR')} — ${ekipIdleri.length} kişiye ₺${kisiBasi.toLocaleString('tr-TR')} hasar borcu yazıldı (primden kesilecek).` : ''}`);
+      setResolveDamageModal({ isOpen: false, jobId: null, note: '', cost: '' });
     };
 
     // YENİ: Hasarlı İşler "Düzenle" butonu — hasar notunu ve (çözülmüşse) çözüm notunu düzenlemek için modalı açar.
@@ -8826,7 +8878,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
               <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-green-500 shrink-0">
                 <h3 className="font-bold text-lg flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-500" /> Hasar Sorununu Çöz</h3>
-                <button onClick={() => setResolveDamageModal({ isOpen: false, jobId: null, note: '' })} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+                <button onClick={() => setResolveDamageModal({ isOpen: false, jobId: null, note: '', cost: '' })} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
               <div className="p-6 overflow-y-auto custom-scrollbar">
@@ -8834,6 +8886,23 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   <div>
                     <label className="block text-sm font-bold text-black mb-2">Çözüm Notu / Açıklama</label>
                     <textarea required value={resolveDamageModal.note} onChange={e => setResolveDamageModal({...resolveDamageModal, note: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none transition text-sm" placeholder="Sorun nasıl çözüldü? Müşteri ile nasıl anlaşıldı? (Örn: Tamir masrafı karşılandı.)"></textarea>
+                  </div>
+                  {/* YENİ: HASAR TUTARI — hasarın şirkete maliyeti. Girilirse işe giden
+                      ekibe eşit bölünür ve her kişiye PRİMDEN kesilecek hasar borcu
+                      yazılır (maaşa asla dokunulmaz). Boş/0 bırakılırsa borç yazılmaz. */}
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-2">Hasar Tutarı / Maliyet (₺) <span className="font-medium text-neutral-400">— isteğe bağlı</span></label>
+                    <input type="number" min="0" step="0.01" value={resolveDamageModal.cost} onChange={e => setResolveDamageModal({...resolveDamageModal, cost: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none transition text-sm" placeholder="Örn: 10000" />
+                    {(() => {
+                      // Canlı önizleme: tutar ve ekip belliyse kişi başı payı göster
+                      const j = jobs.find(x => x.id === resolveDamageModal.jobId);
+                      const ekipSayisi = (j?.assignedPersonnelIds || []).filter(Boolean).length;
+                      const tutar = parseFloat(resolveDamageModal.cost) || 0;
+                      if (tutar <= 0) return null;
+                      if (ekipSayisi === 0) return <p className="text-[11px] font-bold text-red-600 mt-1.5">Bu işe atanmış ekip bulunamadı — tutar girilse de kimseye borç yazılamaz.</p>;
+                      const pay = Math.round((tutar / ekipSayisi) * 100) / 100;
+                      return <p className="text-[11px] font-bold text-amber-700 mt-1.5">İşe giden {ekipSayisi} kişiye eşit bölünür: kişi başı ₺{pay.toLocaleString('tr-TR')} hasar borcu yazılır ve yalnızca PRİMLERİNDEN kesilir.</p>;
+                    })()}
                   </div>
                   <button type="button" onClick={handleResolveDamageSubmit} className="w-full py-4 bg-green-500 text-white font-black rounded-xl hover:bg-green-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
                     <CheckCircle className="w-5 h-5" /> Çözüldü Olarak Kaydet
