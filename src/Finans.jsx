@@ -8,7 +8,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
   // YENİ: Avans ve maaş ödemelerini ilgili deftere gider olarak yazar.
   defterPersonelGiderKaydet,
   // YENİ: Hazır etiket ağacı ve kullanıcı etiketlerinin Firestore referansı.
-  VARSAYILAN_ETIKET_GRUPLARI, tumVarsayilanEtiketler, defterEtiketleriRef } from './shared.jsx';
+  VARSAYILAN_ETIKET_GRUPLARI, tumVarsayilanEtiketler, defterEtiketleriRef, GARANTI_MAAS_SABLON_BASE64 } from './shared.jsx';
 
   // ==========================================================================
   // YENİ BİLEŞEN: MAAŞ RAPORU (Genel Ciro Raporu sayfasındaki 2. sekme)
@@ -3493,62 +3493,137 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         }
 
         // ====================================================================
-        // YENİ: ÇIKTI ARTIK CSV DEĞİL, BANKANIN ORİJİNAL EXCEL (.xlsx)
-        // ŞABLONUNUN BİREBİR AYNISI. Satır düzeni, başlıklar, sağdaki "Ödeme
-        // Tipleri" referans tablosu ve bilgilendirme metinleri şablonla aynı;
-        // yalnızca rakamlar (kurum bilgileri, adet, tutar, tarih ve personel
-        // satırları) seçime göre doldurulur. 3 sekme (Resmi Avans / Kalan
-        // Banka / Yol Parası) için de aynı şablon kullanılır.
-        // SheetJS kütüphanesi ilk indirmede CDN'den bir kez yüklenir.
+        // TAMAMEN YENİLENDİ: ÇIKTI ARTIK BANKANIN ORİJİNAL ŞABLONUNUN KENDİSİ
+        // ====================================================================
+        // ESKİ YÖNTEMİN SORUNU: Dosya SheetJS ile SIFIRDAN kuruluyordu. SheetJS'in
+        // ücretsiz sürümü stil yazamadığı için fontlar (Times New Roman /
+        // Courier New), renkler (yeşil başlıklar), birleşik hücreler, veri
+        // doğrulama kuralları ve formüller ÜRETİLEMİYORDU. Banka bu yüzden
+        // dosyayı reddediyordu.
+        //
+        // YENİ YÖNTEM: Bankanın kabul ettiği orijinal .xlsx dosyası base64
+        // olarak uygulamaya gömülü (shared.jsx > GARANTI_MAAS_SABLON_BASE64).
+        // Dosya bir ZIP arşividir; fflate ile açılır, içindeki sheet1.xml'de
+        // YALNIZCA şu hücreler değiştirilir:
+        //   B1-B2-B3 (kurum/şube/hesap) · B7 (tarih) · B8 (tip) · B9 (izahat)
+        //   B4-B5 (adet/toplam formülleri korunur, önbellek değeri güncellenir)
+        //   13. satırdan itibaren personel satırları (İsim + IBAN + Tutar)
+        // Fontlar, renkler, sütun genişlikleri, birleşik hücreler, açıklama
+        // balonları ve veri doğrulama kuralları dosyanın içinde HAZIR olduğu
+        // için çıktı şablondan hiçbir şekilde sapamaz.
         // ====================================================================
         try {
-          const XLSX = await import(/* @vite-ignore */ 'https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs');
+          // fflate: küçük ve hızlı zip kütüphanesi (ilk indirmede CDN'den bir kez yüklenir)
+          const { unzipSync, zipSync, strToU8, strFromU8 } = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/fflate@0.8.2/+esm');
 
-          // Şablonun üst bilgi + veri satırlarını birebir kur (A1:L...)
-          const aoa = [
-            ['Kurum Kodu', bankInfo.kurumKodu, 'Garanti Bankası tarafından verilen kurum kodunuz.', null, null, null, null, null, 'Ödeme Tipleri', null, null, null],
-            ['Şube Kodu', bankInfo.subeKodu, 'Şubenizden öğreniniz', null, null, null, null, null, 'O', 'SOSYAL YARDIM', 'G', 'PROMOSYON'],
-            ['Hesap', bankInfo.hesapNo, 'Maaş ödemesinde kullanacağınız hesap. 1299998-2 şeklinde kontrol digiti girmeyiniz.', null, null, null, null, null, 'D', 'DÖNER SERMAYE    ', 'R', 'PRİM ÖDEMESİ     '],
-            ['Toplam Adet', toplamAdet, 'Toplam maaş adedi. (Giriş yapıldıkça otomatik olarak hesaplanır.)', null, null, null, null, null, 'C', 'KOMİSYON', 'S', 'EK DERS ÜCRETİ'],
-            ['Toplam Tutar', Math.round(toplamTutar * 100) / 100, 'Toplam ödeme tutarı. (Giriş yapıldıkça otomatik olarak hesaplanır.)', null, null, null, null, null, 'F', 'FAZLA MESAİ      ', 'H', 'HUZUR HAKKI'],
-            ['Döviz Kodu', 'TL ', 'Döviz kodunu listeden seçiniz.', null, null, null, null, null, 'I', 'İKRAMİYE         ', 'V', 'ASGARİ GEÇİM İNDİRİMİ'],
-            ['Ödeme Tarihi', odemeTarihiFormatted, 'GGAAYYYY formatında. (Örnek: 04032001 giriniz.)', null, null, null, null, null, 'K', 'KIDEM TAZMİNATI  ', 'Y', 'YOLLUK           '],
-            ['Ödeme Tipi', odemeTipiFormatted, 'Ödeme tiplerini yandaki tabloda görebilirsiniz.', null, null, null, null, null, 'M', 'MAAŞ             ', 'Z', 'DİĞER            '],
-            ['Borç İzahat', bankInfo.borcIzahat, null, null, null, null, null, null, 'N', 'AVANS            ', 'X', 'KESİNTİ'],
-            ["BİLGİLENDİRME : Dosyanızdaki bilgiler banka sistemine otomatik olarak yüklenecektir. Banka kodu boş veya  62 ise havale, 62'den farklı ise EFT'dir. Kayıtlar içinde EFT varsa ödeme tarihi işgünü olmalıdır. Başka bir excel dosyasından kopyalama yapmak istiyorsanız Edit/Paste Spacial seçeneğini Values seçerek kullanınız."],
-            ['Herhangi bir hataya yol açmamak için dosyanın formatını değiştirmeyiniz, açıklamalara uyunuz. '],
-            ['İsim', 'TCKN (Opsiyonel)', 'Banka Kodu', 'Şube Kodu', 'Hesap', 'IBAN (Boşluksuz 26 Karakter)', 'Tutar', 'Borç İzahat', 'Alacak izahat'],
-          ];
+          // --- Base64 şablonu byte dizisine çevir ---
+          const ham = atob(GARANTI_MAAS_SABLON_BASE64);
+          const bayt = new Uint8Array(ham.length);
+          for (let i = 0; i < ham.length; i++) bayt[i] = ham.charCodeAt(i);
+          const files = unzipSync(bayt);
 
-          // Personel satırları — şablondaki gibi: İsim + IBAN + Tutar (sayı olarak)
-          selectedPersonnel.forEach(id => {
-            const person = targetPersonnelList.find(p => p.id === id);
-            if (!person) return;
-            const amount = getAmountForTab(id);
+          // --- XML yardımcıları ---
+          // Özel karakter kaçışı (& < > " ') — Türkçe karakterler UTF-8 olarak aynen kalır
+          const xmlKacir = (s) => String(s ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&apos;');
+          // Bir satırın tamamını yenisiyle değiştirir (boş/self-closing veya dolu)
+          const satirDegistir = (x, rowNo, yeni) => {
+            const re = new RegExp(`<row r="${rowNo}"[^>]*/>|<row r="${rowNo}"[^>]*>[\\s\\S]*?</row>`);
+            if (!re.test(x)) throw new Error(`Şablonda ${rowNo}. satır bulunamadı`);
+            return x.replace(re, yeni);
+          };
+          // Tek bir hücreyi yenisiyle değiştirir
+          const hucreDegistir = (x, ref, yeni) => {
+            const re = new RegExp(`<c r="${ref}"[^>]*/>|<c r="${ref}"[^>]*>[\\s\\S]*?</c>`);
+            if (!re.test(x)) throw new Error(`Şablonda ${ref} hücresi bulunamadı`);
+            return x.replace(re, yeni);
+          };
+          // Metin hücresi (inline string) ve sayı/metin otomatik seçimi
+          const metinHucre = (ref, s, deger) => `<c r="${ref}" s="${s}" t="inlineStr"><is><t xml:space="preserve">${xmlKacir(deger)}</t></is></c>`;
+          const akilliHucre = (ref, s, deger) => /^\d+$/.test(String(deger).trim())
+            ? `<c r="${ref}" s="${s}"><v>${String(deger).trim()}</v></c>`
+            : metinHucre(ref, s, deger);
+
+          let xml = strFromU8(files['xl/worksheets/sheet1.xml']);
+
+          // --- 1) ÜST BİLGİ HÜCRELERİ (stil numaraları şablondan birebir) ---
+          xml = hucreDegistir(xml, 'B1', akilliHucre('B1', 2, bankInfo.kurumKodu));  // Kurum Kodu
+          xml = hucreDegistir(xml, 'B2', akilliHucre('B2', 2, bankInfo.subeKodu));   // Şube Kodu
+          xml = hucreDegistir(xml, 'B3', akilliHucre('B3', 2, bankInfo.hesapNo));    // Hesap No
+          // B4 Toplam Adet / B5 Toplam Tutar: FORMÜLLER korunur, yalnızca
+          // Excel açılmadan da doğru görünsün diye önbellek değeri güncellenir
+          xml = hucreDegistir(xml, 'B4', `<c r="B4" s="2"><f>COUNTA(A:A)-12+COUNTBLANK(A1:A12)</f><v>${toplamAdet}</v></c>`);
+          const toplamYuvarlak = Math.round(toplamTutar * 100) / 100;
+          xml = hucreDegistir(xml, 'B5', `<c r="B5" s="8"><f>SUM(G:G)</f><v>${toplamYuvarlak}</v></c>`);
+          xml = hucreDegistir(xml, 'B7', metinHucre('B7', 9, odemeTarihiFormatted)); // GGAAYYYY
+          xml = hucreDegistir(xml, 'B8', metinHucre('B8', 2, odemeTipiFormatted));   // M / N / Z
+          xml = hucreDegistir(xml, 'B9', metinHucre('B9', 38, bankInfo.borcIzahat)); // Borç İzahat
+
+          // --- 2) PERSONEL SATIRLARI (13. satırdan itibaren) ---
+          // Stil numaraları şablonun kendi veri satırlarından birebir alındı:
+          //   13. satır: A=19, H=25  |  sonrakiler: A=20, H=20 (kenarlık farkı)
+          const secilenler = selectedPersonnel
+            .map(id => targetPersonnelList.find(p => p.id === id))
+            .filter(Boolean);
+          const veriSatiri = (i, person) => {
+            const aStil = i === 13 ? 19 : 20;
+            const hStil = i === 13 ? 25 : 20;
             const iban = person.iban ? person.iban.replace(/\s+/g, '') : '';
-            const tckn = person.tcNo ? person.tcNo.replace(/\s+/g, '') : null;
-            aoa.push([person.fullName, tckn || null, null, null, null, iban, Math.round(amount * 100) / 100, null, null]);
-          });
+            const tckn = person.tcNo ? person.tcNo.replace(/\s+/g, '') : '';
+            const tutar = Math.round(getAmountForTab(person.id) * 100) / 100;
+            return `<row r="${i}" spans="1:12" ht="14.25" customHeight="1" x14ac:dyDescent="0.25">` +
+              metinHucre(`A${i}`, aStil, person.fullName) +
+              (tckn ? metinHucre(`B${i}`, 20, tckn) : `<c r="B${i}" s="20"/>`) +
+              `<c r="C${i}" s="21"/><c r="D${i}" s="22"/><c r="E${i}" s="23"/>` +
+              metinHucre(`F${i}`, 24, iban) +
+              `<c r="G${i}" s="24"><v>${tutar}</v></c>` +
+              `<c r="H${i}" s="${hStil}"/><c r="I${i}" s="25"/><c r="J${i}" s="29"/><c r="K${i}" s="30"/><c r="L${i}" s="30"/></row>`;
+          };
+          const bosSatir = (i) => `<row r="${i}" spans="1:12" ht="14.25" customHeight="1" x14ac:dyDescent="0.25"/>`;
 
-          const ws = XLSX.utils.aoa_to_sheet(aoa);
-          // Şablona yakın sütun genişlikleri
-          ws['!cols'] = [
-            { wch: 24 }, { wch: 18 }, { wch: 40 }, { wch: 10 }, { wch: 10 },
-            { wch: 30 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 22 }, { wch: 6 }, { wch: 24 }
-          ];
-          const wb = XLSX.utils.book_new();
-          XLSX.utils.book_append_sheet(wb, ws, 'Sayfa1');
+          // 13'ten başlayarak personel satırları yazılır; şablonda dolu kalan
+          // eski satırlar (24'e kadar) boş satırla değiştirilir ki şablondaki
+          // örnek kişiler çıktıya sızmasın.
+          const temizlenecekSon = Math.max(24, 12 + secilenler.length);
+          for (let i = 13; i <= temizlenecekSon; i++) {
+            const idx = i - 13;
+            xml = satirDegistir(xml, i, idx < secilenler.length ? veriSatiri(i, secilenler[idx]) : bosSatir(i));
+          }
 
-          // YENİ: Dosya adı artık bulunduğun bölümün adını alıyor — örn.
-          // "Beyaz Yaka Temmuz 2026 Avans Listesi.xlsx" (ekteki örnek dosya adıyla
-          // aynı okunabilir formatta). Hangi sekmedeysen o sekmenin adı kullanılır.
+          files['xl/worksheets/sheet1.xml'] = strToU8(xml);
+
+          // --- 3) calcChain TEMİZLİĞİ ---
+          // Şablonun calcChain'i, boşalttığımız J14/J16 formül hücrelerine işaret
+          // ediyor; formülü kalmayan hücreye işaret Excel'de "onarım" uyarısı
+          // çıkarabilir. calcChain silinirse Excel açılışta sessizce yeniden
+          // kurar — standart ve güvenli yöntem. İlgili kayıt ve ilişki de silinir.
+          delete files['xl/calcChain.xml'];
+          files['[Content_Types].xml'] = strToU8(
+            strFromU8(files['[Content_Types].xml']).replace(/<Override PartName="\/xl\/calcChain\.xml"[^>]*\/>/, '')
+          );
+          files['xl/_rels/workbook.xml.rels'] = strToU8(
+            strFromU8(files['xl/_rels/workbook.xml.rels']).replace(/<Relationship[^>]*Target="calcChain\.xml"[^>]*\/>/, '')
+          );
+
+          // --- 4) ZIP'e geri paketle ve indir ---
+          const zipBayt = zipSync(files, { level: 6 });
+          const blob = new Blob([zipBayt], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
           const sekmeDosyaAdi = {
             'Resmi Avans Ödemesi': 'Avans Listesi',
             'Kalan Banka Ödemesi': 'Kalan Banka Listesi',
             'Yol Parası Ödemesi': 'Yol Parası Listesi'
           }[activeTab] || activeTab;
           const dosyaAdi = `${collarType} ${monthNames[currentMonth - 1]} ${currentYear} ${sekmeDosyaAdi}.xlsx`;
-          XLSX.writeFile(wb, dosyaAdi);
+
+          // Tarayıcıda indirme tetikleme (SheetJS writeFile'ın karşılığı)
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = dosyaAdi;
+          document.body.appendChild(a); a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
 
           addSystemLog('Banka Excel İndirildi', `${collarType} ${activeTab} için toplu ödeme Excel dosyası oluşturuldu. (${selectedPersonnel.length} Kişi)`);
         } catch (err) {
