@@ -16252,6 +16252,98 @@ const mesaiSuankiSaat = () => new Date().toLocaleTimeString('tr-TR', { hour: '2-
 // Personelin yakasını belirler (uygulamanın diğer bölümlerindeki mantıkla birebir aynı)
 export const mesaiYakaTipi = (p) => (p?.collarType === 'Mavi Yaka' || (!p?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p?.position))) ? 'Mavi Yaka' : 'Beyaz Yaka';
 
+// ============================================================================
+// YENİ: MESAİ TAKİBİNE KİM DAHİL?
+// Kullanıcı kuralı: "Sadece Beyaz Yakada örgün çalışanların takibi olsun.
+// Uzaktan olanların olmasın. QR Kod Anasayfa ve Mesai Takip Bölümünde
+// uzaktan çalışanlar gözükmesin."
+// Bu yüzden ARTIK tek kapı bu fonksiyondur: hem Anasayfa QR butonları hem
+// Mesai Takip tablosu buradan geçer. calismaSekli === 'Uzaktan' olan personel
+// (danışman, uzaktan panel kullanıcısı vb.) hiçbir yerde görünmez.
+// NOT: isUzaktanCalisan shared.tsx'ten geliyor (dosyanın en üstünde import edilmiş).
+// ============================================================================
+export const mesaiTakibeDahil = (p) => !!p && p.employmentStatus !== 'Pasif' && !isUzaktanCalisan(p);
+
+// ============================================================================
+// YENİ: BEYAZ YAKA ÖNERİ MOTORU
+// Kullanıcı kuralı: "Beyaz Yakada sistem mesaili giriş yapmasın, durumu göre
+// biz yaparız." Yani beyaz yakada geç geliş / fazla mesai / eksik mesai
+// HESAPLANMAZ. Sistem yalnızca üç durumdan birini önerir:
+//   • QR/kod okuttu           -> G  (Geldi)
+//   • Okutmadı + izin günü    -> Hİ (Haftalık İzin)
+//   • Okutmadı + normal gün   -> D  (Devamsızlık)
+// Saat (hours) her zaman boş kalır; fazla/eksik mesai yöneticinin elle
+// gireceği bir karardır. Mavi yakanın mesaiOnerileriHesapla motoruna
+// KESİNLİKLE dokunulmadı; bu ayrı ve çok daha sade bir fonksiyondur.
+// DİKKAT: Burada kullanılan gununProgrami() bu dosyada AŞAĞIDA tanımlıdır.
+// Sorun oluşturmaz, çünkü çağrı fonksiyon GÖVDESİNİN içindedir; modül
+// tamamen yüklendikten sonra çalışır. Dosyanın üstüne taşımayın.
+// ============================================================================
+export const beyazYakaOnerileriHesapla = (personeller, qrKayitlari, tarihStr) => {
+  const sonuc = {};
+  (personeller || []).forEach(person => {
+    const giris = (qrKayitlari || []).find(k => String(k.personnelId) === String(person.id) && k.type === 'giris');
+    const cikis = (qrKayitlari || []).find(k => String(k.personnelId) === String(person.id) && k.type === 'cikis');
+    const prog = gununProgrami(person, tarihStr); // Haftalık izin günü bilgisi için
+
+    if (giris) {
+      // QR okutmuş -> sadece "Geldi". Saat hesabı yapılmaz.
+      sonuc[person.id] = {
+        status: 'G', hours: '',
+        girisSaati: giris.timeStr, cikisSaati: cikis?.timeStr || null,
+        aciklama: 'QR/kod ile giriş yapıldı → Geldi. (Beyaz yakada fazla/eksik mesai sistem tarafından hesaplanmaz.)',
+        kaynak: giris.method
+      };
+      return;
+    }
+    if (prog.izinli) {
+      // Okutmamış ama çalışma programında o gün izinli -> Haftalık İzin
+      sonuc[person.id] = {
+        status: 'Hİ', hours: '',
+        girisSaati: null, cikisSaati: cikis?.timeStr || null,
+        aciklama: `${prog.gun} çalışma programında haftalık izin günü → Haftalık İzin önerildi.`,
+        kaynak: 'program'
+      };
+      return;
+    }
+    // Okutmamış ve izin günü de değil -> Devamsızlık
+    sonuc[person.id] = {
+      status: 'D', hours: '',
+      girisSaati: null, cikisSaati: cikis?.timeStr || null,
+      aciklama: 'QR/kod ile giriş kaydı yok → Devamsızlık önerildi.',
+      kaynak: 'yok'
+    };
+  });
+  return sonuc;
+};
+
+// ============================================================================
+// YENİ: POZİSYON RENK PALETİ (beyaz yaka blokları için)
+// Mavi yakada renk = araç plakası (aynı ekip aynı renk). Beyaz yakada araç
+// yok, o yüzden renk = POZİSYON. Aynı pozisyondaki herkes aynı renkte görünür.
+// ============================================================================
+export const POZISYON_RENKLERI = [
+  { yazi: 'text-slate-700', rozet: 'bg-slate-100 text-slate-700 border-slate-300' },
+  { yazi: 'text-sky-700', rozet: 'bg-sky-100 text-sky-700 border-sky-300' },
+  { yazi: 'text-fuchsia-700', rozet: 'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-300' },
+  { yazi: 'text-lime-700', rozet: 'bg-lime-100 text-lime-800 border-lime-300' },
+  { yazi: 'text-violet-700', rozet: 'bg-violet-100 text-violet-700 border-violet-300' },
+  { yazi: 'text-stone-700', rozet: 'bg-stone-100 text-stone-700 border-stone-300' },
+  { yazi: 'text-red-700', rozet: 'bg-red-100 text-red-700 border-red-300' },
+  { yazi: 'text-green-700', rozet: 'bg-green-100 text-green-700 border-green-300' },
+];
+
+// Pozisyon adından SABİT bir renk üretir (aynı pozisyon her zaman aynı renk).
+// Basit karakter toplamı hash'i kullanılır; alfabetik sıraya bağlı olmadığı
+// için yeni pozisyon eklendiğinde diğerlerinin rengi kaymaz.
+export const pozisyonRengi = (pozisyon) => {
+  const ad = String(pozisyon || '').trim();
+  if (!ad) return { yazi: 'text-neutral-500', rozet: 'bg-neutral-100 text-neutral-600 border-neutral-300' };
+  let toplam = 0;
+  for (let i = 0; i < ad.length; i++) toplam += ad.charCodeAt(i);
+  return POZISYON_RENKLERI[toplam % POZISYON_RENKLERI.length];
+};
+
 // Cihaz tipi tespiti: kayıtlarda hangi cihazdan (iOS/Android/Bilgisayar) girildiğini görürüz
 const mesaiCihazTipi = () => {
   const ua = (typeof navigator !== 'undefined' ? navigator.userAgent : '') || '';
@@ -16967,9 +17059,18 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
     return () => { iptal = true; }; // Cleanup
   }, [currentUser?.id]);
 
-  // ŞU AN YALNIZCA MAVİ YAKA: Beyaz Yaka personelde QR mesai hiç yazılmamış
-  // gibi davranılır (kullanıcı talebi). Beyaz Yaka mantığı sonra kurulacak.
-  if (mesaiYakaTipi(currentUser) !== 'Mavi Yaka') return null;
+  // ==========================================================================
+  // DEĞİŞTİ: ARTIK BEYAZ YAKA DA QR/MANUEL MESAİ GİRİŞİ YAPABİLİR.
+  // ESKİ HALİ: mesaiYakaTipi(currentUser) !== 'Mavi Yaka' ise null dönüyordu,
+  //   yani beyaz yaka personel anasayfada hiç buton görmüyordu.
+  // YENİ HALİ: yaka ayrımı KALDIRILDI; giriş/çıkış akışı iki yakada da
+  //   birebir aynı çalışır (aynı QR, aynı konum + kamera doğrulaması).
+  //   Fark yalnızca DURUM ÖNERİSİNDE: beyaz yakada sistem fazla/eksik mesai
+  //   hesaplamaz (bkz. beyazYakaOnerileriHesapla).
+  // TEK İSTİSNA: UZAKTAN çalışanlar. Onlar ofise gelmediği için QR butonları
+  //   kendilerine hiç gösterilmez (kullanıcı kuralı).
+  // ==========================================================================
+  if (!mesaiTakibeDahil(currentUser)) return null;
 
   const bugunku = kayitlarim.filter(k => k.dateStr === mesaiBugunStr());
   // Bugünün giriş ve çıkış kayıtları — butonların açık/kapalı olmasını belirler
@@ -17239,23 +17340,43 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     return () => unsub();
   }, [sekme, raporAy]);
 
-  // Aktif (Pasif olmayan) personel listesi, yakaya göre ayrılmış
-  const aktifPersonel = useMemo(() => personnelList.filter(p => p.employmentStatus !== 'Pasif'), [personnelList]);
+  // ==========================================================================
+  // AKTİF PERSONEL LİSTESİ — DEĞİŞTİ
+  // ESKİ HALİ: sadece 'Pasif' olanlar çıkarılıyordu.
+  // YENİ HALİ: mesaiTakibeDahil() üzerinden UZAKTAN çalışanlar da çıkarılır.
+  // Sebep (kullanıcı kuralı): "Sadece beyaz yakada örgün çalışanların takibi
+  // olsun, uzaktan olanların olmasın." Böylece uzaktan personel ne tabloda
+  // ne "Personel Seç" açılır listesinde ne de sayaç rozetlerinde görünür.
+  // ==========================================================================
+  const aktifPersonel = useMemo(() => personnelList.filter(p => mesaiTakibeDahil(p)), [personnelList]);
   const maviYaka = aktifPersonel.filter(p => mesaiYakaTipi(p) === 'Mavi Yaka');
   const beyazYaka = aktifPersonel.filter(p => mesaiYakaTipi(p) === 'Beyaz Yaka');
+  // YENİ: Tablo artık iki yakayı birlikte gösteriyor — mavi önce, beyaz sonra.
+  const takiptekiPersonel = useMemo(() => [...maviYaka, ...beyazYaka], [maviYaka, beyazYaka]);
 
   const bugun = mesaiBugunStr();
 
   // Filtrelenmiş kayıtlar (Tüm Kayıtlar sekmesi) — en yeni üstte, ilk 300 kayıt
   const filtreli = useMemo(() => gunlukKayitlar
-    .filter(k => k.collarType === 'Mavi Yaka') // Şu an yalnızca Mavi Yaka aktif
+    // ========================================================================
+    // DEĞİŞTİ: "Şu an yalnızca Mavi Yaka aktif" kısıtı KALDIRILDI.
+    // ESKİ HALİ: .filter(k => k.collarType === 'Mavi Yaka')
+    // YENİ HALİ: iki yaka da gelir; yalnızca UZAKTAN çalışanların kayıtları
+    // ayıklanır. (Eski kayıtlarda personel uzaktana çevrilmiş olabilir; o
+    // yüzden filtre kaydın collarType'ına değil, güncel personel kartına bakar.)
+    // ========================================================================
+    .filter(k => {
+      const kisi = personnelList.find(pp => String(pp.id) === String(k.personnelId));
+      return kisi ? !isUzaktanCalisan(kisi) : true; // Personeli bulunamayan eski kayıt gizlenmez
+    })
     .filter(k => fYaka === 'hepsi' || k.collarType === fYaka)
     // NOT: Mesai durumu filtresi burada uygulanmaz; durum bilgisi puantaj ve
     // öneri hesabından geldiği için tablo çizilirken (aşağıda) uygulanır.
 
     .filter(k => fPersonel === 'hepsi' || String(k.personnelId) === String(fPersonel))
     .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0))
-    .slice(0, 300), [gunlukKayitlar, fYaka, fPersonel]); // fTarih zaten sorguda filtreli
+    // personnelList eklendi: uzaktan çalışan filtresi bu listeye bakıyor
+    .slice(0, 300), [gunlukKayitlar, fYaka, fPersonel, personnelList]); // fTarih zaten sorguda filtreli
 
   // YENİ: Görünen kayıtların ait olduğu AYLARIN puantaj belgelerini yükler.
   // "Mesai Durumu" sütunu, muhasebedeki (Personel Muhasebe) günlük durumu gösterir.
@@ -17283,24 +17404,74 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   // YENİ: Görünen her tarih için QR'a dayalı ÖNERİLERİ hesaplar.
   // Böylece muhasebeye henüz yazılmamış günlerde de "önerilen durum" görünür.
   const gunlukOneriler = useMemo(() => {
-    const tarihler = [...new Set(filtreli.map(k => k.dateStr))];
+    // DEĞİŞTİ: Seçili tarih (fTarih) her zaman listeye katılır.
+    // Sebep: O gün HİÇ kimse QR okutmamışsa eski kodda tarihler dizisi boş
+    // kalıyor ve "Devamsızlık" önerisi hiç üretilmiyordu. Artık seçili gün
+    // için her koşulda öneri hesaplanır.
+    const tarihler = [...new Set([...filtreli.map(k => k.dateStr), fTarih].filter(Boolean))];
     const sonuc = {};
     tarihler.forEach(tarih => {
-      const oGunkuKayitlar = gunlukKayitlar.filter(k => k.dateStr === tarih && k.collarType === 'Mavi Yaka');
-      const kisiIdler = [...new Set(oGunkuKayitlar.map(k => String(k.personnelId)))];
-      const ekip = kisiIdler.map(id => personnelList.find(p => String(p.id) === id)).filter(Boolean);
-      if (ekip.length === 0) return;
-      try { sonuc[tarih] = mesaiOnerileriHesapla(ekip, oGunkuKayitlar, tarih); } catch (e) { /* sessiz geç */ }
+      // ======================================================================
+      // DEĞİŞTİ: İKİ YAKA İÇİN AYRI ÖNERİ MOTORU
+      // ESKİ HALİ: yalnızca Mavi Yaka kayıtları alınıp mesaiOnerileriHesapla
+      //   çalıştırılıyordu; beyaz yakada "Girilmemiş" görünüyordu.
+      // YENİ HALİ:
+      //   • MAVİ YAKA  -> mesaiOnerileriHesapla (ekip bazlı çıkış, fazla/eksik
+      //     mesai, geç geliş toleransı — hiçbir şey değişmedi)
+      //   • BEYAZ YAKA -> beyazYakaOnerileriHesapla (yalnızca Geldi /
+      //     Haftalık İzin / Devamsızlık; saat hesabı YOK)
+      // İki sonuç aynı tarih anahtarı altında birleştirilir.
+      // ======================================================================
+      const oGunkuTumKayitlar = gunlukKayitlar.filter(k => k.dateStr === tarih);
+      const kisiCoz = (kayitlar) => [...new Set(kayitlar.map(k => String(k.personnelId)))]
+        .map(id => personnelList.find(p => String(p.id) === id))
+        .filter(p => p && mesaiTakibeDahil(p)); // Uzaktan çalışanlar öneri hesabına girmez
+
+      // --- MAVİ YAKA (mevcut motor, dokunulmadı) ---
+      const maviKayitlar = oGunkuTumKayitlar.filter(k => k.collarType === 'Mavi Yaka');
+      const maviEkip = kisiCoz(maviKayitlar).filter(p => mesaiYakaTipi(p) === 'Mavi Yaka');
+      let maviSonuc = {};
+      if (maviEkip.length > 0) {
+        try { maviSonuc = mesaiOnerileriHesapla(maviEkip, maviKayitlar, tarih) || {}; } catch (e) { /* sessiz geç */ }
+      }
+
+      // --- BEYAZ YAKA (yeni sade motor) ---
+      // ÖNEMLİ FARK: Beyaz yakada öneri, kaydı OLAN kişilerle sınırlı DEĞİL;
+      // takipteki TÜM beyaz yaka personeline uygulanır. Böylece QR okutmayan
+      // personel için "Devamsızlık", izin günündeki için "Haftalık İzin"
+      // önerisi otomatik üretilir (kullanıcı kuralı). Mavi yakada bu genişletme
+      // yapılmadı çünkü oradaki motor ekip bazlı çıkış saati hesaplıyor ve
+      // kayıtsız kişileri eklemek ekip hesabını bozar.
+      const beyazKayitlar = oGunkuTumKayitlar.filter(k => k.collarType === 'Beyaz Yaka');
+      let beyazSonuc = {};
+      if (beyazYaka.length > 0) {
+        try { beyazSonuc = beyazYakaOnerileriHesapla(beyazYaka, beyazKayitlar, tarih) || {}; } catch (e) { /* sessiz geç */ }
+      }
+
+      if (Object.keys(maviSonuc).length || Object.keys(beyazSonuc).length) {
+        sonuc[tarih] = { ...maviSonuc, ...beyazSonuc };
+      }
     });
     return sonuc;
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // Bağımlılık sadeleştirildi: filtreli zaten gunlukKayitlar'dan türüyor
-  }, [gunlukKayitlar, personnelList]);
+    // YENİ: fTarih ve beyazYaka eklendi (beyaz yaka önerisi bu ikisine bağlı)
+  }, [gunlukKayitlar, personnelList, fTarih, beyazYaka]);
 
   // RAPORLAMA: seçilen aydaki kayıtlardan kişi bazlı özet çıkarır
   const rapor = useMemo(() => {
     // Rapor ayının kayıtları ayrı ve kapsamı daraltılmış sorgudan gelir
-    const aylik = aylikKayitlar.filter(k => k.collarType === 'Mavi Yaka');
+    // ========================================================================
+    // DEĞİŞTİ: Rapor artık İKİ YAKAYI kapsar.
+    // ESKİ HALİ: .filter(k => k.collarType === 'Mavi Yaka')
+    // YENİ HALİ: yaka kısıtı kaldırıldı; yalnızca UZAKTAN çalışanların
+    // kayıtları ayıklanır. Böylece "Giriş/Çıkış takibi yine aynı şekilde"
+    // kuralı raporlamada da geçerli olur.
+    // ========================================================================
+    const aylik = aylikKayitlar.filter(k => {
+      const kisi = personnelList.find(pp => String(pp.id) === String(k.personnelId));
+      return kisi ? !isUzaktanCalisan(kisi) : true;
+    });
     const kisiler = new Map();
     aylik.forEach(k => {
       if (!kisiler.has(k.personnelName)) kisiler.set(k.personnelName, { ad: k.personnelName, yaka: k.collarType, gunler: new Map(), kamera: 0, manuel: 0 });
@@ -17324,7 +17495,8 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       const ortGiris = girisSay ? `${String(Math.floor(girisDkToplam / girisSay / 60)).padStart(2, '0')}:${String(Math.round(girisDkToplam / girisSay) % 60).padStart(2, '0')}` : '—';
       return { ...kisi, gunSayisi: kisi.gunler.size, toplamSaat: (toplamDk / 60).toFixed(1).replace('.', ','), ortGiris };
     }).sort((a, b) => b.gunSayisi - a.gunSayisi);
-  }, [aylikKayitlar]);
+    // personnelList eklendi: uzaktan çalışan filtresi bu listeye bakıyor
+  }, [aylikKayitlar, personnelList]);
 
   // ---------------------------------------------------------------------------
   // "BİRLİKTE" SÜTUNU — EKİP BAZLI (yalnızca Mavi Yaka)
@@ -17452,7 +17624,10 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   const gunlukOzet = useMemo(() => {
     const ozet = { geldi: 0, devamsiz: 0, haftalikIzin: 0, digerIzin: 0, belirsiz: 0, toplam: 0 };
     if (!fTarih) return ozet;
-    maviYaka.forEach(p => {
+    // DEĞİŞTİ: maviYaka -> takiptekiPersonel (mavi + beyaz, uzaktan hariç).
+    // Böylece başlıktaki "X kişi geldi / Y haftalık izin" rozetleri artık
+    // beyaz yakayı da sayar ve tablodaki liste ile birebir tutar.
+    takiptekiPersonel.forEach(p => {
       const satir = {
         personnelId: String(p.id),
         dateStr: fTarih,
@@ -17468,7 +17643,7 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     });
     return ozet;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fTarih, maviYaka, gunlukKayitlar, puantajlar, gunlukOneriler]);
+  }, [fTarih, takiptekiPersonel, gunlukKayitlar, puantajlar, gunlukOneriler]);
 
   // Düzenlemeyi puantaja (Personel Muhasebe ile AYNI koleksiyona) yazar.
   // manual:true işaretlenir; böylece bu satır bir daha düzenlenemez ve
@@ -17678,8 +17853,23 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
             {/* YENİ: PERSONEL SEÇ — seçilen personelin kayıtları filtrelenir */}
             <select value={fPersonel} onChange={e => setFPersonel(e.target.value)} className="min-w-0 truncate px-2 py-2.5 border border-neutral-300 rounded-xl text-xs font-bold lg:col-span-2" title="Tek bir personeli seçerek yalnızca onun kayıtlarını görün">
               <option value="hepsi">Personel Seç (Tümü)</option>
-              {/* Alfabetik sıra (Türkçe harf düzenine göre) */}
-              {[...maviYaka].sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'tr')).map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+              {/* ================================================================
+                  DEĞİŞTİ: Liste artık iki yakayı da içerir.
+                  ESKİ HALİ: yalnızca [...maviYaka] listeleniyordu.
+                  YENİ HALİ: optgroup ile "Mavi Yaka" ve "Beyaz Yaka" başlıkları
+                  altında ayrı ayrı, her grup Türkçe alfabetik sırada.
+                  Uzaktan çalışanlar bu listede HİÇ görünmez (aktifPersonel filtresi).
+                  ================================================================ */}
+              <optgroup label="Mavi Yaka">
+                {[...maviYaka].sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'tr')).map(p => <option key={p.id} value={p.id}>{p.fullName}</option>)}
+              </optgroup>
+              <optgroup label="Beyaz Yaka (Örgün)">
+                {/* Beyaz yakada önce POZİSYON, sonra isim alfabetik — tabloyla aynı mantık */}
+                {[...beyazYaka].sort((a, b) => {
+                  const poz = (a.position || 'zzz').localeCompare(b.position || 'zzz', 'tr');
+                  return poz !== 0 ? poz : (a.fullName || '').localeCompare(b.fullName || '', 'tr');
+                }).map(p => <option key={p.id} value={p.id}>{p.fullName} — {p.position || 'Pozisyonsuz'}</option>)}
+              </optgroup>
             </select>
 
             {/* YENİ: ARAÇ / EKİP FİLTRESİ — seçilen araçla giden ekibi gösterir */}
@@ -17735,8 +17925,15 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                   // çünkü o filtre zaten mevcut kayıtları süzmeyi amaçlar.
                   if (fTarih) {
                     const gunler = [fTarih]; // Tek gün görüntülendiği için sadece seçilen tarih
-                    // Filtrelere uyan personel listesi (şu an yalnızca Mavi Yaka aktif)
-                    const hedefPersonel = maviYaka
+                    // ==================================================================
+                    // DEĞİŞTİ: Filtrelere uyan personel listesi
+                    // ESKİ HALİ: `maviYaka` — yalnızca mavi yaka listelenirdi.
+                    // YENİ HALİ: `takiptekiPersonel` — mavi + beyaz yaka birlikte,
+                    //   UZAKTAN çalışanlar hariç. Böylece QR okutmayan beyaz yaka
+                    //   personel de tabloda satır olarak görünür ve durumu
+                    //   (Devamsızlık / Haftalık İzin) önerilir.
+                    // ==================================================================
+                    const hedefPersonel = takiptekiPersonel
                       .filter(pp => fPersonel === 'hepsi' || String(pp.id) === String(fPersonel))
                       .filter(pp => fYaka === 'hepsi' || mesaiYakaTipi(pp) === fYaka);
                     gunler.forEach(tarih => {
@@ -17781,7 +17978,18 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                     //   4) Diğer izinliler   (Yİ / Bİ / Üİ / R / İB)
                     //   5) Durumu belirsizler (en sonda)
                     // ==================================================================
+                    // ==================================================================
+                    // YENİ ÜST SEVİYE KURAL: ÖNCE MAVİ YAKA, SONRA BEYAZ YAKA
+                    // Kullanıcı kuralı: "Beyaz yaka mavi yakanın altında sıralansın."
+                    // Bu yüzden sıralamanın ilk kriteri artık YAKA'dır; yakalar
+                    // birbirine karışmaz, tablo iki net bölüme ayrılır.
+                    // ==================================================================
                     .sort((a, b) => {
+                      // 0) YAKA: Mavi Yaka = 0 (üstte), Beyaz Yaka = 1 (altta)
+                      const yakaNo = (satir) => satir.collarType === 'Mavi Yaka' ? 0 : 1;
+                      const yakaFark = yakaNo(a) - yakaNo(b);
+                      if (yakaFark !== 0) return yakaFark;
+
                       const grupNo = (satir) => {
                         const kod = satirDurumKodu(satir);
                         if (satir.giris) return 1;
@@ -17793,14 +18001,24 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                       };
                       const fark = grupNo(a) - grupNo(b);
                       if (fark !== 0) return fark;
-                      // GELENLER grubunda: önce ARACA göre kümelen (aynı ekip alt alta),
-                      // araçsızlar en sona; sonra ekip içinde Türkçe alfabetik.
+                      // GELENLER grubunda kümeleme yakaya göre FARKLI çalışır:
+                      //  • MAVİ YAKA  -> ARACA göre (aynı ekip alt alta), araçsızlar sona
+                      //  • BEYAZ YAKA -> POZİSYONA göre (aynı pozisyon alt alta), alfabetik
+                      // Kullanıcı kuralı: beyaz yakada araç yok, gruplama pozisyonla yapılır.
                       if (grupNo(a) === 1) {
-                        const pa = personelAraci(a.personnelId, a.dateStr).plakalar[0] || 'zzz_aracsiz';
-                        const pb = personelAraci(b.personnelId, b.dateStr).plakalar[0] || 'zzz_aracsiz';
-                        const plakaFark = pa.localeCompare(pb, 'tr');
-                        if (plakaFark !== 0) return plakaFark;
+                        if (yakaNo(a) === 0) {
+                          const pa = personelAraci(a.personnelId, a.dateStr).plakalar[0] || 'zzz_aracsiz';
+                          const pb = personelAraci(b.personnelId, b.dateStr).plakalar[0] || 'zzz_aracsiz';
+                          const plakaFark = pa.localeCompare(pb, 'tr');
+                          if (plakaFark !== 0) return plakaFark;
+                        } else {
+                          const poza = (a.position || 'zzz_pozisyonsuz');
+                          const pozb = (b.position || 'zzz_pozisyonsuz');
+                          const pozFark = poza.localeCompare(pozb, 'tr'); // Pozisyonlar Türkçe alfabetik
+                          if (pozFark !== 0) return pozFark;
+                        }
                       }
+                      // Aynı blok içinde: Türkçe alfabetik isim sırası
                       const ad = (a.personnelName || '').localeCompare(b.personnelName || '', 'tr');
                       return ad !== 0 ? ad : (b.dateStr || '').localeCompare(a.dateStr || '');
                     });
@@ -17809,28 +18027,55 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                   // BLOK AYIRICI: Her ekip (araç) ve her durum grubu arasına kalın
                   // ayırıcı satır konur; blok başlığında araç plakası / durum yazar.
                   // ====================================================================
+                  // ==================================================================
+                  // DEĞİŞTİ: Blok anahtarına YAKA ön eki eklendi.
+                  // Sebep: Aynı durum kodu iki yakada da geçebiliyor (ör. her iki
+                  // yakada "Devamsızlık"). Ön ek olmadan mavi yakanın devamsızlık
+                  // bloğu ile beyaz yakanın devamsızlık bloğu tek blok sayılıyor ve
+                  // araya ayırıcı başlık girmiyordu.
+                  // Beyaz yakada gelenler ARAÇ yerine POZİSYONA göre bloklanır.
+                  // ==================================================================
                   const blokAnahtari = (g) => {
+                    const beyaz = g.collarType !== 'Mavi Yaka';
+                    const on = beyaz ? 'beyaz' : 'mavi'; // Yaka ön eki
                     const kod = satirDurumKodu(g);
                     if (g.giris || ['G', 'FM', 'EM', 'FG', 'FGM'].includes(kod)) {
+                      if (beyaz) {
+                        // BEYAZ YAKA: blok = pozisyon (Operasyon, Muhasebe, Satış Personeli...)
+                        return `${on}|pozisyon:${g.position || ''}`;
+                      }
                       const plaka = personelAraci(g.personnelId, g.dateStr).plakalar[0];
-                      return plaka ? `arac:${plaka}` : 'arac:yok';
+                      return plaka ? `${on}|arac:${plaka}` : `${on}|arac:yok`;
                     }
-                    if (kod === 'D') return 'durum:D';
-                    if (kod === 'Hİ') return 'durum:Hİ';
-                    if (['Yİ', 'Bİ', 'Üİ', 'R', 'İB'].includes(kod)) return 'durum:izin';
-                    return 'durum:bos';
+                    if (kod === 'D') return `${on}|durum:D`;
+                    if (kod === 'Hİ') return `${on}|durum:Hİ`;
+                    if (['Yİ', 'Bİ', 'Üİ', 'R', 'İB'].includes(kod)) return `${on}|durum:izin`;
+                    return `${on}|durum:bos`;
                   };
-                  const blokBasligi = (anahtar) => {
+                  const blokBasligi = (tamAnahtar) => {
+                    const [on, anahtar] = String(tamAnahtar).split('|');
+                    const beyaz = on === 'beyaz';
+                    // BEYAZ YAKA etiketlerinin başına "BEYAZ YAKA •" konur ki
+                    // tabloda hangi bölümde olduğunuz bir bakışta anlaşılsın.
+                    const onEk = beyaz ? 'BEYAZ YAKA • ' : '';
+
+                    if (anahtar.startsWith('pozisyon:')) {
+                      const poz = anahtar.slice(9);
+                      // Pozisyon rozeti, o pozisyona atanan SABİT renkle boyanır
+                      return poz
+                        ? { metin: `${onEk}${poz.toLocaleUpperCase('tr-TR')}`, stil: pozisyonRengi(poz).rozet }
+                        : { metin: `${onEk}POZİSYON GİRİLMEMİŞ`, stil: 'bg-neutral-100 text-neutral-600' };
+                    }
                     if (anahtar.startsWith('arac:')) {
                       const plaka = anahtar.slice(5);
                       return plaka === 'yok'
                         ? { metin: 'İŞE GİTTİ — ARAÇ ATANMAMIŞ', stil: 'bg-neutral-100 text-neutral-600' }
                         : { metin: `EKİP — ${plaka}`, stil: aracRengi(plaka).rozet };
                     }
-                    if (anahtar === 'durum:D') return { metin: 'DEVAMSIZLIK', stil: 'bg-red-100 text-red-700' };
-                    if (anahtar === 'durum:Hİ') return { metin: 'HAFTALIK İZİN', stil: 'bg-blue-100 text-blue-700' };
-                    if (anahtar === 'durum:izin') return { metin: 'DİĞER İZİNLER (Yıllık / Bayram / Ücretsiz / Raporlu)', stil: 'bg-purple-100 text-purple-700' };
-                    return { metin: 'DURUMU GİRİLMEMİŞ', stil: 'bg-neutral-100 text-neutral-500' };
+                    if (anahtar === 'durum:D') return { metin: `${onEk}DEVAMSIZLIK`, stil: 'bg-red-100 text-red-700' };
+                    if (anahtar === 'durum:Hİ') return { metin: `${onEk}HAFTALIK İZİN`, stil: 'bg-blue-100 text-blue-700' };
+                    if (anahtar === 'durum:izin') return { metin: `${onEk}DİĞER İZİNLER (Yıllık / Bayram / Ücretsiz / Raporlu)`, stil: 'bg-purple-100 text-purple-700' };
+                    return { metin: `${onEk}DURUMU GİRİLMEMİŞ`, stil: 'bg-neutral-100 text-neutral-500' };
                   };
                   let oncekiBlok = null;
 
@@ -17930,8 +18175,18 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                           className="text-left group"
                           title="Personel profilini aç"
                         >
-                          {/* İsim rengi, gittiği aracın rengiyle AYNI — aynı ekip aynı renk */}
+                          {/* ============================================================
+                              İSİM RENGİ — YAKAYA GÖRE FARKLI KAYNAK
+                              • MAVİ YAKA : gittiği ARACIN rengi (aynı ekip aynı renk)
+                              • BEYAZ YAKA: POZİSYONUN rengi (aynı pozisyon aynı renk)
+                              Kullanıcı kuralı: "Pozisyon içinde renklendirme yapalım."
+                              ============================================================ */}
                           {(() => {
+                            const beyaz = g.collarType !== 'Mavi Yaka';
+                            if (beyaz) {
+                              const renk = g.position ? pozisyonRengi(g.position).yazi : 'text-black';
+                              return <span className={`text-xs font-black ${renk} group-hover:underline transition`}>{g.personnelName}</span>;
+                            }
                             const pl = personelAraci(g.personnelId, g.dateStr).plakalar[0];
                             const renk = pl ? aracRengi(pl).yazi : 'text-black';
                             return <span className={`text-xs font-black ${renk} group-hover:underline transition`}>{g.personnelName}</span>;
@@ -17996,6 +18251,24 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                       {/* İŞE GİTTİ / ARAÇ: plaka, ekip rengiyle */}
                       <td className="py-2.5 pr-3">
                         {(() => {
+                          // ============================================================
+                          // YENİ: BEYAZ YAKADA BU SÜTUNDA POZİSYON YAZAR
+                          // Kullanıcı kuralı: "İşe Gitti / Araç sütununda onlarda
+                          // pozisyonları yazsın." Beyaz yaka sahaya araçla çıkmadığı
+                          // için plaka yerine pozisyon rozeti gösterilir; rozet rengi
+                          // pozisyonun sabit rengidir.
+                          // ============================================================
+                          if (g.collarType !== 'Mavi Yaka') {
+                            if (!g.position) {
+                              return <span className="text-[10px] font-bold text-neutral-300 whitespace-nowrap">Pozisyon girilmemiş</span>;
+                            }
+                            return (
+                              <span className={`text-[10px] font-black px-2 py-0.5 rounded-lg border whitespace-nowrap inline-flex items-center gap-1 ${pozisyonRengi(g.position).rozet}`}
+                                    title={`${g.personnelName} — ${g.position} (Beyaz Yaka)`}>
+                                <Briefcase className="w-3 h-3" /> {g.position}
+                              </span>
+                            );
+                          }
                           const bilgi = personelAraci(g.personnelId, g.dateStr);
                           if (bilgi.plakalar.length === 0) {
                             return <span className="text-[10px] font-bold text-neutral-300 whitespace-nowrap">İşe gitmedi</span>;
