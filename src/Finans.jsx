@@ -128,7 +128,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const primTL = (maas / 200) * prim;                   // primin TL karşılığı (raporda ayrı gösterilir)
       const mesaiUcreti = mesaiUcretiToplam - primTL;       // primden arındırılmış saf mesai ücreti
       const netMaas = (maas / 30) * mesaiGunSayisi;
-      const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcretiToplam;
+      // YENİ: HASAR KESİNTİSİ — Maaş Tablosu'nun priminden otomatik kestiği
+      // hasar borcu payı. Rapor tarafında da Kalan Nakit ve Personele Ödenecek
+      // tutarlardan düşülür ki iki ekran birbirini tutsun. Prim TL'sinden
+      // büyük olamaz (Maaş Tablosu'ndaki effect bunu garanti eder; yine de
+      // güvenlik için burada da sınırlanır).
+      const hasarKesinti = Math.min(parseFloat(row.hasarKesinti) || 0, primTL);
+      const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcretiToplam - hasarKesinti;
 
       // ====================================================================
       // YENİ: SİGORTA MALİYETİ
@@ -140,7 +146,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const sigortaMaliyeti = parseFloat(person.sigortaMaliyeti) || 0;
 
       // PERSONELE ÖDENECEK brüt tutar (sigorta hariç — bu para personelin eline/bankasına geçer)
-      const personeleOdenecek = netMaas + mesaiUcretiToplam + yol + yemek;
+      // YENİ: hasar kesintisi düşülür — kesilen prim personele hiç ödenmez
+      const personeleOdenecek = netMaas + mesaiUcretiToplam + yol + yemek - hasarKesinti;
       // TOPLAM İŞVEREN MALİYETİ (sigorta dahil)
       const maliyet = personeleOdenecek + sigortaMaliyeti;
 
@@ -160,7 +167,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const odenenToplam = odenen + toplamAvans;       // fiilen personele geçen toplam para
       const kalan = personeleOdenecek - odenenToplam;   // hâlâ ödenmesi gereken (eksi olabilir = fazla ödeme)
 
-      return { netMaas, mesaiUcreti, primTL, yol, yemek, nakitAvans, resmiAvans, toplamAvans, icraKesintisi, hesaplananBanka, bankaKalan, kalanNakit, sigortaMaliyeti, personeleOdenecek, maliyet, odenen, odenenToplam, kalan };
+      return { netMaas, mesaiUcreti, primTL, hasarKesinti, yol, yemek, nakitAvans, resmiAvans, toplamAvans, icraKesintisi, hesaplananBanka, bankaKalan, kalanNakit, sigortaMaliyeti, personeleOdenecek, maliyet, odenen, odenenToplam, kalan };
     };
 
     // ------------------------------------------------------------------
@@ -2707,7 +2714,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                           onClick={() => { if (duzenlenebilir) setPrimDuzenlenenId(person.id); }}
                           className={`w-full h-6 flex items-center justify-center text-[10px] font-bold text-green-700 rounded ${duzenlenebilir ? 'cursor-pointer hover:bg-green-50' : ''}`}
                           title={duzenlenebilir ? `Girilen prim: ${c.prim} saat — değiştirmek için tıklayın` : `Girilen prim: ${c.prim} saat`}>
-                          {c.primTL.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}
+                          {/* YENİ: Hasar kesintisi varsa NET prim gösterilir; kesilen
+                              tutar kırmızı olarak yanında belirtilir. Kesinti yoksa
+                              görünüm eskisiyle birebir aynıdır. */}
+                          {c.hasarKesinti > 0 ? (
+                            <span className="flex flex-col leading-tight items-center">
+                              <span>{c.primTLNet.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
+                              <span className="text-[8px] text-red-600 font-black" title={`Hasar kesintisi: ₺${c.hasarKesinti.toLocaleString('tr-TR')}`}>-{c.hasarKesinti.toLocaleString('tr-TR', { maximumFractionDigits: 2 })} hasar</span>
+                            </span>
+                          ) : (
+                            c.primTL.toLocaleString('tr-TR', { maximumFractionDigits: 2 })
+                          )}
                         </div>
                       )}
                     </td>
@@ -2906,6 +2923,87 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // kalemler deftere gider.
     const sonSenkronRef = useRef({});
 
+    // ========================================================================
+    // YENİ: HASAR BORCU -> PRİMDEN OTOMATİK KESİNTİ
+    // ========================================================================
+    // KURALLAR (kullanıcı talebi):
+    //  • Kesinti YALNIZCA primden yapılır; maaş, yol, yemek, banka asla etkilenmez.
+    //  • Prim eksiye düşmez: kesinti = min(o ayki prim TL, kalan hasar borcu).
+    //  • O ay prim yoksa kesinti 0 olur; borç SONRAKİ aylara aynen devreder.
+    //  • Prim borçtan büyükse borç tamamen kapanır, primin kalanı personele kalır.
+    //
+    // NASIL ÇALIŞIR (kendi kendini düzelten hesap):
+    //  Personel kartındaki hasarBorcuKalan, KAYITLI TÜM kesintiler düşülmüş
+    //  kalan borçtur. Bu ayın primi değiştiğinde önce bu ayın eski kesintisi
+    //  geri eklenir (borcOncesi), sonra yeni prim üzerinden kesinti YENİDEN
+    //  hesaplanır. Böylece prim artarsa kesinti otomatik büyür, azalırsa
+    //  küçülür; işlem kaç kez çalışırsa çalışsın sonuç aynı kalır (idempotent).
+    //
+    //  Kesinti maaş satırına (row.hasarKesinti) yazılır -> calcRow bunu
+    //  Kalan Nakit'ten düşer. Personelin hareket akışına ayda TEK kayıt düşülür
+    //  (sabit belge kimliği ile üzerine yazılır, tuş başına kayıt ÜREMEZ).
+    // ========================================================================
+    const hasarSenkronRef = useRef({});
+    useEffect(() => { hasarSenkronRef.current = {}; }, [currentYear, currentMonth, docPrefix]);
+
+    useEffect(() => {
+      if (!isDataLoaded) return;
+      const timeoutId = setTimeout(async () => {
+        for (const person of targetPersonnelList) {
+          const row = maasData[person.id] || {};
+          const eskiKesinti = parseFloat(row.hasarKesinti) || 0;
+          const kalanBorc = parseFloat(person.hasarBorcuKalan) || 0;
+          if (kalanBorc <= 0 && eskiKesinti <= 0) continue; // Borcu olmayan atlanır
+
+          // Bu ayın etkisi geri alınmış borç (yeniden hesap için taban)
+          const borcOncesi = Math.round((kalanBorc + eskiKesinti) * 100) / 100;
+
+          // O ayki prim TL — calcRow ile AYNI formül: (maaş / 200) * prim saati
+          const c = calcRow(person.id);
+          const yeniKesinti = Math.round(Math.min(c.primTL, borcOncesi) * 100) / 100;
+
+          if (Math.abs(yeniKesinti - eskiKesinti) < 0.01) continue; // Değişiklik yoksa dokunma
+
+          // Aynı değeri arka arkaya yazmayı önle (personnelList prop'u
+          // güncellenince effect yeniden koşar; bu bekçi döngüyü keser)
+          const bekciAnahtari = `${docPrefix}${currentYear}_${currentMonth}_${person.id}`;
+          if (hasarSenkronRef.current[bekciAnahtari] === yeniKesinti) continue;
+          hasarSenkronRef.current[bekciAnahtari] = yeniKesinti;
+
+          try {
+            // 1) Maaş satırına yaz (autosave 'maas' dokümanına kaydeder)
+            setMaasData(prev => ({ ...prev, [person.id]: { ...(prev[person.id] || {}), hasarKesinti: yeniKesinti } }));
+
+            // 2) Personel kartındaki kalan borcu güncelle
+            const yeniKalan = Math.round((borcOncesi - yeniKesinti) * 100) / 100;
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(person.id)), {
+              hasarBorcuKalan: yeniKalan
+            });
+
+            // 3) Hareket akışına AYDA TEK kayıt (sabit kimlik -> üzerine yazar)
+            const actionRef = doc(db, 'artifacts', appId, 'public', 'data', 'personnelActions', `hasarkesinti_${docPrefix}${currentYear}_${currentMonth}_${person.id}`);
+            if (yeniKesinti > 0) {
+              await setDoc(actionRef, {
+                personnelId: String(person.id),
+                type: 'hasarKesinti',
+                title: 'Hasar Kesintisi (Primden)',
+                amount: yeniKesinti,
+                month: `${currentYear}-${String(currentMonth).padStart(2, '0')}`,
+                note: `Priminden ₺${yeniKesinti.toLocaleString('tr-TR')} hasar borcu düşüldü. Kalan borç: ₺${yeniKalan.toLocaleString('tr-TR')}.`,
+                date: new Date().toISOString().split('T')[0],
+                createdAt: new Date().toISOString()
+              });
+            } else {
+              // Kesinti 0'a düştüyse (prim silindiyse) o ayın kaydı da kaldırılır
+              await deleteDoc(actionRef).catch(() => {});
+            }
+          } catch (err) { console.error('Hasar kesintisi yazılamadı:', person.id, err); }
+        }
+      }, 1500); // Prim yazımı bitene kadar bekle (defter entegrasyonuyla aynı süre)
+      return () => clearTimeout(timeoutId);
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [maasData, isDataLoaded, personnelList]);
+
     // Ay/yıl değiştiğinde hafıza sıfırlanır. Aksi halde önceki aya ait
     // tutarlar "değişmedi" sanılır ve yeni ayın kalemleri deftere yazılmaz.
     useEffect(() => { sonSenkronRef.current = {}; }, [currentYear, currentMonth, docPrefix]);
@@ -3087,18 +3185,31 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const primTL = (maas / 200) * prim;
       const mesaiUcretiSaf = mesaiUcreti - primTL;
 
+      // ====================================================================
+      // YENİ: HASAR KESİNTİSİ (yalnızca PRİMDEN, asla maaştan)
+      // ====================================================================
+      // row.hasarKesinti: bu ay personelin priminden kesilen hasar borcu (TL).
+      // Bu değer aşağıdaki otomatik effect tarafından yazılır ve HİÇBİR ZAMAN
+      // o ayın prim TL'sinden büyük olamaz (prim eksiye düşmez; saat hesabına
+      // da eksi sokulmaz — toplamSaat/mesaiUcreti formülleri aynen korunur).
+      // primTLNet: kesinti sonrası personelin eline geçecek prim.
+      // ====================================================================
+      const hasarKesinti = Math.min(parseFloat(row.hasarKesinti) || 0, primTL);
+      const primTLNet = primTL - hasarKesinti;
+
       const toplamAvans = nakitAvans + resmiAvans;
       const netMaas = (maas / 30) * mesaiGunSayisi;
       const maliyet = netMaas + mesaiUcreti + yol + yemek;
       
       // Kalan Nakit: (Hak edilen maaş) - Bankaya Yatan Kısım - Nakit Avans + Mesai Ücreti
-      const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcreti;
+      // YENİ: - Hasar Kesintisi (prim nakit ödendiği için kesinti Kalan Nakit'ten düşer)
+      const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcreti - hasarKesinti;
 
       return { 
         nakitAvans, resmiAvans, gunlukSaat, toplamSaat, mesaiGunSayisi, 
         maas, fazlaGunSayisi, devamsizlikSayisi, rapor, ucretsizIzinSayisi, prim, yol, yemek,
         hesaplananBanka, icraKesintisi, bankaKalan,
-        mesaiUcreti, primTL, mesaiUcretiSaf, toplamAvans, netMaas, maliyet, kalanNakit 
+        mesaiUcreti, primTL, mesaiUcretiSaf, hasarKesinti, primTLNet, toplamAvans, netMaas, maliyet, kalanNakit 
       };
     };
 
