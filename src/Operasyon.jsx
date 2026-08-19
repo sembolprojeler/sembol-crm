@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, getDocs, where, orderBy, limit } from 'firebase/firestore';
-import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar,
+import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, normalizePozisyon, belgeListesiNormalize, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar,
   // YENİ: Deneme maaşı alanları — süre seçenekleri ve canlı özet metni.
   // Ayrı dosya yerine shared.jsx içinde tutuluyor; Finans.jsx da aynı
   // kaynaktan gecerliMaas'ı okur, böylece tek doğru kaynak vardır.
@@ -6764,16 +6764,47 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       return uploadedUrl;
     };
 
-    // Maaş tablosundaki (personnelMaas) ilgili aya avans/onay verisini işleyen ortak fonksiyon
+    // ========================================================================
+    // MAAŞ SATIRINA YAZMA — DÜZELTİLDİ (KRİTİK HATA)
+    // ========================================================================
+    // SORUNUN KÖKÜ: Bu fonksiyon 'personnelMaas' adlı bir koleksiyona,
+    // { rows: { personId: {...} } } yapısıyla yazıyordu. Ancak Personel Muhasebe
+    // ekranındaki Maaş Tablosu (Finans.tsx > MaasView) verisini
+    // 'maas' koleksiyonundan ve { records: { personId: {...} } } yapısından okur.
+    // Yani avans girişi HİÇ KİMSENİN OKUMADIĞI bir koleksiyona yazılıyordu;
+    // veri Firebase'e gidiyor ama Hak Ediş Durumu sütunlarında hiç görünmüyordu.
+    //
+    // Doğrusu şudur (Şirkete Borç Ödemesi fonksiyonu zaten böyle çalışıyordu):
+    //   koleksiyon: 'maas'   ·   doküman: {beyaz_}{yıl}_{ay}   ·   alan: records
+    //
+    // ÇAKIŞMA ÖNLEMİ: Yazma sırasında TÜM records nesnesi geri gönderilmez;
+    // yalnızca bu personelin değişen alanları "nokta notasyonu" ile yazılır
+    // (records.{personId}.{alan}). Böylece aynı anda Maaş Tablosu ekranında
+    // başka bir personel üzerinde çalışılıyorsa onun verisi ezilmez.
+    // ========================================================================
     const applyToMaasRow = async (monthStr, patch) => {
       const [y, m] = monthStr.split('-');
-      const maasRef = doc(db, 'artifacts', appId, 'public', 'data', 'personnelMaas', `${maasDocPrefix}${parseInt(y)}_${parseInt(m)}`);
+      const maasRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${maasDocPrefix}${parseInt(y)}_${parseInt(m)}`);
       const snap = await getDoc(maasRef);
-      const data = snap.exists() ? snap.data() : { rows: {} };
-      const rows = data.rows || {};
-      const existingRow = rows[personId] || {};
-      rows[personId] = { ...existingRow, ...patch(existingRow) };
-      await setDoc(maasRef, { rows, updatedAt: new Date().toISOString() }, { merge: true });
+      const records = snap.exists() ? (snap.data().records || {}) : {};
+      const existingRow = records[personId] || {};
+      const degisenAlanlar = patch(existingRow) || {};
+
+      if (!snap.exists()) {
+        // Doküman hiç yoksa (o ay için maaş tablosu hiç açılmamışsa) baştan kurulur
+        await setDoc(maasRef, {
+          records: { [personId]: { ...existingRow, ...degisenAlanlar } },
+          updatedAt: new Date().toISOString()
+        }, { merge: true });
+        return;
+      }
+
+      // Doküman varsa: sadece değişen alanlara nokta notasyonuyla dokunulur
+      const guncelleme = { updatedAt: new Date().toISOString() };
+      Object.entries(degisenAlanlar).forEach(([alan, deger]) => {
+        guncelleme[`records.${personId}.${alan}`] = deger;
+      });
+      await updateDoc(maasRef, guncelleme);
     };
 
     const logAction = async (actionData) => {
@@ -6789,10 +6820,17 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       e.preventDefault();
       if (!avansForm.amount) return;
       const amount = parseFloat(avansForm.amount) || 0;
+      if (amount <= 0) { alert('Lütfen 0’dan büyük bir tutar girin.'); return; }
+      // Nakit Avans -> "NAKİT AV." sütunu (Kalan Nakit'i düşürür)
+      // Resmi Avans -> "RESMİ AV." sütunu (Kalan Banka'yı düşürür)
       const fieldKey = avansForm.type === 'nakit' ? 'nakitAvans' : 'resmiAvans';
       try {
+        // KÜMÜLATİF: Mevcut avans üzerine EKLENİR, üzerine yazılmaz.
+        // Örn. sütunda 15.000 varsa ve 5.000 avans girilirse sonuç 20.000 olur.
+        // String olarak yazılır çünkü Maaş Tablosu'ndaki hücreler metin kutusudur
+        // ve elle girilen değerler de string olarak saklanıyor (tip tutarlılığı).
         await applyToMaasRow(avansForm.month, (row) => ({
-          [fieldKey]: (parseFloat(row[fieldKey]) || 0) + amount
+          [fieldKey]: String((parseFloat(row[fieldKey]) || 0) + amount)
         }));
         await logAction({
           type: 'avans',
@@ -6980,18 +7018,53 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       printPersonnelTemplate(template, tutanakForm);
     };
 
+    // ========================================================================
+    // YENİ ORTAK YARDIMCI: ÖZLÜK DOSYASINA BELGE EKLE
+    // ========================================================================
+    // SORUNUN KÖKÜ (düzeltilen hata):
+    // Eski kod, tutanağı özlük dosyasına `tutanak_1755612345` gibi HER SEFERİNDE
+    // BENZERSİZ bir anahtarla yazıyordu. Ancak Özlük Dosyaları ekranı belgeleri
+    // sabit bir liste (documentTypes) üzerinden okuyor: 'tutanaklar',
+    // 'saglikRaporu', 'kimlik' ... Benzersiz anahtar bu listede olmadığı için
+    // belge Firebase'e yazılıyor ama HİÇBİR KARTTA GÖRÜNMÜYORDU.
+    //
+    // ÇÖZÜM: Belge artık ilgili SABİT belge türünün DİZİSİNE eklenir
+    // ('tutanaklar' / 'saglikRaporu'). Böylece Özlük Dosyaları ekranındaki
+    // ilgili kartta, mevcut belgelerin yanına satır olarak düşer.
+    //
+    // Ayrıca özlük ekranının "Hareketler" bölümüne de kayıt düşülür ki belgenin
+    // kim tarafından, ne zaman eklendiği izlenebilsin.
+    // ========================================================================
+    const ozlukBelgesiEkle = async (docTypeId, belgeAdi, url, tarih) => {
+      if (!url) return; // Yüklenmiş dosya yoksa özlüğe eklenecek bir şey yok
+      const ozluk = person.ozlukDosyalari || {};
+      // Mevcut liste normalize edilir (dizi / metin / tek nesne biçimleri)
+      const mevcut = belgeListesiNormalize(ozluk[docTypeId]);
+      const yeniListe = [...mevcut, { url, name: belgeAdi, date: tarih || new Date().toISOString() }];
+
+      // Hareket kaydı — özlük ekranındaki "Hareketler" listesiyle aynı yapıda
+      const hareket = {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        tip: 'ekleme',
+        belgeAdi,
+        url,
+        tarih: new Date().toISOString(),
+        kullanici: currentUser?.fullName || 'Sistem',
+      };
+
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(personId)), {
+        ozlukDosyalari: { ...ozluk, [docTypeId]: yeniListe },
+        ozlukGecmisi: [...(person.ozlukGecmisi || []), hareket]
+      });
+    };
+
     const handleTutanakSubmit = async (e) => {
       e.preventDefault();
       if (!tutanakForm.title) return;
       try {
-        // Özlük dosyasına otomatik ekle
-        if (tutanakForm.fileUrl) {
-          const ozluk = person.ozlukDosyalari || {};
-          const key = `tutanak_${Date.now()}`;
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(personId)), {
-            ozlukDosyalari: { ...ozluk, [key]: { name: `Tutanak: ${tutanakForm.title}`, url: tutanakForm.fileUrl, date: tutanakForm.date } }
-          });
-        }
+        // DEĞİŞTİ: Artık 'tutanaklar' belge türünün dizisine ekleniyor.
+        // ESKİ HALİ: ozlukDosyalari[`tutanak_${Date.now()}`] = { ... }  -> görünmüyordu
+        await ozlukBelgesiEkle('tutanaklar', `Tutanak: ${tutanakForm.title}`, tutanakForm.fileUrl, tutanakForm.date);
         await logAction({ type: 'tutanak', title: tutanakForm.title, date: tutanakForm.date, note: tutanakForm.note, fileUrl: tutanakForm.fileUrl });
         if (addSystemLog) addSystemLog('Personel Tutanağı', `${person.fullName} için "${tutanakForm.title}" tutanağı eklendi.`);
         setTutanakForm({ title: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
@@ -7003,13 +7076,11 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     const handleRaporSubmit = async (e) => {
       e.preventDefault();
       try {
-        if (raporForm.fileUrl) {
-          const ozluk = person.ozlukDosyalari || {};
-          const key = `rapor_${Date.now()}`;
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(personId)), {
-            ozlukDosyalari: { ...ozluk, [key]: { name: `Sağlık Raporu (${raporForm.startDate})`, url: raporForm.fileUrl, date: raporForm.startDate } }
-          });
-        }
+        // DEĞİŞTİ: Tutanakla AYNI hata burada da vardı — rapor
+        // `rapor_${Date.now()}` benzersiz anahtarıyla yazıldığı için Özlük
+        // Dosyaları > "Sağlık Raporu" kartında görünmüyordu. Artık 'saglikRaporu'
+        // belge türünün dizisine eklenir.
+        await ozlukBelgesiEkle('saglikRaporu', `Sağlık Raporu (${raporForm.startDate})`, raporForm.fileUrl, raporForm.startDate);
         await logAction({ type: 'rapor', title: 'Sağlık Raporu', startDate: raporForm.startDate, endDate: raporForm.endDate, note: raporForm.note, fileUrl: raporForm.fileUrl, date: raporForm.startDate });
         if (addSystemLog) addSystemLog('Personel Sağlık Raporu', `${person.fullName} için sağlık raporu eklendi (${raporForm.startDate} - ${raporForm.endDate}).`);
         setRaporForm({ startDate: new Date().toISOString().split('T')[0], endDate: new Date().toISOString().split('T')[0], note: '', fileUrl: '' });
@@ -8704,6 +8775,85 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     const [showExtraForm, setShowExtraForm] = useState(false);
     const [extraLabel, setExtraLabel] = useState('');
 
+    // ========================================================================
+    // YENİ: KAYIP BELGE KURTARMA (tek seferlik, otomatik)
+    // ========================================================================
+    // GEÇMİŞTEKİ HATA: Personel profilinden eklenen tutanak ve sağlık raporları
+    // özlük dosyasına `tutanak_1755612345` / `rapor_1755612345` gibi BENZERSİZ
+    // anahtarlarla yazılıyordu. Özlük Dosyaları ekranı ise belgeleri yalnızca
+    // sabit türler üzerinden okuduğu için (documentTypes) bu belgeler
+    // veritabanında DURUYOR ama ekranda HİÇBİR YERDE GÖRÜNMÜYORDU.
+    //
+    // BU EFEKT NE YAPAR: Bir personelin özlük dosyası açıldığında eski biçimli
+    // anahtar var mı diye bakar; varsa içeriği doğru belge türünün dizisine
+    // ('tutanaklar' / 'saglikRaporu') TAŞIR ve eski anahtarı siler.
+    //
+    // GÜVENLİK: Hiçbir dosya silinmez, yalnızca yer değiştirir. İşlem
+    // idempotenttir — taşınacak anahtar kalmadığında hiçbir yazma yapmaz, yani
+    // ikinci açılışta tekrar çalışmaz. Her taşıma "Hareketler" bölümüne iz olarak
+    // düşer, böylece ne olduğu geriye dönük görülebilir.
+    //
+    // Yeni eklenen tutanak/raporlar ARTIK doğru anahtarla yazıldığı için bu efekt
+    // yalnızca ESKİ kayıtlar için çalışır ve zamanla kendiliğinden gereksizleşir.
+    // ========================================================================
+    useEffect(() => {
+      if (!selectedPerson?.id) return;
+      const ozluk = selectedPerson.ozlukDosyalari || {};
+
+      // Eski biçimli anahtarları bul: tutanak_... / rapor_...
+      const eskiAnahtarlar = Object.keys(ozluk).filter(k => /^(tutanak|rapor)_\d+$/.test(k));
+      if (eskiAnahtarlar.length === 0) return; // Taşınacak bir şey yok, çık
+
+      let iptal = false;
+      (async () => {
+        const yeniOzluk = { ...ozluk };
+        const yeniHareketler = [];
+
+        eskiAnahtarlar.forEach(anahtar => {
+          // Hedef belge türü: tutanak_ -> 'tutanaklar', rapor_ -> 'saglikRaporu'
+          const hedef = anahtar.startsWith('tutanak_') ? 'tutanaklar' : 'saglikRaporu';
+          const belgeler = belgeListesiNormalize(ozluk[anahtar]);
+          if (belgeler.length === 0) { delete yeniOzluk[anahtar]; return; } // Boş/bozuk kayıt: sadece temizle
+
+          const mevcut = belgeListesiNormalize(yeniOzluk[hedef]);
+          // AYNI URL zaten hedefte varsa tekrar eklemez (kopya oluşmaz)
+          const eklenecek = belgeler.filter(b => b?.url && !mevcut.some(m => m?.url === b.url));
+          yeniOzluk[hedef] = [...mevcut, ...eklenecek];
+          delete yeniOzluk[anahtar]; // Eski anahtar kaldırılır
+
+          eklenecek.forEach(b => yeniHareketler.push({
+            id: `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            tip: 'ekleme',
+            belgeAdi: b.name || (hedef === 'tutanaklar' ? 'Tutanak (eski kayıttan taşındı)' : 'Sağlık Raporu (eski kayıttan taşındı)'),
+            url: b.url,
+            tarih: new Date().toISOString(),
+            kullanici: 'Sistem (otomatik taşıma)',
+          }));
+        });
+
+        try {
+          const yeniGecmis = [...(selectedPerson.ozlukGecmisi || []), ...yeniHareketler];
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', selectedPerson.id), {
+            ozlukDosyalari: yeniOzluk,
+            ozlukGecmisi: yeniGecmis
+          });
+          if (iptal) return;
+          // Ekrandaki kopyayı da güncelle ki taşınan belgeler anında görünsün
+          setSelectedPerson(prev => prev && prev.id === selectedPerson.id
+            ? { ...prev, ozlukDosyalari: yeniOzluk, ozlukGecmisi: yeniGecmis }
+            : prev);
+          if (addSystemLog && yeniHareketler.length > 0) {
+            addSystemLog('Özlük Belge Taşıma', `${selectedPerson.fullName}: eski biçimde kaydedilmiş ${yeniHareketler.length} belge doğru klasöre taşındı.`);
+          }
+        } catch (err) {
+          // Hata olursa sessiz geçilir; belge kaybolmaz, eski anahtarda kalır
+          console.error('Eski özlük belgeleri taşınamadı:', err);
+        }
+      })();
+      return () => { iptal = true; }; // Personel değişirse state güncellemesi yapılmaz
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [selectedPerson?.id, selectedPerson?.ozlukDosyalari]);
+
     const filteredList = personnelList.filter(p => {
       // UZAKTAN çalışanların özlük dosyası tutulmaz
       if (isUzaktanCalisan(p)) return false;
@@ -8749,22 +8899,14 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     const belgeAdiBul = (docTypeId) => (documentTypes.find(d => d.id === docTypeId)?.label) || docTypeId;
 
     // ======================================================================
-    // YENİ: ÇOKLU BELGE DESTEĞİ
-    // Eskiden her belge türünde TEK bir dosya URL'si tutuluyordu (string).
-    // Artık aynı belge türüne birden fazla dosya eklenebilir; bunlar dizi
-    // olarak saklanır: [{ url, name, date }, ...]
-    // GERİYE DÖNÜK UYUM: Eski kayıtlar string ("https://...") veya tek nesne
-    // ({ url, name, date } — tutanak/rapor/çıkış belgesi gibi) olabilir.
-    // belgeListesiNormalize bu üç biçimi de tek bir diziye çevirir; hiçbir
-    // eski veri kaybolmaz veya bozulmaz.
+    // ÇOKLU BELGE DESTEĞİ
+    // belgeListesiNormalize artık shared.tsx'ten geliyor (dosyanın en üstünde
+    // import edilmiş). Buradaki YEREL kopya kaldırıldı; sebebi, personel
+    // profilindeki tutanak/rapor ekleme akışının da aynı mantığa ihtiyaç
+    // duyması. İki yerde aynı fonksiyonun iki kopyası olması, birinde yapılan
+    // düzeltmenin diğerine yansımaması riskini taşıyordu.
+    // Desteklenen üç biçim (dizi / metin / tek nesne) aynen korundu.
     // ======================================================================
-    const belgeListesiNormalize = (val) => {
-      if (!val) return [];
-      if (Array.isArray(val)) return val;
-      if (typeof val === 'string') return [{ url: val, name: null, date: null }];
-      if (typeof val === 'object' && val.url) return [val];
-      return [];
-    };
 
     // YENİ: Artık BİRDEN FAZLA dosya seçilebilir (MediaCaptureMenu'ye multiple=true verildi).
     // Her dosya sırayla yüklenir ve mevcut belge listesine EKLENİR (üzerine yazmaz).
@@ -17904,7 +18046,12 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                         anahtar,
                         personnelId: k.personnelId,
                         personnelName: k.personnelName,
-                        position: k.position,
+                        // DÜZELTME: Pozisyon adı normalize edilir. Eski/hatalı yazılmış
+                        // pozisyonlar (ör. "Satış Destek") geçerli karşılığına
+                        // ("Satış Personeli") çevrilir; kataloğa uyan adlar aynen kalır.
+                        // Kayıt anındaki pozisyon eski adla yazılmış olabileceği için
+                        // burada da uygulanır.
+                        position: normalizePozisyon(k.position),
                         collarType: k.collarType,
                         dateStr: k.dateStr,
                         giris: null,
@@ -17944,7 +18091,11 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                           anahtar,
                           personnelId: String(pp.id),
                           personnelName: pp.fullName,
-                          position: pp.position,
+                          // DÜZELTME: Personel kartındaki pozisyon adı da normalize edilir.
+                          // Böylece hem satır alt metni, hem "İşe Gitti / Araç" sütunundaki
+                          // pozisyon rozeti, hem de blok başlığı ("BEYAZ YAKA • ...") aynı
+                          // düzeltilmiş adı gösterir ve tek bir grupta toplanır.
+                          position: normalizePozisyon(pp.position),
                           collarType: mesaiYakaTipi(pp),
                           dateStr: tarih,
                           giris: null,
