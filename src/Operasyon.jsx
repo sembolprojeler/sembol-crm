@@ -5530,6 +5530,19 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     // Personelin güncel borcu (maas_yearly dokümanındaki borclanma alanından okunur)
     const [currentDebt, setCurrentDebt] = useState(0);
 
+    // ========================================================================
+    // YENİ: HASAR BORCU TAKİBİ
+    // Değerler doğrudan personel kartından okunur (App.tsx hasar çözümünde
+    // yazar, Finans.tsx Maaş Tablosu primden kestikçe kalanı azaltır):
+    //   hasarToplam -> bugüne kadar yazılan toplam hasar payı
+    //   hasarKalan  -> henüz primlerden kesilmemiş kalan borç
+    //   hasarOdenen -> primlerden kesilerek kapatılmış kısım (toplam - kalan)
+    // ========================================================================
+    const [showHasarModal, setShowHasarModal] = useState(false);
+    const hasarToplam = parseFloat(person?.hasarBorcuToplam) || 0;
+    const hasarKalan = parseFloat(person?.hasarBorcuKalan) || 0;
+    const hasarOdenen = Math.max(0, Math.round((hasarToplam - hasarKalan) * 100) / 100);
+
     // YENİ: Prim Ödeme Gir — Maaş Tablosu'ndaki prim (fazla mesai saati) alanına saat veya tutar girişi
     const [showPrimModal, setShowPrimModal] = useState(false);
     const [primForm, setPrimForm] = useState({ mode: 'tutar', value: '', month: nowMonth, note: '' });
@@ -7245,6 +7258,19 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
             <button type="button" onClick={() => { setPrimForm({ mode: 'tutar', value: '', month: nowMonth, note: '' }); setShowPrimModal(true); }} className="p-3 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-xl transition flex flex-col items-center justify-center gap-1.5 min-h-[84px]">
               <Star className="w-5 h-5" /> Prim Ödeme Gir
             </button>
+            {/* ================================================================
+                YENİ: HASAR BORCU TAKİBİ
+                Hasarlı iş kapatılırken girilen maliyetin bu personele düşen
+                payı burada izlenir. Rozet KALAN borcu gösterir; primlerden
+                yapılan kesintilerle borç eridiğinde otomatik "Borç Yok" olur.
+                Tıklanınca toplam / ödenen / kalan dökümü açılır.
+                ================================================================ */}
+            <button type="button" onClick={() => setShowHasarModal(true)} className="p-3 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-xl transition flex flex-col items-center justify-center gap-1.5 relative min-h-[84px]">
+              <AlertTriangle className="w-5 h-5" /> Hasar Borcu Takibi
+              <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${hasarKalan > 0 ? 'bg-orange-600 text-white' : 'bg-green-100 text-green-700'}`}>
+                {hasarKalan > 0 ? `Kalan Borç: ₺${hasarKalan.toLocaleString('tr-TR')}` : 'Borç Yok'}
+              </span>
+            </button>
             {/* YENİ: PERSONEL GİRİŞ BELGELERİ — otomatik doldurulan evrakları oluştur/yazdır + yükle */}
             <div className="relative">
               <button type="button" onClick={() => setBelgeMenuOpen(belgeMenuOpen === 'giris' ? '' : 'giris')} className={`w-full p-3 bg-green-50 hover:bg-green-100 text-green-700 text-xs font-bold rounded-xl transition flex flex-col items-center justify-center gap-1.5 min-h-[84px] ${belgeUploading === 'giris' ? 'opacity-60 pointer-events-none' : ''}`}>
@@ -7480,7 +7506,10 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                       onay: { bg: 'bg-green-50 border-green-200', badge: 'bg-green-600', icon: <CheckCircle className="w-4 h-4 text-white" /> },
                       tutanak: { bg: 'bg-neutral-50 border-neutral-200', badge: 'bg-neutral-700', icon: <FileText className="w-4 h-4 text-white" /> },
                       rapor: { bg: 'bg-red-50 border-red-200', badge: 'bg-red-600', icon: <PlusCircle className="w-4 h-4 text-white" /> },
-                      borcOdeme: { bg: 'bg-rose-50 border-rose-200', badge: 'bg-rose-600', icon: <Landmark className="w-4 h-4 text-white" /> }
+                      borcOdeme: { bg: 'bg-rose-50 border-rose-200', badge: 'bg-rose-600', icon: <Landmark className="w-4 h-4 text-white" /> },
+                      // YENİ: Hasar hareketleri — borç yazımı ve primden kesinti
+                      hasarBorcu: { bg: 'bg-orange-50 border-orange-200', badge: 'bg-orange-600', icon: <AlertTriangle className="w-4 h-4 text-white" /> },
+                      hasarKesinti: { bg: 'bg-orange-50 border-orange-200', badge: 'bg-orange-500', icon: <AlertTriangle className="w-4 h-4 text-white" /> }
                     };
                     const st = typeStyles[h.type] || typeStyles.tutanak;
                     return (
@@ -8669,6 +8698,56 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                 </div>
                 <button type="submit" disabled={actionUploading} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition disabled:opacity-50">Raporu Kaydet</button>
               </form>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================
+            YENİ: HASAR BORCU TAKİBİ MODALI (salt bilgi)
+            Toplam yazılan hasar payı, primlerden kesilerek ÖDENEN kısım ve
+            KALAN borç gösterilir. Kesinti işlemi otomatik olduğu için burada
+            giriş alanı yoktur; hareket dökümü "Personel Hareket İşlemleri"
+            akışında (Hasar Borcu Eklendi / Hasar Kesintisi kayıtları) izlenir.
+            ================================================================== */}
+        {showHasarModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-orange-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><AlertTriangle className="w-5 h-5" /> Hasar Borcu Takibi</h3>
+                <button onClick={() => setShowHasarModal(false)} className="text-orange-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <div className="p-6 space-y-4">
+                {/* Üçlü özet: Toplam / Ödenen / Kalan */}
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-3 rounded-xl border-2 bg-neutral-50 border-neutral-200">
+                    <span className="text-[9px] font-bold uppercase tracking-wider block mb-1 text-neutral-500">Toplam Hasar</span>
+                    <span className="text-sm font-black text-neutral-800">₺{hasarToplam.toLocaleString('tr-TR')}</span>
+                  </div>
+                  <div className="p-3 rounded-xl border-2 bg-green-50 border-green-200">
+                    <span className="text-[9px] font-bold uppercase tracking-wider block mb-1 text-green-600">Primden Ödenen</span>
+                    <span className="text-sm font-black text-green-700">₺{hasarOdenen.toLocaleString('tr-TR')}</span>
+                  </div>
+                  <div className={`p-3 rounded-xl border-2 ${hasarKalan > 0 ? 'bg-orange-50 border-orange-200' : 'bg-green-50 border-green-200'}`}>
+                    <span className={`text-[9px] font-bold uppercase tracking-wider block mb-1 ${hasarKalan > 0 ? 'text-orange-600' : 'text-green-600'}`}>Kalan Borç</span>
+                    <span className={`text-sm font-black ${hasarKalan > 0 ? 'text-orange-700' : 'text-green-700'}`}>₺{hasarKalan.toLocaleString('tr-TR')}</span>
+                  </div>
+                </div>
+                {/* Seçili aydaki kesinti (profildeki finans ayı seçimine göre) */}
+                {(parseFloat(financeMonthRow?.hasarKesinti) || 0) > 0 && (
+                  <p className="text-xs text-orange-700 font-bold bg-orange-50 p-3 rounded-xl border border-orange-200 text-center">
+                    Seçili ayda priminden kesilen: ₺{(parseFloat(financeMonthRow.hasarKesinti) || 0).toLocaleString('tr-TR')}
+                  </p>
+                )}
+                <p className="text-[11px] text-neutral-500 font-medium leading-relaxed bg-neutral-50 p-3 rounded-xl border border-neutral-200">
+                  Hasar borcu <b>asla maaştan kesilmez</b>; yalnızca prim hak edilen aylarda o ayın prim tutarından otomatik düşülür. Prim borçtan azsa prim sıfırlanır, kalan borç sonraki aya devreder. Tüm hareketler aşağıdaki "Personel Hareket İşlemleri" akışında listelenir.
+                </p>
+                {hasarKalan <= 0 && hasarToplam > 0 && (
+                  <p className="text-sm text-green-700 font-bold text-center bg-green-50 p-3 rounded-xl border border-green-200">Tüm hasar borcu primlerden kesilerek kapatıldı. 🎉</p>
+                )}
+                {hasarToplam === 0 && (
+                  <p className="text-sm text-neutral-500 font-medium text-center">Bu personele yazılmış bir hasar borcu bulunmuyor.</p>
+                )}
+              </div>
             </div>
           </div>
         )}
