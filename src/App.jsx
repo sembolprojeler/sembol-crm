@@ -4948,6 +4948,19 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       const job = jobs.find(j => j.id === resolveDamageModal.jobId);
       if (!job) return;
 
+      // DEĞİŞTİ: HASAR TUTARI ZORUNLU. Boş bırakılarak kayıt yapılamaz;
+      // masrafsız çözümlerde 0 girilmelidir (0 geçerlidir, borç yazılmaz).
+      // Buton zaten boşken kilitli, ama fonksiyon seviyesinde de denetlenir.
+      if (String(resolveDamageModal.cost).trim() === '') {
+        alert('Hasar Tutarı zorunludur. Maliyetsiz çözüm olduysa 0 girebilirsiniz.');
+        return;
+      }
+      const girilenTutar = parseFloat(resolveDamageModal.cost);
+      if (isNaN(girilenTutar) || girilenTutar < 0) {
+        alert('Hasar Tutarı 0 veya daha büyük bir sayı olmalıdır.');
+        return;
+      }
+
       // ======================================================================
       // YENİ: HASAR TUTARI -> EKİBE EŞİT BÖLÜNEREK "HASAR BORCU" YAZILIR
       // ======================================================================
@@ -8887,12 +8900,21 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     <label className="block text-sm font-bold text-black mb-2">Çözüm Notu / Açıklama</label>
                     <textarea required value={resolveDamageModal.note} onChange={e => setResolveDamageModal({...resolveDamageModal, note: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none h-24 resize-none transition text-sm" placeholder="Sorun nasıl çözüldü? Müşteri ile nasıl anlaşıldı? (Örn: Tamir masrafı karşılandı.)"></textarea>
                   </div>
-                  {/* YENİ: HASAR TUTARI — hasarın şirkete maliyeti. Girilirse işe giden
-                      ekibe eşit bölünür ve her kişiye PRİMDEN kesilecek hasar borcu
-                      yazılır (maaşa asla dokunulmaz). Boş/0 bırakılırsa borç yazılmaz. */}
+                  {/* DEĞİŞTİ: HASAR TUTARI ARTIK ZORUNLU.
+                      • Boş bırakılamaz; masrafsız çözümler için 0 girilir.
+                      • Kutu, dikkat çekmesi için turuncu temalıdır.
+                      • 0'dan büyük tutar girilince kutu ve "Çözüldü Olarak
+                        Kaydet" butonu KIRMIZIYA döner — ekibe borç yazılacağı
+                        bir bakışta anlaşılır. */}
                   <div>
-                    <label className="block text-sm font-bold text-black mb-2">Hasar Tutarı / Maliyet (₺) <span className="font-medium text-neutral-400">— isteğe bağlı</span></label>
-                    <input type="number" min="0" step="0.01" value={resolveDamageModal.cost} onChange={e => setResolveDamageModal({...resolveDamageModal, cost: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-green-500 outline-none transition text-sm" placeholder="Örn: 10000" />
+                    <label className="block text-sm font-bold text-black mb-2">Hasar Tutarı / Maliyet (₺) <span className="font-black text-red-600">*</span> <span className="font-medium text-neutral-400">— zorunlu</span></label>
+                    <input type="number" required min="0" step="0.01" value={resolveDamageModal.cost} onChange={e => setResolveDamageModal({...resolveDamageModal, cost: e.target.value})}
+                      className={`w-full p-3 border-2 rounded-xl outline-none transition text-sm font-bold ${(parseFloat(resolveDamageModal.cost) || 0) > 0
+                        ? 'bg-red-50 border-red-400 text-red-700 focus:ring-2 focus:ring-red-500'
+                        : 'bg-orange-50 border-orange-300 text-orange-800 focus:ring-2 focus:ring-orange-400'}`}
+                      placeholder="Örn: 10000" />
+                    {/* Açıklama: maliyetsiz çözümde 0 girilebilir */}
+                    <p className="text-[11px] font-medium text-neutral-500 mt-1.5">Maliyetsiz çözüm olduysa <b>0</b> girebilirsiniz — kimseye borç yazılmaz.</p>
                     {(() => {
                       // Canlı önizleme: tutar ve ekip belliyse kişi başı payı göster
                       const j = jobs.find(x => x.id === resolveDamageModal.jobId);
@@ -8901,11 +8923,21 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       if (tutar <= 0) return null;
                       if (ekipSayisi === 0) return <p className="text-[11px] font-bold text-red-600 mt-1.5">Bu işe atanmış ekip bulunamadı — tutar girilse de kimseye borç yazılamaz.</p>;
                       const pay = Math.round((tutar / ekipSayisi) * 100) / 100;
-                      return <p className="text-[11px] font-bold text-amber-700 mt-1.5">İşe giden {ekipSayisi} kişiye eşit bölünür: kişi başı ₺{pay.toLocaleString('tr-TR')} hasar borcu yazılır ve yalnızca PRİMLERİNDEN kesilir.</p>;
+                      return <p className="text-[11px] font-bold text-red-700 mt-1.5">İşe giden {ekipSayisi} kişiye eşit bölünür: kişi başı ₺{pay.toLocaleString('tr-TR')} hasar borcu yazılır ve yalnızca PRİMLERİNDEN kesilir.</p>;
                     })()}
                   </div>
-                  <button type="button" onClick={handleResolveDamageSubmit} className="w-full py-4 bg-green-500 text-white font-black rounded-xl hover:bg-green-600 transition flex justify-center items-center gap-2 shadow-lg mt-2">
-                    <CheckCircle className="w-5 h-5" /> Çözüldü Olarak Kaydet
+                  {/* DEĞİŞTİ: Buton, hasar tutarı 0'dan büyükse KIRMIZI olur (borç
+                      yazılacak uyarısı); 0 veya boşsa eskisi gibi YEŞİL kalır.
+                      Tutar alanı boşsa buton kilitlenir (zorunlu alan). */}
+                  <button type="button" onClick={handleResolveDamageSubmit}
+                    disabled={String(resolveDamageModal.cost).trim() === ''}
+                    className={`w-full py-4 text-white font-black rounded-xl transition flex justify-center items-center gap-2 shadow-lg mt-2 ${String(resolveDamageModal.cost).trim() === ''
+                      ? 'bg-neutral-300 cursor-not-allowed'
+                      : (parseFloat(resolveDamageModal.cost) || 0) > 0
+                        ? 'bg-red-600 hover:bg-red-700'
+                        : 'bg-green-500 hover:bg-green-600'}`}>
+                    <CheckCircle className="w-5 h-5" />
+                    {(parseFloat(resolveDamageModal.cost) || 0) > 0 ? 'Çözüldü Olarak Kaydet (Ekibe Borç Yazılacak)' : 'Çözüldü Olarak Kaydet'}
                   </button>
                 </div>
               </div>
