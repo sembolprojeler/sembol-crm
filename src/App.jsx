@@ -3087,7 +3087,16 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             <p className="text-red-600 text-xs font-bold mt-1 tracking-[0.2em] bg-red-50 px-3 py-1 rounded-full border border-red-100">OPERASYON MERKEZİ</p>
           </div>
           
-          <div  className="p-8 space-y-6">
+          {/* ================================================================
+              DEĞİŞTİ: <div> yerine gerçek <form> kullanılıyor.
+              Sebep: Eskiden giriş yalnızca butona TIKLANARAK yapılabiliyordu;
+              kullanıcı adı/şifre alanlarında Enter tuşu hiçbir şey yapmıyordu.
+              Gerçek form + type="submit" buton sayesinde her iki alanda da
+              Enter'a basmak formu gönderir (tarayıcının doğal davranışı).
+              handleSubmit içindeki e.preventDefault() sayfa yenilenmesini
+              engeller; "required" alan denetimleri de artık çalışır.
+              ================================================================ */}
+          <form onSubmit={handleSubmit} className="p-8 space-y-6">
             {error && (
               <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100">
                 <AlertTriangle className="w-5 h-5 shrink-0" /> {error}
@@ -3137,10 +3146,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               </label>
             </div>
             
-            <button type="button" onClick={handleSubmit} className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg mt-4">
+            {/* DEĞİŞTİ: type="button" + onClick yerine type="submit" — Enter
+                tuşu da bu butonu tetikler, tıklama davranışı aynen korunur */}
+            <button type="submit" className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg mt-4">
               Sisteme Giriş Yap
             </button>
-          </div>
+          </form>
         </div>
       </div>
     );
@@ -5647,6 +5658,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     };
 
     const handleLogin = async (email, password, rememberMe) => {
+      // YENİ: Açılış animasyonu kaldırıldığı için giriş ekranı, personel
+      // listesi arka planda yüklenmeden önce de görünür durumda. Liste henüz
+      // gelmemişken deneme yapılırsa kullanıcıya "şifre hatalı" demek yanlış
+      // olur; bunun yerine kısa bir bekleme uyarısı gösterilir.
+      if (!personnelList || personnelList.length === 0) {
+        setLoginError('Sistem hazırlanıyor, lütfen 1-2 saniye sonra tekrar deneyin.');
+        return;
+      }
       const normalizeStr = (str) => (str || '').toString().trim().toLocaleLowerCase('tr-TR');
       const loginInput = normalizeStr(email);
       
@@ -5689,27 +5708,20 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
     const allDataLoaded = Object.values(dataLoadStatus).every(v => v === true);
 
-    // YENİ: Açılış ekranı SADECE gerçekten gerekli olduğunda gösterilir:
-    //  - Firebase kimlik kontrolü sürüyorsa, veya
-    //  - Kayıtlı bir oturum varsa ve o oturum henüz geri yüklenmeye çalışılmadıysa
-    //    (böylece giriş ekranı bir an "flaş" edip kaybolmaz).
-    // Artık TÜM koleksiyonların yüklenmesi BEKLENMİYOR; uygulama hemen açılır,
-    // veriler arka planda geldikçe ekranlara dolar.
-    const acilisEkraniGoster = isAuthChecking || (kayitliOturumVar && !isAuthenticated && !oturumDenendi);
-
-    if (acilisEkraniGoster) {
-      return (
-        <div className="min-h-screen bg-black flex flex-col items-center justify-center text-white animate-in fade-in">
-          <MarkaLogo
-            logoUrl={appBranding?.logoUrl}
-            className="max-w-[80vw] w-auto object-contain mb-6 animate-pulse drop-shadow-2xl"
-            style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
-            fallback={<div className="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg mb-6 animate-pulse">S</div>}
-          />
-          <p className="font-bold tracking-widest text-neutral-400">SİSTEM YÜKLENİYOR...</p>
-        </div>
-      );
-    }
+    // ========================================================================
+    // KALDIRILDI: "SİSTEM YÜKLENİYOR..." AÇILIŞ ANİMASYONU (kullanıcı talebi)
+    // ========================================================================
+    // Eskiden burada, Firebase kimlik kontrolü ve kayıtlı oturumun geri
+    // yüklenmesi sırasında logolu/animasyonlu siyah bir bekleme ekranı
+    // gösteriliyordu. Artık uygulama beklemeden DOĞRUDAN giriş ekranını açar.
+    // Notlar:
+    //  • "Beni Hatırla" ile kayıtlı oturumu olanlarda giriş ekranı bir an
+    //    görünüp otomatik girişle kapanabilir — animasyonun kaldırılmasının
+    //    doğal sonucudur, hata değildir.
+    //  • Personel listesi arka planda henüz yüklenmemişken giriş denenirse
+    //    handleLogin "Sistem hazırlanıyor..." uyarısı verir (aşağıda eklendi),
+    //    yanlış yere "şifre hatalı" denmez.
+    // ========================================================================
 
     if (!isAuthenticated) {
       return <LoginScreen onLogin={handleLogin} error={loginError} appBranding={appBranding} />;
