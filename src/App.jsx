@@ -2662,6 +2662,37 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       .replace(/[üÜ]/g, 'u').replace(/[öÖ]/g, 'o').replace(/[çÇ]/g, 'c')
       .replace(/[^a-z0-9]/g, ''); // Boşluk ve noktalama tamamen atılır
 
+    // Telefonu son 10 haneye indirger (0/+90/boşluk farklarını yok sayar)
+    const telNormalize = (s) => String(s || '').replace(/\D/g, '').slice(-10);
+
+    // ========================================================================
+    // DÜZELTME: TELEFON ARTIK EŞLEŞTİRMEYE DAHİL
+    // ========================================================================
+    // ÖNCEKİ SORUN: Yalnızca "gün + ad" eşleşiyordu. Aynı isimli FARKLI iki
+    // müşteri (ör. iki ayrı "Kadir Usta": 0537... ve 0532...) aynı gün iş
+    // yaptırdığında mükerrer sanılıyordu. Artık telefonu farklı olanlar AYRI
+    // müşteri sayılır ve gruplanmaz.
+    // Telefonu olmayan kayıtlar yalnızca kendi aralarında eşleşir.
+    // ========================================================================
+    const grupAnahtari = (j) => `${j.date}__${adNormalize(j.customerName)}__${telNormalize(j.customerPhone)}`;
+
+    // ========================================================================
+    // YENİ: "BİREBİR AYNI" PARMAK İZİ
+    // ========================================================================
+    // İki kaydın gerçekten aynı işin kopyası olduğunu anlamak için yalnızca ad
+    // ve tarih yetmez — fiyat, saat, adresler ve tip de birebir tutmalıdır.
+    // Bu imza eşleşiyorsa kayıtlar ayırt edilemez kopyalardır ve birini silmek
+    // bilgi kaybına yol açmaz.
+    // ========================================================================
+    const birebirImza = (j) => [
+      j.date, j.time, adNormalize(j.customerName), telNormalize(j.customerPhone),
+      j.type || 'Nakliye',
+      String(parseFloat(j.price) || 0), String(parseFloat(j.deposit) || 0),
+      adNormalize(j.fromProvince), adNormalize(j.fromDistrict), adNormalize(j.fromAddress),
+      adNormalize(j.toProvince), adNormalize(j.toDistrict), adNormalize(j.toAddress),
+      adNormalize(j.notes)
+    ].join('|');
+
     const mukerrerGruplar = useMemo(() => {
       const harita = new Map();
       (jobs || [])
@@ -2669,11 +2700,35 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         .forEach(j => {
           const ad = adNormalize(j.customerName);
           if (!ad || !j.date) return; // Adı veya tarihi olmayan kayıt eşleştirilemez
-          const anahtar = `${j.date}__${ad}`;
+          const anahtar = grupAnahtari(j); // DEĞİŞTİ: telefon da anahtara dahil
           if (!harita.has(anahtar)) harita.set(anahtar, []);
           harita.get(anahtar).push(j);
         });
       // Yalnızca 2+ kayıt içeren gruplar mükerrerdir; en yeni tarih en üstte
+      return [...harita.values()]
+        .filter(g => g.length > 1)
+        .sort((a, b) => String(b[0].date).localeCompare(String(a[0].date)));
+    }, [jobs, silinen]);
+
+    // ========================================================================
+    // YENİ: BİREBİR AYNI KAYITLAR (güvenli otomatik temizlik adayları)
+    // ========================================================================
+    // Yukarıdaki "mükerrer" listesi benzer kayıtları da içerir (biri ekipli,
+    // diğeri değil gibi) — orada karar insana aittir. Buradaki liste ise
+    // TÜM alanları birebir tutan, ayırt edilemez kopyalardır. Her gruptan
+    // yalnızca BİR tanesi tutulur; hangisinin tutulacağı doluluk puanına göre
+    // seçilir (ekip/sonlandırma bilgisi olan kazanır), kalanlar silinebilir.
+    // ========================================================================
+    const birebirGruplar = useMemo(() => {
+      const harita = new Map();
+      (jobs || [])
+        .filter(j => j && j.status !== 'cancelled' && !silinen.includes(j.id))
+        .forEach(j => {
+          if (!j.date || !adNormalize(j.customerName)) return;
+          const im = birebirImza(j);
+          if (!harita.has(im)) harita.set(im, []);
+          harita.get(im).push(j);
+        });
       return [...harita.values()]
         .filter(g => g.length > 1)
         .sort((a, b) => String(b[0].date).localeCompare(String(a[0].date)));
@@ -2701,6 +2756,88 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         alert('Kayıt silinirken bir hata oluştu.');
       }
       setSiliniyor(null);
+    };
+
+    // ========================================================================
+    // YENİ: BİREBİR KOPYALARI TOPLU SİL
+    // Her gruptan en dolu kayıt TUTULUR, kalanları silinir. Silmeden önce
+    // kullanıcıdan açık onay alınır (aşağıdaki onay penceresi).
+    // ========================================================================
+    const [topluSilOnay, setTopluSilOnay] = useState(false);
+    const [topluIlerleme, setTopluIlerleme] = useState(null);
+
+    const birebirTopluSil = async () => {
+      const silinecekler = [];
+      birebirGruplar.forEach(g => {
+        const tutulan = g.reduce((a, b) => doluluk(b) > doluluk(a) ? b : a, g[0]);
+        g.forEach(j => { if (j.id !== tutulan.id) silinecekler.push(j); });
+      });
+      setTopluSilOnay(false);
+      setTopluIlerleme({ toplam: silinecekler.length, biten: 0 });
+      const basarili = [];
+      for (const j of silinecekler) {
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', j.id));
+          basarili.push(j.id);
+        } catch (e) { console.error('Kopya silinemedi:', j.id, e); }
+        setTopluIlerleme(p => ({ ...p, biten: (p?.biten || 0) + 1 }));
+      }
+      setSilinen(prev => [...prev, ...basarili]);
+      if (addSystemLog) addSystemLog('Birebir Kopyalar Temizlendi', `${basarili.length} adet ayırt edilemez kopya iş kaydı silindi.`);
+      setTimeout(() => setTopluIlerleme(null), 2500);
+    };
+
+    // ========================================================================
+    // YENİ: YEDEKTEN İŞ KAYDI GERİ YÜKLEME
+    // ========================================================================
+    // Yanlışlıkla silinen işleri kurtarmanın TEK yolu budur; Firestore'da
+    // silinen doküman kalıcı olarak yok olur. Bu araç, daha önce indirilmiş
+    // JSON yedeğini okur, içindeki işlerden ŞU AN veritabanında BULUNMAYANLARI
+    // tespit eder ve orijinal kimlikleriyle geri yazar.
+    // GÜVENLİK: Mevcut kayıtların üzerine ASLA yazmaz — yalnızca eksik olanlar
+    // eklenir. Böylece geri yükleme, sonradan yapılan düzenlemeleri bozmaz.
+    // ========================================================================
+    const [yedekIsler, setYedekIsler] = useState(null);   // Dosyadan okunan işler
+    const [geriYukleniyor, setGeriYukleniyor] = useState(null);
+
+    const yedekDosyaSec = (e) => {
+      const dosya = e.target.files?.[0];
+      if (!dosya) return;
+      e.target.value = ''; // Aynı dosya tekrar seçilebilsin
+      const okuyucu = new FileReader();
+      okuyucu.onload = () => {
+        try {
+          const veri = JSON.parse(okuyucu.result);
+          const isler = Array.isArray(veri.jobs) ? veri.jobs : null;
+          if (!isler) { alert('Bu dosyada iş kaydı bulunamadı. Sistem Yedekleme ile indirilmiş .json dosyasını seçin.'); return; }
+          setYedekIsler({ tarih: veri.timestamp, isler });
+        } catch (err) {
+          alert('Dosya okunamadı. Geçerli bir yedek (.json) dosyası seçtiğinizden emin olun.');
+        }
+      };
+      okuyucu.readAsText(dosya);
+    };
+
+    // Yedekte olup şu an sistemde OLMAYAN işler
+    const eksikIsler = useMemo(() => {
+      if (!yedekIsler) return [];
+      const mevcutIdler = new Set((jobs || []).map(j => j.id));
+      return yedekIsler.isler.filter(j => j?.id && !mevcutIdler.has(j.id));
+    }, [yedekIsler, jobs]);
+
+    const eksikleriGeriYukle = async () => {
+      setGeriYukleniyor({ toplam: eksikIsler.length, biten: 0 });
+      let basarili = 0;
+      for (const j of eksikIsler) {
+        try {
+          const { id, ...veri } = j; // id alanı doküman kimliği olarak kullanılır
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id), veri);
+          basarili++;
+        } catch (e) { console.error('Geri yüklenemedi:', j.id, e); }
+        setGeriYukleniyor(p => ({ ...p, biten: (p?.biten || 0) + 1 }));
+      }
+      if (addSystemLog) addSystemLog('Yedekten Geri Yükleme', `${basarili} adet silinmiş iş kaydı yedekten geri yüklendi.`);
+      setTimeout(() => { setGeriYukleniyor(null); setYedekIsler(null); }, 2500);
     };
 
     const handleBackup = () => {
@@ -2745,6 +2882,113 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         </div>
 
         {/* ==================================================================
+            YENİ: YEDEKTEN GERİ YÜKLEME
+            Silinen iş kayıtlarını kurtarmanın tek yolu. Yalnızca sistemde
+            BULUNMAYAN kayıtlar eklenir; mevcutların üzerine yazılmaz.
+            ================================================================== */}
+        <div className="mt-8 pt-6 border-t border-neutral-200">
+          <h2 className="text-xl font-bold text-black mb-4 flex items-center gap-2">
+            <Upload className="w-6 h-6 text-green-600" /> Yedekten İş Kaydı Geri Yükle
+          </h2>
+          <div className="bg-green-50 text-green-800 p-4 rounded-xl text-sm font-medium mb-4 border border-green-200">
+            Yanlışlıkla silinen işleri kurtarmak için daha önce indirdiğiniz <b>.json yedeğini</b> seçin. Sistem, yedekte olup şu an veritabanında <b>bulunmayan</b> kayıtları bulur ve orijinal kimlikleriyle geri yazar. Mevcut kayıtlara dokunulmaz, üzerine yazılmaz. <b>Yedeğiniz yoksa silinen kayıtlar geri getirilemez</b> — Firestore'da silme kalıcıdır.
+          </div>
+
+          <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-3 bg-white border border-neutral-300 border-dashed rounded-xl hover:bg-neutral-50 transition text-sm font-bold text-neutral-700">
+            <Upload className="w-4 h-4" /> Yedek Dosyası Seç (.json)
+            <input type="file" accept="application/json,.json" onChange={yedekDosyaSec} className="hidden" />
+          </label>
+
+          {yedekIsler && (
+            <div className="mt-4 border border-green-200 rounded-xl overflow-hidden">
+              <div className="bg-green-100 px-4 py-2 text-xs font-black text-green-800">
+                Yedek tarihi: {yedekIsler.tarih ? new Date(yedekIsler.tarih).toLocaleString('tr-TR') : 'bilinmiyor'} • Yedekteki iş sayısı: {yedekIsler.isler.length}
+              </div>
+              <div className="p-4">
+                {eksikIsler.length === 0 ? (
+                  <p className="text-sm font-bold text-neutral-600">Bu yedekteki tüm işler sistemde zaten mevcut — geri yüklenecek kayıt yok.</p>
+                ) : (
+                  <>
+                    <p className="text-sm font-black text-green-700 mb-3">{eksikIsler.length} kayıt sistemde bulunmuyor, geri yüklenebilir:</p>
+                    <div className="max-h-56 overflow-y-auto space-y-1 mb-4">
+                      {eksikIsler.slice(0, 100).map(j => (
+                        <div key={j.id} className="text-xs font-medium text-neutral-600 bg-neutral-50 px-3 py-1.5 rounded-lg flex justify-between gap-2">
+                          <span className="truncate"><b className="text-black">{j.customerName}</b> • {j.date?.split('-').reverse().join('.')} {j.time || ''}</span>
+                          <span className="shrink-0">₺{j.price ? parseInt(j.price).toLocaleString('tr-TR') : '0'}</span>
+                        </div>
+                      ))}
+                      {eksikIsler.length > 100 && <p className="text-[11px] font-bold text-neutral-400 px-3">…ve {eksikIsler.length - 100} kayıt daha</p>}
+                    </div>
+                    {geriYukleniyor ? (
+                      <p className="text-sm font-bold text-green-700">Geri yükleniyor… {geriYukleniyor.biten} / {geriYukleniyor.toplam}</p>
+                    ) : (
+                      <button onClick={eksikleriGeriYukle} className="px-4 py-3 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition flex items-center gap-2 shadow-lg">
+                        <Upload className="w-4 h-4" /> {eksikIsler.length} Kaydı Geri Yükle
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ==================================================================
+            YENİ: BİREBİR AYNI KAYITLAR (güvenli toplu temizlik)
+            Tüm alanları (fiyat, saat, adresler, telefon, not) birebir tutan
+            ayırt edilemez kopyalar. Her gruptan biri tutulur.
+            ================================================================== */}
+        <div className="mt-8 pt-6 border-t border-neutral-200">
+          <h2 className="text-xl font-bold text-black mb-4 flex items-center gap-2">
+            <Copy className="w-6 h-6 text-red-600" /> Birebir Aynı Kayıtlar
+          </h2>
+          <div className="bg-red-50 text-red-800 p-4 rounded-xl text-sm font-medium mb-4 border border-red-200">
+            Burada yalnızca <b>tüm alanları birebir aynı</b> olan kayıtlar listelenir: tarih, saat, müşteri, telefon, tutar, kapora, alış/teslim adresleri ve not. Bunlar ayırt edilemez kopyalardır, birini silmek bilgi kaybettirmez. Her gruptan <b>bir kayıt tutulur</b>. Benzer ama farklı kayıtlar (biri ekipli, diğeri değil gibi) buraya <b>girmez</b> — onlar aşağıdaki listede tek tek incelenir. <b>Silmeden önce yukarıdan yedek alın.</b>
+          </div>
+
+          {topluIlerleme ? (
+            <p className="text-sm font-bold text-red-700">Siliniyor… {topluIlerleme.biten} / {topluIlerleme.toplam}</p>
+          ) : birebirGruplar.length === 0 ? (
+            <p className="text-sm font-bold text-green-700 bg-green-50 p-4 rounded-xl border border-green-200 text-center">Birebir aynı kayıt bulunamadı.</p>
+          ) : (
+            <>
+              <p className="text-sm font-bold text-neutral-600 mb-3">
+                {birebirGruplar.length} grup • silinecek kopya: {birebirGruplar.reduce((t, g) => t + g.length - 1, 0)} kayıt
+              </p>
+              <div className="max-h-56 overflow-y-auto space-y-1 mb-4">
+                {birebirGruplar.map((g, i) => (
+                  <div key={i} className="text-xs font-medium text-neutral-600 bg-neutral-50 px-3 py-1.5 rounded-lg flex justify-between gap-2">
+                    <span className="truncate"><b className="text-black">{g[0].customerName}</b> • {g[0].date?.split('-').reverse().join('.')} {g[0].time || ''} • ₺{g[0].price ? parseInt(g[0].price).toLocaleString('tr-TR') : '0'}</span>
+                    <span className="shrink-0 font-black text-red-600">{g.length} kopya</span>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setTopluSilOnay(true)} className="px-4 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center gap-2 shadow-lg">
+                <Trash2 className="w-4 h-4" /> Kopyaları Temizle (her gruptan 1 kayıt kalır)
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Toplu silme onay penceresi */}
+        {topluSilOnay && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center shadow-2xl">
+              <AlertTriangle className="w-16 h-16 text-red-600 mx-auto mb-4" />
+              <h3 className="font-black text-xl text-black mb-2">Kopyaları Temizle</h3>
+              <p className="text-neutral-600 mb-2 text-sm font-medium">
+                {birebirGruplar.reduce((t, g) => t + g.length - 1, 0)} adet birebir kopya silinecek. Her gruptan bir kayıt korunacak.
+              </p>
+              <p className="text-red-600 mb-6 text-xs font-bold">Bu işlem geri alınamaz. Yedeğinizi aldınız mı?</p>
+              <div className="flex gap-3">
+                <button onClick={() => setTopluSilOnay(false)} className="flex-1 p-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">Vazgeç</button>
+                <button onClick={birebirTopluSil} className="flex-1 p-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg">Evet, Temizle</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================
             YENİ: MÜKERRER İŞ KAYITLARI
             Aynı gün + aynı müşteri adına birden fazla iş kaydı varsa burada
             listelenir. Silme işlemi her zaman kullanıcı onayıyla yapılır.
@@ -2754,7 +2998,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             <Copy className="w-6 h-6 text-orange-600" /> Mükerrer İş Kayıtları
           </h2>
           <div className="bg-orange-50 text-orange-800 p-4 rounded-xl text-sm font-medium mb-4 border border-orange-200">
-            Aynı <b>gün</b> ve aynı <b>müşteri adına</b> birden fazla iş kaydı varsa burada listelenir. Genellikle eski sistemden yapılan toplu aktarımın, elle girilmiş kayıtlarla çakışmasından oluşur. Adlar Türkçe karakter ve boşluk farkları gözetilmeden eşleştirilir ("Müminoğlu" = "Mümin oğlu"). <b>Hiçbir kayıt otomatik silinmez</b> — hangisinin kalacağına siz karar verirsiniz. Silmeden önce yukarıdan yedek almanız önerilir.
+            Aynı <b>gün</b>, aynı <b>müşteri adı</b> ve aynı <b>telefon</b> ile birden fazla iş kaydı varsa burada listelenir. (Telefonu farklı olan aynı isimli müşteriler AYRI kişi sayılır, gruplanmaz.) Genellikle eski sistemden yapılan toplu aktarımın, elle girilmiş kayıtlarla çakışmasından oluşur. Adlar Türkçe karakter ve boşluk farkları gözetilmeden eşleştirilir ("Müminoğlu" = "Mümin oğlu"). <b>Hiçbir kayıt otomatik silinmez</b> — hangisinin kalacağına siz karar verirsiniz. Silmeden önce yukarıdan yedek almanız önerilir.
           </div>
 
           {!mukerrerAcik ? (
