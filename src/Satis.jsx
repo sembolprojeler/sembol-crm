@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where } from 'firebase/firestore';
-import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu } from './shared.jsx';
+import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri } from './shared.jsx';
 
   // ============================================================================
   // YENİ: Ortak Bölüm Başlığı Bileşeni (SectionHeader)
@@ -1110,7 +1110,7 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
   // iş kaydı otomatik olarak ilgili müşterinin cari profiline işliyor;
   // ayrıca büyük/küçük harf ve telefon formatı farkı gözetmeksizin aynı
   // müşteri tek bir cari profilde birleşmiş oluyor.
-  export const CustomerProfileView = ({ jobs, cariKey, onBack, handleEditJob, db, appId, addSystemLog, personnelList = [], vehicles = [], currentUser, setViewingImage }) => {
+  export const CustomerProfileView = ({ jobs, cariKey, onBack, handleEditJob, db, appId, addSystemLog, personnelList = [], vehicles = [], currentUser, setViewingImage, setMarkDamageJobId }) => {
     const customerJobs = jobs
       .filter(j => normalizeCariPhone(j.customerPhone) === cariKey)
       .sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -1513,6 +1513,32 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                       <button onClick={() => handleEditJob(job)} className="px-3 py-2 bg-white border border-neutral-200 text-neutral-600 text-xs font-bold rounded-lg hover:bg-neutral-100 transition flex items-center gap-1.5 whitespace-nowrap">
                         İşe Git <ArrowUpRight className="w-3.5 h-3.5" />
                       </button>
+                      {/* ==========================================================
+                          YENİ: HASAR OLUŞTU BUTONU (müşteri profili iş kartı)
+                          Operasyon > Biten İşler ekranındaki buton ile AYNI akışı
+                          kullanır: setMarkDamageJobId ile onay penceresi açılır,
+                          onaylanınca iş "Hasar var" olarak işaretlenir ve Hasar
+                          Tahtası'nda "Çözüm Bekliyor" listesine düşer.
+                          GÖRÜNME KOŞULU: yalnızca TAMAMLANMIŞ işlerde ve henüz
+                          hasar işaretlenmemişse çıkar. Zaten hasarlıysa buton
+                          yerine durum rozeti gösterilir (çözüldü / çözüm bekliyor).
+                          NOT: setMarkDamageJobId verilmemişse hiçbir şey çizilmez,
+                          böylece bu bileşeni başka yerden çağıran kod bozulmaz.
+                          ========================================================== */}
+                      {setMarkDamageJobId && (forcedComplete || job.status === 'completed') && (
+                        job.endJobDetails?.damageStatus === 'Hasar var' ? (
+                          <span className={`px-3 py-2 text-xs font-bold rounded-lg flex items-center gap-1.5 whitespace-nowrap border ${job.endJobDetails?.damageResolved
+                            ? 'bg-green-50 border-green-200 text-green-700'
+                            : 'bg-red-50 border-red-200 text-red-700'}`}>
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            {job.endJobDetails?.damageResolved ? 'Hasar Çözüldü' : 'Hasar Çözüm Bekliyor'}
+                          </span>
+                        ) : (
+                          <button onClick={() => setMarkDamageJobId(job.id)} className="px-3 py-2 bg-orange-50 border border-orange-200 text-orange-700 text-xs font-bold rounded-lg hover:bg-orange-100 transition flex items-center gap-1.5 whitespace-nowrap">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Hasar Oluştu
+                          </button>
+                        )
+                      )}
                     </div>
                   </div>
 
@@ -1595,6 +1621,8 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                     const satirlar = [
                       { etiket: 'Müşteri Memnuniyeti', deger: d?.customerSatisfaction },
                       { etiket: 'Hasar Durumu', deger: d?.damageStatus, detay: d?.damageDetails },
+                      // YENİ: Hasar çözüldüyse çözüm notu da müşteri profilinde görünür
+                      { etiket: 'Hasar Çözümü', deger: d?.damageResolved ? 'Çözüldü' : null, detay: d?.damageResolutionNote },
                       { etiket: 'Kamyon Durumu', deger: d?.truckStatus, detay: d?.truckIssueDetails },
                       { etiket: 'Asansör Kurulumu', deger: d?.elevatorSetup, detay: d?.elevatorSetupReason },
                       { etiket: 'Asansörde Sorun', deger: d?.elevatorIssue === 'Evet' ? 'Evet' : null, detay: d?.elevatorIssueReason },
@@ -1635,6 +1663,17 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                           </div>
                         ) : (
                           <p className="text-[10px] font-bold text-neutral-400">Bu işe ait fotoğraf / video eklenmemiş.</p>
+                        )}
+
+                        {/* YENİ: HASAR ÇÖZÜM BELGELERİ — hasar kapatılırken eklenen
+                            fotoğraf/PDF/dekont dosyaları müşteri profilinde de görünür.
+                            Ortak bileşen (shared.jsx): görseller görüntüleyicide,
+                            PDF/belgeler yeni sekmede açılır. */}
+                        {(d?.damageResolutionFiles || []).length > 0 && (
+                          <div className="mt-2">
+                            <span className="text-neutral-400 font-bold uppercase text-[9px] block">Hasar Çözüm Belgeleri</span>
+                            <HasarCozumBelgeleri files={d.damageResolutionFiles} setViewingImage={setViewingImage} />
+                          </div>
                         )}
                       </div>
                     );
