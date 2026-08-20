@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, getDocs, where, orderBy, limit } from 'firebase/firestore';
-import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, normalizePozisyon, belgeListesiNormalize, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar,
+import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, normalizePozisyon, belgeListesiNormalize, HasarCozumBelgeleri, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar,
   // YENİ: Deneme maaşı alanları — süre seçenekleri ve canlı özet metni.
   // Ayrı dosya yerine shared.jsx içinde tutuluyor; Finans.jsx da aynı
   // kaynaktan gecerliMaas'ı okur, böylece tek doğru kaynak vardır.
@@ -1161,6 +1161,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                         <div className="bg-green-50 p-2.5 rounded-lg text-green-800 border border-green-200 leading-relaxed mt-2">
                           <b className="block mb-0.5 flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5" /> Çözüm Notu:</b> 
                           {job.endJobDetails.damageResolutionNote}
+                          {/* YENİ: Çözüm belgeleri (fotoğraf/PDF/dekont) iş kartında da görünür */}
+                          <HasarCozumBelgeleri files={job.endJobDetails.damageResolutionFiles} setViewingImage={setViewingImage} />
+                          {(parseFloat(job.endJobDetails.damageCost) || 0) > 0 && (
+                            <span className="block text-[10px] font-black text-red-600 mt-1.5">Hasar Maliyeti: ₺{parseFloat(job.endJobDetails.damageCost).toLocaleString('tr-TR')}</span>
+                          )}
                         </div>
                       )}
                     </div>
@@ -3177,6 +3182,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                     <div className="mt-3 pt-3 border-t border-neutral-100">
                       <p className="font-bold text-green-800 mb-1.5 flex items-center gap-1.5"><CheckCircle className="w-4 h-4"/> Çözüm Notu:</p>
                       <p className="text-neutral-700 leading-relaxed text-xs">{job.endJobDetails.damageResolutionNote}</p>
+                      {/* YENİ: Çözüm sırasında eklenen belgeler (fotoğraf/PDF/dekont) —
+                          ortak bileşen; görseller görüntüleyicide, PDF yeni sekmede açılır */}
+                      <HasarCozumBelgeleri files={job.endJobDetails.damageResolutionFiles} setViewingImage={setViewingImage} />
+                      {/* YENİ: Hasar maliyeti girildiyse burada da görünür */}
+                      {(parseFloat(job.endJobDetails.damageCost) || 0) > 0 && (
+                        <p className="text-[10px] font-black text-red-600 mt-2">Hasar Maliyeti: ₺{parseFloat(job.endJobDetails.damageCost).toLocaleString('tr-TR')}{job.endJobDetails.damageCostTeamCount > 0 ? ` (${job.endJobDetails.damageCostTeamCount} kişiye ₺${parseFloat(job.endJobDetails.damageCostPerPerson || 0).toLocaleString('tr-TR')})` : ''}</p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -4314,6 +4326,108 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
 // Veri, personel kaydının 'calismaProgrami' alanında saklanır.
 // ============================================================================
 export const HAFTA_GUNLERI = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+
+// ============================================================================
+// HAFTALIK MESAİ KURAL MOTORU (tüm yakalar için ortak)
+// ============================================================================
+// Kullanıcı kuralları (20.08.2026'dan itibaren geçerli):
+//  1) QR veya manuel giriş yapan       -> GELDİ (G)
+//  2) Gelmeyen personel:
+//       • O hafta İLK kez gelmediyse   -> HAFTALIK İZİN (Hİ)
+//       • O hafta İKİNCİ ve sonraki    -> DEVAMSIZLIK (D)
+//       • O hafta zaten Hİ kullanmışsa -> doğrudan DEVAMSIZLIK (D)
+//  3) Puantajda ZATEN bir izin/rapor kodu varsa (Yİ, Bİ, Üİ, R, İB) o güne
+//     HİÇ dokunulmaz; QR okutulmamış olması devamsızlık saydırmaz.
+//  4) Hafta boyunca 7 gün de geldiyse (Pazartesi–Pazar) PAZAR günü
+//     FAZLA GÜN (FG) olarak işaretlenir.
+//
+// TARİH SINIRI: MESAI_KURAL_BASLANGIC'tan ÖNCEKİ günlere kural UYGULANMAZ.
+// O günler "zaten işlenmiş" kabul edilir; haftalık sayımda ise puantajdaki
+// mevcut kodu izin türü değilse GELMİŞ sayılır (kullanıcı talebi).
+//
+// Bu fonksiyon SAF'tır (Firestore'a dokunmaz), böylece hem Mesai Takip hem
+// Personel Muhasebe aynı sonucu üretir ve ayrıca test edilebilir.
+// ============================================================================
+export const MESAI_KURAL_BASLANGIC = '2026-08-20';
+
+// Puantajda "o güne zaten karar verilmiş" sayılan izin/rapor kodları
+export const MESAI_IZIN_KODLARI = ['Yİ', 'Bİ', 'Üİ', 'R', 'İB'];
+// "Gelmiş" sayılan puantaj kodları (mesai/fazla gün varyantları dahil)
+export const MESAI_GELDI_KODLARI = ['G', 'FM', 'EM', 'FG', 'FGM'];
+
+// Verilen tarihin ait olduğu haftanın PAZARTESİ gününü döndürür (YYYY-AA-GG)
+export const haftaninPazartesisi = (tarihStr) => {
+  const d = new Date(tarihStr + 'T00:00:00');
+  const gunIndeks = (d.getDay() + 6) % 7; // Pazartesi = 0 ... Pazar = 6
+  d.setDate(d.getDate() - gunIndeks);
+  const ay = String(d.getMonth() + 1).padStart(2, '0');
+  const gun = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${ay}-${gun}`;
+};
+
+// Haftanın 7 gününü (Pazartesi→Pazar) tarih dizisi olarak döndürür
+export const haftaGunleriListesi = (tarihStr) => {
+  const bas = new Date(haftaninPazartesisi(tarihStr) + 'T00:00:00');
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(bas);
+    d.setDate(bas.getDate() + i);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  });
+};
+
+/**
+ * Bir gün için haftalık kural kararını üretir.
+ * @param tarihStr      Değerlendirilen gün (YYYY-AA-GG)
+ * @param girisVarMi    O gün QR/manuel giriş kaydı var mı?
+ * @param mevcutKod     O günün puantajdaki mevcut kodu (yoksa null/'')
+ * @param haftaGunleri  [{ tarihStr, girisVarMi, kod }] — haftanın TÜM 7 günü
+ * @returns { status, aciklama } veya null (karara karışılmaz)
+ */
+export const haftalikMesaiKarari = ({ tarihStr, girisVarMi, mevcutKod, haftaGunleri = [] }) => {
+  // Kural sınırı: başlangıç tarihinden önceki günlere hiç karışma
+  if (tarihStr < MESAI_KURAL_BASLANGIC) return null;
+
+  // KURAL 3: Elle işaretlenmiş izin/rapor varsa dokunma
+  if (mevcutKod && MESAI_IZIN_KODLARI.includes(mevcutKod)) return null;
+
+  // Bir günün "gelmiş" sayılıp sayılmadığı: QR girişi VEYA puantajda geldi kodu.
+  // Kural başlangıcından ÖNCEKİ günlerde QR aranmaz; puantaj kodu esas alınır
+  // (kullanıcı talebi: "öncesini QR/manuel basılmış kabul et").
+  const gelmisSayilir = (g) => {
+    if (g.kod && MESAI_IZIN_KODLARI.includes(g.kod)) return false; // İzinli gün gelmiş sayılmaz
+    if (g.kod && MESAI_GELDI_KODLARI.includes(g.kod)) return true;
+    if (g.tarihStr < MESAI_KURAL_BASLANGIC) return false; // Kodu yoksa ve eskiyse bilinmiyor
+    return !!g.girisVarMi;
+  };
+
+  const gunAdiBu = HAFTA_GUNLERI[(new Date(tarihStr + 'T00:00:00').getDay() + 6) % 7];
+
+  // ---------------------------------------------------------------- GELDİ
+  if (girisVarMi) {
+    // KURAL 4: Pazar günü geldiyse VE haftanın diğer 6 günü de gelinmişse -> FG
+    if (gunAdiBu === 'Pazar') {
+      const digerAltiGun = haftaGunleri.filter(g => g.tarihStr !== tarihStr);
+      const hepsiGelmis = digerAltiGun.length === 6 && digerAltiGun.every(gelmisSayilir);
+      if (hepsiGelmis) {
+        return { status: 'FG', aciklama: 'Hafta boyunca 7 gün çalışıldı → Pazar günü Fazla Gün (FG) önerildi.' };
+      }
+      // Hafta içinde eksik gün varsa Pazar normal çalışma günüdür
+      return { status: 'G', aciklama: 'Pazar günü giriş yapıldı; hafta içinde gelinmeyen gün olduğu için normal Geldi önerildi.' };
+    }
+    return { status: 'G', aciklama: 'QR/kod ile giriş yapıldı → Geldi.' };
+  }
+
+  // ------------------------------------------------------------- GELMEDİ
+  // Haftanın BU GÜNDEN ÖNCEKİ günlerine bakılır: daha önce Hİ verilmiş mi?
+  const oncekiGunler = haftaGunleri.filter(g => g.tarihStr < tarihStr);
+  const oncedenHaftalikIzin = oncekiGunler.some(g => g.kod === 'Hİ');
+
+  if (oncedenHaftalikIzin) {
+    return { status: 'D', aciklama: `Bu hafta haftalık izin zaten kullanılmış (${gunAdiBu} günü giriş yok) → Devamsızlık.` };
+  }
+  // Bu hafta ilk kez gelinmemiş -> haftalık izin
+  return { status: 'Hİ', aciklama: `Bu hafta ilk kez giriş yapılmadı → Haftalık İzin (${gunAdiBu}).` };
+};
 
 // Yeni personel için varsayılan program (yaka tipine göre)
 export const varsayilanCalismaProgrami = (yaka = 'Mavi Yaka') => yaka === 'Beyaz Yaka'
@@ -6458,7 +6572,36 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       // YENİ: Gerçek puantaj verisiyle kırılım — ayın 1'inden ayrılış gününe kadar
       // Devamsız/Rapor/Ücretsiz İzin günleri "Ödenecek Gün"den düşülür; Fazla Mesai/Gün günleri
       // fazla mesai ücreti olarak ayrıca eklenir.
-      const personMesaiUpToResign = (allMesaiRecords || []).filter(m => String(m.personId) === String(personId) && m.year === year && m.month === month && m.day <= resignDay);
+      // ======================================================================
+      // DÜZELTİLDİ (KRİTİK): PUANTAJ KAYNAĞI ARTIK MAAŞ TABLOSU İLE AYNI
+      // ======================================================================
+      // ESKİ HALİ: Kırılım, App.tsx'in topladığı allMesaiRecords listesinden
+      // okunuyordu. O liste 'mesai' koleksiyonundan SIRASIZ limit(12) ile
+      // çekildiği için, 12 aydan fazla veri birikince İÇİNDE BULUNULAN AY
+      // listeye girmeyebiliyordu. Sonuç: Maaş Tablosu'nda Mesai Ücreti dolu
+      // görünürken ayrılış dökümünde 0 çıkıyordu (ekran görüntüsündeki fark).
+      //
+      // YENİ HALİ: O ayın 'mesai' dokümanı (Maaş Tablosu'nun okuduğu dokümanın
+      // TA KENDİSİ) buradan da doğrudan okunur. Doküman yoksa eski liste
+      // YEDEK olarak kullanılır; hiçbir eski davranış kaybolmaz.
+      // ======================================================================
+      let mesaiDocKisi = null;
+      try {
+        const _prefix2 = person.collarType === 'Beyaz Yaka' ? 'beyaz_' : '';
+        const _msnap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${_prefix2}${year}_${month}`));
+        if (_msnap.exists()) mesaiDocKisi = (_msnap.data().records || {})[personId] || null;
+      } catch (e) { console.error('Mesai dokümanı okunamadı (ayrılış hesabı):', e); }
+
+      const personMesaiUpToResign = mesaiDocKisi
+        ? Object.keys(mesaiDocKisi).map(gunNo => {
+            const dd = mesaiDocKisi[gunNo];
+            // Kayıt iki biçimde olabilir: { status, hours } nesnesi veya düz kod metni
+            const code = (typeof dd === 'object' && dd !== null) ? dd.status : dd;
+            const hours = (typeof dd === 'object' && dd !== null) ? (parseFloat(dd.hours) || 0) : 0;
+            return { day: parseInt(gunNo), code, hours };
+          }).filter(x => x.day <= resignDay) // Ayrılış günü SONRASI (otomatik İB) hesaba girmez
+        : (allMesaiRecords || []).filter(m => String(m.personId) === String(personId) && m.year === year && m.month === month && m.day <= resignDay);
+
       const devamsizGunOto = personMesaiUpToResign.filter(m => m.code === 'D').length;
       const raporGunOto = personMesaiUpToResign.filter(m => m.code === 'R').length;
       const ucretsizIzinGun = personMesaiUpToResign.filter(m => m.code === 'Üİ' || m.code === 'İB').length;
@@ -6524,6 +6667,10 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       const dokum = {
         dateStr, year, month, daysInMonth, calışılanGun, calışılmayanGun,
         devamsizGun, raporGun, ucretsizIzinGun, fazlaGunSayisi, odenecekGun, fazlaMesaiUcreti,
+        // YENİ: Mesai ücretinin dayanağı da dökümde taşınır — ekranda "kaç saat
+        // mesai yaptı" ayrıca gösterilebilsin diye (toplamSaat = günlük FM/FGM/EM
+        // saatleri + fazla gün×10 − devamsız×3 + prim saati; Maaş Tablosu formülü)
+        toplamSaat, saatlikUcret, primSaati,
         maas, netMaas, netMaasBase, hesaplananBanka, icraKesintisi,
         yemekAylik, yolAylik, yemekIade, yolIade, toplamIade,
         nakittenDusulen, bankadanDusulen,
@@ -8217,12 +8364,16 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                         </>
                       )}
                       <tr><td className="p-2.5 text-neutral-600">Ödenecek Gün (Puantaj Kırılımlı)</td><td className="p-2.5 text-right font-bold text-black">{settlementData.odenecekGun} gün</td></tr>
-                      {settlementData.fazlaMesaiUcreti !== 0 && (
-                        <tr className={settlementData.fazlaMesaiUcreti > 0 ? 'bg-green-50' : 'bg-red-50'}>
-                          <td className={`p-2.5 ${settlementData.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>Fazla Mesai / Devamsızlık Ücret Etkisi</td>
-                          <td className={`p-2.5 text-right font-bold ${settlementData.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>{settlementData.fazlaMesaiUcreti > 0 ? '+' : ''}₺{settlementData.fazlaMesaiUcreti.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td>
-                        </tr>
-                      )}
+                      {/* DEĞİŞTİ: Mesai Ücreti satırı artık HER ZAMAN görünür (0 olsa bile)
+                          ve kaç saat mesai yapıldığı ayrıca yazılır — kullanıcı talebi:
+                          "Eklediğin tutar ayrı gözüksün ki ne kadar mesai yaptığını görelim."
+                          Tutar, Personel Muhasebe > Maaş'taki MESAİ ÜCR. ile birebir aynıdır. */}
+                      <tr className={settlementData.fazlaMesaiUcreti > 0 ? 'bg-green-50' : settlementData.fazlaMesaiUcreti < 0 ? 'bg-red-50' : ''}>
+                        <td className={`p-2.5 ${settlementData.fazlaMesaiUcreti > 0 ? 'text-green-700' : settlementData.fazlaMesaiUcreti < 0 ? 'text-red-700' : 'text-neutral-600'}`}>
+                          Mesai Ücreti <span className="text-[10px] opacity-70">(Maaş Tablosu ile aynı — toplam {(settlementData.toplamSaat ?? 0).toLocaleString('tr-TR', {maximumFractionDigits: 1})} saat × ₺{(settlementData.saatlikUcret ?? 0).toLocaleString('tr-TR', {maximumFractionDigits: 2})}/saat)</span>
+                        </td>
+                        <td className={`p-2.5 text-right font-bold ${settlementData.fazlaMesaiUcreti > 0 ? 'text-green-700' : settlementData.fazlaMesaiUcreti < 0 ? 'text-red-700' : 'text-neutral-600'}`}>{settlementData.fazlaMesaiUcreti > 0 ? '+' : ''}₺{settlementData.fazlaMesaiUcreti.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td>
+                      </tr>
                       <tr><td className="p-2.5 text-neutral-600">Hak Edilen Net Maaş <span className="text-[10px] text-neutral-400">(maaş + mesai + yemek + yol)</span></td><td className="p-2.5 text-right font-bold text-black">₺{settlementData.netMaas.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
                       <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yemek Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− ₺{settlementData.yemekIade.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
                       <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yol Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− ₺{settlementData.yolIade.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
@@ -8415,12 +8566,14 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                         <tr><td className="p-2.5 text-neutral-600">Ödenecek Gün (Puantaj Kırılımlı)</td><td className="p-2.5 text-right font-bold text-black">{sd.odenecekGun} gün</td></tr>
                         {/* YENİ: Çalışılan güne düşen saf maaş — mesai ve yemek/yol ayrı satırlarda görülsün */}
                         <tr><td className="p-2.5 text-neutral-600">Çalışılan Güne Düşen Maaş <span className="text-[10px] text-neutral-400">({sd.odenecekGun} gün × günlük)</span></td><td className="p-2.5 text-right font-bold text-black">{tl(sd.netMaasBase)}</td></tr>
-                        {sd.fazlaMesaiUcreti !== 0 && (
-                          <tr className={sd.fazlaMesaiUcreti > 0 ? 'bg-green-50' : 'bg-red-50'}>
-                            <td className={`p-2.5 ${sd.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>Fazla Mesai / Devamsızlık Ücret Etkisi</td>
-                            <td className={`p-2.5 text-right font-bold ${sd.fazlaMesaiUcreti > 0 ? 'text-green-700' : 'text-red-700'}`}>{sd.fazlaMesaiUcreti > 0 ? '+' : ''}{tl(sd.fazlaMesaiUcreti)}</td>
-                          </tr>
-                        )}
+                        {/* DEĞİŞTİ: Mesai Ücreti satırı HER ZAMAN görünür ve saat dökümü verir
+                            (Maaş Tablosu > MESAİ ÜCR. ile birebir aynı tutar) */}
+                        <tr className={sd.fazlaMesaiUcreti > 0 ? 'bg-green-50' : sd.fazlaMesaiUcreti < 0 ? 'bg-red-50' : ''}>
+                          <td className={`p-2.5 ${sd.fazlaMesaiUcreti > 0 ? 'text-green-700' : sd.fazlaMesaiUcreti < 0 ? 'text-red-700' : 'text-neutral-600'}`}>
+                            Mesai Ücreti <span className="text-[10px] opacity-70">(Maaş Tablosu ile aynı — toplam {(sd.toplamSaat ?? 0).toLocaleString('tr-TR', {maximumFractionDigits: 1})} saat × ₺{(sd.saatlikUcret ?? 0).toLocaleString('tr-TR', {maximumFractionDigits: 2})}/saat)</span>
+                          </td>
+                          <td className={`p-2.5 text-right font-bold ${sd.fazlaMesaiUcreti > 0 ? 'text-green-700' : sd.fazlaMesaiUcreti < 0 ? 'text-red-700' : 'text-neutral-600'}`}>{sd.fazlaMesaiUcreti > 0 ? '+' : ''}{tl(sd.fazlaMesaiUcreti)}</td>
+                        </tr>
                         {/* YENİ: Aylık yemek/yol hak edişi ayrı satırlarda (brüt hakedişe dahil edilen kısım) */}
                         <tr><td className="p-2.5 text-neutral-500 text-xs">Aylık Yemek Hakedişi (brüte dahil)</td><td className="p-2.5 text-right text-xs text-neutral-500">+{tl(sd.yemekAylik)}</td></tr>
                         <tr><td className="p-2.5 text-neutral-500 text-xs">Aylık Yol Hakedişi (brüte dahil)</td><td className="p-2.5 text-right text-xs text-neutral-500">+{tl(sd.yolAylik)}</td></tr>
@@ -16912,6 +17065,42 @@ export const QrTarayiciModal = ({ tip, currentUser, onKapat, hedefTarih }) => {
       }
       const ref = await addDoc(mesaiKayitlarColRef(), kayit);
       setSonKayit({ id: ref.id, ...kayit });
+
+      // ======================================================================
+      // YENİ: MESAİ TAKİP <-> PERSONEL MUHASEBE CANLI ENTEGRASYONU
+      // ======================================================================
+      // Kullanıcı kuralı: "Sabah okutana Geldi diye işaretliyoruz; Personel
+      // Muhasebe ekranında da aynı şekilde." QR/manuel GİRİŞ kaydı başarıyla
+      // yazıldığı anda, o günün puantaj hücresine otomatik 'G' işlenir.
+      // Güvenlik kuralları:
+      //  • Yalnızca GİRİŞ kaydında çalışır (çıkışta puantaj değişmez).
+      //  • Yalnızca MESAI_KURAL_BASLANGIC ve sonrası için çalışır.
+      //  • Hücrede HERHANGİ bir kod zaten varsa (izin, D, elle G, FM...)
+      //    ASLA üzerine yazılmaz — elle/onaylı kayıtlar her zaman üstündür.
+      //  • Hata olursa sessiz geçilir; QR kaydının kendisi zaten yazıldı,
+      //    yönetici Mesai Takip'ten öneriyi tek tıkla onaylayabilir.
+      // ======================================================================
+      if (tip === 'giris' && kayit.dateStr >= MESAI_KURAL_BASLANGIC) {
+        try {
+          const [py, pa, pg] = kayit.dateStr.split('-').map(Number);
+          const puantajRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${py}_${pa}`);
+          const pSnap = await getDoc(puantajRef);
+          const pRecords = pSnap.exists() ? (pSnap.data().records || {}) : {};
+          const mevcutHucre = pRecords[String(kayit.personnelId)]?.[pg];
+          const mevcutKod = (typeof mevcutHucre === 'object' && mevcutHucre !== null) ? mevcutHucre.status : mevcutHucre;
+          if (!mevcutKod) { // Hücre boşsa 'G' yaz — doluysa dokunma
+            if (!pRecords[String(kayit.personnelId)]) pRecords[String(kayit.personnelId)] = {};
+            pRecords[String(kayit.personnelId)][pg] = {
+              status: 'G',
+              hours: '',
+              kaynak: `QR otomatik (${yontem})`, // Nereden geldiği izlenebilsin
+              otomatikTarih: new Date().toISOString()
+            };
+            await setDoc(puantajRef, { records: pRecords, updatedAt: new Date().toISOString() }, { merge: true });
+          }
+        } catch (e) { console.warn('Puantaja otomatik G yazılamadı (öneri akışı devrede):', e); }
+      }
+
       setMesaj(`Mesai ${tip === 'giris' ? 'GİRİŞİNİZ' : 'ÇIKIŞINIZ'} ${kayit.timeStr} olarak kaydedildi. İyi çalışmalar!`);
       setAsama('basarili');
     } catch (e) {
@@ -17044,6 +17233,113 @@ const gunAdi = (tarihStr) => HAFTA_GUNLERI[(new Date(tarihStr).getDay() + 6) % 7
 // GEÇ GELİŞ TOLERANSI (kullanıcı kuralı): 08:00 programlı personel 08:15'e
 // kadar gelirse eksik mesai YAZILMAZ. 08:16'dan itibaren yarım saate YUKARI
 // yuvarlanarak düşülür (08:16-08:30 -> 0,5 sa | 08:31-09:00 -> 1 sa).
+// ============================================================================
+// YENİ: HAFTALIK MESAİ KURAL MOTORU (tüm yakalar için ortak)
+// ============================================================================
+// KULLANICI KURALLARI:
+//  1) QR veya elle kod okutan  -> G (Geldi)
+//  2) Okutmayan personelde HAFTA bazlı karar verilir:
+//       • O hafta İLK kez gelmiyorsa       -> Hİ (Haftalık İzin)
+//       • O hafta İKİNCİ ve sonraki kez    -> D  (Devamsızlık)
+//       • O hafta Hİ zaten kullanılmışsa   -> doğrudan D
+//  3) Puantajda ELLE girilmiş izin/rapor kodu (Yİ / Bİ / Üİ / R / İB / Hİ)
+//     varsa hiç dokunulmaz; o gün için QR okutma beklenmez, devamsızlık yazılmaz.
+//  4) Hafta boyunca 7/7 giriş varsa PAZAR günü FG (Fazla Gün) olur.
+//     (Pazar çalışılmış ama hafta tam değilse o gün normal G sayılır; çünkü
+//      haftalık izin başka bir gün kullanılmış demektir.)
+//
+// HAFTA TANIMI: Pazartesi → Pazar (ISO). "Pazar = fazla gün" kuralı bu tanımla
+// tutarlıdır; Pazar haftanın son ve normalde izinli günüdür.
+// ============================================================================
+
+// Verilen tarihin ait olduğu haftanın PAZARTESİ gününü 'YYYY-MM-DD' döner
+export const haftaBaslangici = (tarihStr) => {
+  const [y, a, g] = String(tarihStr || '').split('-').map(Number);
+  const d = new Date(y, (a || 1) - 1, g || 1);
+  const gunNo = d.getDay();                 // 0=Pazar, 1=Pazartesi ... 6=Cumartesi
+  const geriGit = gunNo === 0 ? 6 : gunNo - 1; // Pazar ise 6 gün geri (Pazartesi'ye)
+  d.setDate(d.getDate() - geriGit);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+// Haftanın 7 gününü Pazartesi'den Pazar'a sıralı 'YYYY-MM-DD' dizisi olarak döner
+export const haftaninGunleri = (tarihStr) => {
+  const bas = haftaBaslangici(tarihStr);
+  const [y, a, g] = bas.split('-').map(Number);
+  const liste = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(y, a - 1, g + i);
+    liste.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+  }
+  return liste;
+};
+
+// Verilen tarih Pazar mı? (FG kuralı için)
+export const pazarMi = (tarihStr) => {
+  const [y, a, g] = String(tarihStr || '').split('-').map(Number);
+  return new Date(y, (a || 1) - 1, g || 1).getDay() === 0;
+};
+
+// Elle girilmiş ve sisteme "bu gün kapandı" diyen kodlar. Bu kodlar varsa
+// personelden QR okutması BEKLENMEZ ve asla devamsızlık önerilmez.
+export const ELLE_IZIN_KODLARI = ['Yİ', 'Bİ', 'Üİ', 'R', 'İB'];
+
+// ----------------------------------------------------------------------------
+// HAFTA BAĞLAMI
+// Bir personelin İLGİLİ HAFTASINI tarar ve karar için gereken üç bilgiyi çıkarır.
+//   haftaKayitlari : o haftanın TÜM QR kayıtları (tüm personel, tüm günler)
+//   puantajHafta   : { [personId]: { 'YYYY-MM-DD': kod } } elle girilmiş kodlar
+// Döner: { gelmemeSirasi, haftaHiVar, tamHafta, girisGunSayisi }
+//   gelmemeSirasi : bu gün, haftanın kaçıncı "gelmeme"si (1 = ilk)
+//   haftaHiVar    : bu günden ÖNCE hafta içinde Hİ kullanılmış mı
+//   tamHafta      : haftanın 7 gününde de giriş var mı (Pazar FG kuralı)
+// ----------------------------------------------------------------------------
+export const haftaBaglamiHesapla = (person, tarihStr, haftaKayitlari, puantajHafta) => {
+  const gunler = haftaninGunleri(tarihStr);
+  const pid = String(person?.id);
+  const kisiPuantaj = (puantajHafta || {})[pid] || {};
+
+  const girisVarMi = (gun) => (haftaKayitlari || []).some(k =>
+    String(k.personnelId) === pid && k.dateStr === gun && k.type === 'giris');
+
+  let gelmemeSirasi = 0;   // bu güne kadarki (bu gün dahil) gelmeme sayısı
+  let haftaHiVar = false;  // bu günden ÖNCE Hİ kullanıldı mı
+  let girisGunSayisi = 0;
+
+  for (const gun of gunler) {
+    const geldi = girisVarMi(gun);
+    if (geldi) girisGunSayisi++;
+    const elleKod = kisiPuantaj[gun];
+
+    if (gun === tarihStr) {
+      if (!geldi && !ELLE_IZIN_KODLARI.includes(elleKod)) gelmemeSirasi++;
+      break; // Bu günden SONRAKİ günler kararı etkilemez
+    }
+
+    // Geçmiş günler: Hİ izi ara (elle girilmiş VEYA o gün gelmeyip Hİ'ye düşmüş)
+    if (elleKod === 'Hİ') { haftaHiVar = true; continue; }
+    if (ELLE_IZIN_KODLARI.includes(elleKod)) continue; // Yİ/R/Üİ vb. gelmeme sayılmaz
+    if (!geldi) {
+      gelmemeSirasi++;
+      // Puantaja henüz yazılmamışsa bile, ilk gelmeme sistemce Hİ önerilmiştir
+      if (gelmemeSirasi === 1) haftaHiVar = true;
+    }
+  }
+
+  return { gelmemeSirasi, haftaHiVar, tamHafta: girisGunSayisi === 7, girisGunSayisi };
+};
+
+// ----------------------------------------------------------------------------
+// GELMEME KARARI: Hİ mi D mi?
+// Hafta içindeki ilk gelmeme ve daha önce Hİ kullanılmamışsa -> Hİ, aksi halde D
+// ----------------------------------------------------------------------------
+export const gelmemeKarari = (baglam) => {
+  if (baglam && baglam.gelmemeSirasi === 1 && !baglam.haftaHiVar) {
+    return { status: 'Hİ', aciklama: 'Bu hafta ilk kez gelinmedi → Haftalık İzin önerildi.' };
+  }
+  return { status: 'D', aciklama: 'Bu hafta haftalık izin zaten kullanıldı → Devamsızlık önerildi.' };
+};
+
 const GEC_GELIS_TOLERANS_DK = 15;
 
 
@@ -17548,6 +17844,27 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     return () => unsub(); // Tarih değişince veya sayfadan çıkınca dinleyici kapanır
   }, [fTarih]);
 
+  // ==========================================================================
+  // 1b) YENİ: SEÇİLİ GÜNÜN HAFTASINA AİT KAYITLAR (haftalık kural motoru için)
+  // ==========================================================================
+  // Haftalık kural (ilk gelmeme → Hİ, ikinci → D, 7 gün → Pazar FG) o haftanın
+  // TAMAMINI bilmeyi gerektirir. Tek günlük dinleyici bunun için yetmez.
+  // Pazartesi–Pazar aralığı tek sorguda çekilir (7 gün × personel sayısı).
+  // ==========================================================================
+  const [haftaKayitlari, setHaftaKayitlari] = useState([]);
+  useEffect(() => {
+    if (!fTarih) { setHaftaKayitlari([]); return; }
+    const gunler = haftaGunleriListesi(fTarih);
+    const q = query(
+      mesaiKayitlarColRef(),
+      where('dateStr', '>=', gunler[0]), // Haftanın Pazartesi'si
+      where('dateStr', '<=', gunler[6]), // Haftanın Pazar'ı
+      limit(1500)                        // 7 gün × ~100 personel × 2 kayıt payı
+    );
+    const unsub = onSnapshot(q, snap => setHaftaKayitlari(snap.docs.map(d => ({ id: d.id, ...d.data() }))), () => setHaftaKayitlari([]));
+    return () => unsub();
+  }, [fTarih]);
+
   // 2) RAPOR AYININ KAYITLARI (yalnızca Raporlama sekmesi açıkken)
   useEffect(() => {
     if (sekme !== 'rapor' || !raporAy) { setAylikKayitlar([]); return; }
@@ -17622,6 +17939,33 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     return () => unsub(); // Ay değişince veya sayfadan çıkınca kapanır
   }, [raporAyAnahtari]);
 
+  // ==========================================================================
+  // YENİ: HAFTA ÖNCEKİ AYA TAŞIYORSA O AYIN PUANTAJI DA YÜKLENİR
+  // ==========================================================================
+  // Haftalık kural motoru (ilk gelmeme → Hİ, ikinci → D, 7/7 → Pazar FG)
+  // haftanın Pazartesi'sinden itibaren puantaj kodlarına bakar. Ay başındaki
+  // günlerde haftanın başı ÖNCEKİ AYDA kalır (örn. 02.09 Çarşamba'nın haftası
+  // 31.08 Pazartesi'de başlar). Yukarıdaki dinleyici yalnızca seçili günün
+  // ayını yüklediği için önceki ayın kodları görünmez ve kural yanlış karar
+  // verirdi. Bu etki, hafta başının ayı farklıysa O TEK belgeyi de dinler;
+  // aynı aydaysa hiçbir ek okuma yapmaz.
+  // ==========================================================================
+  const haftaBasiAyAnahtari = useMemo(() => {
+    if (!fTarih) return null;
+    const [y, a] = haftaninPazartesisi(fTarih).split('-');
+    const anahtar = `${Number(y)}_${Number(a)}`;
+    return anahtar !== raporAyAnahtari ? anahtar : null; // Aynı aysa ek yükleme yok
+  }, [fTarih, raporAyAnahtari]);
+
+  useEffect(() => {
+    if (!haftaBasiAyAnahtari) return;
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', haftaBasiAyAnahtari);
+    const unsub = onSnapshot(ref, snap => {
+      setPuantajlar(prev => ({ ...prev, [haftaBasiAyAnahtari]: snap.exists() ? (snap.data().records || {}) : {} }));
+    }, () => {});
+    return () => unsub();
+  }, [haftaBasiAyAnahtari]);
+
   // YENİ: Görünen her tarih için QR'a dayalı ÖNERİLERİ hesaplar.
   // Böylece muhasebeye henüz yazılmamış günlerde de "önerilen durum" görünür.
   const gunlukOneriler = useMemo(() => {
@@ -17632,6 +17976,15 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     const tarihler = [...new Set([...filtreli.map(k => k.dateStr), fTarih].filter(Boolean))];
     const sonuc = {};
     tarihler.forEach(tarih => {
+      // ======================================================================
+      // YENİ TARİH SINIRI: 20.08.2026 ÖNCESİNE HİÇ ÖNERİ ÜRETİLMEZ
+      // ======================================================================
+      // Kullanıcı kuralı: "20 Ağustos 2026 öncesinde QR/manuel takip yoktu;
+      // o dönemde Personel Muhasebe'ye girilenler geçerli sayılsın, karışık
+      // olmasın." Bu yüzden eski günlerde günlük motorlar (D/Hİ önerisi) de
+      // çalıştırılmaz; tablo yalnızca muhasebedeki kayıtlı kodu gösterir.
+      // ======================================================================
+      if (tarih < MESAI_KURAL_BASLANGIC) return;
       // ======================================================================
       // DEĞİŞTİ: İKİ YAKA İÇİN AYRI ÖNERİ MOTORU
       // ESKİ HALİ: yalnızca Mavi Yaka kayıtları alınıp mesaiOnerileriHesapla
@@ -17672,12 +18025,71 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       if (Object.keys(maviSonuc).length || Object.keys(beyazSonuc).length) {
         sonuc[tarih] = { ...maviSonuc, ...beyazSonuc };
       }
+
+      // ======================================================================
+      // YENİ: HAFTALIK KURAL MOTORU — GELMEYENLER VE PAZAR GÜNÜ
+      // ======================================================================
+      // Yukarıdaki iki motor tek günlük veriye bakar; "o hafta ilk gelmeme →
+      // Haftalık İzin, ikinci → Devamsızlık" ve "7 gün çalışıldıysa Pazar → FG"
+      // kuralları HAFTA bağlamı ister. Bu blok, o kararı haftalık veriye göre
+      // ÜZERİNE YAZAR. Saat hesabı gerektiren durumlara (FM/EM) dokunmaz;
+      // yalnızca G / Hİ / D / FG kararını düzeltir.
+      // Tarih sınırı ve izin kodlarına dokunmama kuralı motorun içindedir.
+      // ======================================================================
+      if (tarih >= MESAI_KURAL_BASLANGIC) {
+        const haftaGunTarihleri = haftaGunleriListesi(tarih);
+        // O haftaki tüm QR girişleri: { 'personelId|tarih': true }
+        const haftaGirisSeti = new Set(
+          (haftaKayitlari || [])
+            .filter(k => k.type === 'giris')
+            .map(k => `${k.personnelId}|${k.dateStr}`)
+        );
+        // Puantajdaki mevcut kodu okur (elle işlenmiş izin/rapor tespiti için)
+        const puantajKodu = (personId, tStr) => {
+          const [yy, aa, gg] = tStr.split('-');
+          const hucre = puantajlar[`${parseInt(yy)}_${parseInt(aa)}`]?.[personId]?.[parseInt(gg)];
+          return (typeof hucre === 'object' && hucre !== null) ? hucre.status : (hucre || null);
+        };
+
+        takiptekiPersonel.forEach(p => {
+          const haftaGunleri = haftaGunTarihleri.map(t => ({
+            tarihStr: t,
+            girisVarMi: haftaGirisSeti.has(`${p.id}|${t}`),
+            kod: puantajKodu(p.id, t)
+          }));
+          const karar = haftalikMesaiKarari({
+            tarihStr: tarih,
+            girisVarMi: haftaGirisSeti.has(`${p.id}|${tarih}`),
+            mevcutKod: puantajKodu(p.id, tarih),
+            haftaGunleri
+          });
+          if (!karar) return; // Kural karışmıyor (izin kodu veya tarih sınırı)
+
+          const oncekiOneri = sonuc[tarih]?.[p.id];
+          // FM/EM (saatli) önerileri KORUNUR — kişi gelmiş demektir, saat hesabı
+          // tek günlük motorun işidir. Haftalık kural yalnızca G kararını
+          // Pazar/FG açısından düzeltir ve gelmeyenlere Hİ/D yazar.
+          if (oncekiOneri && ['FM', 'EM', 'FGM'].includes(oncekiOneri.status) && karar.status === 'G') return;
+
+          if (!sonuc[tarih]) sonuc[tarih] = {};
+          sonuc[tarih][p.id] = {
+            ...(oncekiOneri || {}),
+            status: karar.status,
+            hours: ['Hİ', 'D', 'FG', 'G'].includes(karar.status) ? '' : (oncekiOneri?.hours || ''),
+            girisSaati: oncekiOneri?.girisSaati || null,
+            cikisSaati: oncekiOneri?.cikisSaati || null,
+            aciklama: karar.aciklama,
+            kaynak: oncekiOneri?.kaynak || 'haftalikKural'
+          };
+        });
+      }
     });
     return sonuc;
     // eslint-disable-next-line react-hooks/exhaustive-deps
     // Bağımlılık sadeleştirildi: filtreli zaten gunlukKayitlar'dan türüyor
     // YENİ: fTarih ve beyazYaka eklendi (beyaz yaka önerisi bu ikisine bağlı)
-  }, [gunlukKayitlar, personnelList, fTarih, beyazYaka]);
+    // YENİ: haftaKayitlari, puantajlar, takiptekiPersonel — haftalık kural motoru
+  }, [gunlukKayitlar, personnelList, fTarih, beyazYaka, haftaKayitlari, puantajlar, takiptekiPersonel]);
 
   // RAPORLAMA: seçilen aydaki kayıtlardan kişi bazlı özet çıkarır
   const rapor = useMemo(() => {
@@ -17816,6 +18228,9 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       return sadeKod === dogal.status ? dogal : { ...dogal, status: sadeKod, hours: '' };
     }
     if (!k.dateStr || k.dateStr > mesaiBugunStr()) return null; // Gelecek gün -> boş bırak
+    // YENİ TARİH SINIRI: kural başlangıcından önceki günlere "Devamsız" önerilmez;
+    // o dönemin kaydı Personel Muhasebe'de ne girildiyse odur (kullanıcı kuralı).
+    if (k.dateStr < MESAI_KURAL_BASLANGIC) return null;
     const person = personnelList.find(pp => String(pp.id) === String(k.personnelId));
     if (!person) return null;
     // NOT: Eskiden çalışma programındaki sabit izin gününe (ör. Pazar) bakılıp
