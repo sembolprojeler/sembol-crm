@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Truck, Calendar, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
+import { Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
@@ -13,7 +13,7 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
   // YENİ: İş kapandığında kalan bakiyeyi ilgili deftere gelir olarak yazar.
   defterGelirKaydet,
   // YENİ: Kaporayı banka defterine gelir olarak yazar.
-  defterKaporaKaydet } from './shared.jsx';
+  defterKaporaKaydet, HasarCozumBelgeleri } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
 import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './Operasyon.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
@@ -2634,6 +2634,75 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
   };
 
   const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, addSystemLog }) => {
+    // ========================================================================
+    // YENİ: MÜKERRER İŞ KAYDI TEMİZLİĞİ
+    // ========================================================================
+    // NEDEN GEREKLİ: Eski sistemden toplu aktarım yapılan dönemlerde (ör. Mayıs
+    // 2026), zaten elle girilmiş işler bir kez daha "Eski Sistem Aktarımı"
+    // olarak eklenmiş. Bunlar KOD hatası değil, iki ayrı veritabanı kaydıdır;
+    // bu yüzden takvimde ve listelerde aynı müşteri iki kez görünür.
+    //
+    // NASIL EŞLEŞTİRİR: Aynı GÜN + aynı MÜŞTERİ (ad normalize edilir: küçük
+    // harf, Türkçe karakter sadeleştirmesi, boşluk/noktalama temizliği) olan
+    // işler bir grup sayılır. Böylece "Müminoğlu" ile "Mümin oğlu" veya
+    // "Çömez" ile "Comez" aynı grupta buluşur.
+    //
+    // GÜVENLİK: Hiçbir kayıt otomatik silinmez. Araç yalnızca grupları listeler;
+    // hangi kaydın kalacağına kullanıcı karar verir. Silinecek kayıt için ayrıca
+    // yazılı onay istenir. İptal edilmiş işler taramaya dahil edilmez.
+    // ========================================================================
+    const [mukerrerAcik, setMukerrerAcik] = useState(false);
+    const [silinen, setSilinen] = useState([]);   // Bu oturumda silinen id'ler
+    const [siliniyor, setSiliniyor] = useState(null);
+
+    // Müşteri adını karşılaştırılabilir hale getirir
+    const adNormalize = (s) => String(s || '')
+      .toLocaleLowerCase('tr-TR')
+      .replace(/[ıİ]/g, 'i').replace(/[şŞ]/g, 's').replace(/[ğĞ]/g, 'g')
+      .replace(/[üÜ]/g, 'u').replace(/[öÖ]/g, 'o').replace(/[çÇ]/g, 'c')
+      .replace(/[^a-z0-9]/g, ''); // Boşluk ve noktalama tamamen atılır
+
+    const mukerrerGruplar = useMemo(() => {
+      const harita = new Map();
+      (jobs || [])
+        .filter(j => j && j.status !== 'cancelled' && !silinen.includes(j.id))
+        .forEach(j => {
+          const ad = adNormalize(j.customerName);
+          if (!ad || !j.date) return; // Adı veya tarihi olmayan kayıt eşleştirilemez
+          const anahtar = `${j.date}__${ad}`;
+          if (!harita.has(anahtar)) harita.set(anahtar, []);
+          harita.get(anahtar).push(j);
+        });
+      // Yalnızca 2+ kayıt içeren gruplar mükerrerdir; en yeni tarih en üstte
+      return [...harita.values()]
+        .filter(g => g.length > 1)
+        .sort((a, b) => String(b[0].date).localeCompare(String(a[0].date)));
+    }, [jobs, silinen]);
+
+    // Bir kaydın ne kadar "dolu" olduğunu puanlar — hangisini tutacağınıza yardımcı olur
+    const doluluk = (j) => {
+      let p = 0;
+      if ((j.assignedPersonnelIds || []).length > 0) p += 3; // Ekip atanmış
+      if (j.team && j.team !== 'Atanmadı') p += 2;
+      if (j.endJobDetails) p += 3;                            // İş sonlandırılmış
+      if (j.deposit) p += 1;
+      if (j.createdBy && j.createdBy !== 'Eski Sistem Aktarımı') p += 2;
+      if (j.notes) p += 1;
+      return p;
+    };
+
+    const kaydiSil = async (job) => {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id));
+        setSilinen(prev => [...prev, job.id]);
+        if (addSystemLog) addSystemLog('Mükerrer Kayıt Silindi', `${job.customerName} (${job.date}) mükerrer iş kaydı silindi. Kaydı açan: ${job.createdBy || 'bilinmiyor'}.`);
+      } catch (e) {
+        console.error('Mükerrer kayıt silinemedi:', e);
+        alert('Kayıt silinirken bir hata oluştu.');
+      }
+      setSiliniyor(null);
+    };
+
     const handleBackup = () => {
       const backupData = {
         timestamp: new Date().toISOString(),
@@ -2674,6 +2743,92 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             </button>
           </div>
         </div>
+
+        {/* ==================================================================
+            YENİ: MÜKERRER İŞ KAYITLARI
+            Aynı gün + aynı müşteri adına birden fazla iş kaydı varsa burada
+            listelenir. Silme işlemi her zaman kullanıcı onayıyla yapılır.
+            ================================================================== */}
+        <div className="mt-8 pt-6 border-t border-neutral-200">
+          <h2 className="text-xl font-bold text-black mb-4 flex items-center gap-2">
+            <Copy className="w-6 h-6 text-orange-600" /> Mükerrer İş Kayıtları
+          </h2>
+          <div className="bg-orange-50 text-orange-800 p-4 rounded-xl text-sm font-medium mb-4 border border-orange-200">
+            Aynı <b>gün</b> ve aynı <b>müşteri adına</b> birden fazla iş kaydı varsa burada listelenir. Genellikle eski sistemden yapılan toplu aktarımın, elle girilmiş kayıtlarla çakışmasından oluşur. Adlar Türkçe karakter ve boşluk farkları gözetilmeden eşleştirilir ("Müminoğlu" = "Mümin oğlu"). <b>Hiçbir kayıt otomatik silinmez</b> — hangisinin kalacağına siz karar verirsiniz. Silmeden önce yukarıdan yedek almanız önerilir.
+          </div>
+
+          {!mukerrerAcik ? (
+            <button onClick={() => setMukerrerAcik(true)} className="w-full max-w-xs py-3 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 transition flex items-center justify-center gap-2 shadow-lg">
+              <Search className="w-5 h-5" /> Mükerrer Kayıtları Tara
+            </button>
+          ) : mukerrerGruplar.length === 0 ? (
+            <p className="text-sm font-bold text-green-700 bg-green-50 p-4 rounded-xl border border-green-200 text-center">
+              Mükerrer iş kaydı bulunamadı. {silinen.length > 0 ? `(${silinen.length} kayıt bu oturumda silindi.)` : ''}
+            </p>
+          ) : (
+            <div className="space-y-4">
+              <p className="text-sm font-bold text-neutral-600">
+                {mukerrerGruplar.length} mükerrer grup bulundu
+                {silinen.length > 0 ? ` • ${silinen.length} kayıt silindi` : ''}
+              </p>
+              {mukerrerGruplar.map((grup, gi) => {
+                // Grubun en "dolu" kaydı — tutulması önerilen kayıt
+                const enDolu = grup.reduce((a, b) => doluluk(b) > doluluk(a) ? b : a, grup[0]);
+                return (
+                  <div key={gi} className="border border-orange-200 rounded-xl overflow-hidden">
+                    <div className="bg-orange-100 px-4 py-2 text-xs font-black text-orange-800">
+                      {grup[0].date?.split('-').reverse().join('.')} • {grup[0].customerName} • {grup.length} kayıt
+                    </div>
+                    <div className="divide-y divide-neutral-200">
+                      {grup.map(j => {
+                        const onerilir = j.id === enDolu.id;
+                        return (
+                          <div key={j.id} className={`p-3 flex flex-col sm:flex-row sm:items-center gap-3 ${onerilir ? 'bg-green-50' : 'bg-white'}`}>
+                            <div className="flex-1 min-w-0 text-xs">
+                              <div className="flex items-center gap-2 flex-wrap mb-1">
+                                <span className="font-black text-black">{j.customerName}</span>
+                                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600">{j.type || 'Nakliye'}</span>
+                                {onerilir && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-green-600 text-white">BUNU TUTUN</span>}
+                              </div>
+                              <div className="text-neutral-500 font-medium space-y-0.5">
+                                <div>Kaydı açan: <b className={j.createdBy === 'Eski Sistem Aktarımı' ? 'text-orange-700' : 'text-black'}>{j.createdBy || 'bilinmiyor'}</b></div>
+                                <div>Ekip: <b className="text-black">{(j.assignedPersonnelIds || []).length > 0 ? `${j.assignedPersonnelIds.length} kişi atanmış` : 'Atanmadı'}</b> • Araç: <b className="text-black">{j.team && j.team !== 'Atanmadı' ? j.team : '—'}</b></div>
+                                <div>Tutar: <b className="text-black">₺{j.price ? parseInt(j.price).toLocaleString('tr-TR') : '0'}</b> • Kapora: <b className="text-black">₺{j.deposit ? parseInt(j.deposit).toLocaleString('tr-TR') : '0'}</b> • {j.endJobDetails ? <b className="text-green-700">Sonlandırılmış</b> : 'Sonlandırılmamış'}</div>
+                              </div>
+                            </div>
+                            <button onClick={() => setSiliniyor(j)} className="shrink-0 px-3 py-2 bg-red-50 border border-red-200 text-red-700 text-xs font-bold rounded-lg hover:bg-red-100 transition flex items-center gap-1.5">
+                              <Trash2 className="w-3.5 h-3.5" /> Bu Kaydı Sil
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Silme onay penceresi — kalıcı silme her zaman açık onay ister */}
+        {siliniyor && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center shadow-2xl">
+              <AlertTriangle className="w-16 h-16 text-red-600 mx-auto mb-4" />
+              <h3 className="font-black text-xl text-black mb-2">Kaydı Kalıcı Olarak Sil</h3>
+              <p className="text-neutral-600 mb-2 text-sm font-medium">
+                <b>{siliniyor.customerName}</b> — {siliniyor.date?.split('-').reverse().join('.')}
+              </p>
+              <p className="text-neutral-500 mb-6 text-xs font-medium">
+                Kaydı açan: {siliniyor.createdBy || 'bilinmiyor'}. Bu işlem geri alınamaz.
+              </p>
+              <div className="flex gap-3">
+                <button onClick={() => setSiliniyor(null)} className="flex-1 p-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">Vazgeç</button>
+                <button onClick={() => kaydiSil(siliniyor)} className="flex-1 p-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg">Evet, Sil</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -3347,7 +3502,48 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [deleteJobId, setDeleteJobId] = useState(null);
     const [markDamageJobId, setMarkDamageJobId] = useState(null);
     // DEĞİŞTİ: cost (Hasar Tutarı ₺) alanı eklendi — hasar kapatılırken maliyet girilir
-    const [resolveDamageModal, setResolveDamageModal] = useState({ isOpen: false, jobId: null, note: '', cost: '' });
+    // DEĞİŞTİ: files (çözüm belgeleri) eklendi — fotoğraf/PDF/dekont, çoklu ve isteğe bağlı
+    const [resolveDamageModal, setResolveDamageModal] = useState({ isOpen: false, jobId: null, note: '', cost: '', files: [] });
+    // Kaç dosyanın yüklemesi sürüyor? (>0 iken Kaydet kilitlenir ki yarım dosya kaydedilmesin)
+    const [resolveYukleniyor, setResolveYukleniyor] = useState(0);
+
+    // ========================================================================
+    // YENİ: HASAR ÇÖZÜM BELGESİ YÜKLEME (çoklu — fotoğraf, PDF, dekont vb.)
+    // Mevcut handleFileUpload ile AYNI sunucuya (upload.php) yükler; tek fark
+    // sonucun iş sonlandırma verisine değil, çözüm modalının files listesine
+    // { url, name } olarak eklenmesidir. Dosyalar sırayla yüklenir; her biri
+    // için listede "Yükleniyor..." yer tutucusu görünür.
+    // ========================================================================
+    const handleResolveFileUpload = async (e) => {
+      const files = Array.from(e.target.files || []);
+      if (files.length === 0) return;
+      e.target.value = ''; // Aynı dosya tekrar seçilebilsin
+      for (const file of files) {
+        const yerTutucu = { url: 'Yükleniyor...', name: file.name };
+        setResolveDamageModal(prev => ({ ...prev, files: [...prev.files, yerTutucu] }));
+        setResolveYukleniyor(n => n + 1);
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+          const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: formData });
+          const text = await res.text();
+          let uploadedUrl = '';
+          try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; }
+          catch (err) { uploadedUrl = text.trim(); }
+          setResolveDamageModal(prev => ({
+            ...prev,
+            files: prev.files.map(f => f === yerTutucu ? { url: uploadedUrl, name: file.name } : f)
+          }));
+        } catch (err) {
+          console.error('Çözüm belgesi yüklenemedi:', err);
+          // Başarısız yükleme listeden çıkarılır (kırık bağlantı kaydedilmez)
+          setResolveDamageModal(prev => ({ ...prev, files: prev.files.filter(f => f !== yerTutucu) }));
+          alert(`"${file.name}" yüklenemedi. Lütfen tekrar deneyin.`);
+        } finally {
+          setResolveYukleniyor(n => n - 1);
+        }
+      }
+    };
     // YENİ: Hasarlı İşler "Düzenle" — hasar notu ve (varsa) çözüm notunu düzenleme modalı
     const [editDamageModal, setEditDamageModal] = useState({ isOpen: false, jobId: null, damageDetails: '', damageResolutionNote: '', damageResolved: false });
 
@@ -4949,7 +5145,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     };
 
     const handleOpenResolveDamageModal = (id) => {
-      setResolveDamageModal({ isOpen: true, jobId: id, note: '', cost: '' });
+      setResolveDamageModal({ isOpen: true, jobId: id, note: '', cost: '', files: [] });
     };
 
     const handleResolveDamageSubmit = async (e) => {
@@ -5023,6 +5219,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         ...(job.endJobDetails || {}),
         damageResolved: true,
         damageResolutionNote: resolveDamageModal.note,
+        // YENİ: Çözüm belgeleri (fotoğraf/PDF/dekont) — { url, name } listesi.
+        // Yüklemesi tamamlanmamış yer tutucular kaydedilmez.
+        damageResolutionFiles: (resolveDamageModal.files || []).filter(f => f.url && f.url !== 'Yükleniyor...'),
         // YENİ: Maliyet bilgisi işin üzerinde de saklanır (raporlama/iz için)
         damageCost: hasarTutari,
         damageCostPerPerson: kisiBasi,
@@ -5034,7 +5233,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       });
 
       addSystemLog('Hasar Çözüldü', `${job.customerName} müşterisinin hasar kaydı çözüldü olarak işaretlendi.${hasarTutari > 0 ? ` Maliyet ₺${hasarTutari.toLocaleString('tr-TR')} — ${ekipIdleri.length} kişiye ₺${kisiBasi.toLocaleString('tr-TR')} hasar borcu yazıldı (primden kesilecek).` : ''}`);
-      setResolveDamageModal({ isOpen: false, jobId: null, note: '', cost: '' });
+      setResolveDamageModal({ isOpen: false, jobId: null, note: '', cost: '', files: [] });
     };
 
     // YENİ: Hasarlı İşler "Düzenle" butonu — hasar notunu ve (çözülmüşse) çözüm notunu düzenlemek için modalı açar.
@@ -7259,7 +7458,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               </div>
             )}
             {activeTab === 'specialCustomers' && showCustomers && <CustomerListView jobs={jobs} title="Özel Müşteriler" handleEditJob={handleEditJob} onViewCari={(key) => { setViewingCariKey(key); setActiveTab('customerProfile'); }} />}
-            {activeTab === 'customerProfile' && showCustomers && <CustomerProfileView currentUser={currentUser} setViewingImage={setViewingImage} jobs={jobs} cariKey={viewingCariKey} handleEditJob={handleEditJob} onBack={() => setActiveTab('allCustomers')} db={db} appId={appId} addSystemLog={addSystemLog} personnelList={personnelList} vehicles={vehicles} />}
+            {activeTab === 'customerProfile' && showCustomers && <CustomerProfileView currentUser={currentUser} setViewingImage={setViewingImage} setMarkDamageJobId={setMarkDamageJobId} jobs={jobs} cariKey={viewingCariKey} handleEditJob={handleEditJob} onBack={() => setActiveTab('allCustomers')} db={db} appId={appId} addSystemLog={addSystemLog} personnelList={personnelList} vehicles={vehicles} />}
 
             {activeTab === 'currentJobs' && showJobList && <CurrentJobsView jobs={jobs} handleEditJob={handleEditJob} handleOpenAssignModal={handleOpenAssignModal} handleGenerateMessage={handleGenerateMessage} handleEstimateMaterials={handleEstimateMaterials} setCancelJobId={setCancelJobId} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} />}
             {activeTab === 'completedJobs' && showJobList && <CompletedJobsView jobs={jobs} handleEditJob={handleEditJob} setViewingImage={setViewingImage} setDeleteJobId={setDeleteJobId} setMarkDamageJobId={setMarkDamageJobId} canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal} handleOpenMesaiModal={handleOpenMesaiModal} handleOpenResolveDamageModal={handleOpenResolveDamageModal} />}
@@ -8903,7 +9102,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
               <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-green-500 shrink-0">
                 <h3 className="font-bold text-lg flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-500" /> Hasar Sorununu Çöz</h3>
-                <button onClick={() => setResolveDamageModal({ isOpen: false, jobId: null, note: '', cost: '' })} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+                <button onClick={() => setResolveDamageModal({ isOpen: false, jobId: null, note: '', cost: '', files: [] })} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
               <div className="p-6 overflow-y-auto custom-scrollbar">
@@ -8938,12 +9137,48 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       return <p className="text-[11px] font-bold text-red-700 mt-1.5">İşe giden {ekipSayisi} kişiye eşit bölünür: kişi başı ₺{pay.toLocaleString('tr-TR')} hasar borcu yazılır ve yalnızca PRİMLERİNDEN kesilir.</p>;
                     })()}
                   </div>
+                  {/* ==============================================================
+                      YENİ: ÇÖZÜM BELGELERİ (isteğe bağlı, çoklu)
+                      Fotoğraf, PDF, dekont, servis fişi vb. eklenebilir. Dosyalar
+                      mevcut yükleme sunucusuna gider; kayıt sırasında işin
+                      endJobDetails.damageResolutionFiles alanına yazılır ve hasar
+                      tahtasında, iş kartında ve müşteri profilinde görüntülenir.
+                      ============================================================== */}
+                  <div>
+                    <label className="block text-sm font-bold text-black mb-2">Çözüm Belgeleri <span className="font-medium text-neutral-400">— isteğe bağlı (fotoğraf, PDF, dekont; çoklu seçilebilir)</span></label>
+                    <label className="cursor-pointer w-full bg-neutral-50 hover:bg-neutral-100 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2 text-sm font-bold text-neutral-600">
+                      <Upload className="w-4 h-4" /> Dosya Ekle (Fotoğraf / PDF / Belge)
+                      {/* accept: görseller + PDF + yaygın belge türleri; multiple ile çoklu seçim */}
+                      <input type="file" multiple accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" onChange={handleResolveFileUpload} className="hidden" />
+                    </label>
+                    {/* Eklenen dosyaların listesi — tek tek kaldırılabilir */}
+                    {resolveDamageModal.files.length > 0 && (
+                      <div className="flex flex-col gap-1.5 mt-2">
+                        {resolveDamageModal.files.map((f, i) => (
+                          <div key={i} className={`flex items-center justify-between gap-2 p-2 rounded-lg border text-xs font-bold ${f.url === 'Yükleniyor...' ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
+                            <span className="flex items-center gap-1.5 min-w-0">
+                              {f.url === 'Yükleniyor...' ? <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" /> : (/\.(jpe?g|png|gif|webp|heic|bmp)(\?|$)/i.test(f.url) ? <Camera className="w-3.5 h-3.5 shrink-0" /> : <FileText className="w-3.5 h-3.5 shrink-0" />)}
+                              <span className="truncate">{f.name}</span>
+                              {f.url === 'Yükleniyor...' && <span className="shrink-0 font-medium">yükleniyor…</span>}
+                            </span>
+                            {f.url !== 'Yükleniyor...' && (
+                              <button type="button" onClick={() => setResolveDamageModal(prev => ({ ...prev, files: prev.files.filter((_, x) => x !== i) }))} className="text-red-500 hover:text-red-700 shrink-0" title="Listeden çıkar">
+                                <X className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   {/* DEĞİŞTİ: Buton, hasar tutarı 0'dan büyükse KIRMIZI olur (borç
                       yazılacak uyarısı); 0 veya boşsa eskisi gibi YEŞİL kalır.
-                      Tutar alanı boşsa buton kilitlenir (zorunlu alan). */}
+                      Tutar alanı boşsa buton kilitlenir (zorunlu alan).
+                      YENİ: Dosya yüklemesi SÜRERKEN de kilitlenir — yarım kalmış
+                      "Yükleniyor..." yer tutucusunun kaydedilmesi engellenir. */}
                   <button type="button" onClick={handleResolveDamageSubmit}
-                    disabled={String(resolveDamageModal.cost).trim() === ''}
-                    className={`w-full py-4 text-white font-black rounded-xl transition flex justify-center items-center gap-2 shadow-lg mt-2 ${String(resolveDamageModal.cost).trim() === ''
+                    disabled={String(resolveDamageModal.cost).trim() === '' || resolveYukleniyor > 0}
+                    className={`w-full py-4 text-white font-black rounded-xl transition flex justify-center items-center gap-2 shadow-lg mt-2 ${(String(resolveDamageModal.cost).trim() === '' || resolveYukleniyor > 0)
                       ? 'bg-neutral-300 cursor-not-allowed'
                       : (parseFloat(resolveDamageModal.cost) || 0) > 0
                         ? 'bg-red-600 hover:bg-red-700'
