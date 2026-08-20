@@ -2711,6 +2711,59 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     }, [jobs, silinen]);
 
     // ========================================================================
+    // YENİ: EKİPSİZ KOPYALAR (kullanıcı kuralı — en güvenilir tespit)
+    // ========================================================================
+    // KURAL: "Ekip listesi olan orijinal, diğerleri sistemin kopyaladığı."
+    // Aynı gün + aynı müşteri + aynı telefon grubunda, ekip atanmış bir kayıt
+    // VARSA, ekibi olmayanlar aktarım artığıdır.
+    //
+    // Bu tespit adrese BAKMAZ — çünkü aktarımda adresler farklı yazılmış olabiliyor
+    // (ör. aynı iş için biri "İstanbul/Pendik/Kurtköy", diğeri "Bitlis/" diyor).
+    // "Birebir aynı" listesi bu yüzden bu çiftleri kaçırıyordu.
+    //
+    // GÜVENLİK ŞARTLARI — bir kayıt ancak ŞU ÜÇÜ birden sağlanırsa silinebilir:
+    //   1) Grubunda ekip atanmış EN AZ BİR kayıt var (yani orijinali duruyor)
+    //   2) Kendisinde ekip atanmamış
+    //   3) İş sonlandırma verisi yok (endJobDetails boş) — sonlandırılmış kayıt
+    //      hasar/fotoğraf/ödeme bilgisi taşır, asla silinmez
+    // Ekip atanmış kayıt birden fazlaysa gruba hiç dokunulmaz; o durum
+    // gerçekten iki ayrı iş olabilir (ör. aynı gün ikinci iş) ve kararı
+    // kullanıcı aşağıdaki listede tek tek verir.
+    // ========================================================================
+    const ekipsizKopyalar = useMemo(() => {
+      const sonuc = [];
+      mukerrerGruplar.forEach(g => {
+        const ekipli = g.filter(j => (j.assignedPersonnelIds || []).length > 0);
+        if (ekipli.length !== 1) return; // Tek bir orijinal yoksa karışma
+        g.forEach(j => {
+          if ((j.assignedPersonnelIds || []).length > 0) return; // Orijinal korunur
+          if (j.endJobDetails) return;                            // Sonlandırılmış korunur
+          sonuc.push({ silinecek: j, tutulan: ekipli[0] });
+        });
+      });
+      return sonuc;
+    }, [mukerrerGruplar]);
+
+    const [ekipsizOnay, setEkipsizOnay] = useState(false);
+    const [ekipsizIlerleme, setEkipsizIlerleme] = useState(null);
+
+    const ekipsizTopluSil = async () => {
+      setEkipsizOnay(false);
+      setEkipsizIlerleme({ toplam: ekipsizKopyalar.length, biten: 0 });
+      const basarili = [];
+      for (const { silinecek } of ekipsizKopyalar) {
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', silinecek.id));
+          basarili.push(silinecek.id);
+        } catch (e) { console.error('Ekipsiz kopya silinemedi:', silinecek.id, e); }
+        setEkipsizIlerleme(p => ({ ...p, biten: (p?.biten || 0) + 1 }));
+      }
+      setSilinen(prev => [...prev, ...basarili]);
+      if (addSystemLog) addSystemLog('Ekipsiz Kopyalar Temizlendi', `${basarili.length} adet ekibi atanmamış kopya iş kaydı silindi.`);
+      setTimeout(() => setEkipsizIlerleme(null), 2500);
+    };
+
+    // ========================================================================
     // YENİ: BİREBİR AYNI KAYITLAR (güvenli otomatik temizlik adayları)
     // ========================================================================
     // Yukarıdaki "mükerrer" listesi benzer kayıtları da içerir (biri ekipli,
@@ -2932,6 +2985,62 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             </div>
           )}
         </div>
+
+        {/* ==================================================================
+            YENİ: EKİPSİZ KOPYALAR — en güvenilir temizlik
+            Ekip atanmış kayıt orijinaldir; aynı gün/müşteri/telefondaki
+            ekipsiz ve sonlandırılmamış kayıtlar aktarım artığıdır.
+            ================================================================== */}
+        <div className="mt-8 pt-6 border-t border-neutral-200">
+          <h2 className="text-xl font-bold text-black mb-4 flex items-center gap-2">
+            <Users className="w-6 h-6 text-red-600" /> Ekipsiz Kopyalar
+          </h2>
+          <div className="bg-red-50 text-red-800 p-4 rounded-xl text-sm font-medium mb-4 border border-red-200">
+            <b>Ekip listesi olan kayıt orijinaldir.</b> Aynı gün, aynı müşteri ve aynı telefonla kayıtlı olup <b>ekibi atanmamış</b> ve <b>sonlandırılmamış</b> kayıtlar, eski sistem aktarımının bıraktığı kopyalardır. Adresler farklı yazılmış olsa bile yakalanır — aktarımda adres alanları bozulabildiği için karşılaştırmaya girmez. Grupta ekipli <b>birden fazla</b> kayıt varsa hiç dokunulmaz (gerçekten iki ayrı iş olabilir); o gruplar aşağıda tek tek incelenir. <b>Silmeden önce yukarıdan yedek alın.</b>
+          </div>
+
+          {ekipsizIlerleme ? (
+            <p className="text-sm font-bold text-red-700">Siliniyor… {ekipsizIlerleme.biten} / {ekipsizIlerleme.toplam}</p>
+          ) : ekipsizKopyalar.length === 0 ? (
+            <p className="text-sm font-bold text-green-700 bg-green-50 p-4 rounded-xl border border-green-200 text-center">Ekipsiz kopya bulunamadı.</p>
+          ) : (
+            <>
+              <p className="text-sm font-bold text-neutral-600 mb-3">{ekipsizKopyalar.length} kopya silinebilir:</p>
+              <div className="max-h-64 overflow-y-auto space-y-1.5 mb-4">
+                {ekipsizKopyalar.map(({ silinecek, tutulan }, i) => (
+                  <div key={i} className="text-xs bg-neutral-50 px-3 py-2 rounded-lg border border-neutral-200">
+                    <div className="font-black text-black mb-1">{silinecek.customerName} • {silinecek.date?.split('-').reverse().join('.')} {silinecek.time || ''} • ₺{silinecek.price ? parseInt(silinecek.price).toLocaleString('tr-TR') : '0'}</div>
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 font-medium">
+                      <span className="text-green-700">✓ Tutulacak: <b>{(tutulan.assignedPersonnelIds || []).length} kişilik ekip</b> • {tutulan.createdBy || '—'}</span>
+                      <span className="text-red-700">✕ Silinecek: <b>ekip yok</b> • {silinecek.createdBy || '—'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button onClick={() => setEkipsizOnay(true)} className="px-4 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex items-center gap-2 shadow-lg">
+                <Trash2 className="w-4 h-4" /> {ekipsizKopyalar.length} Ekipsiz Kopyayı Sil
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Ekipsiz kopya silme onayı */}
+        {ekipsizOnay && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center shadow-2xl">
+              <AlertTriangle className="w-16 h-16 text-red-600 mx-auto mb-4" />
+              <h3 className="font-black text-xl text-black mb-2">Ekipsiz Kopyaları Sil</h3>
+              <p className="text-neutral-600 mb-2 text-sm font-medium">
+                {ekipsizKopyalar.length} kayıt silinecek. Ekibi atanmış orijinaller korunacak.
+              </p>
+              <p className="text-red-600 mb-6 text-xs font-bold">Bu işlem geri alınamaz. Yedeğinizi aldınız mı?</p>
+              <div className="flex gap-3">
+                <button onClick={() => setEkipsizOnay(false)} className="flex-1 p-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">Vazgeç</button>
+                <button onClick={ekipsizTopluSil} className="flex-1 p-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg">Evet, Sil</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* ==================================================================
             YENİ: BİREBİR AYNI KAYITLAR (güvenli toplu temizlik)
