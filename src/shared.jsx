@@ -228,6 +228,43 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
     export const isUzaktanCalisan = (person) => person?.calismaSekli === 'Uzaktan';
 
     // ==========================================================================
+    // HASAR ÇÖZÜM BELGELERİ — ORTAK GÖRÜNTÜLEME BİLEŞENİ
+    // ==========================================================================
+    // Hasar kapatılırken eklenen fotoğraf / PDF / dekont dosyalarını rozet
+    // olarak listeler. Üç ekranda birden kullanılır (Hasar Tahtası, iş kartı,
+    // müşteri profili) — tek bileşen olması sayesinde davranış her yerde aynı:
+    //   • Görseller  -> uygulamanın mevcut görüntüleyicisinde açılır
+    //     (setViewingImage verilmişse; verilmemişse yeni sekmede)
+    //   • PDF/diğer  -> her zaman yeni sekmede açılır (görüntüleyici PDF basmaz)
+    // files: [{ url, name }] — App.tsx hasar çözümünde bu biçimde kaydedilir.
+    export const HasarCozumBelgeleri = ({ files, setViewingImage }) => {
+      const liste = (files || []).filter(f => f && f.url && f.url !== 'Yükleniyor...');
+      if (liste.length === 0) return null;
+      const gorselMi = (u) => /\.(jpe?g|png|gif|webp|heic|bmp)(\?|$)/i.test(String(u));
+      return (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {liste.map((f, i) => {
+            const gorsel = gorselMi(f.url);
+            const ad = f.name || (gorsel ? `Fotoğraf ${i + 1}` : `Belge ${i + 1}`);
+            return (
+              <button key={i} type="button"
+                onClick={(e) => {
+                  e.stopPropagation(); // Kart tıklamasını tetiklemesin
+                  if (gorsel && setViewingImage) setViewingImage({ title: `Çözüm Belgesi — ${ad}`, name: f.url });
+                  else window.open(f.url, '_blank', 'noopener'); // PDF/belge yeni sekmede
+                }}
+                title={ad}
+                className="text-[10px] font-black px-2 py-1 rounded-lg border transition flex items-center gap-1 bg-green-50 text-green-700 border-green-200 hover:bg-green-100 max-w-[160px]">
+                {gorsel ? <Camera className="w-3 h-3 shrink-0" /> : <FileText className="w-3 h-3 shrink-0" />}
+                <span className="truncate">{ad}</span>
+              </button>
+            );
+          })}
+        </div>
+      );
+    };
+
+    // ==========================================================================
     // GARANTİ BANKASI TOPLU MAAŞ/AVANS EXCEL ŞABLONU (base64)
     // ==========================================================================
     // Bu sabit, bankanın KABUL ETTİĞİ orijinal .xlsx dosyasının BİREBİR
