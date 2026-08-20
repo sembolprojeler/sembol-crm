@@ -2633,7 +2633,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     );
   };
 
-  const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, addSystemLog }) => {
+  const SystemFilesView = ({ jobs, personnelList, vehicles, materials, db, appId, addSystemLog, onJobDeleted }) => {
     // ========================================================================
     // YENİ: MÜKERRER İŞ KAYDI TEMİZLİĞİ
     // ========================================================================
@@ -2759,6 +2759,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         setEkipsizIlerleme(p => ({ ...p, biten: (p?.biten || 0) + 1 }));
       }
       setSilinen(prev => [...prev, ...basarili]);
+      if (onJobDeleted) onJobDeleted(basarili); // Arşiv katmanından da düşür
       if (addSystemLog) addSystemLog('Ekipsiz Kopyalar Temizlendi', `${basarili.length} adet ekibi atanmamış kopya iş kaydı silindi.`);
       setTimeout(() => setEkipsizIlerleme(null), 2500);
     };
@@ -2803,6 +2804,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       try {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id));
         setSilinen(prev => [...prev, job.id]);
+        if (onJobDeleted) onJobDeleted([job.id]); // Arşiv katmanından da düşür
         if (addSystemLog) addSystemLog('Mükerrer Kayıt Silindi', `${job.customerName} (${job.date}) mükerrer iş kaydı silindi. Kaydı açan: ${job.createdBy || 'bilinmiyor'}.`);
       } catch (e) {
         console.error('Mükerrer kayıt silinemedi:', e);
@@ -2836,6 +2838,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         setTopluIlerleme(p => ({ ...p, biten: (p?.biten || 0) + 1 }));
       }
       setSilinen(prev => [...prev, ...basarili]);
+      if (onJobDeleted) onJobDeleted(basarili); // Arşiv katmanından da düşür
       if (addSystemLog) addSystemLog('Birebir Kopyalar Temizlendi', `${basarili.length} adet ayırt edilemez kopya iş kaydı silindi.`);
       setTimeout(() => setTopluIlerleme(null), 2500);
     };
@@ -5441,6 +5444,18 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const handleCompletelyDeleteJob = async (id) => {
       if (!firebaseUser) return;
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id));
+      // ======================================================================
+      // DÜZELTME (KRİTİK): ARŞİV KATMANINDAN DA DÜŞÜR
+      // ======================================================================
+      // SORUNUN KÖKÜ: İşler iki katmanda tutulur — son 30 gün canlı dinlenir
+      // (onSnapshot, silinince kendiliğinden düşer), daha ESKİ işler ise bir
+      // kez okunup arsivIsler içinde BELLEKTE tutulur. Eski Sistem Aktarımı
+      // kayıtları Mayıs/Haziran tarihli olduğu için arşiv katmanındaydı;
+      // deleteDoc Firestore'dan siliyordu ama bellekteki kopya kaldığı için
+      // ekranda hiçbir şey olmamış gibi görünüyordu ("silmiyor" şikâyeti).
+      // Artık silinen kayıt arşiv listesinden de anında çıkarılır.
+      // ======================================================================
+      setArsivIsler(prev => prev.filter(j => j.id !== id));
       addSystemLog('İş Kalıcı Olarak Silindi', `Sistem üzerinden bir operasyon kalıcı olarak silindi.`);
     };
 
@@ -8404,7 +8419,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'permissions' && showAuth && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} positions={positions} />}
             {activeTab === 'moduleAccess' && showAuth && <ModuleAccessView moduleCatalog={moduleCatalog} addSystemLog={addSystemLog} />}
             
-            {activeTab === 'backupSystem' && showSystemFiles && <SystemFilesView jobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} />}
+            {activeTab === 'backupSystem' && showSystemFiles && <SystemFilesView jobs={jobs} personnelList={personnelList} vehicles={vehicles} materials={materials} db={db} appId={appId} addSystemLog={addSystemLog} onJobDeleted={(idler) => setArsivIsler(prev => prev.filter(j => !idler.includes(j.id)))} />}
             {activeTab === 'systemLogs' && showSystemFiles && <SystemLogsView logs={systemLogs} />}
             {activeTab === 'userActivities' && showSystemFiles && <UserActivitiesView personnelList={personnelList} />}
             {activeTab === 'companyPasswords' && showSystemFiles && <CompanyPasswordsView passwords={companyPasswords} db={db} appId={appId} addSystemLog={addSystemLog} />}
