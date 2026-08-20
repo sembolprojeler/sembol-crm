@@ -1273,7 +1273,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
       </div>
     );
   };
-  export const CalendarView = ({ jobs, handleEditJob, currentUser, setJobToChangeDate, setNewJobDate, setShowChangeDateModal, setCancelJobId, onDonemGerekli, donemYukleniyor }) => {
+  export const CalendarView = ({ jobs, handleEditJob, currentUser, setJobToChangeDate, setNewJobDate, setShowChangeDateModal, setCancelJobId, setDeleteJobId, onDonemGerekli, donemYukleniyor }) => {
     const canAssign = currentUser?.position?.includes('Operasyon') || currentUser?.position?.includes('Firma Sahibi') || currentUser?.permissions?.canEdit;
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
@@ -1686,6 +1686,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                               </>
                             );
                           })()}
+                          {/* ==============================================================
+                              YENİ: KALICI SİL — YALNIZCA MÜDÜR VE FİRMA SAHİBİ
+                              ==============================================================
+                              "İptal Et" işi iptal listesine taşır, kayıt sistemde kalır.
+                              Bu buton ise işi veritabanından TAMAMEN siler; hiç kaydedilmemiş
+                              gibi olur ve geri alınamaz.
+                              YETKİ: Yukarıdaki "Değiştir/İptal" grubundan AYRI ve daha dardır.
+                              Orada işi açan kişi veya canEdit yetkisi olan da işlem yapabilir;
+                              burada YALNIZCA position === 'Firma Sahibi' veya rank === 'Müdür'
+                              olanlar butonu görür. canEdit yetkisi TEK BAŞINA yetmez.
+                              Silme onayı, App.tsx'teki mevcut "Kalıcı Olarak Sil" penceresinden
+                              geçer (setDeleteJobId) — ayrı bir onay akışı kurulmadı.
+                              ============================================================== */}
+                          {(currentUser?.position === 'Firma Sahibi' || currentUser?.rank === 'Müdür') && setDeleteJobId && (
+                            <button onClick={() => setDeleteJobId(job.id)} className="flex-1 min-w-0 px-1 py-1.5 bg-red-600 hover:bg-red-700 text-white text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 shadow-sm whitespace-nowrap overflow-hidden" title="İşi veritabanından tamamen siler — geri alınamaz">
+                              <Trash2 className="w-2.5 h-2.5 shrink-0"/> Kalıcı Sil
+                            </button>
+                          )}
                         </>
                         )}
                       </div>
