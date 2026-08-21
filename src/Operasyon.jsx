@@ -18024,7 +18024,51 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       const maviEkip = kisiCoz(maviKayitlar).filter(p => mesaiYakaTipi(p) === 'Mavi Yaka');
       let maviSonuc = {};
       if (maviEkip.length > 0) {
-        try { maviSonuc = mesaiOnerileriHesapla(maviEkip, maviKayitlar, tarih) || {}; } catch (e) { /* sessiz geç */ }
+        // ====================================================================
+        // DÜZELTME (KRİTİK): ÖNERİ ARTIK GERÇEKTEN EKİP BAZLI
+        // ====================================================================
+        // SORUNUN KÖKÜ: mesaiOnerileriHesapla, "ekipte EN ERKEN çıkan" saati
+        // esas alıyor. Ancak fonksiyon o günün TÜM mavi yakasına TEK SEFERDE
+        // çağrılıyordu; yani "ekip" aslında "o gün çalışan herkes" oluyordu.
+        // Sonuç: 34 NAR 456 ekibinden biri 19:00'da çıkınca, 21:00'e kadar
+        // çalışan 34 KUD 891 ekibinin fazla mesaisi de 19:00'a göre hesaplanıp
+        // haksız yere düşüyordu.
+        //
+        // YENİ HALİ: Personel önce O GÜN ÇIKTIĞI ARACA (plaka) göre gruplanır
+        // ve motor HER EKİP İÇİN AYRI çalıştırılır. Böylece "en erken çıkış"
+        // yalnızca kişinin KENDİ ekibinden alınır. Araca atanmamış personel
+        // ayrı bir grup olarak değerlendirilir.
+        //
+        // NOT: Buradaki ekip çözümü, aşağıdaki personelAraci() ile aynı işi
+        // yapar ama onu ÇAĞIRMAZ — o fonksiyon bu satırlardan SONRA tanımlı
+        // olduğu için render sırasında henüz erişilebilir değildir.
+        // ====================================================================
+        const ekipIdleriCoz = (is) => {
+          const idler = [...(is.assignedPersonnelIds || [])];
+          if (is.assignedPersonnelId && !idler.includes(is.assignedPersonnelId)) idler.push(is.assignedPersonnelId);
+          return idler.map(String);
+        };
+        const ekipGruplari = new Map(); // plaka -> personel[]
+        const aracsizlar = [];
+        maviEkip.forEach(p => {
+          const oGunkuIsler = (jobs || []).filter(is => is.date === tarih && ekipIdleriCoz(is).includes(String(p.id)));
+          const plaka = oGunkuIsler.map(is => is.assignedVehiclePlate).filter(Boolean)[0];
+          if (plaka) {
+            if (!ekipGruplari.has(plaka)) ekipGruplari.set(plaka, []);
+            ekipGruplari.get(plaka).push(p);
+          } else {
+            aracsizlar.push(p); // Araca atanmamış: kendi aralarında değerlendirilir
+          }
+        });
+
+        try {
+          ekipGruplari.forEach(grup => {
+            Object.assign(maviSonuc, mesaiOnerileriHesapla(grup, maviKayitlar, tarih) || {});
+          });
+          if (aracsizlar.length > 0) {
+            Object.assign(maviSonuc, mesaiOnerileriHesapla(aracsizlar, maviKayitlar, tarih) || {});
+          }
+        } catch (e) { /* sessiz geç */ }
       }
 
       // --- BEYAZ YAKA (yeni sade motor) ---
@@ -18107,7 +18151,8 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     // Bağımlılık sadeleştirildi: filtreli zaten gunlukKayitlar'dan türüyor
     // YENİ: fTarih ve beyazYaka eklendi (beyaz yaka önerisi bu ikisine bağlı)
     // YENİ: haftaKayitlari, puantajlar, takiptekiPersonel — haftalık kural motoru
-  }, [gunlukKayitlar, personnelList, fTarih, beyazYaka, haftaKayitlari, puantajlar, takiptekiPersonel]);
+    // YENİ: jobs — ekip (araç) bazlı gruplama bu listeden plaka çözüyor
+  }, [gunlukKayitlar, personnelList, fTarih, beyazYaka, haftaKayitlari, puantajlar, takiptekiPersonel, jobs]);
 
   // RAPORLAMA: seçilen aydaki kayıtlardan kişi bazlı özet çıkarır
   const rapor = useMemo(() => {
