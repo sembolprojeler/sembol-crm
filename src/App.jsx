@@ -6669,9 +6669,27 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     kendiliğinden normal görünümüne döner (aşağıdaki tarih
                     farkı hesabına göre).
                     ======================================================== */}
-                {/* YENİ: İŞ KILAVUZU VE İŞ ŞEMASI — kaldırılan "Takip ve Yapılacak İşler"
-                    butonunun yerine geçti. Personel buradan kendi pozisyonunun görev
-                    kılavuzunu ve iş akış şemasını görür. */}
+                {/* ==========================================================
+                    DEĞİŞTİ (kullanıcı talebi): BU KISAYOL KİME GÖRE NE GÖSTERİR
+                    ==========================================================
+                    • MÜDÜR / FİRMA SAHİBİ  -> DEFTER kısayolu (kitap simgesi,
+                      zümrüt yeşili, sürekli yanıp söner). En sık kullanılan
+                      sayfa olduğu için isim satırının yanında hep elinin
+                      altında durur. Bu kişilerde İş Kılavuzu simgesi GÖRÜNMEZ;
+                      kılavuza gerektiğinde sol menüden ulaşılabilir.
+                    • DİĞER PERSONEL        -> eskisi gibi İŞ KILAVUZU simgesi.
+                    ========================================================== */}
+                {(currentUser?.position === 'Firma Sahibi' || currentUser?.rank === 'Müdür') ? (
+                  <button
+                    onClick={() => { setActiveTab('finansDefter'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsFinanceSubMenuOpen(true); }}
+                    className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'finansDefter'
+                      ? 'bg-emerald-600 text-white'
+                      : 'defter-kisayol-yanson text-white'}`}
+                    title="Defter — Kasa, cari ve borç/alacak takibi"
+                  >
+                    <BookOpen className="w-5 h-5" />
+                  </button>
+                ) : (
                 <button
                   onClick={() => { setActiveTab('isKilavuzu'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
                   className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'isKilavuzu' ? 'bg-red-600 text-white' : (() => {
@@ -6707,6 +6725,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     );
                   })()}
                 </button>
+                )}
                 <button 
                   onClick={() => { setActiveTab('notifications'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
                   className={`relative p-2 rounded-xl transition shrink-0 ${activeTab === 'notifications' ? 'bg-red-600 text-white' : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
@@ -9806,6 +9825,28 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           }
           .yeni-personel-isik-yanson {
             animation: yeniPersonelIsikYanson 1s ease-in-out infinite;
+          }
+
+          /* ================================================================
+             YENİ: DEFTER KISAYOLU — SÜREKLİ YANIP SÖNME
+             Müdür ve firma sahibinde, isim satırının yanındaki Defter simgesi
+             kalıcı olarak nabız atar. İş Kılavuzu'nun kırmızısından ayrılsın
+             diye ZÜMRÜT YEŞİLİ seçildi (Defter sayfasının kendi rengi).
+             Ritim biraz daha yavaş (1.6s) — sürekli göründüğü için hızlı
+             yanıp sönme yorucu olurdu; bu tempo göz köşesinde fark edilir
+             ama rahatsız etmez.
+             ================================================================ */
+          @keyframes defterKisayolYanson {
+            0%, 100% { background-color: #059669; box-shadow: 0 0 0 0 rgba(16,185,129,0.55); transform: scale(1); }
+            50%      { background-color: #34d399; box-shadow: 0 0 0 7px rgba(16,185,129,0.12); transform: scale(1.10); }
+          }
+          .defter-kisayol-yanson {
+            animation: defterKisayolYanson 1.6s ease-in-out infinite;
+          }
+          /* Hareket azaltma tercihi açık kullanıcılarda animasyon durur,
+             simge sabit yeşil kalır (erişilebilirlik). */
+          @media (prefers-reduced-motion: reduce) {
+            .defter-kisayol-yanson { animation: none; background-color: #059669; }
           }
 
           /* ================================================================
