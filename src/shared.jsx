@@ -146,11 +146,17 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
     export const FLOORS = ['Bodrum Kat', 'Giriş Kat', 'Müstakil / Villa', ...Array.from({ length: 30 }, (_, i) => `${i + 1}. Kat`)];
 
     // DEPOEVİM TESİSLERİ
+    // YENİ: floor ve transportMethod alanları eklendi. Her tesisin fiziksel
+    // durumu farklı olabiliyor (bazısı giriş kat + merdiven, bazısı üst kat +
+    // bina asansörü). Bu alanlar boş bırakılırsa handleDepoChange varsayılan
+    // olarak "Giriş Kat" + "Merdiven" kullanır, yani eski depolar etkilenmez.
     export const DEPO_LOCATIONS = [
       { name: "Pendik Depoevim", province: "İstanbul (Anadolu)", district: "Pendik", address: "Bahçelievler Mah. Yeni Sk. No: 5/A" },
       { name: "Kartal Depoevim", province: "İstanbul (Anadolu)", district: "Kartal", address: "Yalı Mah. Bağlar Cad. No: 74/2" },
       { name: "Çekmeköy Depoevim", province: "İstanbul (Anadolu)", district: "Çekmeköy", address: "Ekşioğlu Mah. Atabey Cad. No: 28/2" },
-      { name: "Ümraniye Depoevim", province: "İstanbul (Anadolu)", district: "Ümraniye", address: "Dudullu OSB Mah. 1. Cad. No: 30/4" }
+      { name: "Ümraniye Depoevim", province: "İstanbul (Anadolu)", district: "Ümraniye", address: "Dudullu OSB Mah. 1. Cad. No: 30/4" },
+      // YENİ TESİS: Avrupa yakası. 2. katta ve bina asansörü var.
+      { name: "Başakşehir Depoevim", province: "İstanbul (Avrupa)", district: "Başakşehir", address: "İkitelli OSB. Atatürk Blv. No:98", floor: "2. Kat", transportMethod: "Bina Asansörü" }
     ];
 
     export const MESAI_STATUS_OPTIONS = [
