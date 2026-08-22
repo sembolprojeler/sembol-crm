@@ -4009,6 +4009,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const [vadeOdeme, setVadeOdeme] = useState(null);
     // Vade listesi açık olan kalemin kimliği (akordiyon)
     const [acikOdemeKalemi, setAcikOdemeKalemi] = useState(null);
+
+    // YENİ: Kredi kalemi formu ve akordiyon durumu (Ödemeler ile aynı desen)
+    const bosKrediKalemi = { id: '', ad: '', bankaAdi: '', anaPara: '', toplamGeriOdeme: '', taksitSayisi: '', aylikTaksit: '', ilkTaksitTarihi: bugunStr(), not: '' };
+    const [krediKalemForm, setKrediKalemForm] = useState(null); // null = kapalı
+    const [acikKrediKalemi, setAcikKrediKalemi] = useState(null);
     const [editingDefterId, setEditingDefterId] = useState(null);
     const [deleteDefterId, setDeleteDefterId] = useState(null);
 
@@ -4251,8 +4256,20 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // taksitNo alanından okunur. Yani "ödendi" bilgisi ayrı bir yerde değil,
     // paranın gerçekten hareket ettiği işlemin kendisinde durur.
     // ========================================================================
-    const krediBilgi = (defter) => {
-      const k = defter?.kredi || {};
+    // Bir defterin kredi kalemlerini verir.
+    // GERİYE UYUM: Eski sürümde defterin kendisi TEK bir krediydi (defter.kredi).
+    // O yapıdaki kayıtlar, tek elemanlı bir listeye çevrilerek yeni ekranda
+    // aynen görünmeye devam eder; kimlikleri '__eski__' olur.
+    const krediKalemleri = (defter) => {
+      if (Array.isArray(defter?.krediler)) return defter.krediler;
+      if (defter?.kredi && (parseFloat(defter.kredi.toplamGeriOdeme) > 0)) {
+        return [{ id: '__eski__', ...defter.kredi }];
+      }
+      return [];
+    };
+
+    const krediBilgi = (defter, kalem) => {
+      const k = kalem || {};
       const taksitSayisi = parseInt(k.taksitSayisi) || 0;
       const toplamGeriOdeme = parseFloat(k.toplamGeriOdeme) || 0;
       const anaPara = parseFloat(k.anaPara) || 0;
@@ -4260,8 +4277,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const aylikTaksit = parseFloat(k.aylikTaksit) || (taksitSayisi > 0 ? toplamGeriOdeme / taksitSayisi : 0);
       const toplamFaiz = Math.max(0, toplamGeriOdeme - anaPara);
 
-      // O kredi defterine yazılmış taksit ödemeleri (giriş = borç azalması)
-      const odemeler = defterIslemleri(defter?.id).filter(i => i.tip === 'giris' && i.krediMahsup);
+      // Bu KALEME ait taksit ödemeleri (giriş = borç azalması).
+      // Eski kayıtlarda krediKalemId yoktur; o durumda defterin tüm kredi
+      // mahsupları tek krediye aittir ve hepsi sayılır.
+      const odemeler = defterIslemleri(defter?.id).filter(i =>
+        i.tip === 'giris' && i.krediMahsup &&
+        (k.id === '__eski__' ? true : (i.krediKalemId ? i.krediKalemId === k.id : false)));
       const odenenTutar = odemeler.reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
       const odenenTaksitNolar = new Set(odemeler.map(i => parseInt(i.taksitNo)).filter(n => !isNaN(n)));
       const kalanBorc = Math.max(0, toplamGeriOdeme - odenenTutar);
@@ -4294,15 +4315,30 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       // Sırada bekleyen ilk ödenmemiş taksit
       const siradaki = plan.find(t => !t.odendi) || null;
 
-      return { anaPara, toplamGeriOdeme, toplamFaiz, taksitSayisi, aylikTaksit,
+      return { kalemId: k.id, anaPara, toplamGeriOdeme, toplamFaiz, taksitSayisi, aylikTaksit,
                odenenTutar, kalanBorc, plan, odenenAdet, kalanAdet: taksitSayisi - odenenAdet,
-               gecikmisAdet, siradaki, bankaAdi: k.bankaAdi || '' };
+               gecikmisAdet, siradaki, bankaAdi: k.bankaAdi || '', ad: k.ad || k.bankaAdi || 'Kredi' };
+    };
+
+    // Bir kredi defterinin TÜM kalemlerinin toplu durumu
+    const krediDefterBilgi = (defter) => {
+      const kalemler = krediKalemleri(defter);
+      const detaylar = kalemler.map(k => ({ kalem: k, bilgi: krediBilgi(defter, k) }));
+      return {
+        detaylar,
+        kalemSayisi: kalemler.length,
+        toplamBorc: detaylar.reduce((t, d) => t + d.bilgi.kalanBorc, 0),
+        toplamAnaPara: detaylar.reduce((t, d) => t + d.bilgi.anaPara, 0),
+        toplamGeriOdeme: detaylar.reduce((t, d) => t + d.bilgi.toplamGeriOdeme, 0),
+        toplamOdenen: detaylar.reduce((t, d) => t + d.bilgi.odenenTutar, 0),
+        gecikmisAdet: detaylar.reduce((t, d) => t + d.bilgi.gecikmisAdet, 0),
+      };
     };
 
     // Tüm kredi defterlerinin toplam kalan borcu — üst özette gösterilir
     const krediDefterleri = defterler.filter(d => d.tur === 'Kredi');
-    const toplamKrediBorcu = krediDefterleri.reduce((t, d) => t + krediBilgi(d).kalanBorc, 0);
-    const toplamGecikmis = krediDefterleri.reduce((t, d) => t + krediBilgi(d).gecikmisAdet, 0);
+    const toplamKrediBorcu = krediDefterleri.reduce((t, d) => t + krediDefterBilgi(d).toplamBorc, 0);
+    const toplamGecikmis = krediDefterleri.reduce((t, d) => t + krediDefterBilgi(d).gecikmisAdet, 0);
 
     // ========================================================================
     // ÖDEMELER MOTORU
@@ -4450,16 +4486,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // --- Defter işlemleri ---
     const handleSaveDefter = async () => {
       if (!defterForm.ad.trim()) return;
-      // YENİ: Kredi defterinde zorunlu alan denetimi. Toplam geri ödeme, taksit
-      // sayısı ve ilk taksit tarihi olmadan taksit planı üretilemez.
-      if (defterForm.tur === 'Kredi') {
-        const k = defterForm.kredi || {};
-        if (!(parseFloat(k.toplamGeriOdeme) > 0)) { alert('Kredi defteri için "Toplam Geri Ödeme" girilmelidir.'); return; }
-        if (!(parseInt(k.taksitSayisi) > 0)) { alert('Kredi defteri için "Taksit Sayısı" girilmelidir.'); return; }
-        if (!k.ilkTaksitTarihi) { alert('Kredi defteri için "İlk Taksit Tarihi" seçilmelidir.'); return; }
-      }
-      // Kredi dışı türlerde kredi alt nesnesi kaydedilmez (gereksiz veri kalmasın)
-      const kayitVerisi = defterForm.tur === 'Kredi' ? { ...defterForm } : { ...defterForm, kredi: null };
+      // DEĞİŞTİ: Kredi bilgileri defter formunda sorulmadığı için burada
+      // doğrulama yapılmaz; krediler defterin içinden tek tek eklenir ve
+      // zorunlu alan denetimi kredi kalemi formunda yapılır.
+      // Form kredi alt nesnesini artık Firestore'a yazmaz — mevcut kayıtlardaki
+      // krediler dizisine dokunulmaz (updateDoc yalnızca verilen alanları değiştirir).
+      const { kredi: _formKredi, ...kayitVerisi } = defterForm;
       if (editingDefterId) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', editingDefterId), { ...kayitVerisi });
         addSystemLog?.('Defter Güncellendi', `"${defterForm.ad}" defteri düzenlendi.`);
@@ -4498,6 +4530,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         odemeId,
         taksitNo: t.no,
         krediDefterId: seciliDefter.id,
+        // YENİ: hangi krediye ait olduğu — bir defterde birden çok kredi olabilir
+        krediKalemId: taksitOdeme.kalem?.id || null,
         kaynak: 'Kredi Ödemesi',
         createdAt: new Date().toISOString(),
         by: currentUser?.fullName || 'Sistem',
@@ -4509,7 +4543,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           ...ortak, tip: 'cikis', tutar,
           defterId: taksitOdeme.kaynakDefterId,
           odemeYontemi: defterdenOdemeYontemi(taksitOdeme.kaynakDefterId),
-          aciklama: `${seciliDefter.ad} — ${t.no}. taksit ödemesi`,
+          aciklama: `${taksitOdeme.kalem?.ad || taksitOdeme.kalem?.bankaAdi || seciliDefter.ad} — ${t.no}. taksit ödemesi`,
         });
         // 2) Kredi defterinde GİRİŞ (borç azalması — ciroya girmez)
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
@@ -4517,7 +4551,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           defterId: seciliDefter.id,
           krediMahsup: true,
           odemeYontemi: defterdenOdemeYontemi(taksitOdeme.kaynakDefterId),
-          aciklama: `${t.no}. taksit ödendi ← ${kaynak?.ad || 'hesap'}`,
+          aciklama: `${taksitOdeme.kalem?.ad || taksitOdeme.kalem?.bankaAdi || 'Kredi'} ${t.no}. taksit ödendi ← ${kaynak?.ad || 'hesap'}`,
         });
         addSystemLog?.('Kredi Taksiti Ödendi',
           `${seciliDefter.ad}: ${t.no}. taksit ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi.`);
@@ -4528,6 +4562,43 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       } finally {
         setTaksitKaydediliyor(false);
       }
+    };
+
+    // ========================================================================
+    // YENİ: KREDİ KALEMİ KAYDET / SİL
+    // Krediler defterin krediler dizisinde tutulur (Ödemeler ile aynı desen).
+    // Böylece tek bir "KREDİLER" defterinde şirketin tüm kredileri toplanır.
+    // ========================================================================
+    const krediKalemiKaydet = async () => {
+      if (!seciliDefter || !krediKalemForm) return;
+      const f = krediKalemForm;
+      if (!f.ad.trim() && !f.bankaAdi.trim()) { alert('Kredi adı veya banka girin (örn: Taşıt Kredisi).'); return; }
+      if (!(parseFloat(f.toplamGeriOdeme) > 0)) { alert('"Toplam Geri Ödeme" girilmelidir.'); return; }
+      if (!(parseInt(f.taksitSayisi) > 0)) { alert('"Taksit Sayısı" girilmelidir.'); return; }
+      if (!f.ilkTaksitTarihi) { alert('"İlk Taksit Tarihi" seçilmelidir.'); return; }
+      const mevcut = krediKalemleri(seciliDefter).filter(k => k.id !== '__eski__');
+      const kalem = { ...f, id: f.id && f.id !== '__eski__' ? f.id : `kr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
+      const yeniListe = (f.id && f.id !== '__eski__')
+        ? mevcut.map(k => k.id === kalem.id ? kalem : k)
+        : [...mevcut, kalem];
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), { krediler: yeniListe });
+        addSystemLog?.('Kredi Kalemi', `${seciliDefter.ad}: "${kalem.ad || kalem.bankaAdi}" ${f.id ? 'güncellendi' : 'eklendi'} (₺${paraFmt(kalem.toplamGeriOdeme)}).`);
+        setKrediKalemForm(null);
+      } catch (e) { console.error(e); alert('Kredi kaydedilemedi.'); }
+    };
+
+    const krediKalemiSil = async (kalemId) => {
+      if (!seciliDefter) return;
+      const kalem = krediKalemleri(seciliDefter).find(k => k.id === kalemId);
+      // Yapılmış taksit ödemeleri SİLİNMEZ; yalnızca kredi planı kaldırılır.
+      if (!window.confirm(`"${kalem?.ad || kalem?.bankaAdi}" kredi planı kaldırılsın mı?\n\nDaha önce yapılmış taksit ödemeleri silinmez, defterde kalır.`)) return;
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), {
+          krediler: krediKalemleri(seciliDefter).filter(k => k.id !== kalemId && k.id !== '__eski__')
+        });
+        addSystemLog?.('Kredi Kalemi Silindi', `${seciliDefter.ad}: "${kalem?.ad || kalem?.bankaAdi}" planı kaldırıldı.`);
+      } catch (e) { console.error(e); alert('Kredi silinemedi.'); }
     };
 
     // ========================================================================
@@ -5017,19 +5088,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       </div>
                     );
                   })() : d.tur === 'Kredi' ? (() => {
-                    const kb = krediBilgi(d);
-                    const yuzde = kb.toplamGeriOdeme > 0 ? Math.round((kb.odenenTutar / kb.toplamGeriOdeme) * 100) : 0;
+                    // DEĞİŞTİ: Defterdeki TÜM kredilerin toplamı gösterilir
+                    const kd = krediDefterBilgi(d);
+                    const yuzde = kd.toplamGeriOdeme > 0 ? Math.round((kd.toplamOdenen / kd.toplamGeriOdeme) * 100) : 0;
                     return (
                       <div className="text-right shrink-0 min-w-[120px]">
-                        <div className={`text-lg font-black ${kb.kalanBorc > 0 ? 'text-violet-700' : 'text-emerald-600'}`}>₺{paraFmt(kb.kalanBorc)}</div>
+                        <div className={`text-lg font-black ${kd.toplamBorc > 0 ? 'text-violet-700' : 'text-emerald-600'}`}>₺{paraFmt(kd.toplamBorc)}</div>
                         <div className="text-[10px] font-black uppercase text-violet-500">
-                          {kb.kalanBorc > 0 ? `Kalan Borç • ${kb.kalanAdet}/${kb.taksitSayisi} taksit` : 'Kredi Kapandı'}
+                          {kd.kalemSayisi === 0 ? 'Kredi Eklenmemiş'
+                            : kd.toplamBorc > 0 ? `Kalan Borç • ${kd.kalemSayisi} kredi`
+                            : 'Tüm Krediler Kapandı'}
                         </div>
-                        <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden mt-1">
-                          <div className="h-full bg-violet-500" style={{ width: `${yuzde}%` }}></div>
-                        </div>
-                        {kb.gecikmisAdet > 0 && (
-                          <div className="text-[9px] font-black text-red-600 mt-0.5">{kb.gecikmisAdet} gecikmiş</div>
+                        {kd.kalemSayisi > 0 && (
+                          <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden mt-1">
+                            <div className="h-full bg-violet-500" style={{ width: `${yuzde}%` }}></div>
+                          </div>
+                        )}
+                        {kd.gecikmisAdet > 0 && (
+                          <div className="text-[9px] font-black text-red-600 mt-0.5">{kd.gecikmisAdet} gecikmiş taksit</div>
                         )}
                       </div>
                     );
@@ -5076,48 +5152,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       Bu defter <b>kira, sigorta, vergi, abonelik</b> gibi düzenli ödemeleri takip eder. Defteri açtıktan sonra içine tek tek ödeme kalemleri ekleyecek, her biri için tekrar sıklığını (haftalık/aylık/yıllık), kaç kez tekrarlanacağını ve ilk ödeme tarihini belirleyeceksiniz.
                     </div>
                   )}
+                  {/* DEĞİŞTİ: Kredi bilgileri artık BURADA sorulmuyor.
+                      Bir şirketin birden fazla kredisi olabildiği için Kredi
+                      defteri, Ödemeler defteriyle aynı mantığa geçirildi:
+                      defter bir KAPSAYICIDIR, krediler defterin içine tek tek
+                      eklenir. Böylece tüm krediler tek defterde toplanır ve
+                      toplam borç bir arada görünür. */}
                   {defterForm.tur === 'Kredi' && (
-                    <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl space-y-3">
-                      <div className="text-[11px] font-black text-violet-800 uppercase flex items-center gap-1.5">
-                        <Landmark className="w-3.5 h-3.5" /> Kredi Bilgileri
-                      </div>
-                      <div><label className="text-xs font-bold text-neutral-600 block mb-1">Banka / Kurum</label>
-                        <input value={defterForm.kredi?.bankaAdi || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, bankaAdi: e.target.value } })}
-                          className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="Örn: Garanti BBVA, Halkbank" /></div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ana Para (₺)</label>
-                          <input type="number" inputMode="decimal" value={defterForm.kredi?.anaPara || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, anaPara: e.target.value } })}
-                            className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="500000" /></div>
-                        <div><label className="text-xs font-bold text-neutral-600 block mb-1">Toplam Geri Ödeme (₺) *</label>
-                          <input type="number" inputMode="decimal" value={defterForm.kredi?.toplamGeriOdeme || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, toplamGeriOdeme: e.target.value } })}
-                            className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="650000" /></div>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2">
-                        <div><label className="text-xs font-bold text-neutral-600 block mb-1">Taksit Sayısı *</label>
-                          <input type="number" inputMode="numeric" value={defterForm.kredi?.taksitSayisi || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, taksitSayisi: e.target.value } })}
-                            className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="24" /></div>
-                        <div><label className="text-xs font-bold text-neutral-600 block mb-1">Aylık Taksit (₺)</label>
-                          <input type="number" inputMode="decimal" value={defterForm.kredi?.aylikTaksit || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, aylikTaksit: e.target.value } })}
-                            className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="boş = otomatik" /></div>
-                      </div>
-                      <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlk Taksit Tarihi *</label>
-                        <input type="date" value={defterForm.kredi?.ilkTaksitTarihi || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, ilkTaksitTarihi: e.target.value } })}
-                          className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" /></div>
-                      {/* Canlı önizleme: girilen bilgilerden ne çıkacağı anında görünsün */}
-                      {(() => {
-                        const ana = parseFloat(defterForm.kredi?.anaPara) || 0;
-                        const top = parseFloat(defterForm.kredi?.toplamGeriOdeme) || 0;
-                        const adet = parseInt(defterForm.kredi?.taksitSayisi) || 0;
-                        const aylik = parseFloat(defterForm.kredi?.aylikTaksit) || (adet > 0 ? top / adet : 0);
-                        if (!top || !adet) return null;
-                        return (
-                          <div className="text-[11px] font-bold text-violet-800 bg-white rounded-lg p-2.5 border border-violet-200 space-y-0.5">
-                            <div>Aylık taksit: <b>₺{paraFmt(aylik)}</b> × {adet} ay</div>
-                            {ana > 0 && <div>Toplam faiz / masraf: <b>₺{paraFmt(Math.max(0, top - ana))}</b></div>}
-                            {aylik * adet !== top && <div className="text-amber-700">Uyarı: {adet} × ₺{paraFmt(aylik)} = ₺{paraFmt(aylik * adet)} — toplamla ₺{paraFmt(Math.abs(aylik * adet - top))} fark var.</div>}
-                          </div>
-                        );
-                      })()}
+                    <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl text-[11px] font-bold text-violet-800">
+                      Bu defter <b>tüm kredilerinizi</b> tek çatı altında toplar. Defteri açtıktan sonra içine girip <b>"Yeni Kredi Ekle"</b> ile her krediyi ayrı ayrı tanımlayacaksınız (banka, ana para, toplam geri ödeme, taksit sayısı, ilk taksit tarihi). Toplam kredi borcunuz tüm kalemlerin toplamı olarak görünür.
                     </div>
                   )}
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
@@ -5223,102 +5266,185 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             Her ödenmemiş taksitin yanında "Öde" düğmesi vardır; ödeme hangi
             defterden yapılacaksa oradan ÇIKIŞ, kredi defterine GİRİŞ yazılır.
             ================================================================== */}
+        {/* ==================================================================
+            KREDİ PANELİ — tür "Kredi" olan defterlerde görünür
+            ==================================================================
+            DEĞİŞTİ: Artık defterin KENDİSİ tek bir kredi değil; defter bir
+            kapsayıcıdır ve içinde birden çok kredi kalemi bulunur (Ödemeler
+            defteriyle aynı desen). Üstte tüm kredilerin toplamı, altında her
+            kredi ayrı kart olarak listelenir; kart açılınca taksit planı çıkar.
+            ================================================================== */}
         {seciliDefter.tur === 'Kredi' && (() => {
-          const kb = krediBilgi(seciliDefter);
-          const yuzde = kb.toplamGeriOdeme > 0 ? Math.round((kb.odenenTutar / kb.toplamGeriOdeme) * 100) : 0;
+          const kd = krediDefterBilgi(seciliDefter);
+          const genelYuzde = kd.toplamGeriOdeme > 0 ? Math.round((kd.toplamOdenen / kd.toplamGeriOdeme) * 100) : 0;
           return (
             <div className="bg-white rounded-2xl border border-violet-200 overflow-hidden">
-              <div className="bg-violet-600 text-white px-4 py-3 flex items-center justify-between">
+              <div className="bg-violet-600 text-white px-4 py-3 flex items-center justify-between gap-2 flex-wrap">
                 <div className="font-black flex items-center gap-2 text-sm">
-                  <Landmark className="w-4 h-4" /> Kredi Takibi{kb.bankaAdi ? ` — ${kb.bankaAdi}` : ''}
+                  <Landmark className="w-4 h-4" /> Krediler
+                  <span className="text-[10px] font-bold text-white/70">{kd.kalemSayisi} kredi</span>
+                  {kd.gecikmisAdet > 0 && (
+                    <span className="text-[10px] font-black bg-red-500 px-2 py-0.5 rounded-full">{kd.gecikmisAdet} GECİKMİŞ TAKSİT</span>
+                  )}
                 </div>
-                {kb.gecikmisAdet > 0 && (
-                  <span className="text-[10px] font-black bg-red-500 px-2 py-1 rounded-full">{kb.gecikmisAdet} GECİKMİŞ TAKSİT</span>
-                )}
+                <button type="button"
+                  onClick={() => setKrediKalemForm({ ...bosKrediKalemi })}
+                  className="px-3 py-1.5 bg-white text-violet-700 text-[11px] font-black rounded-lg hover:bg-violet-50 transition flex items-center gap-1.5">
+                  <PlusCircle className="w-3.5 h-3.5" /> Yeni Kredi Ekle
+                </button>
               </div>
 
-              <div className="p-4 space-y-4">
-                {/* DÖRT ÖZET KUTUSU */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
-                    <div className="text-[9px] font-black uppercase text-neutral-500">Ana Para</div>
-                    <div className="text-sm font-black text-black">₺{paraFmt(kb.anaPara)}</div>
+              {/* TÜM KREDİLERİN TOPLAMI */}
+              {kd.kalemSayisi > 0 && (
+                <div className="p-4 pb-0 space-y-3">
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
+                      <div className="text-[9px] font-black uppercase text-neutral-500">Toplam Ana Para</div>
+                      <div className="text-sm font-black text-black">₺{paraFmt(kd.toplamAnaPara)}</div>
+                    </div>
+                    <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
+                      <div className="text-[9px] font-black uppercase text-neutral-500">Toplam Geri Ödeme</div>
+                      <div className="text-sm font-black text-black">₺{paraFmt(kd.toplamGeriOdeme)}</div>
+                    </div>
+                    <div className="bg-emerald-50 rounded-xl p-2.5 border border-emerald-200">
+                      <div className="text-[9px] font-black uppercase text-emerald-600">Ödenen</div>
+                      <div className="text-sm font-black text-emerald-700">₺{paraFmt(kd.toplamOdenen)}</div>
+                    </div>
+                    <div className="bg-red-50 rounded-xl p-2.5 border border-red-200">
+                      <div className="text-[9px] font-black uppercase text-red-600">Kalan Borç</div>
+                      <div className="text-sm font-black text-red-700">₺{paraFmt(kd.toplamBorc)}</div>
+                    </div>
                   </div>
-                  <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
-                    <div className="text-[9px] font-black uppercase text-neutral-500">Toplam Geri Ödeme</div>
-                    <div className="text-sm font-black text-black">₺{paraFmt(kb.toplamGeriOdeme)}</div>
-                    {kb.toplamFaiz > 0 && <div className="text-[9px] font-bold text-amber-600">faiz ₺{paraFmt(kb.toplamFaiz)}</div>}
-                  </div>
-                  <div className="bg-emerald-50 rounded-xl p-2.5 border border-emerald-200">
-                    <div className="text-[9px] font-black uppercase text-emerald-600">Ödenen</div>
-                    <div className="text-sm font-black text-emerald-700">₺{paraFmt(kb.odenenTutar)}</div>
-                    <div className="text-[9px] font-bold text-emerald-600">{kb.odenenAdet} / {kb.taksitSayisi} taksit</div>
-                  </div>
-                  <div className="bg-red-50 rounded-xl p-2.5 border border-red-200">
-                    <div className="text-[9px] font-black uppercase text-red-600">Kalan Borç</div>
-                    <div className="text-sm font-black text-red-700">₺{paraFmt(kb.kalanBorc)}</div>
-                    <div className="text-[9px] font-bold text-red-600">{kb.kalanAdet} taksit kaldı</div>
+                  <div>
+                    <div className="flex justify-between text-[11px] font-black mb-1">
+                      <span className="text-neutral-600">Toplam Ödeme İlerlemesi</span>
+                      <span className="text-violet-700">%{genelYuzde}</span>
+                    </div>
+                    <div className="h-3 bg-neutral-100 rounded-full overflow-hidden">
+                      <div className="h-full bg-gradient-to-r from-violet-500 to-emerald-500 transition-all" style={{ width: `${genelYuzde}%` }}></div>
+                    </div>
                   </div>
                 </div>
+              )}
 
-                {/* İLERLEME ÇUBUĞU */}
-                <div>
-                  <div className="flex justify-between text-[11px] font-black mb-1">
-                    <span className="text-neutral-600">Ödeme İlerlemesi</span>
-                    <span className="text-violet-700">%{yuzde}</span>
+              <div className="p-4 space-y-3">
+                {kd.kalemSayisi === 0 && (
+                  <div className="text-center py-8 border border-dashed border-neutral-300 rounded-xl">
+                    <Landmark className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-neutral-400">Henüz kredi eklenmemiş.</p>
+                    <p className="text-[11px] font-medium text-neutral-400 mt-1">"Yeni Kredi Ekle" ile taşıt, ihtiyaç, ticari kredilerinizi tek tek tanımlayın.</p>
                   </div>
-                  <div className="h-3 bg-neutral-100 rounded-full overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-violet-500 to-emerald-500 transition-all" style={{ width: `${yuzde}%` }}></div>
-                  </div>
-                  {kb.siradaki && (
-                    <p className="text-[11px] font-bold text-neutral-500 mt-1.5">
-                      Sıradaki: <b className={kb.siradaki.gecikmis ? 'text-red-600' : 'text-violet-700'}>{kb.siradaki.no}. taksit</b> — {kb.siradaki.tarih.split('-').reverse().join('.')} • ₺{paraFmt(kb.siradaki.tutar)}
-                      {kb.siradaki.gecikmis && ' (gecikmiş)'}
-                    </p>
-                  )}
-                  {!kb.siradaki && kb.taksitSayisi > 0 && (
-                    <p className="text-[11px] font-black text-emerald-700 mt-1.5">Tüm taksitler ödendi — kredi kapandı. 🎉</p>
-                  )}
-                </div>
+                )}
 
-                {/* TAKSİT TABLOSU */}
-                <div>
-                  <div className="text-[10px] font-black text-neutral-500 uppercase mb-2">Taksit Planı</div>
-                  <div className="max-h-72 overflow-y-auto space-y-1">
-                    {kb.plan.map(t => (
-                      <div key={t.no} className={`flex items-center gap-2 p-2 rounded-lg border text-xs ${
-                        t.odendi ? 'bg-emerald-50 border-emerald-200'
-                        : t.gecikmis ? 'bg-red-50 border-red-200'
-                        : 'bg-white border-neutral-200'}`}>
-                        <span className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-[11px] shrink-0 ${
-                          t.odendi ? 'bg-emerald-600 text-white' : t.gecikmis ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>
-                          {t.no}
-                        </span>
+                {kd.detaylar.map(({ kalem, bilgi }) => {
+                  const acik = acikKrediKalemi === kalem.id;
+                  const yuzde = bilgi.toplamGeriOdeme > 0 ? Math.round((bilgi.odenenTutar / bilgi.toplamGeriOdeme) * 100) : 0;
+                  return (
+                    <div key={kalem.id} className={`rounded-xl border overflow-hidden ${bilgi.gecikmisAdet > 0 ? 'border-red-300' : 'border-neutral-200'}`}>
+                      {/* KREDİ BAŞLIĞI — tıklayınca taksit planı açılır */}
+                      <div className={`p-3 flex items-center gap-3 cursor-pointer transition ${bilgi.gecikmisAdet > 0 ? 'bg-red-50 hover:bg-red-100' : 'bg-neutral-50 hover:bg-neutral-100'}`}
+                        onClick={() => setAcikKrediKalemi(acik ? null : kalem.id)}>
                         <div className="flex-1 min-w-0">
-                          <div className="font-black text-black">₺{paraFmt(t.tutar)}</div>
-                          <div className={`text-[10px] font-bold ${t.gecikmis ? 'text-red-600' : 'text-neutral-500'}`}>
-                            Vade: {t.tarih.split('-').reverse().join('.')}
-                            {t.odendi && t.odemeTarihi ? ` • Ödendi: ${t.odemeTarihi.split('-').reverse().join('.')}` : t.gecikmis ? ' • GECİKMİŞ' : ''}
+                          <div className="font-black text-black text-sm truncate flex items-center gap-2">
+                            {bilgi.ad}
+                            {kalem.id === '__eski__' && <span className="text-[9px] font-black bg-neutral-300 text-neutral-700 px-1.5 py-0.5 rounded-full shrink-0">ESKİ KAYIT</span>}
+                            {bilgi.gecikmisAdet > 0 && <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full shrink-0">{bilgi.gecikmisAdet} GECİKMİŞ</span>}
+                          </div>
+                          <div className="text-[11px] font-bold text-neutral-500">
+                            {bilgi.bankaAdi ? `${bilgi.bankaAdi} • ` : ''}₺{paraFmt(bilgi.aylikTaksit)} × {bilgi.taksitSayisi} ay • {bilgi.odenenAdet}/{bilgi.taksitSayisi} ödendi
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <div className="h-1.5 bg-neutral-200 rounded-full overflow-hidden flex-1 max-w-[140px]">
+                              <div className="h-full bg-violet-500" style={{ width: `${yuzde}%` }}></div>
+                            </div>
+                            <span className={`text-[11px] font-black ${bilgi.kalanBorc > 0 ? 'text-violet-700' : 'text-emerald-700'}`}>
+                              {bilgi.kalanBorc > 0 ? `₺${paraFmt(bilgi.kalanBorc)} kaldı` : 'Kapandı ✓'}
+                            </span>
+                          </div>
+                          {bilgi.siradaki && (
+                            <div className={`text-[11px] font-bold mt-0.5 ${bilgi.siradaki.gecikmis ? 'text-red-600' : 'text-violet-700'}`}>
+                              Sıradaki: {bilgi.siradaki.no}. taksit — {bilgi.siradaki.tarih.split('-').reverse().join('.')}
+                              {bilgi.siradaki.gecikmis && ' (gecikmiş)'}
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {bilgi.siradaki && (
+                            <button type="button"
+                              onClick={e => { e.stopPropagation(); setTaksitOdeme({ kalem, taksit: bilgi.siradaki, kaynakDefterId: '', tarih: bugunStr() }); }}
+                              className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black rounded-lg transition">
+                              Öde
+                            </button>
+                          )}
+                          <button type="button" onClick={e => { e.stopPropagation(); setKrediKalemForm({ ...bosKrediKalemi, ...kalem }); }}
+                            className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle">
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button type="button" onClick={e => { e.stopPropagation(); krediKalemiSil(kalem.id); }}
+                            className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Krediyi kaldır">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                          <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${acik ? 'rotate-180' : ''}`} />
+                        </div>
+                      </div>
+
+                      {/* TAKSİT PLANI */}
+                      {acik && (
+                        <div className="p-3 bg-white border-t border-neutral-200">
+                          <div className="grid grid-cols-3 gap-2 mb-3">
+                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200 text-center">
+                              <div className="text-[9px] font-black uppercase text-neutral-500">Ana Para</div>
+                              <div className="text-xs font-black text-black">₺{paraFmt(bilgi.anaPara)}</div>
+                            </div>
+                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200 text-center">
+                              <div className="text-[9px] font-black uppercase text-neutral-500">Toplam</div>
+                              <div className="text-xs font-black text-black">₺{paraFmt(bilgi.toplamGeriOdeme)}</div>
+                            </div>
+                            <div className="bg-amber-50 rounded-lg p-2 border border-amber-200 text-center">
+                              <div className="text-[9px] font-black uppercase text-amber-600">Faiz</div>
+                              <div className="text-xs font-black text-amber-700">₺{paraFmt(bilgi.toplamFaiz)}</div>
+                            </div>
+                          </div>
+                          {kalem.not && <p className="text-[11px] font-medium text-neutral-500 mb-2 italic">{kalem.not}</p>}
+                          <div className="max-h-64 overflow-y-auto space-y-1">
+                            {bilgi.plan.map(t => (
+                              <div key={t.no} className={`flex items-center gap-2 p-2 rounded-lg border text-xs ${
+                                t.odendi ? 'bg-emerald-50 border-emerald-200'
+                                : t.gecikmis ? 'bg-red-50 border-red-200'
+                                : 'bg-white border-neutral-200'}`}>
+                                <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${
+                                  t.odendi ? 'bg-emerald-600 text-white' : t.gecikmis ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>
+                                  {t.no}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-black text-black">₺{paraFmt(t.tutar)}</div>
+                                  <div className={`text-[10px] font-bold ${t.gecikmis ? 'text-red-600' : 'text-neutral-500'}`}>
+                                    Vade: {t.tarih.split('-').reverse().join('.')}
+                                    {t.odendi && t.odemeTarihi ? ` • Ödendi: ${t.odemeTarihi.split('-').reverse().join('.')}` : t.gecikmis ? ' • GECİKMİŞ' : ''}
+                                  </div>
+                                </div>
+                                {t.odendi ? (
+                                  <span className="text-[10px] font-black text-emerald-700 flex items-center gap-1 shrink-0"><CheckCircle className="w-3.5 h-3.5" /> ÖDENDİ</span>
+                                ) : (
+                                  <button type="button"
+                                    onClick={() => setTaksitOdeme({ kalem, taksit: t, kaynakDefterId: '', tarih: bugunStr() })}
+                                    className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black rounded-lg transition shrink-0">
+                                    Öde
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                            {bilgi.plan.length === 0 && (
+                              <p className="text-xs font-bold text-neutral-400 text-center py-4">
+                                Taksit planı üretilemedi. Krediyi düzenleyip taksit sayısı ve ilk taksit tarihini kontrol edin.
+                              </p>
+                            )}
                           </div>
                         </div>
-                        {t.odendi ? (
-                          <span className="text-[10px] font-black text-emerald-700 flex items-center gap-1 shrink-0"><CheckCircle className="w-3.5 h-3.5" /> ÖDENDİ</span>
-                        ) : (
-                          <button type="button"
-                            onClick={() => setTaksitOdeme({ taksit: t, kaynakDefterId: '', tarih: bugunStr() })}
-                            className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black rounded-lg transition shrink-0">
-                            Öde
-                          </button>
-                        )}
-                      </div>
-                    ))}
-                    {kb.plan.length === 0 && (
-                      <p className="text-xs font-bold text-neutral-400 text-center py-4">
-                        Taksit planı oluşturulamadı. Defteri düzenleyip taksit sayısı ve ilk taksit tarihini girin.
-                      </p>
-                    )}
-                  </div>
-                </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           );
@@ -5960,6 +6086,77 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             düşebilir; karar kullanıcıya bırakılır).
             ================================================================== */}
         {/* ==================================================================
+            YENİ: KREDİ EKLE / DÜZENLE
+            Bir defterde birden çok kredi olabildiği için her kredi burada
+            ayrı ayrı tanımlanır. Aylık taksit boş bırakılırsa toplam/adet
+            olarak otomatik hesaplanır.
+            ================================================================== */}
+        {krediKalemForm && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2">
+                  <Landmark className="w-5 h-5 text-violet-600" /> {krediKalemForm.id ? 'Krediyi Düzenle' : 'Yeni Kredi'}
+                </h3>
+                <button onClick={() => setKrediKalemForm(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Kredi Adı *</label>
+                  <input value={krediKalemForm.ad} onChange={e => setKrediKalemForm({ ...krediKalemForm, ad: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm"
+                    placeholder="Örn: Taşıt Kredisi, İşletme Kredisi" /></div>
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Banka / Kurum</label>
+                  <input value={krediKalemForm.bankaAdi} onChange={e => setKrediKalemForm({ ...krediKalemForm, bankaAdi: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm"
+                    placeholder="Örn: Garanti BBVA, Halkbank" /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ana Para (₺)</label>
+                    <input type="number" inputMode="decimal" value={krediKalemForm.anaPara} onChange={e => setKrediKalemForm({ ...krediKalemForm, anaPara: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="500000" /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Toplam Geri Ödeme (₺) *</label>
+                    <input type="number" inputMode="decimal" value={krediKalemForm.toplamGeriOdeme} onChange={e => setKrediKalemForm({ ...krediKalemForm, toplamGeriOdeme: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="650000" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Taksit Sayısı *</label>
+                    <input type="number" inputMode="numeric" value={krediKalemForm.taksitSayisi} onChange={e => setKrediKalemForm({ ...krediKalemForm, taksitSayisi: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="24" /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Aylık Taksit (₺)</label>
+                    <input type="number" inputMode="decimal" value={krediKalemForm.aylikTaksit} onChange={e => setKrediKalemForm({ ...krediKalemForm, aylikTaksit: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="boş = otomatik" /></div>
+                </div>
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlk Taksit Tarihi *</label>
+                  <input type="date" value={krediKalemForm.ilkTaksitTarihi} onChange={e => setKrediKalemForm({ ...krediKalemForm, ilkTaksitTarihi: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" /></div>
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
+                  <input value={krediKalemForm.not || ''} onChange={e => setKrediKalemForm({ ...krediKalemForm, not: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="Opsiyonel açıklama..." /></div>
+
+                {/* Canlı önizleme */}
+                {(() => {
+                  const ana = parseFloat(krediKalemForm.anaPara) || 0;
+                  const top = parseFloat(krediKalemForm.toplamGeriOdeme) || 0;
+                  const adet = parseInt(krediKalemForm.taksitSayisi) || 0;
+                  const aylik = parseFloat(krediKalemForm.aylikTaksit) || (adet > 0 ? top / adet : 0);
+                  if (!top || !adet) return null;
+                  return (
+                    <div className="text-[11px] font-bold text-violet-800 bg-violet-50 rounded-lg p-2.5 border border-violet-200 space-y-0.5">
+                      <div>Aylık taksit: <b>₺{paraFmt(aylik)}</b> × {adet} ay</div>
+                      {ana > 0 && <div>Toplam faiz / masraf: <b>₺{paraFmt(Math.max(0, top - ana))}</b></div>}
+                      {Math.abs(aylik * adet - top) > 1 && <div className="text-amber-700">Uyarı: {adet} × ₺{paraFmt(aylik)} = ₺{paraFmt(aylik * adet)} — toplamla ₺{paraFmt(Math.abs(aylik * adet - top))} fark var.</div>}
+                    </div>
+                  );
+                })()}
+
+                <button onClick={krediKalemiKaydet} className="w-full py-3 bg-violet-600 hover:bg-violet-700 text-white font-black rounded-xl transition">
+                  {krediKalemForm.id ? 'Kaydet' : 'Krediyi Ekle'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================
             YENİ: ÖDEME KALEMİ EKLE / DÜZENLE
             Tekrar tipi ve sayısı burada belirlenir. "Süresiz" için tekrar
             sayısı boş bırakılır — kira gibi bitiş tarihi olmayan ödemeler.
@@ -6124,7 +6321,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl">
                   <div className="text-2xl font-black text-violet-800">₺{paraFmt(taksitOdeme.taksit.tutar)}</div>
                   <div className="text-[11px] font-bold text-violet-600">
-                    {seciliDefter.ad} • Vade: {taksitOdeme.taksit.tarih.split('-').reverse().join('.')}
+                    {/* DEĞİŞTİ: Defter adı yerine ÖDENEN KREDİNİN adı — bir
+                        defterde birden çok kredi olduğu için hangisi olduğu
+                        belli olmalı. */}
+                    {taksitOdeme.kalem?.ad || taksitOdeme.kalem?.bankaAdi || seciliDefter.ad} • Vade: {taksitOdeme.taksit.tarih.split('-').reverse().join('.')}
                     {taksitOdeme.taksit.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
                   </div>
                 </div>
