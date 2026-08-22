@@ -3960,6 +3960,25 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // dönüştürüldü ve seçenekler gerçek defterlerden geliyor. Bu dizi yalnızca
     // referans olarak bırakıldı; kayıtlardaki odemeYontemi değeri artık
     // defterdenOdemeYontemi() ile hesabın türünden türetiliyor.
+    // ========================================================================
+    // TAŞINDI (KRİTİK HATA DÜZELTMESİ): bugunStr artık bileşenin EN BAŞINDA
+    // ========================================================================
+    // HATANIN SEBEBİ: bosKrediForm ve bosOdemeKalemi sabitleri tanımlanırken
+    // bugunStr() ÇAĞRILIYORDU; ama bugunStr'nin tanımı onlardan YÜZ satır kadar
+    // SONRA duruyordu. JavaScript'te const'a tanımından önce erişmek "Cannot
+    // access before initialization" hatası verir — canlıda Defter sayfası bu
+    // yüzden "Bir şeyler ters gitti / Cannot access 'Ee' before initialization"
+    // diyerek hiç açılmıyordu ('Ee', derleyicinin bugunStr'ye verdiği kısa ad).
+    // Tanım tüm kullanımların ÖNÜNE taşındı; davranış birebir aynı.
+    //
+    // DİKKAT: toISOString() kullanılmıyor; o UTC'ye çevirdiği için Türkiye
+    // saatinde gece yarısına yakın saatlerde günü bir gün geriye kaydırabiliyor.
+    // Bu yüzden yerel tarih parçalarından elle string üretiliyor.
+    const bugunStr = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
     const ODEME_YONTEMLERI = ['Nakit', 'Banka / Havale', 'Kredi Kartı', 'Çek / Senet', 'Diğer'];
 
     const [defterler, setDefterler] = useState([]);
@@ -4077,14 +4096,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // sayfası hiç açılmıyordu. Çözüm: yardımcıları kullanıldıkları yerin
     // ÜSTÜNE taşımak. Fonksiyon gövdeleri değişmedi.
     // YENİ: GÜNLÜK FİLTRE — defter detayında hangi günün hareketleri görünecek.
-    // DİKKAT: toISOString() kullanılmıyor; o UTC'ye çevirdiği için Türkiye
-    // saatinde gece yarısına yakın saatlerde günü bir gün geriye kaydırabiliyor.
-    // Bu yüzden yerel tarih parçalarından elle string üretiliyor.
-    const bugunStr = () => {
-      const d = new Date();
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    };
-
     // Verilen güne +1 / -1 gün ekler. Ay ve yıl geçişlerini Date nesnesi
     // kendisi hallettiği için 31 Aralık -> 1 Ocak de doğru çalışır.
     const gunKaydir = (gunStr, adet) => {
