@@ -14626,6 +14626,8 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     // sağ/sol oklarla gün değiştirilir.
     const [tarih, setTarih] = useState(bugunStr);
     const [sefFiltre, setSefFiltre] = useState('Tümü');
+    // YENİ: Denetim notları açık olan personel kartının anahtarı (akordiyon)
+    const [acikPuanKarti, setAcikPuanKarti] = useState(null);
     const [arama, setArama] = useState('');
     // NOT: acikId state'i, alttaki "Denetim Yapılan İşler" açılır listesi kaldırıldığı için silindi.
     const [yukleniyor, setYukleniyor] = useState(true);
@@ -14751,7 +14753,18 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         const k = String(p.personelId);
         if (!harita[k]) harita[k] = { ad: p.personelAdi, pozisyon: p.pozisyon || '', puanlar: [], notlar: [] };
         harita[k].puanlar.push(puan);
-        if ((p.ozelNot || '').trim()) harita[k].notlar.push(p.ozelNot.trim());
+        // DEĞİŞTİ: Not artık düz metin değil, BAĞLAMIYLA saklanıyor — hangi işte,
+        // hangi şef tarafından, kaç puanla yazıldığı ekranda gösterilebilsin diye.
+        // (Eskiden yalnızca metin tutuluyordu ve ekranda sadece "1 not" yazıyordu.)
+        if ((p.ozelNot || '').trim()) harita[k].notlar.push({
+          metin: p.ozelNot.trim(),
+          is: d.jobCustomerName || '',
+          sef: d.sefAdi || '',
+          puan,
+          // Denetim saati kayıtta ayrı bir alan değil; denetimTarihi'nden türetilir
+          // (üstteki denetim kartı da aynı kaynağı kullanıyor).
+          saat: d.denetimTarihi ? new Date(d.denetimTarihi).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : ''
+        });
       }));
       return Object.values(harita).map(x => ({
         ...x, ortalama: Math.round((x.puanlar.reduce((t, n) => t + n, 0) / x.puanlar.length) * 10) / 10,
@@ -15050,18 +15063,50 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                 <Star className="w-3.5 h-3.5 text-yellow-500" /> Personel Saha Puanları <span className="normal-case font-bold text-neutral-400">(en düşük puanlı üstte)</span>
               </h3>
               <div className="space-y-2 max-h-[320px] overflow-y-auto custom-scrollbar pr-1">
-                {personelPuanOzet.map((p, i) => (
-                  <div key={p.ad + i} className="flex items-center gap-3 bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
-                    <div className="flex-1 min-w-0">
-                      <span className="font-black text-sm text-black block truncate">{p.ad}</span>
-                      <span className="text-[10px] font-bold text-neutral-400">{p.pozisyon || '—'} • {p.puanlar.length} denetim{p.notlar.length > 0 ? ` • ${p.notlar.length} not` : ''}</span>
+                {personelPuanOzet.map((p, i) => {
+                  // YENİ: Notu olan kartlar açılabilir. Tıklanınca o personele
+                  // yazılmış tüm denetim notları, hangi işte ve hangi şef
+                  // tarafından yazıldığıyla birlikte listelenir.
+                  const anahtar = p.ad + i;
+                  const acik = acikPuanKarti === anahtar;
+                  const notVar = p.notlar.length > 0;
+                  return (
+                    <div key={anahtar} className="bg-neutral-50 rounded-xl border border-neutral-200 overflow-hidden">
+                      <div
+                        onClick={() => { if (notVar) setAcikPuanKarti(acik ? null : anahtar); }}
+                        className={`flex items-center gap-3 p-2.5 ${notVar ? 'cursor-pointer hover:bg-neutral-100 transition' : ''}`}>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-black text-sm text-black block truncate">{p.ad}</span>
+                          <span className="text-[10px] font-bold text-neutral-400">
+                            {p.pozisyon || '—'} • {p.puanlar.length} denetim
+                            {notVar && <span className="text-purple-600"> • {p.notlar.length} not</span>}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <span className={`text-lg font-black ${puanRenk(p.ortalama)}`}>{String(p.ortalama).replace('.', ',')}</span>
+                          <Star className="w-3.5 h-3.5 text-yellow-500" />
+                          {notVar && <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${acik ? 'rotate-180' : ''}`} />}
+                        </div>
+                      </div>
+                      {/* DENETİM NOTLARI */}
+                      {acik && notVar && (
+                        <div className="px-2.5 pb-2.5 space-y-1.5 border-t border-neutral-200 pt-2">
+                          {p.notlar.map((n, ni) => (
+                            <div key={ni} className="bg-white rounded-lg p-2 border border-neutral-200">
+                              <p className="text-xs font-medium text-neutral-700 leading-relaxed">{n.metin}</p>
+                              <p className="text-[10px] font-bold text-neutral-400 mt-1">
+                                {n.puan} <Star className="w-2.5 h-2.5 text-yellow-500 inline -mt-0.5" />
+                                {n.is ? ` • ${n.is}` : ''}
+                                {n.sef ? ` • ${n.sef}` : ''}
+                                {n.saat ? ` • ${n.saat}` : ''}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <span className={`text-lg font-black ${puanRenk(p.ortalama)}`}>{String(p.ortalama).replace('.', ',')}</span>
-                      <Star className="w-3.5 h-3.5 text-yellow-500" />
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
