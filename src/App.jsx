@@ -5390,10 +5390,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       const depoName = e.target.value;
       const depo = DEPO_LOCATIONS.find(d => d.name === depoName);
       if (depo) {
+        // YENİ: Kat ve taşıma şekli artık tesise göre gelir. Tanımlı değilse
+        // eski davranış korunur: Giriş Kat + Merdiven.
+        const kat = depo.floor || 'Giriş Kat';
+        const tasima = depo.transportMethod || 'Merdiven';
         if (formData.depoDirection === 'fromDepo') {
-          setFormData({...formData, selectedDepo: depoName, fromProvince: depo.province, fromDistrict: depo.district, fromAddress: depo.address, fromFloor: 'Giriş Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre'});
+          setFormData({...formData, selectedDepo: depoName, fromProvince: depo.province, fromDistrict: depo.district, fromAddress: depo.address, fromFloor: kat, fromTransportMethod: tasima, fromPacking: 'Kendisi Topladı', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre'});
         } else {
-          setFormData({...formData, selectedDepo: depoName, toProvince: depo.province, toDistrict: depo.district, toAddress: depo.address, toFloor: 'Giriş Kat', toTransportMethod: 'Merdiven', toPacking: 'Kendisi Topladı', toRoomCount: 'Depoevim Tesisleri', toDistance: '0', toDistanceUnit: 'Metre'});
+          setFormData({...formData, selectedDepo: depoName, toProvince: depo.province, toDistrict: depo.district, toAddress: depo.address, toFloor: kat, toTransportMethod: tasima, toPacking: 'Kendisi Topladı', toRoomCount: 'Depoevim Tesisleri', toDistance: '0', toDistanceUnit: 'Metre'});
         }
       } else {
         if (formData.depoDirection === 'fromDepo') {
