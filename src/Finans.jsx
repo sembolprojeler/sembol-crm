@@ -4206,10 +4206,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // olabildiği için hepsi birden çizilmez; 50'şer açılır.
     const SAYFA_BOYU = 50;
     const [gosterilenSayi, setGosterilenSayi] = useState(SAYFA_BOYU);
+    // YENİ: HAREKET TÜRÜ FİLTRESİ — 'tumu' | 'giris' | 'cikis' | 'transfer'
+    // Defterde yalnızca gelirleri, yalnızca giderleri ya da yalnızca hesaplar
+    // arası transferleri görmek için. Transfer kayıtları isVirman bayrağıyla
+    // işaretli olduğu için gelir/gider filtrelerinde dışarıda bırakılır —
+    // aksi halde bir transfer hem "gelir" hem "gider" listesinde çıkardı.
+    const [hareketFiltre, setHareketFiltre] = useState('tumu');
     // Defter değişince, arama yapılınca veya kategori filtresi değişince
     // sayaç başa sarılır. Aksi halde 200 kayıt açıkken filtreleyip 12 kayda
     // düşünce "Devamını Gör" mantığı şaşar ve gereksiz kalabalık kalır.
-    useEffect(() => { setGosterilenSayi(SAYFA_BOYU); }, [seciliDefterId, detayArama, kategoriFiltre]);
+    useEffect(() => { setGosterilenSayi(SAYFA_BOYU); }, [seciliDefterId, detayArama, kategoriFiltre, hareketFiltre]);
 
     // YENİ: VİRMAN (hesaplar arası transfer) formu.
     // State'ler kasten BURAYA konuldu: bugunStr/seciliGun tanımlarından SONRA,
@@ -5187,6 +5193,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       // YENİ: GÜNLÜK FİLTRE — en başta uygulanır ki arama ve kategori
       // filtreleri yalnızca o günün hareketleri içinde çalışsın.
       .filter(i => !gunFiltreAktif || i.tarih === seciliGun)
+      // YENİ: Gelir / Gider / Transfer filtresi.
+      // Transferler (isVirman) gelir ve gider listelerinden çıkarılır; kendi
+      // sekmelerinde görünürler.
+      .filter(i => hareketFiltre === 'tumu'
+        || (hareketFiltre === 'transfer' && i.isVirman)
+        || (hareketFiltre === 'giris' && i.tip === 'giris' && !i.isVirman)
+        || (hareketFiltre === 'cikis' && i.tip === 'cikis' && !i.isVirman))
       .filter(i => kategoriFiltre === 'Tümü' || i.kategori === kategoriFiltre)
       .filter(i => {
         const q = detayArama.trim().toLocaleLowerCase('tr-TR');
@@ -5673,6 +5686,48 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             </button>
           </div>
 
+          {/* ==============================================================
+              YENİ: HAREKET TÜRÜ FİLTRESİ — Tümü / Gelir / Gider / Transfer
+              ==============================================================
+              Gün gezinme çubuğunun hemen altında, "Tüm Zamanlar" düğmesiyle
+              aynı bloktadır. Her sekmede o türe ait KAYIT SAYISI da yazar,
+              böylece tıklamadan önce ne kadar hareket olduğu görünür.
+              Sayılar, o an geçerli olan gün/tüm zamanlar seçimine göre
+              hesaplanır — yani "Gelir 12" derken hangi dönemdeyseniz onun
+              gelir sayısıdır.
+              MOBİL: Dört sekme eşit bölüşür, dar ekranda yazı küçülür.
+              ============================================================== */}
+          {(() => {
+            // Sayımlar: yalnızca gün filtresi uygulanmış havuz üzerinden
+            // (arama ve kategori filtresi burada kasten hesaba katılmaz;
+            //  sekme sayıları sabit bir referans olmalı).
+            const havuz = defterIslemleri(seciliDefterId).filter(i => !gunFiltreAktif || i.tarih === seciliGun);
+            const sayilar = {
+              tumu: havuz.length,
+              giris: havuz.filter(i => i.tip === 'giris' && !i.isVirman).length,
+              cikis: havuz.filter(i => i.tip === 'cikis' && !i.isVirman).length,
+              transfer: havuz.filter(i => i.isVirman).length,
+            };
+            const sekmeler = [
+              { id: 'tumu', ad: 'Tümü', aktif: 'bg-neutral-900 text-white', pasif: 'text-neutral-500 hover:bg-neutral-100' },
+              { id: 'giris', ad: 'Gelir', aktif: 'bg-emerald-600 text-white', pasif: 'text-emerald-700 hover:bg-emerald-50' },
+              { id: 'cikis', ad: 'Gider', aktif: 'bg-red-600 text-white', pasif: 'text-red-600 hover:bg-red-50' },
+              { id: 'transfer', ad: 'Transfer', aktif: 'bg-slate-800 text-white', pasif: 'text-slate-600 hover:bg-slate-100' },
+            ];
+            return (
+              <div className="grid grid-cols-4 gap-1.5 px-2.5 sm:px-3 pb-2.5 sm:pb-3 border-t border-neutral-100 pt-2.5">
+                {sekmeler.map(sk => (
+                  <button key={sk.id} type="button" onClick={() => setHareketFiltre(sk.id)}
+                    className={`py-2 rounded-xl text-[10px] sm:text-[11px] font-black transition flex flex-col items-center justify-center leading-tight ${
+                      hareketFiltre === sk.id ? sk.aktif : `bg-neutral-50 ${sk.pasif}`}`}>
+                    <span>{sk.ad}</span>
+                    <span className={`text-[9px] font-bold ${hareketFiltre === sk.id ? 'text-white/70' : 'text-neutral-400'}`}>{sayilar[sk.id]}</span>
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
+
           {/* SEÇİLİ GÜNÜN GELİR / GİDER / NET tablosu — yalnızca günlük moddayken */}
           {gunFiltreAktif && (
             <div className="grid grid-cols-3 border-t border-neutral-200 divide-x divide-neutral-200">
@@ -5724,9 +5779,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               defterin tamamen boş olduğunu sanabilir. */}
           {dIslemler.length === 0 && (
             <div className="p-8 text-center text-sm font-bold text-neutral-400">
-              {gunFiltreAktif
-                ? `${gunEtiketi(seciliGun)} tarihinde hareket yok. Oklarla başka bir güne geçin veya "Tüm Geçmiş"e bakın.`
-                : 'Kayıt bulunamadı. Alttaki butonlarla ilk işlemi ekleyin.'}
+              {/* DEĞİŞTİ: Mesaj artık hareket türü filtresini de dikkate alır.
+                  "Gelir" sekmesindeyken "hareket yok" demek yanıltıcı olurdu —
+                  o gün gider olabilir ama gelir olmayabilir. */}
+              {hareketFiltre !== 'tumu'
+                ? `Bu ${gunFiltreAktif ? 'günde' : 'defterde'} ${hareketFiltre === 'giris' ? 'gelir' : hareketFiltre === 'cikis' ? 'gider' : 'transfer'} kaydı yok. "Tümü" sekmesine bakabilirsiniz.`
+                : gunFiltreAktif
+                  ? `${gunEtiketi(seciliGun)} tarihinde hareket yok. Oklarla başka bir güne geçin veya "Tüm Zamanlar"a bakın.`
+                  : 'Kayıt bulunamadı. Alttaki butonlarla ilk işlemi ekleyin.'}
             </div>
           )}
           <div className="divide-y divide-neutral-100">
