@@ -248,10 +248,11 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                     className="p-1.5 border border-red-200 rounded-lg text-xs font-bold bg-white outline-none focus:ring-2 focus:ring-red-600 text-red-700 cursor-pointer"
                   >
                     <option value="">-- Özel Adres (Seçilmedi) --</option>
-                    <option value="Pendik Depoevim">Pendik Depoevim</option>
-                    <option value="Kartal Depoevim">Kartal Depoevim</option>
-                    <option value="Çekmeköy Depoevim">Çekmeköy Depoevim</option>
-                    <option value="Ümraniye Depoevim">Ümraniye Depoevim</option>
+                    {/* DEĞİŞTİ: Depolar artık tek tek yazılmıyor; shared.jsx'teki
+                        DEPO_LOCATIONS listesinden üretiliyor. Yeni bir tesis
+                        açıldığında yalnızca o listeye eklemek yeterli — bu ekranı
+                        ve boşaltma tarafındaki ikizini elle güncellemek gerekmiyor. */}
+                    {DEPO_LOCATIONS.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
                   </select>
                 </div>
               ) : null}
@@ -583,10 +584,8 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                         className="p-1.5 border border-red-200 rounded-lg text-xs font-bold bg-white outline-none focus:ring-2 focus:ring-red-600 text-red-700 cursor-pointer"
                       >
                         <option value="">-- Özel Adres (Seçilmedi) --</option>
-                        <option value="Pendik Depoevim">Pendik Depoevim</option>
-                        <option value="Kartal Depoevim">Kartal Depoevim</option>
-                        <option value="Çekmeköy Depoevim">Çekmeköy Depoevim</option>
-                        <option value="Ümraniye Depoevim">Ümraniye Depoevim</option>
+                        {/* Aynı liste — DEPO_LOCATIONS tek kaynaktır */}
+                        {DEPO_LOCATIONS.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
                       </select>
                     </div>
                   ) : null}
