@@ -6664,7 +6664,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       const yolIade = (yolAylik / daysInMonth) * calışılmayanGun;
       const toplamIade = yemekIade + yolIade;
 
-      // Kalan tutarlar (avans bu ekranda 0 kabul; profil ana kaynağı maaş tablosudur)
+      // Kalan tutarlar
       let kalanNakit = netMaas - hesaplananBanka;   // nakit el ödemesi kısmı
       let kalanBanka = hesaplananBanka - icraKesintisi;
 
@@ -6682,6 +6682,35 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         iadeKalan -= bankadanDusulen;
       }
 
+      // ======================================================================
+      // YENİ: AVANSLAR ve FİİLEN YAPILMIŞ ÖDEMELER DE DÜŞÜLÜR (kullanıcı talebi)
+      // ======================================================================
+      // ESKİ HALİ: "avans bu ekranda 0 kabul" ediliyordu; Kalan Banka/Nakit,
+      // ay içinde verilmiş avansları ve maaş tablosunda ÖDENDİ işaretlenmiş
+      // yemek/yol/maaş kalemlerini görmüyordu. Çıkış anında gerçekte ne
+      // ödeneceği görünmüyordu.
+      //
+      // YENİ HALİ: Çıkış ayının maaş satırından (maasRow — zaten yukarıda
+      // okunuyor) tüm ödenmiş kalemler alınır ve KANALINA göre düşülür:
+      //   • NAKİT kanalı: nakit avans + nakit maaş ödemesi + ödendi işaretli
+      //     yemek ve yol paraları (elden/peşin verilirler)
+      //   • BANKA kanalı: resmi avans + banka maaş ödemesi + ödenen icra
+      // Sonuç EKSİYE DÜŞEBİLİR: verilen avans hak edilenden fazlaysa personel
+      // şirkete iade edecek demektir — bu bilerek gizlenmez, ekranda kırmızı
+      // "personel iade edecek" olarak gösterilir.
+      // ======================================================================
+      const avansNakit  = parseFloat(maasRow.nakitAvans) || 0;
+      const avansResmi  = parseFloat(maasRow.resmiAvans) || 0;
+      const odYemek     = parseFloat(maasRow.yemekOdenenTutar) || 0;
+      const odYol       = parseFloat(maasRow.yolOdenenTutar) || 0;
+      const odBanka     = parseFloat(maasRow.bankaOdenenTutar) || 0;
+      const odNakit     = parseFloat(maasRow.nakitOdenenTutar) || 0;
+      const odIcra      = parseFloat(maasRow.icraOdenenTutar) || 0;
+      const odenenNakitToplam = avansNakit + odNakit + odYemek + odYol;
+      const odenenBankaToplam = avansResmi + odBanka + odIcra;
+      kalanNakit -= odenenNakitToplam;
+      kalanBanka -= odenenBankaToplam;
+
       const dokum = {
         dateStr, year, month, daysInMonth, calışılanGun, calışılmayanGun,
         devamsizGun, raporGun, ucretsizIzinGun, fazlaGunSayisi, odenecekGun, fazlaMesaiUcreti,
@@ -6692,8 +6721,16 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         maas, netMaas, netMaasBase, hesaplananBanka, icraKesintisi,
         yemekAylik, yolAylik, yemekIade, yolIade, toplamIade,
         nakittenDusulen, bankadanDusulen,
-        finalKalanNakit: Math.max(0, kalanNakit),
-        finalKalanBanka: Math.max(0, kalanBanka)
+        // YENİ: Avans/ödeme kalemleri dökümle birlikte saklanır. odenenlerDusuldu
+        // bayrağı, kayıtlı dökümü gösteren "Ayrılış Hakediş Dökümü" ekranına
+        // "bu tutarlar ZATEN düşülmüş, bir daha düşme" der (çifte düşüm koruması).
+        avansNakit, avansResmi, odYemek, odYol, odBanka, odNakit, odIcra,
+        odenenNakitToplam, odenenBankaToplam,
+        odenenlerDusuldu: true,
+        // DEĞİŞTİ: Math.max(0, ...) kaldırıldı — avans hak edilenden fazlaysa
+        // sonuç eksi çıkar ve personelin iade edeceği tutarı gösterir.
+        finalKalanNakit: kalanNakit,
+        finalKalanBanka: kalanBanka
       };
       setSettlementData(dokum);
       setSettlementConfirm({ nakitVerildi: false, bankaVerildi: false, belgeUrl: '' });
@@ -8400,19 +8437,41 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                       )}
                       <tr><td className="p-2.5 text-neutral-500 text-xs">İadenin Nakitten Düşülen Kısmı</td><td className="p-2.5 text-right text-xs text-neutral-500">₺{settlementData.nakittenDusulen.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
                       <tr><td className="p-2.5 text-neutral-500 text-xs">İadenin Bankadan Düşülen Kısmı</td><td className="p-2.5 text-right text-xs text-neutral-500">₺{settlementData.bankadanDusulen.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td></tr>
+                      {/* ==========================================================
+                          YENİ: AY İÇİNDE YAPILMIŞ ÖDEMELER (avanslar + ödendi
+                          işaretli kalemler). Her satırın kanalı bellidir: avans
+                          nakitse Kalan Nakit'ten, bankadansa Kalan Banka'dan
+                          düşülmüştür. Yalnızca tutarı 0'dan büyük olanlar görünür.
+                          ========================================================== */}
+                      {[
+                        { ad: 'Nakit Avans', tutar: settlementData.avansNakit, kanal: 'Nakitten' },
+                        { ad: 'Resmi Avans (Banka)', tutar: settlementData.avansResmi, kanal: 'Bankadan' },
+                        { ad: 'Yemek Parası Ödendi', tutar: settlementData.odYemek, kanal: 'Nakitten' },
+                        { ad: 'Yol Parası Ödendi', tutar: settlementData.odYol, kanal: 'Nakitten' },
+                        { ad: 'Banka Maaş Ödemesi', tutar: settlementData.odBanka, kanal: 'Bankadan' },
+                        { ad: 'Nakit Maaş Ödemesi', tutar: settlementData.odNakit, kanal: 'Nakitten' },
+                        { ad: 'İcra Kesintisi Ödendi', tutar: settlementData.odIcra, kanal: 'Bankadan' },
+                      ].filter(k => (k.tutar || 0) > 0).map((k, i) => (
+                        <tr key={i} className="bg-blue-50">
+                          <td className="p-2.5 text-blue-700 text-xs font-bold">{k.ad} <span className="text-[10px] text-blue-400">({k.kanal} düşüldü)</span></td>
+                          <td className="p-2.5 text-right text-xs font-bold text-blue-700">− ₺{(k.tutar || 0).toLocaleString('tr-TR', {maximumFractionDigits: 2})}</td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
 
-                {/* Final tutarlar */}
+                {/* Final tutarlar — DEĞİŞTİ: avanslar düşüldüğü için sonuç eksi
+                    çıkabilir; eksi durumda kutu kırmızıya döner ve tutarın
+                    personelden İADE alınacağı açıkça yazılır. */}
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="bg-yellow-50 border-2 border-yellow-300 rounded-xl p-3 text-center">
-                    <p className="text-[10px] font-black uppercase text-yellow-700 mb-1">Kalan Banka Parası</p>
-                    <p className="text-xl font-black text-yellow-800">₺{settlementData.finalKalanBanka.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</p>
+                  <div className={`rounded-xl p-3 text-center border-2 ${settlementData.finalKalanBanka < 0 ? 'bg-red-50 border-red-300' : 'bg-yellow-50 border-yellow-300'}`}>
+                    <p className={`text-[10px] font-black uppercase mb-1 ${settlementData.finalKalanBanka < 0 ? 'text-red-700' : 'text-yellow-700'}`}>{settlementData.finalKalanBanka < 0 ? 'Banka — Personel İade Edecek' : 'Kalan Banka Parası'}</p>
+                    <p className={`text-xl font-black ${settlementData.finalKalanBanka < 0 ? 'text-red-800' : 'text-yellow-800'}`}>₺{Math.abs(settlementData.finalKalanBanka).toLocaleString('tr-TR', {maximumFractionDigits: 2})}</p>
                   </div>
-                  <div className="bg-orange-50 border-2 border-orange-300 rounded-xl p-3 text-center">
-                    <p className="text-[10px] font-black uppercase text-orange-700 mb-1">Kalan Nakit Parası</p>
-                    <p className="text-xl font-black text-orange-800">₺{settlementData.finalKalanNakit.toLocaleString('tr-TR', {maximumFractionDigits: 2})}</p>
+                  <div className={`rounded-xl p-3 text-center border-2 ${settlementData.finalKalanNakit < 0 ? 'bg-red-50 border-red-300' : 'bg-orange-50 border-orange-300'}`}>
+                    <p className={`text-[10px] font-black uppercase mb-1 ${settlementData.finalKalanNakit < 0 ? 'text-red-700' : 'text-orange-700'}`}>{settlementData.finalKalanNakit < 0 ? 'Nakit — Personel İade Edecek' : 'Kalan Nakit Parası'}</p>
+                    <p className={`text-xl font-black ${settlementData.finalKalanNakit < 0 ? 'text-red-800' : 'text-orange-800'}`}>₺{Math.abs(settlementData.finalKalanNakit).toLocaleString('tr-TR', {maximumFractionDigits: 2})}</p>
                   </div>
                 </div>
 
@@ -8475,21 +8534,34 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
           // NİHAİ ödenecek rakamı buluyoruz.
           // ==================================================================
           const r = cikisAyiMaasRow || {};
-          const nakitAvans   = parseFloat(r.nakitAvans) || 0;   // Nakit avans (elden verilen)
-          const resmiAvans   = parseFloat(r.resmiAvans) || 0;   // Resmi avans (bankadan verilen)
-          const odYemek      = parseFloat(r.yemekOdenenTutar) || 0;
-          const odYol        = parseFloat(r.yolOdenenTutar) || 0;
-          const odBanka      = parseFloat(r.bankaOdenenTutar) || 0;
-          const odNakit      = parseFloat(r.nakitOdenenTutar) || 0;
-          const odIcra       = parseFloat(r.icraOdenenTutar) || 0;
+          // ==================================================================
+          // ÇİFTE DÜŞÜM KORUMASI (KRİTİK)
+          // ==================================================================
+          // YENİ dökümlerde (odenenlerDusuldu bayrağı olanlar) avanslar ve
+          // ödenen kalemler computeSettlement içinde ZATEN düşülmüş durumda;
+          // finalKalan tutarları nihai değerdir. Bu ekran onları BİR DAHA
+          // düşerse aynı avans iki kez kesilmiş olur. Bu yüzden:
+          //   • Bayrak VARSA: kalemler dökümün İÇİNDEN gösterilir, düşüm 0.
+          //   • Bayrak YOKSA (eski kayıt): eski davranış — kalemler çıkış
+          //     ayının maaş satırından okunur ve burada düşülür.
+          // ==================================================================
+          const zatenDusuldu = !!sd.odenenlerDusuldu;
+          const nakitAvans   = zatenDusuldu ? (parseFloat(sd.avansNakit) || 0) : (parseFloat(r.nakitAvans) || 0);
+          const resmiAvans   = zatenDusuldu ? (parseFloat(sd.avansResmi) || 0) : (parseFloat(r.resmiAvans) || 0);
+          const odYemek      = zatenDusuldu ? (parseFloat(sd.odYemek) || 0) : (parseFloat(r.yemekOdenenTutar) || 0);
+          const odYol        = zatenDusuldu ? (parseFloat(sd.odYol) || 0) : (parseFloat(r.yolOdenenTutar) || 0);
+          const odBanka      = zatenDusuldu ? (parseFloat(sd.odBanka) || 0) : (parseFloat(r.bankaOdenenTutar) || 0);
+          const odNakit      = zatenDusuldu ? (parseFloat(sd.odNakit) || 0) : (parseFloat(r.nakitOdenenTutar) || 0);
+          const odIcra       = zatenDusuldu ? (parseFloat(sd.odIcra) || 0) : (parseFloat(r.icraOdenenTutar) || 0);
 
           // Ödeme kanalına göre ayrıştırma:
           //  • NAKİT kanalı: nakit avans + nakit ödemesi + peşin verilen yemek/yol
           //    (yemek/yol elden veya karta peşin verildiği için nakit tarafına yazılır)
           //  • BANKA kanalı: resmi avans + banka ödemesi
-          const odenenNakitToplam = nakitAvans + odNakit + odYemek + odYol;
-          const odenenBankaToplam = resmiAvans + odBanka;
-          const odenenGenelToplam = odenenNakitToplam + odenenBankaToplam;
+          // zatenDusuldu ise düşülecek tutar 0'dır (final değerler zaten nihai).
+          const odenenNakitToplam = zatenDusuldu ? 0 : (nakitAvans + odNakit + odYemek + odYol);
+          const odenenBankaToplam = zatenDusuldu ? 0 : (resmiAvans + odBanka);
+          const odenenGenelToplam = nakitAvans + odNakit + odYemek + odYol + resmiAvans + odBanka;
 
           // Çıkışta hesaplanan kalan tutarlar (dondurulmuş döküm)
           const hakNakit  = Number(sd.finalKalanNakit) || 0;
@@ -8519,6 +8591,50 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                   <button onClick={() => setShowExitSettlementView(false)} className="text-neutral-300 hover:text-white transition"><X className="w-6 h-6" /></button>
                 </div>
                 <div className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
+                  {/* ==============================================================
+                      YENİ: ESKİ KAYIT UYARISI + GÜNCEL VERİLERLE YENİDEN HESAPLA
+                      ==============================================================
+                      Bu döküm, çıkış ANINDA hesaplanıp personel kartına dondurulmuş
+                      kayıttır. Mesai entegrasyonundan ÖNCE çıkarılan personellerde
+                      kayıtta mesai alanları yoktur; bu yüzden "0 saat × ₺0" görünür
+                      (Maaş Tablosu dolu olsa bile). Aşağıdaki buton, hesabı BUGÜNKÜ
+                      kodla ve güncel puantaj/maaş verisiyle yeniden üretip kayıtlı
+                      dökümün üzerine yazar. Çıkış tarihi DEĞİŞMEZ; yalnızca hesap
+                      tazelenir. İşlem sistem günlüğüne yazılır.
+                      ============================================================== */}
+                  {sd.toplamSaat === undefined && (
+                    <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 text-xs font-bold text-amber-800">
+                      Bu döküm, mesai entegrasyonu eklenmeden önce kaydedilmiş. Mesai ücreti bu yüzden ₺0 görünüyor. "Yeniden Hesapla" ile güncel verilerden tazeleyebilirsiniz.
+                    </div>
+                  )}
+                  <button type="button" disabled={cikisTarihiKaydediliyor}
+                    onClick={async () => {
+                      if (!window.confirm(`Hakediş dökümü, ${sd.dateStr} çıkış tarihi ve GÜNCEL puantaj/maaş verileriyle yeniden hesaplanıp kayıtlı dökümün üzerine yazılacak. Devam edilsin mi?`)) return;
+                      setCikisTarihiKaydediliyor(true);
+                      try {
+                        const yeniDokum = await computeSettlement(sd.dateStr);
+                        // computeSettlement kendi önizleme modalını açar; burada gerek yok
+                        setShowSettlementModal(false);
+                        if (!yeniDokum) { alert('Hesap yeniden üretilemedi.'); }
+                        else {
+                          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(personId)), {
+                            cikisHesapDetay: yeniDokum,
+                            cikisHesabiYenidenHesaplandi: new Date().toISOString(),
+                            cikisHesabiYenideHesaplayan: currentUser?.fullName || 'Sistem'
+                          });
+                          if (addSystemLog) addSystemLog('Ayrılış Hakedişi Yeniden Hesaplandı',
+                            `${person.fullName} (${sd.dateStr}) hakediş dökümü güncel verilerle yeniden üretildi. Mesai: ₺${(yeniDokum.fazlaMesaiUcreti || 0).toLocaleString('tr-TR')}. İşlemi yapan: ${currentUser?.fullName || 'Sistem'}.`);
+                          // person prop'u canlı dinlendiği için sd otomatik yenilenir; modal açık kalır.
+                        }
+                      } catch (err) {
+                        console.error('Yeniden hesaplama hatası:', err);
+                        alert('Yeniden hesaplanamadı: ' + (err?.message || 'bilinmeyen hata'));
+                      }
+                      setCikisTarihiKaydediliyor(false);
+                    }}
+                    className="w-full py-2.5 bg-blue-50 hover:bg-blue-100 disabled:opacity-50 text-blue-700 text-xs font-black rounded-xl border border-blue-200 transition flex items-center justify-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5" /> {cikisTarihiKaydediliyor ? 'Hesaplanıyor...' : 'Güncel Verilerle Yeniden Hesapla'}
+                  </button>
                   {/* Personel & çıkış tarihi */}
                   <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-sm">
                     <div className="flex items-start justify-between gap-3">
@@ -8584,17 +8700,18 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                         <tr><td className="p-2.5 text-neutral-600">Ödenecek Gün (Puantaj Kırılımlı)</td><td className="p-2.5 text-right font-bold text-black">{sd.odenecekGun} gün</td></tr>
                         {/* YENİ: Çalışılan güne düşen saf maaş — mesai ve yemek/yol ayrı satırlarda görülsün */}
                         <tr><td className="p-2.5 text-neutral-600">Çalışılan Güne Düşen Maaş <span className="text-[10px] text-neutral-400">({sd.odenecekGun} gün × günlük)</span></td><td className="p-2.5 text-right font-bold text-black">{tl(sd.netMaasBase)}</td></tr>
-                        {/* DEĞİŞTİ: Mesai Ücreti satırı HER ZAMAN görünür ve saat dökümü verir
-                            (Maaş Tablosu > MESAİ ÜCR. ile birebir aynı tutar) */}
+                        {/* YENİ: Aylık yemek/yol hak edişi ayrı satırlarda (brüt hakedişe dahil edilen kısım) */}
+                        <tr><td className="p-2.5 text-neutral-500 text-xs">Aylık Yemek Hakedişi (brüte dahil)</td><td className="p-2.5 text-right text-xs text-neutral-500">+{tl(sd.yemekAylik)}</td></tr>
+                        <tr><td className="p-2.5 text-neutral-500 text-xs">Aylık Yol Hakedişi (brüte dahil)</td><td className="p-2.5 text-right text-xs text-neutral-500">+{tl(sd.yolAylik)}</td></tr>
+                        {/* TAŞINDI (kullanıcı talebi): Mesai Ücreti satırı artık Aylık Yol
+                            Hakedişi'nin ALTINDA. Tutar, Personel Muhasebe > Maaş'taki
+                            MESAİ ÜCR. sütunuyla birebir aynıdır ve Net Maaş'a dahildir. */}
                         <tr className={sd.fazlaMesaiUcreti > 0 ? 'bg-green-50' : sd.fazlaMesaiUcreti < 0 ? 'bg-red-50' : ''}>
                           <td className={`p-2.5 ${sd.fazlaMesaiUcreti > 0 ? 'text-green-700' : sd.fazlaMesaiUcreti < 0 ? 'text-red-700' : 'text-neutral-600'}`}>
                             Mesai Ücreti <span className="text-[10px] opacity-70">(Maaş Tablosu ile aynı — toplam {(sd.toplamSaat ?? 0).toLocaleString('tr-TR', {maximumFractionDigits: 1})} saat × ₺{(sd.saatlikUcret ?? 0).toLocaleString('tr-TR', {maximumFractionDigits: 2})}/saat)</span>
                           </td>
                           <td className={`p-2.5 text-right font-bold ${sd.fazlaMesaiUcreti > 0 ? 'text-green-700' : sd.fazlaMesaiUcreti < 0 ? 'text-red-700' : 'text-neutral-600'}`}>{sd.fazlaMesaiUcreti > 0 ? '+' : ''}{tl(sd.fazlaMesaiUcreti)}</td>
                         </tr>
-                        {/* YENİ: Aylık yemek/yol hak edişi ayrı satırlarda (brüt hakedişe dahil edilen kısım) */}
-                        <tr><td className="p-2.5 text-neutral-500 text-xs">Aylık Yemek Hakedişi (brüte dahil)</td><td className="p-2.5 text-right text-xs text-neutral-500">+{tl(sd.yemekAylik)}</td></tr>
-                        <tr><td className="p-2.5 text-neutral-500 text-xs">Aylık Yol Hakedişi (brüte dahil)</td><td className="p-2.5 text-right text-xs text-neutral-500">+{tl(sd.yolAylik)}</td></tr>
                         <tr><td className="p-2.5 text-neutral-600">Hak Edilen Net Maaş <span className="text-[10px] text-neutral-400">(maaş + mesai + yemek + yol)</span></td><td className="p-2.5 text-right font-bold text-black">{tl(sd.netMaas)}</td></tr>
                         <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yemek Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− {tl(sd.yemekIade)}</td></tr>
                         <tr className="bg-red-50"><td className="p-2.5 text-red-700">Yol Parası İadesi <span className="text-[10px] text-red-400">(peşin verildi)</span></td><td className="p-2.5 text-right font-bold text-red-700">− {tl(sd.yolIade)}</td></tr>
