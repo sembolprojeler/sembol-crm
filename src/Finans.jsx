@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown , Banknote, UserMinus } from 'lucide-react';
+import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp , Banknote, UserMinus } from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 // DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
 // Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
@@ -3917,7 +3917,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // DEĞİŞİKLİK: 'Kasa' türünün adı 'Nakit' oldu. Eski defter kayıtlarında
     // d.tur alanında 'Kasa' yazmaya devam eder; defterTuruEtiket eşlemesi
     // onları da 'Nakit' olarak gösterir, veritabanına dokunulmaz.
-    const DEFTER_TURLERI = ['Nakit', 'Banka', 'Kredi Kartı', 'Borçlu'];
+    const DEFTER_TURLERI = ['Nakit', 'Banka', 'Kredi Kartı', 'Borçlu', 'Kredi', 'Ödemeler'];
+
+    // ========================================================================
+    // YENİ: "KREDİ" DEFTER TÜRÜ
+    // ========================================================================
+    // Diğer türlerden farklı çalışır. Bir kredi defteri açıldığında ana para,
+    // toplam geri ödeme, taksit sayısı ve ilk taksit tarihi girilir; sistem
+    // taksit planını kendisi üretir. Taksit ödendiğinde İKİ kayıt oluşur:
+    //   1) Ödemenin yapıldığı defterde  ÇIKIŞ  (gerçek para çıkışı)
+    //   2) Kredi defterinde             GİRİŞ  (borcun azalması — mahsup)
+    // İkincisi gerçek bir gelir olmadığı için krediMahsup bayrağıyla
+    // ciro toplamlarından dışlanır (virman mantığının aynısı).
+    // ========================================================================
 
     // Eski kayıtları yeni karşılıklarına eşler. Sadece GÖRÜNTÜLEME için kullanılır;
     // Firestore'daki eski veri değiştirilmez, dolayısıyla geçmiş bozulmaz.
@@ -3930,6 +3942,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       if (tur === 'Nakit' || tur === 'Kasa') return { Ikon: Banknote, renk: 'bg-emerald-600' };
       if (tur === 'Kredi Kartı' || tur === 'Cari (Kişi/Firma)') return { Ikon: CreditCard, renk: 'bg-amber-500' };
       if (tur === 'Borçlu' || tur === 'Diğer') return { Ikon: UserMinus, renk: 'bg-rose-600' };
+      // YENİ: Kredi — mor tema, diğerlerinden net ayrılsın
+      if (tur === 'Kredi') return { Ikon: Landmark, renk: 'bg-violet-600' };
+      // YENİ: Ödemeler — turuncu tema (kira, sigorta, vergi gibi düzenli giderler)
+      if (tur === 'Ödemeler') return { Ikon: CalendarDays, renk: 'bg-orange-600' };
       // Tanınmayan tür: nötr gri + genel defter simgesi
       return { Ikon: BookOpen, renk: 'bg-neutral-500' };
     };
@@ -3940,6 +3956,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       if (tur === 'Diğer') return 'Borçlu';
       return tur || '-';
     };
+    // ARTIK FORMDA KULLANILMIYOR: "Ödeme Yöntemi" seçicisi "Hesap Türü"ne
+    // dönüştürüldü ve seçenekler gerçek defterlerden geliyor. Bu dizi yalnızca
+    // referans olarak bırakıldı; kayıtlardaki odemeYontemi değeri artık
+    // defterdenOdemeYontemi() ile hesabın türünden türetiliyor.
     const ODEME_YONTEMLERI = ['Nakit', 'Banka / Havale', 'Kredi Kartı', 'Çek / Senet', 'Diğer'];
 
     const [defterler, setDefterler] = useState([]);
@@ -3949,7 +3969,27 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
     // Defter oluşturma/düzenleme penceresi
     const [showDefterForm, setShowDefterForm] = useState(false);
-    const [defterForm, setDefterForm] = useState({ ad: '', tur: 'Nakit', not: '' });
+    // YENİ: kredi alt nesnesi — yalnızca tur === 'Kredi' iken kullanılır
+    const bosKrediForm = { bankaAdi: '', anaPara: '', toplamGeriOdeme: '', taksitSayisi: '', aylikTaksit: '', ilkTaksitTarihi: bugunStr() };
+    const [defterForm, setDefterForm] = useState({ ad: '', tur: 'Nakit', not: '', kredi: bosKrediForm });
+
+    // ========================================================================
+    // YENİ: TAKSİT ÖDEME PENCERESİ
+    // ========================================================================
+    // { taksit, kaynakDefterId, tarih } — hangi taksit, hangi hesaptan, ne zaman.
+    // Ödeme onaylanınca iki kayıt oluşur (bkz. taksitOde).
+    const [taksitOdeme, setTaksitOdeme] = useState(null);
+    const [taksitKaydediliyor, setTaksitKaydediliyor] = useState(false);
+
+    // ========================================================================
+    // YENİ: ÖDEME KALEMİ FORMU ve VADE ÖDEME PENCERESİ
+    // ========================================================================
+    const bosOdemeKalemi = { id: '', ad: '', tutar: '', ilkTarih: bugunStr(), tekrar: 'aylik', tekrarSayisi: '', not: '' };
+    const [odemeKalemForm, setOdemeKalemForm] = useState(null); // null = kapalı
+    // { kalem, vade, kaynakDefterId, tarih } — hangi kalemin hangi vadesi, nereden
+    const [vadeOdeme, setVadeOdeme] = useState(null);
+    // Vade listesi açık olan kalemin kimliği (akordiyon)
+    const [acikOdemeKalemi, setAcikOdemeKalemi] = useState(null);
     const [editingDefterId, setEditingDefterId] = useState(null);
     const [deleteDefterId, setDeleteDefterId] = useState(null);
 
@@ -4062,6 +4102,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     };
 
     const emptyIslem = { tip: 'giris', tutar: '', aciklama: '', kategori: '', etiketler: [], odemeYontemi: 'Nakit', tarih: bugunStr(),
+      // YENİ: hedefDefterId — işlemin HANGİ DEFTERDE duracağını belirler.
+      // Boşsa o an açık olan defter kullanılır (eski davranış). Düzenleme
+      // sırasında değiştirilirse işlem seçilen deftere TAŞINIR.
+      hedefDefterId: '',
       // YENİ: MÜŞTERİ (cari) ve ARAÇ alanları — ikisi de OPSİYONEL.
       // Eskiden bu bilgiler açıklama metnine gömülüydü; ayrı alan olunca
       // tıklanabilir, filtrelenebilir ve raporlanabilir hale geliyor.
@@ -4177,9 +4221,217 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // eklerdi; net doğru kalsa da iki rakam şişer ve gelir-gider yanlış okunur.
     // NOT: defterBakiye() virmanı SAYAR — çünkü para o defterden gerçekten çıkıp
     // diğerine gerçekten girdi, bakiyeler doğru olmak zorunda.
-    const ciroyaGirer = (i) => !i.isVirman;
-    const toplamGiris = islemler.filter(i => i.tip === 'giris' && ciroyaGirer(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
-    const toplamCikis = islemler.filter(i => i.tip === 'cikis' && ciroyaGirer(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    // Ciro toplamlarına GİRMEYEN hareketler:
+    //  isVirman     -> hesaplar arası transfer (para yer değiştirir, gelir değil)
+    //  krediMahsup  -> kredi taksitinin kredi defterindeki borç azaltma bacağı
+    //  odemeMahsup  -> düzenli ödemenin ödemeler defterindeki izleme bacağı
+    // Bunlar sayılsaydı her ödeme hem gelir hem gider olarak görünür, ciro şişerdi.
+    const ciroyaGirer = (i) => !i.isVirman && !i.krediMahsup && !i.odemeMahsup;
+
+    // ========================================================================
+    // KREDİ MOTORU
+    // ========================================================================
+    // Bir kredi defterinin taksit planını üretir ve ödeme durumunu çıkarır.
+    // Taksit planı VERİTABANINDA TUTULMAZ; defterdeki dört bilgiden (toplam
+    // geri ödeme, taksit sayısı, ilk taksit tarihi, aylık taksit) her seferinde
+    // hesaplanır. Böylece plan bozulmaz ve kayıt şişmez.
+    //
+    // Hangi taksitin ödendiği, o kredi defterine yazılmış GİRİŞ kayıtlarının
+    // taksitNo alanından okunur. Yani "ödendi" bilgisi ayrı bir yerde değil,
+    // paranın gerçekten hareket ettiği işlemin kendisinde durur.
+    // ========================================================================
+    const krediBilgi = (defter) => {
+      const k = defter?.kredi || {};
+      const taksitSayisi = parseInt(k.taksitSayisi) || 0;
+      const toplamGeriOdeme = parseFloat(k.toplamGeriOdeme) || 0;
+      const anaPara = parseFloat(k.anaPara) || 0;
+      // Aylık taksit girilmemişse toplamdan türetilir
+      const aylikTaksit = parseFloat(k.aylikTaksit) || (taksitSayisi > 0 ? toplamGeriOdeme / taksitSayisi : 0);
+      const toplamFaiz = Math.max(0, toplamGeriOdeme - anaPara);
+
+      // O kredi defterine yazılmış taksit ödemeleri (giriş = borç azalması)
+      const odemeler = defterIslemleri(defter?.id).filter(i => i.tip === 'giris' && i.krediMahsup);
+      const odenenTutar = odemeler.reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+      const odenenTaksitNolar = new Set(odemeler.map(i => parseInt(i.taksitNo)).filter(n => !isNaN(n)));
+      const kalanBorc = Math.max(0, toplamGeriOdeme - odenenTutar);
+
+      // Taksit planı: ilk taksit tarihinden başlayarak aydan aya
+      const plan = [];
+      if (taksitSayisi > 0 && k.ilkTaksitTarihi) {
+        const [y, a, g] = k.ilkTaksitTarihi.split('-').map(Number);
+        for (let n = 1; n <= taksitSayisi; n++) {
+          // Ay ekleme: gün taşmalarını (31 Ocak + 1 ay) ayın son gününe sabitler
+          const t = new Date(y, (a - 1) + (n - 1), 1);
+          const ayinSonGunu = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+          t.setDate(Math.min(g, ayinSonGunu));
+          const tarihStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+          const odendi = odenenTaksitNolar.has(n);
+          const odemeKaydi = odemeler.find(i => parseInt(i.taksitNo) === n);
+          plan.push({
+            no: n,
+            tarih: tarihStr,
+            tutar: aylikTaksit,
+            odendi,
+            odemeTarihi: odemeKaydi?.tarih || null,
+            // Vadesi geçmiş ve hâlâ ödenmemişse gecikmiş sayılır
+            gecikmis: !odendi && tarihStr < bugunStr(),
+          });
+        }
+      }
+      const odenenAdet = plan.filter(t => t.odendi).length;
+      const gecikmisAdet = plan.filter(t => t.gecikmis).length;
+      // Sırada bekleyen ilk ödenmemiş taksit
+      const siradaki = plan.find(t => !t.odendi) || null;
+
+      return { anaPara, toplamGeriOdeme, toplamFaiz, taksitSayisi, aylikTaksit,
+               odenenTutar, kalanBorc, plan, odenenAdet, kalanAdet: taksitSayisi - odenenAdet,
+               gecikmisAdet, siradaki, bankaAdi: k.bankaAdi || '' };
+    };
+
+    // Tüm kredi defterlerinin toplam kalan borcu — üst özette gösterilir
+    const krediDefterleri = defterler.filter(d => d.tur === 'Kredi');
+    const toplamKrediBorcu = krediDefterleri.reduce((t, d) => t + krediBilgi(d).kalanBorc, 0);
+    const toplamGecikmis = krediDefterleri.reduce((t, d) => t + krediBilgi(d).gecikmisAdet, 0);
+
+    // ========================================================================
+    // ÖDEMELER MOTORU
+    // ========================================================================
+    // "Ödemeler" defteri, içinde BİRDEN FAZLA ödeme kalemi barındırır
+    // (kira, sigorta, vergi, abonelik...). Krediden farkı budur: kredi tek bir
+    // borç planıdır, ödemeler defteri ise bir gider takvimidir.
+    //
+    // Her kalem defterin odemeler dizisinde durur:
+    //   { id, ad, tutar, ilkTarih, tekrar, tekrarSayisi, not }
+    //   tekrar: 'tek' | 'haftalik' | 'aylik' | 'yillik'
+    //   tekrarSayisi: sayı  ya da  0 = SÜRESİZ (sürekli ödeme)
+    //
+    // Vade planı kayıt edilmez, bu dört bilgiden üretilir. Süresiz kalemlerde
+    // sonsuz liste olamayacağı için ileriye dönük SURESIZ_VADE_PENCERESI kadar
+    // vade gösterilir; ödendikçe pencere kendiliğinden ilerler.
+    // ========================================================================
+    const TEKRAR_SECENEKLERI = [
+      { id: 'tek', ad: 'Tek Seferlik' },
+      { id: 'haftalik', ad: 'Her Hafta' },
+      { id: 'aylik', ad: 'Her Ay' },
+      { id: 'yillik', ad: 'Her Yıl' },
+    ];
+    const SURESIZ_VADE_PENCERESI = 24; // Süresiz kalemlerde gösterilecek vade sayısı
+
+    const tekrarEtiket = (tekrar, sayi) => {
+      const ad = TEKRAR_SECENEKLERI.find(t => t.id === tekrar)?.ad || 'Tek Seferlik';
+      if (tekrar === 'tek') return ad;
+      return parseInt(sayi) > 0 ? `${ad} • ${sayi} kez` : `${ad} • süresiz`;
+    };
+
+    // Bir ödeme kaleminin vade planını ve ödeme durumunu çıkarır
+    const odemeKalemBilgi = (defter, kalem) => {
+      const tutar = parseFloat(kalem.tutar) || 0;
+      const tekrar = kalem.tekrar || 'tek';
+      const istenenAdet = tekrar === 'tek' ? 1 : (parseInt(kalem.tekrarSayisi) || 0);
+      const suresiz = tekrar !== 'tek' && istenenAdet === 0;
+
+      // Bu kaleme ait ödemeler (defterdeki mahsup girişleri)
+      const odemeler = defterIslemleri(defter?.id)
+        .filter(i => i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalem.id);
+      const odenenVadeNolar = new Set(odemeler.map(i => parseInt(i.vadeNo)).filter(n => !isNaN(n)));
+      const odenenTutar = odemeler.reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+
+      // Süresizde: ödenen sayısı + pencere kadar vade üret (liste hep dolu kalsın)
+      const uretilecek = suresiz ? odenenVadeNolar.size + SURESIZ_VADE_PENCERESI : istenenAdet;
+
+      const plan = [];
+      if (kalem.ilkTarih) {
+        const [y, a, g] = kalem.ilkTarih.split('-').map(Number);
+        for (let n = 1; n <= uretilecek; n++) {
+          let t;
+          if (tekrar === 'haftalik') { t = new Date(y, a - 1, g); t.setDate(t.getDate() + 7 * (n - 1)); }
+          else if (tekrar === 'yillik') { t = new Date(y + (n - 1), a - 1, 1); const son = new Date(y + (n - 1), a, 0).getDate(); t.setDate(Math.min(g, son)); }
+          else if (tekrar === 'aylik') { t = new Date(y, (a - 1) + (n - 1), 1); const son = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate(); t.setDate(Math.min(g, son)); }
+          else { t = new Date(y, a - 1, g); } // tek seferlik
+          const tarihStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+          const odendi = odenenVadeNolar.has(n);
+          const kayit = odemeler.find(i => parseInt(i.vadeNo) === n);
+          plan.push({ no: n, tarih: tarihStr, tutar, odendi, odemeTarihi: kayit?.tarih || null,
+                      gecikmis: !odendi && tarihStr < bugunStr() });
+        }
+      }
+      const odenenAdet = plan.filter(p => p.odendi).length;
+      const gecikmisler = plan.filter(p => p.gecikmis);
+      const siradaki = plan.find(p => !p.odendi) || null;
+      // Kalan borç yalnızca SONLU planlarda anlamlıdır; süresizde bilinemez
+      const kalanTutar = suresiz ? null : Math.max(0, tutar * istenenAdet - odenenTutar);
+
+      return { tutar, tekrar, suresiz, istenenAdet, plan, odenenAdet, odenenTutar,
+               kalanAdet: suresiz ? null : Math.max(0, istenenAdet - odenenAdet),
+               kalanTutar, gecikmisAdet: gecikmisler.length,
+               gecikmisTutar: gecikmisler.reduce((t, p) => t + p.tutar, 0), siradaki };
+    };
+
+    // Bir ödemeler defterinin toplu durumu
+    const odemeDefterBilgi = (defter) => {
+      const kalemler = defter?.odemeler || [];
+      const detaylar = kalemler.map(k => ({ kalem: k, bilgi: odemeKalemBilgi(defter, k) }));
+      const gecikmisAdet = detaylar.reduce((t, d) => t + d.bilgi.gecikmisAdet, 0);
+      const gecikmisTutar = detaylar.reduce((t, d) => t + d.bilgi.gecikmisTutar, 0);
+      // Bu ay içinde vadesi gelen ve HENÜZ ÖDENMEMİŞ toplam
+      const buAyBas = bugunStr().slice(0, 8) + '01';
+      const [yy, mm] = bugunStr().split('-').map(Number);
+      const buAyBit = `${yy}-${String(mm).padStart(2, '0')}-${String(new Date(yy, mm, 0).getDate()).padStart(2, '0')}`;
+      const buAyBekleyen = detaylar.reduce((t, d) =>
+        t + d.bilgi.plan.filter(p => !p.odendi && p.tarih >= buAyBas && p.tarih <= buAyBit).reduce((s, p) => s + p.tutar, 0), 0);
+      return { detaylar, kalemSayisi: kalemler.length, gecikmisAdet, gecikmisTutar, buAyBekleyen };
+    };
+
+    const odemeDefterleri = defterler.filter(d => d.tur === 'Ödemeler');
+    const toplamGecikmisOdeme = odemeDefterleri.reduce((t, d) => t + odemeDefterBilgi(d).gecikmisAdet, 0);
+    const toplamBuAyBekleyen = odemeDefterleri.reduce((t, d) => t + odemeDefterBilgi(d).buAyBekleyen, 0);
+
+    // ========================================================================
+    // YENİ: ÜST ÖZET DÖNEM FİLTRESİ
+    // ========================================================================
+    // Eskiden Toplam Giriş / Çıkış / Net Bakiye TÜM ZAMANLARI topluyordu ve
+    // değiştirilemiyordu. Artık üstte bir dönem seçici var.
+    // VARSAYILAN: 'bugun' — kullanıcı isteği: "Her zaman Bugün gözüksün."
+    // Sayfa her açıldığında bugüne döner (state başlangıç değeri olduğu için).
+    // NOT: Bu filtre YALNIZCA üstteki özet kartını etkiler; alttaki defter
+    // listesi ve her defterin kendi bakiyesi TÜM ZAMANLAR üzerinden kalır,
+    // çünkü bir hesabın bakiyesi doğası gereği kümülatiftir.
+    // ========================================================================
+    const OZET_DONEMLERI = [
+      { id: 'tum', ad: 'Tüm Zamanlar' },
+      { id: 'bugun', ad: 'Bugün' },
+      { id: 'dun', ad: 'Dün' },
+      { id: 'buAy', ad: 'Bu Ay' },
+      { id: 'gecenAy', ad: 'Geçen Ay' },
+      { id: 'buSene', ad: 'Bu Sene' },
+      { id: 'gecenSene', ad: 'Geçen Sene' },
+    ];
+    const [ozetDonem, setOzetDonem] = useState('bugun'); // Varsayılan: Bugün
+
+    // Seçilen döneme karşılık gelen tarih aralığını verir (YYYY-AA-GG metinleri).
+    // Kayıtlardaki tarih alanı da aynı biçimde olduğu için metin karşılaştırması
+    // güvenlidir (saat dilimi kaymasına yol açmaz).
+    const donemAraligi = (donem) => {
+      const g = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const bugun = new Date();
+      if (donem === 'bugun') return { bas: g(bugun), bit: g(bugun) };
+      if (donem === 'dun') { const d = new Date(bugun); d.setDate(d.getDate() - 1); return { bas: g(d), bit: g(d) }; }
+      if (donem === 'buAy') return { bas: g(new Date(bugun.getFullYear(), bugun.getMonth(), 1)), bit: g(new Date(bugun.getFullYear(), bugun.getMonth() + 1, 0)) };
+      if (donem === 'gecenAy') return { bas: g(new Date(bugun.getFullYear(), bugun.getMonth() - 1, 1)), bit: g(new Date(bugun.getFullYear(), bugun.getMonth(), 0)) };
+      if (donem === 'buSene') return { bas: `${bugun.getFullYear()}-01-01`, bit: `${bugun.getFullYear()}-12-31` };
+      if (donem === 'gecenSene') return { bas: `${bugun.getFullYear() - 1}-01-01`, bit: `${bugun.getFullYear() - 1}-12-31` };
+      return null; // 'tum' -> sınır yok
+    };
+
+    // Dönem filtresinden geçen işlemler (virmanlar zaten ciroyaGirer ile dışlanır)
+    const ozetIslemleri = useMemo(() => {
+      const aralik = donemAraligi(ozetDonem);
+      if (!aralik) return islemler; // Tüm Zamanlar
+      return islemler.filter(i => i.tarih && i.tarih >= aralik.bas && i.tarih <= aralik.bit);
+    }, [islemler, ozetDonem]);
+
+    const toplamGiris = ozetIslemleri.filter(i => i.tip === 'giris' && ciroyaGirer(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    const toplamCikis = ozetIslemleri.filter(i => i.tip === 'cikis' && ciroyaGirer(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
     const netBakiye = toplamGiris - toplamCikis;
 
     const seciliDefter = defterler.find(d => d.id === seciliDefterId) || null;
@@ -4187,16 +4439,176 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // --- Defter işlemleri ---
     const handleSaveDefter = async () => {
       if (!defterForm.ad.trim()) return;
+      // YENİ: Kredi defterinde zorunlu alan denetimi. Toplam geri ödeme, taksit
+      // sayısı ve ilk taksit tarihi olmadan taksit planı üretilemez.
+      if (defterForm.tur === 'Kredi') {
+        const k = defterForm.kredi || {};
+        if (!(parseFloat(k.toplamGeriOdeme) > 0)) { alert('Kredi defteri için "Toplam Geri Ödeme" girilmelidir.'); return; }
+        if (!(parseInt(k.taksitSayisi) > 0)) { alert('Kredi defteri için "Taksit Sayısı" girilmelidir.'); return; }
+        if (!k.ilkTaksitTarihi) { alert('Kredi defteri için "İlk Taksit Tarihi" seçilmelidir.'); return; }
+      }
+      // Kredi dışı türlerde kredi alt nesnesi kaydedilmez (gereksiz veri kalmasın)
+      const kayitVerisi = defterForm.tur === 'Kredi' ? { ...defterForm } : { ...defterForm, kredi: null };
       if (editingDefterId) {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', editingDefterId), { ...defterForm });
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', editingDefterId), { ...kayitVerisi });
         addSystemLog?.('Defter Güncellendi', `"${defterForm.ad}" defteri düzenlendi.`);
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterler'), {
-          ...defterForm, createdAt: new Date().toISOString(), createdBy: currentUser?.fullName || 'Sistem'
+          ...kayitVerisi, createdAt: new Date().toISOString(), createdBy: currentUser?.fullName || 'Sistem'
         });
         addSystemLog?.('Yeni Defter', `"${defterForm.ad}" defteri açıldı.`);
       }
-      setShowDefterForm(false); setEditingDefterId(null); setDefterForm({ ad: '', tur: 'Nakit', not: '' });
+      setShowDefterForm(false); setEditingDefterId(null); setDefterForm({ ad: '', tur: 'Nakit', not: '', kredi: bosKrediForm });
+    };
+
+    // ========================================================================
+    // YENİ: TAKSİT ÖDEME — iki bacaklı kayıt
+    // ========================================================================
+    // 1) KAYNAK DEFTERDE ÇIKIŞ: gerçek para çıkışıdır, gidere yazılır.
+    // 2) KREDİ DEFTERİNDE GİRİŞ: borcun azalmasıdır, GERÇEK GELİR DEĞİLDİR;
+    //    bu yüzden krediMahsup:true ile ciro toplamlarından dışlanır. Aksi halde
+    //    her taksit ödemesi hem gelir hem gider olarak sayılır, ciro şişerdi.
+    // İki kayıt aynı odemeId ile bağlanır; geri alınmak istenirse ikisi birden
+    // bulunabilir. taksitNo alanı, planda hangi taksitin ödendiğini belirler.
+    // ========================================================================
+    const taksitOde = async () => {
+      if (!taksitOdeme?.taksit || !seciliDefter) return;
+      if (!taksitOdeme.kaynakDefterId) { alert('Ödemenin hangi hesaptan yapıldığını seçin.'); return; }
+      const t = taksitOdeme.taksit;
+      const tutar = parseFloat(t.tutar) || 0;
+      if (tutar <= 0) { alert('Taksit tutarı geçersiz.'); return; }
+      const kaynak = defterler.find(d => d.id === taksitOdeme.kaynakDefterId);
+      const odemeId = `kredi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const ortak = {
+        tarih: taksitOdeme.tarih || bugunStr(),
+        kategori: 'Kredi Taksiti',
+        etiketler: [],
+        krediMahsup: false,
+        odemeId,
+        taksitNo: t.no,
+        krediDefterId: seciliDefter.id,
+        kaynak: 'Kredi Ödemesi',
+        createdAt: new Date().toISOString(),
+        by: currentUser?.fullName || 'Sistem',
+      };
+      setTaksitKaydediliyor(true);
+      try {
+        // 1) Ödemenin yapıldığı hesaptan ÇIKIŞ (gerçek gider)
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak, tip: 'cikis', tutar,
+          defterId: taksitOdeme.kaynakDefterId,
+          odemeYontemi: defterdenOdemeYontemi(taksitOdeme.kaynakDefterId),
+          aciklama: `${seciliDefter.ad} — ${t.no}. taksit ödemesi`,
+        });
+        // 2) Kredi defterinde GİRİŞ (borç azalması — ciroya girmez)
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak, tip: 'giris', tutar,
+          defterId: seciliDefter.id,
+          krediMahsup: true,
+          odemeYontemi: defterdenOdemeYontemi(taksitOdeme.kaynakDefterId),
+          aciklama: `${t.no}. taksit ödendi ← ${kaynak?.ad || 'hesap'}`,
+        });
+        addSystemLog?.('Kredi Taksiti Ödendi',
+          `${seciliDefter.ad}: ${t.no}. taksit ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi.`);
+        setTaksitOdeme(null);
+      } catch (e) {
+        console.error('Taksit ödemesi kaydedilemedi:', e);
+        alert('Taksit ödemesi kaydedilemedi. Lütfen tekrar deneyin.');
+      } finally {
+        setTaksitKaydediliyor(false);
+      }
+    };
+
+    // ========================================================================
+    // YENİ: ÖDEME KALEMİ KAYDET / SİL
+    // Kalemler defter dokümanındaki odemeler dizisinde tutulur. Ayrı koleksiyon
+    // açmak yerine dizi tercih edildi: kalem sayısı sınırlıdır (kira, sigorta,
+    // vergi gibi onlarca kalem) ve defterle birlikte tek okumada gelir.
+    // ========================================================================
+    const odemeKalemiKaydet = async () => {
+      if (!seciliDefter || !odemeKalemForm) return;
+      if (!odemeKalemForm.ad.trim()) { alert('Ödeme adı girin (örn: Dükkan Kirası).'); return; }
+      if (!(parseFloat(odemeKalemForm.tutar) > 0)) { alert('Geçerli bir tutar girin.'); return; }
+      if (!odemeKalemForm.ilkTarih) { alert('İlk ödeme tarihini seçin.'); return; }
+      const mevcut = seciliDefter.odemeler || [];
+      const kalem = {
+        ...odemeKalemForm,
+        // Yeni kalemse benzersiz kimlik üretilir; düzenlemede mevcut kimlik korunur
+        id: odemeKalemForm.id || `ok_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        tutar: String(parseFloat(odemeKalemForm.tutar)),
+        // Tek seferlikte tekrar sayısı anlamsızdır
+        tekrarSayisi: odemeKalemForm.tekrar === 'tek' ? '' : odemeKalemForm.tekrarSayisi,
+      };
+      const yeniListe = odemeKalemForm.id
+        ? mevcut.map(k => k.id === kalem.id ? kalem : k)
+        : [...mevcut, kalem];
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), { odemeler: yeniListe });
+        addSystemLog?.('Ödeme Kalemi', `${seciliDefter.ad}: "${kalem.ad}" ${odemeKalemForm.id ? 'güncellendi' : 'eklendi'} (₺${paraFmt(kalem.tutar)}).`);
+        setOdemeKalemForm(null);
+      } catch (e) { console.error(e); alert('Ödeme kalemi kaydedilemedi.'); }
+    };
+
+    const odemeKalemiSil = async (kalemId) => {
+      if (!seciliDefter) return;
+      const kalem = (seciliDefter.odemeler || []).find(k => k.id === kalemId);
+      // Yapılmış ödemeler SİLİNMEZ; yalnızca plan kaldırılır. Geçmiş hareketler
+      // defterde durmaya devam eder, muhasebe izi kaybolmaz.
+      if (!window.confirm(`"${kalem?.ad}" ödeme planı kaldırılsın mı?\n\nDaha önce yapılmış ödemeler silinmez, defterde kalır.`)) return;
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), {
+          odemeler: (seciliDefter.odemeler || []).filter(k => k.id !== kalemId)
+        });
+        addSystemLog?.('Ödeme Kalemi Silindi', `${seciliDefter.ad}: "${kalem?.ad}" planı kaldırıldı.`);
+      } catch (e) { console.error(e); alert('Kalem silinemedi.'); }
+    };
+
+    // ========================================================================
+    // YENİ: VADE ÖDEME — kredi taksitiyle aynı iki bacaklı mantık
+    //   1) Kaynak hesapta ÇIKIŞ (gerçek gider, ciroya girer)
+    //   2) Ödemeler defterinde GİRİŞ (izleme kaydı, odemeMahsup ile ciro dışı)
+    // ========================================================================
+    const vadeOde = async () => {
+      if (!vadeOdeme?.vade || !seciliDefter) return;
+      if (!vadeOdeme.kaynakDefterId) { alert('Ödemenin hangi hesaptan yapıldığını seçin.'); return; }
+      const v = vadeOdeme.vade;
+      const tutar = parseFloat(vadeOdeme.tutar ?? v.tutar) || 0;
+      if (tutar <= 0) { alert('Geçerli bir tutar girin.'); return; }
+      const kaynak = defterler.find(d => d.id === vadeOdeme.kaynakDefterId);
+      const odemeId = `odeme_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const ortak = {
+        tarih: vadeOdeme.tarih || bugunStr(),
+        kategori: 'Düzenli Ödeme',
+        etiketler: [],
+        odemeId,
+        vadeNo: v.no,
+        odemeKalemId: vadeOdeme.kalem.id,
+        odemeDefterId: seciliDefter.id,
+        kaynak: 'Ödeme Planı',
+        createdAt: new Date().toISOString(),
+        by: currentUser?.fullName || 'Sistem',
+      };
+      setTaksitKaydediliyor(true);
+      try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak, tip: 'cikis', tutar, odemeMahsup: false,
+          defterId: vadeOdeme.kaynakDefterId,
+          odemeYontemi: defterdenOdemeYontemi(vadeOdeme.kaynakDefterId),
+          aciklama: `${vadeOdeme.kalem.ad} — ${v.no}. ödeme`,
+        });
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak, tip: 'giris', tutar, odemeMahsup: true,
+          defterId: seciliDefter.id,
+          odemeYontemi: defterdenOdemeYontemi(vadeOdeme.kaynakDefterId),
+          aciklama: `${vadeOdeme.kalem.ad} ${v.no}. ödeme ← ${kaynak?.ad || 'hesap'}`,
+        });
+        addSystemLog?.('Düzenli Ödeme Yapıldı',
+          `${vadeOdeme.kalem.ad} ${v.no}. ödeme ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi.`);
+        setVadeOdeme(null);
+      } catch (e) {
+        console.error('Ödeme kaydedilemedi:', e);
+        alert('Ödeme kaydedilemedi. Lütfen tekrar deneyin.');
+      } finally { setTaksitKaydediliyor(false); }
     };
 
     const handleDeleteDefter = async () => {
@@ -4212,20 +4624,45 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     };
 
     // --- İşlem kayıtları ---
+    // Defter türünden eski "ödeme yöntemi" etiketini türetir (geriye uyum için).
+    // Kayıttaki odemeYontemi alanı listede rozet olarak gösterildiği ve eski
+    // kayıtlarda arandığı için korunuyor; artık elle seçilmiyor, hesabın
+    // türünden otomatik geliyor.
+    const defterdenOdemeYontemi = (defterId) => {
+      const tur = defterler.find(d => d.id === defterId)?.tur;
+      if (tur === 'Banka') return 'Banka / Havale';
+      if (tur === 'Kredi Kartı' || tur === 'Cari (Kişi/Firma)') return 'Kredi Kartı';
+      if (tur === 'Nakit' || tur === 'Kasa') return 'Nakit';
+      if (tur === 'Borçlu' || tur === 'Diğer') return 'Diğer';
+      return 'Nakit';
+    };
+
     const handleSaveIslem = async () => {
       const tutar = parseFloat(islemForm.tutar);
       if (!tutar || tutar <= 0) { alert('Geçerli bir tutar girin.'); return; }
+      // DEĞİŞTİ: Hedef defter seçildiyse işlem ORAYA yazılır (taşıma).
+      // Seçilmediyse eski davranış: o an açık olan defter.
+      const kayitDefterId = islemForm.hedefDefterId || seciliDefterId;
+      const tasindiMi = editingIslemId && kayitDefterId !== seciliDefterId;
+      // hedefDefterId yalnızca form içi bir alan — Firestore'a yazılmaz
+      const { hedefDefterId, ...formVerisi } = islemForm;
       const kayit = {
-        ...islemForm,
+        ...formVerisi,
         tutar,
         // Etiketler virgülle ayrılır, boşluklar temizlenir
         // DEĞİŞİKLİK: Artık dizi geldiği için split gerekmez; yalnızca boşlar ayıklanır.
         etiketler: (islemForm.etiketler || []).filter(Boolean),
-        defterId: seciliDefterId,
+        // Ödeme yöntemi artık hesabın türünden türetilir (elle seçilmiyor)
+        odemeYontemi: defterdenOdemeYontemi(kayitDefterId),
+        defterId: kayitDefterId,
       };
       if (editingIslemId) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', editingIslemId), kayit);
-        addSystemLog?.('Defter İşlemi Güncellendi', `${seciliDefter?.ad}: ${kayit.tip === 'giris' ? 'Giriş' : 'Çıkış'} ₺${paraFmt(tutar)} düzenlendi.`);
+        const hedefAd = defterler.find(d => d.id === kayitDefterId)?.ad || '-';
+        addSystemLog?.('Defter İşlemi Güncellendi',
+          tasindiMi
+            ? `${seciliDefter?.ad} -> ${hedefAd}: ₺${paraFmt(tutar)} tutarındaki işlem başka hesaba taşındı.`
+            : `${seciliDefter?.ad}: ${kayit.tip === 'giris' ? 'Giriş' : 'Çıkış'} ₺${paraFmt(tutar)} düzenlendi.`);
       } else {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
           ...kayit, kaynak: 'Manuel', createdAt: new Date().toISOString(), by: currentUser?.fullName || 'Sistem'
@@ -4325,9 +4762,48 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
     // ======================== DEFTER LİSTESİ GÖRÜNÜMÜ ========================
     if (!seciliDefter) {
+      // ====================================================================
+      // DEĞİŞTİ: DEFTER SIRASI ARTIK ELLE AYARLANABİLİR
+      // ====================================================================
+      // ESKİ HALİ: Liste her zaman alfabetikti; kullanıcı defterleri kendi
+      // önem sırasına göre dizemiyordu.
+      // YENİ HALİ: Her defterin 'sira' alanı vardır (yukarı/aşağı oklarıyla
+      // değişir). Sırası HENÜZ atanmamış defterler (eski kayıtlar) listenin
+      // sonuna gider ve kendi aralarında alfabetik kalır — böylece ilk açılışta
+      // görünüm bozulmaz.
+      // ====================================================================
       const filtreliDefterler = defterler
         .filter(d => !arama.trim() || (d.ad || '').toLocaleLowerCase('tr-TR').includes(arama.trim().toLocaleLowerCase('tr-TR')))
-        .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+        .sort((a, b) => {
+          const sa = Number.isFinite(a.sira) ? a.sira : 9999;
+          const sb = Number.isFinite(b.sira) ? b.sira : 9999;
+          if (sa !== sb) return sa - sb;
+          return (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'); // Eşitse alfabetik
+        });
+
+      // Arama yapılırken sıralama okları gizlenir: filtrelenmiş kısa listede
+      // "yukarı taşı" demek yanıltıcı olur, çünkü aradaki gizli defterler
+      // görünmüyor. Sıra düzenlemek için aramayı temizlemek gerekir.
+      const siralamaAktif = !arama.trim();
+
+      // İki defterin yerini değiştirir ve yeni sırayı Firestore'a yazar.
+      // Not: Sıra hiç atanmamışsa önce GÖRÜNEN sıraya göre 0,1,2… atanır;
+      // böylece ilk tıklamada liste zıplamaz.
+      const defterSirasiDegistir = async (index, yon) => {
+        const hedefIndex = index + yon;
+        if (hedefIndex < 0 || hedefIndex >= filtreliDefterler.length) return; // Uçlarda işlem yok
+        const yeniSira = [...filtreliDefterler];
+        [yeniSira[index], yeniSira[hedefIndex]] = [yeniSira[hedefIndex], yeniSira[index]];
+        try {
+          // Yalnızca sırası DEĞİŞEN defterler yazılır (gereksiz yazma olmasın)
+          await Promise.all(yeniSira.map((d, i) =>
+            d.sira === i ? null : updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', d.id), { sira: i })
+          ).filter(Boolean));
+        } catch (e) {
+          console.error('Defter sırası kaydedilemedi:', e);
+          alert('Sıra değiştirilemedi. Lütfen tekrar deneyin.');
+        }
+      };
 
       return (
         <div className="max-w-5xl mx-auto animate-in fade-in space-y-5">
@@ -4338,6 +4814,35 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <h2 className="text-xl font-black">Defter</h2>
               <span className="text-xs font-bold text-white/60">Kasa, cari ve borç/alacak takibi</span>
             </div>
+            {/* ==============================================================
+                YENİ: DÖNEM FİLTRESİ
+                Aşağıdaki üç kutu (Giriş / Çıkış / Net) seçilen döneme göre
+                hesaplanır. Varsayılan "Bugün"dür ve sayfa her açıldığında
+                bugüne döner. Dar ekranda yatay kaydırılabilir.
+                ============================================================== */}
+            <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 -mx-1 px-1">
+              {OZET_DONEMLERI.map(d => (
+                <button key={d.id} type="button" onClick={() => setOzetDonem(d.id)}
+                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black whitespace-nowrap transition shrink-0 border ${
+                    ozetDonem === d.id
+                      ? 'bg-white text-emerald-800 border-white'
+                      : 'bg-white/10 text-white/70 border-white/10 hover:bg-white/20 hover:text-white'
+                  }`}>
+                  {d.ad}
+                </button>
+              ))}
+            </div>
+            {/* Seçili dönemin tarih aralığı — hangi aralığın toplandığı net görünsün */}
+            {(() => {
+              const a = donemAraligi(ozetDonem);
+              const gg = (t) => t.split('-').reverse().join('.');
+              return (
+                <div className="text-[10px] font-bold text-white/50 mb-2">
+                  {a ? (a.bas === a.bit ? gg(a.bas) : `${gg(a.bas)} — ${gg(a.bit)}`) : 'Tüm kayıtlar'}
+                  {' • '}{ozetIslemleri.filter(ciroyaGirer).length} işlem
+                </div>
+              );
+            })()}
             <div className="grid grid-cols-3 gap-3">
               <div className="bg-white/10 rounded-xl p-3 border border-white/10">
                 <div className="text-[10px] font-black uppercase text-emerald-300 flex items-center gap-1"><ArrowDownRight className="w-3.5 h-3.5" /> Toplam Giriş</div>
@@ -4352,6 +4857,49 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <div className={`text-lg md:text-2xl font-black mt-1 ${netBakiye >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>₺{paraFmt(netBakiye)}</div>
               </div>
             </div>
+
+            {/* ==============================================================
+                YENİ: TOPLAM KREDİ BORCU
+                Yalnızca en az bir kredi defteri varsa görünür. Dönem
+                filtresinden ETKİLENMEZ — kalan borç kümülatif bir tutardır,
+                "bugünkü kredi borcu" diye bir şey olmaz.
+                ============================================================== */}
+            {krediDefterleri.length > 0 && (
+              <div className="mt-3 bg-violet-500/20 border border-violet-300/30 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Landmark className="w-4 h-4 text-violet-200" />
+                  <div>
+                    <div className="text-[10px] font-black uppercase text-violet-200">Toplam Kredi Borcu</div>
+                    <div className="text-[10px] font-bold text-white/50">{krediDefterleri.length} kredi hesabı • tüm zamanlar</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg md:text-2xl font-black text-violet-100">₺{paraFmt(toplamKrediBorcu)}</div>
+                  {toplamGecikmis > 0 && (
+                    <div className="text-[10px] font-black text-red-300">{toplamGecikmis} gecikmiş taksit</div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* YENİ: BEKLEYEN ÖDEMELER — bu ay vadesi gelen + gecikmişler */}
+            {odemeDefterleri.length > 0 && (toplamBuAyBekleyen > 0 || toplamGecikmisOdeme > 0) && (
+              <div className="mt-2 bg-orange-500/20 border border-orange-300/30 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-orange-200" />
+                  <div>
+                    <div className="text-[10px] font-black uppercase text-orange-200">Bu Ay Bekleyen Ödemeler</div>
+                    <div className="text-[10px] font-bold text-white/50">{odemeDefterleri.length} ödeme defteri</div>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg md:text-2xl font-black text-orange-100">₺{paraFmt(toplamBuAyBekleyen)}</div>
+                  {toplamGecikmisOdeme > 0 && (
+                    <div className="text-[10px] font-black text-red-300">{toplamGecikmisOdeme} gecikmiş ödeme</div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ARAMA + YENİ DEFTER */}
@@ -4361,7 +4909,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Defter ara (kasa, kişi, firma adı)..."
                 className="w-full pl-9 pr-3 py-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 bg-white transition" />
             </div>
-            <button onClick={() => { setDefterForm({ ad: '', tur: 'Nakit', not: '' }); setEditingDefterId(null); setShowDefterForm(true); }}
+            <button onClick={() => { setDefterForm({ ad: '', tur: 'Nakit', not: '', kredi: bosKrediForm }); setEditingDefterId(null); setShowDefterForm(true); }}
               className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black rounded-xl transition flex items-center gap-2 shadow-md shadow-emerald-600/20 shrink-0">
               <PlusCircle className="w-4 h-4" /> Yeni Defter
             </button>
@@ -4374,7 +4922,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 Henüz defter yok. "Yeni Defter" ile ilk defterinizi (örn. MERKEZ KASA) açın.
               </div>
             )}
-            {filtreliDefterler.map(d => {
+            {filtreliDefterler.map((d, defterIndex) => {
               const bakiye = defterBakiye(d.id);
               const sonTarih = defterSonIslem(d.id);
               // DÜZELTME: Bu açıklama önce {/* */} biçiminde return ( ile <button>
@@ -4385,10 +4933,42 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               // DEĞİŞİKLİK: Defter açılırken günlük filtre BUGÜNE sıfırlanır.
               // Başka bir defterde geçmiş bir güne bakıp çıkıldığında, yeni
               // defter yanlış günde açılmasın diye.
+              //
+              // DEĞİŞİKLİK (SIRALAMA): Kartın kendisi eskiden <button> idi.
+              // İçine yukarı/aşağı ok BUTONLARI eklenince "buton içinde buton"
+              // oluşuyordu; bu geçersiz HTML'dir ve tarayıcı yapıyı bozar.
+              // Bu yüzden kart <div role="button"> oldu; klavye ile açılabilmesi
+              // için tabIndex ve Enter/Space desteği eklendi.
+              const defteriAc = () => { setSeciliDefterId(d.id); setDetayArama(''); setKategoriFiltre('Tümü'); setSeciliGun(bugunStr()); setGunFiltreAktif(true); };
               return (
-                <button key={d.id} onClick={() => { setSeciliDefterId(d.id); setDetayArama(''); setKategoriFiltre('Tümü'); setSeciliGun(bugunStr()); setGunFiltreAktif(true); }}
-                  className="w-full bg-white rounded-2xl border border-neutral-200 p-4 flex items-center gap-3 hover:border-emerald-400 hover:shadow-md transition text-left">
-                  {/* DEĞİŞİKLİK: Defter adının ilk HARFİ yerine TÜRE UYGUN SİMGE.
+                <div key={d.id} role="button" tabIndex={0}
+                  onClick={defteriAc}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); defteriAc(); } }}
+                  className="w-full bg-white rounded-2xl border border-neutral-200 p-4 flex items-center gap-3 hover:border-emerald-400 hover:shadow-md transition text-left cursor-pointer">
+                  {/* ==========================================================
+                      YENİ: SIRALAMA OKLARI (yukarı / aşağı)
+                      Defterin listedeki yerini değiştirir. stopPropagation ile
+                      kart tıklaması (defteri açma) engellenir. En üstteki
+                      defterde yukarı, en alttakinde aşağı oku pasif görünür.
+                      Arama yapılırken oklar hiç gösterilmez (bkz. siralamaAktif).
+                      ========================================================== */}
+                  {siralamaAktif && (
+                    <div className="flex flex-col gap-0.5 shrink-0">
+                      <button type="button" disabled={defterIndex === 0}
+                        onClick={e => { e.stopPropagation(); defterSirasiDegistir(defterIndex, -1); }}
+                        title="Yukarı taşı"
+                        className={`p-1 rounded-md transition ${defterIndex === 0 ? 'text-neutral-200 cursor-not-allowed' : 'text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
+                        <ChevronUp className="w-4 h-4" />
+                      </button>
+                      <button type="button" disabled={defterIndex === filtreliDefterler.length - 1}
+                        onClick={e => { e.stopPropagation(); defterSirasiDegistir(defterIndex, 1); }}
+                        title="Aşağı taşı"
+                        className={`p-1 rounded-md transition ${defterIndex === filtreliDefterler.length - 1 ? 'text-neutral-200 cursor-not-allowed' : 'text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
+                        <ChevronDown className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                  {/* Defter adının ilk HARFİ yerine TÜRE UYGUN SİMGE.
                       Tüm defterler "NAKLİYE (...)" ile başladığı için hepsinde aynı
                       "N" harfi çıkıyordu ve ayırt edici bir bilgi vermiyordu.
                       Simge + renk defterTuruGorunum() ile tek yerden geliyor. */}
@@ -4406,13 +4986,51 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                         yeni isimle görünür (Cari -> Kredi Kartı, Diğer -> Borçlu). */}
                     <div className="text-[11px] font-bold text-neutral-400">{defterTuruEtiket(d.tur)} {sonTarih ? `• Son işlem: ${new Date(sonTarih).toLocaleDateString('tr-TR')}` : '• Henüz işlem yok'}</div>
                   </div>
+                  {/* ==========================================================
+                      KREDİ DEFTERİ farklı gösterilir: "bakiye" yerine KALAN BORÇ
+                      ve taksit ilerlemesi. Kredi hesabının bakiyesi kavramsal
+                      olarak anlamsızdır; asıl bilgi ne kadar borç kaldığıdır.
+                      ========================================================== */}
+                  {d.tur === 'Ödemeler' ? (() => {
+                    // ÖDEMELER DEFTERİ: bakiye yerine bu ay bekleyen tutar ve gecikme
+                    const od = odemeDefterBilgi(d);
+                    return (
+                      <div className="text-right shrink-0 min-w-[120px]">
+                        <div className={`text-lg font-black ${od.gecikmisAdet > 0 ? 'text-red-600' : 'text-orange-700'}`}>₺{paraFmt(od.buAyBekleyen)}</div>
+                        <div className="text-[10px] font-black uppercase text-orange-500">
+                          Bu Ay Bekleyen • {od.kalemSayisi} kalem
+                        </div>
+                        {od.gecikmisAdet > 0 && (
+                          <div className="text-[9px] font-black text-red-600 mt-0.5">{od.gecikmisAdet} gecikmiş • ₺{paraFmt(od.gecikmisTutar)}</div>
+                        )}
+                      </div>
+                    );
+                  })() : d.tur === 'Kredi' ? (() => {
+                    const kb = krediBilgi(d);
+                    const yuzde = kb.toplamGeriOdeme > 0 ? Math.round((kb.odenenTutar / kb.toplamGeriOdeme) * 100) : 0;
+                    return (
+                      <div className="text-right shrink-0 min-w-[120px]">
+                        <div className={`text-lg font-black ${kb.kalanBorc > 0 ? 'text-violet-700' : 'text-emerald-600'}`}>₺{paraFmt(kb.kalanBorc)}</div>
+                        <div className="text-[10px] font-black uppercase text-violet-500">
+                          {kb.kalanBorc > 0 ? `Kalan Borç • ${kb.kalanAdet}/${kb.taksitSayisi} taksit` : 'Kredi Kapandı'}
+                        </div>
+                        <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden mt-1">
+                          <div className="h-full bg-violet-500" style={{ width: `${yuzde}%` }}></div>
+                        </div>
+                        {kb.gecikmisAdet > 0 && (
+                          <div className="text-[9px] font-black text-red-600 mt-0.5">{kb.gecikmisAdet} gecikmiş</div>
+                        )}
+                      </div>
+                    );
+                  })() : (
                   <div className="text-right shrink-0">
                     <div className={`text-lg font-black ${bakiye > 0 ? 'text-emerald-600' : bakiye < 0 ? 'text-red-600' : 'text-neutral-400'}`}>₺{paraFmt(Math.abs(bakiye))}</div>
                     <div className={`text-[10px] font-black uppercase ${bakiye > 0 ? 'text-emerald-500' : bakiye < 0 ? 'text-red-500' : 'text-neutral-400'}`}>
                       {bakiye > 0 ? 'Alacaklısınız / Kasada Var' : bakiye < 0 ? 'Borçlusunuz' : 'Bakiye Sıfır'}
                     </div>
                   </div>
-                </button>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -4432,6 +5050,65 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     <select value={defterForm.tur} onChange={e => setDefterForm({ ...defterForm, tur: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
                       {DEFTER_TURLERI.map(t => <option key={t}>{t}</option>)}
                     </select></div>
+
+                  {/* ==============================================================
+                      YENİ: KREDİ BİLGİLERİ — yalnızca tür "Kredi" seçilince açılır
+                      Girilen dört bilgiden (toplam geri ödeme, taksit sayısı, ilk
+                      taksit tarihi, aylık taksit) taksit planı OTOMATİK üretilir.
+                      Aylık taksit boş bırakılırsa toplam / taksit sayısı olarak
+                      hesaplanır. Ana para ile toplam geri ödeme arasındaki fark
+                      "toplam faiz/masraf" olarak gösterilir.
+                      ============================================================== */}
+                  {/* Ödemeler türü seçilince: kalemler defter açıldıktan sonra eklenir */}
+                  {defterForm.tur === 'Ödemeler' && (
+                    <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl text-[11px] font-bold text-orange-800">
+                      Bu defter <b>kira, sigorta, vergi, abonelik</b> gibi düzenli ödemeleri takip eder. Defteri açtıktan sonra içine tek tek ödeme kalemleri ekleyecek, her biri için tekrar sıklığını (haftalık/aylık/yıllık), kaç kez tekrarlanacağını ve ilk ödeme tarihini belirleyeceksiniz.
+                    </div>
+                  )}
+                  {defterForm.tur === 'Kredi' && (
+                    <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl space-y-3">
+                      <div className="text-[11px] font-black text-violet-800 uppercase flex items-center gap-1.5">
+                        <Landmark className="w-3.5 h-3.5" /> Kredi Bilgileri
+                      </div>
+                      <div><label className="text-xs font-bold text-neutral-600 block mb-1">Banka / Kurum</label>
+                        <input value={defterForm.kredi?.bankaAdi || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, bankaAdi: e.target.value } })}
+                          className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="Örn: Garanti BBVA, Halkbank" /></div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ana Para (₺)</label>
+                          <input type="number" inputMode="decimal" value={defterForm.kredi?.anaPara || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, anaPara: e.target.value } })}
+                            className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="500000" /></div>
+                        <div><label className="text-xs font-bold text-neutral-600 block mb-1">Toplam Geri Ödeme (₺) *</label>
+                          <input type="number" inputMode="decimal" value={defterForm.kredi?.toplamGeriOdeme || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, toplamGeriOdeme: e.target.value } })}
+                            className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="650000" /></div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><label className="text-xs font-bold text-neutral-600 block mb-1">Taksit Sayısı *</label>
+                          <input type="number" inputMode="numeric" value={defterForm.kredi?.taksitSayisi || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, taksitSayisi: e.target.value } })}
+                            className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="24" /></div>
+                        <div><label className="text-xs font-bold text-neutral-600 block mb-1">Aylık Taksit (₺)</label>
+                          <input type="number" inputMode="decimal" value={defterForm.kredi?.aylikTaksit || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, aylikTaksit: e.target.value } })}
+                            className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="boş = otomatik" /></div>
+                      </div>
+                      <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlk Taksit Tarihi *</label>
+                        <input type="date" value={defterForm.kredi?.ilkTaksitTarihi || ''} onChange={e => setDefterForm({ ...defterForm, kredi: { ...defterForm.kredi, ilkTaksitTarihi: e.target.value } })}
+                          className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" /></div>
+                      {/* Canlı önizleme: girilen bilgilerden ne çıkacağı anında görünsün */}
+                      {(() => {
+                        const ana = parseFloat(defterForm.kredi?.anaPara) || 0;
+                        const top = parseFloat(defterForm.kredi?.toplamGeriOdeme) || 0;
+                        const adet = parseInt(defterForm.kredi?.taksitSayisi) || 0;
+                        const aylik = parseFloat(defterForm.kredi?.aylikTaksit) || (adet > 0 ? top / adet : 0);
+                        if (!top || !adet) return null;
+                        return (
+                          <div className="text-[11px] font-bold text-violet-800 bg-white rounded-lg p-2.5 border border-violet-200 space-y-0.5">
+                            <div>Aylık taksit: <b>₺{paraFmt(aylik)}</b> × {adet} ay</div>
+                            {ana > 0 && <div>Toplam faiz / masraf: <b>₺{paraFmt(Math.max(0, top - ana))}</b></div>}
+                            {aylik * adet !== top && <div className="text-amber-700">Uyarı: {adet} × ₺{paraFmt(aylik)} = ₺{paraFmt(aylik * adet)} — toplamla ₺{paraFmt(Math.abs(aylik * adet - top))} fark var.</div>}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
                     <input value={defterForm.not} onChange={e => setDefterForm({ ...defterForm, not: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" placeholder="Opsiyonel açıklama..." /></div>
                   <button onClick={handleSaveDefter} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl transition">{editingDefterId ? 'Kaydet' : 'Defteri Aç'}</button>
@@ -4495,7 +5172,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           <div className="flex items-center justify-between gap-2 mb-3">
             <button onClick={() => setSeciliDefterId(null)} className="flex items-center gap-1.5 text-white/80 hover:text-white font-bold text-sm transition"><ChevronLeft className="w-5 h-5" /> Defterler</button>
             <div className="flex items-center gap-2">
-              <button onClick={() => { setDefterForm({ ad: seciliDefter.ad, tur: seciliDefter.tur, not: seciliDefter.not || '' }); setEditingDefterId(seciliDefter.id); setShowDefterForm(true); }}
+              <button onClick={() => { setDefterForm({ ad: seciliDefter.ad, tur: seciliDefter.tur, not: seciliDefter.not || '', kredi: { ...bosKrediForm, ...(seciliDefter.kredi || {}) } }); setEditingDefterId(seciliDefter.id); setShowDefterForm(true); }}
                 className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition" title="Defteri Düzenle"><Edit className="w-4 h-4" /></button>
               <button onClick={() => setDeleteDefterId(seciliDefter.id)} className="p-2 bg-white/10 hover:bg-red-500/60 rounded-lg transition" title="Defteri Sil"><X className="w-4 h-4" /></button>
             </div>
@@ -4529,7 +5206,251 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           </div>
         </div>
 
-        {/* KATEGORİ DAĞILIMI — etiket/kategori bazlı görsel rapor */}
+        {/* ==================================================================
+            YENİ: KREDİ PANELİ — yalnızca tür "Kredi" olan defterlerde görünür
+            Üstte dört özet kutusu, altında ilerleme çubuğu ve taksit tablosu.
+            Her ödenmemiş taksitin yanında "Öde" düğmesi vardır; ödeme hangi
+            defterden yapılacaksa oradan ÇIKIŞ, kredi defterine GİRİŞ yazılır.
+            ================================================================== */}
+        {seciliDefter.tur === 'Kredi' && (() => {
+          const kb = krediBilgi(seciliDefter);
+          const yuzde = kb.toplamGeriOdeme > 0 ? Math.round((kb.odenenTutar / kb.toplamGeriOdeme) * 100) : 0;
+          return (
+            <div className="bg-white rounded-2xl border border-violet-200 overflow-hidden">
+              <div className="bg-violet-600 text-white px-4 py-3 flex items-center justify-between">
+                <div className="font-black flex items-center gap-2 text-sm">
+                  <Landmark className="w-4 h-4" /> Kredi Takibi{kb.bankaAdi ? ` — ${kb.bankaAdi}` : ''}
+                </div>
+                {kb.gecikmisAdet > 0 && (
+                  <span className="text-[10px] font-black bg-red-500 px-2 py-1 rounded-full">{kb.gecikmisAdet} GECİKMİŞ TAKSİT</span>
+                )}
+              </div>
+
+              <div className="p-4 space-y-4">
+                {/* DÖRT ÖZET KUTUSU */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
+                    <div className="text-[9px] font-black uppercase text-neutral-500">Ana Para</div>
+                    <div className="text-sm font-black text-black">₺{paraFmt(kb.anaPara)}</div>
+                  </div>
+                  <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
+                    <div className="text-[9px] font-black uppercase text-neutral-500">Toplam Geri Ödeme</div>
+                    <div className="text-sm font-black text-black">₺{paraFmt(kb.toplamGeriOdeme)}</div>
+                    {kb.toplamFaiz > 0 && <div className="text-[9px] font-bold text-amber-600">faiz ₺{paraFmt(kb.toplamFaiz)}</div>}
+                  </div>
+                  <div className="bg-emerald-50 rounded-xl p-2.5 border border-emerald-200">
+                    <div className="text-[9px] font-black uppercase text-emerald-600">Ödenen</div>
+                    <div className="text-sm font-black text-emerald-700">₺{paraFmt(kb.odenenTutar)}</div>
+                    <div className="text-[9px] font-bold text-emerald-600">{kb.odenenAdet} / {kb.taksitSayisi} taksit</div>
+                  </div>
+                  <div className="bg-red-50 rounded-xl p-2.5 border border-red-200">
+                    <div className="text-[9px] font-black uppercase text-red-600">Kalan Borç</div>
+                    <div className="text-sm font-black text-red-700">₺{paraFmt(kb.kalanBorc)}</div>
+                    <div className="text-[9px] font-bold text-red-600">{kb.kalanAdet} taksit kaldı</div>
+                  </div>
+                </div>
+
+                {/* İLERLEME ÇUBUĞU */}
+                <div>
+                  <div className="flex justify-between text-[11px] font-black mb-1">
+                    <span className="text-neutral-600">Ödeme İlerlemesi</span>
+                    <span className="text-violet-700">%{yuzde}</span>
+                  </div>
+                  <div className="h-3 bg-neutral-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-violet-500 to-emerald-500 transition-all" style={{ width: `${yuzde}%` }}></div>
+                  </div>
+                  {kb.siradaki && (
+                    <p className="text-[11px] font-bold text-neutral-500 mt-1.5">
+                      Sıradaki: <b className={kb.siradaki.gecikmis ? 'text-red-600' : 'text-violet-700'}>{kb.siradaki.no}. taksit</b> — {kb.siradaki.tarih.split('-').reverse().join('.')} • ₺{paraFmt(kb.siradaki.tutar)}
+                      {kb.siradaki.gecikmis && ' (gecikmiş)'}
+                    </p>
+                  )}
+                  {!kb.siradaki && kb.taksitSayisi > 0 && (
+                    <p className="text-[11px] font-black text-emerald-700 mt-1.5">Tüm taksitler ödendi — kredi kapandı. 🎉</p>
+                  )}
+                </div>
+
+                {/* TAKSİT TABLOSU */}
+                <div>
+                  <div className="text-[10px] font-black text-neutral-500 uppercase mb-2">Taksit Planı</div>
+                  <div className="max-h-72 overflow-y-auto space-y-1">
+                    {kb.plan.map(t => (
+                      <div key={t.no} className={`flex items-center gap-2 p-2 rounded-lg border text-xs ${
+                        t.odendi ? 'bg-emerald-50 border-emerald-200'
+                        : t.gecikmis ? 'bg-red-50 border-red-200'
+                        : 'bg-white border-neutral-200'}`}>
+                        <span className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-[11px] shrink-0 ${
+                          t.odendi ? 'bg-emerald-600 text-white' : t.gecikmis ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>
+                          {t.no}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-black text-black">₺{paraFmt(t.tutar)}</div>
+                          <div className={`text-[10px] font-bold ${t.gecikmis ? 'text-red-600' : 'text-neutral-500'}`}>
+                            Vade: {t.tarih.split('-').reverse().join('.')}
+                            {t.odendi && t.odemeTarihi ? ` • Ödendi: ${t.odemeTarihi.split('-').reverse().join('.')}` : t.gecikmis ? ' • GECİKMİŞ' : ''}
+                          </div>
+                        </div>
+                        {t.odendi ? (
+                          <span className="text-[10px] font-black text-emerald-700 flex items-center gap-1 shrink-0"><CheckCircle className="w-3.5 h-3.5" /> ÖDENDİ</span>
+                        ) : (
+                          <button type="button"
+                            onClick={() => setTaksitOdeme({ taksit: t, kaynakDefterId: '', tarih: bugunStr() })}
+                            className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black rounded-lg transition shrink-0">
+                            Öde
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                    {kb.plan.length === 0 && (
+                      <p className="text-xs font-bold text-neutral-400 text-center py-4">
+                        Taksit planı oluşturulamadı. Defteri düzenleyip taksit sayısı ve ilk taksit tarihini girin.
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ==================================================================
+            YENİ: ÖDEMELER PANELİ — tür "Ödemeler" olan defterlerde görünür
+            Her ödeme kalemi (kira, sigorta, vergi...) ayrı bir kart olur.
+            Kartta sıradaki vade, ilerleme ve gecikme bilgisi durur; açılınca
+            tüm vade listesi ve tek tek "Öde" düğmeleri görünür.
+            ================================================================== */}
+        {seciliDefter.tur === 'Ödemeler' && (() => {
+          const od = odemeDefterBilgi(seciliDefter);
+          return (
+            <div className="bg-white rounded-2xl border border-orange-200 overflow-hidden">
+              <div className="bg-orange-600 text-white px-4 py-3 flex items-center justify-between gap-2 flex-wrap">
+                <div className="font-black flex items-center gap-2 text-sm">
+                  <CalendarDays className="w-4 h-4" /> Ödeme Planları
+                  <span className="text-[10px] font-bold text-white/70">{od.kalemSayisi} kalem</span>
+                </div>
+                <button type="button"
+                  onClick={() => setOdemeKalemForm({ ...bosOdemeKalemi })}
+                  className="px-3 py-1.5 bg-white text-orange-700 text-[11px] font-black rounded-lg hover:bg-orange-50 transition flex items-center gap-1.5">
+                  <PlusCircle className="w-3.5 h-3.5" /> Yeni Ödeme
+                </button>
+              </div>
+
+              {/* ÜST ÖZET: bu ay bekleyen + gecikmiş */}
+              <div className="grid grid-cols-2 gap-2 p-4 pb-0">
+                <div className="bg-orange-50 rounded-xl p-2.5 border border-orange-200">
+                  <div className="text-[9px] font-black uppercase text-orange-600">Bu Ay Bekleyen</div>
+                  <div className="text-sm font-black text-orange-700">₺{paraFmt(od.buAyBekleyen)}</div>
+                </div>
+                <div className={`rounded-xl p-2.5 border ${od.gecikmisAdet > 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                  <div className={`text-[9px] font-black uppercase ${od.gecikmisAdet > 0 ? 'text-red-600' : 'text-emerald-600'}`}>Gecikmiş</div>
+                  <div className={`text-sm font-black ${od.gecikmisAdet > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                    {od.gecikmisAdet > 0 ? `₺${paraFmt(od.gecikmisTutar)} • ${od.gecikmisAdet} ödeme` : 'Yok'}
+                  </div>
+                </div>
+              </div>
+
+              <div className="p-4 space-y-3">
+                {od.detaylar.length === 0 && (
+                  <div className="text-center py-8 border border-dashed border-neutral-300 rounded-xl">
+                    <CalendarDays className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-neutral-400">Henüz ödeme planı yok.</p>
+                    <p className="text-[11px] font-medium text-neutral-400 mt-1">"Yeni Ödeme" ile kira, sigorta, vergi gibi düzenli giderlerinizi ekleyin.</p>
+                  </div>
+                )}
+
+                {od.detaylar.map(({ kalem, bilgi }) => {
+                  const acik = acikOdemeKalemi === kalem.id;
+                  return (
+                    <div key={kalem.id} className={`rounded-xl border overflow-hidden ${bilgi.gecikmisAdet > 0 ? 'border-red-300' : 'border-neutral-200'}`}>
+                      {/* KALEM BAŞLIĞI — tıklayınca vade listesi açılır */}
+                      <div className={`p-3 flex items-center gap-3 cursor-pointer transition ${bilgi.gecikmisAdet > 0 ? 'bg-red-50 hover:bg-red-100' : 'bg-neutral-50 hover:bg-neutral-100'}`}
+                        onClick={() => setAcikOdemeKalemi(acik ? null : kalem.id)}>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-black text-black text-sm truncate flex items-center gap-2">
+                            {kalem.ad}
+                            {bilgi.gecikmisAdet > 0 && <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full shrink-0">{bilgi.gecikmisAdet} GECİKMİŞ</span>}
+                          </div>
+                          <div className="text-[11px] font-bold text-neutral-500">
+                            ₺{paraFmt(bilgi.tutar)} • {tekrarEtiket(kalem.tekrar, kalem.tekrarSayisi)}
+                            {bilgi.suresiz ? ` • ${bilgi.odenenAdet} ödeme yapıldı` : ` • ${bilgi.odenenAdet}/${bilgi.istenenAdet} ödendi`}
+                          </div>
+                          {bilgi.siradaki && (
+                            <div className={`text-[11px] font-bold mt-0.5 ${bilgi.siradaki.gecikmis ? 'text-red-600' : 'text-orange-700'}`}>
+                              Sıradaki: {bilgi.siradaki.tarih.split('-').reverse().join('.')}
+                              {bilgi.siradaki.gecikmis && ' (gecikmiş)'}
+                            </div>
+                          )}
+                          {!bilgi.siradaki && <div className="text-[11px] font-black text-emerald-700 mt-0.5">Tüm ödemeler tamamlandı ✓</div>}
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {/* Sıradaki vadeyi tek tıkla ödeme kısayolu */}
+                          {bilgi.siradaki && (
+                            <button type="button"
+                              onClick={e => { e.stopPropagation(); setVadeOdeme({ kalem, vade: bilgi.siradaki, kaynakDefterId: '', tarih: bugunStr(), tutar: String(bilgi.siradaki.tutar) }); }}
+                              className="px-2.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-[10px] font-black rounded-lg transition">
+                              Öde
+                            </button>
+                          )}
+                          <button type="button" onClick={e => { e.stopPropagation(); setOdemeKalemForm({ ...bosOdemeKalemi, ...kalem }); }}
+                            className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle">
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button type="button" onClick={e => { e.stopPropagation(); odemeKalemiSil(kalem.id); }}
+                            className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Planı kaldır">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                          <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${acik ? 'rotate-180' : ''}`} />
+                        </div>
+                      </div>
+
+                      {/* VADE LİSTESİ */}
+                      {acik && (
+                        <div className="p-3 bg-white border-t border-neutral-200">
+                          {kalem.not && <p className="text-[11px] font-medium text-neutral-500 mb-2 italic">{kalem.not}</p>}
+                          <div className="max-h-64 overflow-y-auto space-y-1">
+                            {bilgi.plan.map(v => (
+                              <div key={v.no} className={`flex items-center gap-2 p-2 rounded-lg border text-xs ${
+                                v.odendi ? 'bg-emerald-50 border-emerald-200'
+                                : v.gecikmis ? 'bg-red-50 border-red-200'
+                                : 'bg-white border-neutral-200'}`}>
+                                <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${
+                                  v.odendi ? 'bg-emerald-600 text-white' : v.gecikmis ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>
+                                  {v.no}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-black text-black">₺{paraFmt(v.tutar)}</div>
+                                  <div className={`text-[10px] font-bold ${v.gecikmis ? 'text-red-600' : 'text-neutral-500'}`}>
+                                    Vade: {v.tarih.split('-').reverse().join('.')}
+                                    {v.odendi && v.odemeTarihi ? ` • Ödendi: ${v.odemeTarihi.split('-').reverse().join('.')}` : v.gecikmis ? ' • GECİKMİŞ' : ''}
+                                  </div>
+                                </div>
+                                {v.odendi ? (
+                                  <span className="text-[10px] font-black text-emerald-700 flex items-center gap-1 shrink-0"><CheckCircle className="w-3.5 h-3.5" /> ÖDENDİ</span>
+                                ) : (
+                                  <button type="button"
+                                    onClick={() => setVadeOdeme({ kalem, vade: v, kaynakDefterId: '', tarih: bugunStr(), tutar: String(v.tutar) })}
+                                    className="px-2.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-[10px] font-black rounded-lg transition shrink-0">
+                                    Öde
+                                  </button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                          {bilgi.suresiz && (
+                            <p className="text-[10px] font-bold text-neutral-400 mt-2 text-center">
+                              Süresiz ödeme — sonraki {SURESIZ_VADE_PENCERESI} vade gösteriliyor, ödedikçe liste ilerler.
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
         {Object.keys(katDagilim).length > 0 && (
           <div className="bg-white rounded-2xl border border-neutral-200 p-4">
             <div className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5 mb-3"><BarChart className="w-3.5 h-3.5 text-emerald-600" /> Kategori Dağılımı</div>
@@ -4727,7 +5648,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   )}
                   <div className="text-[10px] font-bold text-neutral-300">{i.by}</div>
                   <div className="hidden group-hover:flex items-center gap-1 mt-1">
-                    <button onClick={() => { setIslemForm({ tip: i.tip, tutar: String(i.tutar), aciklama: i.aciklama || '', kategori: i.kategori || 'Diğer', etiketler: (i.etiketler || []), odemeYontemi: i.odemeYontemi || 'Nakit', tarih: i.tarih, musteriAdi: i.musteriAdi || '', musteriTel: i.musteriTel || '', plaka: i.plaka || '', aracId: i.aracId || '', ekipSefi: i.ekipSefi || '', ekipSefiId: i.ekipSefiId || '' }); setEditingIslemId(i.id); setShowIslemForm(true); }}
+                    <button onClick={() => { setIslemForm({ tip: i.tip, tutar: String(i.tutar), aciklama: i.aciklama || '', kategori: i.kategori || 'Diğer', etiketler: (i.etiketler || []), odemeYontemi: i.odemeYontemi || 'Nakit', tarih: i.tarih, hedefDefterId: i.defterId || seciliDefterId || '', musteriAdi: i.musteriAdi || '', musteriTel: i.musteriTel || '', plaka: i.plaka || '', aracId: i.aracId || '', ekipSefi: i.ekipSefi || '', ekipSefiId: i.ekipSefiId || '' }); setEditingIslemId(i.id); setShowIslemForm(true); }}
                       className="text-[10px] font-black text-blue-600 hover:underline flex items-center gap-0.5"><Edit className="w-3 h-3" /> Düzenle</button>
                     <button onClick={() => setDeleteIslemId(i.id)} className="text-[10px] font-black text-red-500 hover:underline flex items-center gap-0.5 ml-2"><X className="w-3 h-3" /> Sil</button>
                   </div>
@@ -5020,6 +5941,221 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             Etiket ve kategori BİLEREK yok — transfer bir harcama kalemi değil.
             Katman z-[9998]: işlem formunun (9997) üstünde, etiket seçicinin
             (9999) altında kalır. */}
+        {/* ==================================================================
+            YENİ: TAKSİT ÖDEME PENCERESİ
+            Ödemenin hangi hesaptan yapılacağı seçilir. Onaylanınca o hesaptan
+            para çıkar, kredinin kalan borcu azalır. Bakiyesi yetersiz hesap
+            seçilirse uyarı gösterilir ama engellenmez (nakit akışı eksiye
+            düşebilir; karar kullanıcıya bırakılır).
+            ================================================================== */}
+        {/* ==================================================================
+            YENİ: ÖDEME KALEMİ EKLE / DÜZENLE
+            Tekrar tipi ve sayısı burada belirlenir. "Süresiz" için tekrar
+            sayısı boş bırakılır — kira gibi bitiş tarihi olmayan ödemeler.
+            ================================================================== */}
+        {odemeKalemForm && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2">
+                  <CalendarDays className="w-5 h-5 text-orange-600" /> {odemeKalemForm.id ? 'Ödemeyi Düzenle' : 'Yeni Ödeme'}
+                </h3>
+                <button onClick={() => setOdemeKalemForm(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Adı *</label>
+                  <input value={odemeKalemForm.ad} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, ad: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                    placeholder="Örn: Dükkan Kirası, Araç Sigortası, Vergi" /></div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tutar (₺) *</label>
+                    <input type="number" inputMode="decimal" value={odemeKalemForm.tutar} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, tutar: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" placeholder="25000" /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlk Ödeme Tarihi *</label>
+                    <input type="date" value={odemeKalemForm.ilkTarih} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, ilkTarih: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" /></div>
+                </div>
+                <p className="text-[10px] font-bold text-neutral-400 -mt-1">İleri tarihli ödeme için gelecekteki bir tarih seçebilirsiniz.</p>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tekrar</label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {TEKRAR_SECENEKLERI.map(t => (
+                      <button key={t.id} type="button" onClick={() => setOdemeKalemForm({ ...odemeKalemForm, tekrar: t.id })}
+                        className={`py-2 rounded-lg text-[11px] font-black border-2 transition ${
+                          odemeKalemForm.tekrar === t.id ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-orange-400'}`}>
+                        {t.ad}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Tek seferlikte tekrar sayısı sorulmaz */}
+                {odemeKalemForm.tekrar !== 'tek' && (
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Kaç kez tekrarlanacak?</label>
+                    <input type="number" inputMode="numeric" min="0" value={odemeKalemForm.tekrarSayisi}
+                      onChange={e => setOdemeKalemForm({ ...odemeKalemForm, tekrarSayisi: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                      placeholder="Boş bırakın = süresiz (kira gibi)" />
+                    <p className="text-[10px] font-bold text-neutral-400 mt-1">
+                      Örn: 10 yazarsanız 10 kez tekrarlanır ve biter. Boş bırakırsanız süresiz devam eder.
+                    </p>
+                  </div>
+                )}
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
+                  <input value={odemeKalemForm.not || ''} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, not: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" placeholder="Opsiyonel açıklama..." /></div>
+
+                {/* Canlı önizleme: kaç ödeme, ne zaman biter, toplam ne kadar */}
+                {(() => {
+                  const tutar = parseFloat(odemeKalemForm.tutar) || 0;
+                  const adet = odemeKalemForm.tekrar === 'tek' ? 1 : (parseInt(odemeKalemForm.tekrarSayisi) || 0);
+                  if (!tutar || !odemeKalemForm.ilkTarih) return null;
+                  const suresiz = odemeKalemForm.tekrar !== 'tek' && adet === 0;
+                  const gecici = odemeKalemBilgi({ id: '__onizleme__', odemeler: [] }, { ...odemeKalemForm, id: '__onizleme__' });
+                  const son = !suresiz && gecici.plan.length > 0 ? gecici.plan[gecici.plan.length - 1].tarih : null;
+                  return (
+                    <div className="text-[11px] font-bold text-orange-800 bg-orange-50 rounded-lg p-2.5 border border-orange-200 space-y-0.5">
+                      <div>{tekrarEtiket(odemeKalemForm.tekrar, odemeKalemForm.tekrarSayisi)}</div>
+                      {suresiz
+                        ? <div>Süresiz ödeme — bitiş tarihi yok, siz durdurana kadar devam eder.</div>
+                        : <><div>Toplam: <b>₺{paraFmt(tutar * adet)}</b> ({adet} ödeme)</div>
+                           {son && <div>Son ödeme: <b>{son.split('-').reverse().join('.')}</b></div>}</>}
+                    </div>
+                  );
+                })()}
+
+                <button onClick={odemeKalemiKaydet} className="w-full py-3 bg-orange-600 hover:bg-orange-700 text-white font-black rounded-xl transition">
+                  {odemeKalemForm.id ? 'Kaydet' : 'Ödemeyi Ekle'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================
+            YENİ: VADE ÖDEME PENCERESİ
+            Tutar değiştirilebilir — kira zammı gibi durumlarda o ayki gerçek
+            tutar farklı olabilir. Plan tutarı bozulmaz, yalnızca bu ödeme
+            girilen tutarla kaydedilir.
+            ================================================================== */}
+        {vadeOdeme && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2">
+                  <CalendarDays className="w-5 h-5 text-orange-600" /> Ödeme Yap
+                </h3>
+                <button onClick={() => setVadeOdeme(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl">
+                  <div className="font-black text-orange-900">{vadeOdeme.kalem.ad}</div>
+                  <div className="text-[11px] font-bold text-orange-600">
+                    {vadeOdeme.vade.no}. ödeme • Vade: {vadeOdeme.vade.tarih.split('-').reverse().join('.')}
+                    {vadeOdeme.vade.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
+                  </div>
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödenen Tutar (₺) *</label>
+                  <input type="number" inputMode="decimal" value={vadeOdeme.tutar}
+                    onChange={e => setVadeOdeme({ ...vadeOdeme, tutar: e.target.value })}
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-lg font-black" />
+                  {parseFloat(vadeOdeme.tutar) !== parseFloat(vadeOdeme.vade.tutar) && (
+                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">
+                      Plandaki tutar ₺{paraFmt(vadeOdeme.vade.tutar)}. Farklı tutar girdiniz — yalnızca bu ödeme etkilenir, plan değişmez.
+                    </p>
+                  )}
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
+                  <select value={vadeOdeme.kaynakDefterId}
+                    onChange={e => setVadeOdeme({ ...vadeOdeme, kaynakDefterId: e.target.value })}
+                    className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-orange-500 text-sm">
+                    <option value="">Hesap seçin...</option>
+                    {/* Kredi ve Ödemeler defterleri kaynak olamaz — onlar plan defteridir */}
+                    {defterler.filter(d => d.tur !== 'Kredi' && d.tur !== 'Ödemeler')
+                      .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
+                      .map(d => (
+                        <option key={d.id} value={d.id}>{d.ad} — {defterTuruEtiket(d.tur)} (₺{paraFmt(defterBakiye(d.id))})</option>
+                      ))}
+                  </select>
+                  {vadeOdeme.kaynakDefterId && defterBakiye(vadeOdeme.kaynakDefterId) < (parseFloat(vadeOdeme.tutar) || 0) && (
+                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">Bu hesabın bakiyesi yetersiz. Ödeme yine de kaydedilir, hesap eksiye düşer.</p>
+                  )}
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Tarihi</label>
+                  <input type="date" value={vadeOdeme.tarih} onChange={e => setVadeOdeme({ ...vadeOdeme, tarih: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" /></div>
+
+                <button onClick={vadeOde} disabled={taksitKaydediliyor}
+                  className="w-full py-3 bg-orange-600 hover:bg-orange-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                  <CheckCircle className="w-4 h-4" /> {taksitKaydediliyor ? 'Kaydediliyor...' : 'Ödemeyi Kaydet'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {taksitOdeme && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2">
+                  <Landmark className="w-5 h-5 text-violet-600" /> {taksitOdeme.taksit.no}. Taksiti Öde
+                </h3>
+                <button onClick={() => setTaksitOdeme(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                {/* Taksit özeti */}
+                <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl">
+                  <div className="text-2xl font-black text-violet-800">₺{paraFmt(taksitOdeme.taksit.tutar)}</div>
+                  <div className="text-[11px] font-bold text-violet-600">
+                    {seciliDefter.ad} • Vade: {taksitOdeme.taksit.tarih.split('-').reverse().join('.')}
+                    {taksitOdeme.taksit.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
+                  </div>
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
+                  <select value={taksitOdeme.kaynakDefterId}
+                    onChange={e => setTaksitOdeme({ ...taksitOdeme, kaynakDefterId: e.target.value })}
+                    className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-violet-500 text-sm">
+                    <option value="">Hesap seçin...</option>
+                    {/* Kredi defterleri listeye alınmaz — krediyle kredi ödenmez */}
+                    {defterler.filter(d => d.tur !== 'Kredi')
+                      .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
+                      .map(d => (
+                        <option key={d.id} value={d.id}>{d.ad} — {defterTuruEtiket(d.tur)} (₺{paraFmt(defterBakiye(d.id))})</option>
+                      ))}
+                  </select>
+                  {/* Bakiye yetersizse uyar, ama engelleme */}
+                  {taksitOdeme.kaynakDefterId && defterBakiye(taksitOdeme.kaynakDefterId) < taksitOdeme.taksit.tutar && (
+                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">
+                      Bu hesabın bakiyesi taksitten düşük. Ödeme yine de kaydedilir, hesap eksiye düşer.
+                    </p>
+                  )}
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Tarihi</label>
+                  <input type="date" value={taksitOdeme.tarih}
+                    onChange={e => setTaksitOdeme({ ...taksitOdeme, tarih: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" /></div>
+
+                <p className="text-[11px] font-medium text-neutral-500 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
+                  Onayladığınızda seçtiğiniz hesaptan <b>₺{paraFmt(taksitOdeme.taksit.tutar)} çıkış</b> yazılır ve kredinin kalan borcu aynı tutarda azalır. Bu hareket ciro toplamlarında <b>çift sayılmaz</b>.
+                </p>
+
+                <button onClick={taksitOde} disabled={taksitKaydediliyor}
+                  className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                  <CheckCircle className="w-4 h-4" /> {taksitKaydediliyor ? 'Kaydediliyor...' : 'Ödemeyi Kaydet'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {showVirmanForm && (
           <div className="fixed inset-0 bg-black/60 z-[9998] flex items-end sm:items-center justify-center p-0 sm:p-4">
             <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[92vh] overflow-y-auto">
@@ -5191,10 +6327,42 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <div className="grid grid-cols-2 gap-2">
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tarih</label>
                     <input type="date" value={islemForm.tarih} onChange={e => setIslemForm({ ...islemForm, tarih: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" /></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Yöntemi</label>
-                    <select value={islemForm.odemeYontemi} onChange={e => setIslemForm({ ...islemForm, odemeYontemi: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
-                      {ODEME_YONTEMLERI.map(y => <option key={y}>{y}</option>)}
-                    </select></div>
+                  {/* ==============================================================
+                      DEĞİŞTİ: "Ödeme Yöntemi" -> "Hesap Türü"
+                      ==============================================================
+                      ESKİ HALİ: Sabit bir liste (Nakit / Banka-Havale / Kredi Kartı /
+                      Çek-Senet / Diğer) seçtiriyordu. Bu liste yalnızca bir ETİKETTİ;
+                      işlemin hangi defterde durduğuyla ilgisi yoktu ve işlem yanlış
+                      deftere kaydedilmişse düzeltmenin yolu yoktu.
+
+                      YENİ HALİ: Seçenekler artık Defter ekranındaki GERÇEK HESAPLARDIR
+                      (NAKLİYE (NAKİT), NAKLİYE (GARANTİ BANK), DEPO (ALBARAKA BANK)…).
+                      Buradan başka bir hesap seçilirse işlem kaydedilirken O DEFTERE
+                      TAŞINIR — yani yanlış deftere düşmüş bir kayıt tek hamlede
+                      doğru hesaba alınır.
+
+                      GERİYE UYUM: Kayıttaki odemeYontemi alanı silinmedi; seçilen
+                      defterin türünden otomatik türetilip yazılmaya devam eder
+                      (Banka -> "Banka / Havale" gibi). Böylece işlem listesindeki
+                      mavi rozet ve eski kayıtların araması bozulmaz.
+                      ============================================================== */}
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hesap Türü</label>
+                    <select value={islemForm.hedefDefterId || seciliDefterId || ''}
+                      onChange={e => setIslemForm({ ...islemForm, hedefDefterId: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
+                      {defterler
+                        .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
+                        .map(d => (
+                          <option key={d.id} value={d.id}>{d.ad} — {defterTuruEtiket(d.tur)}</option>
+                        ))}
+                    </select>
+                    {/* Başka hesap seçildiyse taşınacağı açıkça belirtilir */}
+                    {islemForm.hedefDefterId && islemForm.hedefDefterId !== seciliDefterId && (
+                      <p className="text-[11px] font-bold text-amber-700 mt-1.5">
+                        Bu işlem kaydedildiğinde <b>{defterler.find(d => d.id === islemForm.hedefDefterId)?.ad}</b> hesabına taşınacak.
+                      </p>
+                    )}
+                  </div>
                 </div>
                 {/* DEĞİŞİKLİK: Eski sabit kategori listesi (İş Geliri, Tahsilat, ...)
                     KALDIRILDI. Kategori artık hazır etiket ağacından seçilir; eski
