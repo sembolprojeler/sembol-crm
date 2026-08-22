@@ -4202,6 +4202,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const [seciliGun, setSeciliGun] = useState(bugunStr());
     // Günlük filtre açık mı? Kapatılırsa defterin tüm geçmişi listelenir.
     const [gunFiltreAktif, setGunFiltreAktif] = useState(true);
+    // YENİ: "Tüm Geçmiş" modunda sayfalama. Bir defterde binlerce hareket
+    // olabildiği için hepsi birden çizilmez; 50'şer açılır.
+    const SAYFA_BOYU = 50;
+    const [gosterilenSayi, setGosterilenSayi] = useState(SAYFA_BOYU);
+    // Defter değişince, arama yapılınca veya kategori filtresi değişince
+    // sayaç başa sarılır. Aksi halde 200 kayıt açıkken filtreleyip 12 kayda
+    // düşünce "Devamını Gör" mantığı şaşar ve gereksiz kalabalık kalır.
+    useEffect(() => { setGosterilenSayi(SAYFA_BOYU); }, [seciliDefterId, detayArama, kategoriFiltre]);
 
     // YENİ: VİRMAN (hesaplar arası transfer) formu.
     // State'ler kasten BURAYA konuldu: bugunStr/seciliGun tanımlarından SONRA,
@@ -5250,11 +5258,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           </div>
           <div className="grid grid-cols-2 gap-3 mt-4">
             <div className="bg-white/10 rounded-xl p-2.5 border border-white/10">
-              <div className="text-[10px] font-black uppercase text-emerald-300">Toplam Giriş (Aldım)</div>
+              <div className="text-[10px] font-black uppercase text-emerald-300">Toplam Gelir</div>
               <div className="text-base font-black">₺{paraFmt(dGiris)}</div>
             </div>
             <div className="bg-white/10 rounded-xl p-2.5 border border-white/10">
-              <div className="text-[10px] font-black uppercase text-red-300">Toplam Çıkış (Verdim)</div>
+              <div className="text-[10px] font-black uppercase text-red-300">Toplam Gider</div>
               <div className="text-base font-black">₺{paraFmt(dCikis)}</div>
             </div>
           </div>
@@ -5618,7 +5626,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             Sol/sağ oklarla düne ve yarına geçilir. Açılışta her zaman bugün seçilidir.
             "Tüm Geçmiş" düğmesi filtreyi kapatıp defterin tamamını listeler. */}
         <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
-          <div className="flex items-center gap-2 p-3">
+          <div className="flex items-center gap-1.5 sm:gap-2 p-2.5 sm:p-3">
             {/* DÜN */}
             <button onClick={() => { setSeciliGun(gunKaydir(seciliGun, -1)); setGunFiltreAktif(true); }}
               title="Önceki gün"
@@ -5631,7 +5639,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <button onClick={() => { setSeciliGun(bugunStr()); setGunFiltreAktif(true); }}
                 className="w-full group">
                 <div className="text-sm font-black text-black truncate">
-                  {gunFiltreAktif ? gunEtiketi(seciliGun) : 'Tüm Geçmiş'}
+                  {gunFiltreAktif ? gunEtiketi(seciliGun) : 'Tüm Zamanlar'}
                 </div>
                 <div className="text-[10px] font-bold text-neutral-400">
                   {!gunFiltreAktif ? `${defterIslemleri(seciliDefterId).length} kayıt` :
@@ -5652,12 +5660,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               )}
             </button>
 
-            {/* TÜM GEÇMİŞ / GÜNLÜK geçişi */}
-            <button onClick={() => { setGunFiltreAktif(!gunFiltreAktif); if (gunFiltreAktif) setKategoriFiltre('Tümü'); }}
-              className={`shrink-0 px-3 h-10 rounded-xl text-[11px] font-black transition ${
+            {/* TÜM GEÇMİŞ / TARİHE DÖN geçişi
+                DEĞİŞTİ: "Günlük" yerine "Tarihe Dön" yazıyor (kullanıcı talebi) —
+                tüm geçmişteyken hangi düğmenin sizi günlük görünüme geri
+                götüreceği daha açık oluyor. Mod değişince sayfalama sayacı
+                başa sarılır ki yeni listede yine 50'den başlansın. */}
+            <button onClick={() => { setGunFiltreAktif(!gunFiltreAktif); setGosterilenSayi(SAYFA_BOYU); if (gunFiltreAktif) setKategoriFiltre('Tümü'); }}
+              className={`shrink-0 px-2.5 sm:px-3 h-10 rounded-xl text-[10px] sm:text-[11px] font-black transition ${
                 gunFiltreAktif ? 'bg-neutral-900 text-white hover:bg-neutral-800' : 'bg-emerald-600 text-white hover:bg-emerald-700'
               }`}>
-              {gunFiltreAktif ? 'Tüm Geçmiş' : 'Günlük'}
+              {gunFiltreAktif ? 'Tüm Zamanlar' : 'Tarihe Dön'}
             </button>
           </div>
 
@@ -5665,11 +5677,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           {gunFiltreAktif && (
             <div className="grid grid-cols-3 border-t border-neutral-200 divide-x divide-neutral-200">
               <div className="p-2.5 text-center">
-                <div className="text-[9px] font-black uppercase text-emerald-600">Gelir (Aldım)</div>
+                <div className="text-[9px] font-black uppercase text-emerald-600">Gelir</div>
                 <div className="text-sm font-black text-emerald-700">₺{paraFmt(gunGiris)}</div>
               </div>
               <div className="p-2.5 text-center">
-                <div className="text-[9px] font-black uppercase text-red-500">Gider (Verdim)</div>
+                <div className="text-[9px] font-black uppercase text-red-500">Gider</div>
                 <div className="text-sm font-black text-red-600">₺{paraFmt(gunCikis)}</div>
               </div>
               <div className="p-2.5 text-center">
@@ -5704,8 +5716,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
         {/* İŞLEM LİSTESİ — tarih + açıklama + etiketler | sağda renkli tutar */}
         <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
-          <div className="grid grid-cols-[1fr_auto_auto] gap-2 px-4 py-2.5 bg-neutral-900 text-white text-[10px] font-black uppercase">
-            <span>İşlem</span><span className="text-right w-28">Giriş (Aldım)</span><span className="text-right w-28">Çıkış (Verdim)</span>
+          <div className="grid grid-cols-[1fr_auto_auto] gap-1.5 sm:gap-2 px-3 sm:px-4 py-2.5 bg-neutral-900 text-white text-[10px] font-black uppercase">
+            <span>İşlem</span><span className="text-right w-24 sm:w-28">Gelir</span><span className="text-right w-24 sm:w-28">Gider</span>
           </div>
           {/* DEĞİŞİKLİK: Boş liste mesajı artık hangi modda olduğumuzu söylüyor.
               Günlük moddayken "kayıt yok" demek yanıltıcı olurdu; kullanıcı
@@ -5718,8 +5730,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             </div>
           )}
           <div className="divide-y divide-neutral-100">
-            {dIslemler.map(i => (
-              <div key={i.id} className="grid grid-cols-[1fr_auto_auto] gap-2 px-4 py-3 items-center group hover:bg-neutral-50 transition">
+            {/* YENİ: Tüm Zamanlar modunda yalnızca ilk 'gosterilenSayi' kayıt
+                çizilir (günlük modda zaten tek günün hareketleri var, dilimlenmez). */}
+            {(gunFiltreAktif ? dIslemler : dIslemler.slice(0, gosterilenSayi)).map(i => (
+              <div key={i.id} className="grid grid-cols-[1fr_auto_auto] gap-1.5 sm:gap-2 px-3 sm:px-4 py-3 items-center group hover:bg-neutral-50 transition">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[11px] font-black text-neutral-400">{new Date(i.tarih).toLocaleDateString('tr-TR')}</span>
@@ -5790,11 +5804,37 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     <button onClick={() => setDeleteIslemId(i.id)} className="text-[10px] font-black text-red-500 hover:underline flex items-center gap-0.5 ml-2"><X className="w-3 h-3" /> Sil</button>
                   </div>
                 </div>
-                <div className="text-right w-28 font-black text-emerald-600">{i.tip === 'giris' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
-                <div className="text-right w-28 font-black text-red-500">{i.tip === 'cikis' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
+                <div className="text-right w-24 sm:w-28 font-black text-emerald-600 text-sm sm:text-base">{i.tip === 'giris' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
+                <div className="text-right w-24 sm:w-28 font-black text-red-500 text-sm sm:text-base">{i.tip === 'cikis' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
               </div>
             ))}
           </div>
+
+          {/* ==============================================================
+              YENİ: DEVAMINI GÖR
+              Tüm Zamanlar modunda ve gösterilenden fazla kayıt varsa çıkar.
+              Her tıklamada 50 kayıt daha açılır; kaç kaydın kaldığı da yazar.
+              Hepsi açıldığında düğme yerini "tümü listelendi" bilgisine bırakır.
+              ============================================================== */}
+          {!gunFiltreAktif && dIslemler.length > 0 && (
+            <div className="p-3 border-t border-neutral-100 bg-neutral-50 text-center">
+              {dIslemler.length > gosterilenSayi ? (
+                <>
+                  <button onClick={() => setGosterilenSayi(n => n + SAYFA_BOYU)}
+                    className="px-4 py-2.5 bg-neutral-900 hover:bg-neutral-800 text-white text-xs font-black rounded-xl transition inline-flex items-center gap-2">
+                    <ChevronDown className="w-4 h-4" /> Devamını Gör ({Math.min(SAYFA_BOYU, dIslemler.length - gosterilenSayi)} kayıt daha)
+                  </button>
+                  <p className="text-[11px] font-bold text-neutral-400 mt-1.5">
+                    {gosterilenSayi} / {dIslemler.length} kayıt gösteriliyor
+                  </p>
+                </>
+              ) : (
+                <p className="text-[11px] font-bold text-neutral-400">
+                  Tüm kayıtlar listelendi ({dIslemler.length} hareket)
+                </p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* YENİ: ETİKET SEÇME PENCERESİ
@@ -6490,30 +6530,45 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           </div>
         )}
 
-        {/* ALDIM / VERDİM BÜYÜK BUTONLAR — videodaki gibi sabit altta */}
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-full max-w-xl px-4 flex gap-3 z-40">
-          {/* DEĞİŞİKLİK: Yeni işlemin tarihi, ekranda BAKILAN güne ayarlanır.
-              Geçmiş bir güne bakarken kayıt eklendiğinde bugüne yazılsaydı,
-              kayıt anında listeden kaybolur ve kullanıcı eklenmedi sanardı.
-              Tüm Geçmiş modunda bugüne yazılır. */}
-          <button onClick={() => { setIslemForm({ ...emptyIslem, tip: 'cikis', tarih: gunFiltreAktif ? seciliGun : bugunStr() }); setEditingIslemId(null); setShowIslemForm(true); }}
-            className="flex-1 py-4 bg-red-600 hover:bg-red-700 text-white font-black rounded-2xl shadow-2xl shadow-red-600/40 transition flex items-center justify-center gap-2 text-base">
-            <ArrowUpRight className="w-5 h-5" /> VERDİM (Çıkış)
-          </button>
-          <button onClick={() => { setIslemForm({ ...emptyIslem, tip: 'giris', tarih: gunFiltreAktif ? seciliGun : bugunStr() }); setEditingIslemId(null); setShowIslemForm(true); }}
-            className="flex-1 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl shadow-2xl shadow-emerald-600/40 transition flex items-center justify-center gap-2 text-base">
-            <ArrowDownRight className="w-5 h-5" /> ALDIM (Giriş)
-          </button>
-          {/* YENİ: ÜÇÜNCÜ BUTON — TRANSFER (VİRMAN)
-              Diğer ikisi flex-1 ile eşit bölüşüyor; bu buton sabit genişlikte
-              tutuldu (shrink-0 + px) ki VERDİM/ALDIM daralıp okunmaz hale gelmesin.
-              Nötr lacivert seçildi: yeşil/kırmızı gelir-gideri işaret ediyor,
-              transfer ikisi de olmadığı için o renklerden uzak durmalı. */}
-          <button onClick={() => { setVirmanForm({ hedefDefterId: '', tutar: '', aciklama: '' }); setShowVirmanForm(true); }}
-            title="Hesaplar arası transfer"
-            className="shrink-0 px-4 py-4 bg-slate-800 hover:bg-slate-900 text-white font-black rounded-2xl shadow-2xl shadow-slate-800/40 transition flex items-center justify-center gap-2 text-base">
-            <ArrowRightLeft className="w-5 h-5" /> <span className="hidden sm:inline">Transfer</span>
-          </button>
+        {/* Sabit alt buton çubuğunun son kayıtları örtmemesi için boşluk.
+            Mobilde çubuk daha yüksek durduğu için pay biraz fazla bırakıldı. */}
+        <div className="h-24 sm:h-20"></div>
+
+        {/* ==================================================================
+            GELİR / GİDER / TRANSFER — sayfanın altında sabit buton çubuğu
+            ==================================================================
+            DEĞİŞTİ (kullanıcı talebi):
+              • "ALDIM" -> GELİR, "VERDİM" -> GİDER
+              • Sıra: GELİR → GİDER → TRANSFER (önce para girişi)
+              • Çubuk sayfaya tam ortalandı (left-1/2 + -translate-x-1/2 zaten
+                vardı; max-w genişletilip mobilde kenar boşlukları dengelendi)
+            MOBİL: Dar ekranda üç buton yan yana sığmadığı için yazılar
+            küçülür, Transfer'in metni gizlenip yalnız simge kalır ve dokunma
+            yüksekliği korunur (py-3.5). Güvenli alan (iPhone alt çubuğu) için
+            pb-[env(safe-area-inset-bottom)] eklendi. */}
+        <div className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <div className="mx-auto w-full max-w-xl px-3 flex gap-2 sm:gap-3 pointer-events-auto">
+            {/* DEĞİŞİKLİK: Yeni işlemin tarihi, ekranda BAKILAN güne ayarlanır.
+                Geçmiş bir güne bakarken kayıt eklendiğinde bugüne yazılsaydı,
+                kayıt anında listeden kaybolur ve kullanıcı eklenmedi sanardı.
+                Tüm Zamanlar modunda bugüne yazılır. */}
+            <button onClick={() => { setIslemForm({ ...emptyIslem, tip: 'giris', tarih: gunFiltreAktif ? seciliGun : bugunStr() }); setEditingIslemId(null); setShowIslemForm(true); }}
+              className="flex-1 min-w-0 py-3.5 sm:py-4 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black rounded-2xl shadow-2xl shadow-emerald-600/40 transition flex items-center justify-center gap-1.5 sm:gap-2 text-sm sm:text-base">
+              <ArrowDownRight className="w-5 h-5 shrink-0" /> <span className="truncate">GELİR</span>
+            </button>
+            <button onClick={() => { setIslemForm({ ...emptyIslem, tip: 'cikis', tarih: gunFiltreAktif ? seciliGun : bugunStr() }); setEditingIslemId(null); setShowIslemForm(true); }}
+              className="flex-1 min-w-0 py-3.5 sm:py-4 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black rounded-2xl shadow-2xl shadow-red-600/40 transition flex items-center justify-center gap-1.5 sm:gap-2 text-sm sm:text-base">
+              <ArrowUpRight className="w-5 h-5 shrink-0" /> <span className="truncate">GİDER</span>
+            </button>
+            {/* TRANSFER (VİRMAN): nötr lacivert — yeşil/kırmızı gelir-gideri
+                işaret ettiği için transfer o renklerden uzak durmalı.
+                Dar ekranda yalnız simge görünür, geniş ekranda metin de çıkar. */}
+            <button onClick={() => { setVirmanForm({ hedefDefterId: '', tutar: '', aciklama: '' }); setShowVirmanForm(true); }}
+              title="Hesaplar arası transfer"
+              className="shrink-0 px-4 py-3.5 sm:py-4 bg-slate-800 hover:bg-slate-900 active:scale-95 text-white font-black rounded-2xl shadow-2xl shadow-slate-800/40 transition flex items-center justify-center gap-2 text-sm sm:text-base">
+              <ArrowRightLeft className="w-5 h-5 shrink-0" /> <span className="hidden sm:inline">Transfer</span>
+            </button>
+          </div>
         </div>
 
         {/* İŞLEM EKLE/DÜZENLE PENCERESİ */}
@@ -6523,15 +6578,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <div className="flex items-center justify-between mb-4">
                 <h3 className={`font-black flex items-center gap-2 ${islemForm.tip === 'giris' ? 'text-emerald-700' : 'text-red-600'}`}>
                   {islemForm.tip === 'giris' ? <ArrowDownRight className="w-5 h-5" /> : <ArrowUpRight className="w-5 h-5" />}
-                  {editingIslemId ? 'İşlemi Düzenle' : islemForm.tip === 'giris' ? 'PARA GİRİŞİ (Aldım)' : 'PARA ÇIKIŞI (Verdim)'}
+                  {editingIslemId ? 'İşlemi Düzenle' : islemForm.tip === 'giris' ? 'GELİR EKLE' : 'GİDER EKLE'}
                 </h3>
                 <button onClick={() => setShowIslemForm(false)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
               </div>
               <div className="space-y-3">
                 {/* Giriş/Çıkış değiştirme (düzenlemede de kullanılabilir) */}
                 <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => setIslemForm({ ...islemForm, tip: 'giris' })} className={`py-2.5 rounded-xl font-black text-sm border-2 transition ${islemForm.tip === 'giris' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-emerald-400'}`}>ALDIM (Giriş)</button>
-                  <button onClick={() => setIslemForm({ ...islemForm, tip: 'cikis' })} className={`py-2.5 rounded-xl font-black text-sm border-2 transition ${islemForm.tip === 'cikis' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-red-400'}`}>VERDİM (Çıkış)</button>
+                  <button onClick={() => setIslemForm({ ...islemForm, tip: 'giris' })} className={`py-2.5 rounded-xl font-black text-sm border-2 transition ${islemForm.tip === 'giris' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-emerald-400'}`}>GELİR</button>
+                  <button onClick={() => setIslemForm({ ...islemForm, tip: 'cikis' })} className={`py-2.5 rounded-xl font-black text-sm border-2 transition ${islemForm.tip === 'cikis' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-red-400'}`}>GİDER</button>
                 </div>
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tutar (₺) *</label>
                   <input type="number" inputMode="decimal" value={islemForm.tutar} onChange={e => setIslemForm({ ...islemForm, tutar: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-lg font-black" placeholder="0,00" autoFocus /></div>
