@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
+import { Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
@@ -6877,6 +6877,78 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 </button>
             )}
 
+            {/* TAŞINDI (kullanıcı talebi): FİNANS menüsü artık SATIŞ'ın ÜSTÜNDE.
+                Günlük kullanım sırası bu şekilde daha akıcı. */}
+            {showFinance && (
+              <div className="flex flex-col gap-1">
+                <button 
+                  onClick={() => { setIsFinanceSubMenuOpen(!isFinanceSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
+                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-sky-500 to-blue-700 text-white shadow-lg shadow-blue-600/30 hover:scale-[1.02]`}
+                >
+                  <div className="flex items-center gap-3">
+                    <Wallet className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Finans</span>
+                  </div>
+                  {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+                
+                {isFinanceSubMenuOpen && (
+                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    {/* ==========================================================
+                        TAŞINDI + ÖNE ÇIKARILDI (kullanıcı talebi):
+                        Defter, alt menünün EN ÜSTÜNE alındı ve diğerlerinden
+                        görsel olarak ayrıldı — en sık kullanılan sayfa olduğu için:
+                          • Küçük nokta yerine DEFTER SİMGESİ (BookOpen)
+                          • Kendi çerçevesi ve hafif zümrüt zemini
+                          • Seçiliyken dolu zümrüt, değilken çerçeveli duruş
+                        Altına ince bir ayırıcı çizgi konarak menünün geri
+                        kalanından ayrıldı.
+                        ========================================================== */}
+                    <button 
+                      onClick={() => { setActiveTab('finansDefter'); setIsSidebarOpen(false); }}
+                      className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-2.5 rounded-xl border ${activeTab === 'finansDefter'
+                        ? 'bg-emerald-600 text-white border-emerald-500 shadow-lg shadow-emerald-600/30'
+                        : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/20 hover:text-emerald-200'}`}
+                    >
+                      <BookOpen className="w-4 h-4 shrink-0" /> Defter
+                      <span className={`ml-auto text-[9px] font-black px-1.5 py-0.5 rounded-full ${activeTab === 'finansDefter' ? 'bg-white/20 text-white' : 'bg-emerald-500/20 text-emerald-300'}`}>KASA</span>
+                    </button>
+                    {/* Defter'i menünün geri kalanından ayıran ince çizgi */}
+                    <div className="h-px bg-neutral-800 my-1.5"></div>
+                    <button 
+                      onClick={() => { setActiveTab('financeDashboard'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'financeDashboard' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'financeDashboard' ? 'bg-white' : 'bg-blue-500'}`}></div> Kasa Özeti
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('reporting'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'reporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'reporting' ? 'bg-white' : 'bg-blue-500'}`}></div> Genel Ciro Raporu
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('advancedReporting'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'advancedReporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'advancedReporting' ? 'bg-white' : 'bg-blue-500'}`}></div> Analiz & İstatistik
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('personelMuhasebe'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelMuhasebe' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelMuhasebe' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Muhasebe
+                    </button>
+                    <button 
+                      onClick={() => { setActiveTab('personelOdeme'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelOdeme' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelOdeme' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Ödemeleri
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {showAddJob && (
               <div className="flex flex-col gap-1">
                 <button 
@@ -7162,62 +7234,6 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     </button>
                     {/* NOT: İK altındaki eski "Şirket Evrakları" (sirketEvraklari) menüden kaldırıldı —
                         aynı işlev artık "Şirket Dosyaları" ana menüsü altında (sirketBelgeleri) yönetiliyor. */}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {showFinance && (
-              <div className="flex flex-col gap-1">
-                <button 
-                  onClick={() => { setIsFinanceSubMenuOpen(!isFinanceSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
-                  className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-sky-500 to-blue-700 text-white shadow-lg shadow-blue-600/30 hover:scale-[1.02]`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Wallet className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Finans</span>
-                  </div>
-                  {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-                
-                {isFinanceSubMenuOpen && (
-                  <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
-                    <button 
-                      onClick={() => { setActiveTab('financeDashboard'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'financeDashboard' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'financeDashboard' ? 'bg-white' : 'bg-blue-500'}`}></div> Kasa Özeti
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('reporting'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'reporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'reporting' ? 'bg-white' : 'bg-blue-500'}`}></div> Genel Ciro Raporu
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('advancedReporting'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'advancedReporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'advancedReporting' ? 'bg-white' : 'bg-blue-500'}`}></div> Analiz & İstatistik
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('personelMuhasebe'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelMuhasebe' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelMuhasebe' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Muhasebe
-                    </button>
-                    <button 
-                      onClick={() => { setActiveTab('personelOdeme'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'personelOdeme' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'personelOdeme' ? 'bg-white' : 'bg-blue-500'}`}></div> Personel Ödemeleri
-                    </button>
-                    {/* YENİ: Defter — kasa/cari alacak-verecek takip sayfası */}
-                    <button 
-                      onClick={() => { setActiveTab('finansDefter'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'finansDefter' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'finansDefter' ? 'bg-white' : 'bg-blue-500'}`}></div> Defter
-                    </button>
                   </div>
                 )}
               </div>
