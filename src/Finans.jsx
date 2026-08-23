@@ -4090,6 +4090,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const bosKrediKalemi = { id: '', ad: '', bankaAdi: '', anaPara: '', toplamGeriOdeme: '', taksitSayisi: '', aylikTaksit: '', ilkTaksitTarihi: bugunStr(), not: '' };
     const [krediKalemForm, setKrediKalemForm] = useState(null); // null = kapalı
     const [acikKrediKalemi, setAcikKrediKalemi] = useState(null);
+    // YENİ (kullanıcı talebi): Kredi sayfası Ödemeler sayfasıyla aynı mantığa
+    // geçirildi. krediAyi 'YYYY-MM' biçiminde tutulur; ay gezgini bununla
+    // "Ağustos 2026 Kredi Ödemeleri" gibi başlıklar üretir.
+    const [krediAyi, setKrediAyi] = useState(bugunStr().slice(0, 7));
+    // "Mevcut Krediler" düğmesi: true iken aylık görünüm gizlenir, tüm
+    // kredi kartları (taksit planlarıyla birlikte) bu panelde listelenir.
+    const [mevcutKredilerAcik, setMevcutKredilerAcik] = useState(false);
     const [editingDefterId, setEditingDefterId] = useState(null);
     const [deleteDefterId, setDeleteDefterId] = useState(null);
 
@@ -5783,8 +5790,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         {seciliDefter.tur === 'Kredi' && (() => {
           const kd = krediDefterBilgi(seciliDefter);
           const genelYuzde = kd.toplamGeriOdeme > 0 ? Math.round((kd.toplamOdenen / kd.toplamGeriOdeme) * 100) : 0;
+
+          // ============================================================
+          // YENİ (kullanıcı talebi): AYLIK KREDİ GÖRÜNÜMÜ
+          // ============================================================
+          // Ödemeler sayfasıyla AYNI mantık: seçili aya (krediAyi) vadesi
+          // düşen taksitler — hangi krediden olursa olsun — tek listede,
+          // güne göre sıralı gösterilir. Ödenen taksitler en alttaki
+          // "Ödenenler" bölümüne iner. Günlük takvim/uzun taksit tablosu
+          // ana sayfadan kaldırıldı; tüm kredilerin ayrıntısı artık
+          // "Mevcut Krediler" düğmesinin açtığı panelde.
+          const [ky, km] = krediAyi.split('-').map(Number);
+          const ayBaslik = `${AY_ADLARI[km - 1]} ${ky}`;
+          // Sağ/sol oklarla ay değiştirme — Ödemeler'deki ayDegistir ile aynı
+          const krediAyDegistir = (yon) => {
+            const d = new Date(ky, km - 1 + yon, 1);
+            setKrediAyi(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+          };
+          // Seçili aya düşen TÜM taksitleri topla (tüm kredi kalemlerinden)
+          const ayinTaksitleri = [];
+          kd.detaylar.forEach(({ kalem, bilgi }) => {
+            (bilgi.plan || []).forEach(t => {
+              if (t.tarih && t.tarih.startsWith(krediAyi)) ayinTaksitleri.push({ kalem, bilgi, t });
+            });
+          });
+          // Gün sıralaması: ayın en erken vadesi en üstte
+          ayinTaksitleri.sort((a, b) => a.t.tarih.localeCompare(b.t.tarih));
+          const bekleyenTaksitler = ayinTaksitleri.filter(s => !s.t.odendi);
+          const odenenTaksitler = ayinTaksitleri.filter(s => s.t.odendi);
+          const buAyBekleyenTutar = bekleyenTaksitler.reduce((top, s) => top + (parseFloat(s.t.tutar) || 0), 0);
+          const trh = (t) => t?.split('-').reverse().join('.');
           return (
             <div className="bg-white rounded-2xl border border-violet-200 overflow-hidden">
+              {/* BAŞLIK ÇUBUĞU — Ödeme Planları başlığıyla aynı düzen */}
               <div className="bg-violet-600 text-white px-4 py-3 flex items-center justify-between gap-2 flex-wrap">
                 <div className="font-black flex items-center gap-2 text-sm">
                   <Landmark className="w-4 h-4" /> Krediler
@@ -5793,165 +5831,270 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     <span className="text-[10px] font-black bg-red-500 px-2 py-0.5 rounded-full">{kd.gecikmisAdet} GECİKMİŞ TAKSİT</span>
                   )}
                 </div>
-                <button type="button"
-                  onClick={() => setKrediKalemForm({ ...bosKrediKalemi })}
-                  className="px-3 py-1.5 bg-white text-violet-700 text-[11px] font-black rounded-lg hover:bg-violet-50 transition flex items-center gap-1.5">
-                  <PlusCircle className="w-3.5 h-3.5" /> Yeni Kredi Ekle
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {/* YENİ: "Mevcut Krediler" — Yeni Kredi Ekle'nin SOL yanında.
+                      Tıklanınca tüm kredi kartları (taksit planlarıyla) açılır;
+                      tekrar tıklanınca aylık görünüme dönülür. */}
+                  <button type="button" onClick={() => setMevcutKredilerAcik(v => !v)}
+                    className={`px-3 py-1.5 text-[11px] font-black rounded-lg transition flex items-center gap-1.5 ${
+                      mevcutKredilerAcik ? 'bg-white text-violet-700 hover:bg-violet-50' : 'bg-violet-800 text-white hover:bg-violet-900'}`}>
+                    <ClipboardList className="w-3.5 h-3.5" /> {mevcutKredilerAcik ? 'Aylık Görünüm' : 'Mevcut Krediler'}
+                  </button>
+                  <button type="button"
+                    onClick={() => setKrediKalemForm({ ...bosKrediKalemi })}
+                    className="px-3 py-1.5 bg-white text-violet-700 text-[11px] font-black rounded-lg hover:bg-violet-50 transition flex items-center gap-1.5">
+                    <PlusCircle className="w-3.5 h-3.5" /> Yeni Kredi Ekle
+                  </button>
+                </div>
               </div>
 
-              {/* TÜM KREDİLERİN TOPLAMI */}
-              {kd.kalemSayisi > 0 && (
-                <div className="p-4 pb-0 space-y-3">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
-                      <div className="text-[9px] font-black uppercase text-neutral-500">Toplam Ana Para</div>
-                      <div className="text-sm font-black text-black">₺{paraFmt(kd.toplamAnaPara)}</div>
-                    </div>
-                    <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
-                      <div className="text-[9px] font-black uppercase text-neutral-500">Toplam Geri Ödeme</div>
-                      <div className="text-sm font-black text-black">₺{paraFmt(kd.toplamGeriOdeme)}</div>
-                    </div>
-                    <div className="bg-emerald-50 rounded-xl p-2.5 border border-emerald-200">
-                      <div className="text-[9px] font-black uppercase text-emerald-600">Ödenen</div>
-                      <div className="text-sm font-black text-emerald-700">₺{paraFmt(kd.toplamOdenen)}</div>
-                    </div>
-                    <div className="bg-red-50 rounded-xl p-2.5 border border-red-200">
-                      <div className="text-[9px] font-black uppercase text-red-600">Kalan Borç</div>
-                      <div className="text-sm font-black text-red-700">₺{paraFmt(kd.toplamBorc)}</div>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="flex justify-between text-[11px] font-black mb-1">
-                      <span className="text-neutral-600">Toplam Ödeme İlerlemesi</span>
-                      <span className="text-violet-700">%{genelYuzde}</span>
-                    </div>
-                    <div className="h-3 bg-neutral-100 rounded-full overflow-hidden">
-                      <div className="h-full bg-gradient-to-r from-violet-500 to-emerald-500 transition-all" style={{ width: `${genelYuzde}%` }}></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="p-4 space-y-3">
-                {kd.kalemSayisi === 0 && (
+              {/* HİÇ KREDİ YOKSA — boş durum (iki görünümde de aynı) */}
+              {kd.kalemSayisi === 0 && (
+                <div className="p-4">
                   <div className="text-center py-8 border border-dashed border-neutral-300 rounded-xl">
                     <Landmark className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
                     <p className="text-sm font-bold text-neutral-400">Henüz kredi eklenmemiş.</p>
                     <p className="text-[11px] font-medium text-neutral-400 mt-1">"Yeni Kredi Ekle" ile taşıt, ihtiyaç, ticari kredilerinizi tek tek tanımlayın.</p>
                   </div>
-                )}
+                </div>
+              )}
 
-                {kd.detaylar.map(({ kalem, bilgi }) => {
-                  const acik = acikKrediKalemi === kalem.id;
-                  const yuzde = bilgi.toplamGeriOdeme > 0 ? Math.round((bilgi.odenenTutar / bilgi.toplamGeriOdeme) * 100) : 0;
-                  return (
-                    <div key={kalem.id} className={`rounded-xl border overflow-hidden ${bilgi.gecikmisAdet > 0 ? 'border-red-300' : 'border-neutral-200'}`}>
-                      {/* KREDİ BAŞLIĞI — tıklayınca taksit planı açılır */}
-                      <div className={`p-3 flex items-center gap-3 cursor-pointer transition ${bilgi.gecikmisAdet > 0 ? 'bg-red-50 hover:bg-red-100' : 'bg-neutral-50 hover:bg-neutral-100'}`}
-                        onClick={() => setAcikKrediKalemi(acik ? null : kalem.id)}>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-black text-black text-sm truncate flex items-center gap-2">
-                            {bilgi.ad}
-                            {kalem.id === '__eski__' && <span className="text-[9px] font-black bg-neutral-300 text-neutral-700 px-1.5 py-0.5 rounded-full shrink-0">ESKİ KAYIT</span>}
-                            {bilgi.gecikmisAdet > 0 && <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full shrink-0">{bilgi.gecikmisAdet} GECİKMİŞ</span>}
-                          </div>
-                          <div className="text-[11px] font-bold text-neutral-500">
-                            {bilgi.bankaAdi ? `${bilgi.bankaAdi} • ` : ''}₺{paraFmt(bilgi.aylikTaksit)} × {bilgi.taksitSayisi} ay • {bilgi.odenenAdet}/{bilgi.taksitSayisi} ödendi
-                          </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <div className="h-1.5 bg-neutral-200 rounded-full overflow-hidden flex-1 max-w-[140px]">
-                              <div className="h-full bg-violet-500" style={{ width: `${yuzde}%` }}></div>
+              {/* ==========================================================
+                  GÖRÜNÜM 1: AYLIK KREDİ ÖDEMELERİ (varsayılan ana sayfa)
+                  Ödemeler sayfasındaki desenin birebir kredi karşılığı.
+                  ========================================================== */}
+              {kd.kalemSayisi > 0 && !mevcutKredilerAcik && (
+                <>
+                  {/* ÜST ÖZET: bu ay bekleyen + gecikmiş — Ödemeler ile aynı */}
+                  <div className="grid grid-cols-2 gap-2 p-4 pb-0">
+                    <div className="bg-violet-50 rounded-xl p-2.5 border border-violet-200">
+                      <div className="text-[9px] font-black uppercase text-violet-600">Bu Ay Bekleyen</div>
+                      <div className="text-sm font-black text-violet-700">₺{paraFmt(buAyBekleyenTutar)}</div>
+                    </div>
+                    <div className={`rounded-xl p-2.5 border ${kd.gecikmisAdet > 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                      <div className={`text-[9px] font-black uppercase ${kd.gecikmisAdet > 0 ? 'text-red-600' : 'text-emerald-600'}`}>Gecikmiş</div>
+                      <div className={`text-sm font-black ${kd.gecikmisAdet > 0 ? 'text-red-700' : 'text-emerald-700'}`}>
+                        {kd.gecikmisAdet > 0 ? `${kd.gecikmisAdet} taksit` : 'Yok'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4">
+                    {/* AY GEZGİNİ — "Ağustos 2026 Kredi Ödemeleri" */}
+                    <div className="flex items-center justify-between gap-2 bg-neutral-900 text-white rounded-xl px-2 py-2 mb-2">
+                      <button type="button" onClick={() => krediAyDegistir(-1)} className="p-2 hover:bg-white/10 rounded-lg transition"><ChevronLeft className="w-5 h-5" /></button>
+                      <div className="text-center">
+                        <div className="font-black text-base">{ayBaslik} Kredi Ödemeleri</div>
+                        <div className="text-[10px] font-bold text-white/60">{bekleyenTaksitler.length} bekleyen • {odenenTaksitler.length} ödenen</div>
+                      </div>
+                      <button type="button" onClick={() => krediAyDegistir(1)} className="p-2 hover:bg-white/10 rounded-lg transition"><ChevronRight className="w-5 h-5" /></button>
+                    </div>
+
+                    {/* BEKLEYEN TAKSİTLER — güne göre sıralı, en erken üstte */}
+                    <div className="space-y-1.5">
+                      {bekleyenTaksitler.length === 0 && (
+                        <div className="p-4 text-center text-xs font-bold text-neutral-400 bg-neutral-50 rounded-xl border border-dashed border-neutral-300">Bu ay bekleyen kredi ödemesi yok.</div>
+                      )}
+                      {bekleyenTaksitler.map(({ kalem, bilgi, t }) => (
+                        <div key={`${kalem.id}_${t.no}`} className={`flex items-center gap-2 p-2.5 rounded-xl border ${t.gecikmis ? 'border-red-300 bg-red-50' : 'border-violet-200 bg-violet-50'}`}>
+                          {/* Vadeye 7 gün ve daha az kaldıysa yanıp sönen uyarı — Ödemeler ile aynı */}
+                          {vadeYaklasti(t.tarih) && !t.gecikmis && <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" title="Vadeye 1 haftadan az kaldı"></span>}
+                          <Landmark className={`w-4 h-4 shrink-0 ${t.gecikmis ? 'text-red-600' : 'text-violet-600'}`} />
+                          <div className="flex-1 min-w-0">
+                            {/* Başlıkta ayın adı yazar: "Ağustos Taksiti" — hangi ayın
+                                borcu olduğu tek bakışta anlaşılır (Ödemeler deseni) */}
+                            <div className="font-black text-sm text-neutral-800 truncate">
+                              {bilgi.ad} <span className="text-neutral-500 font-bold">— {AY_ADLARI[Number(t.tarih.slice(5, 7)) - 1]} Taksiti ({t.no}/{bilgi.taksitSayisi})</span>
                             </div>
-                            <span className={`text-[11px] font-black ${bilgi.kalanBorc > 0 ? 'text-violet-700' : 'text-emerald-700'}`}>
-                              {bilgi.kalanBorc > 0 ? `₺${paraFmt(bilgi.kalanBorc)} kaldı` : 'Kapandı ✓'}
-                            </span>
-                          </div>
-                          {bilgi.siradaki && (
-                            <div className={`text-[11px] font-bold mt-0.5 ${bilgi.siradaki.gecikmis ? 'text-red-600' : 'text-violet-700'}`}>
-                              Sıradaki: {bilgi.siradaki.no}. taksit — {bilgi.siradaki.tarih.split('-').reverse().join('.')}
-                              {bilgi.siradaki.gecikmis && ' (gecikmiş)'}
+                            <div className="text-[10px] font-bold text-neutral-500">
+                              Vade: {trh(t.tarih)}{bilgi.bankaAdi ? ` • ${bilgi.bankaAdi}` : ''}
+                              {t.gecikmis && <span className="ml-1 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
                             </div>
-                          )}
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className={`font-black tabular-nums ${t.gecikmis ? 'text-red-700' : 'text-violet-700'}`}>₺{paraFmt(t.tutar)}</div>
+                            {vadeYaklasti(t.tarih) && !t.gecikmis && <div className="text-[9px] font-black text-red-600 animate-pulse">YAKLAŞIYOR</div>}
+                          </div>
+                          <button type="button" onClick={() => setTaksitOdeme({ kalem, taksit: t, kaynakDefterId: '', tarih: bugunStr() })}
+                            className="shrink-0 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-black rounded-lg transition">Öde</button>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {bilgi.siradaki && (
-                            <button type="button"
-                              onClick={e => { e.stopPropagation(); setTaksitOdeme({ kalem, taksit: bilgi.siradaki, kaynakDefterId: '', tarih: bugunStr() }); }}
-                              className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black rounded-lg transition">
-                              Öde
-                            </button>
-                          )}
-                          <button type="button" onClick={e => { e.stopPropagation(); setKrediKalemForm({ ...bosKrediKalemi, ...kalem }); }}
-                            className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle">
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
-                          <button type="button" onClick={e => { e.stopPropagation(); krediKalemiSil(kalem.id); }}
-                            className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Krediyi kaldır">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                          <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${acik ? 'rotate-180' : ''}`} />
+                      ))}
+                    </div>
+
+                    {/* ÖDENENLER — en altta ayrı bölüm (Ödemeler ile aynı) */}
+                    {odenenTaksitler.length > 0 && (
+                      <div className="mt-3 border-t-2 border-dashed border-emerald-300 pt-2">
+                        <div className="text-[10px] font-black text-emerald-700 uppercase mb-1.5 flex items-center gap-1.5">
+                          <CheckCircle className="w-3.5 h-3.5" /> Ödenenler ({odenenTaksitler.length})
+                        </div>
+                        <div className="space-y-1">
+                          {odenenTaksitler.map(({ kalem, bilgi, t }) => (
+                            <div key={`${kalem.id}_${t.no}`} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
+                              <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">
+                                {bilgi.ad} — {AY_ADLARI[Number(t.tarih.slice(5, 7)) - 1]} Taksiti ({t.no}/{bilgi.taksitSayisi}) • ₺{paraFmt(t.tutar)}
+                              </span>
+                              <span className="text-[10px] font-black text-emerald-700 shrink-0">{t.odemeTarihi ? trh(t.odemeTarihi) : 'Ödendi'} ✓</span>
+                            </div>
+                          ))}
                         </div>
                       </div>
+                    )}
+                  </div>
+                </>
+              )}
 
-                      {/* TAKSİT PLANI */}
-                      {acik && (
-                        <div className="p-3 bg-white border-t border-neutral-200">
-                          <div className="grid grid-cols-3 gap-2 mb-3">
-                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200 text-center">
-                              <div className="text-[9px] font-black uppercase text-neutral-500">Ana Para</div>
-                              <div className="text-xs font-black text-black">₺{paraFmt(bilgi.anaPara)}</div>
+              {/* ==========================================================
+                  GÖRÜNÜM 2: MEVCUT KREDİLER (düğmeyle açılır)
+                  Eski ana sayfadaki her şey buraya taşındı: dört özet kutusu,
+                  toplam ilerleme çubuğu ve taksit planlı kredi kartları.
+                  ========================================================== */}
+              {kd.kalemSayisi > 0 && mevcutKredilerAcik && (
+                <>
+                  {/* TÜM KREDİLERİN TOPLAMI */}
+                  <div className="p-4 pb-0 space-y-3">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
+                        <div className="text-[9px] font-black uppercase text-neutral-500">Toplam Ana Para</div>
+                        <div className="text-sm font-black text-black">₺{paraFmt(kd.toplamAnaPara)}</div>
+                      </div>
+                      <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
+                        <div className="text-[9px] font-black uppercase text-neutral-500">Toplam Geri Ödeme</div>
+                        <div className="text-sm font-black text-black">₺{paraFmt(kd.toplamGeriOdeme)}</div>
+                      </div>
+                      <div className="bg-emerald-50 rounded-xl p-2.5 border border-emerald-200">
+                        <div className="text-[9px] font-black uppercase text-emerald-600">Ödenen</div>
+                        <div className="text-sm font-black text-emerald-700">₺{paraFmt(kd.toplamOdenen)}</div>
+                      </div>
+                      <div className="bg-red-50 rounded-xl p-2.5 border border-red-200">
+                        <div className="text-[9px] font-black uppercase text-red-600">Kalan Borç</div>
+                        <div className="text-sm font-black text-red-700">₺{paraFmt(kd.toplamBorc)}</div>
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex justify-between text-[11px] font-black mb-1">
+                        <span className="text-neutral-600">Toplam Ödeme İlerlemesi</span>
+                        <span className="text-violet-700">%{genelYuzde}</span>
+                      </div>
+                      <div className="h-3 bg-neutral-100 rounded-full overflow-hidden">
+                        <div className="h-full bg-gradient-to-r from-violet-500 to-emerald-500 transition-all" style={{ width: `${genelYuzde}%` }}></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 space-y-3">
+                    {kd.detaylar.map(({ kalem, bilgi }) => {
+                      const acik = acikKrediKalemi === kalem.id;
+                      const yuzde = bilgi.toplamGeriOdeme > 0 ? Math.round((bilgi.odenenTutar / bilgi.toplamGeriOdeme) * 100) : 0;
+                      return (
+                        <div key={kalem.id} className={`rounded-xl border overflow-hidden ${bilgi.gecikmisAdet > 0 ? 'border-red-300' : 'border-neutral-200'}`}>
+                          {/* KREDİ BAŞLIĞI — tıklayınca taksit planı açılır */}
+                          <div className={`p-3 flex items-center gap-3 cursor-pointer transition ${bilgi.gecikmisAdet > 0 ? 'bg-red-50 hover:bg-red-100' : 'bg-neutral-50 hover:bg-neutral-100'}`}
+                            onClick={() => setAcikKrediKalemi(acik ? null : kalem.id)}>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-black text-black text-sm truncate flex items-center gap-2">
+                                {bilgi.ad}
+                                {kalem.id === '__eski__' && <span className="text-[9px] font-black bg-neutral-300 text-neutral-700 px-1.5 py-0.5 rounded-full shrink-0">ESKİ KAYIT</span>}
+                                {bilgi.gecikmisAdet > 0 && <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full shrink-0">{bilgi.gecikmisAdet} GECİKMİŞ</span>}
+                              </div>
+                              <div className="text-[11px] font-bold text-neutral-500">
+                                {bilgi.bankaAdi ? `${bilgi.bankaAdi} • ` : ''}₺{paraFmt(bilgi.aylikTaksit)} × {bilgi.taksitSayisi} ay • {bilgi.odenenAdet}/{bilgi.taksitSayisi} ödendi
+                              </div>
+                              <div className="flex items-center gap-2 mt-1">
+                                <div className="h-1.5 bg-neutral-200 rounded-full overflow-hidden flex-1 max-w-[140px]">
+                                  <div className="h-full bg-violet-500" style={{ width: `${yuzde}%` }}></div>
+                                </div>
+                                <span className={`text-[11px] font-black ${bilgi.kalanBorc > 0 ? 'text-violet-700' : 'text-emerald-700'}`}>
+                                  {bilgi.kalanBorc > 0 ? `₺${paraFmt(bilgi.kalanBorc)} kaldı` : 'Kapandı ✓'}
+                                </span>
+                              </div>
+                              {bilgi.siradaki && (
+                                <div className={`text-[11px] font-bold mt-0.5 ${bilgi.siradaki.gecikmis ? 'text-red-600' : 'text-violet-700'}`}>
+                                  Sıradaki: {bilgi.siradaki.no}. taksit — {bilgi.siradaki.tarih.split('-').reverse().join('.')}
+                                  {bilgi.siradaki.gecikmis && ' (gecikmiş)'}
+                                </div>
+                              )}
                             </div>
-                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200 text-center">
-                              <div className="text-[9px] font-black uppercase text-neutral-500">Toplam</div>
-                              <div className="text-xs font-black text-black">₺{paraFmt(bilgi.toplamGeriOdeme)}</div>
-                            </div>
-                            <div className="bg-amber-50 rounded-lg p-2 border border-amber-200 text-center">
-                              <div className="text-[9px] font-black uppercase text-amber-600">Faiz</div>
-                              <div className="text-xs font-black text-amber-700">₺{paraFmt(bilgi.toplamFaiz)}</div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {bilgi.siradaki && (
+                                <button type="button"
+                                  onClick={e => { e.stopPropagation(); setTaksitOdeme({ kalem, taksit: bilgi.siradaki, kaynakDefterId: '', tarih: bugunStr() }); }}
+                                  className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black rounded-lg transition">
+                                  Öde
+                                </button>
+                              )}
+                              <button type="button" onClick={e => { e.stopPropagation(); setKrediKalemForm({ ...bosKrediKalemi, ...kalem }); }}
+                                className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle">
+                                <Edit className="w-3.5 h-3.5" />
+                              </button>
+                              <button type="button" onClick={e => { e.stopPropagation(); krediKalemiSil(kalem.id); }}
+                                className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Krediyi kaldır">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                              <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${acik ? 'rotate-180' : ''}`} />
                             </div>
                           </div>
-                          {kalem.not && <p className="text-[11px] font-medium text-neutral-500 mb-2 italic">{kalem.not}</p>}
-                          <div className="max-h-64 overflow-y-auto space-y-1">
-                            {bilgi.plan.map(t => (
-                              <div key={t.no} className={`flex items-center gap-2 p-2 rounded-lg border text-xs ${
-                                t.odendi ? 'bg-emerald-50 border-emerald-200'
-                                : t.gecikmis ? 'bg-red-50 border-red-200'
-                                : 'bg-white border-neutral-200'}`}>
-                                <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${
-                                  t.odendi ? 'bg-emerald-600 text-white' : t.gecikmis ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>
-                                  {t.no}
-                                </span>
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-black text-black">₺{paraFmt(t.tutar)}</div>
-                                  <div className={`text-[10px] font-bold ${t.gecikmis ? 'text-red-600' : 'text-neutral-500'}`}>
-                                    Vade: {t.tarih.split('-').reverse().join('.')}
-                                    {t.odendi && t.odemeTarihi ? ` • Ödendi: ${t.odemeTarihi.split('-').reverse().join('.')}` : t.gecikmis ? ' • GECİKMİŞ' : ''}
-                                  </div>
+
+                          {/* TAKSİT PLANI */}
+                          {acik && (
+                            <div className="p-3 bg-white border-t border-neutral-200">
+                              <div className="grid grid-cols-3 gap-2 mb-3">
+                                <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200 text-center">
+                                  <div className="text-[9px] font-black uppercase text-neutral-500">Ana Para</div>
+                                  <div className="text-xs font-black text-black">₺{paraFmt(bilgi.anaPara)}</div>
                                 </div>
-                                {t.odendi ? (
-                                  <span className="text-[10px] font-black text-emerald-700 flex items-center gap-1 shrink-0"><CheckCircle className="w-3.5 h-3.5" /> ÖDENDİ</span>
-                                ) : (
-                                  <button type="button"
-                                    onClick={() => setTaksitOdeme({ kalem, taksit: t, kaynakDefterId: '', tarih: bugunStr() })}
-                                    className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black rounded-lg transition shrink-0">
-                                    Öde
-                                  </button>
+                                <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200 text-center">
+                                  <div className="text-[9px] font-black uppercase text-neutral-500">Toplam</div>
+                                  <div className="text-xs font-black text-black">₺{paraFmt(bilgi.toplamGeriOdeme)}</div>
+                                </div>
+                                <div className="bg-amber-50 rounded-lg p-2 border border-amber-200 text-center">
+                                  <div className="text-[9px] font-black uppercase text-amber-600">Faiz</div>
+                                  <div className="text-xs font-black text-amber-700">₺{paraFmt(bilgi.toplamFaiz)}</div>
+                                </div>
+                              </div>
+                              {kalem.not && <p className="text-[11px] font-medium text-neutral-500 mb-2 italic">{kalem.not}</p>}
+                              <div className="max-h-64 overflow-y-auto space-y-1">
+                                {bilgi.plan.map(t => (
+                                  <div key={t.no} className={`flex items-center gap-2 p-2 rounded-lg border text-xs ${
+                                    t.odendi ? 'bg-emerald-50 border-emerald-200'
+                                    : t.gecikmis ? 'bg-red-50 border-red-200'
+                                    : 'bg-white border-neutral-200'}`}>
+                                    <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${
+                                      t.odendi ? 'bg-emerald-600 text-white' : t.gecikmis ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>
+                                      {t.no}
+                                    </span>
+                                    <div className="flex-1 min-w-0">
+                                      <div className="font-black text-black">₺{paraFmt(t.tutar)}</div>
+                                      <div className={`text-[10px] font-bold ${t.gecikmis ? 'text-red-600' : 'text-neutral-500'}`}>
+                                        Vade: {t.tarih.split('-').reverse().join('.')}
+                                        {t.odendi && t.odemeTarihi ? ` • Ödendi: ${t.odemeTarihi.split('-').reverse().join('.')}` : t.gecikmis ? ' • GECİKMİŞ' : ''}
+                                      </div>
+                                    </div>
+                                    {t.odendi ? (
+                                      <span className="text-[10px] font-black text-emerald-700 flex items-center gap-1 shrink-0"><CheckCircle className="w-3.5 h-3.5" /> ÖDENDİ</span>
+                                    ) : (
+                                      <button type="button"
+                                        onClick={() => setTaksitOdeme({ kalem, taksit: t, kaynakDefterId: '', tarih: bugunStr() })}
+                                        className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black rounded-lg transition shrink-0">
+                                        Öde
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                                {bilgi.plan.length === 0 && (
+                                  <p className="text-xs font-bold text-neutral-400 text-center py-4">
+                                    Taksit planı üretilemedi. Krediyi düzenleyip taksit sayısı ve ilk taksit tarihini kontrol edin.
+                                  </p>
                                 )}
                               </div>
-                            ))}
-                            {bilgi.plan.length === 0 && (
-                              <p className="text-xs font-bold text-neutral-400 text-center py-4">
-                                Taksit planı üretilemedi. Krediyi düzenleyip taksit sayısı ve ilk taksit tarihini kontrol edin.
-                              </p>
-                            )}
-                          </div>
+                            </div>
+                          )}
                         </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           );
         })()}
