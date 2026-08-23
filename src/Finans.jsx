@@ -4016,7 +4016,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // ========================================================================
     // YENİ: ÖDEME KALEMİ FORMU ve VADE ÖDEME PENCERESİ
     // ========================================================================
-    const bosOdemeKalemi = { id: '', ad: '', tutar: '', ilkTarih: bugunStr(), tekrar: 'aylik', tekrarSayisi: '', not: '' };
+    const bosOdemeKalemi = { id: '', ad: '', tutar: '', ilkTarih: bugunStr(), tekrar: 'aylik', tekrarSayisi: '', not: '', odemeTuru: 'firma' };
     const [odemeKalemForm, setOdemeKalemForm] = useState(null); // null = kapalı
     // { kalem, vade, kaynakDefterId, tarih } — hangi kalemin hangi vadesi, nereden
     const [vadeOdeme, setVadeOdeme] = useState(null);
@@ -4383,6 +4383,23 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // sonsuz liste olamayacağı için ileriye dönük SURESIZ_VADE_PENCERESI kadar
     // vade gösterilir; ödendikçe pencere kendiliğinden ilerler.
     // ========================================================================
+    // ========================================================================
+    // YENİ: ÖDEME TÜRLERİ
+    // ========================================================================
+    // Her ödeme kalemi bir türe aittir. Ödemeler defterinde kalemler bu
+    // türlere göre AYRI BLOKLAR halinde listelenir; her bloğun başlığı kendi
+    // rengini taşır. Böylece kira, firma gideri ve personel ödemesi bir arada
+    // karışmaz. Türü olmayan eski kayıtlar varsayılan olarak "Firma Ödemesi"
+    // sayılır (geriye uyum).
+    // ========================================================================
+    const ODEME_TURLERI = [
+      { id: 'kira',     ad: 'Kira Ödemesi',   baslik: 'bg-blue-600',    yumusak: 'bg-blue-50 border-blue-200',       yazi: 'text-blue-700',    Ikon: Landmark },
+      { id: 'firma',    ad: 'Firma Ödemesi',  baslik: 'bg-orange-600',  yumusak: 'bg-orange-50 border-orange-200',   yazi: 'text-orange-700',  Ikon: Briefcase },
+      { id: 'personel', ad: 'Personel Ödeme', baslik: 'bg-purple-600',  yumusak: 'bg-purple-50 border-purple-200',   yazi: 'text-purple-700',  Ikon: Users },
+    ];
+    const VARSAYILAN_ODEME_TURU = 'firma';
+    const odemeTuruBilgi = (id) => ODEME_TURLERI.find(t => t.id === id) || ODEME_TURLERI.find(t => t.id === VARSAYILAN_ODEME_TURU);
+
     const TEKRAR_SECENEKLERI = [
       { id: 'tek', ad: 'Tek Seferlik' },
       { id: 'haftalik', ad: 'Her Hafta' },
@@ -5659,7 +5676,45 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   </div>
                 )}
 
-                {od.detaylar.map(({ kalem, bilgi }) => {
+                {/* ==============================================================
+                    YENİ: TÜRE GÖRE BLOKLAR
+                    Kalemler ödeme türlerine ayrılır; her blok kendi renkli
+                    başlığını ve kendi toplamını taşır. Boş türler çizilmez.
+                    Sıra ODEME_TURLERI dizisindeki sıradır (Kira > Firma >
+                    Personel). Türü olmayan eski kayıtlar "Firma Ödemesi"
+                    bloğunda görünür.
+                    ============================================================== */}
+                {ODEME_TURLERI.map(tur => {
+                  const turKalemleri = od.detaylar.filter(d =>
+                    (d.kalem.odemeTuru || VARSAYILAN_ODEME_TURU) === tur.id);
+                  if (turKalemleri.length === 0) return null;
+                  // Bu türün bu ay bekleyen ve gecikmiş toplamları
+                  const turBuAy = turKalemleri.reduce((t, d) => {
+                    const buAyBas = bugunStr().slice(0, 8) + '01';
+                    const [yy, mm] = bugunStr().split('-').map(Number);
+                    const buAyBit = `${yy}-${String(mm).padStart(2, '0')}-${String(new Date(yy, mm, 0).getDate()).padStart(2, '0')}`;
+                    return t + d.bilgi.plan.filter(p => !p.odendi && p.tarih >= buAyBas && p.tarih <= buAyBit).reduce((x, p) => x + p.tutar, 0);
+                  }, 0);
+                  const turGecikmis = turKalemleri.reduce((t, d) => t + d.bilgi.gecikmisAdet, 0);
+                  return (
+                    <div key={tur.id} className={`rounded-xl border overflow-hidden ${tur.yumusak}`}>
+                      {/* BLOK BAŞLIĞI — her tür kendi renginde */}
+                      <div className={`${tur.baslik} text-white px-3 py-2 flex items-center justify-between gap-2 flex-wrap`}>
+                        <div className="flex items-center gap-2 text-xs font-black">
+                          <tur.Ikon className="w-4 h-4 shrink-0" />
+                          {tur.ad}
+                          <span className="text-[10px] font-bold text-white/70">{turKalemleri.length} kalem</span>
+                          {turGecikmis > 0 && (
+                            <span className="text-[9px] font-black bg-red-600 px-1.5 py-0.5 rounded-full">{turGecikmis} GECİKMİŞ</span>
+                          )}
+                        </div>
+                        <div className="text-right">
+                          <div className="text-[9px] font-black uppercase text-white/70 leading-none">Bu Ay Bekleyen</div>
+                          <div className="text-sm font-black tabular-nums">₺{paraFmt(turBuAy)}</div>
+                        </div>
+                      </div>
+                      <div className="p-2 space-y-2">
+                {turKalemleri.map(({ kalem, bilgi }) => {
                   const acik = acikOdemeKalemi === kalem.id;
                   return (
                     <div key={kalem.id} className={`rounded-xl border overflow-hidden ${bilgi.gecikmisAdet > 0 ? 'border-red-300' : 'border-neutral-200'}`}>
@@ -5747,6 +5802,50 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     </div>
                   );
                 })}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* ==========================================================
+                    YENİ: TÜR BAZLI ÖZET (en altta)
+                    Her ödeme türünün toplam yükünü bir arada gösterir:
+                    bu ay bekleyen + gecikmiş. Üstteki bloklar tek tek
+                    ayrıntı verirken burası "hangi kaleme ne kadar para
+                    gidiyor" sorusunu tek bakışta yanıtlar.
+                    ========================================================== */}
+                {od.detaylar.length > 0 && (
+                  <div className="mt-2 border-t-2 border-dashed border-neutral-300 pt-3">
+                    <div className="text-[10px] font-black text-neutral-500 uppercase mb-2 flex items-center gap-1.5">
+                      <BarChart className="w-3.5 h-3.5" /> Ödeme Türü Özeti
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      {ODEME_TURLERI.map(tur => {
+                        const turKalemleri = od.detaylar.filter(d => (d.kalem.odemeTuru || VARSAYILAN_ODEME_TURU) === tur.id);
+                        const buAyBas = bugunStr().slice(0, 8) + '01';
+                        const [yy, mm] = bugunStr().split('-').map(Number);
+                        const buAyBit = `${yy}-${String(mm).padStart(2, '0')}-${String(new Date(yy, mm, 0).getDate()).padStart(2, '0')}`;
+                        const buAy = turKalemleri.reduce((t, d) =>
+                          t + d.bilgi.plan.filter(p => !p.odendi && p.tarih >= buAyBas && p.tarih <= buAyBit).reduce((x, p) => x + p.tutar, 0), 0);
+                        const gecikmisTutar = turKalemleri.reduce((t, d) => t + d.bilgi.gecikmisTutar, 0);
+                        return (
+                          <div key={tur.id} className={`rounded-xl p-2.5 border ${tur.yumusak}`}>
+                            <div className={`text-[10px] font-black uppercase flex items-center gap-1.5 ${tur.yazi}`}>
+                              <tur.Ikon className="w-3.5 h-3.5" /> {tur.ad}
+                            </div>
+                            <div className={`text-base font-black tabular-nums mt-0.5 ${tur.yazi}`}>₺{paraFmt(buAy)}</div>
+                            <div className="text-[9px] font-bold text-neutral-500">
+                              {turKalemleri.length} kalem • bu ay bekleyen
+                            </div>
+                            {gecikmisTutar > 0 && (
+                              <div className="text-[9px] font-black text-red-600 mt-0.5">Gecikmiş: ₺{paraFmt(gecikmisTutar)}</div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -6424,6 +6523,26 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   <input value={odemeKalemForm.ad} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, ad: e.target.value })}
                     className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm"
                     placeholder="Örn: Dükkan Kirası, Araç Sigortası, Vergi" /></div>
+
+                {/* ==============================================================
+                    YENİ: ÖDEME TÜRÜ
+                    Kalem, defterde bu türün bloğu altında listelenir.
+                    ============================================================== */}
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Türü *</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {ODEME_TURLERI.map(t => {
+                      const secili = (odemeKalemForm.odemeTuru || VARSAYILAN_ODEME_TURU) === t.id;
+                      return (
+                        <button key={t.id} type="button" onClick={() => setOdemeKalemForm({ ...odemeKalemForm, odemeTuru: t.id })}
+                          className={`py-2 px-1 rounded-lg text-[10px] font-black border-2 transition leading-tight flex flex-col items-center gap-1 ${
+                            secili ? `${t.baslik} text-white border-transparent` : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+                          <t.Ikon className="w-3.5 h-3.5" />
+                          {t.ad}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tutar (₺) *</label>
