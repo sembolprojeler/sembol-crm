@@ -16034,7 +16034,9 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
     try {
       // Düzenlemede: atama DEĞİŞTİYSE yeni kişiye bildirim gitsin (aynı kişiye tekrar gitmesin)
       const oncekiAtanan = duzenlenenId ? (kayitlar.find(k => k.id === duzenlenenId)?.atananPersonelId || '') : '';
-      const atamaYeniMi = form.tur === 'gorev' && form.atananPersonelId && form.atananPersonelId !== oncekiAtanan;
+      // DEĞİŞTİ: Görev VEYA NOT — atanmış her hatırlatma bildirim üretir.
+      const atamaYeniMi = form.atananPersonelId && form.atananPersonelId !== oncekiAtanan;
+      let yeniHatirlatmaId = duzenlenenId || null; // bildirime bağlanacak kimlik
 
       if (duzenlenenId) {
         // Mevcut hatırlatmayı güncelle
@@ -16043,9 +16045,13 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
         });
         addSystemLog?.('Hatırlatma Güncellendi', `${form.tarih} — ${form.konu}: ${form.aciklama.slice(0, 60)}`);
       } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), {
+        // DEĞİŞTİ: Dönen referans saklanıyor — bildirime hatirlatmaId yazmak
+        // için kayıt kimliği gerekiyor (Bildirim Merkezi'nden "Tamamlandı"
+        // işaretlenince bu kimlikle hatırlatmanın kendisi kapatılır).
+        const yeniRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), {
           ...form, ekleyen: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(),
         });
+        yeniHatirlatmaId = yeniRef.id;
         addSystemLog?.('Hatırlatma Eklendi', `${form.tarih} — ${form.tur === 'gorev' ? 'Görev' : 'Not'} / ${form.konu}: ${form.aciklama.slice(0, 60)}`);
       }
 
@@ -16060,12 +16066,16 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
         try {
           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notifications'), {
             userId: form.atananPersonelId,
-            title: 'Yeni Görev Atandı',
+            // DEĞİŞTİ: Başlık türe göre — not atamasında "Görev" yazması yanıltıcıydı
+            title: form.tur === 'gorev' ? 'Yeni Görev Atandı' : 'Size Not Bırakıldı',
             message: `${form.konu} — ${form.aciklama.slice(0, 120)}${form.saat ? ` (Saat: ${form.saat})` : ''} | Tarih: ${form.tarih} | Atayan: ${currentUser?.fullName || 'Sistem'}`,
             date: new Date().toLocaleString('tr-TR'),
             read: false,
             type: 'hatirlatmaGorev',
             hatirlatmaTarihi: form.tarih,
+            // YENİ: Bildirim, hatırlatmanın kendisine bağlanır. Bildirim
+            // Merkezi'ndeki "Tamamlandı" düğmesi bu kimlikle hatırlatmayı kapatır.
+            hatirlatmaId: yeniHatirlatmaId,
           });
           addSystemLog?.('Görev Atandı', `${form.atananPersonelAdi} personeline görev atandı: ${form.aciklama.slice(0, 60)}`);
         } catch (bildirimHatasi) {
@@ -16087,6 +16097,27 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
       tamamlayan: !kayit.tamamlandi ? (currentUser?.fullName || 'Sistem') : null,
       tamamlanmaTarihi: !kayit.tamamlandi ? new Date().toISOString() : null,
     });
+    // ========================================================================
+    // YENİ: BAĞLI BİLDİRİMLERİ SENKRONLA
+    // ========================================================================
+    // Görev/not atandığında personelin Bildirim Merkezi'ne hatirlatmaId ile
+    // bağlı bir bildirim düşer. Hatırlatma BURADAN tamamlanırsa o bildirimin
+    // de kapanması gerekir; yoksa personelin ekranında "BEKLİYOR" olarak
+    // kalır ve zil rozetiyle çelişir. Geri açılırsa (tamamlandı geri alınırsa)
+    // bildirim de yeniden bekliyor durumuna döner.
+    // ========================================================================
+    try {
+      const bildirimSnap = await getDocs(query(
+        collection(db, 'artifacts', appId, 'public', 'data', 'notifications'),
+        where('hatirlatmaId', '==', kayit.id)
+      ));
+      for (const b of bildirimSnap.docs) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notifications', b.id), {
+          gorevTamamlandi: !kayit.tamamlandi,
+          read: !kayit.tamamlandi ? true : b.data().read,
+        });
+      }
+    } catch (e) { console.error('Bağlı bildirim güncellenemedi:', e); }
     if (!kayit.tamamlandi) addSystemLog?.('Hatırlatma Tamamlandı', `${kayit.tarih} — ${kayit.konu}: ${(kayit.aciklama || '').slice(0, 60)}`);
   };
 
@@ -16351,9 +16382,11 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
                   seçilir. Seçilen personele Bildirim Merkezi'nde bildirim
                   düşer ve görev tamamlanana kadar zil ikonunda yanıp söner.
                   ============================================================ */}
-              {form.tur === 'gorev' && (
+              {/* DEĞİŞTİ: Atama alanı artık NOT türünde de açık — nota da
+                  personel atanabilir ve aynı bildirim/rozet akışı çalışır. */}
+              {(
                 <div>
-                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">Görevi Atanacak Personel (Ops.)</label>
+                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">{form.tur === 'gorev' ? 'Görevi Atanacak Personel (Ops.)' : 'Notun Atanacağı Personel (Ops.)'}</label>
                   {form.atananPersonelId ? (
                     // Seçim yapıldıysa: seçilen personeli göster + kaldır butonu
                     <div className="flex items-center justify-between gap-2 bg-red-50 border-2 border-red-300 rounded-xl p-2.5">
@@ -17403,6 +17436,46 @@ export const QrTarayiciModal = ({ tip, currentUser, onKapat, hedefTarih }) => {
 
 // "19:49" -> 1189 (dakika)
 const mesaiDk = (s) => { const [h, d] = String(s || '0:0').split(':').map(Number); return (h || 0) * 60 + (d || 0); };
+
+// ===========================================================================
+// YENİ: GECE YARISINI AŞAN ÇIKIŞ (kritik hata düzeltmesi)
+// ===========================================================================
+// SORUN: Personel gece 12'den sonra mesaisini kapattığında çıkış saati küçük
+// bir sayıya düşüyordu (04:00 = 240 dk). Program bitişi 18:00 (1080 dk) ile
+// karşılaştırılınca iki hata birden oluşuyordu:
+//   • "erken çıkış" farkı 1080-240 = 840 dk -> 14 SAAT haksız eksik mesai
+//   • ekip çıkışı 240 dk sanıldığı için 10 saatlik FAZLA MESAİ hiç yazılmıyordu
+// ÇÖZÜM: Çıkış saati GİRİŞ saatinden küçükse iş geceyi aşmıştır; çıkış
+// dakikasına 24 saat (1440 dk) eklenir. Böylece 07:34 giriş / 04:00 çıkış
+// "07:34 -> 28:00" olarak okunur ve süre 20,5 saat çıkar.
+// Giriş bilinmiyorsa GECE_ESIGI_DK altındaki çıkışlar da ertesi gün sayılır
+// (07:00 öncesi bir çıkış, o günün mesaisinin bitişidir).
+// ===========================================================================
+const GECE_ESIGI_DK = 7 * 60; // 07:00 — bu saatten önceki çıkış "dün gecenin" çıkışıdır
+
+// ===========================================================================
+// YENİ: NORMAL ÇIKIŞ PENCERESİ (kullanıcı kuralı)
+// ===========================================================================
+// Saha gerçeği: iş 17:00 civarında biter, personel araç boşaltıp dönerken
+// çıkışı 17:20-17:50 arasında basar. Bu SIRADAN bir gün sonudur:
+//   • Eksik mesai YAZILMAZ (17:10'da basana "erken çıktın" denemez)
+//   • Fazla mesai de YAZILMAZ (17:33'te basan 0,5 saat mesai yapmış sayılmaz)
+// Yani bu pencerede çıkış NÖTR'dür — gün normal tamamlanmıştır.
+// 18:00'dan SONRAKİ çıkışlar gerçek fazla mesaidir ve eskisi gibi hesaplanır.
+// 17:00'dan ÖNCEKİ çıkışlar ise gerçek erken çıkıştır, cezası işler.
+// ===========================================================================
+const NORMAL_CIKIS_BAS_DK = 17 * 60; // 17:00
+const NORMAL_CIKIS_BIT_DK = 18 * 60; // 18:00
+const normalCikisPenceresinde = (dk) => dk !== null && dk >= NORMAL_CIKIS_BAS_DK && dk <= NORMAL_CIKIS_BIT_DK;
+const cikisDkNormalize = (cikisSaat, girisSaat) => {
+  if (!cikisSaat) return null;
+  const c = mesaiDk(cikisSaat);
+  if (girisSaat) {
+    const g = mesaiDk(girisSaat);
+    return c < g ? c + 1440 : c;      // Çıkış girişten küçükse ertesi gün
+  }
+  return c < GECE_ESIGI_DK ? c + 1440 : c; // Giriş yoksa 07:00 eşiğine bak
+};
 // Yarım saate aşağı yuvarla (fazla mesai için): 109 dk -> 1,5 saat
 const asagiYarim = (dk) => Math.max(0, Math.floor(dk / 30) / 2);
 // Yarım saate yukarı yuvarla (eksik mesai için): 20 dk -> 0,5 saat
@@ -17544,12 +17617,17 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr) => {
   const kayitBul = (pId, tip) => qrKayitlari.find(k => String(k.personnelId) === String(pId) && k.type === tip);
 
   // 1) EKİP BAZLI ÇIKIŞ: ekipte çıkış basmış olanların EN ERKEN saati esas alınır
+  // DEĞİŞTİ: Her personelin çıkışı KENDİ girişine göre normalize edilir.
+  // Aksi halde geceyi aşan bir çıkış (04:00) "en erken çıkış" sanılır ve
+  // tüm ekibin fazla mesaisi sıfırlanırdı.
   const cikisSaatleri = personeller
-    .map(p => kayitBul(p.id, 'cikis')?.timeStr)
-    .filter(Boolean)
-    .map(mesaiDk);
+    .map(p => cikisDkNormalize(kayitBul(p.id, 'cikis')?.timeStr, kayitBul(p.id, 'giris')?.timeStr))
+    .filter(v => v !== null);
   const ekipCikisDk = cikisSaatleri.length ? Math.min(...cikisSaatleri) : null;
-  const ekipCikisSaati = ekipCikisDk === null ? null : `${String(Math.floor(ekipCikisDk / 60)).padStart(2, '0')}:${String(ekipCikisDk % 60).padStart(2, '0')}`;
+  // Görüntülenen saat 24 saatlik biçime geri döndürülür (28:00 -> 04:00),
+  // ertesi güne taştığı belli olsun diye yanına (+1 gün) notu eklenir.
+  const ekipCikisSaati = ekipCikisDk === null ? null
+    : `${String(Math.floor((ekipCikisDk % 1440) / 60)).padStart(2, '0')}:${String(ekipCikisDk % 60).padStart(2, '0')}${ekipCikisDk >= 1440 ? ' (+1 gün)' : ''}`;
 
   personeller.forEach(person => {
     const giris = kayitBul(person.id, 'giris');
@@ -17595,13 +17673,28 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr) => {
     //    kişiye 0,5 saat kesmek gerçekçi değil).
     // ======================================================================
     let fazlaCikis = 0, eksikCikis = 0;
-    if (ekipCikisDk !== null) {
-      const ekipFark = ekipCikisDk - mesaiDk(prog.bitis);
-      if (ekipFark > 0) fazlaCikis = asagiYarim(ekipFark); // Yalnızca FAZLA için ekip esas
-    }
-    if (cikis?.timeStr) {
-      const kendiFark = mesaiDk(prog.bitis) - mesaiDk(cikis.timeStr); // + ise erken çıkmış
-      if (kendiFark > GEC_GELIS_TOLERANS_DK) eksikCikis = yukariYarim(kendiFark);
+    const kendiCikisDk = cikis?.timeStr ? cikisDkNormalize(cikis.timeStr, giris?.timeStr) : null;
+
+    // YENİ KURAL: Çıkış 17:00-18:00 arasındaysa gün NORMAL tamamlanmıştır.
+    // Ne fazla ne eksik mesai yazılır; hesap tamamen atlanır.
+    // (Erken çıkış günü olan personellerde bu pencere uygulanmaz — onların
+    //  programı zaten farklıdır, örn. 15:00 bitiş.)
+    const normalCikis = !prog.erkenCikisGunu && normalCikisPenceresinde(kendiCikisDk);
+
+    if (!normalCikis) {
+      if (ekipCikisDk !== null) {
+        // Ekip çıkışı da normal pencerenin içindeyse ekip fazla mesai üretmez.
+        const ekipNormal = !prog.erkenCikisGunu && normalCikisPenceresinde(ekipCikisDk);
+        if (!ekipNormal) {
+          const ekipFark = ekipCikisDk - mesaiDk(prog.bitis);
+          if (ekipFark > 0) fazlaCikis = asagiYarim(ekipFark); // Yalnızca FAZLA için ekip esas
+        }
+      }
+      if (kendiCikisDk !== null) {
+        // Normalize edilmiş çıkış kullanılır (geceyi aşan işler için).
+        const kendiFark = mesaiDk(prog.bitis) - kendiCikisDk; // + ise erken çıkmış
+        if (kendiFark > GEC_GELIS_TOLERANS_DK) eksikCikis = yukariYarim(kendiFark);
+      }
     }
 
     // KURAL 4: NET = fazla - eksik
@@ -18534,6 +18627,91 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     }
   };
 
+  // ==========================================================================
+  // YENİ: ÖNERİLERİ PUANTAJA TOPLU İŞLE
+  // ==========================================================================
+  // SORUN: QR kayıtlarından üretilen öneriler (Geldi / Devamsız / Fazla Mesai
+  // saatleri) yalnızca ekranda görünüyordu. Personel Muhasebe > Mavi Yaka
+  // Mesai tablosuna geçmesi için her satırı tek tek kalemle açıp kaydetmek
+  // gerekiyordu; bu yüzden muhasebede FM kodu yazsa bile SAAT hücresi boş
+  // kalıyordu.
+  //
+  // ÇÖZÜM: Bu düğme, seçili günün tüm önerilerini tek seferde puantaja yazar.
+  // Kritik ayrıntı: ekranda gösterilen SADELEŞTİRİLMİŞ öneri (FM -> G) değil,
+  // HAM öneri (gunlukOneriler) kullanılır — yoksa fazla mesai saatleri yine
+  // kaybolurdu.
+  //
+  // KORUMALAR:
+  //   • manual:true olan kayıtlara DOKUNULMAZ (elle girilen değer kutsaldır)
+  //   • İzin kodları (Yİ/Bİ/Üİ/R/İB/Hİ) varsa üzerine yazılmaz
+  //   • Zaten aynı değer yazılıysa tekrar yazılmaz (gereksiz Firestore yazımı)
+  // ==========================================================================
+  const [topluIsleniyor, setTopluIsleniyor] = useState(false);
+  const KORUNAN_KODLAR = ['Yİ', 'Bİ', 'Üİ', 'R', 'İB', 'Hİ'];
+
+  const onerileriPuantajaIsle = async () => {
+    if (!fTarih) return;
+    const gunOnerileri = gunlukOneriler[fTarih] || {};
+    const [y, a, g] = fTarih.split('-').map(Number);
+    const anahtar = `${y}_${a}`;
+
+    // Yazılacakları önce hesapla ki kullanıcıya net bir onay sorusu sorulabilsin
+    const ref = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', anahtar);
+    let mevcutRecords = {};
+    try {
+      const snap = await getDoc(ref);
+      mevcutRecords = snap.exists() ? (snap.data().records || {}) : {};
+    } catch (e) { console.error('Puantaj okunamadı:', e); alert('Puantaj okunamadı.'); return; }
+
+    const yazilacaklar = [];
+    takiptekiPersonel.forEach(p => {
+      const oneri = gunOnerileri[String(p.id)];
+      if (!oneri || !oneri.status) return;
+      const mevcut = mevcutRecords[String(p.id)]?.[g];
+      const mevcutKod = typeof mevcut === 'object' && mevcut !== null ? mevcut.status : mevcut;
+      if (mevcut && mevcut.manual === true) return;              // Elle girilmiş: dokunma
+      if (KORUNAN_KODLAR.includes(mevcutKod)) return;            // İzin kodu: dokunma
+      const yeniSaat = (oneri.status === 'FM' || oneri.status === 'EM' || oneri.status === 'FGM')
+        ? String(oneri.hours || '') : '';
+      const mevcutSaat = typeof mevcut === 'object' && mevcut !== null ? String(mevcut.hours || '') : '';
+      if (mevcutKod === oneri.status && mevcutSaat === yeniSaat) return; // Değişiklik yok
+      yazilacaklar.push({ id: String(p.id), ad: p.fullName, kod: oneri.status, saat: yeniSaat });
+    });
+
+    if (yazilacaklar.length === 0) {
+      alert('İşlenecek yeni öneri yok. (Elle düzenlenmiş ve izinli kayıtlara dokunulmaz.)');
+      return;
+    }
+    const ozet = yazilacaklar.slice(0, 12).map(x => `• ${x.ad}: ${x.kod}${x.saat ? ` (${x.saat} sa)` : ''}`).join('\n');
+    if (!window.confirm(
+      `${fTarih.split('-').reverse().join('.')} tarihli ${yazilacaklar.length} kayıt Personel Muhasebe puantajına işlenecek:\n\n${ozet}${yazilacaklar.length > 12 ? `\n… ve ${yazilacaklar.length - 12} kayıt daha` : ''}\n\nDevam edilsin mi?`
+    )) return;
+
+    setTopluIsleniyor(true);
+    try {
+      const records = { ...mevcutRecords };
+      yazilacaklar.forEach(x => {
+        if (!records[x.id]) records[x.id] = {};
+        records[x.id][g] = {
+          status: x.kod,
+          hours: x.saat,
+          manual: false,                  // Otomatik: sonraki onaylarda güncellenebilir
+          kaynak: 'Mesai Takip (Toplu Onay)',
+          duzenlemeTarihi: new Date().toLocaleString('tr-TR')
+        };
+      });
+      await setDoc(ref, { records, updatedAt: new Date().toISOString() }, { merge: true });
+      // NOT: Bu bileşene addSystemLog prop'u geçilmediği için sistem günlüğü
+      // yazılmaz; işlemin izi puantaj kaydındaki kaynak/duzenlemeTarihi
+      // alanlarında zaten tutuluyor.
+      alert(`${yazilacaklar.length} kayıt puantaja işlendi. Personel Muhasebe > Mavi Yaka Mesai tablosundan kontrol edebilirsiniz.`);
+    } catch (e) {
+      console.error('Toplu işleme hatası:', e);
+      alert('Puantaja işlenirken hata oluştu. Lütfen tekrar deneyin.');
+    }
+    setTopluIsleniyor(false);
+  };
+
   // Giriş/çıkış SAATİNİ bir kez düzenler ve kaydı kilitler.
   // Kayıt silinmez; yalnızca saat güncellenir ve kimin düzelttiği iz olarak kalır.
   const saatKaydet = async () => {
@@ -18658,6 +18836,20 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
           {/* Hiç veri yoksa kullanıcı boş alana bakmasın */}
           {gunlukOzet.toplam === 0 && (
             <span className="text-[11px] font-bold bg-white/15 px-3 py-2 rounded-xl">Bu gün için personel kaydı yok</span>
+          )}
+          {/* ==============================================================
+              YENİ: PUANTAJA İŞLE
+              Seçili günün QR önerilerini (Geldi / Devamsız / Fazla mesai
+              saatleriyle birlikte) Personel Muhasebe puantajına tek tıkla
+              aktarır. Elle düzenlenmiş ve izinli kayıtlara dokunmaz.
+              ============================================================== */}
+          {gunlukOzet.toplam > 0 && (
+            <button type="button" onClick={onerileriPuantajaIsle} disabled={topluIsleniyor}
+              title="Bu günün mesai önerilerini Personel Muhasebe > Mavi Yaka Mesai tablosuna işler"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl shadow-sm bg-emerald-500 hover:bg-emerald-600 disabled:bg-neutral-400 text-white transition">
+              <CheckCircle className="w-4 h-4 shrink-0" />
+              <span className="text-[11px] font-black whitespace-nowrap">{topluIsleniyor ? 'İşleniyor...' : 'Puantaja İşle'}</span>
+            </button>
           )}
         </div>
       </div>
@@ -18989,6 +19181,22 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                             ? <Keyboard className="w-3.5 h-3.5 text-amber-600" title="Seri kodu elle girdi" />
                             : <Camera className="w-3.5 h-3.5 text-emerald-600" title="Kamerayla QR okuttu" />}
                           {kayit.timeStr}
+                          {/* ==================================================
+                              YENİ: ERTESİ GÜN ROZETİ
+                              Çıkış saati girişten küçükse iş gece yarısını
+                              aşmıştır. "04:00" tek başına yanıltıcı olduğu
+                              için yanına +1 rozeti konur; böylece tabloya
+                              bakan yönetici 20 saatlik mesaiyi görür.
+                              ================================================== */}
+                          {(() => {
+                            if (tip !== 'cikis') return null;
+                            // grup nesnesi hem girişi hem çıkışı taşır (g.giris / g.cikis)
+                            const girisSaat = grup?.giris?.timeStr;
+                            if (!girisSaat || !kayit.timeStr) return null;
+                            const dk = (t) => { const [h2, m2] = String(t).split(':').map(Number); return (h2 || 0) * 60 + (m2 || 0); };
+                            if (dk(kayit.timeStr) >= dk(girisSaat)) return null;
+                            return <span className="text-[9px] font-black bg-indigo-100 text-indigo-700 px-1 py-0.5 rounded" title="Mesai gece yarısını aştı — çıkış ertesi gün">+1 GÜN</span>;
+                          })()}
                           {/* SAAT DÜZENLEME: yalnızca bir kez yapılabilir */}
                           {kilitli ? null : (
                             <button
