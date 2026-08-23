@@ -6535,7 +6535,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     {defterler.filter(d => d.tur !== 'Kredi' && d.tur !== 'Ödemeler')
                       .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
                       .map(d => (
-                        <option key={d.id} value={d.id}>{d.ad} — {defterTuruEtiket(d.tur)} (₺{paraFmt(defterBakiye(d.id))})</option>
+                        <option key={d.id} value={d.id}>{d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})</option>
                       ))}
                   </select>
                   {vadeOdeme.kaynakDefterId && defterBakiye(vadeOdeme.kaynakDefterId) < (parseFloat(vadeOdeme.tutar) || 0) && (
@@ -6587,7 +6587,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     {defterler.filter(d => d.tur !== 'Kredi')
                       .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
                       .map(d => (
-                        <option key={d.id} value={d.id}>{d.ad} — {defterTuruEtiket(d.tur)} (₺{paraFmt(defterBakiye(d.id))})</option>
+                        <option key={d.id} value={d.id}>{d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})</option>
                       ))}
                   </select>
                   {/* Bakiye yetersizse uyar, ama engelleme */}
@@ -6646,7 +6646,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   <div className="p-3 bg-neutral-100 border border-neutral-200 rounded-xl">
                     <div className="text-sm font-black text-black">{seciliDefter.ad}</div>
                     <div className="text-[11px] font-bold text-neutral-500">
-                      {defterTuruEtiket(seciliDefter.tur)} • Bakiye: ₺{paraFmt(defterBakiye(seciliDefterId))}
+                      {/* Kaynak hesapta da blok gösterilir; hedefle aynı dili konuşsun */}
+                      {defterBlogu(seciliDefter)} • Bakiye: ₺{paraFmt(defterBakiye(seciliDefterId))}
                     </div>
                   </div>
                 </div>
@@ -6663,7 +6664,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
                       .map(d => (
                         <option key={d.id} value={d.id}>
-                          {d.ad} — {defterTuruEtiket(d.tur)} (₺{paraFmt(defterBakiye(d.id))})
+                          {/* DEĞİŞTİ (kullanıcı talebi): İkinci alanda TÜR yerine
+                              BLOK yazıyor. "BANKA — Banka" gibi kendini tekrar
+                              eden bir etiket yerine "BANKA — Sembol Nakliyat"
+                              gösteriliyor; hangi şirkete ait olduğu anlaşılıyor. */}
+                          {d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})
                         </option>
                       ))}
                   </select>
