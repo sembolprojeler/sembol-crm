@@ -4896,6 +4896,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           && j.status !== 'completed' && j.status !== 'cancelled'
           && !j.endJobDetails)
         .map(j => ({ ...j, bekleyenTutar: Math.max(0, (parseFloat(j.price) || 0) - (parseFloat(j.deposit) || 0)) }))
+        // ====================================================================
+        // YENİ: ÜCRETSİZ ASANSÖR İŞLERİ LİSTELENMEZ (kullanıcı talebi)
+        // ====================================================================
+        // Kendi nakliye işimize verdiğimiz asansör hizmeti ücretsizdir; müşteri
+        // ayrıca ödeme yapmaz. Bunlar "ödemesi bekleniyor" listesinde ₺0,00
+        // satırı olarak görünüp listeyi kalabalıklaştırıyordu — bekleyen para
+        // yokken bekleme kaydı da olmamalı.
+        // NOT: Yalnızca ASANSÖR + tutar 0 olanlar gizlenir. Fiyatı henüz
+        // girilmemiş bir NAKLİYE işi ₺0 olsa bile listede kalır; orada sıfır
+        // "eksik veri" demektir ve gözden kaçmaması gerekir.
+        // ====================================================================
+        .filter(j => !((j.type === 'Asansör' || j.type === 'asansor') && j.bekleyenTutar <= 0))
         .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
     }, [jobs, seciliDefterId, bekleyenIsDefteriId, gunFiltreAktif, seciliGun]);
 
