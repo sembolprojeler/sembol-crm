@@ -4607,7 +4607,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         i.tip === 'giris' && i.krediMahsup &&
         (k.id === '__eski__' ? true : (i.krediKalemId ? i.krediKalemId === k.id : false)));
       const odenenTutar = odemeler.reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
-      const odenenTaksitNolar = new Set(odemeler.map(i => parseInt(i.taksitNo)).filter(n => !isNaN(n)));
+      // YENİ (kullanıcı talebi): KISMİ ÖDEME — bir taksite birden çok ödeme
+      // yazılabilir; taksit ancak toplam tutara ulaşınca kapanır.
+      const taksitOdenenToplam = {};
+      const taksitSonOdemeTarihi = {};
+      odemeler.forEach(i => {
+        const n = parseInt(i.taksitNo);
+        if (isNaN(n)) return;
+        taksitOdenenToplam[n] = (taksitOdenenToplam[n] || 0) + (parseFloat(i.tutar) || 0);
+        if (!taksitSonOdemeTarihi[n] || (i.tarih || '') > taksitSonOdemeTarihi[n]) taksitSonOdemeTarihi[n] = i.tarih || null;
+      });
+      const odenenTaksitNolar = new Set(Object.keys(taksitOdenenToplam).map(Number));
       const kalanBorc = Math.max(0, toplamGeriOdeme - odenenTutar);
 
       // Taksit planı: ilk taksit tarihinden başlayarak aydan aya
@@ -4620,14 +4630,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           const ayinSonGunu = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
           t.setDate(Math.min(g, ayinSonGunu));
           const tarihStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
-          const odendi = odenenTaksitNolar.has(n);
+          const taksitOdenen = taksitOdenenToplam[n] || 0;
+          const odendi = taksitOdenen >= aylikTaksit - 0.01;
+          const taksitKalan = Math.max(0, aylikTaksit - taksitOdenen);
           const odemeKaydi = odemeler.find(i => parseInt(i.taksitNo) === n);
           plan.push({
             no: n,
             tarih: tarihStr,
             tutar: aylikTaksit,
             odendi,
-            odemeTarihi: odemeKaydi?.tarih || null,
+            odemeTarihi: taksitSonOdemeTarihi[n] || odemeKaydi?.tarih || null,
+            // Kısmi ödeme alanları
+            odenenTutar: taksitOdenen, kalan: taksitKalan,
+            kismi: !odendi && taksitOdenen > 0.01,
             // Vadesi geçmiş ve hâlâ ödenmemişse gecikmiş sayılır
             gecikmis: !odendi && tarihStr < bugunStr(),
           });
@@ -4738,7 +4753,25 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       // Bu kaleme ait ödemeler (defterdeki mahsup girişleri)
       const odemeler = defterIslemleri(defter?.id)
         .filter(i => i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalem.id);
-      const odenenVadeNolar = new Set(odemeler.map(i => parseInt(i.vadeNo)).filter(n => !isNaN(n)));
+      // ======================================================================
+      // YENİ (kullanıcı talebi): KISMİ ÖDEME DESTEĞİ
+      // ======================================================================
+      // Eskiden bir vadeye tek kayıt yazılıyor ve o vade anında "ödendi"
+      // sayılıyordu. Artık aynı vadeye BİRDEN ÇOK ödeme yazılabilir (ör.
+      // bir kısmı nakit, bir kısmı bankadan). Bir vade ancak yapılan
+      // ödemelerin TOPLAMI vade tutarına ulaşınca kapanır; o ana kadar
+      // "kısmi ödendi" olarak bekleyenlerde kalır ve kalan tutarla ödenmeye
+      // devam eder.
+      const vadeOdenenToplam = {};   // { vadeNo: o vadeye şimdiye dek ödenen toplam }
+      const vadeSonOdemeTarihi = {}; // { vadeNo: en son ödeme tarihi }
+      odemeler.forEach(i => {
+        const n = parseInt(i.vadeNo);
+        if (isNaN(n)) return;
+        vadeOdenenToplam[n] = (vadeOdenenToplam[n] || 0) + (parseFloat(i.tutar) || 0);
+        if (!vadeSonOdemeTarihi[n] || (i.tarih || '') > vadeSonOdemeTarihi[n]) vadeSonOdemeTarihi[n] = i.tarih || null;
+      });
+      // Üzerinde en az bir ödeme bulunan vadeler (süresiz pencere hesabı için)
+      const odenenVadeNolar = new Set(Object.keys(vadeOdenenToplam).map(Number));
       const odenenTutar = odemeler.reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
 
       // Süresizde: ödenen sayısı + pencere kadar vade üret (liste hep dolu kalsın)
@@ -4758,21 +4791,20 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           // "Kiralama bitti, artık borçlanmasın" durumu için. Ödenmiş vadeler
           // korunur (geçmiş kayıt silinmez), yalnız ileri vadeler kesilir.
           if (kalem.bitisTarihi && tarihStr > kalem.bitisTarihi && !odenenVadeNolar.has(n)) break;
-          const odendi = odenenVadeNolar.has(n);
-          const kayit = odemeler.find(i => parseInt(i.vadeNo) === n);
           // YENİ: Vadenin tutarı o tarihte geçerli olan zamlı tutardır
           const vadeTutari = kalemTutariTarihte(kalem, tarihStr);
-          // ==============================================================
-          // YENİ (kullanıcı talebi): KİRA YIL DOLUMU UYARISI
-          // ==============================================================
-          // Kira Ödemesi türündeki AYLIK kalemlerde her 12. taksit bir
-          // sözleşme yılının SON ödemesidir (1., 13., 25. taksit yeni yılın
-          // başlangıcı). Bu vadeye "yılSonu" damgası basılır; listede
-          // "1 yıl doldu — gelecek ay zamlı ödeyebilirsiniz" uyarısı çıkar.
-          // yilNo: kaçıncı sözleşme yılının dolduğu (12. taksit -> 1. yıl).
+          // YENİ: Kısmi ödeme hesabı — vade ancak toplam tutara ulaşınca kapanır
+          const vadeOdenen = vadeOdenenToplam[n] || 0;
+          const odendi = vadeOdenen >= vadeTutari - 0.01;
+          const vadeKalan = Math.max(0, vadeTutari - vadeOdenen);
+          const kismi = !odendi && vadeOdenen > 0.01; // kısmen ödenmiş, hâlâ bekliyor
+          const kayit = odemeler.find(i => parseInt(i.vadeNo) === n);
           const kiraAylik = (kalem.odemeTuru === 'kira') && tekrar === 'aylik';
           const yilSonu = kiraAylik && n % 12 === 0;
-          plan.push({ no: n, tarih: tarihStr, tutar: vadeTutari, odendi, odemeTarihi: kayit?.tarih || null,
+          plan.push({ no: n, tarih: tarihStr, tutar: vadeTutari, odendi,
+                      odemeTarihi: vadeSonOdemeTarihi[n] || kayit?.tarih || null,
+                      // Kısmi ödeme alanları: ekranda kalan tutarla devam edilir
+                      odenenTutar: vadeOdenen, kalan: vadeKalan, kismi,
                       gecikmis: !odendi && tarihStr < bugunStr(),
                       yilSonu, yilNo: yilSonu ? n / 12 : null });
         }
@@ -4786,7 +4818,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       return { tutar, tekrar, suresiz, istenenAdet, plan, odenenAdet, odenenTutar,
                kalanAdet: suresiz ? null : Math.max(0, istenenAdet - odenenAdet),
                kalanTutar, gecikmisAdet: gecikmisler.length,
-               gecikmisTutar: gecikmisler.reduce((t, p) => t + p.tutar, 0), siradaki };
+               // KISMİ ÖDEME: gecikmiş tutarda vade tutarı değil KALAN tutar sayılır
+               gecikmisTutar: gecikmisler.reduce((t, p) => t + p.kalan, 0), siradaki };
     };
 
     // Bir ödemeler defterinin toplu durumu
@@ -4800,7 +4833,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const [yy, mm] = bugunStr().split('-').map(Number);
       const buAyBit = `${yy}-${String(mm).padStart(2, '0')}-${String(new Date(yy, mm, 0).getDate()).padStart(2, '0')}`;
       const buAyBekleyen = detaylar.reduce((t, d) =>
-        t + d.bilgi.plan.filter(p => !p.odendi && p.tarih >= buAyBas && p.tarih <= buAyBit).reduce((s, p) => s + p.tutar, 0), 0);
+        t + d.bilgi.plan.filter(p => !p.odendi && p.tarih >= buAyBas && p.tarih <= buAyBit).reduce((s, p) => s + p.kalan, 0), 0);
       return { detaylar, kalemSayisi: kalemler.length, gecikmisAdet, gecikmisTutar, buAyBekleyen };
     };
 
@@ -4893,8 +4926,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       if (!taksitOdeme?.taksit || !seciliDefter) return;
       if (!taksitOdeme.kaynakDefterId) { alert('Ödemenin hangi hesaptan yapıldığını seçin.'); return; }
       const t = taksitOdeme.taksit;
-      const tutar = parseFloat(t.tutar) || 0;
-      if (tutar <= 0) { alert('Taksit tutarı geçersiz.'); return; }
+      // YENİ (kullanıcı talebi): KISMİ ÖDEME — tutar artık formdan gelir.
+      // Kalandan az girilirse taksit kapanmaz, kalan tutarla beklemeye devam eder.
+      const taksitKalan = t.kalan ?? t.tutar;
+      const tutar = parseFloat(taksitOdeme.tutar ?? taksitKalan) || 0;
+      if (tutar <= 0) { alert('Geçerli bir tutar girin.'); return; }
+      if (tutar > taksitKalan + 0.01) {
+        alert(`Kalan tutardan fazla ödeme yapılamaz.\n\nBu taksit için kalan: ₺${paraFmt(taksitKalan)}`);
+        return;
+      }
+      const kismiOdeme = tutar < taksitKalan - 0.01;
+      const kalacak = Math.max(0, taksitKalan - tutar);
+      const kismiNot = kismiOdeme ? ` (kısmi ödeme — kalan ₺${paraFmt(kalacak)})` : '';
       const kaynak = defterler.find(d => d.id === taksitOdeme.kaynakDefterId);
       const odemeId = `kredi_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const ortak = {
@@ -4908,6 +4951,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         // YENİ: hangi krediye ait olduğu — bir defterde birden çok kredi olabilir
         krediKalemId: taksitOdeme.kalem?.id || null,
         kaynak: 'Kredi Ödemesi',
+        kismiOdeme,
         createdAt: new Date().toISOString(),
         by: currentUser?.fullName || 'Sistem',
       };
@@ -4918,7 +4962,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           ...ortak, tip: 'cikis', tutar,
           defterId: taksitOdeme.kaynakDefterId,
           odemeYontemi: defterdenOdemeYontemi(taksitOdeme.kaynakDefterId),
-          aciklama: `${taksitOdeme.kalem?.ad || taksitOdeme.kalem?.bankaAdi || seciliDefter.ad} — ${t.no}. taksit ödemesi`,
+          aciklama: `${taksitOdeme.kalem?.ad || taksitOdeme.kalem?.bankaAdi || seciliDefter.ad} — ${t.no}. taksit ödemesi${kismiNot}`,
         });
         // 2) Kredi defterinde GİRİŞ (borç azalması — ciroya girmez)
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
@@ -4926,10 +4970,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           defterId: seciliDefter.id,
           krediMahsup: true,
           odemeYontemi: defterdenOdemeYontemi(taksitOdeme.kaynakDefterId),
-          aciklama: `${taksitOdeme.kalem?.ad || taksitOdeme.kalem?.bankaAdi || 'Kredi'} ${t.no}. taksit ödendi ← ${kaynak?.ad || 'hesap'}`,
+          aciklama: `${taksitOdeme.kalem?.ad || taksitOdeme.kalem?.bankaAdi || 'Kredi'} ${t.no}. taksit${kismiNot} ← ${kaynak?.ad || 'hesap'}`,
         });
-        addSystemLog?.('Kredi Taksiti Ödendi',
-          `${seciliDefter.ad}: ${t.no}. taksit ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi.`);
+        addSystemLog?.(kismiOdeme ? 'Kredi Taksiti Kısmi Ödendi' : 'Kredi Taksiti Ödendi',
+          `${seciliDefter.ad}: ${t.no}. taksit ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi.${kismiOdeme ? ` Kalan: ₺${paraFmt(kalacak)}` : ''}`);
         setTaksitOdeme(null);
       } catch (e) {
         console.error('Taksit ödemesi kaydedilemedi:', e);
@@ -5182,6 +5226,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const v = vadeOdeme.vade;
       const tutar = parseFloat(vadeOdeme.tutar ?? v.tutar) || 0;
       if (tutar <= 0) { alert('Geçerli bir tutar girin.'); return; }
+      // YENİ (kullanıcı talebi): KISMİ ÖDEME KONTROLÜ
+      // Kalandan fazla ödeme kaydı tutarsızlık yaratır (vade iki kez kapanmış
+      // gibi görünür), bu yüzden engellenir. Kalandan AZ ödeme serbesttir —
+      // vade kapanmaz, kalan tutarla bekleyenlerde durmaya devam eder.
+      const vadeKalan = v.kalan ?? v.tutar;
+      if (tutar > vadeKalan + 0.01) {
+        alert(`Kalan tutardan fazla ödeme yapılamaz.\n\nBu vade için kalan: ₺${paraFmt(vadeKalan)}`);
+        return;
+      }
+      const kismiOdeme = tutar < vadeKalan - 0.01;   // bu ödeme vadeyi kapatmıyor
+      const kalacak = Math.max(0, vadeKalan - tutar);
       const kaynak = defterler.find(d => d.id === vadeOdeme.kaynakDefterId);
       const odemeId = `odeme_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const ortak = {
@@ -5193,25 +5248,29 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         odemeKalemId: vadeOdeme.kalem.id,
         odemeDefterId: seciliDefter.id,
         kaynak: 'Ödeme Planı',
+        // YENİ: kayıt kısmi mi? Açıklamada ve ileride raporlamada kullanılır.
+        kismiOdeme,
         createdAt: new Date().toISOString(),
         by: currentUser?.fullName || 'Sistem',
       };
+      // Açıklamaya kısmi ödeme notu düşülür ki hesap ekstresinde de anlaşılsın
+      const kismiNot = kismiOdeme ? ` (kısmi ödeme — kalan ₺${paraFmt(kalacak)})` : '';
       setTaksitKaydediliyor(true);
       try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
           ...ortak, tip: 'cikis', tutar, odemeMahsup: false,
           defterId: vadeOdeme.kaynakDefterId,
           odemeYontemi: defterdenOdemeYontemi(vadeOdeme.kaynakDefterId),
-          aciklama: `${vadeOdeme.kalem.ad} — ${v.no}. ödeme`,
+          aciklama: `${vadeOdeme.kalem.ad} — ${v.no}. ödeme${kismiNot}`,
         });
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
           ...ortak, tip: 'giris', tutar, odemeMahsup: true,
           defterId: seciliDefter.id,
           odemeYontemi: defterdenOdemeYontemi(vadeOdeme.kaynakDefterId),
-          aciklama: `${vadeOdeme.kalem.ad} ${v.no}. ödeme ← ${kaynak?.ad || 'hesap'}`,
+          aciklama: `${vadeOdeme.kalem.ad} ${v.no}. ödeme${kismiNot} ← ${kaynak?.ad || 'hesap'}`,
         });
-        addSystemLog?.('Düzenli Ödeme Yapıldı',
-          `${vadeOdeme.kalem.ad} ${v.no}. ödeme ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi.`);
+        addSystemLog?.(kismiOdeme ? 'Kısmi Ödeme Yapıldı' : 'Düzenli Ödeme Yapıldı',
+          `${vadeOdeme.kalem.ad} ${v.no}. ödeme ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi.${kismiOdeme ? ` Kalan: ₺${paraFmt(kalacak)}` : ''}`);
         setVadeOdeme(null);
       } catch (e) {
         console.error('Ödeme kaydedilemedi:', e);
@@ -6190,13 +6249,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                             <div className="text-[10px] font-bold text-neutral-500">
                               Vade: {trh(t.tarih)}{bilgi.bankaAdi ? ` • ${bilgi.bankaAdi}` : ''}
                               {t.gecikmis && <span className="ml-1 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
+                              {/* YENİ: kısmi ödeme rozeti */}
+                              {t.kismi && <span className="ml-1 text-[9px] font-black bg-sky-600 text-white px-1.5 py-0.5 rounded-full">KISMİ ÖDENDİ • ₺{paraFmt(t.odenenTutar)} yatırıldı</span>}
                             </div>
                           </div>
                           <div className="text-right shrink-0">
-                            <div className={`font-black tabular-nums ${t.gecikmis ? 'text-red-700' : 'text-violet-700'}`}>₺{paraFmt(t.tutar)}</div>
+                            {/* KISMİ ÖDEME: ekranda KALAN tutar gösterilir */}
+                            <div className={`font-black tabular-nums ${t.gecikmis ? 'text-red-700' : 'text-violet-700'}`}>₺{paraFmt(t.kalan ?? t.tutar)}</div>
+                            {t.kismi && <div className="text-[9px] font-bold text-neutral-400 line-through">₺{paraFmt(t.tutar)}</div>}
                             {vadeYaklasti(t.tarih) && !t.gecikmis && <div className="text-[9px] font-black text-red-600 animate-pulse">YAKLAŞIYOR</div>}
                           </div>
-                          <button type="button" onClick={() => setTaksitOdeme({ kalem, taksit: t, kaynakDefterId: '', tarih: bugunStr() })}
+                          <button type="button" onClick={() => setTaksitOdeme({ kalem, taksit: t, kaynakDefterId: '', tarih: bugunStr(), tutar: String(t.kalan ?? t.tutar) })}
                             className="shrink-0 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-black rounded-lg transition">Öde</button>
                         </div>
                       ))}
@@ -6299,7 +6362,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                             <div className="flex items-center gap-1 shrink-0">
                               {bilgi.siradaki && (
                                 <button type="button"
-                                  onClick={e => { e.stopPropagation(); setTaksitOdeme({ kalem, taksit: bilgi.siradaki, kaynakDefterId: '', tarih: bugunStr() }); }}
+                                  onClick={e => { e.stopPropagation(); setTaksitOdeme({ kalem, taksit: bilgi.siradaki, kaynakDefterId: '', tarih: bugunStr(), tutar: String(bilgi.siradaki.kalan ?? bilgi.siradaki.tutar) }); }}
                                   className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black rounded-lg transition">
                                   Öde
                                 </button>
@@ -6308,7 +6371,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                 className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle">
                                 <Edit className="w-3.5 h-3.5" />
                               </button>
-                              <button type="button" onClick={e => { e.stopPropagation(); krediKalemiSil(kalem.id); }}
+                              {/* YENİ (kullanıcı talebi): Ödeme yapılmış bir krediyi
+                                  silmeden önce ek uyarı. Ödemeler defterindeki Sil
+                                  ile aynı davranış — planı kaldırır, geçmiş taksit
+                                  ödemeleri defterde kalır. */}
+                              <button type="button"
+                                onClick={e => {
+                                  e.stopPropagation();
+                                  if (bilgi.odenenAdet > 0 &&
+                                      !window.confirm(`"${bilgi.ad}" kredisine daha önce ${bilgi.odenenAdet} taksit ödemesi yapılmış (toplam ₺${paraFmt(bilgi.odenenTutar)}).\n\nPlanı silerseniz bu ödemeler defterde KALIR ama hangi krediye ait oldukları listede görünmez.\n\nYine de silmek istiyor musunuz?`)) return;
+                                  krediKalemiSil(kalem.id);
+                                }}
                                 className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Krediyi kaldır">
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -6339,23 +6412,26 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                   <div key={t.no} className={`flex items-center gap-2 p-2 rounded-lg border text-xs ${
                                     t.odendi ? 'bg-emerald-50 border-emerald-200'
                                     : t.gecikmis ? 'bg-red-50 border-red-200'
+                                    : t.kismi ? 'bg-sky-50 border-sky-200'
                                     : 'bg-white border-neutral-200'}`}>
                                     <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${
                                       t.odendi ? 'bg-emerald-600 text-white' : t.gecikmis ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>
                                       {t.no}
                                     </span>
                                     <div className="flex-1 min-w-0">
-                                      <div className="font-black text-black">₺{paraFmt(t.tutar)}</div>
+                                      {/* KISMİ ÖDEME: ödenmemişse KALAN tutar gösterilir */}
+                                      <div className="font-black text-black">₺{paraFmt(t.odendi ? t.tutar : (t.kalan ?? t.tutar))}</div>
                                       <div className={`text-[10px] font-bold ${t.gecikmis ? 'text-red-600' : 'text-neutral-500'}`}>
                                         Vade: {t.tarih.split('-').reverse().join('.')}
                                         {t.odendi && t.odemeTarihi ? ` • Ödendi: ${t.odemeTarihi.split('-').reverse().join('.')}` : t.gecikmis ? ' • GECİKMİŞ' : ''}
+                                        {t.kismi && <span className="ml-1 text-[9px] font-black bg-sky-600 text-white px-1.5 py-0.5 rounded-full">KISMİ • ₺{paraFmt(t.odenenTutar)} ödendi</span>}
                                       </div>
                                     </div>
                                     {t.odendi ? (
                                       <span className="text-[10px] font-black text-emerald-700 flex items-center gap-1 shrink-0"><CheckCircle className="w-3.5 h-3.5" /> ÖDENDİ</span>
                                     ) : (
                                       <button type="button"
-                                        onClick={() => setTaksitOdeme({ kalem, taksit: t, kaynakDefterId: '', tarih: bugunStr() })}
+                                        onClick={() => setTaksitOdeme({ kalem, taksit: t, kaynakDefterId: '', tarih: bugunStr(), tutar: String(t.kalan ?? t.tutar) })}
                                         className="px-2.5 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[10px] font-black rounded-lg transition shrink-0">
                                         Öde
                                       </button>
@@ -6564,13 +6640,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                   {vade.gecikmis && <span className="ml-1 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
                                   {/* YENİ: 12. taksitte sözleşme yılı dolduğu rozeti */}
                                   {vade.yilSonu && <span className="ml-1 text-[9px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded-full">{vade.yilNo}. YIL SON ÖDEMESİ</span>}
+                                  {/* YENİ: kısmi ödeme rozeti — ne kadarı ödenmiş */}
+                                  {vade.kismi && <span className="ml-1 text-[9px] font-black bg-sky-600 text-white px-1.5 py-0.5 rounded-full">KISMİ ÖDENDİ • ₺{paraFmt(vade.odenenTutar)} yatırıldı</span>}
                                 </div>
                               </div>
                               <div className="text-right shrink-0">
-                                <div className={`font-black tabular-nums ${vade.gecikmis ? 'text-red-700' : tur.yazi}`}>₺{paraFmt(vade.tutar)}</div>
+                                {/* KISMİ ÖDEME: ekranda artık KALAN tutar gösterilir */}
+                                <div className={`font-black tabular-nums ${vade.gecikmis ? 'text-red-700' : tur.yazi}`}>₺{paraFmt(vade.kalan ?? vade.tutar)}</div>
+                                {vade.kismi && <div className="text-[9px] font-bold text-neutral-400 line-through">₺{paraFmt(vade.tutar)}</div>}
                                 {vadeYaklasti(vade.tarih) && !vade.gecikmis && <div className="text-[9px] font-black text-red-600 animate-pulse">YAKLAŞIYOR</div>}
                               </div>
-                              <button type="button" onClick={() => setVadeOdeme({ kalem, vade, kaynakDefterId: '', tarih: bugunStr(), tutar: String(vade.tutar) })}
+                              <button type="button" onClick={() => setVadeOdeme({ kalem, vade, kaynakDefterId: '', tarih: bugunStr(), tutar: String(vade.kalan ?? vade.tutar) })}
                                 className="shrink-0 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg transition">Öde</button>
                             </div>
 
@@ -7695,17 +7775,65 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     {vadeOdeme.vade.no}. ödeme • Vade: {vadeOdeme.vade.tarih.split('-').reverse().join('.')}
                     {vadeOdeme.vade.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
                   </div>
+                  {/* YENİ (kullanıcı talebi): KISMİ ÖDEME DURUMU
+                      Bu vadeye daha önce parça ödeme yapıldıysa ne kadar ödendiği
+                      ve ne kadar kaldığı burada açıkça yazar. */}
+                  {vadeOdeme.vade.kismi && (
+                    <div className="mt-2 pt-2 border-t border-orange-200 grid grid-cols-3 gap-2 text-center">
+                      <div><div className="text-[9px] font-black uppercase text-neutral-500">Vade Tutarı</div>
+                        <div className="text-xs font-black text-neutral-700">₺{paraFmt(vadeOdeme.vade.tutar)}</div></div>
+                      <div><div className="text-[9px] font-black uppercase text-emerald-600">Ödenen</div>
+                        <div className="text-xs font-black text-emerald-700">₺{paraFmt(vadeOdeme.vade.odenenTutar)}</div></div>
+                      <div><div className="text-[9px] font-black uppercase text-red-600">Kalan</div>
+                        <div className="text-xs font-black text-red-700">₺{paraFmt(vadeOdeme.vade.kalan)}</div></div>
+                    </div>
+                  )}
                 </div>
 
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödenen Tutar (₺) *</label>
                   <input type="number" inputMode="decimal" value={vadeOdeme.tutar}
                     onChange={e => setVadeOdeme({ ...vadeOdeme, tutar: e.target.value })}
                     className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-lg font-black" />
-                  {parseFloat(vadeOdeme.tutar) !== parseFloat(vadeOdeme.vade.tutar) && (
-                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">
-                      Plandaki tutar ₺{paraFmt(vadeOdeme.vade.tutar)}. Farklı tutar girdiniz — yalnızca bu ödeme etkilenir, plan değişmez.
-                    </p>
-                  )}
+                  {/* YENİ: KISMİ ÖDEME YÖNLENDİRMESİ
+                      Kalanın tamamını değil bir kısmını ödüyorsanız uyarı çıkar ve
+                      geriye ne kalacağı yazar. Tek tıkla "kalanın tamamı" da girilir.
+                      Kalandan FAZLA yazılamaz — fazla ödeme kaydı tutarsızlık yaratır. */}
+                  {(() => {
+                    const kalan = vadeOdeme.vade.kalan ?? vadeOdeme.vade.tutar;
+                    const girilen = parseFloat(vadeOdeme.tutar) || 0;
+                    const kalacak = Math.max(0, kalan - girilen);
+                    return (
+                      <div className="mt-1.5 space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button type="button" onClick={() => setVadeOdeme({ ...vadeOdeme, tutar: String(kalan) })}
+                            className="px-2.5 py-1 bg-neutral-800 hover:bg-black text-white text-[10px] font-black rounded-lg transition">
+                            Kalanın Tamamı (₺{paraFmt(kalan)})
+                          </button>
+                          {[0.5, 0.25].map(oran => (
+                            <button key={oran} type="button" onClick={() => setVadeOdeme({ ...vadeOdeme, tutar: String(Math.round(kalan * oran * 100) / 100) })}
+                              className="px-2.5 py-1 bg-neutral-200 hover:bg-neutral-300 text-neutral-700 text-[10px] font-black rounded-lg transition">
+                              %{oran * 100}
+                            </button>
+                          ))}
+                        </div>
+                        {girilen > kalan + 0.01 && (
+                          <p className="text-[11px] font-black text-red-600">
+                            Kalan tutardan fazla giremezsiniz. Bu vade için kalan: ₺{paraFmt(kalan)}
+                          </p>
+                        )}
+                        {girilen > 0 && girilen < kalan - 0.01 && (
+                          <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                            <b>Kısmi ödeme yapıyorsunuz.</b> Bu ödemeden sonra <b>₺{paraFmt(kalacak)}</b> kalacak ve ödeme <b>tamamlanmış sayılmayacak</b> — bekleyenler listesinde kalan tutarla durmaya devam edecek.
+                          </p>
+                        )}
+                        {girilen >= kalan - 0.01 && girilen <= kalan + 0.01 && kalan > 0 && (
+                          <p className="text-[11px] font-bold text-emerald-700">
+                            Bu ödemeyle vade <b>tamamen kapanacak</b> ve Ödenenler bölümüne inecek.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
@@ -7750,7 +7878,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <div className="space-y-3">
                 {/* Taksit özeti */}
                 <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl">
-                  <div className="text-2xl font-black text-violet-800">₺{paraFmt(taksitOdeme.taksit.tutar)}</div>
+                  <div className="text-2xl font-black text-violet-800">₺{paraFmt(taksitOdeme.taksit.kalan ?? taksitOdeme.taksit.tutar)}</div>
                   <div className="text-[11px] font-bold text-violet-600">
                     {/* DEĞİŞTİ: Defter adı yerine ÖDENEN KREDİNİN adı — bir
                         defterde birden çok kredi olduğu için hangisi olduğu
@@ -7758,6 +7886,60 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     {taksitOdeme.kalem?.ad || taksitOdeme.kalem?.bankaAdi || seciliDefter.ad} • Vade: {taksitOdeme.taksit.tarih.split('-').reverse().join('.')}
                     {taksitOdeme.taksit.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
                   </div>
+                  {/* YENİ: Bu taksite daha önce parça ödeme yapıldıysa dökümü */}
+                  {taksitOdeme.taksit.kismi && (
+                    <div className="mt-2 pt-2 border-t border-violet-200 grid grid-cols-3 gap-2 text-center">
+                      <div><div className="text-[9px] font-black uppercase text-neutral-500">Taksit</div>
+                        <div className="text-xs font-black text-neutral-700">₺{paraFmt(taksitOdeme.taksit.tutar)}</div></div>
+                      <div><div className="text-[9px] font-black uppercase text-emerald-600">Ödenen</div>
+                        <div className="text-xs font-black text-emerald-700">₺{paraFmt(taksitOdeme.taksit.odenenTutar)}</div></div>
+                      <div><div className="text-[9px] font-black uppercase text-red-600">Kalan</div>
+                        <div className="text-xs font-black text-red-700">₺{paraFmt(taksitOdeme.taksit.kalan)}</div></div>
+                    </div>
+                  )}
+                </div>
+
+                {/* YENİ (kullanıcı talebi): KISMİ ÖDEME TUTARI
+                    Taksitin tamamını değil bir kısmını ödeyebilirsiniz (ör. bir
+                    kısmı nakit, bir kısmı bankadan). Taksit ancak toplam tutara
+                    ulaşınca kapanır. */}
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödenen Tutar (₺) *</label>
+                  <input type="number" inputMode="decimal"
+                    value={taksitOdeme.tutar ?? String(taksitOdeme.taksit.kalan ?? taksitOdeme.taksit.tutar)}
+                    onChange={e => setTaksitOdeme({ ...taksitOdeme, tutar: e.target.value })}
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-lg font-black" />
+                  {(() => {
+                    const kalan = taksitOdeme.taksit.kalan ?? taksitOdeme.taksit.tutar;
+                    const girilen = parseFloat(taksitOdeme.tutar ?? kalan) || 0;
+                    const kalacak = Math.max(0, kalan - girilen);
+                    return (
+                      <div className="mt-1.5 space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button type="button" onClick={() => setTaksitOdeme({ ...taksitOdeme, tutar: String(kalan) })}
+                            className="px-2.5 py-1 bg-neutral-800 hover:bg-black text-white text-[10px] font-black rounded-lg transition">
+                            Kalanın Tamamı (₺{paraFmt(kalan)})
+                          </button>
+                          {[0.5, 0.25].map(oran => (
+                            <button key={oran} type="button" onClick={() => setTaksitOdeme({ ...taksitOdeme, tutar: String(Math.round(kalan * oran * 100) / 100) })}
+                              className="px-2.5 py-1 bg-neutral-200 hover:bg-neutral-300 text-neutral-700 text-[10px] font-black rounded-lg transition">
+                              %{oran * 100}
+                            </button>
+                          ))}
+                        </div>
+                        {girilen > kalan + 0.01 && (
+                          <p className="text-[11px] font-black text-red-600">Kalan tutardan fazla giremezsiniz. Kalan: ₺{paraFmt(kalan)}</p>
+                        )}
+                        {girilen > 0 && girilen < kalan - 0.01 && (
+                          <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                            <b>Kısmi ödeme yapıyorsunuz.</b> Bu ödemeden sonra <b>₺{paraFmt(kalacak)}</b> kalacak ve taksit <b>kapanmayacak</b> — kalan tutarla bekleyenlerde durmaya devam edecek.
+                          </p>
+                        )}
+                        {girilen >= kalan - 0.01 && girilen <= kalan + 0.01 && kalan > 0 && (
+                          <p className="text-[11px] font-bold text-emerald-700">Bu ödemeyle taksit <b>tamamen kapanacak</b>.</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
@@ -7786,7 +7968,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" /></div>
 
                 <p className="text-[11px] font-medium text-neutral-500 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
-                  Onayladığınızda seçtiğiniz hesaptan <b>₺{paraFmt(taksitOdeme.taksit.tutar)} çıkış</b> yazılır ve kredinin kalan borcu aynı tutarda azalır. Bu hareket ciro toplamlarında <b>çift sayılmaz</b>.
+                  Onayladığınızda seçtiğiniz hesaptan <b>₺{paraFmt(parseFloat(taksitOdeme.tutar ?? (taksitOdeme.taksit.kalan ?? taksitOdeme.taksit.tutar)) || 0)} çıkış</b> yazılır ve kredinin kalan borcu aynı tutarda azalır. Bu hareket ciro toplamlarında <b>çift sayılmaz</b>.
                 </p>
 
                 <button onClick={taksitOde} disabled={taksitKaydediliyor}
@@ -8092,15 +8274,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <button onClick={() => { setOtomatikYonetim(false); setYonetimForm(null); }} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
               </div>
               <p className="text-[11px] font-bold text-neutral-500 mb-3">
-                Tekrarlanan ödemeleri durdurabilir veya belirli bir tarihten itibaren tutarını değiştirebilirsiniz. Geçmiş aylar ve yapılmış ödemeler etkilenmez.
+                Ödemeleri düzenleyebilir, durdurabilir, belirli bir tarihten itibaren tutarını değiştirebilir veya
+                yanlış eklenmiş bir kalemi tamamen <b>silebilirsiniz</b>. Geçmiş aylar ve yapılmış ödemeler etkilenmez.
               </p>
               <div className="space-y-2">
-                {(seciliDefter.odemeler || []).filter(k => (k.tekrar || 'tek') !== 'tek').length === 0 && (
+                {/* DEĞİŞTİ (kullanıcı talebi): Liste artık TEK SEFERLİK kalemleri de
+                    gösterir. Sebep: yanlış eklenen bir kalem tek seferlikse eskiden
+                    bu pencerede hiç görünmüyor ve silinemiyordu. Tekrarlanmayan
+                    kalemlerde "Tutarı Güncelle / Sonlandır" anlamsız olduğu için
+                    gizlenir; "Düzenle" ve "Sil" her kalemde vardır. */}
+                {(seciliDefter.odemeler || []).length === 0 && (
                   <div className="p-6 text-center text-xs font-bold text-neutral-400 bg-neutral-50 rounded-xl border border-dashed border-neutral-300">
-                    Tekrarlanan (otomatik) ödeme kalemi yok.
+                    Henüz ödeme kalemi yok.
                   </div>
                 )}
-                {(seciliDefter.odemeler || []).filter(k => (k.tekrar || 'tek') !== 'tek').map(k => {
+                {(seciliDefter.odemeler || []).map(k => {
+                  const tekrarli = (k.tekrar || 'tek') !== 'tek';
                   const tur = odemeTuruBilgi(k.odemeTuru);
                   const guncelTutar = kalemTutariTarihte(k, bugunStr());
                   const duzenleniyor = yonetimForm?.kalemId === k.id;
@@ -8126,7 +8315,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                               className="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-900 text-white text-[10px] font-black rounded-lg transition flex items-center gap-1">
                               <Edit className="w-3 h-3" /> Düzenle
                             </button>
-                            {!k.bitisTarihi && (
+                            {/* Tutarı Güncelle / Sonlandır yalnızca TEKRARLANAN
+                                kalemlerde anlamlıdır; tek seferlikte gizlenir. */}
+                            {tekrarli && !k.bitisTarihi && (
                               <>
                                 <button type="button" onClick={() => setYonetimForm({ kalemId: k.id, mod: 'zam', tarih: bugunStr(), tutar: String(guncelTutar) })}
                                   className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black rounded-lg transition">Tutarı Güncelle</button>
@@ -8134,10 +8325,27 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                   className="px-2.5 py-1.5 bg-red-600 hover:bg-red-700 text-white text-[10px] font-black rounded-lg transition">Sonlandır</button>
                               </>
                             )}
-                            {k.bitisTarihi && (
+                            {tekrarli && k.bitisTarihi && (
                               <button type="button" onClick={() => otomatikOdemeGeriAl(k.id, 'bitis')}
                                 className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition">Yeniden Başlat</button>
                             )}
+                            {/* YENİ (kullanıcı talebi): SİL — yanlış eklenmiş kalemi
+                                tamamen kaldırır. Zaten var olan odemeKalemiSil
+                                fonksiyonu çağrılır; o fonksiyon onay sorar ve
+                                YAPILMIŞ ÖDEMELERİ SİLMEZ, yalnızca planı kaldırır.
+                                Yapılmış ödeme varsa ek uyarı gösterilir; "Sonlandır"
+                                çoğu durumda daha doğru seçimdir (geçmiş korunur,
+                                ileri vadeler kesilir). */}
+                            <button type="button"
+                              onClick={() => {
+                                const bilgi = odemeKalemBilgi(seciliDefter, k);
+                                if (bilgi.odenenAdet > 0 &&
+                                    !window.confirm(`"${k.ad}" kalemine daha önce ${bilgi.odenenAdet} ödeme yapılmış (toplam ₺${paraFmt(bilgi.odenenTutar)}).\n\nPlanı silerseniz bu ödemeler defterde KALIR ama hangi plana ait oldukları listede görünmez.\n\nSadece ileri vadeleri durdurmak istiyorsanız "Sonlandır" daha doğrudur.\n\nYine de silmek istiyor musunuz?`)) return;
+                                odemeKalemiSil(k.id);
+                              }}
+                              className="px-2.5 py-1.5 bg-white border border-red-300 text-red-600 hover:bg-red-50 text-[10px] font-black rounded-lg transition flex items-center gap-1">
+                              <Trash2 className="w-3 h-3" /> Sil
+                            </button>
                           </div>
                         )}
                       </div>
