@@ -8,7 +8,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
   // YENİ: Avans ve maaş ödemelerini ilgili deftere gider olarak yazar.
   defterPersonelGiderKaydet,
   // YENİ: Hazır etiket ağacı ve kullanıcı etiketlerinin Firestore referansı.
-  VARSAYILAN_ETIKET_GRUPLARI, tumVarsayilanEtiketler, defterEtiketleriRef, GARANTI_MAAS_SABLON_BASE64 } from './shared.jsx';
+  VARSAYILAN_ETIKET_GRUPLARI, tumVarsayilanEtiketler, defterEtiketleriRef, GARANTI_MAAS_SABLON_BASE64, odemeIcinDefterBul } from './shared.jsx';
 
   // ==========================================================================
   // YENİ BİLEŞEN: MAAŞ RAPORU (Genel Ciro Raporu sayfasındaki 2. sekme)
@@ -3920,6 +3920,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const DEFTER_TURLERI = ['Nakit', 'Banka', 'Kredi Kartı', 'Borçlu', 'Kredi', 'Ödemeler'];
 
     // ========================================================================
+    // YENİ: DEFTER BLOKLARI (şirket/grup ayrımı)
+    // ========================================================================
+    // Defterler artık tek düz liste değil; ait oldukları BLOK'a göre
+    // gruplanır ve her grup kendi ince çerçevesi + başlığı içinde görünür.
+    // Dizideki SIRA, ekrandaki sırayı belirler (kullanıcı talebi: yazıldığı
+    // sıraya göre yukarıdan aşağıya). Blok bilgisi olmayan eski defterler
+    // otomatik olarak son bloğa ('Genel') düşer — veri kaybı olmaz.
+    const DEFTER_BLOKLARI = ['Sembol Nakliyat', 'Depoevim', 'Genel'];
+    const VARSAYILAN_BLOK = 'Genel';
+    // Bir defterin bloğunu güvenli biçimde verir (tanımsız/geçersizse Genel)
+    const defterBlogu = (d) => DEFTER_BLOKLARI.includes(d?.blok) ? d.blok : VARSAYILAN_BLOK;
+
+    // ========================================================================
     // YENİ: "KREDİ" DEFTER TÜRÜ
     // ========================================================================
     // Diğer türlerden farklı çalışır. Bir kredi defteri açıldığında ana para,
@@ -3990,7 +4003,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const [showDefterForm, setShowDefterForm] = useState(false);
     // YENİ: kredi alt nesnesi — yalnızca tur === 'Kredi' iken kullanılır
     const bosKrediForm = { bankaAdi: '', anaPara: '', toplamGeriOdeme: '', taksitSayisi: '', aylikTaksit: '', ilkTaksitTarihi: bugunStr() };
-    const [defterForm, setDefterForm] = useState({ ad: '', tur: 'Nakit', not: '', kredi: bosKrediForm });
+    const [defterForm, setDefterForm] = useState({ ad: '', tur: 'Nakit', not: '', blok: VARSAYILAN_BLOK, kredi: bosKrediForm });
 
     // ========================================================================
     // YENİ: TAKSİT ÖDEME PENCERESİ
@@ -4515,7 +4528,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         });
         addSystemLog?.('Yeni Defter', `"${defterForm.ad}" defteri açıldı.`);
       }
-      setShowDefterForm(false); setEditingDefterId(null); setDefterForm({ ad: '', tur: 'Nakit', not: '', kredi: bosKrediForm });
+      setShowDefterForm(false); setEditingDefterId(null); setDefterForm({ ad: '', tur: 'Nakit', not: '', blok: VARSAYILAN_BLOK, kredi: bosKrediForm });
     };
 
     // ========================================================================
@@ -4885,13 +4898,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       // İki defterin yerini değiştirir ve yeni sırayı Firestore'a yazar.
       // Not: Sıra hiç atanmamışsa önce GÖRÜNEN sıraya göre 0,1,2… atanır;
       // böylece ilk tıklamada liste zıplamaz.
-      const defterSirasiDegistir = async (index, yon) => {
+      // DEĞİŞTİ: Artık BLOK İÇİNDE sıralama yapılır. Eskiden tüm liste
+      // üzerinden index alınıyordu; defterler bloklara ayrıldıktan sonra bu
+      // yanlış defterlerin yer değiştirmesine yol açardı (örn. Depoevim'deki
+      // bir defter, Sembol Nakliyat'takiyle takas edilirdi). Bu yüzden
+      // fonksiyona o bloğun listesi parametre olarak verilir.
+      const defterSirasiDegistir = async (index, yon, blokListesi) => {
+        const liste = blokListesi || filtreliDefterler;
         const hedefIndex = index + yon;
-        if (hedefIndex < 0 || hedefIndex >= filtreliDefterler.length) return; // Uçlarda işlem yok
-        const yeniSira = [...filtreliDefterler];
+        if (hedefIndex < 0 || hedefIndex >= liste.length) return; // Uçlarda işlem yok
+        const yeniSira = [...liste];
         [yeniSira[index], yeniSira[hedefIndex]] = [yeniSira[hedefIndex], yeniSira[index]];
         try {
-          // Yalnızca sırası DEĞİŞEN defterler yazılır (gereksiz yazma olmasın)
+          // Blok içi sıralar 0,1,2… olarak yazılır. Bloklar zaten ekranda ayrı
+          // kutularda çizildiği için bloklar arası sıra çakışması sorun değildir.
+          // Yalnızca sırası DEĞİŞEN defterler yazılır (gereksiz yazma olmasın).
           await Promise.all(yeniSira.map((d, i) =>
             d.sira === i ? null : updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', d.id), { sira: i })
           ).filter(Boolean));
@@ -4906,9 +4927,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           {/* ÜST ÖZET — tüm defterlerin genel durumu */}
           <div className="bg-gradient-to-r from-emerald-700 via-teal-800 to-neutral-900 rounded-2xl p-5 md:p-6 text-white shadow-lg">
             <div className="flex items-center gap-2 mb-4">
-              <BookOpen className="w-6 h-6" />
-              <h2 className="text-xl font-black">Defter</h2>
-              <span className="text-xs font-bold text-white/60">Kasa, cari ve borç/alacak takibi</span>
+              <BookOpen className="w-5 h-5 sm:w-6 sm:h-6 shrink-0" />
+              <h2 className="text-lg sm:text-xl font-black">Defter</h2>
+              {/* Alt başlık telefonda gizlenir — tek satıra sığmıyordu */}
+              <span className="hidden sm:inline text-xs font-bold text-white/60">Kasa, cari ve borç/alacak takibi</span>
             </div>
             {/* ==============================================================
                 YENİ: DÖNEM FİLTRESİ
@@ -4917,9 +4939,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 bugüne döner. Dar ekranda yatay kaydırılabilir.
                 ============================================================== */}
             <div className="flex gap-1.5 mb-4 overflow-x-auto pb-1 -mx-1 px-1">
+              {/* MOBİL: Sekmeler daraltıldı; yedi seçenek dar ekranda yatay
+                  kayarak sığar, yazı küçültülüp dolgu azaltıldı. */}
               {OZET_DONEMLERI.map(d => (
                 <button key={d.id} type="button" onClick={() => setOzetDonem(d.id)}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-black whitespace-nowrap transition shrink-0 border ${
+                  className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black whitespace-nowrap transition shrink-0 border ${
                     ozetDonem === d.id
                       ? 'bg-white text-emerald-800 border-white'
                       : 'bg-white/10 text-white/70 border-white/10 hover:bg-white/20 hover:text-white'
@@ -4939,18 +4963,28 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 </div>
               );
             })()}
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-white/10 rounded-xl p-3 border border-white/10">
-                <div className="text-[10px] font-black uppercase text-emerald-300 flex items-center gap-1"><ArrowDownRight className="w-3.5 h-3.5" /> Toplam Giriş</div>
-                <div className="text-lg md:text-2xl font-black mt-1">₺{paraFmt(toplamGiris)}</div>
+            {/* ==============================================================
+                DEĞİŞTİ (MOBİL DÜZELTME): Üç kutu dar ekranda yan yana
+                sıkışıp rakamlar birbirinin üstüne biniyordu ("₺6.185.000,00"
+                ile "₺6.022.982,02" iç içe geçiyordu). Artık:
+                  • Telefonda ALT ALTA (etiket solda, rakam sağda) — rakam
+                    ne kadar uzun olursa olsun taşmaz
+                  • sm ve üzeri ekranda eski üçlü ızgara korunur
+                  • Rakamlarda tabular-nums: basamaklar eşit genişlikte
+                    hizalanır, alt alta okunması kolaylaşır
+                ============================================================== */}
+            <div className="flex flex-col sm:grid sm:grid-cols-3 gap-2 sm:gap-3">
+              <div className="bg-white/10 rounded-xl p-2.5 sm:p-3 border border-white/10 flex sm:block items-center justify-between gap-2">
+                <div className="text-[10px] font-black uppercase text-emerald-300 flex items-center gap-1 shrink-0"><ArrowDownRight className="w-3.5 h-3.5" /> Toplam Giriş</div>
+                <div className="text-base sm:text-lg md:text-2xl font-black sm:mt-1 tabular-nums text-right">₺{paraFmt(toplamGiris)}</div>
               </div>
-              <div className="bg-white/10 rounded-xl p-3 border border-white/10">
-                <div className="text-[10px] font-black uppercase text-red-300 flex items-center gap-1"><ArrowUpRight className="w-3.5 h-3.5" /> Toplam Çıkış</div>
-                <div className="text-lg md:text-2xl font-black mt-1">₺{paraFmt(toplamCikis)}</div>
+              <div className="bg-white/10 rounded-xl p-2.5 sm:p-3 border border-white/10 flex sm:block items-center justify-between gap-2">
+                <div className="text-[10px] font-black uppercase text-red-300 flex items-center gap-1 shrink-0"><ArrowUpRight className="w-3.5 h-3.5" /> Toplam Çıkış</div>
+                <div className="text-base sm:text-lg md:text-2xl font-black sm:mt-1 tabular-nums text-right">₺{paraFmt(toplamCikis)}</div>
               </div>
-              <div className="bg-white/10 rounded-xl p-3 border border-white/10">
-                <div className="text-[10px] font-black uppercase text-white/70 flex items-center gap-1"><Wallet className="w-3.5 h-3.5" /> Net Bakiye</div>
-                <div className={`text-lg md:text-2xl font-black mt-1 ${netBakiye >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>₺{paraFmt(netBakiye)}</div>
+              <div className="bg-white/10 rounded-xl p-2.5 sm:p-3 border border-white/10 flex sm:block items-center justify-between gap-2">
+                <div className="text-[10px] font-black uppercase text-white/70 flex items-center gap-1 shrink-0"><Wallet className="w-3.5 h-3.5" /> Net Bakiye</div>
+                <div className={`text-base sm:text-lg md:text-2xl font-black sm:mt-1 tabular-nums text-right ${netBakiye >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>₺{paraFmt(netBakiye)}</div>
               </div>
             </div>
 
@@ -4970,7 +5004,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-lg md:text-2xl font-black text-violet-100">₺{paraFmt(toplamKrediBorcu)}</div>
+                  <div className="text-base sm:text-lg md:text-2xl font-black text-violet-100 tabular-nums">₺{paraFmt(toplamKrediBorcu)}</div>
                   {toplamGecikmis > 0 && (
                     <div className="text-[10px] font-black text-red-300">{toplamGecikmis} gecikmiş taksit</div>
                   )}
@@ -4989,7 +5023,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-lg md:text-2xl font-black text-orange-100">₺{paraFmt(toplamBuAyBekleyen)}</div>
+                  <div className="text-base sm:text-lg md:text-2xl font-black text-orange-100 tabular-nums">₺{paraFmt(toplamBuAyBekleyen)}</div>
                   {toplamGecikmisOdeme > 0 && (
                     <div className="text-[10px] font-black text-red-300">{toplamGecikmisOdeme} gecikmiş ödeme</div>
                   )}
@@ -5005,20 +5039,52 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Defter ara (kasa, kişi, firma adı)..."
                 className="w-full pl-9 pr-3 py-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 bg-white transition" />
             </div>
-            <button onClick={() => { setDefterForm({ ad: '', tur: 'Nakit', not: '', kredi: bosKrediForm }); setEditingDefterId(null); setShowDefterForm(true); }}
+            <button onClick={() => { setDefterForm({ ad: '', tur: 'Nakit', not: '', blok: VARSAYILAN_BLOK, kredi: bosKrediForm }); setEditingDefterId(null); setShowDefterForm(true); }}
               className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black rounded-xl transition flex items-center gap-2 shadow-md shadow-emerald-600/20 shrink-0">
               <PlusCircle className="w-4 h-4" /> Yeni Defter
             </button>
           </div>
 
-          {/* DEFTER KARTLARI — videodaki liste mantığı: ad + son işlem + renkli bakiye */}
-          <div className="space-y-2">
+          {/* ==================================================================
+              DEFTER KARTLARI — BLOKLARA GÖRE GRUPLANMIŞ
+              ==================================================================
+              YENİ: Defterler artık düz liste değil; ait oldukları bloğa göre
+              ince çerçeveli kutulara ayrılır ve blok adı kutunun en üstünde
+              yazar. Bloklar DEFTER_BLOKLARI dizisindeki sırayla listelenir
+              (Sembol Nakliyat > Depoevim > Genel).
+              Boş bloklar hiç çizilmez — kullanılmayan grup ekranı doldurmasın.
+              Blok İÇİNDEKİ sıra eskisi gibi 'sira' alanına göredir; sıralama
+              okları da yalnızca kendi bloğu içinde çalışır (aşağıya bkz.).
+              ================================================================== */}
+          <div className="space-y-4">
             {filtreliDefterler.length === 0 && (
               <div className="bg-white rounded-2xl border border-dashed border-neutral-300 p-10 text-center text-sm font-bold text-neutral-400">
                 Henüz defter yok. "Yeni Defter" ile ilk defterinizi (örn. MERKEZ KASA) açın.
               </div>
             )}
-            {filtreliDefterler.map((d, defterIndex) => {
+            {DEFTER_BLOKLARI.map(blokAdi => {
+              const blokDefterleri = filtreliDefterler.filter(d => defterBlogu(d) === blokAdi);
+              if (blokDefterleri.length === 0) return null; // Boş blok çizilmez
+              // Blok toplamı: kredi/ödeme defterleri bakiye mantığına girmediği
+              // için yalnızca para hesapları toplanır (nakit/banka/kk/borçlu).
+              const blokBakiye = blokDefterleri
+                .filter(d => d.tur !== 'Kredi' && d.tur !== 'Ödemeler')
+                .reduce((t, d) => t + defterBakiye(d.id), 0);
+              return (
+                <div key={blokAdi} className="border border-neutral-300 rounded-2xl overflow-hidden bg-neutral-50/50">
+                  {/* BLOK BAŞLIĞI */}
+                  <div className="px-3 sm:px-4 py-2.5 bg-white border-b border-neutral-200 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="w-1.5 h-5 rounded-full bg-emerald-600 shrink-0"></span>
+                      <span className="font-black text-sm text-black truncate">{blokAdi}</span>
+                      <span className="text-[10px] font-bold text-neutral-400 shrink-0">{blokDefterleri.length} defter</span>
+                    </div>
+                    <div className={`text-sm font-black tabular-nums shrink-0 ${blokBakiye > 0 ? 'text-emerald-600' : blokBakiye < 0 ? 'text-red-600' : 'text-neutral-400'}`}>
+                      ₺{paraFmt(Math.abs(blokBakiye))}
+                    </div>
+                  </div>
+                  <div className="p-2 space-y-2">
+            {blokDefterleri.map((d, defterIndex) => {
               const bakiye = defterBakiye(d.id);
               const sonTarih = defterSonIslem(d.id);
               // DÜZELTME: Bu açıklama önce {/* */} biçiminde return ( ile <button>
@@ -5051,15 +5117,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   {siralamaAktif && (
                     <div className="flex flex-col gap-0.5 shrink-0">
                       <button type="button" disabled={defterIndex === 0}
-                        onClick={e => { e.stopPropagation(); defterSirasiDegistir(defterIndex, -1); }}
+                        onClick={e => { e.stopPropagation(); defterSirasiDegistir(defterIndex, -1, blokDefterleri); }}
                         title="Yukarı taşı"
                         className={`p-1 rounded-md transition ${defterIndex === 0 ? 'text-neutral-200 cursor-not-allowed' : 'text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
                         <ChevronUp className="w-4 h-4" />
                       </button>
-                      <button type="button" disabled={defterIndex === filtreliDefterler.length - 1}
-                        onClick={e => { e.stopPropagation(); defterSirasiDegistir(defterIndex, 1); }}
+                      <button type="button" disabled={defterIndex === blokDefterleri.length - 1}
+                        onClick={e => { e.stopPropagation(); defterSirasiDegistir(defterIndex, 1, blokDefterleri); }}
                         title="Aşağı taşı"
-                        className={`p-1 rounded-md transition ${defterIndex === filtreliDefterler.length - 1 ? 'text-neutral-200 cursor-not-allowed' : 'text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
+                        className={`p-1 rounded-md transition ${defterIndex === blokDefterleri.length - 1 ? 'text-neutral-200 cursor-not-allowed' : 'text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
                         <ChevronDown className="w-4 h-4" />
                       </button>
                     </div>
@@ -5091,9 +5157,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     // ÖDEMELER DEFTERİ: bakiye yerine bu ay bekleyen tutar ve gecikme
                     const od = odemeDefterBilgi(d);
                     return (
-                      <div className="text-right shrink-0 min-w-[120px]">
-                        <div className={`text-lg font-black ${od.gecikmisAdet > 0 ? 'text-red-600' : 'text-orange-700'}`}>₺{paraFmt(od.buAyBekleyen)}</div>
-                        <div className="text-[10px] font-black uppercase text-orange-500">
+                      <div className="text-right shrink-0 max-w-[45%] sm:max-w-none sm:min-w-[120px]">
+                        <div className={`text-base sm:text-lg font-black tabular-nums ${od.gecikmisAdet > 0 ? 'text-red-600' : 'text-orange-700'}`}>₺{paraFmt(od.buAyBekleyen)}</div>
+                        <div className="text-[9px] sm:text-[10px] font-black uppercase text-orange-500 leading-tight">
                           Bu Ay Bekleyen • {od.kalemSayisi} kalem
                         </div>
                         {od.gecikmisAdet > 0 && (
@@ -5106,9 +5172,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     const kd = krediDefterBilgi(d);
                     const yuzde = kd.toplamGeriOdeme > 0 ? Math.round((kd.toplamOdenen / kd.toplamGeriOdeme) * 100) : 0;
                     return (
-                      <div className="text-right shrink-0 min-w-[120px]">
-                        <div className={`text-lg font-black ${kd.toplamBorc > 0 ? 'text-violet-700' : 'text-emerald-600'}`}>₺{paraFmt(kd.toplamBorc)}</div>
-                        <div className="text-[10px] font-black uppercase text-violet-500">
+                      <div className="text-right shrink-0 max-w-[45%] sm:max-w-none sm:min-w-[120px]">
+                        <div className={`text-base sm:text-lg font-black tabular-nums ${kd.toplamBorc > 0 ? 'text-violet-700' : 'text-emerald-600'}`}>₺{paraFmt(kd.toplamBorc)}</div>
+                        <div className="text-[9px] sm:text-[10px] font-black uppercase text-violet-500 leading-tight">
                           {kd.kalemSayisi === 0 ? 'Kredi Eklenmemiş'
                             : kd.toplamBorc > 0 ? `Kalan Borç • ${kd.kalemSayisi} kredi`
                             : 'Tüm Krediler Kapandı'}
@@ -5124,13 +5190,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       </div>
                     );
                   })() : (
-                  <div className="text-right shrink-0">
-                    <div className={`text-lg font-black ${bakiye > 0 ? 'text-emerald-600' : bakiye < 0 ? 'text-red-600' : 'text-neutral-400'}`}>₺{paraFmt(Math.abs(bakiye))}</div>
-                    <div className={`text-[10px] font-black uppercase ${bakiye > 0 ? 'text-emerald-500' : bakiye < 0 ? 'text-red-500' : 'text-neutral-400'}`}>
-                      {bakiye > 0 ? 'Alacaklısınız / Kasada Var' : bakiye < 0 ? 'Borçlusunuz' : 'Bakiye Sıfır'}
+                  <div className="text-right shrink-0 max-w-[45%] sm:max-w-none">
+                    {/* MOBİL: Bakiye sütunu daraltıldı, yazı küçültüldü ve
+                        "Alacaklısınız / Kasada Var" etiketi telefonda yalnızca
+                        "ALACAK" olarak kısaltıldı — uzun metin iki satıra taşıp
+                        kart yüksekliğini bozuyordu. */}
+                    <div className={`text-base sm:text-lg font-black tabular-nums ${bakiye > 0 ? 'text-emerald-600' : bakiye < 0 ? 'text-red-600' : 'text-neutral-400'}`}>₺{paraFmt(Math.abs(bakiye))}</div>
+                    <div className={`text-[9px] sm:text-[10px] font-black uppercase leading-tight ${bakiye > 0 ? 'text-emerald-500' : bakiye < 0 ? 'text-red-500' : 'text-neutral-400'}`}>
+                      <span className="sm:hidden">{bakiye > 0 ? 'Alacak' : bakiye < 0 ? 'Borç' : 'Sıfır'}</span>
+                      <span className="hidden sm:inline">{bakiye > 0 ? 'Alacaklısınız / Kasada Var' : bakiye < 0 ? 'Borçlusunuz' : 'Bakiye Sıfır'}</span>
                     </div>
                   </div>
                   )}
+                </div>
+              );
+            })}
+                  </div>
                 </div>
               );
             })}
@@ -5147,6 +5222,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <div className="space-y-3">
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Defter Adı *</label>
                     <input value={defterForm.ad} onChange={e => setDefterForm({ ...defterForm, ad: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" placeholder="Örn: MERKEZ KASA, Ahmet Usta, X Tedarikçi" /></div>
+                  {/* ==============================================================
+                      YENİ: BLOK SEÇİMİ
+                      Defterin hangi grubun (şirketin) altında listeleneceğini
+                      belirler. Türden ÖNCE sorulur, çünkü blok daha üst
+                      seviye bir ayrımdır: önce "kimin defteri", sonra "ne tür".
+                      ============================================================== */}
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Blok (Grup)</label>
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {DEFTER_BLOKLARI.map(b => (
+                        <button key={b} type="button" onClick={() => setDefterForm({ ...defterForm, blok: b })}
+                          className={`py-2 px-1 rounded-lg text-[11px] font-black border-2 transition leading-tight ${
+                            defterForm.blok === b ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-emerald-400'}`}>
+                          {b}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Defter Türü</label>
                     <select value={defterForm.tur} onChange={e => setDefterForm({ ...defterForm, tur: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
                       {DEFTER_TURLERI.map(t => <option key={t}>{t}</option>)}
@@ -5189,6 +5282,30 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     }
 
     // ======================== DEFTER DETAY GÖRÜNÜMÜ ========================
+    // ========================================================================
+    // YENİ: ÖDEMESİ BEKLENEN İŞLER (soluk satırlar)
+    // ========================================================================
+    // İş gelirlerinin otomatik düştüğü BANKA defteri (NAKLİYE GARANTİ BANK)
+    // açıkken, seçili günün HENÜZ SONLANDIRILMAMIŞ işleri listenin en üstünde
+    // soluk kartlar olarak gösterilir: "ödemesi bekleniyor". Bunlar deftere
+    // YAZILMIŞ kayıtlar değildir — para henüz gelmemiştir, yalnızca beklenen
+    // geliri gösteren bir ön izlemedir. Personel işi kapattığı anda:
+    //   • Banka seçtiyse gerçek kayıt bu defterde oluşur (soluk kart kaybolur)
+    //   • Nakit/KK/Ödeme Yapmadı seçtiyse kayıt İLGİLİ deftere düşer — yani
+    //     buradan otomatik "taşınmış" olur (kullanıcının istediği davranış).
+    // ========================================================================
+    const bekleyenIsDefteriId = useMemo(() => odemeIcinDefterBul(defterler, 'Banka')?.id || null, [defterler]);
+    const bekleyenIsler = useMemo(() => {
+      if (!seciliDefterId || seciliDefterId !== bekleyenIsDefteriId) return [];
+      const gun = gunFiltreAktif ? seciliGun : bugunStr();
+      return (jobs || [])
+        .filter(j => j && j.date === gun
+          && j.status !== 'completed' && j.status !== 'cancelled'
+          && !j.endJobDetails)
+        .map(j => ({ ...j, bekleyenTutar: Math.max(0, (parseFloat(j.price) || 0) - (parseFloat(j.deposit) || 0)) }))
+        .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    }, [jobs, seciliDefterId, bekleyenIsDefteriId, gunFiltreAktif, seciliGun]);
+
     const dIslemler = defterIslemleri(seciliDefterId)
       // YENİ: GÜNLÜK FİLTRE — en başta uygulanır ki arama ve kategori
       // filtreleri yalnızca o günün hareketleri içinde çalışsın.
@@ -5242,41 +5359,49 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
     return (
       <div className="max-w-5xl mx-auto animate-in fade-in space-y-4 pb-24">
-        {/* BAŞLIK + BAKİYE KARTI */}
-        <div className="bg-gradient-to-r from-emerald-700 via-teal-800 to-neutral-900 rounded-2xl p-5 text-white shadow-lg">
-          <div className="flex items-center justify-between gap-2 mb-3">
-            <button onClick={() => setSeciliDefterId(null)} className="flex items-center gap-1.5 text-white/80 hover:text-white font-bold text-sm transition"><ChevronLeft className="w-5 h-5" /> Defterler</button>
-            <div className="flex items-center gap-2">
-              <button onClick={() => { setDefterForm({ ad: seciliDefter.ad, tur: seciliDefter.tur, not: seciliDefter.not || '', kredi: { ...bosKrediForm, ...(seciliDefter.kredi || {}) } }); setEditingDefterId(seciliDefter.id); setShowDefterForm(true); }}
-                className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition" title="Defteri Düzenle"><Edit className="w-4 h-4" /></button>
-              <button onClick={() => setDeleteDefterId(seciliDefter.id)} className="p-2 bg-white/10 hover:bg-red-500/60 rounded-lg transition" title="Defteri Sil"><X className="w-4 h-4" /></button>
+        {/* ==================================================================
+            BAŞLIK + BAKİYE KARTI
+            ==================================================================
+            DEĞİŞTİ (kullanıcı talebi): Kart mobilde çok yer kaplıyordu —
+            yaklaşık %40 küçültüldü. Küçülen ölçüler:
+              • Dış dolgu       p-5      -> p-3   (sm+ p-4)
+              • Defter adı      text-2xl -> text-base (sm+ text-xl)
+              • Bakiye rakamı   text-3xl -> text-xl   (sm+ text-2xl)
+              • Tür simgesi     w-6      -> w-4      (sm+ w-5)
+              • Geri/düzenle/sil düğmeleri ve iç kutular da aynı oranda
+            Masaüstünde eski görünüme yakın kalması için sm: kırılımında
+            ölçüler bir kademe yukarı çıkarıldı. */}
+        <div className="bg-gradient-to-r from-emerald-700 via-teal-800 to-neutral-900 rounded-2xl p-3 sm:p-4 text-white shadow-lg">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <button onClick={() => setSeciliDefterId(null)} className="flex items-center gap-1 text-white/80 hover:text-white font-bold text-xs sm:text-sm transition"><ChevronLeft className="w-4 h-4" /> Defterler</button>
+            <div className="flex items-center gap-1.5">
+              <button onClick={() => { setDefterForm({ ad: seciliDefter.ad, tur: seciliDefter.tur, not: seciliDefter.not || '', blok: defterBlogu(seciliDefter), kredi: { ...bosKrediForm, ...(seciliDefter.kredi || {}) } }); setEditingDefterId(seciliDefter.id); setShowDefterForm(true); }}
+                className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition" title="Defteri Düzenle"><Edit className="w-3.5 h-3.5" /></button>
+              <button onClick={() => setDeleteDefterId(seciliDefter.id)} className="p-1.5 bg-white/10 hover:bg-red-500/60 rounded-lg transition" title="Defteri Sil"><X className="w-3.5 h-3.5" /></button>
             </div>
           </div>
-          <div className="flex items-end justify-between gap-3 flex-wrap">
-            <div>
-              {/* DEĞİŞİKLİK: Detay başlığına da TÜR SİMGESİ eklendi; liste kartlarıyla
-                  aynı simgeyi gösterir, böylece hangi defterde olduğunuz belli olur.
-                  Koyu yeşil zemin üzerinde durduğu için renk kutusu yerine sade
-                  beyaz simge kullanıldı. */}
-              <h2 className="text-2xl font-black flex items-center gap-2.5">
-                {(() => { const { Ikon } = defterTuruGorunum(seciliDefter.tur); return <Ikon className="w-6 h-6 shrink-0 text-white/80" />; })()}
-                <span className="truncate">{seciliDefter.ad}</span>
+          <div className="flex items-end justify-between gap-2 flex-wrap">
+            <div className="min-w-0 flex-1">
+              {/* Tür simgesi liste kartlarıyla aynı; hangi defterde olduğunuz belli olsun diye. */}
+              <h2 className="text-base sm:text-xl font-black flex items-center gap-1.5 leading-tight">
+                {(() => { const { Ikon } = defterTuruGorunum(seciliDefter.tur); return <Ikon className="w-4 h-4 sm:w-5 sm:h-5 shrink-0 text-white/80" />; })()}
+                <span className="break-words">{seciliDefter.ad}</span>
               </h2>
-              <div className="text-xs font-bold text-white/60">{defterTuruEtiket(seciliDefter.tur)}{seciliDefter.not ? ` • ${seciliDefter.not}` : ''}</div>
+              <div className="text-[10px] sm:text-xs font-bold text-white/60 mt-0.5">{defterTuruEtiket(seciliDefter.tur)}{seciliDefter.not ? ` • ${seciliDefter.not}` : ''}</div>
             </div>
-            <div className="text-right">
-              <div className={`text-3xl font-black ${dBakiye >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>₺{paraFmt(Math.abs(dBakiye))}</div>
-              <div className="text-[11px] font-black uppercase text-white/70">{dBakiye > 0 ? 'Alacaklısınız / Kasada Var' : dBakiye < 0 ? 'Borçlusunuz' : 'Bakiye Sıfır'}</div>
+            <div className="text-right shrink-0">
+              <div className={`text-xl sm:text-2xl font-black tabular-nums leading-tight ${dBakiye >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>₺{paraFmt(Math.abs(dBakiye))}</div>
+              <div className="text-[9px] sm:text-[10px] font-black uppercase text-white/70 leading-tight">{dBakiye > 0 ? 'Alacaklısınız / Kasada Var' : dBakiye < 0 ? 'Borçlusunuz' : 'Bakiye Sıfır'}</div>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3 mt-4">
-            <div className="bg-white/10 rounded-xl p-2.5 border border-white/10">
-              <div className="text-[10px] font-black uppercase text-emerald-300">Toplam Gelir</div>
-              <div className="text-base font-black">₺{paraFmt(dGiris)}</div>
+          <div className="grid grid-cols-2 gap-2 mt-2.5">
+            <div className="bg-white/10 rounded-lg p-2 border border-white/10">
+              <div className="text-[9px] font-black uppercase text-emerald-300">Toplam Gelir</div>
+              <div className="text-sm font-black tabular-nums">₺{paraFmt(dGiris)}</div>
             </div>
-            <div className="bg-white/10 rounded-xl p-2.5 border border-white/10">
-              <div className="text-[10px] font-black uppercase text-red-300">Toplam Gider</div>
-              <div className="text-base font-black">₺{paraFmt(dCikis)}</div>
+            <div className="bg-white/10 rounded-lg p-2 border border-white/10">
+              <div className="text-[9px] font-black uppercase text-red-300">Toplam Gider</div>
+              <div className="text-sm font-black tabular-nums">₺{paraFmt(dCikis)}</div>
             </div>
           </div>
         </div>
@@ -5609,32 +5734,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           );
         })()}
 
-        {Object.keys(katDagilim).length > 0 && (
-          <div className="bg-white rounded-2xl border border-neutral-200 p-4">
-            <div className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5 mb-3"><BarChart className="w-3.5 h-3.5 text-emerald-600" /> Kategori Dağılımı</div>
-            <div className="space-y-2">
-              {Object.entries(katDagilim).sort((a, b) => (b[1].giris + b[1].cikis) - (a[1].giris + a[1].cikis)).map(([k, v]) => {
-                const oran = Math.round(((v.giris + v.cikis) / katToplam) * 100);
-                return (
-                  <button key={k} onClick={() => setKategoriFiltre(kategoriFiltre === k ? 'Tümü' : k)} className={`w-full text-left group ${kategoriFiltre === k ? 'opacity-100' : 'opacity-90 hover:opacity-100'}`}>
-                    <div className="flex items-center justify-between text-[11px] font-bold mb-0.5">
-                      <span className={`flex items-center gap-1 ${kategoriFiltre === k ? 'text-emerald-700' : 'text-neutral-600'}`}><Tag className="w-3 h-3" /> {k} <span className="text-neutral-400">%{oran}</span></span>
-                      <span className="text-neutral-500">{v.giris > 0 && <span className="text-emerald-600">+₺{paraFmt(v.giris)}</span>} {v.cikis > 0 && <span className="text-red-500 ml-1.5">−₺{paraFmt(v.cikis)}</span>}</span>
-                    </div>
-                    <div className="h-2 bg-neutral-100 rounded-full overflow-hidden flex">
-                      {v.giris > 0 && <div className="h-full bg-emerald-500" style={{ width: `${(v.giris / katToplam) * 100}%` }}></div>}
-                      {v.cikis > 0 && <div className="h-full bg-red-400" style={{ width: `${(v.cikis / katToplam) * 100}%` }}></div>}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            {kategoriFiltre !== 'Tümü' && (
-              <button onClick={() => setKategoriFiltre('Tümü')} className="mt-2 text-[11px] font-black text-emerald-700 hover:underline">✕ "{kategoriFiltre}" filtresini kaldır</button>
-            )}
-          </div>
-        )}
-
         {/* YENİ: GÜNLÜK GEZİNME ÇUBUĞU
             Sol/sağ oklarla düne ve yarına geçilir. Açılışta her zaman bugün seçilidir.
             "Tüm Geçmiş" düğmesi filtreyi kapatıp defterin tamamını listeler. */}
@@ -5789,6 +5888,38 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   : 'Kayıt bulunamadı. Alttaki butonlarla ilk işlemi ekleyin.'}
             </div>
           )}
+          {/* ==============================================================
+              YENİ: ÖDEMESİ BEKLENEN İŞLER — soluk ön izleme kartları
+              Gerçek kayıtların ÜSTÜNDE dururlar (iş sonlanmadıkça hep en
+              üstte). Kesikli çerçeve + düşük opaklık: paranın henüz
+              GELMEDİĞİNİ tek bakışta anlatır. İş kapatıldığında kayıt,
+              seçilen ödeme yöntemine göre ilgili deftere gerçek satır olarak
+              düşer ve buradaki soluk kart kendiliğinden kaybolur.
+              ============================================================== */}
+          {bekleyenIsler.length > 0 && (
+            <div className="border-b border-amber-200 bg-amber-50/50">
+              <div className="px-3 sm:px-4 py-2 text-[10px] font-black uppercase text-amber-700 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5" /> Ödemesi Bekleniyor — {bekleyenIsler.length} iş (sonlanınca yöntemine göre deftere işlenir)
+              </div>
+              {bekleyenIsler.map(j => (
+                <div key={j.id} className="grid grid-cols-[1fr_auto] gap-2 px-3 sm:px-4 py-2.5 items-center opacity-60 border-t border-dashed border-amber-200">
+                  <div className="min-w-0">
+                    <div className="font-black text-sm text-neutral-700 break-words">{j.customerName}</div>
+                    <div className="text-[10px] font-bold text-neutral-500">
+                      {j.time || '—'} • {j.type || 'Nakliye'}
+                      {j.assignedVehiclePlate ? ` • ${j.assignedVehiclePlate}` : ''}
+                      {(parseFloat(j.deposit) || 0) > 0 ? ` • Kapora düşüldü: ₺${paraFmt(parseFloat(j.deposit))}` : ''}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-black text-amber-700 tabular-nums text-sm sm:text-base">₺{paraFmt(j.bekleyenTutar)}</div>
+                    <div className="text-[9px] font-black uppercase text-amber-500">Bekleniyor</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="divide-y divide-neutral-100">
             {/* YENİ: Tüm Zamanlar modunda yalnızca ilk 'gosterilenSayi' kayıt
                 çizilir (günlük modda zaten tek günün hareketleri var, dilimlenmez). */}
@@ -6589,6 +6720,42 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             </div>
           </div>
         )}
+        {/* ==================================================================
+            TAŞINDI (kullanıcı talebi): KATEGORİ DAĞILIMI ARTIK EN ALTTA
+            ==================================================================
+            Eskiden bakiye kartının hemen altındaydı ve asıl bakılan yer olan
+            hesap hareketlerini aşağı itiyordu — özellikle telefonda defteri
+            açar açmaz listeye ulaşmak için uzun uzun kaydırmak gerekiyordu.
+            Artık hareket listesinin ALTINDA duruyor: önce hareketler, sonra
+            özet dağılım. Kategoriye tıklayıp listeyi filtreleme davranışı
+            aynen korundu.
+            ================================================================== */}
+        {Object.keys(katDagilim).length > 0 && (
+          <div className="bg-white rounded-2xl border border-neutral-200 p-4">
+            <div className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5 mb-3"><BarChart className="w-3.5 h-3.5 text-emerald-600" /> Kategori Dağılımı</div>
+            <div className="space-y-2">
+              {Object.entries(katDagilim).sort((a, b) => (b[1].giris + b[1].cikis) - (a[1].giris + a[1].cikis)).map(([k, v]) => {
+                const oran = Math.round(((v.giris + v.cikis) / katToplam) * 100);
+                return (
+                  <button key={k} onClick={() => setKategoriFiltre(kategoriFiltre === k ? 'Tümü' : k)} className={`w-full text-left group ${kategoriFiltre === k ? 'opacity-100' : 'opacity-90 hover:opacity-100'}`}>
+                    <div className="flex items-center justify-between text-[11px] font-bold mb-0.5">
+                      <span className={`flex items-center gap-1 ${kategoriFiltre === k ? 'text-emerald-700' : 'text-neutral-600'}`}><Tag className="w-3 h-3" /> {k} <span className="text-neutral-400">%{oran}</span></span>
+                      <span className="text-neutral-500">{v.giris > 0 && <span className="text-emerald-600">+₺{paraFmt(v.giris)}</span>} {v.cikis > 0 && <span className="text-red-500 ml-1.5">−₺{paraFmt(v.cikis)}</span>}</span>
+                    </div>
+                    <div className="h-2 bg-neutral-100 rounded-full overflow-hidden flex">
+                      {v.giris > 0 && <div className="h-full bg-emerald-500" style={{ width: `${(v.giris / katToplam) * 100}%` }}></div>}
+                      {v.cikis > 0 && <div className="h-full bg-red-400" style={{ width: `${(v.cikis / katToplam) * 100}%` }}></div>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            {kategoriFiltre !== 'Tümü' && (
+              <button onClick={() => setKategoriFiltre('Tümü')} className="mt-2 text-[11px] font-black text-emerald-700 hover:underline">✕ "{kategoriFiltre}" filtresini kaldır</button>
+            )}
+          </div>
+        )}
+
 
         {/* Sabit alt buton çubuğunun son kayıtları örtmemesi için boşluk.
             Mobilde çubuk daha yüksek durduğu için pay biraz fazla bırakıldı. */}
