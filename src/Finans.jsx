@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp , Banknote, UserMinus } from 'lucide-react';
+import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp , Banknote, UserMinus, Settings } from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 // DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
 // Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
@@ -4475,6 +4475,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     };
 
     // Bir ödeme kaleminin vade planını ve ödeme durumunu çıkarır
+    // ========================================================================
+    // YENİ: TUTAR TARİHE GÖRE (ZAM DESTEĞİ)
+    // ========================================================================
+    // kalem.zamlar = [{ gecerliTarih:'2027-01-01', tutar:320000 }, ...]
+    // Bir vadenin tutarı, o vade tarihinde GEÇERLİ olan son zam kaydıdır;
+    // hiç zam yoksa kalemin ana tutarı kullanılır. Böylece "Ocak'tan itibaren
+    // kira 320 bin" dendiğinde geçmiş aylar eski tutarıyla kalır, yeni aylar
+    // zamlı hesaplanır — geçmişe dönük yanlış rakam oluşmaz.
+    // ========================================================================
+    const kalemTutariTarihte = (kalem, tarihStr) => {
+      const anaTutar = parseFloat(kalem.tutar) || 0;
+      const zamlar = (kalem.zamlar || [])
+        .filter(z => z && z.gecerliTarih && z.gecerliTarih <= tarihStr)
+        .sort((a, b) => a.gecerliTarih.localeCompare(b.gecerliTarih));
+      if (!zamlar.length) return anaTutar;
+      return parseFloat(zamlar[zamlar.length - 1].tutar) || anaTutar;
+    };
+
     const odemeKalemBilgi = (defter, kalem) => {
       const tutar = parseFloat(kalem.tutar) || 0;
       const tekrar = kalem.tekrar || 'tek';
@@ -4500,9 +4518,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           else if (tekrar === 'aylik') { t = new Date(y, (a - 1) + (n - 1), 1); const son = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate(); t.setDate(Math.min(g, son)); }
           else { t = new Date(y, a - 1, g); } // tek seferlik
           const tarihStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+          // YENİ: BİTİŞ TARİHİ — bu tarihten SONRAKİ vadeler hiç üretilmez.
+          // "Kiralama bitti, artık borçlanmasın" durumu için. Ödenmiş vadeler
+          // korunur (geçmiş kayıt silinmez), yalnız ileri vadeler kesilir.
+          if (kalem.bitisTarihi && tarihStr > kalem.bitisTarihi && !odenenVadeNolar.has(n)) break;
           const odendi = odenenVadeNolar.has(n);
           const kayit = odemeler.find(i => parseInt(i.vadeNo) === n);
-          plan.push({ no: n, tarih: tarihStr, tutar, odendi, odemeTarihi: kayit?.tarih || null,
+          // YENİ: Vadenin tutarı o tarihte geçerli olan zamlı tutardır
+          const vadeTutari = kalemTutariTarihte(kalem, tarihStr);
+          plan.push({ no: n, tarih: tarihStr, tutar: vadeTutari, odendi, odemeTarihi: kayit?.tarih || null,
                       gecikmis: !odendi && tarihStr < bugunStr() });
         }
       }
@@ -4733,6 +4757,59 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         addSystemLog?.('Ödeme Kalemi', `${seciliDefter.ad}: "${kalem.ad}" ${odemeKalemForm.id ? 'güncellendi' : 'eklendi'} (₺${paraFmt(kalem.tutar)}).`);
         setOdemeKalemForm(null);
       } catch (e) { console.error(e); alert('Ödeme kalemi kaydedilemedi.'); }
+    };
+
+    // ========================================================================
+    // YENİ: OTOMATİK ÖDEME YÖNETİMİ
+    // ========================================================================
+    // Tekrarlanan (aylık/haftalık/yıllık) kalemleri iki şekilde yönetir:
+    //   • SONLANDIR: bitisTarihi yazılır -> o tarihten sonra vade üretilmez
+    //     ("kiralama bitti, artık aylık borç çıkmasın")
+    //   • ZAM: zamlar[] dizisine { gecerliTarih, tutar } eklenir -> o tarihten
+    //     itibaren yeni tutar geçerli olur, GEÇMİŞ AYLAR eski tutarında kalır
+    // Her ikisi de kalemi silmez; geçmiş ödeme kayıtları olduğu gibi durur.
+    // ========================================================================
+    const [otomatikYonetim, setOtomatikYonetim] = useState(false);
+    const [yonetimForm, setYonetimForm] = useState(null); // { kalemId, mod:'bitis'|'zam', tarih, tutar }
+    const [yonetimKaydediliyor, setYonetimKaydediliyor] = useState(false);
+
+    const otomatikOdemeGuncelle = async () => {
+      if (!yonetimForm || !seciliDefter) return;
+      const { kalemId, mod, tarih, tutar } = yonetimForm;
+      if (!tarih) { alert('Tarih seçin.'); return; }
+      if (mod === 'zam' && !(parseFloat(tutar) > 0)) { alert('Yeni tutarı girin.'); return; }
+      setYonetimKaydediliyor(true);
+      try {
+        const yeniListe = (seciliDefter.odemeler || []).map(k => {
+          if (k.id !== kalemId) return k;
+          if (mod === 'bitis') return { ...k, bitisTarihi: tarih };
+          const zamlar = [...(k.zamlar || []).filter(z => z.gecerliTarih !== tarih),
+                          { gecerliTarih: tarih, tutar: String(parseFloat(tutar)) }]
+                          .sort((a, b) => a.gecerliTarih.localeCompare(b.gecerliTarih));
+          return { ...k, zamlar };
+        });
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), { odemeler: yeniListe });
+        const kalemAd = (seciliDefter.odemeler || []).find(k => k.id === kalemId)?.ad || 'Kalem';
+        addSystemLog?.('Otomatik Ödeme Güncellendi', mod === 'bitis'
+          ? `${kalemAd}: ${tarih} tarihinde sonlandırıldı; sonrası için borç oluşmayacak.`
+          : `${kalemAd}: ${tarih} tarihinden itibaren tutar ₺${paraFmt(parseFloat(tutar))} olarak güncellendi.`);
+        setYonetimForm(null);
+      } catch (e) { console.error(e); alert('Güncellenemedi. Lütfen tekrar deneyin.'); }
+      finally { setYonetimKaydediliyor(false); }
+    };
+
+    // Sonlandırmayı veya bir zammı geri al
+    const otomatikOdemeGeriAl = async (kalemId, tur, gecerliTarih) => {
+      if (!seciliDefter) return;
+      if (!window.confirm(tur === 'bitis' ? 'Sonlandırma kaldırılsın mı? Ödeme yeniden aylık borç üretmeye başlar.' : 'Bu tutar değişikliği kaldırılsın mı?')) return;
+      try {
+        const yeniListe = (seciliDefter.odemeler || []).map(k => {
+          if (k.id !== kalemId) return k;
+          if (tur === 'bitis') { const { bitisTarihi, ...kalan } = k; return kalan; }
+          return { ...k, zamlar: (k.zamlar || []).filter(z => z.gecerliTarih !== gecerliTarih) };
+        });
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), { odemeler: yeniListe });
+      } catch (e) { console.error(e); alert('Geri alınamadı.'); }
     };
 
     const odemeKalemiSil = async (kalemId) => {
@@ -5891,11 +5968,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   <CalendarDays className="w-4 h-4" /> Ödeme Planları
                   <span className="text-[10px] font-bold text-white/70">{od.kalemSayisi} kalem</span>
                 </div>
-                <button type="button"
-                  onClick={() => setOdemeKalemForm({ ...bosOdemeKalemi })}
-                  className="px-3 py-1.5 bg-white text-orange-700 text-[11px] font-black rounded-lg hover:bg-orange-50 transition flex items-center gap-1.5">
-                  <PlusCircle className="w-3.5 h-3.5" /> Yeni Ödeme
-                </button>
+                <div className="flex items-center gap-1.5">
+                  {/* YENİ: Otomatik ödemeleri durdurma / tutar güncelleme penceresi */}
+                  <button type="button" onClick={() => setOtomatikYonetim(true)}
+                    className="px-3 py-1.5 bg-orange-800 text-white text-[11px] font-black rounded-lg hover:bg-orange-900 transition flex items-center gap-1.5">
+                    <Settings className="w-3.5 h-3.5" /> Otomatik Ödemeler
+                  </button>
+                  <button type="button"
+                    onClick={() => setOdemeKalemForm({ ...bosOdemeKalemi })}
+                    className="px-3 py-1.5 bg-white text-orange-700 text-[11px] font-black rounded-lg hover:bg-orange-50 transition flex items-center gap-1.5">
+                    <PlusCircle className="w-3.5 h-3.5" /> Yeni Ödeme
+                  </button>
+                </div>
               </div>
 
               {/* ÜST ÖZET: bu ay bekleyen + gecikmiş */}
@@ -6011,9 +6095,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                               {vadeYaklasti(vade.tarih) && !vade.gecikmis && <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" title="Vadeye 1 haftadan az kaldı"></span>}
                               <tur.Ikon className={`w-4 h-4 shrink-0 ${tur.yazi}`} />
                               <div className="flex-1 min-w-0">
-                                <div className="font-black text-sm text-neutral-800 truncate">{kalem.ad}</div>
+                                {/* DEĞİŞTİ: Başlıkta "Sıradaki / 3. ödeme" yerine AYIN ADI.
+                                    Ağustos görünümünde "Ağustos Kirası" yazar; hangi ayın
+                                    borcu olduğu tek bakışta anlaşılır. */}
+                                <div className="font-black text-sm text-neutral-800 truncate">
+                                  {kalem.ad} <span className="text-neutral-500 font-bold">— {AY_ADLARI[Number(vade.tarih.slice(5, 7)) - 1]} {tur.id === 'kira' ? 'Kirası' : 'Ödemesi'}</span>
+                                </div>
                                 <div className="text-[10px] font-bold text-neutral-500">
-                                  Vade: {trh(vade.tarih)} • {vade.no}. ödeme • {tur.ad}
+                                  Vade: {trh(vade.tarih)} • {tur.ad}
                                   {vade.gecikmis && <span className="ml-1 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
                                 </div>
                               </div>
@@ -6045,7 +6134,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                             {odenen.map(({ kalem, vade }) => (
                               <div key={`${kalem.id}_${vade.no}`} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
                                 <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{kalem.ad} — {vade.no}. ödeme (₺{paraFmt(vade.tutar)})</span>
+                                <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{kalem.ad} — {AY_ADLARI[Number(vade.tarih.slice(5, 7)) - 1]} (₺{paraFmt(vade.tutar)})</span>
                                 <span className="text-[10px] font-black text-emerald-700 shrink-0">{trh(vade.odemeTarihi)} ✓</span>
                               </div>
                             ))}
@@ -6139,44 +6228,49 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                         </div>
                       </div>
 
-                      {/* VADE LİSTESİ */}
+                      {/* ==============================================================
+                          DEĞİŞTİ: UZUN VADE LİSTESİ KALDIRILDI
+                          ==============================================================
+                          Süresiz kalemlerde 24 satırlık liste açılıyor ve ekranı
+                          boğuyordu. Aylık görünümde her ayın vadesi zaten kendi
+                          ayında görünüyor; burada yalnızca kalemin ÖZETİ ve
+                          varsa notu/zam-bitiş bilgisi gösteriliyor.
+                          Ödeme, aylık listedeki "Öde" düğmesinden yapılır.
+                          ============================================================== */}
                       {acik && (
-                        <div className="p-3 bg-white border-t border-neutral-200">
-                          {kalem.not && <p className="text-[11px] font-medium text-neutral-500 mb-2 italic">{kalem.not}</p>}
-                          <div className="max-h-64 overflow-y-auto space-y-1">
-                            {bilgi.plan.map(v => (
-                              <div key={v.no} className={`flex items-center gap-2 p-2 rounded-lg border text-xs ${
-                                v.odendi ? 'bg-emerald-50 border-emerald-200'
-                                : v.gecikmis ? 'bg-red-50 border-red-200'
-                                : 'bg-white border-neutral-200'}`}>
-                                <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${
-                                  v.odendi ? 'bg-emerald-600 text-white' : v.gecikmis ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>
-                                  {v.no}
-                                </span>
-                                <div className="flex-1 min-w-0">
-                                  <div className="font-black text-black">₺{paraFmt(v.tutar)}</div>
-                                  <div className={`text-[10px] font-bold ${v.gecikmis ? 'text-red-600' : 'text-neutral-500'}`}>
-                                    Vade: {v.tarih.split('-').reverse().join('.')}
-                                    {v.odendi && v.odemeTarihi ? ` • Ödendi: ${v.odemeTarihi.split('-').reverse().join('.')}` : v.gecikmis ? ' • GECİKMİŞ' : ''}
-                                  </div>
-                                </div>
-                                {v.odendi ? (
-                                  <span className="text-[10px] font-black text-emerald-700 flex items-center gap-1 shrink-0"><CheckCircle className="w-3.5 h-3.5" /> ÖDENDİ</span>
-                                ) : (
-                                  <button type="button"
-                                    onClick={() => setVadeOdeme({ kalem, vade: v, kaynakDefterId: '', tarih: bugunStr(), tutar: String(v.tutar) })}
-                                    className="px-2.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-[10px] font-black rounded-lg transition shrink-0">
-                                    Öde
-                                  </button>
-                                )}
-                              </div>
-                            ))}
+                        <div className="p-3 bg-white border-t border-neutral-200 space-y-2">
+                          {kalem.not && <p className="text-[11px] font-medium text-neutral-500 italic">{kalem.not}</p>}
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200">
+                              <div className="text-[9px] font-black uppercase text-neutral-400">Ödenen</div>
+                              <div className="text-sm font-black text-emerald-700">{bilgi.odenenAdet}</div>
+                            </div>
+                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200">
+                              <div className="text-[9px] font-black uppercase text-neutral-400">Gecikmiş</div>
+                              <div className={`text-sm font-black ${bilgi.gecikmisAdet > 0 ? 'text-red-600' : 'text-neutral-400'}`}>{bilgi.gecikmisAdet}</div>
+                            </div>
+                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200">
+                              <div className="text-[9px] font-black uppercase text-neutral-400">Toplam Ödenen</div>
+                              <div className="text-sm font-black text-neutral-700 tabular-nums">₺{paraFmt(bilgi.odenenTutar)}</div>
+                            </div>
+                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200">
+                              <div className="text-[9px] font-black uppercase text-neutral-400">Sıradaki</div>
+                              <div className="text-sm font-black text-orange-700">{bilgi.siradaki ? bilgi.siradaki.tarih.split('-').reverse().join('.') : '—'}</div>
+                            </div>
                           </div>
-                          {bilgi.suresiz && (
-                            <p className="text-[10px] font-bold text-neutral-400 mt-2 text-center">
-                              Süresiz ödeme — sonraki {SURESIZ_VADE_PENCERESI} vade gösteriliyor, ödedikçe liste ilerler.
+                          {kalem.bitisTarihi && (
+                            <p className="text-[10px] font-black text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">
+                              Bu ödeme {kalem.bitisTarihi.split('-').reverse().join('.')} tarihinde sonlandırıldı — sonrası için borç oluşmaz.
                             </p>
                           )}
+                          {(kalem.zamlar || []).length > 0 && (
+                            <div className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2 space-y-0.5">
+                              {(kalem.zamlar || []).map((z, zi) => (
+                                <div key={zi}>{z.gecerliTarih?.split('-').reverse().join('.')} tarihinden itibaren ₺{paraFmt(parseFloat(z.tutar) || 0)}</div>
+                              ))}
+                            </div>
+                          )}
+                          <p className="text-[10px] font-bold text-neutral-400 text-center">Ödemeler, yukarıdaki aylık listeden yapılır.</p>
                         </div>
                       )}
                     </div>
@@ -7558,6 +7652,109 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
                   <input value={defterForm.not} onChange={e => setDefterForm({ ...defterForm, not: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" /></div>
                 <button onClick={handleSaveDefter} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl transition">Kaydet</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================
+            YENİ: OTOMATİK ÖDEMELER YÖNETİMİ
+            ==================================================================
+            Tekrarlanan kalemleri listeler; her biri için iki işlem sunar:
+              • Sonlandır: seçilen tarihten sonra artık borç üretilmez
+              • Tutarı Güncelle (zam): seçilen tarihten itibaren yeni tutar
+            Geçmiş aylar ve yapılmış ödemeler etkilenmez.
+            ================================================================== */}
+        {otomatikYonetim && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2"><Settings className="w-5 h-5 text-orange-600" /> Otomatik Ödemeler</h3>
+                <button onClick={() => { setOtomatikYonetim(false); setYonetimForm(null); }} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <p className="text-[11px] font-bold text-neutral-500 mb-3">
+                Tekrarlanan ödemeleri durdurabilir veya belirli bir tarihten itibaren tutarını değiştirebilirsiniz. Geçmiş aylar ve yapılmış ödemeler etkilenmez.
+              </p>
+              <div className="space-y-2">
+                {(seciliDefter.odemeler || []).filter(k => (k.tekrar || 'tek') !== 'tek').length === 0 && (
+                  <div className="p-6 text-center text-xs font-bold text-neutral-400 bg-neutral-50 rounded-xl border border-dashed border-neutral-300">
+                    Tekrarlanan (otomatik) ödeme kalemi yok.
+                  </div>
+                )}
+                {(seciliDefter.odemeler || []).filter(k => (k.tekrar || 'tek') !== 'tek').map(k => {
+                  const tur = odemeTuruBilgi(k.odemeTuru);
+                  const guncelTutar = kalemTutariTarihte(k, bugunStr());
+                  const duzenleniyor = yonetimForm?.kalemId === k.id;
+                  return (
+                    <div key={k.id} className={`rounded-xl border p-3 ${k.bitisTarihi ? 'bg-neutral-100 border-neutral-300' : tur.yumusak}`}>
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="min-w-0">
+                          <div className={`font-black text-sm ${k.bitisTarihi ? 'text-neutral-500 line-through' : 'text-neutral-800'}`}>{k.ad}</div>
+                          <div className="text-[10px] font-bold text-neutral-500">
+                            Güncel tutar: ₺{paraFmt(guncelTutar)} • {tekrarEtiket(k.tekrar, k.tekrarSayisi)} • {tur.ad}
+                          </div>
+                        </div>
+                        {!duzenleniyor && (
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {!k.bitisTarihi && (
+                              <>
+                                <button type="button" onClick={() => setYonetimForm({ kalemId: k.id, mod: 'zam', tarih: bugunStr(), tutar: String(guncelTutar) })}
+                                  className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black rounded-lg transition">Tutarı Güncelle</button>
+                                <button type="button" onClick={() => setYonetimForm({ kalemId: k.id, mod: 'bitis', tarih: bugunStr(), tutar: '' })}
+                                  className="px-2.5 py-1.5 bg-red-600 hover:bg-red-700 text-white text-[10px] font-black rounded-lg transition">Sonlandır</button>
+                              </>
+                            )}
+                            {k.bitisTarihi && (
+                              <button type="button" onClick={() => otomatikOdemeGeriAl(k.id, 'bitis')}
+                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition">Yeniden Başlat</button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {k.bitisTarihi && (
+                        <div className="mt-1.5 text-[10px] font-black text-red-600">
+                          {k.bitisTarihi.split('-').reverse().join('.')} tarihinde sonlandırıldı
+                        </div>
+                      )}
+                      {(k.zamlar || []).length > 0 && (
+                        <div className="mt-1.5 space-y-0.5">
+                          {(k.zamlar || []).map((z, zi) => (
+                            <div key={zi} className="flex items-center justify-between gap-2 text-[10px] font-bold text-blue-700 bg-white/70 rounded px-2 py-1">
+                              <span>{z.gecerliTarih?.split('-').reverse().join('.')} → ₺{paraFmt(parseFloat(z.tutar) || 0)}</span>
+                              <button type="button" onClick={() => otomatikOdemeGeriAl(k.id, 'zam', z.gecerliTarih)}
+                                className="text-red-500 hover:text-red-700 shrink-0" title="Bu değişikliği kaldır"><Trash2 className="w-3 h-3" /></button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Düzenleme formu */}
+                      {duzenleniyor && (
+                        <div className="mt-2 pt-2 border-t border-neutral-300 space-y-2">
+                          <div className="text-[10px] font-black uppercase text-neutral-600">
+                            {yonetimForm.mod === 'bitis' ? 'Hangi tarihten sonra borç oluşmasın?' : 'Yeni tutar hangi tarihten itibaren geçerli?'}
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input type="date" value={yonetimForm.tarih} onChange={e => setYonetimForm({ ...yonetimForm, tarih: e.target.value })}
+                              className="w-full p-2 border border-neutral-300 rounded-lg text-xs font-bold outline-none focus:ring-2 focus:ring-orange-500" />
+                            {yonetimForm.mod === 'zam' && (
+                              <input type="number" inputMode="decimal" value={yonetimForm.tutar} onChange={e => setYonetimForm({ ...yonetimForm, tutar: e.target.value })}
+                                placeholder="Yeni tutar" className="w-full p-2 border border-neutral-300 rounded-lg text-xs font-black outline-none focus:ring-2 focus:ring-orange-500" />
+                            )}
+                          </div>
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => setYonetimForm(null)} className="flex-1 py-2 bg-neutral-100 text-neutral-600 text-xs font-black rounded-lg">Vazgeç</button>
+                            <button type="button" onClick={otomatikOdemeGuncelle} disabled={yonetimKaydediliyor}
+                              className={`flex-1 py-2 text-white text-xs font-black rounded-lg disabled:bg-neutral-300 ${yonetimForm.mod === 'bitis' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>
+                              {yonetimKaydediliyor ? 'Kaydediliyor...' : yonetimForm.mod === 'bitis' ? 'Sonlandır' : 'Tutarı Güncelle'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
