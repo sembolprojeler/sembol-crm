@@ -1383,21 +1383,36 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
     const hedefTurler = ODEME_DEFTER_TUR_ESLEME[odemeYontemi] || [];
     if (!hedefTurler.length) return null;
     // ======================================================================
-    // DEĞİŞTİ: "NAKLİYE" ADLI DEFTERLERE ÖNCELİK
+    // DEĞİŞTİ (v2): ÖNCELİK ARTIK AD DEĞİL, BLOK
     // ======================================================================
-    // SORUN: Aynı türde birden çok defter olunca alfabetik ilk seçiliyordu.
-    // "DEPO ( ALBARAKA BANK )" alfabetik olarak "NAKLİYE ( GARANTİ BANK )"ın
-    // ÖNÜNDE olduğu için iş gelirleri yanlışlıkla depo hesabına düşebilirdi.
-    // İş geliri nakliye işinden geldiğine göre, adında "NAKLİYE" geçen defter
-    // önce denenir; yoksa alfabetik ilk uygun defter (eski davranış) kullanılır.
+    // Defterler bloklara ayrıldı (Sembol Nakliyat / Depoevim / Genel) ve
+    // adlardan "NAKLİYE" kalktı ("GARANTİ BANK" gibi). Eski ad önceliği bu
+    // yüzden işlemez oldu — alfabetik ilk Banka defteri Depoevim'in
+    // ALBARAKA'sı olurdu ve iş gelirleri yanlış şirkete düşerdi.
+    //
+    // YENİ KURAL (kullanıcı): İş sonlandırma gelirleri "Sembol Nakliyat"
+    // BLOĞUNDAKİ deftere, ödeme yöntemiyle eşleşen TÜRE göre gider:
+    //   Banka -> Sembol Nakliyat bloğundaki Banka türü defter (GARANTİ BANK)
+    //   Nakit -> Nakit türü (KASA), Kredi Kartı -> Kredi Kartı (İŞYERİM POS),
+    //   Ödeme Yapmadı/Alınamadı -> Borçlu (TAHSİL BEKLEYEN)
+    // Sıralama basamakları (ilk eşleşen SABİT kalsın diye deterministik):
+    //   1) blok === 'Sembol Nakliyat' olanlar önce
+    //   2) (geriye uyum) adında NAKLİYE geçenler — blok atanmamış eski kurulum
+    //   3) blok içi 'sira' alanı, 4) alfabetik
     // ======================================================================
     const uygun = (defterler || [])
       .filter(d => hedefTurler.includes(d.tur))
       .sort((a, b) => {
+        const aB = (a.blok === 'Sembol Nakliyat') ? 0 : 1;
+        const bB = (b.blok === 'Sembol Nakliyat') ? 0 : 1;
+        if (aB !== bB) return aB - bB;                    // 1) Sembol Nakliyat bloğu öne
         const aN = (a.ad || '').toLocaleUpperCase('tr-TR').includes('NAKLİYE') ? 0 : 1;
         const bN = (b.ad || '').toLocaleUpperCase('tr-TR').includes('NAKLİYE') ? 0 : 1;
-        if (aN !== bN) return aN - bN; // NAKLİYE olanlar öne
-        return (a.ad || '').localeCompare((b.ad || ''), 'tr-TR');
+        if (aN !== bN) return aN - bN;                    // 2) geriye uyum: NAKLİYE adı
+        const aS = Number.isFinite(a.sira) ? a.sira : 9999;
+        const bS = Number.isFinite(b.sira) ? b.sira : 9999;
+        if (aS !== bS) return aS - bS;                    // 3) blok içi sıra
+        return (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'); // 4) alfabetik
       });
     return uygun[0] || null;
   };
@@ -1468,15 +1483,22 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
 
       // BANKA türündeki defter seçilir (birden fazlaysa adına göre ilk sıradaki).
       const defterSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'defterler'));
-      // DEĞİŞTİ: Adında "NAKLİYE" geçen Banka defteri öncelikli (iş kaporası
-      // nakliye hesabına düşmeli; DEPO hesabı alfabetik önce diye seçilmesin).
+      // DEĞİŞTİ (v2): Kapora da "Sembol Nakliyat" BLOĞUNDAKİ Banka defterine
+      // düşer (odemeIcinDefterBul ile aynı basamaklar — iki fonksiyon aynı
+      // hesabı seçsin ki kapora ile iş geliri farklı defterlere dağılmasın).
       const uygun = defterSnap.docs
         .map(d => ({ ...d.data(), id: d.id }))
         .filter(d => d.tur === 'Banka')
         .sort((a, b) => {
+          const aB = (a.blok === 'Sembol Nakliyat') ? 0 : 1;
+          const bB = (b.blok === 'Sembol Nakliyat') ? 0 : 1;
+          if (aB !== bB) return aB - bB;
           const aN = (a.ad || '').toLocaleUpperCase('tr-TR').includes('NAKLİYE') ? 0 : 1;
           const bN = (b.ad || '').toLocaleUpperCase('tr-TR').includes('NAKLİYE') ? 0 : 1;
           if (aN !== bN) return aN - bN;
+          const aS = Number.isFinite(a.sira) ? a.sira : 9999;
+          const bS = Number.isFinite(b.sira) ? b.sira : 9999;
+          if (aS !== bS) return aS - bS;
           return (a.ad || '').localeCompare((b.ad || ''), 'tr-TR');
         });
       const defter = uygun[0];
