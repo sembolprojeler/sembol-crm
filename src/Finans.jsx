@@ -7017,6 +7017,27 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <div className="space-y-3">
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Defter Adı *</label>
                   <input value={defterForm.ad} onChange={e => setDefterForm({ ...defterForm, ad: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" /></div>
+                {/* ==============================================================
+                    YENİ: BLOK SEÇİMİ (detay ekranındaki düzenleme formu)
+                    ==============================================================
+                    DİKKAT: Defter formu iki ayrı yerde render ediliyor —
+                    biri defter LİSTESİNDE, biri defter DETAYINDA. Blok seçimi
+                    önce yalnızca listedekine eklenmişti; detaydan "Düzenle"
+                    denince alan görünmüyordu. Aynı alan buraya da eklendi ki
+                    her iki yoldan da blok değiştirilebilsin.
+                    ============================================================== */}
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Blok (Grup)</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {DEFTER_BLOKLARI.map(b => (
+                      <button key={b} type="button" onClick={() => setDefterForm({ ...defterForm, blok: b })}
+                        className={`py-2 px-1 rounded-lg text-[11px] font-black border-2 transition leading-tight ${
+                          defterForm.blok === b ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-emerald-400'}`}>
+                        {b}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px] font-bold text-neutral-400 mt-1">Defter, seçtiğiniz bloğun altında listelenir.</p>
+                </div>
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Defter Türü</label>
                   <select value={defterForm.tur} onChange={e => setDefterForm({ ...defterForm, tur: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
                     {DEFTER_TURLERI.map(t => <option key={t}>{t}</option>)}
