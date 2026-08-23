@@ -4870,6 +4870,35 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     };
 
     // ======================== DEFTER LİSTESİ GÖRÜNÜMÜ ========================
+    // ========================================================================
+    // ÖDEMESİ BEKLENEN İŞLER (soluk satırlar)
+    // ========================================================================
+    // KONUM NOTU (KRİTİK): Bu iki useMemo, aşağıdaki "if (!seciliDefter)"
+    // erken return'ünden ÖNCE durmak ZORUNDADIR. Önceden return'den SONRA
+    // duruyorlardı: defter listesindeyken hiç çalışmıyor, bir deftere
+    // girilince çalışıyorlardı. Hook sayısı render'lar arasında değiştiği
+    // için React #310 hatası ("Rendered more hooks than during the previous
+    // render") oluşuyor ve defter detayı hiç açılmıyordu.
+    // React'te hook'lar her render'da AYNI sayıda ve AYNI sırada çağrılmalıdır;
+    // koşullu return'lerin ÜSTÜNDE tutulmaları bunun tek güvencesidir.
+    //
+    // İşlev: İş gelirlerinin otomatik düştüğü BANKA defteri açıkken, seçili
+    // günün HENÜZ SONLANDIRILMAMIŞ işleri listenin en üstünde soluk kartlar
+    // olarak gösterilir. Bunlar deftere yazılmış kayıtlar değildir; iş
+    // kapatılınca yöntemine göre ilgili deftere gerçek satır olarak düşer.
+    // ========================================================================
+    const bekleyenIsDefteriId = useMemo(() => odemeIcinDefterBul(defterler, 'Banka')?.id || null, [defterler]);
+    const bekleyenIsler = useMemo(() => {
+      if (!seciliDefterId || seciliDefterId !== bekleyenIsDefteriId) return [];
+      const gun = gunFiltreAktif ? seciliGun : bugunStr();
+      return (jobs || [])
+        .filter(j => j && j.date === gun
+          && j.status !== 'completed' && j.status !== 'cancelled'
+          && !j.endJobDetails)
+        .map(j => ({ ...j, bekleyenTutar: Math.max(0, (parseFloat(j.price) || 0) - (parseFloat(j.deposit) || 0)) }))
+        .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+    }, [jobs, seciliDefterId, bekleyenIsDefteriId, gunFiltreAktif, seciliGun]);
+
     if (!seciliDefter) {
       // ====================================================================
       // DEĞİŞTİ: DEFTER SIRASI ARTIK ELLE AYARLANABİLİR
@@ -5283,29 +5312,6 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
     // ======================== DEFTER DETAY GÖRÜNÜMÜ ========================
     // ========================================================================
-    // YENİ: ÖDEMESİ BEKLENEN İŞLER (soluk satırlar)
-    // ========================================================================
-    // İş gelirlerinin otomatik düştüğü BANKA defteri (NAKLİYE GARANTİ BANK)
-    // açıkken, seçili günün HENÜZ SONLANDIRILMAMIŞ işleri listenin en üstünde
-    // soluk kartlar olarak gösterilir: "ödemesi bekleniyor". Bunlar deftere
-    // YAZILMIŞ kayıtlar değildir — para henüz gelmemiştir, yalnızca beklenen
-    // geliri gösteren bir ön izlemedir. Personel işi kapattığı anda:
-    //   • Banka seçtiyse gerçek kayıt bu defterde oluşur (soluk kart kaybolur)
-    //   • Nakit/KK/Ödeme Yapmadı seçtiyse kayıt İLGİLİ deftere düşer — yani
-    //     buradan otomatik "taşınmış" olur (kullanıcının istediği davranış).
-    // ========================================================================
-    const bekleyenIsDefteriId = useMemo(() => odemeIcinDefterBul(defterler, 'Banka')?.id || null, [defterler]);
-    const bekleyenIsler = useMemo(() => {
-      if (!seciliDefterId || seciliDefterId !== bekleyenIsDefteriId) return [];
-      const gun = gunFiltreAktif ? seciliGun : bugunStr();
-      return (jobs || [])
-        .filter(j => j && j.date === gun
-          && j.status !== 'completed' && j.status !== 'cancelled'
-          && !j.endJobDetails)
-        .map(j => ({ ...j, bekleyenTutar: Math.max(0, (parseFloat(j.price) || 0) - (parseFloat(j.deposit) || 0)) }))
-        .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    }, [jobs, seciliDefterId, bekleyenIsDefteriId, gunFiltreAktif, seciliGun]);
-
     const dIslemler = defterIslemleri(seciliDefterId)
       // YENİ: GÜNLÜK FİLTRE — en başta uygulanır ki arama ve kategori
       // filtreleri yalnızca o günün hareketleri içinde çalışsın.
