@@ -3357,18 +3357,55 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
              </div>
           ) : (
              myNotifications.map(n => (
-               <div key={n.id} className={`p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition ${n.read ? 'bg-white border-neutral-200' : 'bg-red-50/40 border-red-200'}`}>
-                 <div>
+               <div key={n.id} className={`p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-4 transition ${
+                 // Görev/not bildirimi tamamlanana kadar sarı vurguyla AYRIŞIR
+                 n.type === 'hatirlatmaGorev' && !n.gorevTamamlandi ? 'bg-amber-50 border-amber-300'
+                 : n.read ? 'bg-white border-neutral-200' : 'bg-red-50/40 border-red-200'}`}>
+                 <div className="min-w-0">
                    <h4 className="font-bold text-black flex items-center gap-2 text-lg">
                      {!n.read && <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse shrink-0"></span>}
                      {n.title}
+                     {n.type === 'hatirlatmaGorev' && (
+                       n.gorevTamamlandi
+                         ? <span className="text-[10px] font-black bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full shrink-0">TAMAMLANDI</span>
+                         : <span className="text-[10px] font-black bg-amber-500 text-white px-2 py-0.5 rounded-full shrink-0 animate-pulse">BEKLİYOR</span>
+                     )}
                    </h4>
                    <p className="text-sm text-neutral-600 mt-1.5 leading-relaxed">{n.message}</p>
                  </div>
-                 <div className="shrink-0 text-right">
+                 <div className="shrink-0 text-right space-y-2">
                     <span className="inline-block text-xs font-bold text-neutral-500 bg-neutral-100 px-3 py-1.5 rounded-lg border border-neutral-200">
                       <Clock className="w-3.5 h-3.5 inline mr-1" />{n.date}
                     </span>
+                    {/* ==========================================================
+                        YENİ: TAMAMLANDI OLARAK İŞARETLE
+                        Görev/not bildirimi, hatırlatmanın kendisine bağlıdır
+                        (hatirlatmaId). Düğme İKİ şeyi birden yapar:
+                          1) hatirlatmalar/{id} -> tamamlandi:true (Hatırlatmalar
+                             sayfasında da tamamlanmış görünür, rozet söner)
+                          2) Bu bildirime gorevTamamlandi:true yazar (rozet ve
+                             sarı vurgu kalkar, TAMAMLANDI etiketi kalır)
+                        Görev tamamlanana kadar düğme burada durur — kullanıcı
+                        talebi: "tamamlandı işaretlenene kadar görsün".
+                        ========================================================== */}
+                    {n.type === 'hatirlatmaGorev' && n.hatirlatmaId && !n.gorevTamamlandi && (
+                      <button type="button"
+                        onClick={async () => {
+                          try {
+                            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar', n.hatirlatmaId), {
+                              tamamlandi: true,
+                              tamamlayan: currentUser?.fullName || 'Sistem',
+                              tamamlanmaTarihi: new Date().toISOString(),
+                            });
+                            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notifications', n.id), {
+                              gorevTamamlandi: true, read: true,
+                            });
+                          } catch (e) { console.error('Görev tamamlanamadı:', e); alert('İşaretlenemedi, tekrar deneyin.'); }
+                        }}
+                        className="block w-full px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg transition">
+                        ✓ Tamamlandı Olarak İşaretle
+                      </button>
+                    )}
                  </div>
                </div>
              ))
@@ -3741,7 +3778,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         if (currentUser?.id) {
           const benimGorevler = snap.docs.filter(d => {
             const k = d.data();
-            return k.tur === 'gorev' && !k.tamamlandi && String(k.atananPersonelId || '') === String(currentUser.id);
+            // DEĞİŞTİ: tur === 'gorev' şartı kaldırıldı — kullanıcıya atanan
+            // NOT'lar da görevler gibi rozette sayılır ve tamamlanana kadar
+            // yanıp sönmeye devam eder (kullanıcı talebi: "görev ya da not").
+            return !k.tamamlandi && String(k.atananPersonelId || '') === String(currentUser.id);
           }).length;
           setAtanmisGorevSayisi(benimGorevler);
         } else {
@@ -3933,7 +3973,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [jobToEnd, setJobToEnd] = useState(null);
     const [endJobError, setEndJobError] = useState('');
     const [endJobData, setEndJobData] = useState({ 
-      paymentMethod: 'Nakit', 
+      paymentMethod: 'Banka', // DEĞİŞTİ: varsayılan Banka — listede de ilk seçenek 
       damageStatus: 'Hasarsız teslim edildi', 
       damageDetails: '',
       damageImages: [],
@@ -6012,7 +6052,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       setJobToEnd(job);
       setEndJobError('');
       setEndJobData({ 
-        paymentMethod: 'Nakit', damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], deliveryImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '',
+        paymentMethod: 'Banka', // DEĞİŞTİ: varsayılan Banka — listede de ilk seçenek damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], deliveryImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '',
         elevatorSetup: 'Evet', elevatorSetupReason: '', elevatorImages: [], elevatorIssue: 'Hayır', elevatorIssueReason: '', vehicleIssue: 'Hayır', vehicleIssueReason: '',
         // YENİ: İş zaten sonlandırılmışsa (düzenleme modu) önceki sonlandırma bilgilerini forma doldur.
         // Yeni/devam eden işlerde job.endJobDetails boş olduğu için varsayılanlar aynen kalır.
@@ -6510,11 +6550,23 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 onChange={(e) => setGlobalSearchQuery(e.target.value)}
                 // YENİ: Enter'a basınca, girilen metinle eşleşen ilk aracın profiline direkt git
                 onKeyDown={(e) => {
-                  if (e.key !== 'Enter' || !showGlobalSearchVehicle) return;
-                  // Arama metnini normalize et (küçük harf + boşlukları kaldır)
+                  if (e.key !== 'Enter') return;
                   const norm = (s) => (s || '').toString().toLocaleLowerCase('tr-TR').replace(/\s+/g, '');
                   const q = norm(globalSearchQuery);
                   if (!q) return;
+                  // YENİ: Enter'da önce TESLİM KODU denenir (3+ karakter).
+                  // Eşleşme varsa doğrudan müşteri profiline gidilir.
+                  if (q.length >= 3) {
+                    const kodEslesme = jobs.find(j => j.deliveryCode && norm(j.deliveryCode) === q && j.customerPhone);
+                    if (kodEslesme) {
+                      setViewingCariKey(normalizeCariPhone(kodEslesme.customerPhone));
+                      setActiveTab('customerProfile');
+                      setGlobalSearchQuery('');
+                      setIsSidebarOpen(false);
+                      return;
+                    }
+                  }
+                  if (!showGlobalSearchVehicle) return;
                   // Önce tam plaka eşleşmesi ara, yoksa plakası aramayı içeren ilk aracı al
                   const match = vehicles.find(v => norm(v.plate) === q) || vehicles.find(v => norm(v.plate).includes(q));
                   if (match) {
@@ -6555,12 +6607,44 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               const customerResults = showGlobalSearchCustomer ? Array.from(customerMap.values()).filter(c =>
                 normalizeSearchStr(c.name).includes(q) || normalizeSearchStr(c.phone).includes(q)
               ).slice(0, 5) : [];
-              const hasAnyResult = vehicleResults.length > 0 || personnelResults.length > 0 || customerResults.length > 0;
+              // ======================================================================
+              // YENİ: TESLİM KODU İLE ARAMA
+              // ======================================================================
+              // Teslim kodu 6 haneli, benzersiz bir koddur; müşteri adı/telefon
+              // yerine bu kodu bilen biri (örn. şoförle konuşan yönetici) direkt
+              // o işin müşterisine ulaşabilsin diye eklendi. Kod tam olarak
+              // eşleşen işin müşterisi bulunur ve normal müşteri sonucu gibi
+              // "Cariye Git" ile profiline gidilir. En az 3 karakter yazılmadan
+              // aranmaz — aksi halde her harf tüm işleri tarardı.
+              // ======================================================================
+              const deliveryCodeMatch = (showGlobalSearchCustomer && q.length >= 3)
+                ? jobs.find(j => j.deliveryCode && normalizeSearchStr(j.deliveryCode) === q)
+                : null;
+              const deliveryCodeResult = (deliveryCodeMatch && deliveryCodeMatch.customerPhone) ? {
+                name: deliveryCodeMatch.customerName,
+                phone: deliveryCodeMatch.customerPhone,
+                cariKey: normalizeCariPhone(deliveryCodeMatch.customerPhone),
+                kod: deliveryCodeMatch.deliveryCode,
+              } : null;
+              const hasAnyResult = vehicleResults.length > 0 || personnelResults.length > 0 || customerResults.length > 0 || !!deliveryCodeResult;
 
               return (
                 <div className="absolute left-0 right-0 mt-2 bg-white border-2 border-red-500 rounded-2xl shadow-2xl z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 max-h-[70vh] overflow-y-auto custom-scrollbar text-black">
                   {!hasAnyResult && (
-                    <p className="p-5 text-sm text-neutral-500 text-center font-medium">Eşleşen araç, personel veya müşteri bulunamadı.</p>
+                    <p className="p-5 text-sm text-neutral-500 text-center font-medium">Eşleşen araç, personel, müşteri veya teslim kodu bulunamadı.</p>
+                  )}
+
+                  {/* YENİ: TESLİM KODU EŞLEŞMESİ — bulunduysa en üstte, kendi
+                      başlığıyla gösterilir; normal müşteri sonuçlarıyla karışmaz. */}
+                  {deliveryCodeResult && (
+                    <div className="p-3 border-b border-neutral-100 bg-emerald-50/40">
+                      <p className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider px-2 mb-1.5">Teslim Kodu Eşleşmesi</p>
+                      <button type="button" onClick={() => { setViewingCariKey(deliveryCodeResult.cariKey); setActiveTab('customerProfile'); setGlobalSearchQuery(''); setIsSidebarOpen(false); }} className="w-full text-left px-3 py-2.5 rounded-xl hover:bg-emerald-50 transition flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-black text-xs shrink-0">{(deliveryCodeResult.name || '?').charAt(0).toUpperCase()}</div>
+                        <div className="flex-1"><span className="font-bold text-black text-sm block">{deliveryCodeResult.name}</span><span className="text-[10px] text-neutral-500">{deliveryCodeResult.phone} • Kod: {deliveryCodeResult.kod}</span></div>
+                        <span className="text-[10px] font-bold text-emerald-700">Cariye Git →</span>
+                      </button>
+                    </div>
                   )}
 
                   {showGlobalSearchCustomer && customerResults.length > 0 && (
@@ -9025,8 +9109,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       <div>
                         <label className="block text-sm font-bold text-black mb-1">Ödeme Şekli</label>
                         <select value={endJobData.paymentMethod} onChange={e => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                            {/* DEĞİŞTİ: "Havale/EFT" -> "Banka", ilk seçenek */}
+                            <option value="Banka">Banka</option>
                             <option value="Nakit">Nakit</option>
-                            <option value="Havale/EFT">Havale/EFT</option>
                             <option value="Ödeme Alınmadı">Ödeme Alınmadı</option>
                         </select>
                       </div>
@@ -9100,9 +9185,18 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
                       <div>
                         <label className="block text-sm font-bold text-black mb-1">Ödeme Yöntemi</label>
+                        {/* DEĞİŞTİ (kullanıcı talebi): "Havale/EFT" -> "Banka" ve
+                            sıra Banka > Nakit > Kredi Kartı > Ödeme Yapmadı oldu.
+                            Seçime göre gelir OTOMATİK olarak doğru deftere düşer:
+                              Banka         -> Banka türü (NAKLİYE GARANTİ BANK)
+                              Nakit         -> Nakit türü (NAKLİYE NAKİT)
+                              Kredi Kartı   -> Kredi Kartı türü (NAKLİYE KREDİ KARTI)
+                              Ödeme Yapmadı -> Borçlu türü (NAKLİYE ALACAK)
+                            Eski işlerdeki 'Havale/EFT' değeri de Banka defterine
+                            eşleşmeye devam eder (shared.tsx ODEME_DEFTER_TUR_ESLEME). */}
                         <select value={endJobData.paymentMethod} onChange={e => setEndJobData({...endJobData, paymentMethod: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white font-medium">
+                          <option value="Banka">Banka</option>
                           <option value="Nakit">Nakit</option>
-                          <option value="Havale/EFT">Havale/EFT</option>
                           <option value="Kredi Kartı">Kredi Kartı</option>
                           <option value="Ödeme Yapmadı">Ödeme Yapmadı</option>
                         </select>
