@@ -7242,176 +7242,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             ayrı ayrı tanımlanır. Aylık taksit boş bırakılırsa toplam/adet
             olarak otomatik hesaplanır.
             ================================================================== */}
-        {krediKalemForm && (
-          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-black text-black flex items-center gap-2">
-                  <Landmark className="w-5 h-5 text-violet-600" /> {krediKalemForm.id ? 'Krediyi Düzenle' : 'Yeni Kredi'}
-                </h3>
-                <button onClick={() => setKrediKalemForm(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-3">
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Kredi Adı *</label>
-                  <input value={krediKalemForm.ad} onChange={e => setKrediKalemForm({ ...krediKalemForm, ad: e.target.value })}
-                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm"
-                    placeholder="Örn: Taşıt Kredisi, İşletme Kredisi" /></div>
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Banka / Kurum</label>
-                  <input value={krediKalemForm.bankaAdi} onChange={e => setKrediKalemForm({ ...krediKalemForm, bankaAdi: e.target.value })}
-                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm"
-                    placeholder="Örn: Garanti BBVA, Halkbank" /></div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ana Para (₺)</label>
-                    <input type="number" inputMode="decimal" value={krediKalemForm.anaPara} onChange={e => setKrediKalemForm({ ...krediKalemForm, anaPara: e.target.value })}
-                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="500000" /></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Toplam Geri Ödeme (₺) *</label>
-                    <input type="number" inputMode="decimal" value={krediKalemForm.toplamGeriOdeme} onChange={e => setKrediKalemForm({ ...krediKalemForm, toplamGeriOdeme: e.target.value })}
-                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="650000" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Taksit Sayısı *</label>
-                    <input type="number" inputMode="numeric" value={krediKalemForm.taksitSayisi} onChange={e => setKrediKalemForm({ ...krediKalemForm, taksitSayisi: e.target.value })}
-                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="24" /></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Aylık Taksit (₺)</label>
-                    <input type="number" inputMode="decimal" value={krediKalemForm.aylikTaksit} onChange={e => setKrediKalemForm({ ...krediKalemForm, aylikTaksit: e.target.value })}
-                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="boş = otomatik" /></div>
-                </div>
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlk Taksit Tarihi *</label>
-                  <input type="date" value={krediKalemForm.ilkTaksitTarihi} onChange={e => setKrediKalemForm({ ...krediKalemForm, ilkTaksitTarihi: e.target.value })}
-                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" /></div>
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
-                  <input value={krediKalemForm.not || ''} onChange={e => setKrediKalemForm({ ...krediKalemForm, not: e.target.value })}
-                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="Opsiyonel açıklama..." /></div>
 
-                {/* Canlı önizleme */}
-                {(() => {
-                  const ana = parseFloat(krediKalemForm.anaPara) || 0;
-                  const top = parseFloat(krediKalemForm.toplamGeriOdeme) || 0;
-                  const adet = parseInt(krediKalemForm.taksitSayisi) || 0;
-                  const aylik = parseFloat(krediKalemForm.aylikTaksit) || (adet > 0 ? top / adet : 0);
-                  if (!top || !adet) return null;
-                  return (
-                    <div className="text-[11px] font-bold text-violet-800 bg-violet-50 rounded-lg p-2.5 border border-violet-200 space-y-0.5">
-                      <div>Aylık taksit: <b>₺{paraFmt(aylik)}</b> × {adet} ay</div>
-                      {ana > 0 && <div>Toplam faiz / masraf: <b>₺{paraFmt(Math.max(0, top - ana))}</b></div>}
-                      {Math.abs(aylik * adet - top) > 1 && <div className="text-amber-700">Uyarı: {adet} × ₺{paraFmt(aylik)} = ₺{paraFmt(aylik * adet)} — toplamla ₺{paraFmt(Math.abs(aylik * adet - top))} fark var.</div>}
-                    </div>
-                  );
-                })()}
-
-                <button onClick={krediKalemiKaydet} className="w-full py-3 bg-violet-600 hover:bg-violet-700 text-white font-black rounded-xl transition">
-                  {krediKalemForm.id ? 'Kaydet' : 'Krediyi Ekle'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* ==================================================================
             YENİ: ÖDEME KALEMİ EKLE / DÜZENLE
             Tekrar tipi ve sayısı burada belirlenir. "Süresiz" için tekrar
             sayısı boş bırakılır — kira gibi bitiş tarihi olmayan ödemeler.
             ================================================================== */}
-        {odemeKalemForm && (
-          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-black text-black flex items-center gap-2">
-                  <CalendarDays className="w-5 h-5 text-orange-600" /> {odemeKalemForm.id ? 'Ödemeyi Düzenle' : 'Yeni Ödeme'}
-                </h3>
-                <button onClick={() => setOdemeKalemForm(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-3">
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Adı *</label>
-                  <input value={odemeKalemForm.ad} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, ad: e.target.value })}
-                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm"
-                    placeholder="Örn: Dükkan Kirası, Araç Sigortası, Vergi" /></div>
 
-                {/* ==============================================================
-                    YENİ: ÖDEME TÜRÜ
-                    Kalem, defterde bu türün bloğu altında listelenir.
-                    ============================================================== */}
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Türü *</label>
-                  <div className="grid grid-cols-3 gap-1.5">
-                    {ODEME_TURLERI.map(t => {
-                      const secili = (odemeKalemForm.odemeTuru || VARSAYILAN_ODEME_TURU) === t.id;
-                      return (
-                        <button key={t.id} type="button" onClick={() => setOdemeKalemForm({ ...odemeKalemForm, odemeTuru: t.id })}
-                          className={`py-2 px-1 rounded-lg text-[10px] font-black border-2 transition leading-tight flex flex-col items-center gap-1 ${
-                            secili ? `${t.baslik} text-white border-transparent` : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
-                          <t.Ikon className="w-3.5 h-3.5" />
-                          {t.ad}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tutar (₺) *</label>
-                    <input type="number" inputMode="decimal" value={odemeKalemForm.tutar} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, tutar: e.target.value })}
-                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" placeholder="25000" /></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlk Ödeme Tarihi *</label>
-                    <input type="date" value={odemeKalemForm.ilkTarih} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, ilkTarih: e.target.value })}
-                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" /></div>
-                </div>
-                <p className="text-[10px] font-bold text-neutral-400 -mt-1">İleri tarihli ödeme için gelecekteki bir tarih seçebilirsiniz.</p>
-
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tekrar</label>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {TEKRAR_SECENEKLERI.map(t => (
-                      <button key={t.id} type="button" onClick={() => setOdemeKalemForm({ ...odemeKalemForm, tekrar: t.id })}
-                        className={`py-2 rounded-lg text-[11px] font-black border-2 transition ${
-                          odemeKalemForm.tekrar === t.id ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-orange-400'}`}>
-                        {t.ad}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Tek seferlikte tekrar sayısı sorulmaz */}
-                {odemeKalemForm.tekrar !== 'tek' && (
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Kaç kez tekrarlanacak?</label>
-                    <input type="number" inputMode="numeric" min="0" value={odemeKalemForm.tekrarSayisi}
-                      onChange={e => setOdemeKalemForm({ ...odemeKalemForm, tekrarSayisi: e.target.value })}
-                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm"
-                      placeholder="Boş bırakın = süresiz (kira gibi)" />
-                    <p className="text-[10px] font-bold text-neutral-400 mt-1">
-                      Örn: 10 yazarsanız 10 kez tekrarlanır ve biter. Boş bırakırsanız süresiz devam eder.
-                    </p>
-                  </div>
-                )}
-
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
-                  <input value={odemeKalemForm.not || ''} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, not: e.target.value })}
-                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" placeholder="Opsiyonel açıklama..." /></div>
-
-                {/* Canlı önizleme: kaç ödeme, ne zaman biter, toplam ne kadar */}
-                {(() => {
-                  const tutar = parseFloat(odemeKalemForm.tutar) || 0;
-                  const adet = odemeKalemForm.tekrar === 'tek' ? 1 : (parseInt(odemeKalemForm.tekrarSayisi) || 0);
-                  if (!tutar || !odemeKalemForm.ilkTarih) return null;
-                  const suresiz = odemeKalemForm.tekrar !== 'tek' && adet === 0;
-                  const gecici = odemeKalemBilgi({ id: '__onizleme__', odemeler: [] }, { ...odemeKalemForm, id: '__onizleme__' });
-                  const son = !suresiz && gecici.plan.length > 0 ? gecici.plan[gecici.plan.length - 1].tarih : null;
-                  return (
-                    <div className="text-[11px] font-bold text-orange-800 bg-orange-50 rounded-lg p-2.5 border border-orange-200 space-y-0.5">
-                      <div>{tekrarEtiket(odemeKalemForm.tekrar, odemeKalemForm.tekrarSayisi)}</div>
-                      {suresiz
-                        ? <div>Süresiz ödeme — bitiş tarihi yok, siz durdurana kadar devam eder.</div>
-                        : <><div>Toplam: <b>₺{paraFmt(tutar * adet)}</b> ({adet} ödeme)</div>
-                           {son && <div>Son ödeme: <b>{son.split('-').reverse().join('.')}</b></div>}</>}
-                    </div>
-                  );
-                })()}
-
-                <button onClick={odemeKalemiKaydet} className="w-full py-3 bg-orange-600 hover:bg-orange-700 text-white font-black rounded-xl transition">
-                  {odemeKalemForm.id ? 'Kaydet' : 'Ödemeyi Ekle'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* ==================================================================
             YENİ: VADE ÖDEME PENCERESİ
@@ -7419,124 +7257,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             tutar farklı olabilir. Plan tutarı bozulmaz, yalnızca bu ödeme
             girilen tutarla kaydedilir.
             ================================================================== */}
-        {vadeOdeme && (
-          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-black text-black flex items-center gap-2">
-                  <CalendarDays className="w-5 h-5 text-orange-600" /> Ödeme Yap
-                </h3>
-                <button onClick={() => setVadeOdeme(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-3">
-                <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl">
-                  <div className="font-black text-orange-900">{vadeOdeme.kalem.ad}</div>
-                  <div className="text-[11px] font-bold text-orange-600">
-                    {vadeOdeme.vade.no}. ödeme • Vade: {vadeOdeme.vade.tarih.split('-').reverse().join('.')}
-                    {vadeOdeme.vade.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
-                  </div>
-                </div>
 
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödenen Tutar (₺) *</label>
-                  <input type="number" inputMode="decimal" value={vadeOdeme.tutar}
-                    onChange={e => setVadeOdeme({ ...vadeOdeme, tutar: e.target.value })}
-                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-lg font-black" />
-                  {parseFloat(vadeOdeme.tutar) !== parseFloat(vadeOdeme.vade.tutar) && (
-                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">
-                      Plandaki tutar ₺{paraFmt(vadeOdeme.vade.tutar)}. Farklı tutar girdiniz — yalnızca bu ödeme etkilenir, plan değişmez.
-                    </p>
-                  )}
-                </div>
 
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
-                  <select value={vadeOdeme.kaynakDefterId}
-                    onChange={e => setVadeOdeme({ ...vadeOdeme, kaynakDefterId: e.target.value })}
-                    className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-orange-500 text-sm">
-                    <option value="">Hesap seçin...</option>
-                    {/* Kredi ve Ödemeler defterleri kaynak olamaz — onlar plan defteridir */}
-                    {defterler.filter(d => d.tur !== 'Kredi' && d.tur !== 'Ödemeler')
-                      .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
-                      .map(d => (
-                        <option key={d.id} value={d.id}>{d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})</option>
-                      ))}
-                  </select>
-                  {vadeOdeme.kaynakDefterId && defterBakiye(vadeOdeme.kaynakDefterId) < (parseFloat(vadeOdeme.tutar) || 0) && (
-                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">Bu hesabın bakiyesi yetersiz. Ödeme yine de kaydedilir, hesap eksiye düşer.</p>
-                  )}
-                </div>
 
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Tarihi</label>
-                  <input type="date" value={vadeOdeme.tarih} onChange={e => setVadeOdeme({ ...vadeOdeme, tarih: e.target.value })}
-                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" /></div>
-
-                <button onClick={vadeOde} disabled={taksitKaydediliyor}
-                  className="w-full py-3 bg-orange-600 hover:bg-orange-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
-                  <CheckCircle className="w-4 h-4" /> {taksitKaydediliyor ? 'Kaydediliyor...' : 'Ödemeyi Kaydet'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {taksitOdeme && (
-          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-black text-black flex items-center gap-2">
-                  <Landmark className="w-5 h-5 text-violet-600" /> {taksitOdeme.taksit.no}. Taksiti Öde
-                </h3>
-                <button onClick={() => setTaksitOdeme(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-3">
-                {/* Taksit özeti */}
-                <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl">
-                  <div className="text-2xl font-black text-violet-800">₺{paraFmt(taksitOdeme.taksit.tutar)}</div>
-                  <div className="text-[11px] font-bold text-violet-600">
-                    {/* DEĞİŞTİ: Defter adı yerine ÖDENEN KREDİNİN adı — bir
-                        defterde birden çok kredi olduğu için hangisi olduğu
-                        belli olmalı. */}
-                    {taksitOdeme.kalem?.ad || taksitOdeme.kalem?.bankaAdi || seciliDefter.ad} • Vade: {taksitOdeme.taksit.tarih.split('-').reverse().join('.')}
-                    {taksitOdeme.taksit.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
-                  </div>
-                </div>
-
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
-                  <select value={taksitOdeme.kaynakDefterId}
-                    onChange={e => setTaksitOdeme({ ...taksitOdeme, kaynakDefterId: e.target.value })}
-                    className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-violet-500 text-sm">
-                    <option value="">Hesap seçin...</option>
-                    {/* Kredi defterleri listeye alınmaz — krediyle kredi ödenmez */}
-                    {defterler.filter(d => d.tur !== 'Kredi')
-                      .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
-                      .map(d => (
-                        <option key={d.id} value={d.id}>{d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})</option>
-                      ))}
-                  </select>
-                  {/* Bakiye yetersizse uyar, ama engelleme */}
-                  {taksitOdeme.kaynakDefterId && defterBakiye(taksitOdeme.kaynakDefterId) < taksitOdeme.taksit.tutar && (
-                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">
-                      Bu hesabın bakiyesi taksitten düşük. Ödeme yine de kaydedilir, hesap eksiye düşer.
-                    </p>
-                  )}
-                </div>
-
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Tarihi</label>
-                  <input type="date" value={taksitOdeme.tarih}
-                    onChange={e => setTaksitOdeme({ ...taksitOdeme, tarih: e.target.value })}
-                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" /></div>
-
-                <p className="text-[11px] font-medium text-neutral-500 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
-                  Onayladığınızda seçtiğiniz hesaptan <b>₺{paraFmt(taksitOdeme.taksit.tutar)} çıkış</b> yazılır ve kredinin kalan borcu aynı tutarda azalır. Bu hareket ciro toplamlarında <b>çift sayılmaz</b>.
-                </p>
-
-                <button onClick={taksitOde} disabled={taksitKaydediliyor}
-                  className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
-                  <CheckCircle className="w-4 h-4" /> {taksitKaydediliyor ? 'Kaydediliyor...' : 'Ödemeyi Kaydet'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {showVirmanForm && (
           <div className="fixed inset-0 bg-black/60 z-[9998] flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -7706,6 +7429,302 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
 
         </>)}
+
+        {/* ==================================================================
+            TAŞINDI (hata düzeltmesi — kullanıcı talebi): AŞAĞIDAKİ 4 PENCERE
+            ==================================================================
+            Yeni Kredi / Kredi Düzenle (krediKalemForm), Yeni Ödeme / Ödeme
+            Düzenle (odemeKalemForm), vade ödeme (vadeOdeme) ve taksit ödeme
+            (taksitOdeme) pencereleri eskiden "günlük işlemler" bloğunun
+            İÇİNDEYDİ. O blok Ödemeler ve Kredi defterlerinde hiç çizilmediği
+            için bu sayfalarda düğmelere basınca pencereler AÇILMIYORDU.
+            Pencereler bloğun dışına taşındı — artık her defter türünde çalışır.
+            İçerikleri tek satır bile değiştirilmedi, yalnızca yerleri değişti. */}
+        {krediKalemForm && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2">
+                  <Landmark className="w-5 h-5 text-violet-600" /> {krediKalemForm.id ? 'Krediyi Düzenle' : 'Yeni Kredi'}
+                </h3>
+                <button onClick={() => setKrediKalemForm(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Kredi Adı *</label>
+                  <input value={krediKalemForm.ad} onChange={e => setKrediKalemForm({ ...krediKalemForm, ad: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm"
+                    placeholder="Örn: Taşıt Kredisi, İşletme Kredisi" /></div>
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Banka / Kurum</label>
+                  <input value={krediKalemForm.bankaAdi} onChange={e => setKrediKalemForm({ ...krediKalemForm, bankaAdi: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm"
+                    placeholder="Örn: Garanti BBVA, Halkbank" /></div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ana Para (₺)</label>
+                    <input type="number" inputMode="decimal" value={krediKalemForm.anaPara} onChange={e => setKrediKalemForm({ ...krediKalemForm, anaPara: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="500000" /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Toplam Geri Ödeme (₺) *</label>
+                    <input type="number" inputMode="decimal" value={krediKalemForm.toplamGeriOdeme} onChange={e => setKrediKalemForm({ ...krediKalemForm, toplamGeriOdeme: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="650000" /></div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Taksit Sayısı *</label>
+                    <input type="number" inputMode="numeric" value={krediKalemForm.taksitSayisi} onChange={e => setKrediKalemForm({ ...krediKalemForm, taksitSayisi: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="24" /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Aylık Taksit (₺)</label>
+                    <input type="number" inputMode="decimal" value={krediKalemForm.aylikTaksit} onChange={e => setKrediKalemForm({ ...krediKalemForm, aylikTaksit: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="boş = otomatik" /></div>
+                </div>
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlk Taksit Tarihi *</label>
+                  <input type="date" value={krediKalemForm.ilkTaksitTarihi} onChange={e => setKrediKalemForm({ ...krediKalemForm, ilkTaksitTarihi: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" /></div>
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
+                  <input value={krediKalemForm.not || ''} onChange={e => setKrediKalemForm({ ...krediKalemForm, not: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="Opsiyonel açıklama..." /></div>
+
+                {/* Canlı önizleme */}
+                {(() => {
+                  const ana = parseFloat(krediKalemForm.anaPara) || 0;
+                  const top = parseFloat(krediKalemForm.toplamGeriOdeme) || 0;
+                  const adet = parseInt(krediKalemForm.taksitSayisi) || 0;
+                  const aylik = parseFloat(krediKalemForm.aylikTaksit) || (adet > 0 ? top / adet : 0);
+                  if (!top || !adet) return null;
+                  return (
+                    <div className="text-[11px] font-bold text-violet-800 bg-violet-50 rounded-lg p-2.5 border border-violet-200 space-y-0.5">
+                      <div>Aylık taksit: <b>₺{paraFmt(aylik)}</b> × {adet} ay</div>
+                      {ana > 0 && <div>Toplam faiz / masraf: <b>₺{paraFmt(Math.max(0, top - ana))}</b></div>}
+                      {Math.abs(aylik * adet - top) > 1 && <div className="text-amber-700">Uyarı: {adet} × ₺{paraFmt(aylik)} = ₺{paraFmt(aylik * adet)} — toplamla ₺{paraFmt(Math.abs(aylik * adet - top))} fark var.</div>}
+                    </div>
+                  );
+                })()}
+
+                <button onClick={krediKalemiKaydet} className="w-full py-3 bg-violet-600 hover:bg-violet-700 text-white font-black rounded-xl transition">
+                  {krediKalemForm.id ? 'Kaydet' : 'Krediyi Ekle'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {odemeKalemForm && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2">
+                  <CalendarDays className="w-5 h-5 text-orange-600" /> {odemeKalemForm.id ? 'Ödemeyi Düzenle' : 'Yeni Ödeme'}
+                </h3>
+                <button onClick={() => setOdemeKalemForm(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Adı *</label>
+                  <input value={odemeKalemForm.ad} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, ad: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                    placeholder="Örn: Dükkan Kirası, Araç Sigortası, Vergi" /></div>
+
+                {/* ==============================================================
+                    YENİ: ÖDEME TÜRÜ
+                    Kalem, defterde bu türün bloğu altında listelenir.
+                    ============================================================== */}
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Türü *</label>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {ODEME_TURLERI.map(t => {
+                      const secili = (odemeKalemForm.odemeTuru || VARSAYILAN_ODEME_TURU) === t.id;
+                      return (
+                        <button key={t.id} type="button" onClick={() => setOdemeKalemForm({ ...odemeKalemForm, odemeTuru: t.id })}
+                          className={`py-2 px-1 rounded-lg text-[10px] font-black border-2 transition leading-tight flex flex-col items-center gap-1 ${
+                            secili ? `${t.baslik} text-white border-transparent` : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+                          <t.Ikon className="w-3.5 h-3.5" />
+                          {t.ad}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tutar (₺) *</label>
+                    <input type="number" inputMode="decimal" value={odemeKalemForm.tutar} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, tutar: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" placeholder="25000" /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlk Ödeme Tarihi *</label>
+                    <input type="date" value={odemeKalemForm.ilkTarih} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, ilkTarih: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" /></div>
+                </div>
+                <p className="text-[10px] font-bold text-neutral-400 -mt-1">İleri tarihli ödeme için gelecekteki bir tarih seçebilirsiniz.</p>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tekrar</label>
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {TEKRAR_SECENEKLERI.map(t => (
+                      <button key={t.id} type="button" onClick={() => setOdemeKalemForm({ ...odemeKalemForm, tekrar: t.id })}
+                        className={`py-2 rounded-lg text-[11px] font-black border-2 transition ${
+                          odemeKalemForm.tekrar === t.id ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-orange-400'}`}>
+                        {t.ad}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Tek seferlikte tekrar sayısı sorulmaz */}
+                {odemeKalemForm.tekrar !== 'tek' && (
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Kaç kez tekrarlanacak?</label>
+                    <input type="number" inputMode="numeric" min="0" value={odemeKalemForm.tekrarSayisi}
+                      onChange={e => setOdemeKalemForm({ ...odemeKalemForm, tekrarSayisi: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm"
+                      placeholder="Boş bırakın = süresiz (kira gibi)" />
+                    <p className="text-[10px] font-bold text-neutral-400 mt-1">
+                      Örn: 10 yazarsanız 10 kez tekrarlanır ve biter. Boş bırakırsanız süresiz devam eder.
+                    </p>
+                  </div>
+                )}
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
+                  <input value={odemeKalemForm.not || ''} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, not: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" placeholder="Opsiyonel açıklama..." /></div>
+
+                {/* Canlı önizleme: kaç ödeme, ne zaman biter, toplam ne kadar */}
+                {(() => {
+                  const tutar = parseFloat(odemeKalemForm.tutar) || 0;
+                  const adet = odemeKalemForm.tekrar === 'tek' ? 1 : (parseInt(odemeKalemForm.tekrarSayisi) || 0);
+                  if (!tutar || !odemeKalemForm.ilkTarih) return null;
+                  const suresiz = odemeKalemForm.tekrar !== 'tek' && adet === 0;
+                  const gecici = odemeKalemBilgi({ id: '__onizleme__', odemeler: [] }, { ...odemeKalemForm, id: '__onizleme__' });
+                  const son = !suresiz && gecici.plan.length > 0 ? gecici.plan[gecici.plan.length - 1].tarih : null;
+                  return (
+                    <div className="text-[11px] font-bold text-orange-800 bg-orange-50 rounded-lg p-2.5 border border-orange-200 space-y-0.5">
+                      <div>{tekrarEtiket(odemeKalemForm.tekrar, odemeKalemForm.tekrarSayisi)}</div>
+                      {suresiz
+                        ? <div>Süresiz ödeme — bitiş tarihi yok, siz durdurana kadar devam eder.</div>
+                        : <><div>Toplam: <b>₺{paraFmt(tutar * adet)}</b> ({adet} ödeme)</div>
+                           {son && <div>Son ödeme: <b>{son.split('-').reverse().join('.')}</b></div>}</>}
+                    </div>
+                  );
+                })()}
+
+                <button onClick={odemeKalemiKaydet} className="w-full py-3 bg-orange-600 hover:bg-orange-700 text-white font-black rounded-xl transition">
+                  {odemeKalemForm.id ? 'Kaydet' : 'Ödemeyi Ekle'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {vadeOdeme && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2">
+                  <CalendarDays className="w-5 h-5 text-orange-600" /> Ödeme Yap
+                </h3>
+                <button onClick={() => setVadeOdeme(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl">
+                  <div className="font-black text-orange-900">{vadeOdeme.kalem.ad}</div>
+                  <div className="text-[11px] font-bold text-orange-600">
+                    {vadeOdeme.vade.no}. ödeme • Vade: {vadeOdeme.vade.tarih.split('-').reverse().join('.')}
+                    {vadeOdeme.vade.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
+                  </div>
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödenen Tutar (₺) *</label>
+                  <input type="number" inputMode="decimal" value={vadeOdeme.tutar}
+                    onChange={e => setVadeOdeme({ ...vadeOdeme, tutar: e.target.value })}
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-lg font-black" />
+                  {parseFloat(vadeOdeme.tutar) !== parseFloat(vadeOdeme.vade.tutar) && (
+                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">
+                      Plandaki tutar ₺{paraFmt(vadeOdeme.vade.tutar)}. Farklı tutar girdiniz — yalnızca bu ödeme etkilenir, plan değişmez.
+                    </p>
+                  )}
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
+                  <select value={vadeOdeme.kaynakDefterId}
+                    onChange={e => setVadeOdeme({ ...vadeOdeme, kaynakDefterId: e.target.value })}
+                    className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-orange-500 text-sm">
+                    <option value="">Hesap seçin...</option>
+                    {/* Kredi ve Ödemeler defterleri kaynak olamaz — onlar plan defteridir */}
+                    {defterler.filter(d => d.tur !== 'Kredi' && d.tur !== 'Ödemeler')
+                      .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
+                      .map(d => (
+                        <option key={d.id} value={d.id}>{d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})</option>
+                      ))}
+                  </select>
+                  {vadeOdeme.kaynakDefterId && defterBakiye(vadeOdeme.kaynakDefterId) < (parseFloat(vadeOdeme.tutar) || 0) && (
+                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">Bu hesabın bakiyesi yetersiz. Ödeme yine de kaydedilir, hesap eksiye düşer.</p>
+                  )}
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Tarihi</label>
+                  <input type="date" value={vadeOdeme.tarih} onChange={e => setVadeOdeme({ ...vadeOdeme, tarih: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" /></div>
+
+                <button onClick={vadeOde} disabled={taksitKaydediliyor}
+                  className="w-full py-3 bg-orange-600 hover:bg-orange-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                  <CheckCircle className="w-4 h-4" /> {taksitKaydediliyor ? 'Kaydediliyor...' : 'Ödemeyi Kaydet'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {taksitOdeme && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2">
+                  <Landmark className="w-5 h-5 text-violet-600" /> {taksitOdeme.taksit.no}. Taksiti Öde
+                </h3>
+                <button onClick={() => setTaksitOdeme(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                {/* Taksit özeti */}
+                <div className="p-3 bg-violet-50 border border-violet-200 rounded-xl">
+                  <div className="text-2xl font-black text-violet-800">₺{paraFmt(taksitOdeme.taksit.tutar)}</div>
+                  <div className="text-[11px] font-bold text-violet-600">
+                    {/* DEĞİŞTİ: Defter adı yerine ÖDENEN KREDİNİN adı — bir
+                        defterde birden çok kredi olduğu için hangisi olduğu
+                        belli olmalı. */}
+                    {taksitOdeme.kalem?.ad || taksitOdeme.kalem?.bankaAdi || seciliDefter.ad} • Vade: {taksitOdeme.taksit.tarih.split('-').reverse().join('.')}
+                    {taksitOdeme.taksit.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
+                  </div>
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
+                  <select value={taksitOdeme.kaynakDefterId}
+                    onChange={e => setTaksitOdeme({ ...taksitOdeme, kaynakDefterId: e.target.value })}
+                    className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-violet-500 text-sm">
+                    <option value="">Hesap seçin...</option>
+                    {/* Kredi defterleri listeye alınmaz — krediyle kredi ödenmez */}
+                    {defterler.filter(d => d.tur !== 'Kredi')
+                      .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
+                      .map(d => (
+                        <option key={d.id} value={d.id}>{d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})</option>
+                      ))}
+                  </select>
+                  {/* Bakiye yetersizse uyar, ama engelleme */}
+                  {taksitOdeme.kaynakDefterId && defterBakiye(taksitOdeme.kaynakDefterId) < taksitOdeme.taksit.tutar && (
+                    <p className="text-[11px] font-bold text-amber-700 mt-1.5">
+                      Bu hesabın bakiyesi taksitten düşük. Ödeme yine de kaydedilir, hesap eksiye düşer.
+                    </p>
+                  )}
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Tarihi</label>
+                  <input type="date" value={taksitOdeme.tarih}
+                    onChange={e => setTaksitOdeme({ ...taksitOdeme, tarih: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" /></div>
+
+                <p className="text-[11px] font-medium text-neutral-500 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
+                  Onayladığınızda seçtiğiniz hesaptan <b>₺{paraFmt(taksitOdeme.taksit.tutar)} çıkış</b> yazılır ve kredinin kalan borcu aynı tutarda azalır. Bu hareket ciro toplamlarında <b>çift sayılmaz</b>.
+                </p>
+
+                <button onClick={taksitOde} disabled={taksitKaydediliyor}
+                  className="w-full py-3 bg-violet-600 hover:bg-violet-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                  <CheckCircle className="w-4 h-4" /> {taksitKaydediliyor ? 'Kaydediliyor...' : 'Ödemeyi Kaydet'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
 
         {/* Sabit alt buton çubuğunun son kayıtları örtmemesi için boşluk.
             Mobilde çubuk daha yüksek durduğu için pay biraz fazla bırakıldı. */}
