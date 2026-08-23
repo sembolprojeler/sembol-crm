@@ -2247,7 +2247,25 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
 
     const [weekStart, setWeekStart] = useState(initialMonday);
     const [puantajData, setPuantajData] = useState({});
-    
+
+    // ========================================================================
+    // YENİ: DÖNEM FİLTRESİ (Bu Hafta / Bu Ay / Bu Sene / Tüm Zamanlar)
+    // ========================================================================
+    // "Bu Hafta" eski takvim tablosunu gösterir (gün gün yıldızlar).
+    // Diğer üçünde takvim anlamsızlaşır (30-365 sütun olurdu); bunun yerine
+    // SIRALI PUAN LİSTESİ gösterilir: en çok puan alan en üstte.
+    // ========================================================================
+    const PUANTAJ_DONEMLERI = [
+      { id: 'hafta', ad: 'Bu Hafta' },
+      { id: 'ay', ad: 'Bu Ay' },
+      { id: 'sene', ad: 'Bu Sene' },
+      { id: 'tum', ad: 'Tüm Zamanlar' },
+    ];
+    const [donem, setDonem] = useState('hafta');
+    // Dönem toplamları: { personelId: toplamPuan }
+    const [donemToplamlari, setDonemToplamlari] = useState({});
+    const [donemYukleniyor, setDonemYukleniyor] = useState(false);
+
     // Mavi yaka olanları filtrele (Sıralama: Şoför, Mobilya Ustası, Taşıma Elemanı)
     const currentListMonth = weekStart.getMonth() + 1;
     const currentListYear = weekStart.getFullYear();
@@ -2310,6 +2328,71 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
       fetchPuantaj();
     }, [weekStart, db, appId]);
 
+    // ========================================================================
+    // YENİ: DÖNEM TOPLAMLARINI ÇEK
+    // ========================================================================
+    // Puantaj kayıtları aylık dokümanlarda tutulur ('puantaj/{yil}_{ay}').
+    // Bu yüzden:
+    //   • Bu Ay        -> tek doküman
+    //   • Bu Sene      -> o yılın 12 dokümanı
+    //   • Tüm Zamanlar -> 2024 başından bu yana tüm aylar (sistem öncesi yok)
+    // Okunan tüm günlerin puanları personel bazında toplanır.
+    // 'hafta' seçiliyken bu effect hiç çalışmaz — orada zaten takvim tablosu var.
+    // ========================================================================
+    useEffect(() => {
+      if (donem === 'hafta') return;
+      let iptal = false;
+      const fetchDonem = async () => {
+        if (!db || !appId) return;
+        setDonemYukleniyor(true);
+        try {
+          const simdi = new Date();
+          const yil = simdi.getFullYear();
+          const ay = simdi.getMonth() + 1;
+          // Okunacak ay anahtarlarını belirle
+          let anahtarlar = [];
+          if (donem === 'ay') {
+            anahtarlar = [`${yil}_${ay}`];
+          } else if (donem === 'sene') {
+            for (let m = 1; m <= 12; m++) anahtarlar.push(`${yil}_${m}`);
+          } else { // tum
+            const BASLANGIC_YIL = 2024; // Sistem bu yıldan önce kullanılmıyordu
+            for (let y = BASLANGIC_YIL; y <= yil; y++) {
+              for (let m = 1; m <= 12; m++) anahtarlar.push(`${y}_${m}`);
+            }
+          }
+          const toplamlar = {};
+          // Aylar paralel okunur; olmayan dokümanlar sessizce atlanır
+          const snaplar = await Promise.all(anahtarlar.map(a =>
+            getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', a)).catch(() => null)
+          ));
+          snaplar.forEach(snap => {
+            if (!snap || !snap.exists()) return;
+            const records = snap.data().records || {};
+            Object.entries(records).forEach(([pId, gunler]) => {
+              Object.values(gunler || {}).forEach(deger => {
+                const p = parseFloat(deger) || 0;
+                if (p > 0) toplamlar[pId] = (toplamlar[pId] || 0) + p;
+              });
+            });
+          });
+          if (!iptal) setDonemToplamlari(toplamlar);
+        } catch (e) {
+          console.error('Dönem puantajı çekilemedi:', e);
+        }
+        if (!iptal) setDonemYukleniyor(false);
+      };
+      fetchDonem();
+      return () => { iptal = true; };
+    }, [donem, db, appId]);
+
+    // Liste görünümü için sıralanmış veri: en yüksek puan en üstte
+    const donemSiralamasi = React.useMemo(() => {
+      return maviYakaList
+        .map(p => ({ person: p, puan: donemToplamlari[p.id] || 0 }))
+        .sort((a, b) => b.puan - a.puan || (a.person.fullName || '').localeCompare((b.person.fullName || ''), 'tr-TR'));
+    }, [maviYakaList, donemToplamlari]);
+
     const handlePrevWeek = () => {
       const newStart = new Date(weekStart);
       newStart.setDate(weekStart.getDate() - 7);
@@ -2337,13 +2420,34 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
         <div className="bg-white p-4 rounded-2xl shadow-sm border border-neutral-200 flex flex-col md:flex-row justify-between items-center gap-4 mb-4 shrink-0">
           <div>
             <h2 className="text-2xl font-black text-black flex items-center gap-2">
-              <Star className="w-7 h-7 text-yellow-500 fill-yellow-500" /> Haftalık Puantaj Takip
+              <Star className="w-7 h-7 text-yellow-500 fill-yellow-500" /> Puantaj Takip
             </h2>
-            <p className="text-sm font-medium text-neutral-500 mt-1">Mavi yaka personellerinin haftalık kazandığı puanları buradan takip edebilirsiniz.</p>
+            <p className="text-sm font-medium text-neutral-500 mt-1">
+              {donem === 'hafta' ? 'Mavi yaka personellerinin haftalık kazandığı puanları buradan takip edebilirsiniz.'
+                : donem === 'ay' ? 'Bu ay kazanılan toplam puanlar — en yüksekten düşüğe sıralı.'
+                : donem === 'sene' ? `${new Date().getFullYear()} yılında kazanılan toplam puanlar — en yüksekten düşüğe sıralı.`
+                : 'Tüm zamanların toplam puanları — en yüksekten düşüğe sıralı.'}
+            </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 justify-end">
+             {/* ==========================================================
+                 YENİ: DÖNEM SEKMELERİ
+                 "Bu Hafta" takvim tablosunu, diğerleri sıralı puan listesini
+                 gösterir. Hafta ileri/geri okları yalnızca hafta görünümünde
+                 anlamlı olduğu için orada çıkar.
+                 ========================================================== */}
+             <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl border border-neutral-200">
+               {PUANTAJ_DONEMLERI.map(d => (
+                 <button key={d.id} type="button" onClick={() => setDonem(d.id)}
+                   className={`px-3 py-1.5 rounded-lg text-xs font-black whitespace-nowrap transition ${
+                     donem === d.id ? 'bg-yellow-500 text-white shadow-sm' : 'text-neutral-600 hover:bg-white'}`}>
+                   {d.ad}
+                 </button>
+               ))}
+             </div>
+             {donem === 'hafta' && (<>
              <button onClick={handleCurrentWeek} className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-bold rounded-xl transition text-sm">
-                Bu Hafta
+                Bu Haftaya Dön
              </button>
              <div className="flex items-center gap-1 bg-neutral-100 p-1 rounded-xl border border-neutral-200">
                <button onClick={handlePrevWeek} className="p-2 hover:bg-white rounded-lg transition"><ChevronLeft className="w-4 h-4" /></button>
@@ -2352,9 +2456,58 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                </span>
                <button onClick={handleNextWeek} className="p-2 hover:bg-white rounded-lg transition"><ChevronRight className="w-4 h-4" /></button>
              </div>
+             </>)}
           </div>
         </div>
 
+        {/* ==================================================================
+            YENİ: DÖNEM LİSTESİ (Bu Ay / Bu Sene / Tüm Zamanlar)
+            ==================================================================
+            Bu dönemlerde gün gün takvim göstermek anlamsız olurdu (30-365
+            sütun). Onun yerine personeller TOPLAM PUANA göre sıralı bir
+            liste halinde gösterilir; ilk üç sıra madalya renkleriyle
+            vurgulanır. Puanı olmayanlar listenin sonunda gri görünür.
+            ================================================================== */}
+        {donem !== 'hafta' && (
+          <div className="flex-1 w-full overflow-auto custom-scrollbar-table border border-neutral-300 rounded-2xl bg-white shadow-sm">
+            {donemYukleniyor ? (
+              <div className="p-10 text-center text-sm font-bold text-neutral-400">Puanlar hesaplanıyor...</div>
+            ) : (
+              <div className="divide-y divide-neutral-100">
+                {donemSiralamasi.map((satir, i) => {
+                  const sira = i + 1;
+                  // İlk üç sıra madalya renkleri; puanı 0 olanlar vurgulanmaz
+                  const madalya = satir.puan > 0 && sira === 1 ? 'bg-yellow-50 border-l-4 border-yellow-400'
+                    : satir.puan > 0 && sira === 2 ? 'bg-neutral-50 border-l-4 border-neutral-400'
+                    : satir.puan > 0 && sira === 3 ? 'bg-orange-50 border-l-4 border-orange-400'
+                    : '';
+                  return (
+                    <div key={satir.person.id} className={`flex items-center gap-3 p-3 hover:bg-neutral-50 transition ${madalya} ${satir.person.employmentStatus === 'Pasif' ? 'opacity-60 grayscale' : ''}`}>
+                      <span className={`w-8 text-center font-black shrink-0 ${sira <= 3 && satir.puan > 0 ? 'text-yellow-700 text-lg' : 'text-neutral-400 text-sm'}`}>{sira}</span>
+                      <div className="w-9 h-9 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
+                        {satir.person.profileImage ? <img src={satir.person.profileImage} className="w-full h-full object-cover" /> : <User className="w-4 h-4 text-neutral-400" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className={`font-bold text-sm truncate ${satir.person.employmentStatus === 'Pasif' ? 'line-through text-neutral-500' : 'text-black'}`}>{satir.person.fullName}</div>
+                        <div className="text-[10px] font-bold text-neutral-500 uppercase tracking-wider truncate">{satir.person.position}</div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {satir.puan > 0 && <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />}
+                        <span className={`font-black tabular-nums ${satir.puan > 0 ? 'text-yellow-700 text-lg' : 'text-neutral-300 text-base'}`}>{satir.puan}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+                {donemSiralamasi.length === 0 && (
+                  <div className="p-10 text-center text-sm font-bold text-neutral-400">Kayıtlı mavi yaka personel bulunamadı.</div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* HAFTALIK TAKVİM TABLOSU — yalnızca "Bu Hafta" seçiliyken */}
+        {donem === 'hafta' && (
         <div className="flex-1 w-full overflow-auto custom-scrollbar-table border border-neutral-300 rounded-2xl bg-white shadow-sm relative">
             <table className="w-full border-collapse text-sm text-left table-fixed">
               <thead className="bg-neutral-100 sticky top-0 z-30 shadow-sm">
@@ -2430,6 +2583,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
               </tbody>
             </table>
           </div>
+        )}
       </div>
     );
   };
