@@ -3900,6 +3900,66 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
   // (maaş, iş geliri vb.) otomatik kayıt aktarmak için defterIslemleri
   // koleksiyonuna kaynak etiketiyle addDoc yapmak yeterlidir.
   // ==========================================================================
+  // ===========================================================================
+  // YENİ: MAAŞ KİŞİ HESABI (modül düzeyi)
+  // ===========================================================================
+  // FinansRaporView içindeki hesaplaKisiAy ile BİREBİR AYNI formüllerdir;
+  // Ödemeler defterindeki otomatik maaş satırları da aynı rakamları üretsin
+  // diye buraya kopyalandı. (O fonksiyon bileşen içinde tanımlı olduğu için
+  // DefterView'dan doğrudan çağrılamıyor; davranışı bozmamak adına mevcut
+  // kod taşınmadı, kopyalandı. Formül değişecekse İKİ YERDE birden değişmeli.)
+  // Döndürdükleri: bankaKalan (banka tarafının ödenmemiş kısmı), kalanNakit
+  // (nakit tarafı) ve tik alanlarıyla birlikte "muhasebede kapatılmamış" tutar.
+  // ===========================================================================
+  const maasKisiHesabi = (person, row, mesaiRecord, yil, ay) => {
+    let devamsiz = 0, raporSay = 0, ucretsizIzin = 0, toplamMesaiSaati = 0, fazlaGun = 0;
+    Object.values(mesaiRecord || {}).forEach(val => {
+      if (typeof val === 'object' && val !== null) {
+        if (val.status === 'D') devamsiz++;
+        else if (val.status === 'R') raporSay++;
+        else if (val.status === 'Üİ' || val.status === 'İB') ucretsizIzin++;
+        else if (val.status === 'FG') fazlaGun++;
+        else if (val.status === 'FGM') { fazlaGun++; toplamMesaiSaati += parseFloat(val.hours) || 0; }
+        else if (val.status === 'FM') toplamMesaiSaati += parseFloat(val.hours) || 0;
+        else if (val.status === 'EM') toplamMesaiSaati -= parseFloat(val.hours) || 0;
+      } else {
+        if (val === 'D') devamsiz++;
+        else if (val === 'R') raporSay++;
+        else if (val === 'Üİ' || val === 'İB') ucretsizIzin++;
+        else if (val === 'FG') fazlaGun++;
+        else if (val === 'FGM') fazlaGun++;
+      }
+    });
+    const devamsizlikSayisi = row.devamsizlik !== undefined && row.devamsizlik !== '' ? parseFloat(row.devamsizlik) : devamsiz;
+    const rapor = row.rapor !== undefined && row.rapor !== '' ? parseFloat(row.rapor) : raporSay;
+    const fazlaGunSayisi = row.fazlaGun !== undefined && row.fazlaGun !== '' ? parseFloat(row.fazlaGun) : fazlaGun;
+    let iseGirisGun = 0;
+    if (person.startDate) {
+      const st = new Date(person.startDate + 'T00:00:00');
+      if (!isNaN(st.getTime())) {
+        const ayGunSayisi = new Date(yil, ay, 0).getDate();
+        const baslangic = new Date(st.getFullYear(), st.getMonth(), st.getDate());
+        for (let d = 1; d <= ayGunSayisi; d++) { if (new Date(yil, ay - 1, d) < baslangic) iseGirisGun++; }
+      }
+    }
+    const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzin - iseGirisGun);
+    const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : gecerliMaas(person, yil, ay)) || 0;
+    const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
+    const nakitAvans = parseFloat(row.nakitAvans) || 0;
+    const resmiAvans = parseFloat(row.resmiAvans) || 0;
+    const prim = parseFloat(row.prim) || 0;
+    const hesaplananBanka = (bankaParasiBase / 30) * mesaiGunSayisi;
+    const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
+    const bankaKalan = hesaplananBanka - icraKesintisi - resmiAvans;
+    const toplamSaat = toplamMesaiSaati + (fazlaGunSayisi * 10) - (devamsizlikSayisi * 3) + prim;
+    const mesaiUcretiToplam = (maas / 200) * toplamSaat;
+    const primTL = (maas / 200) * prim;
+    const netMaas = (maas / 30) * mesaiGunSayisi;
+    const hasarKesinti = Math.min(parseFloat(row.hasarKesinti) || 0, primTL);
+    const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcretiToplam - hasarKesinti;
+    return { bankaKalan, kalanNakit };
+  };
+
   export const FinansDefterView = ({ currentUser, addSystemLog, onViewCari, onViewVehicle, onViewPersonnel, jobs = [], vehicles = [], personnelList = [] }) => {
     // Varsayılan işlem kategorileri (giderler + gelirler bir arada)
     // DEĞİŞİKLİK: Eski sabit kategori listesi KALDIRILDI. Kategoriler artık
@@ -4694,6 +4754,96 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     //   1) Kaynak hesapta ÇIKIŞ (gerçek gider, ciroya girer)
     //   2) Ödemeler defterinde GİRİŞ (izleme kaydı, odemeMahsup ile ciro dışı)
     // ========================================================================
+    // ========================================================================
+    // YENİ: SEÇİLİ AYIN VADELERİ
+    // ========================================================================
+    // Tüm kalemlerin planlarından seçili aya (odemeAyi) düşen vadeler tek
+    // listede toplanır. Bekleyenler tarihe göre EN YAKINI ÜSTTE sıralanır;
+    // ödenenler ayrı dizide döner (ekranda en alttaki "Ödenenler" bölümü).
+    // Maaş satırları bu listeye AYRICA eklenir (render tarafında).
+    // ========================================================================
+    const ayinVadeleri = (defter) => {
+      const bekleyen = [], odenen = [];
+      (defter?.odemeler || []).forEach(kalem => {
+        const bilgi = odemeKalemBilgi(defter, kalem);
+        bilgi.plan.forEach(v => {
+          if (!v.tarih.startsWith(odemeAyi)) return;
+          const kayit = { kalem, vade: v, tur: odemeTuruBilgi(kalem.odemeTuru) };
+          (v.odendi ? odenen : bekleyen).push(kayit);
+        });
+      });
+      bekleyen.sort((a, b) => a.vade.tarih.localeCompare(b.vade.tarih));
+      odenen.sort((a, b) => (a.vade.odemeTarihi || '').localeCompare(b.vade.odemeTarihi || ''));
+      return { bekleyen, odenen };
+    };
+
+    // Vadeye 7 gün ve daha az kaldıysa (ve geçmemişse) yanıp sönen uyarı çıkar
+    const vadeYaklasti = (tarih) => {
+      const bugun = bugunStr();
+      if (tarih < bugun) return false; // geçmiş: zaten GECİKMİŞ rozeti var
+      const fark = (new Date(tarih) - new Date(bugun)) / 86400000;
+      return fark <= 7;
+    };
+
+    // ========================================================================
+    // YENİ: MAAŞ ÖDE — iki yönlü senkronun "Ödemeler -> Muhasebe" bacağı
+    // ========================================================================
+    // 1) Kaynak defterden ÇIKIŞ + Ödemeler defterine mahsup GİRİŞ yazılır
+    //    (vadeOde ile aynı desen; kalem kimliği sentetik: maas_mavi_YYYY_M).
+    // 2) maas dokümanında TÜM personellere banka+nakit tikleri atılır ve
+    //    ödenen tutarlar yazılır — Personel Muhasebe ekranı da "ödendi"
+    //    gösterir, kalanlar sıfırlanır.
+    // ========================================================================
+    const maasOde = async () => {
+      const satir = maasOdeModal?.satir;
+      if (!satir || !seciliDefter) return;
+      if (!maasOdeModal.kaynakDefterId) { alert('Maaşın hangi hesaptan ödendiğini seçin.'); return; }
+      const kaynak = defterler.find(d => d.id === maasOdeModal.kaynakDefterId);
+      const tutar = satir.tutar;
+      if (tutar <= 0) { alert('Ödenecek tutar sıfır — muhasebede zaten kapatılmış görünüyor.'); return; }
+      setMaasKaydediliyor(true);
+      try {
+        const odemeId = `odeme_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        const ortak = {
+          tarih: bugunStr(), kategori: 'Personel Maaşı', etiketler: ['Maaş'],
+          odemeId, vadeNo: 1, odemeKalemId: satir.id, odemeDefterId: seciliDefter.id,
+          kaynak: 'Maaş Ödemesi (Oto)', createdAt: new Date().toISOString(),
+          by: currentUser?.fullName || 'Sistem',
+        };
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak, tip: 'cikis', tutar, odemeMahsup: false,
+          defterId: maasOdeModal.kaynakDefterId,
+          odemeYontemi: defterdenOdemeYontemi(maasOdeModal.kaynakDefterId),
+          aciklama: `${satir.ad} (${satir.kaynakEtiket})`,
+        });
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak, tip: 'giris', tutar, odemeMahsup: true,
+          defterId: seciliDefter.id,
+          odemeYontemi: defterdenOdemeYontemi(maasOdeModal.kaynakDefterId),
+          aciklama: `${satir.ad} (${satir.kaynakEtiket}) ← ${kaynak?.ad || 'hesap'}`,
+        });
+        // 2) Muhasebe tikleri: tik atılmamış herkese banka+nakit ödendi yaz
+        const { yil, ay } = maasKaynakAy;
+        const docAdi = satir.yaka === 'beyaz' ? `beyaz_${yil}_${ay}` : `${yil}_${ay}`;
+        const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', docAdi);
+        const mSnap = await getDoc(mRef);
+        const records = mSnap.exists() ? (mSnap.data().records || {}) : {};
+        satir.kisiler.forEach(k => {
+          if (!records[k.person.id]) records[k.person.id] = {};
+          const r = records[k.person.id];
+          if (!r.bankaOdendi) { r.bankaOdendi = true; r.bankaOdenenTutar = String(Math.max(0, k.bankaKalan).toFixed(2)); }
+          if (!r.nakitOdendi) { r.nakitOdendi = true; r.nakitOdenenTutar = String(Math.max(0, k.kalanNakit).toFixed(2)); }
+        });
+        await setDoc(mRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
+        addSystemLog?.('Maaş Ödemesi Yapıldı',
+          `${satir.ad} (${satir.kaynakEtiket}) ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi; ${satir.kisiler.length} personelin muhasebe tikleri atıldı.`);
+        setMaasOdeModal(null);
+      } catch (e) {
+        console.error('Maaş ödemesi kaydedilemedi:', e);
+        alert('Maaş ödemesi kaydedilemedi. Lütfen tekrar deneyin.');
+      } finally { setMaasKaydediliyor(false); }
+    };
+
     const vadeOde = async () => {
       if (!vadeOdeme?.vade || !seciliDefter) return;
       if (!vadeOdeme.kaynakDefterId) { alert('Ödemenin hangi hesaptan yapıldığını seçin.'); return; }
@@ -4927,6 +5077,101 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         .filter(j => !((j.type === 'Asansör' || j.type === 'asansor') && j.bekleyenTutar <= 0))
         .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
     }, [jobs, seciliDefterId, bekleyenIsDefteriId, gunFiltreAktif, seciliGun]);
+
+    // ========================================================================
+    // YENİ: ÖDEMELER DEFTERİ — AYLIK GÖRÜNÜM + OTOMATİK MAAŞ SATIRLARI
+    // ========================================================================
+    // (Hook'lar erken return'den ÖNCE — React #310 dersi unutulmadı.)
+    //
+    // odemeAyi: 'YYYY-MM' — Ödemeler defterinde hangi ayın vadelerine
+    // bakıldığı. Sağ/sol oklarla gezilir, varsayılan bugünün ayı.
+    //
+    // MAAŞ KURALI (kullanıcı): "Temmuz maaşı Ağustos'un 6'sında ödenir."
+    // Yani seçili ayda görünen maaş satırının KAYNAK AYI bir önceki aydır:
+    // Ağustos görünümü -> Temmuz'un maas/mesai dokümanları okunur, vade
+    // tarihi Ağustos'un 6'sıdır. Mavi ve beyaz yaka AYRI iki satırdır.
+    //
+    // TAMAMLANMA (iki yönlü senkron):
+    //   1) Muhasebe -> Ödemeler: tik atılmamış (bankaOdendi/nakitOdendi
+    //      false) kalanların toplamı 0'a inerse satır kendiliğinden
+    //      "Ödenenler" bölümüne düşer. Yazma yok, canlı hesap.
+    //   2) Ödemeler -> Muhasebe: "Öde" düğmesi hem defterlere gerçek para
+    //      hareketini yazar hem maas dokümanındaki TÜM personellere
+    //      banka/nakit tiklerini atar (aşağıda maasOde fonksiyonu).
+    // ========================================================================
+    const [odemeAyi, setOdemeAyi] = useState(bugunStr().slice(0, 7));
+    const [maasVeri, setMaasVeri] = useState(null); // { mavi:{maas,mesai}, beyaz:{maas,mesai}, kaynakAnahtar }
+    const [maasOdeModal, setMaasOdeModal] = useState(null); // { satir, kaynakDefterId }
+    const [maasKaydediliyor, setMaasKaydediliyor] = useState(false);
+    const [acikMaasSatiri, setAcikMaasSatiri] = useState(null);
+
+    // Seçili ödeme ayının KAYNAK ayı (bir önceki ay): '2026-08' -> {yil:2026, ay:7}
+    const maasKaynakAy = useMemo(() => {
+      const [y, m] = odemeAyi.split('-').map(Number);
+      const d = new Date(y, m - 2, 1); // m-1 = seçili ay indeksi, bir öncesi m-2
+      return { yil: d.getFullYear(), ay: d.getMonth() + 1 };
+    }, [odemeAyi]);
+
+    // Kaynak ayın maaş + mesai dokümanlarını oku (yalnızca Ödemeler defteri açıkken)
+    useEffect(() => {
+      if (seciliDefter?.tur !== 'Ödemeler') return;
+      let iptal = false;
+      const { yil, ay } = maasKaynakAy;
+      const anahtar = `${yil}_${ay}`;
+      (async () => {
+        try {
+          const oku = (kol, ad) => getDoc(doc(db, 'artifacts', appId, 'public', 'data', kol, ad))
+            .then(sn => sn.exists() ? (sn.data().records || {}) : {}).catch(() => ({}));
+          const [maviMaas, maviMesai, beyazMaas, beyazMesai] = await Promise.all([
+            oku('maas', anahtar), oku('mesai', anahtar),
+            oku('maas', `beyaz_${anahtar}`), oku('mesai', `beyaz_${anahtar}`),
+          ]);
+          if (!iptal) setMaasVeri({ mavi: { maas: maviMaas, mesai: maviMesai }, beyaz: { maas: beyazMaas, mesai: beyazMesai }, kaynakAnahtar: anahtar });
+        } catch (e) { console.error('Maaş verisi okunamadı:', e); }
+      })();
+      return () => { iptal = true; };
+    }, [seciliDefter?.tur, maasKaynakAy]);
+
+    // İki otomatik maaş satırı (mavi + beyaz)
+    const AY_ADLARI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+    const maasSatirlari = useMemo(() => {
+      if (seciliDefter?.tur !== 'Ödemeler' || !maasVeri) return [];
+      const { yil, ay } = maasKaynakAy;
+      if (maasVeri.kaynakAnahtar !== `${yil}_${ay}`) return []; // eski ayın verisi ekrana sızmasın
+      const yakalar = [
+        { id: 'mavi', ad: 'Mavi Yaka Maaşı', filtre: (p) => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)) },
+        { id: 'beyaz', ad: 'Beyaz Yaka Maaşı', filtre: (p) => p.collarType === 'Beyaz Yaka' },
+      ];
+      return yakalar.map(yaka => {
+        const veriKaynagi = maasVeri[yaka.id];
+        const kisiler = (personnelList || [])
+          .filter(p => p.position !== 'Firma Sahibi' && yaka.filtre(p) && isPersonnelVisibleInMonth(p, yil, ay))
+          .map(p => {
+            const row = veriKaynagi.maas[p.id] || {};
+            const hes = maasKisiHesabi(p, row, veriKaynagi.mesai[p.id], yil, ay);
+            // Muhasebede tik ATILMAMIŞ kısımlar hâlâ ödenecek demektir
+            const bankaBekleyen = row.bankaOdendi ? 0 : Math.max(0, hes.bankaKalan);
+            const nakitBekleyen = row.nakitOdendi ? 0 : Math.max(0, hes.kalanNakit);
+            return { person: p, bankaKalan: hes.bankaKalan, kalanNakit: hes.kalanNakit,
+                     bankaOdendi: !!row.bankaOdendi, nakitOdendi: !!row.nakitOdendi,
+                     bekleyen: bankaBekleyen + nakitBekleyen };
+          });
+        const toplamBekleyen = kisiler.reduce((t, k) => t + k.bekleyen, 0);
+        const kalemId = `maas_${yaka.id}_${yil}_${ay}`;
+        // "Öde" ile yazılmış mahsup kaydı var mı? (defterden ödendi bilgisi)
+        const mahsup = islemler.find(i => i.defterId === seciliDefterId && i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalemId);
+        return {
+          id: kalemId, yaka: yaka.id, ad: yaka.ad,
+          kaynakEtiket: `${AY_ADLARI[ay - 1]} ${yil} maaşı`,
+          vadeTarihi: `${odemeAyi}-06`,
+          tutar: toplamBekleyen,
+          kisiler,
+          // Tamamlandı: defterden ödendiyse VEYA muhasebedeki kalanlar sıfırlandıysa
+          odendi: !!mahsup || (kisiler.length > 0 && toplamBekleyen <= 0.01),
+          odemeTarihi: mahsup?.tarih || null,
+        };
+      }).filter(sa => sa.kisiler.length > 0);
+    }, [seciliDefter?.tur, maasVeri, maasKaynakAy, personnelList, islemler, seciliDefterId, odemeAyi]);
 
     if (!seciliDefter) {
       // ====================================================================
@@ -5677,6 +5922,141 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 )}
 
                 {/* ==============================================================
+                    YENİ: AYLIK ÖDEME GÖRÜNÜMÜ (kullanıcı talebi)
+                    ==============================================================
+                    "Ağustos 2026 Ödemeleri" başlığı ve sağ/sol oklarla ay
+                    gezilir. O aya vadesi düşen HER kalem (tekrarlananlar
+                    dahil) kendi gününde listelenir; en yakın tarih en üstte.
+                    Ödenenler en alttaki "Ödenenler" bölümüne iner. Vadeye
+                    7 gün ve daha az kalanlarda yanıp sönen uyarı çıkar.
+                    Otomatik MAAŞ satırları (mavi + beyaz, her ayın 6'sı,
+                    tutar Muhasebe'den canlı) bu listenin doğal parçasıdır.
+                    ============================================================== */}
+                {(() => {
+                  const { bekleyen, odenen } = ayinVadeleri(seciliDefter);
+                  const [oy, om] = odemeAyi.split('-').map(Number);
+                  const ayBaslik = `${AY_ADLARI[om - 1]} ${oy}`;
+                  const ayDegistir = (yon) => {
+                    const d = new Date(oy, om - 1 + yon, 1);
+                    setOdemeAyi(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+                  };
+                  const bekleyenMaaslar = maasSatirlari.filter(m => !m.odendi);
+                  const odenenMaaslar = maasSatirlari.filter(m => m.odendi);
+                  // Maaşlar + kalem vadeleri tek sırada: tarihe göre en yakın üstte
+                  const bekleyenBirlesik = [
+                    ...bekleyen.map(x => ({ tip: 'vade', tarih: x.vade.tarih, x })),
+                    ...bekleyenMaaslar.map(m => ({ tip: 'maas', tarih: m.vadeTarihi, m })),
+                  ].sort((a, b) => a.tarih.localeCompare(b.tarih));
+                  const trh = (t) => t?.split('-').reverse().join('.');
+                  return (
+                    <div className="mb-3">
+                      {/* AY GEZGİNİ */}
+                      <div className="flex items-center justify-between gap-2 bg-neutral-900 text-white rounded-xl px-2 py-2 mb-2">
+                        <button type="button" onClick={() => ayDegistir(-1)} className="p-2 hover:bg-white/10 rounded-lg transition"><ChevronLeft className="w-5 h-5" /></button>
+                        <div className="text-center">
+                          <div className="font-black text-base">{ayBaslik} Ödemeleri</div>
+                          <div className="text-[10px] font-bold text-white/60">{bekleyenBirlesik.length} bekleyen • {odenen.length + odenenMaaslar.length} ödenen</div>
+                        </div>
+                        <button type="button" onClick={() => ayDegistir(1)} className="p-2 hover:bg-white/10 rounded-lg transition"><ChevronRight className="w-5 h-5" /></button>
+                      </div>
+
+                      {/* BEKLEYENLER — en yakın vade üstte */}
+                      <div className="space-y-1.5">
+                        {bekleyenBirlesik.length === 0 && (
+                          <div className="p-4 text-center text-xs font-bold text-neutral-400 bg-neutral-50 rounded-xl border border-dashed border-neutral-300">Bu ay bekleyen ödeme yok.</div>
+                        )}
+                        {bekleyenBirlesik.map((satir, i) => {
+                          if (satir.tip === 'maas') {
+                            const m = satir.m;
+                            const acikM = acikMaasSatiri === m.id;
+                            return (
+                              <div key={m.id} className="rounded-xl border border-purple-300 bg-purple-50 overflow-hidden">
+                                <div className="flex items-center gap-2 p-2.5 cursor-pointer" onClick={() => setAcikMaasSatiri(acikM ? null : m.id)}>
+                                  {vadeYaklasti(m.vadeTarihi) && <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" title="Vadeye 1 haftadan az kaldı"></span>}
+                                  <Users className="w-4 h-4 text-purple-600 shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-black text-sm text-purple-900 flex items-center gap-1.5 flex-wrap">
+                                      {m.ad}
+                                      <span className="text-[9px] font-black bg-purple-200 text-purple-700 px-1.5 py-0.5 rounded-full">OTOMATİK • MUHASEBEDEN</span>
+                                    </div>
+                                    <div className="text-[10px] font-bold text-purple-600">{m.kaynakEtiket} • Vade: {trh(m.vadeTarihi)} • {m.kisiler.length} personel • kalan banka+nakit toplamı</div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <div className="font-black text-purple-800 tabular-nums">₺{paraFmt(m.tutar)}</div>
+                                    {vadeYaklasti(m.vadeTarihi) && <div className="text-[9px] font-black text-red-600 animate-pulse">YAKLAŞIYOR</div>}
+                                  </div>
+                                  <button type="button" onClick={e => { e.stopPropagation(); setMaasOdeModal({ satir: m, kaynakDefterId: '' }); }}
+                                    className="shrink-0 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-black rounded-lg transition">Öde</button>
+                                </div>
+                                {/* Personel açılımı: tıklayınca herkesin kalanı alt alta */}
+                                {acikM && (
+                                  <div className="border-t border-purple-200 bg-white divide-y divide-neutral-100">
+                                    {m.kisiler.map(k => (
+                                      <div key={k.person.id} className={`flex items-center justify-between gap-2 px-3 py-1.5 text-xs ${k.bekleyen <= 0.01 ? 'opacity-50' : ''}`}>
+                                        <span className="font-bold text-neutral-700 truncate">{k.person.fullName}</span>
+                                        <span className="font-black tabular-nums text-purple-800 shrink-0">
+                                          {k.bekleyen <= 0.01 ? 'Ödendi ✓' : `₺${paraFmt(k.bekleyen)}`}
+                                          <span className="text-[9px] font-bold text-neutral-400 ml-1">(B: {k.bankaOdendi ? '✓' : paraFmt(Math.max(0, k.bankaKalan))} • N: {k.nakitOdendi ? '✓' : paraFmt(Math.max(0, k.kalanNakit))})</span>
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
+                          const { kalem, vade, tur } = satir.x;
+                          return (
+                            <div key={`${kalem.id}_${vade.no}`} className={`flex items-center gap-2 p-2.5 rounded-xl border ${vade.gecikmis ? 'border-red-300 bg-red-50' : tur.yumusak}`}>
+                              {vadeYaklasti(vade.tarih) && !vade.gecikmis && <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" title="Vadeye 1 haftadan az kaldı"></span>}
+                              <tur.Ikon className={`w-4 h-4 shrink-0 ${tur.yazi}`} />
+                              <div className="flex-1 min-w-0">
+                                <div className="font-black text-sm text-neutral-800 truncate">{kalem.ad}</div>
+                                <div className="text-[10px] font-bold text-neutral-500">
+                                  Vade: {trh(vade.tarih)} • {vade.no}. ödeme • {tur.ad}
+                                  {vade.gecikmis && <span className="ml-1 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className={`font-black tabular-nums ${vade.gecikmis ? 'text-red-700' : tur.yazi}`}>₺{paraFmt(vade.tutar)}</div>
+                                {vadeYaklasti(vade.tarih) && !vade.gecikmis && <div className="text-[9px] font-black text-red-600 animate-pulse">YAKLAŞIYOR</div>}
+                              </div>
+                              <button type="button" onClick={() => setVadeOdeme({ kalem, vade, kaynakDefterId: '', tarih: bugunStr(), tutar: String(vade.tutar) })}
+                                className="shrink-0 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg transition">Öde</button>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* ÖDENENLER — en altta ayrı bölüm */}
+                      {(odenen.length > 0 || odenenMaaslar.length > 0) && (
+                        <div className="mt-3 border-t-2 border-dashed border-emerald-300 pt-2">
+                          <div className="text-[10px] font-black text-emerald-700 uppercase mb-1.5 flex items-center gap-1.5">
+                            <CheckCircle className="w-3.5 h-3.5" /> Ödenenler ({odenen.length + odenenMaaslar.length})
+                          </div>
+                          <div className="space-y-1">
+                            {odenenMaaslar.map(m => (
+                              <div key={m.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
+                                <Users className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{m.ad} — {m.kaynakEtiket}</span>
+                                <span className="text-[10px] font-black text-emerald-700 shrink-0">{m.odemeTarihi ? trh(m.odemeTarihi) : 'Muhasebede kapatıldı'} ✓</span>
+                              </div>
+                            ))}
+                            {odenen.map(({ kalem, vade }) => (
+                              <div key={`${kalem.id}_${vade.no}`} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{kalem.ad} — {vade.no}. ödeme (₺{paraFmt(vade.tutar)})</span>
+                                <span className="text-[10px] font-black text-emerald-700 shrink-0">{trh(vade.odemeTarihi)} ✓</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* ==============================================================
                     YENİ: TÜRE GÖRE BLOKLAR
                     Kalemler ödeme türlerine ayrılır; her blok kendi renkli
                     başlığını ve kendi toplamını taşır. Boş türler çizilmez.
@@ -5851,6 +6231,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           );
         })()}
 
+        {/* DEĞİŞTİ (kullanıcı talebi): Ödemeler defterinde GÜN GÜN görünüm
+            tamamen KALDIRILDI — orada aylık ödeme görünümü var; günlük
+            gezinme, hareket filtreleri, işlem listesi ve kategori dağılımı
+            yalnızca DİĞER defter türlerinde çizilir. */}
+        {seciliDefter.tur !== 'Ödemeler' && (<>
         {/* YENİ: GÜNLÜK GEZİNME ÇUBUĞU
             Sol/sağ oklarla düne ve yarına geçilir. Açılışta her zaman bugün seçilidir.
             "Tüm Geçmiş" düğmesi filtreyi kapatıp defterin tamamını listeler. */}
@@ -6899,6 +7284,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         )}
 
 
+        </>)}
+
         {/* Sabit alt buton çubuğunun son kayıtları örtmemesi için boşluk.
             Mobilde çubuk daha yüksek durduğu için pay biraz fazla bırakıldı. */}
         <div className="h-24 sm:h-20"></div>
@@ -6915,6 +7302,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             küçülür, Transfer'in metni gizlenip yalnız simge kalır ve dokunma
             yüksekliği korunur (py-3.5). Güvenli alan (iPhone alt çubuğu) için
             pb-[env(safe-area-inset-bottom)] eklendi. */}
+        {seciliDefter.tur !== 'Ödemeler' && (
         <div className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none pb-[max(1rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto w-full max-w-xl px-3 flex gap-2 sm:gap-3 pointer-events-auto">
             {/* DEĞİŞİKLİK: Yeni işlemin tarihi, ekranda BAKILAN güne ayarlanır.
@@ -6939,6 +7327,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             </button>
           </div>
         </div>
+        )}
 
         {/* İŞLEM EKLE/DÜZENLE PENCERESİ */}
         {showIslemForm && (
@@ -7169,6 +7558,46 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
                   <input value={defterForm.not} onChange={e => setDefterForm({ ...defterForm, not: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" /></div>
                 <button onClick={handleSaveDefter} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl transition">Kaydet</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================
+            YENİ: MAAŞ ÖDEME PENCERESİ
+            Kaynak hesap seçilir; onaylanınca (1) kaynak defterden çıkış +
+            Ödemeler defterine mahsup girişi yazılır, (2) Muhasebe'deki tüm
+            personellerin banka/nakit tikleri atılır. İki ekran aynı anda
+            "ödendi" gösterir.
+            ================================================================== */}
+        {maasOdeModal && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2"><Users className="w-5 h-5 text-purple-600" /> {maasOdeModal.satir.ad} Öde</h3>
+                <button onClick={() => setMaasOdeModal(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs font-bold text-purple-800">
+                  <div className="font-black text-sm">{maasOdeModal.satir.kaynakEtiket}</div>
+                  <div>{maasOdeModal.satir.kisiler.length} personel • Kalan banka + nakit toplamı</div>
+                  <div className="text-lg font-black tabular-nums mt-1">₺{paraFmt(maasOdeModal.satir.tutar)}</div>
+                </div>
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
+                  <select value={maasOdeModal.kaynakDefterId} onChange={e => setMaasOdeModal({ ...maasOdeModal, kaynakDefterId: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-purple-500 text-sm">
+                    <option value="">Hesap seçin...</option>
+                    {defterler.filter(d => d.id !== seciliDefterId && d.tur !== 'Kredi' && d.tur !== 'Ödemeler')
+                      .map(d => <option key={d.id} value={d.id}>{d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})</option>)}
+                  </select></div>
+                <div className="text-[10px] font-bold text-neutral-500 bg-neutral-50 rounded-lg p-2.5 border border-neutral-200">
+                  Onayladığınızda Muhasebe ekranındaki {maasOdeModal.satir.kisiler.filter(k => k.bekleyen > 0.01).length} personelin
+                  banka ve nakit ödeme tikleri otomatik atılır; oradaki kalanlar sıfırlanır.
+                </div>
+                <button onClick={maasOde} disabled={maasKaydediliyor}
+                  className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition">
+                  {maasKaydediliyor ? 'Kaydediliyor...' : `₺${paraFmt(maasOdeModal.satir.tutar)} Ödemeyi Onayla`}
+                </button>
               </div>
             </div>
           </div>
