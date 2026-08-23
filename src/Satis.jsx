@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight } from 'lucide-react';
-import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where } from 'firebase/firestore';
-import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri } from './shared.jsx';
+import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
+import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul } from './shared.jsx';
 
   // ============================================================================
   // YENİ: Ortak Bölüm Başlığı Bileşeni (SectionHeader)
@@ -1143,6 +1143,15 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
     const [showEditProfileModal, setShowEditProfileModal] = useState(false);
     const [editProfileForm, setEditProfileForm] = useState({ name: '', phone: '', altPhone: '', customerType: 'Bireysel', idNo: '' });
     const [showAddDebtModal, setShowAddDebtModal] = useState(false);
+    // ========================================================================
+    // YENİ: KAPORA EKLE
+    // ========================================================================
+    // Müşterinin SON BEKLEYEN (sonlandırılmamış) işine profilden kapora girme.
+    // form: { tutar, defterId, jobId } — defterler modal açılınca okunur.
+    const [showKaporaModal, setShowKaporaModal] = useState(false);
+    const [kaporaForm, setKaporaForm] = useState({ tutar: '', defterId: '', jobId: '' });
+    const [kaporaDefterler, setKaporaDefterler] = useState([]);
+    const [kaporaKaydediliyor, setKaporaKaydediliyor] = useState(false);
     const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
     const [manualEntryForm, setManualEntryForm] = useState({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
     // YENİ: KARA LİSTE — müşteriyi sebebiyle birlikte kara listeye alma / düzenleme / çıkarma
@@ -1419,6 +1428,36 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
               </button>
               <button type="button" onClick={() => { setManualEntryForm({ amount: '', description: '', date: new Date().toISOString().split('T')[0] }); setShowAddPaymentModal(true); }} className="px-3 py-2 bg-green-50 hover:bg-green-100 text-green-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
                 <PlusCircle className="w-3.5 h-3.5" /> Tahsilat Ekle
+              </button>
+              {/* ==========================================================
+                  YENİ: KAPORA EKLE (kullanıcı talebi)
+                  Açılınca: müşterinin SON BEKLEYEN işi bulunur, %20'si
+                  önerilen tutar olarak dolu gelir (değiştirilebilir) ve
+                  defter listesi okunup BANKA hesabı önseçili gelir.
+                  ========================================================== */}
+              <button type="button" onClick={async () => {
+                // Son bekleyen iş: sonlandırılmamış + iptal edilmemiş, tarihi en yeni
+                const bekleyenler = customerJobs
+                  .filter(j => j.status !== 'completed' && j.status !== 'cancelled' && !j.endJobDetails)
+                  .sort((a, b) => new Date(b.date) - new Date(a.date));
+                const sonIs = bekleyenler[0];
+                if (!sonIs) { alert('Bu müşterinin bekleyen (sonlandırılmamış) işi yok. Kapora, bekleyen bir işe bağlanır.'); return; }
+                // Defterleri oku ve Banka hesabını önseç (NAKLİYE öncelikli)
+                let defterListesi = [];
+                try {
+                  const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'defterler'));
+                  defterListesi = snap.docs.map(d => ({ ...d.data(), id: d.id }))
+                    .filter(d => d.tur !== 'Kredi' && d.tur !== 'Ödemeler') // plan defterlerine para girişi yazılmaz
+                    .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+                } catch (e) { console.error('Defterler okunamadı:', e); }
+                setKaporaDefterler(defterListesi);
+                const bankaDefteri = odemeIcinDefterBul(defterListesi, 'Banka');
+                // %20 öneri: işin fiyatının beşte biri, tam sayıya yuvarlanır
+                const oneri = Math.round((parseFloat(sonIs.price) || 0) * 0.20);
+                setKaporaForm({ tutar: oneri ? String(oneri) : '', defterId: bankaDefteri?.id || defterListesi[0]?.id || '', jobId: sonIs.id });
+                setShowKaporaModal(true);
+              }} className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                <Wallet className="w-3.5 h-3.5" /> Kapora Ekle
               </button>
             </div>
           </div>
@@ -1931,6 +1970,110 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
         )}
 
         {/* YENİ: Manuel Borç Ekle Modalı */}
+        {/* ==================================================================
+            YENİ: KAPORA EKLE PENCERESİ
+            İş fiyatının %20'si önerilir; tutar elle değiştirilebilir.
+            Kaydedilince İKİ şey olur:
+              1) İşin deposit alanına eklenir -> iş kartında ve sonlandırma
+                 hesabında kapora olarak düşer (kayıt ekranındaki kaporayla
+                 birebir aynı mantık).
+              2) Seçilen deftere BUGÜNÜN tarihiyle GİRİŞ yazılır (kaynak:
+                 'Kapora (Manuel)'). Otomatik kapora fonksiyonu bu kaydı
+                 tanır ve asla üzerine yazmaz (shared.tsx koruması).
+            ================================================================== */}
+        {showKaporaModal && (() => {
+          const kaporaIsi = customerJobs.find(j => j.id === kaporaForm.jobId);
+          if (!kaporaIsi) return null;
+          const fiyat = parseFloat(kaporaIsi.price) || 0;
+          const mevcutKapora = parseFloat(kaporaIsi.deposit) || 0;
+          const girilen = parseFloat(kaporaForm.tutar) || 0;
+          const seciliDefter = kaporaDefterler.find(d => d.id === kaporaForm.defterId);
+          const kaydet = async () => {
+            if (!(girilen > 0)) { alert('Geçerli bir kapora tutarı girin.'); return; }
+            if (!kaporaForm.defterId) { alert('Kaporanın yazılacağı hesabı seçin.'); return; }
+            setKaporaKaydediliyor(true);
+            try {
+              const bugun = new Date().toISOString().split('T')[0];
+              // 1) İşin kapora alanına EKLE (mevcut kaporanın üzerine)
+              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', kaporaIsi.id), {
+                deposit: String(mevcutKapora + girilen)
+              });
+              // 2) Seçilen deftere bugünün tarihiyle GİRİŞ yaz
+              await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+                tip: 'giris',
+                tutar: girilen,
+                aciklama: kaporaIsi.deliveryCode ? `Teslim kodu: ${kaporaIsi.deliveryCode}` : 'Profilden kapora',
+                kategori: 'Kapora',
+                etiketler: ['Kapora', kaporaIsi.type].filter(Boolean),
+                odemeYontemi: seciliDefter?.tur === 'Banka' ? 'Banka / Havale' : seciliDefter?.tur === 'Kredi Kartı' ? 'Kredi Kartı' : 'Nakit',
+                tarih: bugun, // Kaporanın GİRİLDİĞİ gün — kullanıcı talebi
+                defterId: kaporaForm.defterId,
+                kaynak: 'Kapora (Manuel)',
+                kayitTipi: 'kapora',
+                kaporaKaynakId: kaporaIsi.id, // Oto fonksiyon ikinci satır açmasın diye
+                isId: kaporaIsi.id,
+                musteriAdi: kaporaIsi.customerName || '',
+                musteriTel: kaporaIsi.customerPhone || '',
+                teslimKodu: kaporaIsi.deliveryCode || '',
+                by: currentUser?.fullName || 'Sistem',
+                createdAt: new Date().toISOString()
+              });
+              if (addSystemLog) addSystemLog('Kapora Eklendi (Profil)',
+                `${kaporaIsi.customerName}: ₺${girilen.toLocaleString('tr-TR')} kapora ${seciliDefter?.ad || 'deftere'} yazıldı ve işin kaporasına eklendi.`);
+              setShowKaporaModal(false);
+            } catch (e) {
+              console.error('Kapora kaydedilemedi:', e);
+              alert('Kapora kaydedilemedi. Lütfen tekrar deneyin.');
+            }
+            setKaporaKaydediliyor(false);
+          };
+          return (
+            <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-black text-black flex items-center gap-2"><Wallet className="w-5 h-5 text-amber-600" /> Kapora Ekle</h3>
+                  <button onClick={() => setShowKaporaModal(false)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="space-y-3">
+                  {/* Bağlanan iş özeti */}
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-800">
+                    <div className="font-black text-sm">{kaporaIsi.customerName}</div>
+                    <div>{kaporaIsi.date?.split('-').reverse().join('.')} • {kaporaIsi.type || 'Nakliye'} • İş tutarı: ₺{fiyat.toLocaleString('tr-TR')}</div>
+                    {mevcutKapora > 0 && <div>Mevcut kapora: ₺{mevcutKapora.toLocaleString('tr-TR')}</div>}
+                  </div>
+
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Kapora Tutarı (₺) *</label>
+                    <input type="number" inputMode="decimal" value={kaporaForm.tutar}
+                      onChange={e => setKaporaForm({ ...kaporaForm, tutar: e.target.value })}
+                      className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-lg font-black" />
+                    <p className="text-[10px] font-bold text-neutral-400 mt-1">İş tutarının %20'si önerildi; gerekirse değiştirin.</p>
+                  </div>
+
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaba yazılsın? *</label>
+                    <select value={kaporaForm.defterId} onChange={e => setKaporaForm({ ...kaporaForm, defterId: e.target.value })}
+                      className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-amber-500 text-sm">
+                      {kaporaDefterler.map(d => <option key={d.id} value={d.id}>{d.ad} — {d.tur}</option>)}
+                    </select>
+                    <p className="text-[10px] font-bold text-neutral-400 mt-1">Banka hesabı önseçili gelir; nakit veya kredi kartı alındıysa değiştirin.</p>
+                  </div>
+
+                  {girilen > 0 && (
+                    <div className="text-[11px] font-bold text-neutral-600 bg-neutral-50 rounded-lg p-2.5 border border-neutral-200 space-y-0.5">
+                      <div>Deftere yazılacak: <b className="text-emerald-700">+₺{girilen.toLocaleString('tr-TR')}</b> (bugün, {seciliDefter?.ad || '-'})</div>
+                      <div>İşin yeni kaporası: <b>₺{(mevcutKapora + girilen).toLocaleString('tr-TR')}</b> • Kalan bakiye: <b>₺{Math.max(0, fiyat - mevcutKapora - girilen).toLocaleString('tr-TR')}</b></div>
+                    </div>
+                  )}
+
+                  <button onClick={kaydet} disabled={kaporaKaydediliyor}
+                    className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition">
+                    {kaporaKaydediliyor ? 'Kaydediliyor...' : 'Kaporayı Kaydet'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {showAddDebtModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
