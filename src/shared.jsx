@@ -1359,6 +1359,10 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
     // DEĞİŞİKLİK: Defter türü 'Kasa' -> 'Nakit' olarak yeniden adlandırıldı.
     // Eski defterler 'Kasa' türüyle kayıtlı kalabileceği için ikisi de eşleşir.
     'Nakit': ['Nakit', 'Kasa'],
+    // DEĞİŞTİ: İş sonlandırma ekranında "Havale/EFT" seçeneğinin adı "Banka"
+    // oldu. Yeni kayıtlar 'Banka' değerini taşır; ESKİ işlerdeki 'Havale/EFT'
+    // değeri de aşağıda eşleşmeye devam eder (geriye uyum).
+    'Banka': ['Banka'],
     'Havale/EFT': ['Banka'],
     'Kredi Kartı': ['Kredi Kartı', 'Cari (Kişi/Firma)'],
     'Ödeme Yapmadı': ['Borçlu', 'Diğer'],
@@ -1378,9 +1382,23 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
   export const odemeIcinDefterBul = (defterler, odemeYontemi) => {
     const hedefTurler = ODEME_DEFTER_TUR_ESLEME[odemeYontemi] || [];
     if (!hedefTurler.length) return null;
+    // ======================================================================
+    // DEĞİŞTİ: "NAKLİYE" ADLI DEFTERLERE ÖNCELİK
+    // ======================================================================
+    // SORUN: Aynı türde birden çok defter olunca alfabetik ilk seçiliyordu.
+    // "DEPO ( ALBARAKA BANK )" alfabetik olarak "NAKLİYE ( GARANTİ BANK )"ın
+    // ÖNÜNDE olduğu için iş gelirleri yanlışlıkla depo hesabına düşebilirdi.
+    // İş geliri nakliye işinden geldiğine göre, adında "NAKLİYE" geçen defter
+    // önce denenir; yoksa alfabetik ilk uygun defter (eski davranış) kullanılır.
+    // ======================================================================
     const uygun = (defterler || [])
       .filter(d => hedefTurler.includes(d.tur))
-      .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+      .sort((a, b) => {
+        const aN = (a.ad || '').toLocaleUpperCase('tr-TR').includes('NAKLİYE') ? 0 : 1;
+        const bN = (b.ad || '').toLocaleUpperCase('tr-TR').includes('NAKLİYE') ? 0 : 1;
+        if (aN !== bN) return aN - bN; // NAKLİYE olanlar öne
+        return (a.ad || '').localeCompare((b.ad || ''), 'tr-TR');
+      });
     return uygun[0] || null;
   };
 
@@ -1424,6 +1442,22 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
         where('kaporaKaynakId', '==', job.id)
       ));
 
+      // ======================================================================
+      // YENİ: MANUEL KAPORA KORUMASI
+      // ======================================================================
+      // Müşteri profilindeki "Kapora Ekle" ile girilen kayıtlar (kaynak:
+      // 'Kapora (Manuel)') kullanıcının bilinçli tercihlerini taşır — hangi
+      // deftere, hangi tarihte yazılacağını kendisi seçmiştir. İş formu
+      // sonradan kaydedildiğinde bu otomatik fonksiyon o kaydı EZMEMELİ:
+      // ne tutarını/defterini değiştirmeli ne de silmelidir.
+      // ======================================================================
+      const manuelKayit = mevcutSnap.docs.find(d => d.data()?.kaynak === 'Kapora (Manuel)');
+      if (manuelKayit) {
+        addSystemLog?.('Kapora Defter Kaydı Korundu',
+          `${job.customerName}: kapora, profilden manuel girildiği için otomatik kayıt dokunmadı.`);
+        return true;
+      }
+
       // Kapora yoksa/sıfırlandıysa varsa kayıt silinir; ₺0 satırı bırakılmaz.
       if (tutar <= 0) {
         for (const d of mevcutSnap.docs) {
@@ -1434,10 +1468,17 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
 
       // BANKA türündeki defter seçilir (birden fazlaysa adına göre ilk sıradaki).
       const defterSnap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'defterler'));
+      // DEĞİŞTİ: Adında "NAKLİYE" geçen Banka defteri öncelikli (iş kaporası
+      // nakliye hesabına düşmeli; DEPO hesabı alfabetik önce diye seçilmesin).
       const uygun = defterSnap.docs
         .map(d => ({ ...d.data(), id: d.id }))
         .filter(d => d.tur === 'Banka')
-        .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+        .sort((a, b) => {
+          const aN = (a.ad || '').toLocaleUpperCase('tr-TR').includes('NAKLİYE') ? 0 : 1;
+          const bN = (b.ad || '').toLocaleUpperCase('tr-TR').includes('NAKLİYE') ? 0 : 1;
+          if (aN !== bN) return aN - bN;
+          return (a.ad || '').localeCompare((b.ad || ''), 'tr-TR');
+        });
       const defter = uygun[0];
 
       if (!defter) {
