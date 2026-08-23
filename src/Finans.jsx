@@ -4762,8 +4762,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           const kayit = odemeler.find(i => parseInt(i.vadeNo) === n);
           // YENİ: Vadenin tutarı o tarihte geçerli olan zamlı tutardır
           const vadeTutari = kalemTutariTarihte(kalem, tarihStr);
+          // ==============================================================
+          // YENİ (kullanıcı talebi): KİRA YIL DOLUMU UYARISI
+          // ==============================================================
+          // Kira Ödemesi türündeki AYLIK kalemlerde her 12. taksit bir
+          // sözleşme yılının SON ödemesidir (1., 13., 25. taksit yeni yılın
+          // başlangıcı). Bu vadeye "yılSonu" damgası basılır; listede
+          // "1 yıl doldu — gelecek ay zamlı ödeyebilirsiniz" uyarısı çıkar.
+          // yilNo: kaçıncı sözleşme yılının dolduğu (12. taksit -> 1. yıl).
+          const kiraAylik = (kalem.odemeTuru === 'kira') && tekrar === 'aylik';
+          const yilSonu = kiraAylik && n % 12 === 0;
           plan.push({ no: n, tarih: tarihStr, tutar: vadeTutari, odendi, odemeTarihi: kayit?.tarih || null,
-                      gecikmis: !odendi && tarihStr < bugunStr() });
+                      gecikmis: !odendi && tarihStr < bugunStr(),
+                      yilSonu, yilNo: yilSonu ? n / 12 : null });
         }
       }
       const odenenAdet = plan.filter(p => p.odendi).length;
@@ -6537,7 +6548,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                           }
                           const { kalem, vade, tur } = satir.x;
                           return (
-                            <div key={`${kalem.id}_${vade.no}`} className={`flex items-center gap-2 p-2.5 rounded-xl border ${vade.gecikmis ? 'border-red-300 bg-red-50' : tur.yumusak}`}>
+                            <div key={`${kalem.id}_${vade.no}`} className={`rounded-xl border overflow-hidden ${vade.gecikmis ? 'border-red-300 bg-red-50' : vade.yilSonu ? 'border-amber-300 bg-amber-50' : tur.yumusak}`}>
+                            <div className="flex items-center gap-2 p-2.5">
                               {vadeYaklasti(vade.tarih) && !vade.gecikmis && <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse shrink-0" title="Vadeye 1 haftadan az kaldı"></span>}
                               <tur.Ikon className={`w-4 h-4 shrink-0 ${tur.yazi}`} />
                               <div className="flex-1 min-w-0">
@@ -6550,6 +6562,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                 <div className="text-[10px] font-bold text-neutral-500">
                                   Vade: {trh(vade.tarih)} • {tur.ad}
                                   {vade.gecikmis && <span className="ml-1 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
+                                  {/* YENİ: 12. taksitte sözleşme yılı dolduğu rozeti */}
+                                  {vade.yilSonu && <span className="ml-1 text-[9px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded-full">{vade.yilNo}. YIL SON ÖDEMESİ</span>}
                                 </div>
                               </div>
                               <div className="text-right shrink-0">
@@ -6558,6 +6572,41 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                               </div>
                               <button type="button" onClick={() => setVadeOdeme({ kalem, vade, kaynakDefterId: '', tarih: bugunStr(), tutar: String(vade.tutar) })}
                                 className="shrink-0 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg transition">Öde</button>
+                            </div>
+
+                            {/* ==================================================
+                                YENİ (kullanıcı talebi): KİRA YIL DOLUMU UYARISI
+                                ==================================================
+                                Kira sözleşmesinin 12. ayına gelindiğinde bu şerit
+                                çıkar. "Tutarı Güncelle" düğmesi, Otomatik Ödemeler
+                                penceresindeki zam formunu doğrudan bu kalem için
+                                açar; geçerlilik tarihi bir sonraki vadeye ayarlanır,
+                                böylece geçmiş aylar eski tutarında kalır. */}
+                            {vade.yilSonu && !vade.gecikmis && (() => {
+                              // Bir sonraki vadenin tarihi = zammın geçerli olacağı gün
+                              const sonrakiTarih = (() => {
+                                const [yy, mm, dd] = vade.tarih.split('-').map(Number);
+                                const d = new Date(yy, mm, 1);
+                                const sonGun = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+                                d.setDate(Math.min(dd, sonGun));
+                                return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                              })();
+                              return (
+                                <div className="px-2.5 pb-2.5 pt-0">
+                                  <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-100 border border-amber-300 flex-wrap">
+                                    <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                                    <div className="flex-1 min-w-0 text-[11px] font-bold text-amber-800">
+                                      Bu ödemeyle <b>{vade.yilNo}. yıl doldu.</b> Gelecek ay ({trh(sonrakiTarih)}) itibarıyla zamlı tutar uygulayabilirsiniz.
+                                    </div>
+                                    <button type="button"
+                                      onClick={() => { setOtomatikYonetim(true); setYonetimForm({ kalemId: kalem.id, mod: 'zam', tarih: sonrakiTarih, tutar: String(vade.tutar) }); }}
+                                      className="shrink-0 px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black rounded-lg transition">
+                                      Tutarı Güncelle
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })()}
                             </div>
                           );
                         })}
@@ -6578,10 +6627,34 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                               </div>
                             ))}
                             {odenen.map(({ kalem, vade }) => (
-                              <div key={`${kalem.id}_${vade.no}`} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
-                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{kalem.ad} — {AY_ADLARI[Number(vade.tarih.slice(5, 7)) - 1]} (₺{paraFmt(vade.tutar)})</span>
-                                <span className="text-[10px] font-black text-emerald-700 shrink-0">{trh(vade.odemeTarihi)} ✓</span>
+                              <div key={`${kalem.id}_${vade.no}`}>
+                                <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
+                                  <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{kalem.ad} — {AY_ADLARI[Number(vade.tarih.slice(5, 7)) - 1]} (₺{paraFmt(vade.tutar)})</span>
+                                  <span className="text-[10px] font-black text-emerald-700 shrink-0">{trh(vade.odemeTarihi)} ✓</span>
+                                </div>
+                                {/* YENİ: Yıl dolumu uyarısı ÖDENDİKTEN SONRA DA görünür —
+                                    asıl anlamı burada: yıl kapandı, sıradaki ay zamlı olacak.
+                                    Zam zaten girilmişse (bir sonraki vadenin tutarı bu
+                                    vadeden farklıysa) uyarı gösterilmez, iş tamamlanmıştır. */}
+                                {vade.yilSonu && (() => {
+                                  const bilgi = odemeKalemBilgi(seciliDefter, kalem);
+                                  const sonraki = bilgi.plan.find(p => p.no === vade.no + 1);
+                                  if (!sonraki || Math.abs(sonraki.tutar - vade.tutar) > 0.01) return null; // zam girilmiş
+                                  return (
+                                    <div className="flex items-center gap-2 p-2 mt-1 rounded-lg bg-amber-100 border border-amber-300 flex-wrap">
+                                      <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 animate-pulse" />
+                                      <div className="flex-1 min-w-0 text-[11px] font-bold text-amber-800">
+                                        <b>{kalem.ad}</b> için {vade.yilNo}. yıl doldu. Gelecek ay ({trh(sonraki.tarih)}) zamlı tutar uygulayabilirsiniz.
+                                      </div>
+                                      <button type="button"
+                                        onClick={() => { setOtomatikYonetim(true); setYonetimForm({ kalemId: kalem.id, mod: 'zam', tarih: sonraki.tarih, tutar: String(vade.tutar) }); }}
+                                        className="shrink-0 px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black rounded-lg transition">
+                                        Tutarı Güncelle
+                                      </button>
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             ))}
                           </div>
