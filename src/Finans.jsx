@@ -4081,6 +4081,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // { kalem, vade, kaynakDefterId, tarih } — hangi kalemin hangi vadesi, nereden
     const [vadeOdeme, setVadeOdeme] = useState(null);
     // Vade listesi açık olan kalemin kimliği (akordiyon)
+    // NOT: Türe göre kalem blokları kaldırıldığı için bu state artık
+    // kullanılmıyor; kalem açılımı "Otomatik Ödemeler" penceresine taşındı.
+    // Silinmedi çünkü ileride kalem detayı geri istenirse hazır duruyor.
     const [acikOdemeKalemi, setAcikOdemeKalemi] = useState(null);
 
     // YENİ: Kredi kalemi formu ve akordiyon durumu (Ödemeler ile aynı desen)
@@ -6146,140 +6149,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 })()}
 
                 {/* ==============================================================
-                    YENİ: TÜRE GÖRE BLOKLAR
-                    Kalemler ödeme türlerine ayrılır; her blok kendi renkli
-                    başlığını ve kendi toplamını taşır. Boş türler çizilmez.
-                    Sıra ODEME_TURLERI dizisindeki sıradır (Kira > Firma >
-                    Personel). Türü olmayan eski kayıtlar "Firma Ödemesi"
-                    bloğunda görünür.
+                    KALDIRILDI (kullanıcı talebi): TÜRE GÖRE KALEM BLOKLARI
+                    ==============================================================
+                    Kalemler yukarıdaki AYLIK listede zaten görünüyor; ayrıca
+                    türe göre renkli bloklar halinde tekrar listelenmesi aynı
+                    ödemeyi iki kez göstermek oluyordu. Kalemlerin tam listesi
+                    ve yönetimi artık "Otomatik Ödemeler" penceresinde.
+                    Aşağıdaki "Ödeme Türü Özeti" korundu — o, kalem listesi
+                    değil, türlerin toplam yükünü karşılaştıran bir özettir.
                     ============================================================== */}
-                {ODEME_TURLERI.map(tur => {
-                  const turKalemleri = od.detaylar.filter(d =>
-                    (d.kalem.odemeTuru || VARSAYILAN_ODEME_TURU) === tur.id);
-                  if (turKalemleri.length === 0) return null;
-                  // Bu türün bu ay bekleyen ve gecikmiş toplamları
-                  const turBuAy = turKalemleri.reduce((t, d) => {
-                    const buAyBas = bugunStr().slice(0, 8) + '01';
-                    const [yy, mm] = bugunStr().split('-').map(Number);
-                    const buAyBit = `${yy}-${String(mm).padStart(2, '0')}-${String(new Date(yy, mm, 0).getDate()).padStart(2, '0')}`;
-                    return t + d.bilgi.plan.filter(p => !p.odendi && p.tarih >= buAyBas && p.tarih <= buAyBit).reduce((x, p) => x + p.tutar, 0);
-                  }, 0);
-                  const turGecikmis = turKalemleri.reduce((t, d) => t + d.bilgi.gecikmisAdet, 0);
-                  return (
-                    <div key={tur.id} className={`rounded-xl border overflow-hidden ${tur.yumusak}`}>
-                      {/* BLOK BAŞLIĞI — her tür kendi renginde */}
-                      <div className={`${tur.baslik} text-white px-3 py-2 flex items-center justify-between gap-2 flex-wrap`}>
-                        <div className="flex items-center gap-2 text-xs font-black">
-                          <tur.Ikon className="w-4 h-4 shrink-0" />
-                          {tur.ad}
-                          <span className="text-[10px] font-bold text-white/70">{turKalemleri.length} kalem</span>
-                          {turGecikmis > 0 && (
-                            <span className="text-[9px] font-black bg-red-600 px-1.5 py-0.5 rounded-full">{turGecikmis} GECİKMİŞ</span>
-                          )}
-                        </div>
-                        <div className="text-right">
-                          <div className="text-[9px] font-black uppercase text-white/70 leading-none">Bu Ay Bekleyen</div>
-                          <div className="text-sm font-black tabular-nums">₺{paraFmt(turBuAy)}</div>
-                        </div>
-                      </div>
-                      <div className="p-2 space-y-2">
-                {turKalemleri.map(({ kalem, bilgi }) => {
-                  const acik = acikOdemeKalemi === kalem.id;
-                  return (
-                    <div key={kalem.id} className={`rounded-xl border overflow-hidden ${bilgi.gecikmisAdet > 0 ? 'border-red-300' : 'border-neutral-200'}`}>
-                      {/* KALEM BAŞLIĞI — tıklayınca vade listesi açılır */}
-                      <div className={`p-3 flex items-center gap-3 cursor-pointer transition ${bilgi.gecikmisAdet > 0 ? 'bg-red-50 hover:bg-red-100' : 'bg-neutral-50 hover:bg-neutral-100'}`}
-                        onClick={() => setAcikOdemeKalemi(acik ? null : kalem.id)}>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-black text-black text-sm truncate flex items-center gap-2">
-                            {kalem.ad}
-                            {bilgi.gecikmisAdet > 0 && <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full shrink-0">{bilgi.gecikmisAdet} GECİKMİŞ</span>}
-                          </div>
-                          <div className="text-[11px] font-bold text-neutral-500">
-                            ₺{paraFmt(bilgi.tutar)} • {tekrarEtiket(kalem.tekrar, kalem.tekrarSayisi)}
-                            {bilgi.suresiz ? ` • ${bilgi.odenenAdet} ödeme yapıldı` : ` • ${bilgi.odenenAdet}/${bilgi.istenenAdet} ödendi`}
-                          </div>
-                          {bilgi.siradaki && (
-                            <div className={`text-[11px] font-bold mt-0.5 ${bilgi.siradaki.gecikmis ? 'text-red-600' : 'text-orange-700'}`}>
-                              Sıradaki: {bilgi.siradaki.tarih.split('-').reverse().join('.')}
-                              {bilgi.siradaki.gecikmis && ' (gecikmiş)'}
-                            </div>
-                          )}
-                          {!bilgi.siradaki && <div className="text-[11px] font-black text-emerald-700 mt-0.5">Tüm ödemeler tamamlandı ✓</div>}
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {/* Sıradaki vadeyi tek tıkla ödeme kısayolu */}
-                          {bilgi.siradaki && (
-                            <button type="button"
-                              onClick={e => { e.stopPropagation(); setVadeOdeme({ kalem, vade: bilgi.siradaki, kaynakDefterId: '', tarih: bugunStr(), tutar: String(bilgi.siradaki.tutar) }); }}
-                              className="px-2.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-[10px] font-black rounded-lg transition">
-                              Öde
-                            </button>
-                          )}
-                          <button type="button" onClick={e => { e.stopPropagation(); setOdemeKalemForm({ ...bosOdemeKalemi, ...kalem }); }}
-                            className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle">
-                            <Edit className="w-3.5 h-3.5" />
-                          </button>
-                          <button type="button" onClick={e => { e.stopPropagation(); odemeKalemiSil(kalem.id); }}
-                            className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Planı kaldır">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                          <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${acik ? 'rotate-180' : ''}`} />
-                        </div>
-                      </div>
-
-                      {/* ==============================================================
-                          DEĞİŞTİ: UZUN VADE LİSTESİ KALDIRILDI
-                          ==============================================================
-                          Süresiz kalemlerde 24 satırlık liste açılıyor ve ekranı
-                          boğuyordu. Aylık görünümde her ayın vadesi zaten kendi
-                          ayında görünüyor; burada yalnızca kalemin ÖZETİ ve
-                          varsa notu/zam-bitiş bilgisi gösteriliyor.
-                          Ödeme, aylık listedeki "Öde" düğmesinden yapılır.
-                          ============================================================== */}
-                      {acik && (
-                        <div className="p-3 bg-white border-t border-neutral-200 space-y-2">
-                          {kalem.not && <p className="text-[11px] font-medium text-neutral-500 italic">{kalem.not}</p>}
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200">
-                              <div className="text-[9px] font-black uppercase text-neutral-400">Ödenen</div>
-                              <div className="text-sm font-black text-emerald-700">{bilgi.odenenAdet}</div>
-                            </div>
-                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200">
-                              <div className="text-[9px] font-black uppercase text-neutral-400">Gecikmiş</div>
-                              <div className={`text-sm font-black ${bilgi.gecikmisAdet > 0 ? 'text-red-600' : 'text-neutral-400'}`}>{bilgi.gecikmisAdet}</div>
-                            </div>
-                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200">
-                              <div className="text-[9px] font-black uppercase text-neutral-400">Toplam Ödenen</div>
-                              <div className="text-sm font-black text-neutral-700 tabular-nums">₺{paraFmt(bilgi.odenenTutar)}</div>
-                            </div>
-                            <div className="bg-neutral-50 rounded-lg p-2 border border-neutral-200">
-                              <div className="text-[9px] font-black uppercase text-neutral-400">Sıradaki</div>
-                              <div className="text-sm font-black text-orange-700">{bilgi.siradaki ? bilgi.siradaki.tarih.split('-').reverse().join('.') : '—'}</div>
-                            </div>
-                          </div>
-                          {kalem.bitisTarihi && (
-                            <p className="text-[10px] font-black text-red-600 bg-red-50 border border-red-200 rounded-lg p-2">
-                              Bu ödeme {kalem.bitisTarihi.split('-').reverse().join('.')} tarihinde sonlandırıldı — sonrası için borç oluşmaz.
-                            </p>
-                          )}
-                          {(kalem.zamlar || []).length > 0 && (
-                            <div className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2 space-y-0.5">
-                              {(kalem.zamlar || []).map((z, zi) => (
-                                <div key={zi}>{z.gecerliTarih?.split('-').reverse().join('.')} tarihinden itibaren ₺{paraFmt(parseFloat(z.tutar) || 0)}</div>
-                              ))}
-                            </div>
-                          )}
-                          <p className="text-[10px] font-bold text-neutral-400 text-center">Ödemeler, yukarıdaki aylık listeden yapılır.</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                      </div>
-                    </div>
-                  );
-                })}
 
                 {/* ==========================================================
                     YENİ: TÜR BAZLI ÖZET (en altta)
