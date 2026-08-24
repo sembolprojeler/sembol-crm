@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp , Banknote, UserMinus, Settings } from 'lucide-react';
+import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp , Banknote, UserMinus, Settings, FileText } from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 // DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
 // Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
@@ -6611,6 +6611,56 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 </div>
               </div>
 
+              {/* ==============================================================
+                  YENİ (kullanıcı talebi): KALICI KİRA ZAM UYARISI
+                  ==============================================================
+                  Hangi ay görüntülenirse görüntülensin, 12 ayı (24., 36. ...)
+                  DOLMUŞ ama henüz ZAM GİRİLMEMİŞ her kira burada listelenir.
+                  İlk ödeme tarihi = kiralama tarihi kabul edilir; yıl dönümü
+                  hep o tarihe göre sayılır (sonradan eklenen kiralar dahil,
+                  devirden ödenmiş sayılan geçmiş aylar da hesaba katılır).
+                  Uyarı, o kiraya zam girilene (veya kira sonlandırılana) kadar
+                  KAYBOLMAZ; zam girildiği an kendiliğinden söner. */}
+              {(() => {
+                const bugun = bugunStr();
+                const zamBekleyenler = [];
+                od.detaylar.forEach(({ kalem, bilgi }) => {
+                  if (kalem.odemeTuru !== 'kira' || kalem.bitisTarihi) return;
+                  // Vadesi geçmiş yıl dönümleri (12., 24., 36. ... ödemeler)
+                  const gecmisYilSonlari = bilgi.plan.filter(p => p.yilSonu && p.tarih <= bugun);
+                  if (gecmisYilSonlari.length === 0) return;
+                  const sonYilSonu = gecmisYilSonlari[gecmisYilSonlari.length - 1];
+                  const sonraki = bilgi.plan.find(p => p.no === sonYilSonu.no + 1);
+                  // Sonraki vade yoksa veya tutarı değiştiyse zam zaten girilmiş demektir
+                  if (!sonraki || Math.abs(sonraki.tutar - sonYilSonu.tutar) > 0.01) return;
+                  zamBekleyenler.push({ kalem, sonYilSonu, sonraki });
+                });
+                if (zamBekleyenler.length === 0) return null;
+                return (
+                  <div className="mx-4 mt-3 rounded-xl border border-amber-300 bg-amber-50 overflow-hidden">
+                    <div className="px-3 py-2 bg-amber-100 border-b border-amber-300 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-700 animate-pulse" />
+                      <span className="text-[11px] font-black text-amber-800 uppercase">Zam Bekleyen Kiralar ({zamBekleyenler.length})</span>
+                    </div>
+                    <div className="p-2 space-y-1.5">
+                      {zamBekleyenler.map(({ kalem, sonYilSonu, sonraki }) => (
+                        <div key={kalem.id} className="flex items-center gap-2 p-2 rounded-lg bg-white border border-amber-200 flex-wrap">
+                          <div className="flex-1 min-w-0 text-[11px] font-bold text-amber-900">
+                            <b>{kalem.ad}</b> — {sonYilSonu.yilNo}. yıl {trh(sonYilSonu.tarih)}'de doldu, hâlâ zam girilmedi.
+                            Güncel tutar ₺{paraFmt(sonYilSonu.tutar)} ödenmeye devam ediyor.
+                          </div>
+                          <button type="button"
+                            onClick={() => { setOtomatikYonetim(true); setYonetimForm({ kalemId: kalem.id, mod: 'zam', tarih: sonraki.tarih >= bugun ? sonraki.tarih : bugun, tutar: String(sonYilSonu.tutar) }); }}
+                            className="shrink-0 px-2.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-[10px] font-black rounded-lg transition">
+                            Tutarı Güncelle
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="p-4 space-y-3">
                 {od.detaylar.length === 0 && (
                   <div className="text-center py-8 border border-dashed border-neutral-300 rounded-xl">
@@ -7964,6 +8014,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     {vadeOdeme.vade.no}. ödeme • Vade: {vadeOdeme.vade.tarih.split('-').reverse().join('.')}
                     {vadeOdeme.vade.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
                   </div>
+                  {/* YENİ (kullanıcı talebi): Kaleme girilen AÇIKLAMA / NOT ödeme
+                      sırasında burada görünür (ör. "ŞAHSİ İBANA GÖNDERİLMEKTEDİR.").
+                      Not girilmemişse bu kutu hiç çizilmez. */}
+                  {(vadeOdeme.kalem.not || '').trim() && (
+                    <div className="mt-2 pt-2 border-t border-orange-200 flex items-start gap-1.5">
+                      <FileText className="w-3.5 h-3.5 text-orange-600 shrink-0 mt-0.5" />
+                      <div className="text-[11px] font-bold text-orange-800 whitespace-pre-wrap">{vadeOdeme.kalem.not}</div>
+                    </div>
+                  )}
                   {/* YENİ (kullanıcı talebi): KISMİ ÖDEME DURUMU
                       Bu vadeye daha önce parça ödeme yapıldıysa ne kadar ödendiği
                       ve ne kadar kaldığı burada açıkça yazar. */}
