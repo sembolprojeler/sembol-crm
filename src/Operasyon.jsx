@@ -4551,11 +4551,12 @@ export const haftaGunleriListesi = (tarihStr) => {
  * Bir gün için haftalık kural kararını üretir.
  * @param tarihStr      Değerlendirilen gün (YYYY-AA-GG)
  * @param girisVarMi    O gün QR/manuel giriş kaydı var mı?
+ * @param cikisVarMi    O gün QR/manuel ÇIKIŞ kaydı var mı? (YENİ)
  * @param mevcutKod     O günün puantajdaki mevcut kodu (yoksa null/'')
- * @param haftaGunleri  [{ tarihStr, girisVarMi, kod }] — haftanın TÜM 7 günü
+ * @param haftaGunleri  [{ tarihStr, girisVarMi, cikisVarMi, kod }] — haftanın TÜM 7 günü
  * @returns { status, aciklama } veya null (karara karışılmaz)
  */
-export const haftalikMesaiKarari = ({ tarihStr, girisVarMi, mevcutKod, haftaGunleri = [] }) => {
+export const haftalikMesaiKarari = ({ tarihStr, girisVarMi, cikisVarMi = false, mevcutKod, haftaGunleri = [] }) => {
   // Kural sınırı: başlangıç tarihinden önceki günlere hiç karışma
   if (tarihStr < MESAI_KURAL_BASLANGIC) return null;
 
@@ -4569,7 +4570,10 @@ export const haftalikMesaiKarari = ({ tarihStr, girisVarMi, mevcutKod, haftaGunl
     if (g.kod && MESAI_IZIN_KODLARI.includes(g.kod)) return false; // İzinli gün gelmiş sayılmaz
     if (g.kod && MESAI_GELDI_KODLARI.includes(g.kod)) return true;
     if (g.tarihStr < MESAI_KURAL_BASLANGIC) return false; // Kodu yoksa ve eskiyse bilinmiyor
-    return !!g.girisVarMi;
+    // YENİ (kullanıcı talebi): Şehir dışı görevden dönüp SADECE ÇIKIŞ basılan
+    // gün de çalışılmış sayılır; aksi halde o gün "gelinmedi" görünüp haftalık
+    // izin/devamsızlık sayacını yanlış tetiklerdi.
+    return !!g.girisVarMi || !!g.cikisVarMi;
   };
 
   const gunAdiBu = HAFTA_GUNLERI[(new Date(tarihStr + 'T00:00:00').getDay() + 6) % 7];
@@ -4587,6 +4591,16 @@ export const haftalikMesaiKarari = ({ tarihStr, girisVarMi, mevcutKod, haftaGunl
       return { status: 'G', aciklama: 'Pazar günü giriş yapıldı; hafta içinde gelinmeyen gün olduğu için normal Geldi önerildi.' };
     }
     return { status: 'G', aciklama: 'QR/kod ile giriş yapıldı → Geldi.' };
+  }
+
+  // ============================================================ ŞEHİR DIŞI
+  // YENİ (kullanıcı talebi): Giriş yok ama ÇIKIŞ var.
+  // Personel il dışına çıktığı gün çıkış basamamış, ertesi gün (veya bir
+  // sonraki gün) dönüp basmıştır. O gün devamsız DEĞİLDİR; çalışılmıştır ve
+  // personele 1 Fazla Gün (FG) eklenir. Bu kontrol haftalık izin /
+  // devamsızlık kararından ÖNCE gelir, aksi halde üzerine yazılırdı.
+  if (cikisVarMi) {
+    return { status: 'FG', aciklama: 'Giriş kaydı yok ama çıkış basılmış → şehir dışı görevden dönüş kabul edildi; 1 Fazla Gün (FG) eklendi.' };
   }
 
   // ------------------------------------------------------------- GELMEDİ
@@ -17037,6 +17051,20 @@ export const beyazYakaOnerileriHesapla = (personeller, qrKayitlari, tarihStr) =>
       };
       return;
     }
+    // YENİ (kullanıcı talebi): ŞEHİR DIŞI GÖREV — GECİKMELİ ÇIKIŞ BASMA
+    // Giriş yok ama çıkış varsa, personel önceki gün(ler)deki şehir dışı
+    // görevden dönüp çıkış basmış demektir. Devamsız değil, Fazla Gün (FG).
+    // Beyaz yakada saat hesabı yapılmadığı için hours yine boş bırakılır.
+    if (cikis) {
+      sonuc[person.id] = {
+        status: 'FG', hours: '',
+        girisSaati: null, cikisSaati: cikis.timeStr,
+        aciklama: `Giriş kaydı yok ama ${cikis.timeStr} çıkış basılmış → şehir dışı görevden dönüş kabul edildi; 1 Fazla Gün (FG) eklendi.`,
+        kaynak: cikis.method || 'cikis',
+        gecikmeliCikis: true,
+      };
+      return;
+    }
     if (prog.izinli) {
       // Okutmamış ama çalışma programında o gün izinli -> Haftalık İzin
       sonuc[person.id] = {
@@ -17788,6 +17816,31 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr) => {
     const cikis = kayitBul(person.id, 'cikis');
     const prog = gununProgrami(person, tarihStr);
 
+    // ====================================================================
+    // YENİ (kullanıcı talebi): ŞEHİR DIŞI GÖREV — GECİKMELİ ÇIKIŞ BASMA
+    // ====================================================================
+    // Durum: Personel il dışına çıkıyor, o gün çıkış basamıyor; ertesi gün
+    // ya da bir sonraki gün dönüp çıkış basıyor. O günün kayıtlarında
+    // GİRİŞ YOK ama ÇIKIŞ VAR olur.
+    // ESKİ DAVRANIŞ: "giriş kaydı yok" denip DEVAMSIZ (D) yazılıyordu —
+    // personel yolda çalışırken devamsız görünüyordu.
+    // YENİ DAVRANIŞ: Bu bir dönüş kaydıdır; o gün de çalışılmış sayılır ve
+    // personele 1 FAZLA GÜN (FG) eklenir. FG kodu ücret hesabında zaten
+    // fazla gün olarak sayıldığı için ek bir hesaplama gerekmez.
+    // NOT: Yalnızca giriş HİÇ yokken uygulanır. Aynı gün hem giriş hem
+    // çıkış varsa normal gün akışı bozulmadan işler.
+    if (!giris && cikis) {
+      sonuc[person.id] = {
+        status: 'FG', hours: '',
+        girisSaati: null, cikisSaati: cikis.timeStr, ekipCikis: ekipCikisSaati,
+        aciklama: `Giriş kaydı yok ama ${cikis.timeStr} çıkış basılmış → şehir dışı görevden dönüş kabul edildi; 1 Fazla Gün (FG) eklendi.`,
+        kaynak: cikis.method || 'cikis',
+        // Bu bayrak arayüzde uyarı rozeti göstermek için kullanılır
+        gecikmeliCikis: true,
+      };
+      return;
+    }
+
     // KURAL 1: Hiç giriş basmamışsa devamsız
     if (!giris) {
       sonuc[person.id] = { status: 'D', hours: '', girisSaati: null, cikisSaati: cikis?.timeStr || null, ekipCikis: ekipCikisSaati, aciklama: 'QR/kod ile giriş kaydı yok → Devamsız önerildi.', kaynak: 'yok' };
@@ -18515,6 +18568,13 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
             .filter(k => k.type === 'giris')
             .map(k => `${k.personnelId}|${k.dateStr}`)
         );
+        // YENİ (kullanıcı talebi): O haftaki tüm QR ÇIKIŞLARI. Girişi olmayıp
+        // yalnızca çıkışı olan gün "şehir dışı dönüşü" sayılır ve FG verilir.
+        const haftaCikisSeti = new Set(
+          (haftaKayitlari || [])
+            .filter(k => k.type === 'cikis')
+            .map(k => `${k.personnelId}|${k.dateStr}`)
+        );
         // Puantajdaki mevcut kodu okur (elle işlenmiş izin/rapor tespiti için)
         const puantajKodu = (personId, tStr) => {
           const [yy, aa, gg] = tStr.split('-');
@@ -18526,11 +18586,13 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
           const haftaGunleri = haftaGunTarihleri.map(t => ({
             tarihStr: t,
             girisVarMi: haftaGirisSeti.has(`${p.id}|${t}`),
+            cikisVarMi: haftaCikisSeti.has(`${p.id}|${t}`),
             kod: puantajKodu(p.id, t)
           }));
           const karar = haftalikMesaiKarari({
             tarihStr: tarih,
             girisVarMi: haftaGirisSeti.has(`${p.id}|${tarih}`),
+            cikisVarMi: haftaCikisSeti.has(`${p.id}|${tarih}`),
             mevcutKod: puantajKodu(p.id, tarih),
             haftaGunleri
           });
@@ -19429,7 +19491,21 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                       <td className="py-2.5 pr-3"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full whitespace-nowrap ${g.collarType === 'Mavi Yaka' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-200 text-neutral-700'}`}>{g.collarType}</span></td>
                       <td className="py-2.5 pr-3 text-xs font-bold whitespace-nowrap">{g.dateStr?.split('-').reverse().join('.')}</td>
                       {/* GİRİŞ ve ÇIKIŞ ayrı sütunlar — basılmayan taraf boş kalır */}
-                      <td className="py-2.5 pr-3"><SaatHucresi kayit={g.giris} renk="text-green-700" etiket="Giriş" grup={g} tip="giris" /></td>
+                      {/* YENİ (kullanıcı talebi): Giriş basılmamış ama çıkış basılmışsa
+                          bu bir "şehir dışı görevden dönüş" kaydıdır. Giriş hücresinde
+                          kırmızı "Basılmadı" uyarısı yerine amber bilgi rozeti gösterilir;
+                          sistem o güne otomatik 1 Fazla Gün (FG) verir. */}
+                      <td className="py-2.5 pr-3">
+                        {!g.giris && g.cikis ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-100 border border-amber-300 text-amber-800"
+                            title="Giriş basılmamış, çıkış basılmış — şehir dışı görevden dönüş sayıldı, 1 Fazla Gün (FG) eklendi">
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            <span className="text-[10px] font-black">ŞEHİR DIŞI DÖNÜŞÜ • +1 FG</span>
+                          </span>
+                        ) : (
+                          <SaatHucresi kayit={g.giris} renk="text-green-700" etiket="Giriş" grup={g} tip="giris" />
+                        )}
+                      </td>
                       <td className="py-2.5 pr-3"><SaatHucresi kayit={g.cikis} renk="text-red-700" etiket="Çıkış" grup={g} tip="cikis" /></td>
                       {/* MESAİ DURUMU — muhasebedeki günlük durum, tam adıyla */}
                       <td className="py-2.5 pr-3">
