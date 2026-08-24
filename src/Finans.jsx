@@ -6166,8 +6166,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
     // Kategori dağılımı (bu defterin tüm işlemleri üzerinden)
     // PERFORMANS: Kredi sayfasında bu kart gizli olduğundan hesap da atlanır.
+    // ========================================================================
+    // DEĞİŞTİ (kullanıcı talebi): KATEGORİ DAĞILIMI KARTI TÜM SAYFALARDAN
+    // KALDIRILDI. Kod silinmedi; ileride geri istenirse aşağıdaki anahtarı
+    // true yapmak yeterlidir. false iken hem kart çizilmez hem de hesap
+    // hiç yapılmaz (boşa işlem dönmesin diye).
+    // ========================================================================
+    const KATEGORI_DAGILIMI_GOSTER = false;
     const katDagilim = {};
-    if (seciliDefter.tur !== 'Kredi') defterIslemleri(seciliDefterId).forEach(i => {
+    if (KATEGORI_DAGILIMI_GOSTER && seciliDefter.tur !== 'Kredi') defterIslemleri(seciliDefterId).forEach(i => {
       const k = i.kategori || 'Diğer';
       if (!katDagilim[k]) katDagilim[k] = { giris: 0, cikis: 0 };
       katDagilim[k][i.tip === 'giris' ? 'giris' : 'cikis'] += (parseFloat(i.tutar) || 0);
@@ -7732,7 +7739,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             işlemler bölümüyle birlikte kaldırıldı; kredi sayfası yalnızca
             aylık ödeme görünümü + Mevcut Krediler panelinden oluşur.
             ================================================================== */}
-        {seciliDefter.tur !== 'Kredi' && Object.keys(katDagilim).length > 0 && (
+        {/* DEĞİŞTİ (kullanıcı talebi): kart tüm sayfalardan kaldırıldı —
+            KATEGORI_DAGILIMI_GOSTER anahtarı yukarıda false. */}
+        {KATEGORI_DAGILIMI_GOSTER && seciliDefter.tur !== 'Kredi' && Object.keys(katDagilim).length > 0 && (
           <div className="bg-white rounded-2xl border border-neutral-200 p-4">
             <div className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5 mb-3"><BarChart className="w-3.5 h-3.5 text-emerald-600" /> Kategori Dağılımı</div>
             <div className="space-y-2">
