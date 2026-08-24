@@ -4292,8 +4292,53 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // ========================================================================
     // YENİ: ÖDEME KALEMİ FORMU ve VADE ÖDEME PENCERESİ
     // ========================================================================
-    const bosOdemeKalemi = { id: '', ad: '', tutar: '', ilkTarih: bugunStr(), tekrar: 'aylik', tekrarSayisi: '', not: '', odemeTuru: 'firma' };
+    // YENİ (kullanıcı talebi): ibanlar — bir ödeme kalemine BİRDEN ÇOK IBAN
+    // eklenebilir. Her kayıt { id, isim, iban, tur } biçimindedir; tur 'sahsi'
+    // veya 'resmi' olur. Boş dizi varsayılan; eski kalemlerde alan hiç yoksa
+    // kod her yerde (k.ibanlar || []) diye okuduğu için sorun çıkmaz.
+    const bosOdemeKalemi = { id: '', ad: '', tutar: '', ilkTarih: bugunStr(), tekrar: 'aylik', tekrarSayisi: '', not: '', odemeTuru: 'firma', ibanlar: [] };
     const [odemeKalemForm, setOdemeKalemForm] = useState(null); // null = kapalı
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): IBAN YARDIMCILARI
+    // ========================================================================
+    // Bir ödeme kalemine birden çok IBAN eklenebilir (şahsi/resmi ayrımıyla).
+    // Amaç: ödeme yaparken IBAN'ı ve hesap sahibinin adını tek tıkla kopyalayıp
+    // bankacılık uygulamasına yapıştırabilmek.
+    // ========================================================================
+    // Hangi değerin az önce kopyalandığını gösterir (buton "Kopyalandı ✓" olur)
+    const [kopyalanan, setKopyalanan] = useState('');
+    // IBAN'ı 4'erli gruplar hâlinde okunaklı yazar: TR12 3456 7890 ...
+    const ibanGoster = (iban) => (iban || '').replace(/\s+/g, '').toUpperCase().replace(/(.{4})/g, '$1 ').trim();
+    // Panoya kopyalama. navigator.clipboard bazı tarayıcı/HTTP ortamlarında
+    // çalışmaz; o yüzden eski usul textarea + execCommand yedeği bırakıldı.
+    const panoyaKopyala = async (metin, etiket) => {
+      const temiz = (metin || '').toString();
+      if (!temiz) return;
+      try {
+        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(temiz);
+        else {
+          const ta = document.createElement('textarea');
+          ta.value = temiz; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        setKopyalanan(etiket);
+        setTimeout(() => setKopyalanan(k => (k === etiket ? '' : k)), 1800);
+      } catch (e) { console.error('Kopyalanamadı:', e); alert('Kopyalanamadı, elle seçip kopyalayın.'); }
+    };
+    // Formdaki IBAN satırlarını ekle / güncelle / sil
+    const ibanSatirEkle = () => setOdemeKalemForm(f => ({
+      ...f,
+      ibanlar: [...(f.ibanlar || []), { id: `ib_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`, isim: '', iban: '', tur: 'resmi' }],
+    }));
+    const ibanSatirGuncelle = (id, alan, deger) => setOdemeKalemForm(f => ({
+      ...f,
+      ibanlar: (f.ibanlar || []).map(s => s.id === id ? { ...s, [alan]: deger } : s),
+    }));
+    const ibanSatirSil = (id) => setOdemeKalemForm(f => ({
+      ...f, ibanlar: (f.ibanlar || []).filter(s => s.id !== id),
+    }));
     // { kalem, vade, kaynakDefterId, tarih } — hangi kalemin hangi vadesi, nereden
     const [vadeOdeme, setVadeOdeme] = useState(null);
     // Vade listesi açık olan kalemin kimliği (akordiyon)
@@ -4631,18 +4676,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           t.setDate(Math.min(g, ayinSonGunu));
           const tarihStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
           const taksitOdenen = taksitOdenenToplam[n] || 0;
-          const odendi = taksitOdenen >= aylikTaksit - 0.01;
-          const taksitKalan = Math.max(0, aylikTaksit - taksitOdenen);
+          // YENİ (kullanıcı talebi): DEVİR — 1 Eylül 2026 öncesi taksitler eski
+          // düzende ödendiği için ödenmiş kabul edilir. Kredinin KALAN BORCU bu
+          // kuraldan etkilenmez; o hâlâ gerçekten yatan paradan hesaplanır.
+          const devir = tarihStr < SISTEM_DEVIR_TARIHI;
+          const odendi = devir || taksitOdenen >= aylikTaksit - 0.01;
+          const taksitKalan = devir ? 0 : Math.max(0, aylikTaksit - taksitOdenen);
           const odemeKaydi = odemeler.find(i => parseInt(i.taksitNo) === n);
           plan.push({
             no: n,
             tarih: tarihStr,
             tutar: aylikTaksit,
-            odendi,
+            odendi, devir,
             odemeTarihi: taksitSonOdemeTarihi[n] || odemeKaydi?.tarih || null,
             // Kısmi ödeme alanları
             odenenTutar: taksitOdenen, kalan: taksitKalan,
-            kismi: !odendi && taksitOdenen > 0.01,
+            kismi: !devir && !odendi && taksitOdenen > 0.01,
             // Vadesi geçmiş ve hâlâ ödenmemişse gecikmiş sayılır
             gecikmis: !odendi && tarihStr < bugunStr(),
           });
@@ -4719,6 +4768,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     ];
     const SURESIZ_VADE_PENCERESI = 24; // Süresiz kalemlerde gösterilecek vade sayısı
 
+    // ========================================================================
+    // YENİ (kullanıcı talebi): SİSTEM DEVİR TARİHİ
+    // ========================================================================
+    // Şirket bu sisteme 1 Eylül 2026'da geçti. Bu tarihten ÖNCEKİ tüm vadeler
+    // (kiralar, firma ödemeleri, kredi taksitleri) eski düzende zaten ödenmişti;
+    // uygulamaya tek tek girilmeyecekleri için "devirden ödendi" sayılırlar.
+    // Böylece geçmişten gelen yüzlerce sahte "gecikmiş" kaydı temizlenir ve
+    // yalnızca 1 Eylül 2026 ve sonrası bekleyen olarak görünür.
+    // Kiralarda geçmiş aylar, zam yapılmış hâliyle ödenmiş kabul edilir.
+    // NOT: Bu tarihi ileride değiştirmek gerekirse SADECE bu satır yeterlidir.
+    const SISTEM_DEVIR_TARIHI = '2026-09-01';
+
+    // ========================================================================
+    // DÜZELTME (kullanıcı talebi: "Otomatik ödeme olup da burada gözükmeyen
+    // ödemeler var"): SÜRESİZ VADE ÜRETİMİ ARTIK TARİH TABANLI
+    // ========================================================================
+    // ESKİ HATA: Süresiz kalemlerde üretilecek vade sayısı
+    //   (yapılmış ödeme sayısı + 24) idi. Hiç ödeme yapılmamış ve ilk tarihi
+    //   eski olan bir kalem (ör. 01.08.2022 başlangıçlı kira) yalnızca ilk 24
+    //   ayı üretiyor, plan 2024'te bitiyordu; bu yüzden Eylül/Ekim 2026
+    //   listesinde HİÇ GÖRÜNMÜYORDU. Otomatik Ödemeler penceresinde duruyor
+    //   ama aylık listede yok — bildirilen sorun tam olarak buydu.
+    // YENİ: Vadeler ilk tarihten başlayıp BUGÜNDEN 24 AY SONRASINA kadar
+    //   üretilir. Böylece başlangıcı ne kadar eski olursa olsun her kalem
+    //   içinde bulunulan ayda ve ileri aylarda görünür.
+    const vadeUfku = (() => {
+      const [y, a] = bugunStr().split('-').map(Number);
+      const d = new Date(y, (a - 1) + SURESIZ_VADE_PENCERESI, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-31`;
+    })();
+    // Güvenlik sınırı: haftalık kalemlerde bile sonsuz döngü olmasın
+    const VADE_URETIM_SINIRI = 2000;
+
     const tekrarEtiket = (tekrar, sayi) => {
       const ad = TEKRAR_SECENEKLERI.find(t => t.id === tekrar)?.ad || 'Tek Seferlik';
       if (tekrar === 'tek') return ad;
@@ -4774,8 +4856,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const odenenVadeNolar = new Set(Object.keys(vadeOdenenToplam).map(Number));
       const odenenTutar = odemeler.reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
 
-      // Süresizde: ödenen sayısı + pencere kadar vade üret (liste hep dolu kalsın)
-      const uretilecek = suresiz ? odenenVadeNolar.size + SURESIZ_VADE_PENCERESI : istenenAdet;
+      // DEĞİŞTİ: Süresizde artık sabit adet değil, TARİH UFKU esas alınır.
+      // Sınır yalnızca sonsuz döngüyü engellemek için; asıl duruş koşulu
+      // aşağıdaki "tarihStr > vadeUfku" kontrolüdür.
+      const uretilecek = suresiz ? VADE_URETIM_SINIRI : istenenAdet;
 
       const plan = [];
       if (kalem.ilkTarih) {
@@ -4787,6 +4871,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           else if (tekrar === 'aylik') { t = new Date(y, (a - 1) + (n - 1), 1); const son = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate(); t.setDate(Math.min(g, son)); }
           else { t = new Date(y, a - 1, g); } // tek seferlik
           const tarihStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+          // YENİ: Süresizlerde ufku aşınca dur (yukarıdaki açıklamaya bakınız)
+          if (suresiz && tarihStr > vadeUfku) break;
           // YENİ: BİTİŞ TARİHİ — bu tarihten SONRAKİ vadeler hiç üretilmez.
           // "Kiralama bitti, artık borçlanmasın" durumu için. Ödenmiş vadeler
           // korunur (geçmiş kayıt silinmez), yalnız ileri vadeler kesilir.
@@ -4795,13 +4881,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           const vadeTutari = kalemTutariTarihte(kalem, tarihStr);
           // YENİ: Kısmi ödeme hesabı — vade ancak toplam tutara ulaşınca kapanır
           const vadeOdenen = vadeOdenenToplam[n] || 0;
-          const odendi = vadeOdenen >= vadeTutari - 0.01;
-          const vadeKalan = Math.max(0, vadeTutari - vadeOdenen);
-          const kismi = !odendi && vadeOdenen > 0.01; // kısmen ödenmiş, hâlâ bekliyor
+          // YENİ (kullanıcı talebi): DEVİR — sistem devir tarihinden önceki her
+          // vade, uygulamada kaydı olmasa bile ödenmiş kabul edilir.
+          const devir = tarihStr < SISTEM_DEVIR_TARIHI;
+          const odendi = devir || vadeOdenen >= vadeTutari - 0.01;
+          const vadeKalan = devir ? 0 : Math.max(0, vadeTutari - vadeOdenen);
+          const kismi = !devir && !odendi && vadeOdenen > 0.01; // kısmen ödenmiş, hâlâ bekliyor
           const kayit = odemeler.find(i => parseInt(i.vadeNo) === n);
           const kiraAylik = (kalem.odemeTuru === 'kira') && tekrar === 'aylik';
           const yilSonu = kiraAylik && n % 12 === 0;
-          plan.push({ no: n, tarih: tarihStr, tutar: vadeTutari, odendi,
+          plan.push({ no: n, tarih: tarihStr, tutar: vadeTutari, odendi, devir,
                       odemeTarihi: vadeSonOdemeTarihi[n] || kayit?.tarih || null,
                       // Kısmi ödeme alanları: ekranda kalan tutarla devam edilir
                       odenenTutar: vadeOdenen, kalan: vadeKalan, kismi,
@@ -5039,6 +5128,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         tutar: String(parseFloat(odemeKalemForm.tutar)),
         // Tek seferlikte tekrar sayısı anlamsızdır
         tekrarSayisi: odemeKalemForm.tekrar === 'tek' ? '' : odemeKalemForm.tekrarSayisi,
+        // YENİ: IBAN'lar boşluksuz/büyük harf saklanır (kopyalarken temiz gelsin);
+        // hem ismi hem numarası boş olan satırlar atılır.
+        ibanlar: (odemeKalemForm.ibanlar || [])
+          .map(s => ({
+            id: s.id || `ib_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+            isim: (s.isim || '').trim(),
+            iban: (s.iban || '').replace(/\s+/g, '').toUpperCase(),
+            tur: s.tur === 'sahsi' ? 'sahsi' : 'resmi',
+          }))
+          .filter(s => s.isim || s.iban),
       };
       const yeniListe = odemeKalemForm.id
         ? mevcut.map(k => k.id === kalem.id ? kalem : k)
@@ -5582,8 +5681,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             vadeTarihi: `${odemeAyi}-06`,
             tutar: toplamBekleyen,
             kisiler: kanalKisiler,
-            // Tamamlandı: defterden ödendiyse VEYA muhasebedeki kalanlar sıfırlandıysa
-            odendi: !!mahsup || (kanalKisiler.length > 0 && toplamBekleyen <= 0.01),
+            // YENİ (kullanıcı talebi): DEVİR — vadesi 1 Eylül 2026'dan önce olan
+            // maaş satırları eski düzende ödendiği için ödenmiş sayılır.
+            devir: `${odemeAyi}-06` < SISTEM_DEVIR_TARIHI,
+            // Tamamlandı: devirse VEYA defterden ödendiyse VEYA muhasebedeki kalanlar sıfırlandıysa
+            odendi: `${odemeAyi}-06` < SISTEM_DEVIR_TARIHI || !!mahsup || (kanalKisiler.length > 0 && toplamBekleyen <= 0.01),
             odemeTarihi: mahsup?.tarih || null,
           };
         });
@@ -6278,7 +6380,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                               <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">
                                 {bilgi.ad} — {AY_ADLARI[Number(t.tarih.slice(5, 7)) - 1]} Taksiti ({t.no}/{bilgi.taksitSayisi}) • ₺{paraFmt(t.tutar)}
                               </span>
-                              <span className="text-[10px] font-black text-emerald-700 shrink-0">{t.odemeTarihi ? trh(t.odemeTarihi) : 'Ödendi'} ✓</span>
+                              <span className="text-[10px] font-black text-emerald-700 shrink-0">
+                                {t.devir ? 'Devir (sistem öncesi)' : (t.odemeTarihi ? trh(t.odemeTarihi) : 'Ödendi')} ✓
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -6703,7 +6807,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                               <div key={m.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
                                 <Users className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                 <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{m.ad} — {m.kaynakEtiket}</span>
-                                <span className="text-[10px] font-black text-emerald-700 shrink-0">{m.odemeTarihi ? trh(m.odemeTarihi) : 'Muhasebede kapatıldı'} ✓</span>
+                                <span className="text-[10px] font-black text-emerald-700 shrink-0">{m.devir ? 'Devir (sistem öncesi)' : (m.odemeTarihi ? trh(m.odemeTarihi) : 'Muhasebede kapatıldı')} ✓</span>
                               </div>
                             ))}
                             {odenen.map(({ kalem, vade }) => (
@@ -6711,7 +6815,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                 <div className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
                                   <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                   <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{kalem.ad} — {AY_ADLARI[Number(vade.tarih.slice(5, 7)) - 1]} (₺{paraFmt(vade.tutar)})</span>
-                                  <span className="text-[10px] font-black text-emerald-700 shrink-0">{trh(vade.odemeTarihi)} ✓</span>
+                                  {/* YENİ: Devirden gelen kayıtlar ayrı etiketlenir ki
+                                      "bunu ben mi ödedim?" sorusu oluşmasın. */}
+                                  <span className="text-[10px] font-black text-emerald-700 shrink-0">
+                                    {vade.devir ? 'Devir (sistem öncesi) ✓' : `${trh(vade.odemeTarihi)} ✓`}
+                                  </span>
                                 </div>
                                 {/* YENİ: Yıl dolumu uyarısı ÖDENDİKTEN SONRA DA görünür —
                                     asıl anlamı burada: yıl kapandı, sıradaki ay zamlı olacak.
@@ -7732,6 +7840,76 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   <input value={odemeKalemForm.not || ''} onChange={e => setOdemeKalemForm({ ...odemeKalemForm, not: e.target.value })}
                     className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-orange-500 text-sm" placeholder="Opsiyonel açıklama..." /></div>
 
+                {/* ==============================================================
+                    YENİ (kullanıcı talebi): IBAN BİLGİLERİ (çoklu)
+                    ==============================================================
+                    Bir ödemeye birden çok IBAN eklenebilir. Her satırda hesap
+                    sahibinin ADI ve IBAN NUMARASI AYRI kutulardadır; ikisi de
+                    ödeme sırasında tek tıkla ayrı ayrı kopyalanabilir. Tür
+                    (Şahsi / Resmi) seçimi, ödemenin nereye gittiğini ayırt eder
+                    — ör. kira şahsi IBAN'a, fatura resmi hesaba gidebilir. */}
+                <div className="border-t border-neutral-200 pt-3">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <label className="text-xs font-black text-neutral-700 flex items-center gap-1.5">
+                      <Landmark className="w-3.5 h-3.5 text-orange-600" /> IBAN Bilgileri
+                      <span className="text-[10px] font-bold text-neutral-400">({(odemeKalemForm.ibanlar || []).length} kayıt)</span>
+                    </label>
+                    <button type="button" onClick={ibanSatirEkle}
+                      className="px-2.5 py-1.5 bg-orange-600 hover:bg-orange-700 text-white text-[10px] font-black rounded-lg transition flex items-center gap-1">
+                      <PlusCircle className="w-3 h-3" /> IBAN Ekle
+                    </button>
+                  </div>
+
+                  {(odemeKalemForm.ibanlar || []).length === 0 && (
+                    <p className="text-[11px] font-bold text-neutral-400 bg-neutral-50 border border-dashed border-neutral-300 rounded-lg p-2.5 text-center">
+                      IBAN eklemek zorunlu değildir. Eklerseniz ödeme yaparken tek tıkla kopyalayabilirsiniz.
+                    </p>
+                  )}
+
+                  <div className="space-y-2">
+                    {(odemeKalemForm.ibanlar || []).map((s, i) => {
+                      // Basit biçim kontrolü: TR + 24 rakam = 26 karakter
+                      const temiz = (s.iban || '').replace(/\s+/g, '').toUpperCase();
+                      const gecerli = /^TR\d{24}$/.test(temiz);
+                      return (
+                        <div key={s.id} className={`rounded-xl border p-2.5 space-y-2 ${s.tur === 'sahsi' ? 'bg-amber-50 border-amber-200' : 'bg-sky-50 border-sky-200'}`}>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-black text-neutral-500">#{i + 1}</span>
+                            <div className="flex items-center gap-1.5">
+                              {/* ŞAHSİ / RESMİ seçimi */}
+                              {[{ id: 'resmi', ad: 'Resmi' }, { id: 'sahsi', ad: 'Şahsi' }].map(t => (
+                                <button key={t.id} type="button" onClick={() => ibanSatirGuncelle(s.id, 'tur', t.id)}
+                                  className={`px-2.5 py-1 text-[10px] font-black rounded-lg transition ${
+                                    s.tur === t.id
+                                      ? (t.id === 'sahsi' ? 'bg-amber-600 text-white' : 'bg-sky-600 text-white')
+                                      : 'bg-white text-neutral-500 border border-neutral-300 hover:bg-neutral-50'}`}>
+                                  {t.ad}
+                                </button>
+                              ))}
+                              <button type="button" onClick={() => ibanSatirSil(s.id)}
+                                className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Bu IBAN'ı kaldır">
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                          {/* İSİM ve IBAN AYRI KUTULARDA */}
+                          <input value={s.isim} onChange={e => ibanSatirGuncelle(s.id, 'isim', e.target.value)}
+                            placeholder="Hesap sahibinin adı (örn: Ahmet Yılmaz / Sembol Nakliyat Ltd. Şti.)"
+                            className="w-full p-2 border border-neutral-300 rounded-lg outline-none focus:ring-2 focus:ring-orange-500 text-sm bg-white" />
+                          <input value={s.iban} onChange={e => ibanSatirGuncelle(s.id, 'iban', e.target.value.toUpperCase())}
+                            placeholder="TR00 0000 0000 0000 0000 0000 00"
+                            className="w-full p-2 border border-neutral-300 rounded-lg outline-none focus:ring-2 focus:ring-orange-500 text-sm font-mono tracking-wide bg-white" />
+                          {temiz.length > 0 && !gecerli && (
+                            <p className="text-[10px] font-bold text-amber-700">
+                              IBAN "TR" ile başlayıp 24 rakam içermeli (toplam 26 karakter). Şu an {temiz.length} karakter — yine de kaydedilir.
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 {/* Canlı önizleme: kaç ödeme, ne zaman biter, toplam ne kadar */}
                 {(() => {
                   const tutar = parseFloat(odemeKalemForm.tutar) || 0;
@@ -7835,6 +8013,46 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     );
                   })()}
                 </div>
+
+                {/* ==============================================================
+                    YENİ (kullanıcı talebi): ÖDEME SIRASINDA IBAN KOPYALAMA
+                    ==============================================================
+                    Bu kaleme tanımlı IBAN'lar burada listelenir. İsim ve numara
+                    ayrı kutulardadır, her biri kendi düğmesiyle tek tıkla
+                    kopyalanır — bankacılık uygulamasına doğrudan yapıştırılır. */}
+                {(vadeOdeme.kalem.ibanlar || []).length > 0 && (
+                  <div className="space-y-1.5">
+                    <label className="text-xs font-bold text-neutral-600 flex items-center gap-1.5">
+                      <Landmark className="w-3.5 h-3.5 text-neutral-500" /> Ödeme Yapılacak Hesaplar
+                    </label>
+                    {(vadeOdeme.kalem.ibanlar || []).map(s => (
+                      <div key={s.id} className={`rounded-xl border p-2.5 ${s.tur === 'sahsi' ? 'bg-amber-50 border-amber-200' : 'bg-sky-50 border-sky-200'}`}>
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full text-white ${s.tur === 'sahsi' ? 'bg-amber-600' : 'bg-sky-600'}`}>
+                            {s.tur === 'sahsi' ? 'ŞAHSİ' : 'RESMİ'}
+                          </span>
+                          <span className="flex-1 min-w-0 text-xs font-black text-neutral-800 truncate">{s.isim || '(isim girilmemiş)'}</span>
+                          {s.isim && (
+                            <button type="button" onClick={() => panoyaKopyala(s.isim, `isim_${s.id}`)}
+                              className="shrink-0 px-2 py-1 bg-white border border-neutral-300 hover:bg-neutral-50 text-neutral-700 text-[10px] font-black rounded-lg transition">
+                              {kopyalanan === `isim_${s.id}` ? 'Kopyalandı ✓' : 'İsmi Kopyala'}
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className="flex-1 min-w-0 text-[11px] font-mono font-bold text-neutral-700 truncate">{ibanGoster(s.iban) || '—'}</span>
+                          {s.iban && (
+                            <button type="button" onClick={() => panoyaKopyala(s.iban, `iban_${s.id}`)}
+                              className={`shrink-0 px-2.5 py-1 text-white text-[10px] font-black rounded-lg transition ${
+                                kopyalanan === `iban_${s.id}` ? 'bg-emerald-600' : (s.tur === 'sahsi' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-sky-600 hover:bg-sky-700')}`}>
+                              {kopyalanan === `iban_${s.id}` ? 'Kopyalandı ✓' : 'IBAN Kopyala'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
                   <select value={vadeOdeme.kaynakDefterId}
@@ -8301,6 +8519,30 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                           <div className="text-[10px] font-bold text-neutral-500">
                             Güncel tutar: ₺{paraFmt(guncelTutar)} • {tekrarEtiket(k.tekrar, k.tekrarSayisi)} • {tur.ad}
                           </div>
+                          {/* YENİ (kullanıcı talebi): Kalemin IBAN'ları burada da
+                              görünür ve kopyalanabilir — ödeme yapmadan önce
+                              hesap bilgisini almak için pencere değiştirmeye
+                              gerek kalmaz. */}
+                          {(k.ibanlar || []).length > 0 && (
+                            <div className="mt-1.5 space-y-1">
+                              {(k.ibanlar || []).map(s => (
+                                <div key={s.id} className="flex items-center gap-1.5 flex-wrap">
+                                  <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full text-white shrink-0 ${s.tur === 'sahsi' ? 'bg-amber-600' : 'bg-sky-600'}`}>
+                                    {s.tur === 'sahsi' ? 'ŞAHSİ' : 'RESMİ'}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-neutral-600">{s.isim}</span>
+                                  <span className="text-[10px] font-mono font-bold text-neutral-500">{ibanGoster(s.iban)}</span>
+                                  {s.iban && (
+                                    <button type="button" onClick={() => panoyaKopyala(s.iban, `yon_${s.id}`)}
+                                      className={`px-1.5 py-0.5 text-[9px] font-black rounded-md transition ${
+                                        kopyalanan === `yon_${s.id}` ? 'bg-emerald-600 text-white' : 'bg-white border border-neutral-300 text-neutral-600 hover:bg-neutral-50'}`}>
+                                      {kopyalanan === `yon_${s.id}` ? 'Kopyalandı ✓' : 'Kopyala'}
+                                    </button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         {!duzenleniyor && (
                           <div className="flex items-center gap-1.5 shrink-0">
@@ -8311,7 +8553,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                 kayıt mevcut odemeKalemiKaydet akışıyla yapılır
                                 (id dolu olduğu için ekleme değil güncelleme olur). */}
                             <button type="button"
-                              onClick={() => { setOtomatikYonetim(false); setYonetimForm(null); setOdemeKalemForm({ ...bosOdemeKalemi, ...k, tutar: String(k.tutar ?? '') }); }}
+                              onClick={() => { setOtomatikYonetim(false); setYonetimForm(null); setOdemeKalemForm({ ...bosOdemeKalemi, ...k, tutar: String(k.tutar ?? ''), ibanlar: k.ibanlar || [] }); }}
                               className="px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-900 text-white text-[10px] font-black rounded-lg transition flex items-center gap-1">
                               <Edit className="w-3 h-3" /> Düzenle
                             </button>
