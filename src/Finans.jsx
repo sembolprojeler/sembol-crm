@@ -6623,6 +6623,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   KAYBOLMAZ; zam girildiği an kendiliğinden söner. */}
               {(() => {
                 const bugun = bugunStr();
+                // DÜZELTME: trh bu kapsamda tanımlı değildi ("trh is not defined"
+                // hatasıyla Ödemeler sayfası çöküyordu). Diğer bloklardaki
+                // tanımlar kendi kapsamlarında kaldığı için burada yerel olarak
+                // tanımlanır: YYYY-AA-GG -> GG.AA.YYYY
+                const trh = (t) => t?.split('-').reverse().join('.');
                 const zamBekleyenler = [];
                 od.detaylar.forEach(({ kalem, bilgi }) => {
                   if (kalem.odemeTuru !== 'kira' || kalem.bitisTarihi) return;
