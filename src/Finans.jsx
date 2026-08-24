@@ -4284,6 +4284,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // 1 Eylül 2026'dan itibaren her defterdeki "Devir" düğmesiyle açılır.
     const [devirModal, setDevirModal] = useState(null);
     const [devirKaydediliyor, setDevirKaydediliyor] = useState(false);
+    // ========================================================================
+    // YENİ (kullanıcı talebi): MOBİL HIZLI KAYIT ÇUBUĞU
+    // ========================================================================
+    // Telefonda, banka uygulamalarındaki gibi tek satırdan işlem girilir:
+    // tutar yazılır, alttaki sekmeden GİDER/GELİR seçilir, KAYDET'e basılır.
+    // Kayıt bakılan güne, "Diğer" kategorisiyle anında yazılır; ayrıntı
+    // gerekiyorsa sağdaki simge tam formu açar. TRANSFER sekmesi tutarı
+    // hazır şekilde virman penceresine taşır.
+    const [hizliTip, setHizliTip] = useState('cikis');   // ekran görüntüsündeki gibi GİDER önde
+    const [hizliTutar, setHizliTutar] = useState('');
+    const [hizliKaydediliyor, setHizliKaydediliyor] = useState(false);
+    // YENİ: "Yaklaşan İşlemler" akordeonu (mobil kolaylık) — varsayılan kapalı
+    const [yaklasanAcik, setYaklasanAcik] = useState(false);
 
     // ========================================================================
     // YENİ: TAKSİT ÖDEME PENCERESİ
@@ -5030,6 +5043,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // eşleşir) ama CİROYA GİRMEZ (ciroyaGirer dışlar) — o ayın gelir/gider
     // rakamlarını etkilemez. Girdiğiniz gün işlenir; tarih devir gününden
     // önceye alınamaz (öncesi zaten hesaba katılmıyor).
+    // YENİ: Mobil hızlı kayıt — tek dokunuşta gelir/gider yazar.
+    const hizliKaydet = async () => {
+      const tutar = parseFloat(hizliTutar);
+      if (!tutar || tutar <= 0) { alert('Geçerli bir tutar girin.'); return; }
+      // TRANSFER: tutar hazır, hedef hesap seçimi için virman penceresi açılır
+      if (hizliTip === 'virman') {
+        setVirmanForm({ hedefDefterId: '', tutar: String(tutar), aciklama: '' });
+        setShowVirmanForm(true);
+        setHizliTutar('');
+        return;
+      }
+      setHizliKaydediliyor(true);
+      try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          defterId: seciliDefterId,
+          tip: hizliTip,
+          tutar,
+          // Kayıt, ekranda BAKILAN güne yazılır ki listeden kaybolmasın
+          tarih: gunFiltreAktif ? seciliGun : bugunStr(),
+          kategori: 'Diğer',
+          etiketler: [],
+          aciklama: 'Hızlı kayıt',
+          odemeYontemi: defterdenOdemeYontemi(seciliDefterId),
+          kaynak: 'Hızlı Kayıt',
+          createdAt: new Date().toISOString(),
+          by: currentUser?.fullName || 'Sistem',
+        });
+        addSystemLog?.('Defter İşlemi (Hızlı)', `${seciliDefter?.ad}: ${hizliTip === 'giris' ? 'PARA GİRİŞİ' : 'PARA ÇIKIŞI'} ₺${paraFmt(tutar)}.`);
+        setHizliTutar('');
+      } catch (e) { console.error('Hızlı kayıt başarısız:', e); alert('Kaydedilemedi. Lütfen tekrar deneyin.'); }
+      finally { setHizliKaydediliyor(false); }
+    };
+
     const devirKaydet = async () => {
       if (!devirModal) return;
       const tutar = parseFloat(devirModal.tutar) || 0;
@@ -7148,6 +7194,101 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             geçerli — Krediler sayfası Ödemeler ile aynı aylık mantığa
             geçtiği için günlük işlemler bölümü orada da gösterilmez. */}
         {seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi' && (<>
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): AY ÖZETİ ŞERİDİ (mobil banka görünümü)
+            ==================================================================
+            Ekran görüntüsündeki "AĞUSTOS 2026  2.510.200  −1.993.411 = 516.788"
+            şeridinin karşılığı: bakılan günün AYINA ait gelir, gider ve net,
+            tek satırda. Virman/devir/mahsuplar ciroyaGirer ile dışlanır;
+            canlı dönemde 1 Eylül öncesi zaten hesaba katılmaz. */}
+        {(() => {
+          const ayOn = (gunFiltreAktif ? seciliGun : bugunStr()).slice(0, 7);
+          const [oy, oa] = ayOn.split('-').map(Number);
+          const ayIsimleri = ['OCAK','ŞUBAT','MART','NİSAN','MAYIS','HAZİRAN','TEMMUZ','AĞUSTOS','EYLÜL','EKİM','KASIM','ARALIK'];
+          const ayIslemler = defterIslemleri(seciliDefterId).filter(i => (i.tarih || '').startsWith(ayOn) && hesabaKatilir(i) && ciroyaGirer(i));
+          const ayGelir = ayIslemler.filter(i => i.tip === 'giris').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+          const ayGider = ayIslemler.filter(i => i.tip === 'cikis').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+          const ayNet = ayGelir - ayGider;
+          return (
+            <div className="bg-neutral-900 text-white rounded-2xl px-3 py-2.5 flex items-center justify-between gap-2 flex-wrap">
+              <span className="text-[11px] font-black tracking-wide text-white/70">{ayIsimleri[oa - 1]} {oy}</span>
+              <span className="flex items-center gap-2 text-[13px] font-black tabular-nums flex-wrap">
+                <span className="text-emerald-400">{paraFmt(ayGelir)}</span>
+                <span className="text-red-400">−{paraFmt(ayGider)}</span>
+                <span className="text-white/50">=</span>
+                <span className={ayNet >= 0 ? 'text-white' : 'text-red-300'}>{paraFmt(ayNet)}</span>
+              </span>
+            </div>
+          );
+        })()}
+
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): YAKLAŞAN İŞLEMLER AKORDEONU
+            ==================================================================
+            Ekran görüntüsündeki "Yaklaşan İşlemler (4)" bölümünün karşılığı:
+            bu bloktaki (Sembol Nakliyat / Depoevim) Ödemeler ve Kredi
+            defterlerinin önümüzdeki 30 güne düşen bekleyen vadeleri, güne
+            göre sıralı, en fazla 8 satır. Satıra dokununca ilgili defter
+            açılır ve ödeme oradan yapılır. */}
+        {(() => {
+          const bugun = bugunStr();
+          const [by2, ba2, bg2] = bugun.split('-').map(Number);
+          const d30 = new Date(by2, ba2 - 1, bg2 + 30);
+          const sinir = `${d30.getFullYear()}-${String(d30.getMonth() + 1).padStart(2, '0')}-${String(d30.getDate()).padStart(2, '0')}`;
+          const yaklasanlar = [];
+          defterler.filter(d => d.blok === seciliDefter.blok && (d.tur === 'Ödemeler' || d.tur === 'Kredi')).forEach(d => {
+            if (d.tur === 'Ödemeler') {
+              odemeDefterBilgi(d).detaylar.forEach(({ kalem, bilgi }) => {
+                bilgi.plan.forEach(v => {
+                  if (!v.odendi && v.tarih >= bugun && v.tarih <= sinir)
+                    yaklasanlar.push({ defterId: d.id, ad: kalem.ad, tarih: v.tarih, tutar: v.kalan ?? v.tutar, tip: 'Ödeme' });
+                });
+              });
+            } else {
+              krediDefterBilgi(d).detaylar.forEach(({ bilgi }) => {
+                bilgi.plan.forEach(t => {
+                  if (!t.odendi && t.tarih >= bugun && t.tarih <= sinir)
+                    yaklasanlar.push({ defterId: d.id, ad: `${bilgi.ad} (${t.no}. taksit)`, tarih: t.tarih, tutar: t.kalan ?? t.tutar, tip: 'Kredi' });
+                });
+              });
+            }
+          });
+          yaklasanlar.sort((a, b) => a.tarih.localeCompare(b.tarih));
+          const liste = yaklasanlar.slice(0, 8);
+          if (yaklasanlar.length === 0) return null;
+          return (
+            <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
+              <button type="button" onClick={() => setYaklasanAcik(v => !v)}
+                className="w-full flex items-center justify-between gap-2 px-3 py-2.5 hover:bg-neutral-50 transition">
+                <span className="flex items-center gap-2 text-xs font-black text-neutral-700">
+                  <CalendarDays className="w-4 h-4 text-blue-600" />
+                  Yaklaşan İşlemler
+                  <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center">{yaklasanlar.length}</span>
+                </span>
+                <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${yaklasanAcik ? 'rotate-180' : ''}`} />
+              </button>
+              {yaklasanAcik && (
+                <div className="border-t border-neutral-100 divide-y divide-neutral-100">
+                  {liste.map((y, i) => (
+                    <button key={i} type="button" onClick={() => setSeciliDefterId(y.defterId)}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-neutral-50 transition">
+                      <span className="text-[9px] font-black text-red-600 uppercase shrink-0 w-10">Gider</span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-xs font-black text-neutral-800 truncate">{y.ad}</span>
+                        <span className="block text-[10px] font-bold text-neutral-400">{y.tarih.split('-').reverse().join('.')} • {y.tip}</span>
+                      </span>
+                      <span className="shrink-0 text-sm font-black tabular-nums text-red-600">−{paraFmt(y.tutar)}</span>
+                    </button>
+                  ))}
+                  {yaklasanlar.length > liste.length && (
+                    <div className="px-3 py-2 text-[10px] font-bold text-neutral-400 text-center">+ {yaklasanlar.length - liste.length} işlem daha (Ödemeler defterinde)</div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {/* YENİ: GÜNLÜK GEZİNME ÇUBUĞU
             Sol/sağ oklarla düne ve yarına geçilir. Açılışta her zaman bugün seçilidir.
             "Tüm Geçmiş" düğmesi filtreyi kapatıp defterin tamamını listeler. */}
@@ -8461,7 +8602,47 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             pb-[env(safe-area-inset-bottom)] eklendi. */}
         {seciliDefter.tur !== 'Ödemeler' && (
         <div className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto w-full max-w-xl px-3 flex gap-2 sm:gap-3 pointer-events-auto">
+          {/* ==============================================================
+              YENİ (kullanıcı talebi): MOBİL HIZLI KAYIT ÇUBUĞU
+              ==============================================================
+              Telefonda banka uygulaması gibi: üstte tutar + KAYDET, altta
+              GİDER / GELİR / TRANSFER sekmeleri ve tam formu açan simge.
+              Masaüstünde eski üç büyük buton aynen kalır (aşağıda). */}
+          <div className="sm:hidden mx-auto w-full max-w-xl px-3 pointer-events-auto">
+            <div className={`rounded-2xl shadow-2xl border overflow-hidden ${hizliTip === 'giris' ? 'bg-emerald-700 border-emerald-500 shadow-emerald-700/40' : hizliTip === 'virman' ? 'bg-slate-800 border-slate-600 shadow-slate-800/40' : 'bg-red-700 border-red-500 shadow-red-700/40'}`}>
+              <div className="flex items-center gap-2 p-2">
+                <input type="number" inputMode="decimal" value={hizliTutar}
+                  onChange={e => setHizliTutar(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') hizliKaydet(); }}
+                  placeholder={hizliTip === 'giris' ? 'Gelir tutarı (₺)' : hizliTip === 'virman' ? 'Transfer tutarı (₺)' : 'Gider tutarı (₺)'}
+                  className="flex-1 min-w-0 p-2.5 rounded-xl bg-black/25 text-white placeholder-white/50 font-black text-base outline-none focus:ring-2 focus:ring-white/40" />
+                <button type="button" onClick={hizliKaydet} disabled={hizliKaydediliyor}
+                  className="shrink-0 px-4 py-2.5 bg-white/95 hover:bg-white text-black text-sm font-black rounded-xl transition disabled:opacity-60">
+                  {hizliKaydediliyor ? '...' : 'KAYDET'}
+                </button>
+              </div>
+              <div className="flex items-stretch border-t border-white/15">
+                {[
+                  { id: 'cikis', ad: 'GİDER' },
+                  { id: 'giris', ad: 'GELİR' },
+                  { id: 'virman', ad: 'TRANSFER' },
+                ].map(t => (
+                  <button key={t.id} type="button" onClick={() => setHizliTip(t.id)}
+                    className={`flex-1 py-2.5 text-[11px] font-black transition ${hizliTip === t.id ? 'bg-white/20 text-white' : 'text-white/55 hover:text-white'}`}>
+                    {t.ad}
+                  </button>
+                ))}
+                {/* Ayrıntılı kayıt gerekiyorsa tam form (kategori, etiket, not...) */}
+                <button type="button" title="Ayrıntılı işlem formu"
+                  onClick={() => { setIslemForm({ ...emptyIslem, tip: hizliTip === 'virman' ? 'cikis' : hizliTip, tutar: hizliTutar, tarih: gunFiltreAktif ? seciliGun : bugunStr() }); setEditingIslemId(null); setShowIslemForm(true); }}
+                  className="shrink-0 px-3.5 text-white/70 hover:text-white transition border-l border-white/15">
+                  <ClipboardList className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+          {/* MASAÜSTÜ: eski üç büyük buton (mobilde gizli) */}
+          <div className="hidden sm:flex mx-auto w-full max-w-xl px-3 gap-2 sm:gap-3 pointer-events-auto">
             {/* DEĞİŞİKLİK: Yeni işlemin tarihi, ekranda BAKILAN güne ayarlanır.
                 Geçmiş bir güne bakarken kayıt eklendiğinde bugüne yazılsaydı,
                 kayıt anında listeden kaybolur ve kullanıcı eklenmedi sanardı.
