@@ -4280,6 +4280,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // YENİ: kredi alt nesnesi — yalnızca tur === 'Kredi' iken kullanılır
     const bosKrediForm = { bankaAdi: '', anaPara: '', toplamGeriOdeme: '', taksitSayisi: '', aylikTaksit: '', ilkTaksitTarihi: bugunStr() };
     const [defterForm, setDefterForm] = useState({ ad: '', tur: 'Nakit', not: '', blok: VARSAYILAN_BLOK, kredi: bosKrediForm });
+    // YENİ (kullanıcı talebi): DEVİR TUTARI penceresi — { defter, tutar, yon, tarih, not }
+    // 1 Eylül 2026'dan itibaren her defterdeki "Devir" düğmesiyle açılır.
+    const [devirModal, setDevirModal] = useState(null);
+    const [devirKaydediliyor, setDevirKaydediliyor] = useState(false);
 
     // ========================================================================
     // YENİ: TAKSİT ÖDEME PENCERESİ
@@ -4592,7 +4596,32 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       if (!_defterIslemCache.has(dId)) _defterIslemCache.set(dId, islemler.filter(i => i.defterId === dId));
       return _defterIslemCache.get(dId);
     };
-    const defterBakiye = (dId) => defterIslemleri(dId).reduce((t, i) => t + (i.tip === 'giris' ? 1 : -1) * (parseFloat(i.tutar) || 0), 0);
+    // ========================================================================
+    // YENİ (kullanıcı talebi): CANLI DÖNEM — 1 EYLÜL 2026 SİSTEM GEÇİŞİ PLANI
+    // ========================================================================
+    // Şirket 1 Eylül 2026'da (o gün DAHİL) başka uygulamadan bu sisteme geçer.
+    // PLAN ŞÖYLE İŞLER:
+    //   1) 1 Eylül'e KADAR: her şey bugünkü gibi çalışır (deneme dönemi).
+    //      Eski işlemler listelerde görünmeye devam eder, hiçbir kayıt silinmez.
+    //   2) 1 Eylül'den İTİBAREN: bakiye, gelir, gider ve ciro hesapları
+    //      YALNIZCA 1 Eylül ve sonrası işlemlerden yapılır — geçmiş "deneme"
+    //      rakamları hesaplara girmez ama işlem listelerinde görünür kalır.
+    //   3) O gün her defterde "Devir" düğmesi AKTİF olur; eski uygulamadaki
+    //      gerçek kalan bakiye devir kaydı olarak girilir. Devir kaydı
+    //      BAKİYEYE GİRER (banka ile eşleşsin) ama CİROYA GİRMEZ (o ayın
+    //      gelir/giderini şişirmesin — ciroyaGirer bunu dışlar).
+    //   4) Devirler girilip banka bakiyeleriyle eşleşince canlı takip başlar.
+    // Not: SISTEM_DEVIR_TARIHI'nin tek tanımı burasıdır.
+    const SISTEM_DEVIR_TARIHI = '2026-09-01';
+    // Canlı dönemde miyiz? (bugün devir gününe ulaştı mı — o gün dahil)
+    const canliDonemde = bugunStr() >= SISTEM_DEVIR_TARIHI;
+    // Bir işlem bakiye/ciro hesaplarına katılır mı?
+    // Deneme döneminde HERKES katılır; canlı dönemde yalnızca devir tarihi ve
+    // sonrası katılır. (Listeleme filtrelenmez — eski kayıtlar hep görünür.)
+    const hesabaKatilir = (i) => !canliDonemde || ((i.tarih || '') >= SISTEM_DEVIR_TARIHI);
+
+    // DEĞİŞTİ: Bakiye artık yalnızca canlı döneme dahil işlemlerden hesaplanır.
+    const defterBakiye = (dId) => defterIslemleri(dId).filter(hesabaKatilir).reduce((t, i) => t + (i.tip === 'giris' ? 1 : -1) * (parseFloat(i.tutar) || 0), 0);
     const defterSonIslem = (dId) => {
       const list = defterIslemleri(dId).sort((a, b) => new Date(b.tarih) - new Date(a.tarih));
       return list[0]?.tarih || null;
@@ -4610,7 +4639,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     //  krediMahsup  -> kredi taksitinin kredi defterindeki borç azaltma bacağı
     //  odemeMahsup  -> düzenli ödemenin ödemeler defterindeki izleme bacağı
     // Bunlar sayılsaydı her ödeme hem gelir hem gider olarak görünür, ciro şişerdi.
-    const ciroyaGirer = (i) => !i.isVirman && !i.krediMahsup && !i.odemeMahsup;
+    // DEĞİŞTİ (kullanıcı talebi): devir kayıtları (devirKaydi) CİROYA GİRMEZ —
+    // açılış bakiyesidir, o ayın gelir/giderini şişirmemelidir.
+    const ciroyaGirer = (i) => !i.isVirman && !i.krediMahsup && !i.odemeMahsup && !i.devirKaydi;
 
     // ========================================================================
     // KREDİ MOTORU
@@ -4647,8 +4678,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // Böylece geçmişten gelen yüzlerce sahte "gecikmiş" kaydı temizlenir ve
     // yalnızca 1 Eylül 2026 ve sonrası bekleyen olarak görünür.
     // Kiralarda geçmiş aylar, zam yapılmış hâliyle ödenmiş kabul edilir.
-    // NOT: Bu tarihi ileride değiştirmek gerekirse SADECE bu satır yeterlidir.
-    const SISTEM_DEVIR_TARIHI = '2026-09-01';
+    // NOT: SISTEM_DEVIR_TARIHI'nin tanımı yukarıya (defterBakiye'nin üstüne)
+    // taşındı — canlı dönem yardımcılarıyla birlikte tek kaynaktan yönetilir.
 
     // ========================================================================
     // DÜZELTME (kullanıcı talebi: "Otomatik ödeme olup da burada gözükmeyen
@@ -4977,16 +5008,59 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
     // Dönem filtresinden geçen işlemler (virmanlar zaten ciroyaGirer ile dışlanır)
     const ozetIslemleri = useMemo(() => {
+      // DEĞİŞTİ (kullanıcı talebi): canlı dönemde özet kartlar da yalnızca
+      // 1 Eylül 2026 ve sonrası işlemleri sayar ("Tüm Zamanlar" dahil).
+      const canliFiltre = islemler.filter(hesabaKatilir);
       const aralik = donemAraligi(ozetDonem);
-      if (!aralik) return islemler; // Tüm Zamanlar
-      return islemler.filter(i => i.tarih && i.tarih >= aralik.bas && i.tarih <= aralik.bit);
-    }, [islemler, ozetDonem]);
+      if (!aralik) return canliFiltre; // Tüm Zamanlar (canlı dönem sınırıyla)
+      return canliFiltre.filter(i => i.tarih && i.tarih >= aralik.bas && i.tarih <= aralik.bit);
+    }, [islemler, ozetDonem, canliDonemde]);
 
     const toplamGiris = ozetIslemleri.filter(i => i.tip === 'giris' && ciroyaGirer(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
     const toplamCikis = ozetIslemleri.filter(i => i.tip === 'cikis' && ciroyaGirer(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
     const netBakiye = toplamGiris - toplamCikis;
 
     const seciliDefter = defterler.find(d => d.id === seciliDefterId) || null;
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): DEVİR TUTARI KAYDETME
+    // ========================================================================
+    // Eski uygulamadan aktarılan gerçek kalan bakiye deftere tek kayıtla
+    // işlenir. Kayıt devirKaydi=true taşır: BAKİYEYE GİRER (banka hesabıyla
+    // eşleşir) ama CİROYA GİRMEZ (ciroyaGirer dışlar) — o ayın gelir/gider
+    // rakamlarını etkilemez. Girdiğiniz gün işlenir; tarih devir gününden
+    // önceye alınamaz (öncesi zaten hesaba katılmıyor).
+    const devirKaydet = async () => {
+      if (!devirModal) return;
+      const tutar = parseFloat(devirModal.tutar) || 0;
+      if (tutar <= 0) { alert('Geçerli bir devir tutarı girin.'); return; }
+      const tarih = devirModal.tarih || bugunStr();
+      if (tarih < SISTEM_DEVIR_TARIHI) {
+        alert(`Devir tarihi ${SISTEM_DEVIR_TARIHI.split('-').reverse().join('.')} gününden önce olamaz.`);
+        return;
+      }
+      setDevirKaydediliyor(true);
+      try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          defterId: devirModal.defter.id,
+          tip: devirModal.yon, // 'giris' = kasada var / alacak, 'cikis' = borç
+          tutar,
+          tarih,
+          kategori: 'Devir',
+          etiketler: [],
+          devirKaydi: true, // ciro raporlarından dışlanmasını sağlayan damga
+          odemeYontemi: devirModal.defter.tur === 'Nakit' ? 'nakit' : 'banka',
+          aciklama: `Devir tutarı — sistem geçişi (eski uygulamadan aktarılan ${devirModal.yon === 'giris' ? 'kasa/alacak' : 'borç'} bakiyesi)${devirModal.not ? ` • ${devirModal.not}` : ''}`,
+          kaynak: 'Devir',
+          createdAt: new Date().toISOString(),
+          by: currentUser?.fullName || 'Sistem',
+        });
+        addSystemLog?.('Devir Tutarı Girildi',
+          `${devirModal.defter.ad}: ₺${paraFmt(tutar)} ${devirModal.yon === 'giris' ? 'kasada var/alacak' : 'borç'} olarak devredildi (${tarih.split('-').reverse().join('.')}). Ciroya dahil edilmedi.`);
+        setDevirModal(null);
+      } catch (e) { console.error('Devir kaydedilemedi:', e); alert('Devir kaydedilemedi. Lütfen tekrar deneyin.'); }
+      finally { setDevirKaydediliyor(false); }
+    };
 
     // --- Defter işlemleri ---
     const handleSaveDefter = async () => {
@@ -6032,6 +6106,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     </div>
                   </div>
                   )}
+                  {/* ==========================================================
+                      YENİ (kullanıcı talebi): DEVİR DÜĞMESİ — her defterde var.
+                      1 Eylül 2026'ya kadar KİLİTLİ görünür (deneme dönemi);
+                      o gün ve sonrasında aktif olur. Eski uygulamadaki gerçek
+                      kalan bakiye buradan girilir; bakiye banka ile eşleşir,
+                      ciro etkilenmez. ========================================== */}
+                  <button type="button"
+                    disabled={!canliDonemde}
+                    title={canliDonemde ? 'Eski uygulamadaki kalan bakiyeyi devret' : `1 Eylül 2026'da aktif olur — canlı döneme geçişte devir girilecek`}
+                    onClick={e => { e.stopPropagation(); setDevirModal({ defter: d, tutar: '', yon: 'giris', tarih: bugunStr() < SISTEM_DEVIR_TARIHI ? SISTEM_DEVIR_TARIHI : bugunStr(), not: '' }); }}
+                    className={`shrink-0 px-2 py-1.5 text-[10px] font-black rounded-lg transition flex items-center gap-1 ${
+                      canliDonemde
+                        ? 'bg-teal-600 hover:bg-teal-700 text-white'
+                        : 'bg-neutral-100 text-neutral-400 border border-neutral-200 cursor-not-allowed'}`}>
+                    {!canliDonemde && <Clock className="w-3 h-3" />} Devir
+                  </button>
                 </div>
               );
             })}
@@ -6040,6 +6130,69 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               );
             })}
           </div>
+
+          {/* ==================================================================
+              YENİ (kullanıcı talebi): DEVİR TUTARI PENCERESİ
+              ==================================================================
+              Eski uygulamadaki gerçek kalan bakiye buradan girilir. Kayıt
+              bakiyeye işlenir (banka ile eşleşir) ama ciroya GİRMEZ. */}
+          {devirModal && (
+            <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-black text-black flex items-center gap-2"><ArrowRightLeft className="w-5 h-5 text-teal-600" /> Devir Tutarı Gir</h3>
+                  <button onClick={() => setDevirModal(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="space-y-3">
+                  <div className="p-3 bg-teal-50 border border-teal-200 rounded-xl">
+                    <div className="font-black text-teal-900">{devirModal.defter.ad}</div>
+                    <div className="text-[11px] font-bold text-teal-600">{defterTuruEtiket(devirModal.defter.tur)} • Sistem geçişi açılış bakiyesi</div>
+                  </div>
+
+                  {/* YÖN: kasada var (giriş) mı, borç (çıkış) mı? */}
+                  <div>
+                    <label className="text-xs font-bold text-neutral-600 block mb-1">Devir Yönü *</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button type="button" onClick={() => setDevirModal({ ...devirModal, yon: 'giris' })}
+                        className={`p-2.5 rounded-xl text-xs font-black transition border ${devirModal.yon === 'giris' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-neutral-500 border-neutral-300 hover:bg-neutral-50'}`}>
+                        Kasada Var / Alacak
+                      </button>
+                      <button type="button" onClick={() => setDevirModal({ ...devirModal, yon: 'cikis' })}
+                        className={`p-2.5 rounded-xl text-xs font-black transition border ${devirModal.yon === 'cikis' ? 'bg-red-600 text-white border-red-600' : 'bg-white text-neutral-500 border-neutral-300 hover:bg-neutral-50'}`}>
+                        Borç
+                      </button>
+                    </div>
+                  </div>
+
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Devir Tutarı (₺) *</label>
+                    <input type="number" inputMode="decimal" value={devirModal.tutar}
+                      onChange={e => setDevirModal({ ...devirModal, tutar: e.target.value })}
+                      placeholder="Eski uygulamadaki kalan bakiye"
+                      className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-teal-500 text-lg font-black" /></div>
+
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Devir Tarihi</label>
+                    <input type="date" value={devirModal.tarih} min={SISTEM_DEVIR_TARIHI}
+                      onChange={e => setDevirModal({ ...devirModal, tarih: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-teal-500 text-sm" />
+                    <p className="text-[10px] font-bold text-neutral-400 mt-1">Girdiğiniz gün işlenir; {SISTEM_DEVIR_TARIHI.split('-').reverse().join('.')} öncesine alınamaz.</p></div>
+
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
+                    <input value={devirModal.not} onChange={e => setDevirModal({ ...devirModal, not: e.target.value })}
+                      placeholder="Örn: Garanti hesap ekstresiyle eşleşti"
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-teal-500 text-sm" /></div>
+
+                  <p className="text-[11px] font-medium text-neutral-500 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
+                    Devir kaydı defterin <b>bakiyesine işlenir</b> (banka hesabıyla birebir eşleşmesi için) ama <b>ciroya ve gelir/gider raporlarına girmez</b> — o ayın rakamlarını etkilemez.
+                  </p>
+
+                  <button onClick={devirKaydet} disabled={devirKaydediliyor}
+                    className="w-full py-3 bg-teal-600 hover:bg-teal-700 disabled:opacity-60 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                    <CheckCircle className="w-4 h-4" /> {devirKaydediliyor ? 'Kaydediliyor...' : 'Devri Kaydet'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* DEFTER OLUŞTUR/DÜZENLE PENCERESİ */}
           {showDefterForm && (
@@ -6160,8 +6313,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // Toplam (tüm zamanlar) — üst karttaki defter bakiyesi bunu kullanır,
     // günlük filtre bu rakamları ETKİLEMEZ. Bakiye her zaman defterin
     // gerçek durumunu göstermeli, yoksa yanlış okunur.
-    const dGiris = defterIslemleri(seciliDefterId).filter(i => i.tip === 'giris').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
-    const dCikis = defterIslemleri(seciliDefterId).filter(i => i.tip === 'cikis').reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    // DEĞİŞTİ (kullanıcı talebi): başlıktaki toplamlar da canlı dönem kuralına
+    // uyar — 1 Eylül 2026'dan itibaren yalnızca o tarihten sonraki işlemler
+    // sayılır; günlük işlem listesi ise filtrelenmez, eski kayıtlar görünür.
+    const dGiris = defterIslemleri(seciliDefterId).filter(i => i.tip === 'giris' && hesabaKatilir(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    const dCikis = defterIslemleri(seciliDefterId).filter(i => i.tip === 'cikis' && hesabaKatilir(i)).reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
     const dBakiye = dGiris - dCikis;
 
     // Kategori dağılımı (bu defterin tüm işlemleri üzerinden)
