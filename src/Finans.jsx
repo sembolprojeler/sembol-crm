@@ -5901,18 +5901,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               görünsün, özet aşağıda dursun. */}
 
 
-          {/* ARAMA + YENİ DEFTER */}
-          <div className="flex gap-2">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Defter ara (kasa, kişi, firma adı)..."
-                className="w-full pl-9 pr-3 py-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 bg-white transition" />
-            </div>
-            <button onClick={() => { setDefterForm({ ad: '', tur: 'Nakit', not: '', blok: VARSAYILAN_BLOK, kredi: bosKrediForm }); setEditingDefterId(null); setShowDefterForm(true); }}
-              className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black rounded-xl transition flex items-center gap-2 shadow-md shadow-emerald-600/20 shrink-0">
-              <PlusCircle className="w-4 h-4" /> Yeni Defter
-            </button>
-          </div>
+          {/* TAŞINDI (kullanıcı talebi): "Defter ara" kutusu ve "Yeni Defter"
+              düğmesi SAYFANIN EN ALTINA alındı — açılışta doğrudan defter
+              listesi görünür. */}
 
           {/* ==================================================================
               DEFTER KARTLARI — BLOKLARA GÖRE GRUPLANMIŞ
@@ -6205,6 +6196,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 </div>
               </div>
             )}
+          </div>
+
+          {/* ==================================================================
+              TAŞINDI (kullanıcı talebi): DEFTER ARAMA + YENİ DEFTER
+              Artık sayfanın en altında. İçerik hiç değişmedi. */}
+          {/* ARAMA + YENİ DEFTER */}
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Defter ara (kasa, kişi, firma adı)..."
+                className="w-full pl-9 pr-3 py-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 bg-white transition" />
+            </div>
+            <button onClick={() => { setDefterForm({ ad: '', tur: 'Nakit', not: '', blok: VARSAYILAN_BLOK, kredi: bosKrediForm }); setEditingDefterId(null); setShowDefterForm(true); }}
+              className="px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black rounded-xl transition flex items-center gap-2 shadow-md shadow-emerald-600/20 shrink-0">
+              <PlusCircle className="w-4 h-4" /> Yeni Defter
+            </button>
           </div>
 
           {/* ==================================================================
@@ -7331,141 +7338,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           );
         })()}
 
-        {/* YENİ: GÜNLÜK GEZİNME ÇUBUĞU
-            Sol/sağ oklarla düne ve yarına geçilir. Açılışta her zaman bugün seçilidir.
-            "Tüm Geçmiş" düğmesi filtreyi kapatıp defterin tamamını listeler. */}
-        <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
-          <div className="flex items-center gap-1.5 sm:gap-2 p-2.5 sm:p-3">
-            {/* DÜN */}
-            <button onClick={() => { setSeciliGun(gunKaydir(seciliGun, -1)); setGunFiltreAktif(true); }}
-              title="Önceki gün"
-              className="w-10 h-10 shrink-0 rounded-xl bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center transition">
-              <ChevronLeft className="w-5 h-5 text-neutral-700" />
-            </button>
+        {/* TAŞINDI (kullanıcı talebi): Gün gezinme çubuğu, hareket
+            filtreleri, günün gelir/gider/net tablosu ve işlem araması
+            SAYFANIN EN ALTINA alındı — önce hareketler görünsün. */}
 
-            <div className="flex-1 min-w-0 text-center">
-              {/* Tarih etiketi — tıklanınca bugüne döner */}
-              <button onClick={() => { setSeciliGun(bugunStr()); setGunFiltreAktif(true); }}
-                className="w-full group">
-                <div className="text-sm font-black text-black truncate">
-                  {gunFiltreAktif ? gunEtiketi(seciliGun) : 'Tüm Zamanlar'}
-                </div>
-                <div className="text-[10px] font-bold text-neutral-400">
-                  {!gunFiltreAktif ? `${defterIslemleri(seciliDefterId).length} kayıt` :
-                    seciliGun === bugunStr() ? 'Bugün' :
-                    `${gunIslemleri.length} hareket • bugüne dönmek için dokun`}
-                </div>
-              </button>
-            </div>
-
-            {/* YARIN — hareket olan günlerde nokta gösterilir ki ileride kayıt
-                olup olmadığı ok tuşuna basmadan anlaşılsın. */}
-            <button onClick={() => { setSeciliGun(gunKaydir(seciliGun, 1)); setGunFiltreAktif(true); }}
-              title="Sonraki gün"
-              className="w-10 h-10 shrink-0 rounded-xl bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center transition relative">
-              <ChevronRight className="w-5 h-5 text-neutral-700" />
-              {hareketliGunler.has(gunKaydir(seciliGun, 1)) && (
-                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-              )}
-            </button>
-
-            {/* TÜM GEÇMİŞ / TARİHE DÖN geçişi
-                DEĞİŞTİ: "Günlük" yerine "Tarihe Dön" yazıyor (kullanıcı talebi) —
-                tüm geçmişteyken hangi düğmenin sizi günlük görünüme geri
-                götüreceği daha açık oluyor. Mod değişince sayfalama sayacı
-                başa sarılır ki yeni listede yine 50'den başlansın. */}
-            <button onClick={() => { setGunFiltreAktif(!gunFiltreAktif); setGosterilenSayi(SAYFA_BOYU); if (gunFiltreAktif) setKategoriFiltre('Tümü'); }}
-              className={`shrink-0 px-2.5 sm:px-3 h-10 rounded-xl text-[10px] sm:text-[11px] font-black transition ${
-                gunFiltreAktif ? 'bg-neutral-900 text-white hover:bg-neutral-800' : 'bg-emerald-600 text-white hover:bg-emerald-700'
-              }`}>
-              {gunFiltreAktif ? 'Tüm Zamanlar' : 'Tarihe Dön'}
-            </button>
-          </div>
-
-          {/* ==============================================================
-              YENİ: HAREKET TÜRÜ FİLTRESİ — Tümü / Gelir / Gider / Transfer
-              ==============================================================
-              Gün gezinme çubuğunun hemen altında, "Tüm Zamanlar" düğmesiyle
-              aynı bloktadır. Her sekmede o türe ait KAYIT SAYISI da yazar,
-              böylece tıklamadan önce ne kadar hareket olduğu görünür.
-              Sayılar, o an geçerli olan gün/tüm zamanlar seçimine göre
-              hesaplanır — yani "Gelir 12" derken hangi dönemdeyseniz onun
-              gelir sayısıdır.
-              MOBİL: Dört sekme eşit bölüşür, dar ekranda yazı küçülür.
-              ============================================================== */}
-          {(() => {
-            // Sayımlar: yalnızca gün filtresi uygulanmış havuz üzerinden
-            // (arama ve kategori filtresi burada kasten hesaba katılmaz;
-            //  sekme sayıları sabit bir referans olmalı).
-            const havuz = defterIslemleri(seciliDefterId).filter(i => !gunFiltreAktif || i.tarih === seciliGun);
-            const sayilar = {
-              tumu: havuz.length,
-              giris: havuz.filter(i => i.tip === 'giris' && !i.isVirman).length,
-              cikis: havuz.filter(i => i.tip === 'cikis' && !i.isVirman).length,
-              transfer: havuz.filter(i => i.isVirman).length,
-            };
-            const sekmeler = [
-              { id: 'tumu', ad: 'Tümü', aktif: 'bg-neutral-900 text-white', pasif: 'text-neutral-500 hover:bg-neutral-100' },
-              { id: 'giris', ad: 'Gelir', aktif: 'bg-emerald-600 text-white', pasif: 'text-emerald-700 hover:bg-emerald-50' },
-              { id: 'cikis', ad: 'Gider', aktif: 'bg-red-600 text-white', pasif: 'text-red-600 hover:bg-red-50' },
-              { id: 'transfer', ad: 'Transfer', aktif: 'bg-slate-800 text-white', pasif: 'text-slate-600 hover:bg-slate-100' },
-            ];
-            // DEĞİŞTİ (kullanıcı talebi): bu bölge MOBİLDE %15 küçültüldü
-            // ([zoom:0.85]); masaüstünde boyut aynı (sm:[zoom:1]).
-            return (
-              <div className="[zoom:0.85] sm:[zoom:1] grid grid-cols-4 gap-1.5 px-2.5 sm:px-3 pb-2.5 sm:pb-3 border-t border-neutral-100 pt-2.5">
-                {sekmeler.map(sk => (
-                  <button key={sk.id} type="button" onClick={() => setHareketFiltre(sk.id)}
-                    className={`py-2 rounded-xl text-[10px] sm:text-[11px] font-black transition flex flex-col items-center justify-center leading-tight ${
-                      hareketFiltre === sk.id ? sk.aktif : `bg-neutral-50 ${sk.pasif}`}`}>
-                    <span>{sk.ad}</span>
-                    <span className={`text-[9px] font-bold ${hareketFiltre === sk.id ? 'text-white/70' : 'text-neutral-400'}`}>{sayilar[sk.id]}</span>
-                  </button>
-                ))}
-              </div>
-            );
-          })()}
-
-          {/* SEÇİLİ GÜNÜN GELİR / GİDER / NET tablosu — yalnızca günlük moddayken */}
-          {gunFiltreAktif && (
-            <div className="[zoom:0.85] sm:[zoom:1] grid grid-cols-3 border-t border-neutral-200 divide-x divide-neutral-200">
-              <div className="p-2.5 text-center">
-                <div className="text-[9px] font-black uppercase text-emerald-600">Gelir</div>
-                <div className="text-sm font-black text-emerald-700">₺{paraFmt(gunGiris)}</div>
-              </div>
-              <div className="p-2.5 text-center">
-                <div className="text-[9px] font-black uppercase text-red-500">Gider</div>
-                <div className="text-sm font-black text-red-600">₺{paraFmt(gunCikis)}</div>
-              </div>
-              <div className="p-2.5 text-center">
-                <div className="text-[9px] font-black uppercase text-neutral-500">Günün Neti</div>
-                {/* Net negatifse eksi işaretiyle kırmızı gösterilir */}
-                <div className={`text-sm font-black ${gunNet > 0 ? 'text-emerald-700' : gunNet < 0 ? 'text-red-600' : 'text-neutral-400'}`}>
-                  {gunNet < 0 ? '−' : ''}₺{paraFmt(Math.abs(gunNet))}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* YENİ: O gün transfer yapıldıysa ayrı satırda gösterilir.
-              Üstteki üç rakama katılmıyor; buraya yazılmasa kullanıcı
-              "para nereye gitti" diye toplamları sorgulardı. */}
-          {gunFiltreAktif && gunVirman > 0 && (
-            <div className="[zoom:0.85] sm:[zoom:1] border-t border-neutral-200 px-3 py-2 flex items-center justify-between bg-slate-50">
-              <span className="text-[10px] font-black uppercase text-slate-600 flex items-center gap-1.5">
-                <ArrowRightLeft className="w-3.5 h-3.5" /> Hesaplar arası transfer
-              </span>
-              <span className="text-xs font-black text-slate-700">₺{paraFmt(gunVirman)}</span>
-            </div>
-          )}
-        </div>
-
-        {/* ARAMA */}
-        <div className="relative">
-          <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input value={detayArama} onChange={e => setDetayArama(e.target.value)} placeholder="İşlemlerde ara: açıklama, kategori veya etiket..."
-            className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 bg-white transition" />
-        </div>
 
         {/* İŞLEM LİSTESİ — tarih + açıklama + etiketler | sağda renkli tutar */}
         <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
@@ -7672,6 +7548,145 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               )}
             </div>
           )}
+        </div>
+
+        {/* ==================================================================
+            TAŞINDI (kullanıcı talebi): GÜN GEZİNME + FİLTRE + ARAMA
+            Artık işlem listesinin ALTINDA. İçerik hiç değişmedi. */}
+        {/* YENİ: GÜNLÜK GEZİNME ÇUBUĞU
+            Sol/sağ oklarla düne ve yarına geçilir. Açılışta her zaman bugün seçilidir.
+            "Tüm Geçmiş" düğmesi filtreyi kapatıp defterin tamamını listeler. */}
+        <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
+          <div className="flex items-center gap-1.5 sm:gap-2 p-2.5 sm:p-3">
+            {/* DÜN */}
+            <button onClick={() => { setSeciliGun(gunKaydir(seciliGun, -1)); setGunFiltreAktif(true); }}
+              title="Önceki gün"
+              className="w-10 h-10 shrink-0 rounded-xl bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center transition">
+              <ChevronLeft className="w-5 h-5 text-neutral-700" />
+            </button>
+
+            <div className="flex-1 min-w-0 text-center">
+              {/* Tarih etiketi — tıklanınca bugüne döner */}
+              <button onClick={() => { setSeciliGun(bugunStr()); setGunFiltreAktif(true); }}
+                className="w-full group">
+                <div className="text-sm font-black text-black truncate">
+                  {gunFiltreAktif ? gunEtiketi(seciliGun) : 'Tüm Zamanlar'}
+                </div>
+                <div className="text-[10px] font-bold text-neutral-400">
+                  {!gunFiltreAktif ? `${defterIslemleri(seciliDefterId).length} kayıt` :
+                    seciliGun === bugunStr() ? 'Bugün' :
+                    `${gunIslemleri.length} hareket • bugüne dönmek için dokun`}
+                </div>
+              </button>
+            </div>
+
+            {/* YARIN — hareket olan günlerde nokta gösterilir ki ileride kayıt
+                olup olmadığı ok tuşuna basmadan anlaşılsın. */}
+            <button onClick={() => { setSeciliGun(gunKaydir(seciliGun, 1)); setGunFiltreAktif(true); }}
+              title="Sonraki gün"
+              className="w-10 h-10 shrink-0 rounded-xl bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center transition relative">
+              <ChevronRight className="w-5 h-5 text-neutral-700" />
+              {hareketliGunler.has(gunKaydir(seciliGun, 1)) && (
+                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+              )}
+            </button>
+
+            {/* TÜM GEÇMİŞ / TARİHE DÖN geçişi
+                DEĞİŞTİ: "Günlük" yerine "Tarihe Dön" yazıyor (kullanıcı talebi) —
+                tüm geçmişteyken hangi düğmenin sizi günlük görünüme geri
+                götüreceği daha açık oluyor. Mod değişince sayfalama sayacı
+                başa sarılır ki yeni listede yine 50'den başlansın. */}
+            <button onClick={() => { setGunFiltreAktif(!gunFiltreAktif); setGosterilenSayi(SAYFA_BOYU); if (gunFiltreAktif) setKategoriFiltre('Tümü'); }}
+              className={`shrink-0 px-2.5 sm:px-3 h-10 rounded-xl text-[10px] sm:text-[11px] font-black transition ${
+                gunFiltreAktif ? 'bg-neutral-900 text-white hover:bg-neutral-800' : 'bg-emerald-600 text-white hover:bg-emerald-700'
+              }`}>
+              {gunFiltreAktif ? 'Tüm Zamanlar' : 'Tarihe Dön'}
+            </button>
+          </div>
+
+          {/* ==============================================================
+              YENİ: HAREKET TÜRÜ FİLTRESİ — Tümü / Gelir / Gider / Transfer
+              ==============================================================
+              Gün gezinme çubuğunun hemen altında, "Tüm Zamanlar" düğmesiyle
+              aynı bloktadır. Her sekmede o türe ait KAYIT SAYISI da yazar,
+              böylece tıklamadan önce ne kadar hareket olduğu görünür.
+              Sayılar, o an geçerli olan gün/tüm zamanlar seçimine göre
+              hesaplanır — yani "Gelir 12" derken hangi dönemdeyseniz onun
+              gelir sayısıdır.
+              MOBİL: Dört sekme eşit bölüşür, dar ekranda yazı küçülür.
+              ============================================================== */}
+          {(() => {
+            // Sayımlar: yalnızca gün filtresi uygulanmış havuz üzerinden
+            // (arama ve kategori filtresi burada kasten hesaba katılmaz;
+            //  sekme sayıları sabit bir referans olmalı).
+            const havuz = defterIslemleri(seciliDefterId).filter(i => !gunFiltreAktif || i.tarih === seciliGun);
+            const sayilar = {
+              tumu: havuz.length,
+              giris: havuz.filter(i => i.tip === 'giris' && !i.isVirman).length,
+              cikis: havuz.filter(i => i.tip === 'cikis' && !i.isVirman).length,
+              transfer: havuz.filter(i => i.isVirman).length,
+            };
+            const sekmeler = [
+              { id: 'tumu', ad: 'Tümü', aktif: 'bg-neutral-900 text-white', pasif: 'text-neutral-500 hover:bg-neutral-100' },
+              { id: 'giris', ad: 'Gelir', aktif: 'bg-emerald-600 text-white', pasif: 'text-emerald-700 hover:bg-emerald-50' },
+              { id: 'cikis', ad: 'Gider', aktif: 'bg-red-600 text-white', pasif: 'text-red-600 hover:bg-red-50' },
+              { id: 'transfer', ad: 'Transfer', aktif: 'bg-slate-800 text-white', pasif: 'text-slate-600 hover:bg-slate-100' },
+            ];
+            // DEĞİŞTİ (kullanıcı talebi): bu bölge MOBİLDE %15 küçültüldü
+            // ([zoom:0.85]); masaüstünde boyut aynı (sm:[zoom:1]).
+            return (
+              <div className="[zoom:0.85] sm:[zoom:1] grid grid-cols-4 gap-1.5 px-2.5 sm:px-3 pb-2.5 sm:pb-3 border-t border-neutral-100 pt-2.5">
+                {sekmeler.map(sk => (
+                  <button key={sk.id} type="button" onClick={() => setHareketFiltre(sk.id)}
+                    className={`py-2 rounded-xl text-[10px] sm:text-[11px] font-black transition flex flex-col items-center justify-center leading-tight ${
+                      hareketFiltre === sk.id ? sk.aktif : `bg-neutral-50 ${sk.pasif}`}`}>
+                    <span>{sk.ad}</span>
+                    <span className={`text-[9px] font-bold ${hareketFiltre === sk.id ? 'text-white/70' : 'text-neutral-400'}`}>{sayilar[sk.id]}</span>
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* SEÇİLİ GÜNÜN GELİR / GİDER / NET tablosu — yalnızca günlük moddayken */}
+          {gunFiltreAktif && (
+            <div className="[zoom:0.85] sm:[zoom:1] grid grid-cols-3 border-t border-neutral-200 divide-x divide-neutral-200">
+              <div className="p-2.5 text-center">
+                <div className="text-[9px] font-black uppercase text-emerald-600">Gelir</div>
+                <div className="text-sm font-black text-emerald-700">₺{paraFmt(gunGiris)}</div>
+              </div>
+              <div className="p-2.5 text-center">
+                <div className="text-[9px] font-black uppercase text-red-500">Gider</div>
+                <div className="text-sm font-black text-red-600">₺{paraFmt(gunCikis)}</div>
+              </div>
+              <div className="p-2.5 text-center">
+                <div className="text-[9px] font-black uppercase text-neutral-500">Günün Neti</div>
+                {/* Net negatifse eksi işaretiyle kırmızı gösterilir */}
+                <div className={`text-sm font-black ${gunNet > 0 ? 'text-emerald-700' : gunNet < 0 ? 'text-red-600' : 'text-neutral-400'}`}>
+                  {gunNet < 0 ? '−' : ''}₺{paraFmt(Math.abs(gunNet))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* YENİ: O gün transfer yapıldıysa ayrı satırda gösterilir.
+              Üstteki üç rakama katılmıyor; buraya yazılmasa kullanıcı
+              "para nereye gitti" diye toplamları sorgulardı. */}
+          {gunFiltreAktif && gunVirman > 0 && (
+            <div className="[zoom:0.85] sm:[zoom:1] border-t border-neutral-200 px-3 py-2 flex items-center justify-between bg-slate-50">
+              <span className="text-[10px] font-black uppercase text-slate-600 flex items-center gap-1.5">
+                <ArrowRightLeft className="w-3.5 h-3.5" /> Hesaplar arası transfer
+              </span>
+              <span className="text-xs font-black text-slate-700">₺{paraFmt(gunVirman)}</span>
+            </div>
+          )}
+        </div>
+
+        {/* ARAMA */}
+        <div className="relative">
+          <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input value={detayArama} onChange={e => setDetayArama(e.target.value)} placeholder="İşlemlerde ara: açıklama, kategori veya etiket..."
+            className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 bg-white transition" />
         </div>
 
         {/* YENİ: ETİKET SEÇME PENCERESİ
