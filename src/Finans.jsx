@@ -4636,6 +4636,41 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       return [];
     };
 
+    const SURESIZ_VADE_PENCERESI = 24; // Süresiz kalemlerde gösterilecek vade sayısı
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): SİSTEM DEVİR TARİHİ
+    // ========================================================================
+    // Şirket bu sisteme 1 Eylül 2026'da geçti. Bu tarihten ÖNCEKİ tüm vadeler
+    // (kiralar, firma ödemeleri, kredi taksitleri) eski düzende zaten ödenmişti;
+    // uygulamaya tek tek girilmeyecekleri için "devirden ödendi" sayılırlar.
+    // Böylece geçmişten gelen yüzlerce sahte "gecikmiş" kaydı temizlenir ve
+    // yalnızca 1 Eylül 2026 ve sonrası bekleyen olarak görünür.
+    // Kiralarda geçmiş aylar, zam yapılmış hâliyle ödenmiş kabul edilir.
+    // NOT: Bu tarihi ileride değiştirmek gerekirse SADECE bu satır yeterlidir.
+    const SISTEM_DEVIR_TARIHI = '2026-09-01';
+
+    // ========================================================================
+    // DÜZELTME (kullanıcı talebi: "Otomatik ödeme olup da burada gözükmeyen
+    // ödemeler var"): SÜRESİZ VADE ÜRETİMİ ARTIK TARİH TABANLI
+    // ========================================================================
+    // ESKİ HATA: Süresiz kalemlerde üretilecek vade sayısı
+    //   (yapılmış ödeme sayısı + 24) idi. Hiç ödeme yapılmamış ve ilk tarihi
+    //   eski olan bir kalem (ör. 01.08.2022 başlangıçlı kira) yalnızca ilk 24
+    //   ayı üretiyor, plan 2024'te bitiyordu; bu yüzden Eylül/Ekim 2026
+    //   listesinde HİÇ GÖRÜNMÜYORDU. Otomatik Ödemeler penceresinde duruyor
+    //   ama aylık listede yok — bildirilen sorun tam olarak buydu.
+    // YENİ: Vadeler ilk tarihten başlayıp BUGÜNDEN 24 AY SONRASINA kadar
+    //   üretilir. Böylece başlangıcı ne kadar eski olursa olsun her kalem
+    //   içinde bulunulan ayda ve ileri aylarda görünür.
+    const vadeUfku = (() => {
+      const [y, a] = bugunStr().split('-').map(Number);
+      const d = new Date(y, (a - 1) + SURESIZ_VADE_PENCERESI, 1);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-31`;
+    })();
+    // Güvenlik sınırı: haftalık kalemlerde bile sonsuz döngü olmasın
+    const VADE_URETIM_SINIRI = 2000;
+
     const krediBilgi = (defter, kalem) => {
       const k = kalem || {};
       const taksitSayisi = parseInt(k.taksitSayisi) || 0;
@@ -4766,40 +4801,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       { id: 'aylik', ad: 'Her Ay' },
       { id: 'yillik', ad: 'Her Yıl' },
     ];
-    const SURESIZ_VADE_PENCERESI = 24; // Süresiz kalemlerde gösterilecek vade sayısı
+    // SURESIZ_VADE_PENCERESI yukarı taşındı (TDZ düzeltmesi — açıklama aşağıda).
 
-    // ========================================================================
-    // YENİ (kullanıcı talebi): SİSTEM DEVİR TARİHİ
-    // ========================================================================
-    // Şirket bu sisteme 1 Eylül 2026'da geçti. Bu tarihten ÖNCEKİ tüm vadeler
-    // (kiralar, firma ödemeleri, kredi taksitleri) eski düzende zaten ödenmişti;
-    // uygulamaya tek tek girilmeyecekleri için "devirden ödendi" sayılırlar.
-    // Böylece geçmişten gelen yüzlerce sahte "gecikmiş" kaydı temizlenir ve
-    // yalnızca 1 Eylül 2026 ve sonrası bekleyen olarak görünür.
-    // Kiralarda geçmiş aylar, zam yapılmış hâliyle ödenmiş kabul edilir.
-    // NOT: Bu tarihi ileride değiştirmek gerekirse SADECE bu satır yeterlidir.
-    const SISTEM_DEVIR_TARIHI = '2026-09-01';
-
-    // ========================================================================
-    // DÜZELTME (kullanıcı talebi: "Otomatik ödeme olup da burada gözükmeyen
-    // ödemeler var"): SÜRESİZ VADE ÜRETİMİ ARTIK TARİH TABANLI
-    // ========================================================================
-    // ESKİ HATA: Süresiz kalemlerde üretilecek vade sayısı
-    //   (yapılmış ödeme sayısı + 24) idi. Hiç ödeme yapılmamış ve ilk tarihi
-    //   eski olan bir kalem (ör. 01.08.2022 başlangıçlı kira) yalnızca ilk 24
-    //   ayı üretiyor, plan 2024'te bitiyordu; bu yüzden Eylül/Ekim 2026
-    //   listesinde HİÇ GÖRÜNMÜYORDU. Otomatik Ödemeler penceresinde duruyor
-    //   ama aylık listede yok — bildirilen sorun tam olarak buydu.
-    // YENİ: Vadeler ilk tarihten başlayıp BUGÜNDEN 24 AY SONRASINA kadar
-    //   üretilir. Böylece başlangıcı ne kadar eski olursa olsun her kalem
-    //   içinde bulunulan ayda ve ileri aylarda görünür.
-    const vadeUfku = (() => {
-      const [y, a] = bugunStr().split('-').map(Number);
-      const d = new Date(y, (a - 1) + SURESIZ_VADE_PENCERESI, 1);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-31`;
-    })();
-    // Güvenlik sınırı: haftalık kalemlerde bile sonsuz döngü olmasın
-    const VADE_URETIM_SINIRI = 2000;
+    // NOT (TDZ düzeltmesi): SISTEM_DEVIR_TARIHI, vadeUfku ve VADE_URETIM_SINIRI
+    // sabitleri buradan krediBilgi'nin ÜSTÜNE taşındı. Sebep: kredi toplamları
+    // bileşen gövdesinde hemen hesaplanıyor ve krediBilgi bu sabitleri
+    // kullanıyor; sabitler aşağıda kalınca "Cannot access before
+    // initialization" hatasıyla Finans/Defter sayfası çöküyordu.
 
     const tekrarEtiket = (tekrar, sayi) => {
       const ad = TEKRAR_SECENEKLERI.find(t => t.id === tekrar)?.ad || 'Tek Seferlik';
@@ -6824,8 +6832,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                 {/* YENİ: Yıl dolumu uyarısı ÖDENDİKTEN SONRA DA görünür —
                                     asıl anlamı burada: yıl kapandı, sıradaki ay zamlı olacak.
                                     Zam zaten girilmişse (bir sonraki vadenin tutarı bu
-                                    vadeden farklıysa) uyarı gösterilmez, iş tamamlanmıştır. */}
-                                {vade.yilSonu && (() => {
+                                    vadeden farklıysa) uyarı gösterilmez, iş tamamlanmıştır.
+                                    DÜZELTME (devir): Sistem öncesi (devir) aylarda uyarı
+                                    çıkmaz — o dönemin zamları eski düzende zaten yapıldı,
+                                    geçmişe dönük "zam girin" uyarısı kafa karıştırırdı. */}
+                                {vade.yilSonu && !vade.devir && (() => {
                                   const bilgi = odemeKalemBilgi(seciliDefter, kalem);
                                   const sonraki = bilgi.plan.find(p => p.no === vade.no + 1);
                                   if (!sonraki || Math.abs(sonraki.tutar - vade.tutar) > 0.01) return null; // zam girilmiş
