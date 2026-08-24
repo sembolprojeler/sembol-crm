@@ -4294,6 +4294,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // hazır şekilde virman penceresine taşır.
     const [hizliTip, setHizliTip] = useState('cikis');   // ekran görüntüsündeki gibi GİDER önde
     const [hizliTutar, setHizliTutar] = useState('');
+    // YENİ (kullanıcı talebi): rakam yazılınca üstte açılan satırın alanları —
+    // Not (açıklama) ve Kategori yan yana.
+    const [hizliAciklama, setHizliAciklama] = useState('');
+    const [hizliKategori, setHizliKategori] = useState('Diğer');
     const [hizliKaydediliyor, setHizliKaydediliyor] = useState(false);
     // YENİ: "Yaklaşan İşlemler" akordeonu (mobil kolaylık) — varsayılan kapalı
     const [yaklasanAcik, setYaklasanAcik] = useState(false);
@@ -4631,7 +4635,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // Bir işlem bakiye/ciro hesaplarına katılır mı?
     // Deneme döneminde HERKES katılır; canlı dönemde yalnızca devir tarihi ve
     // sonrası katılır. (Listeleme filtrelenmez — eski kayıtlar hep görünür.)
-    const hesabaKatilir = (i) => !canliDonemde || ((i.tarih || '') >= SISTEM_DEVIR_TARIHI);
+    // DEĞİŞTİ (kullanıcı talebi): yumuşak silinen işlemler (silindi=true)
+    // hiçbir hesapta sayılmaz — listede etiketle görünmeye devam ederler.
+    const hesabaKatilir = (i) => !i.silindi && (!canliDonemde || ((i.tarih || '') >= SISTEM_DEVIR_TARIHI));
 
     // DEĞİŞTİ: Bakiye artık yalnızca canlı döneme dahil işlemlerden hesaplanır.
     const defterBakiye = (dId) => defterIslemleri(dId).filter(hesabaKatilir).reduce((t, i) => t + (i.tip === 'giris' ? 1 : -1) * (parseFloat(i.tutar) || 0), 0);
@@ -4654,7 +4660,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // Bunlar sayılsaydı her ödeme hem gelir hem gider olarak görünür, ciro şişerdi.
     // DEĞİŞTİ (kullanıcı talebi): devir kayıtları (devirKaydi) CİROYA GİRMEZ —
     // açılış bakiyesidir, o ayın gelir/giderini şişirmemelidir.
-    const ciroyaGirer = (i) => !i.isVirman && !i.krediMahsup && !i.odemeMahsup && !i.devirKaydi;
+    const ciroyaGirer = (i) => !i.silindi && !i.isVirman && !i.krediMahsup && !i.odemeMahsup && !i.devirKaydi;
 
     // ========================================================================
     // KREDİ MOTORU
@@ -4728,7 +4734,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       // Eski kayıtlarda krediKalemId yoktur; o durumda defterin tüm kredi
       // mahsupları tek krediye aittir ve hepsi sayılır.
       const odemeler = defterIslemleri(defter?.id).filter(i =>
-        i.tip === 'giris' && i.krediMahsup &&
+        !i.silindi && i.tip === 'giris' && i.krediMahsup &&
         (k.id === '__eski__' ? true : (i.krediKalemId ? i.krediKalemId === k.id : false)));
       const odenenTutar = odemeler.reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
       // YENİ (kullanıcı talebi): KISMİ ÖDEME — bir taksite birden çok ödeme
@@ -4886,7 +4892,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
       // Bu kaleme ait ödemeler (defterdeki mahsup girişleri)
       const odemeler = defterIslemleri(defter?.id)
-        .filter(i => i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalem.id);
+        .filter(i => !i.silindi && i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalem.id);
       // ======================================================================
       // YENİ (kullanıcı talebi): KISMİ ÖDEME DESTEĞİ
       // ======================================================================
@@ -5062,16 +5068,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           tutar,
           // Kayıt, ekranda BAKILAN güne yazılır ki listeden kaybolmasın
           tarih: gunFiltreAktif ? seciliGun : bugunStr(),
-          kategori: 'Diğer',
+          // YENİ: açılan satırdan gelen kategori ve not kullanılır
+          kategori: hizliKategori || 'Diğer',
           etiketler: [],
-          aciklama: 'Hızlı kayıt',
+          aciklama: (hizliAciklama || '').trim() || 'Hızlı kayıt',
           odemeYontemi: defterdenOdemeYontemi(seciliDefterId),
           kaynak: 'Hızlı Kayıt',
           createdAt: new Date().toISOString(),
           by: currentUser?.fullName || 'Sistem',
         });
-        addSystemLog?.('Defter İşlemi (Hızlı)', `${seciliDefter?.ad}: ${hizliTip === 'giris' ? 'PARA GİRİŞİ' : 'PARA ÇIKIŞI'} ₺${paraFmt(tutar)}.`);
-        setHizliTutar('');
+        addSystemLog?.('Defter İşlemi (Hızlı)', `${seciliDefter?.ad}: ${hizliTip === 'giris' ? 'PARA GİRİŞİ' : 'PARA ÇIKIŞI'} ₺${paraFmt(tutar)} (${hizliKategori}).`);
+        setHizliTutar(''); setHizliAciklama(''); setHizliKategori('Diğer');
       } catch (e) { console.error('Hızlı kayıt başarısız:', e); alert('Kaydedilemedi. Lütfen tekrar deneyin.'); }
       finally { setHizliKaydediliyor(false); }
     };
@@ -5551,7 +5558,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         defterId: kayitDefterId,
       };
       if (editingIslemId) {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', editingIslemId), kayit);
+        // YENİ (kullanıcı talebi): düzenlenen işleme damga vurulur; satırda
+        // mavi "DÜZENLENDİ" rozeti olarak görünür.
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', editingIslemId), {
+          ...kayit, duzenlendi: true, duzenlenmeTarihi: new Date().toISOString(), duzenleyen: currentUser?.fullName || 'Sistem',
+        });
         const hedefAd = defterler.find(d => d.id === kayitDefterId)?.ad || '-';
         addSystemLog?.('Defter İşlemi Güncellendi',
           tasindiMi
@@ -5648,9 +5659,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       setVirmanKaydediliyor(false);
     };
 
+    // DEĞİŞTİ (kullanıcı talebi): SİLME artık YUMUŞAK — kayıt veritabanından
+    // kaldırılmaz, silindi damgası vurulur. Satır listede soluk ve "İŞLEM
+    // SİLİNDİ" etiketiyle kalır; bakiye, ciro ve tüm hesaplardan düşülür
+    // (hesabaKatilir/ciroyaGirer bunu dışlar). Böylece hem iz kaybolmaz hem
+    // yanlışlıkla silmenin kaydı görünür kalır.
     const handleDeleteIslem = async () => {
-      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', deleteIslemId));
-      addSystemLog?.('Defter İşlemi Silindi', `${seciliDefter?.ad} defterinden bir kayıt silindi.`);
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', deleteIslemId), {
+        silindi: true, silinmeTarihi: new Date().toISOString(), silen: currentUser?.fullName || 'Sistem',
+      });
+      addSystemLog?.('Defter İşlemi Silindi', `${seciliDefter?.ad} defterinden bir kayıt silindi (izli silme — satırda görünür).`);
       setDeleteIslemId(null);
     };
 
@@ -5799,7 +5817,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           // kimliği kanalsızdı (maas_mavi_YYYY_M); o kayıt bulunursa her iki
           // kanal da ödenmiş sayılır — eski aylar bozulmaz.
           const eskiKalemId = `maas_${yaka.id}_${yil}_${ay}`;
-          const mahsup = islemler.find(i => i.defterId === seciliDefterId && i.tip === 'giris' && i.odemeMahsup &&
+          const mahsup = islemler.find(i => !i.silindi && i.defterId === seciliDefterId && i.tip === 'giris' && i.odemeMahsup &&
             (i.odemeKalemId === kalemId || i.odemeKalemId === eskiKalemId));
           return {
             id: kalemId, yaka: yaka.id, kanal: kanal.id,
@@ -6420,6 +6438,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <div className="text-[9px] sm:text-[10px] font-black uppercase text-white/70 leading-tight">{dBakiye > 0 ? 'Alacaklısınız / Kasada Var' : dBakiye < 0 ? 'Borçlusunuz' : 'Bakiye Sıfır'}</div>
             </div>
           </div>
+          {/* KALDIRILDI (kullanıcı talebi): TOPLAM GELİR / TOPLAM GİDER
+              kartları başlıktan çıkarıldı — geri istenirse false -> true. */}
+          {false && (
           <div className="grid grid-cols-2 gap-2 mt-2.5">
             <div className="bg-white/10 rounded-lg p-2 border border-white/10">
               <div className="text-[9px] font-black uppercase text-emerald-300">Toplam Gelir</div>
@@ -6430,6 +6451,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               <div className="text-sm font-black tabular-nums">₺{paraFmt(dCikis)}</div>
             </div>
           </div>
+          )}
         </div>
 
         {/* ==================================================================
@@ -7194,8 +7216,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             geçerli — Krediler sayfası Ödemeler ile aynı aylık mantığa
             geçtiği için günlük işlemler bölümü orada da gösterilmez. */}
         {seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi' && (<>
+        {/* KALDIRILDI (kullanıcı talebi): AY ÖZETİ ŞERİDİ — aşağıdaki blok
+            false ile kapatıldı; geri istenirse false -> true yapılır. */}
+        {false && (() => { return null; })()}
+        {false && (
+        <div className="hidden">
         {/* ==================================================================
-            YENİ (kullanıcı talebi): AY ÖZETİ ŞERİDİ (mobil banka görünümü)
+            ESKİ: AY ÖZETİ ŞERİDİ (mobil banka görünümü)
             ==================================================================
             Ekran görüntüsündeki "AĞUSTOS 2026  2.510.200  −1.993.411 = 516.788"
             şeridinin karşılığı: bakılan günün AYINA ait gelir, gider ve net,
@@ -7221,6 +7248,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             </div>
           );
         })()}
+
+        </div>
+        )}
 
         {/* ==================================================================
             YENİ (kullanıcı talebi): YAKLAŞAN İŞLEMLER AKORDEONU
@@ -7368,8 +7398,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               { id: 'cikis', ad: 'Gider', aktif: 'bg-red-600 text-white', pasif: 'text-red-600 hover:bg-red-50' },
               { id: 'transfer', ad: 'Transfer', aktif: 'bg-slate-800 text-white', pasif: 'text-slate-600 hover:bg-slate-100' },
             ];
+            // DEĞİŞTİ (kullanıcı talebi): bu bölge MOBİLDE %15 küçültüldü
+            // ([zoom:0.85]); masaüstünde boyut aynı (sm:[zoom:1]).
             return (
-              <div className="grid grid-cols-4 gap-1.5 px-2.5 sm:px-3 pb-2.5 sm:pb-3 border-t border-neutral-100 pt-2.5">
+              <div className="[zoom:0.85] sm:[zoom:1] grid grid-cols-4 gap-1.5 px-2.5 sm:px-3 pb-2.5 sm:pb-3 border-t border-neutral-100 pt-2.5">
                 {sekmeler.map(sk => (
                   <button key={sk.id} type="button" onClick={() => setHareketFiltre(sk.id)}
                     className={`py-2 rounded-xl text-[10px] sm:text-[11px] font-black transition flex flex-col items-center justify-center leading-tight ${
@@ -7384,7 +7416,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
           {/* SEÇİLİ GÜNÜN GELİR / GİDER / NET tablosu — yalnızca günlük moddayken */}
           {gunFiltreAktif && (
-            <div className="grid grid-cols-3 border-t border-neutral-200 divide-x divide-neutral-200">
+            <div className="[zoom:0.85] sm:[zoom:1] grid grid-cols-3 border-t border-neutral-200 divide-x divide-neutral-200">
               <div className="p-2.5 text-center">
                 <div className="text-[9px] font-black uppercase text-emerald-600">Gelir</div>
                 <div className="text-sm font-black text-emerald-700">₺{paraFmt(gunGiris)}</div>
@@ -7407,7 +7439,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               Üstteki üç rakama katılmıyor; buraya yazılmasa kullanıcı
               "para nereye gitti" diye toplamları sorgulardı. */}
           {gunFiltreAktif && gunVirman > 0 && (
-            <div className="border-t border-neutral-200 px-3 py-2 flex items-center justify-between bg-slate-50">
+            <div className="[zoom:0.85] sm:[zoom:1] border-t border-neutral-200 px-3 py-2 flex items-center justify-between bg-slate-50">
               <span className="text-[10px] font-black uppercase text-slate-600 flex items-center gap-1.5">
                 <ArrowRightLeft className="w-3.5 h-3.5" /> Hesaplar arası transfer
               </span>
@@ -7426,7 +7458,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         {/* İŞLEM LİSTESİ — tarih + açıklama + etiketler | sağda renkli tutar */}
         <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
           <div className="grid grid-cols-[1fr_auto_auto] gap-1.5 sm:gap-2 px-3 sm:px-4 py-2.5 bg-neutral-900 text-white text-[10px] font-black uppercase">
-            <span>İşlem</span><span className="text-right w-24 sm:w-28">Gelir</span><span className="text-right w-24 sm:w-28">Gider</span>
+            <span>İşlem</span><span className="hidden sm:block text-right w-24 sm:w-28">Gelir</span><span className="hidden sm:block text-right w-24 sm:w-28">Gider</span>
           </div>
           {/* DEĞİŞİKLİK: Boş liste mesajı artık hangi modda olduğumuzu söylüyor.
               Günlük moddayken "kayıt yok" demek yanıltıcı olurdu; kullanıcı
@@ -7479,10 +7511,27 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             {/* YENİ: Tüm Zamanlar modunda yalnızca ilk 'gosterilenSayi' kayıt
                 çizilir (günlük modda zaten tek günün hareketleri var, dilimlenmez). */}
             {(gunFiltreAktif ? dIslemler : dIslemler.slice(0, gosterilenSayi)).map(i => (
-              <div key={i.id} className="grid grid-cols-[1fr_auto_auto] gap-1.5 sm:gap-2 px-3 sm:px-4 py-3 items-center group hover:bg-neutral-50 transition">
+              <div key={i.id} className={`grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-1.5 sm:gap-2 px-3 sm:px-4 py-3 items-center group hover:bg-neutral-50 transition ${i.silindi ? 'opacity-50' : ''}`}>
                 <div className="min-w-0">
+                  {/* ==========================================================
+                      YENİ (kullanıcı talebi): MOBİL TEK SÜTUN TUTAR
+                      Telefonda Gelir/Gider iki ayrı sütun yerine banka
+                      uygulamasındaki gibi tek satır: solda GELİR (yeşil) /
+                      GİDER (kırmızı) etiketi + tarih, sağda tutar (gider
+                      önünde − işaretiyle). Masaüstü iki sütun aynen durur. */}
+                  <div className="flex sm:hidden items-center justify-between gap-2 mb-0.5">
+                    <span className={`text-[10px] font-black uppercase ${i.tip === 'giris' ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {i.tip === 'giris' ? 'GELİR' : 'GİDER'} <span className="text-neutral-400 font-bold normal-case">{new Date(i.tarih).toLocaleDateString('tr-TR')}</span>
+                    </span>
+                    <span className={`text-base font-black tabular-nums ${i.silindi ? 'line-through text-neutral-400' : i.tip === 'giris' ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {i.tip === 'cikis' ? '−' : ''}₺{paraFmt(parseFloat(i.tutar))}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[11px] font-black text-neutral-400">{new Date(i.tarih).toLocaleDateString('tr-TR')}</span>
+                    {/* YENİ: silinen/düzenlenen işlemler satırda etiketlenir */}
+                    {i.silindi && <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white">İŞLEM SİLİNDİ</span>}
+                    {!i.silindi && i.duzenlendi && <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-blue-600 text-white">DÜZENLENDİ</span>}
+                    <span className="hidden sm:inline text-[11px] font-black text-neutral-400">{new Date(i.tarih).toLocaleDateString('tr-TR')}</span>
                     <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 border border-neutral-200">{i.kategori}</span>
                     {i.odemeYontemi && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-100">{i.odemeYontemi}</span>}
                     {/* DEĞİŞİKLİK: Etiketlerdeki plaka-tıklama mantığı KALDIRILDI.
@@ -7544,14 +7593,25 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     </div>
                   )}
                   <div className="text-[10px] font-bold text-neutral-300">{i.by}</div>
-                  <div className="hidden group-hover:flex items-center gap-1 mt-1">
-                    <button onClick={() => { setIslemForm({ tip: i.tip, tutar: String(i.tutar), aciklama: i.aciklama || '', kategori: i.kategori || 'Diğer', etiketler: (i.etiketler || []), odemeYontemi: i.odemeYontemi || 'Nakit', tarih: i.tarih, hedefDefterId: i.defterId || seciliDefterId || '', musteriAdi: i.musteriAdi || '', musteriTel: i.musteriTel || '', plaka: i.plaka || '', aracId: i.aracId || '', ekipSefi: i.ekipSefi || '', ekipSefiId: i.ekipSefiId || '' }); setEditingIslemId(i.id); setShowIslemForm(true); }}
-                      className="text-[10px] font-black text-blue-600 hover:underline flex items-center gap-0.5"><Edit className="w-3 h-3" /> Düzenle</button>
-                    <button onClick={() => setDeleteIslemId(i.id)} className="text-[10px] font-black text-red-500 hover:underline flex items-center gap-0.5 ml-2"><X className="w-3 h-3" /> Sil</button>
-                  </div>
+                  {/* DEĞİŞTİ (kullanıcı talebi): Düzenle/Sil düğmeleri artık
+                      MOBİLDE HER İŞLEMDE görünür (telefonda hover yok, gizli
+                      kalıyorlardı); masaüstünde eskisi gibi üzerine gelince
+                      çıkar. Silinmiş işlemde düğmeler gösterilmez. */}
+                  {!i.silindi && (
+                    <div className="flex sm:hidden sm:group-hover:flex items-center gap-1 mt-1">
+                      <button onClick={() => { setIslemForm({ tip: i.tip, tutar: String(i.tutar), aciklama: i.aciklama || '', kategori: i.kategori || 'Diğer', etiketler: (i.etiketler || []), odemeYontemi: i.odemeYontemi || 'Nakit', tarih: i.tarih, hedefDefterId: i.defterId || seciliDefterId || '', musteriAdi: i.musteriAdi || '', musteriTel: i.musteriTel || '', plaka: i.plaka || '', aracId: i.aracId || '', ekipSefi: i.ekipSefi || '', ekipSefiId: i.ekipSefiId || '' }); setEditingIslemId(i.id); setShowIslemForm(true); }}
+                        className="text-[10px] font-black text-blue-600 px-2 py-1 rounded-lg bg-blue-50 border border-blue-200 sm:bg-transparent sm:border-0 sm:px-0 sm:py-0 hover:underline flex items-center gap-0.5"><Edit className="w-3 h-3" /> Düzenle</button>
+                      <button onClick={() => setDeleteIslemId(i.id)} className="text-[10px] font-black text-red-500 px-2 py-1 rounded-lg bg-red-50 border border-red-200 sm:bg-transparent sm:border-0 sm:px-0 sm:py-0 hover:underline flex items-center gap-0.5 ml-1 sm:ml-2"><X className="w-3 h-3" /> Sil</button>
+                    </div>
+                  )}
+                  {i.silindi && (
+                    <div className="text-[10px] font-bold text-red-400 mt-0.5">
+                      İşlem silindi{i.silinmeTarihi ? ` • ${new Date(i.silinmeTarihi).toLocaleDateString('tr-TR')}` : ''}{i.silen ? ` • ${i.silen}` : ''} — hesaplara dahil edilmiyor
+                    </div>
+                  )}
                 </div>
-                <div className="text-right w-24 sm:w-28 font-black text-emerald-600 text-sm sm:text-base">{i.tip === 'giris' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
-                <div className="text-right w-24 sm:w-28 font-black text-red-500 text-sm sm:text-base">{i.tip === 'cikis' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
+                <div className={`hidden sm:block text-right w-24 sm:w-28 font-black text-sm sm:text-base ${i.silindi ? 'line-through text-neutral-300' : 'text-emerald-600'}`}>{i.tip === 'giris' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
+                <div className={`hidden sm:block text-right w-24 sm:w-28 font-black text-sm sm:text-base ${i.silindi ? 'line-through text-neutral-300' : 'text-red-500'}`}>{i.tip === 'cikis' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
               </div>
             ))}
           </div>
@@ -8610,6 +8670,22 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               Masaüstünde eski üç büyük buton aynen kalır (aşağıda). */}
           <div className="sm:hidden mx-auto w-full max-w-xl px-3 pointer-events-auto">
             <div className={`rounded-2xl shadow-2xl border overflow-hidden ${hizliTip === 'giris' ? 'bg-emerald-700 border-emerald-500 shadow-emerald-700/40' : hizliTip === 'virman' ? 'bg-slate-800 border-slate-600 shadow-slate-800/40' : 'bg-red-700 border-red-500 shadow-red-700/40'}`}>
+              {/* YENİ (kullanıcı talebi): RAKAM YAZILINCA AÇILAN SATIR
+                  Tutar kutusuna bir şey yazıldığı anda üstte Not (açıklama) ve
+                  Kategori seçimi YAN YANA belirir; kutu boşalınca kaybolur. */}
+              {hizliTutar.trim() !== '' && (
+                <div className="flex items-center gap-2 p-2 pb-0 animate-in fade-in slide-in-from-bottom-1">
+                  <input value={hizliAciklama} onChange={e => setHizliAciklama(e.target.value)}
+                    placeholder="Not (açıklama)"
+                    className="flex-1 min-w-0 p-2 rounded-lg bg-black/25 text-white placeholder-white/45 text-sm font-bold outline-none focus:ring-2 focus:ring-white/40" />
+                  <select value={hizliKategori} onChange={e => setHizliKategori(e.target.value)}
+                    className="shrink-0 w-[38%] p-2 rounded-lg bg-black/25 text-white text-sm font-bold outline-none focus:ring-2 focus:ring-white/40">
+                    {['Diğer', 'Yakıt', 'Yemek', 'Malzeme', 'Bakım', 'Personel', 'Kira', 'Fatura', 'Vergi', 'Tahsilat'].map(k => (
+                      <option key={k} value={k} className="text-black">{k}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="flex items-center gap-2 p-2">
                 <input type="number" inputMode="decimal" value={hizliTutar}
                   onChange={e => setHizliTutar(e.target.value)}
