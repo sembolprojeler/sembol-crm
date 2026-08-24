@@ -6631,8 +6631,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 const zamBekleyenler = [];
                 od.detaylar.forEach(({ kalem, bilgi }) => {
                   if (kalem.odemeTuru !== 'kira' || kalem.bitisTarihi) return;
-                  // Vadesi geçmiş yıl dönümleri (12., 24., 36. ... ödemeler)
-                  const gecmisYilSonlari = bilgi.plan.filter(p => p.yilSonu && p.tarih <= bugun);
+                  // DEĞİŞTİ (kullanıcı talebi): 1 Eylül 2026 (sistem devri)
+                  // ÖNCESİNE düşen yıl dönümleri için uyarı ÇIKARILMAZ — o
+                  // dönemin zamları eski düzende zaten yapılmış kabul edilir.
+                  // Yalnızca devir tarihi ve SONRASINA düşen, vadesi geçmiş
+                  // yıl dönümleri hatırlatılır.
+                  const gecmisYilSonlari = bilgi.plan.filter(p => p.yilSonu && p.tarih >= SISTEM_DEVIR_TARIHI && p.tarih <= bugun);
                   if (gecmisYilSonlari.length === 0) return;
                   const sonYilSonu = gecmisYilSonlari[gecmisYilSonlari.length - 1];
                   const sonraki = bilgi.plan.find(p => p.no === sonYilSonu.no + 1);
