@@ -5930,10 +5930,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               const blokBakiye = blokDefterleri
                 .filter(d => d.tur !== 'Kredi' && d.tur !== 'Ödemeler')
                 .reduce((t, d) => t + defterBakiye(d.id), 0);
+              // DEĞİŞTİ (kullanıcı talebi): blok çerçevesi ve başlık altı
+              // ayırıcı KALINLAŞTIRILDI — bloklar birbirinden net ayrışıyor.
               return (
-                <div key={blokAdi} className="border border-neutral-300 rounded-2xl overflow-hidden bg-neutral-50/50">
+                <div key={blokAdi} className="border-2 border-neutral-400 rounded-2xl overflow-hidden bg-neutral-100/70 shadow-sm">
                   {/* BLOK BAŞLIĞI */}
-                  <div className="px-3 sm:px-4 py-2.5 bg-white border-b border-neutral-200 flex items-center justify-between gap-2">
+                  <div className="px-3 sm:px-4 py-2.5 bg-white border-b-2 border-neutral-300 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <span className="w-1.5 h-5 rounded-full bg-emerald-600 shrink-0"></span>
                       <span className="font-black text-sm text-black truncate">{blokAdi}</span>
@@ -5943,7 +5945,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       ₺{paraFmt(Math.abs(blokBakiye))}
                     </div>
                   </div>
-                  <div className="p-2 space-y-2">
+                  <div className="p-2.5 space-y-2.5">
             {blokDefterleri.map((d, defterIndex) => {
               const bakiye = defterBakiye(d.id);
               const sonTarih = defterSonIslem(d.id);
@@ -5966,30 +5968,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <div key={d.id} role="button" tabIndex={0}
                   onClick={defteriAc}
                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); defteriAc(); } }}
-                  className="w-full bg-white rounded-2xl border border-neutral-200 p-4 flex items-center gap-3 hover:border-emerald-400 hover:shadow-md transition text-left cursor-pointer">
-                  {/* ==========================================================
-                      YENİ: SIRALAMA OKLARI (yukarı / aşağı)
-                      Defterin listedeki yerini değiştirir. stopPropagation ile
-                      kart tıklaması (defteri açma) engellenir. En üstteki
-                      defterde yukarı, en alttakinde aşağı oku pasif görünür.
-                      Arama yapılırken oklar hiç gösterilmez (bkz. siralamaAktif).
-                      ========================================================== */}
-                  {siralamaAktif && (
-                    <div className="flex flex-col gap-0.5 shrink-0">
-                      <button type="button" disabled={defterIndex === 0}
-                        onClick={e => { e.stopPropagation(); defterSirasiDegistir(defterIndex, -1, blokDefterleri); }}
-                        title="Yukarı taşı"
-                        className={`p-1 rounded-md transition ${defterIndex === 0 ? 'text-neutral-200 cursor-not-allowed' : 'text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
-                        <ChevronUp className="w-4 h-4" />
-                      </button>
-                      <button type="button" disabled={defterIndex === blokDefterleri.length - 1}
-                        onClick={e => { e.stopPropagation(); defterSirasiDegistir(defterIndex, 1, blokDefterleri); }}
-                        title="Aşağı taşı"
-                        className={`p-1 rounded-md transition ${defterIndex === blokDefterleri.length - 1 ? 'text-neutral-200 cursor-not-allowed' : 'text-neutral-400 hover:text-emerald-600 hover:bg-emerald-50'}`}>
-                        <ChevronDown className="w-4 h-4" />
-                      </button>
-                    </div>
-                  )}
+                  /* DEĞİŞTİ (kullanıcı talebi): çerçeve 2px'e çıkarıldı ve
+                     koyulaştırıldı — her defter kartı net ayrışıyor. */
+                  className="w-full bg-white rounded-2xl border-2 border-neutral-300 p-3.5 flex items-center gap-3 hover:border-emerald-500 hover:shadow-md transition text-left cursor-pointer">
+                  {/* KALDIRILDI (kullanıcı talebi): yukarı/aşağı sıralama okları
+                      listeden çıkarıldı — kart artık tüm satırı kullanıyor ve
+                      defter adları tam görünüyor. Sıralama fonksiyonu kodda
+                      duruyor, yalnızca düğmeleri kaldırıldı. */}
                   {/* Defter adının ilk HARFİ yerine TÜRE UYGUN SİMGE.
                       Tüm defterler "NAKLİYE (...)" ile başladığı için hepsinde aynı
                       "N" harfi çıkıyordu ve ayırt edici bir bilgi vermiyordu.
@@ -5997,16 +5982,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   {(() => {
                     const { Ikon, renk } = defterTuruGorunum(d.tur);
                     return (
-                      <div className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 text-white ${renk}`}>
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 text-white ${renk}`}>
                         <Ikon className="w-5 h-5" />
                       </div>
                     );
                   })()}
                   <div className="flex-1 min-w-0">
-                    <div className="font-black text-black truncate">{d.ad}</div>
+                    {/* DEĞİŞTİ (kullanıcı talebi): ad artık KESİLMİYOR — uzun
+                        defter adları alt satıra taşarak tam görünür. */}
+                    <div className="font-black text-black text-[15px] leading-tight break-words">{d.ad}</div>
                     {/* DEĞİŞİKLİK: Ham d.tur yerine defterTuruEtiket() — eski kayıtlar da
                         yeni isimle görünür (Cari -> Kredi Kartı, Diğer -> Borçlu). */}
-                    <div className="text-[11px] font-bold text-neutral-400">{defterTuruEtiket(d.tur)} {sonTarih ? `• Son işlem: ${new Date(sonTarih).toLocaleDateString('tr-TR')}` : '• Henüz işlem yok'}</div>
+                    <div className="text-[10px] font-bold text-neutral-400 truncate mt-0.5">{defterTuruEtiket(d.tur)} {sonTarih ? `• ${new Date(sonTarih).toLocaleDateString('tr-TR')}` : '• Henüz işlem yok'}</div>
                   </div>
                   {/* ==========================================================
                       KREDİ DEFTERİ farklı gösterilir: "bakiye" yerine KALAN BORÇ
@@ -6050,7 +6037,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       </div>
                     );
                   })() : (
-                  <div className="text-right shrink-0 max-w-[45%] sm:max-w-none">
+                  <div className="text-right shrink-0 max-w-[38%] sm:max-w-none">
                     {/* MOBİL: Bakiye sütunu daraltıldı, yazı küçültüldü ve
                         "Alacaklısınız / Kasada Var" etiketi telefonda yalnızca
                         "ALACAK" olarak kısaltıldı — uzun metin iki satıra taşıp
@@ -6068,16 +6055,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       o gün ve sonrasında aktif olur. Eski uygulamadaki gerçek
                       kalan bakiye buradan girilir; bakiye banka ile eşleşir,
                       ciro etkilenmez. ========================================== */}
-                  <button type="button"
-                    disabled={!canliDonemde}
-                    title={canliDonemde ? 'Eski uygulamadaki kalan bakiyeyi devret' : `1 Eylül 2026'da aktif olur — canlı döneme geçişte devir girilecek`}
-                    onClick={e => { e.stopPropagation(); setDevirModal({ defter: d, tutar: '', yon: 'giris', tarih: bugunStr() < SISTEM_DEVIR_TARIHI ? SISTEM_DEVIR_TARIHI : bugunStr(), not: '' }); }}
-                    className={`shrink-0 px-2 py-1.5 text-[10px] font-black rounded-lg transition flex items-center gap-1 ${
-                      canliDonemde
-                        ? 'bg-teal-600 hover:bg-teal-700 text-white'
-                        : 'bg-neutral-100 text-neutral-400 border border-neutral-200 cursor-not-allowed'}`}>
-                    {!canliDonemde && <Clock className="w-3 h-3" />} Devir
-                  </button>
+                  {/* DEĞİŞTİ (kullanıcı talebi): Devir düğmesi ARTIK YALNIZCA
+                      1 Eylül 2026'dan itibaren ve DEVİR HENÜZ GİRİLMEMİŞSE
+                      görünür. Devir kaydı bir kez girildiğinde düğme tamamen
+                      kaybolur (yanlışlıkla ikinci devir girilmesin). */}
+                  {canliDonemde && !defterIslemleri(d.id).some(x => x.devirKaydi && !x.silindi) && (
+                    <button type="button"
+                      title="Eski uygulamadaki kalan bakiyeyi devret"
+                      onClick={e => { e.stopPropagation(); setDevirModal({ defter: d, tutar: '', yon: 'giris', tarih: bugunStr() < SISTEM_DEVIR_TARIHI ? SISTEM_DEVIR_TARIHI : bugunStr(), not: '' }); }}
+                      className="shrink-0 px-2.5 py-1.5 text-[10px] font-black rounded-lg transition bg-teal-600 hover:bg-teal-700 text-white">
+                      Devir
+                    </button>
+                  )}
                 </div>
               );
             })}
