@@ -7604,9 +7604,10 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
           <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2"><Wallet className="w-6 h-6 text-green-600" /> Personel İşlemleri</h3>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            <button type="button" onClick={() => { setAvansForm({ type: 'nakit', amount: '', month: nowMonth, note: '' }); setShowAvansModal(true); }} className="p-3 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
-              <DollarSign className="w-5 h-5" /> Avans Girişi Yap
-            </button>
+            {/* KALDIRILDI (kullanıcı talebi): "Avans Girişi Yap" personel
+                profilinden çıkarıldı. Avans girişi artık yalnızca Finans →
+                Defter → Ödemeler sayfasındaki avans satırlarından yapılır ve
+                ödeme yapılınca muhasebeye işlenir. */}
             <button type="button" onClick={() => { setTutanakForm({ title: '', date: new Date().toISOString().split('T')[0], note: '', fileUrl: '' }); setTutanakTemplateKey(''); setShowTutanakModal(true); }} className="p-3 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-xs font-bold rounded-xl transition flex flex-col items-center gap-1.5">
               <FileText className="w-5 h-5" /> Tutanak Tut
             </button>
