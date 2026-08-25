@@ -2688,12 +2688,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     )}
                     {g('hakedis') && (
                       <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-yellow-50/30">
-                      <input type="number" value={row.nakitAvans || ''} onChange={e => handleCellChange(person.id, 'nakitAvans', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-yellow-100 focus:ring-1 focus:ring-yellow-400 rounded" placeholder="0" />
+                      {/* DEĞİŞTİ (kullanıcı talebi): Muhasebeden avans GİRİŞİ
+                          kaldırıldı. Avanslar artık yalnızca Ödemeler defterinden
+                          girilir ve ÖDEME yapılınca buraya otomatik işlenir. Bu
+                          hücre salt-okunur: ödenen avansı gösterir. */}
+                      <div className="w-full h-6 flex items-center justify-center text-[10px] text-neutral-600 font-bold" title="Avans girişi Ödemeler defterinden yapılır; ödeme sonrası buraya işlenir.">{row.nakitAvans ? Number(row.nakitAvans).toLocaleString('tr-TR') : '—'}</div>
                     </td>
                     )}
                     {g('hakedis') && (
                       <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-yellow-50/30">
-                      <input type="number" value={row.resmiAvans || ''} onChange={e => handleCellChange(person.id, 'resmiAvans', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-yellow-100 focus:ring-1 focus:ring-yellow-400 rounded" placeholder="0" />
+                      {/* DEĞİŞTİ (kullanıcı talebi): salt-okunur — bkz. Nakit Avans hücresi */}
+                      <div className="w-full h-6 flex items-center justify-center text-[10px] text-neutral-600 font-bold" title="Avans girişi Ödemeler defterinden yapılır; ödeme sonrası buraya işlenir.">{row.resmiAvans ? Number(row.resmiAvans).toLocaleString('tr-TR') : '—'}</div>
                     </td>
                     )}
                     {g('hakedis') && (
@@ -3896,14 +3901,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   </div>
                 </div>
                 <div className="flex items-center gap-2 w-full md:w-auto">
-                    {/* YENİ (kullanıcı talebi): TOPLU AVANS GİR — yalnızca
-                        "Resmi Avans Ödemesi" sekmesinde, Excel butonunun
-                        SOL yanında görünür. Hem Mavi hem Beyaz Yaka'da çalışır. */}
-                    {activeTab === 'Resmi Avans Ödemesi' && (
-                        <button onClick={topluAvansAc} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition shadow-md w-full md:w-auto">
-                            <UserPlus className="w-5 h-5" /> Toplu Avans Gir
-                        </button>
-                    )}
+                    {/* KALDIRILDI (kullanıcı talebi): "Toplu Avans Gir" bu sayfadan
+                        kaldırıldı. Avans girişi artık yalnızca Defter → Ödemeler
+                        sayfasındaki avans satırlarından yapılır. */}
                     <button onClick={handleDownloadCSV} className="bg-green-600 hover:bg-green-700 text-white px-5 py-2.5 rounded-xl font-bold flex items-center justify-center gap-2 transition shadow-md w-full md:w-auto">
                         <Download className="w-5 h-5" /> Banka Excel Formatında İndir
                     </button>
@@ -6087,34 +6087,57 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       if (seciliDefter?.tur !== 'Ödemeler' || !avansVeri) return [];
       const [yil, ay] = odemeAyi.split('-').map(Number);
       if (avansVeri.anahtar !== `${yil}_${ay}`) return []; // eski ayın verisi sızmasın
+      // DEĞİŞTİ (kullanıcı talebi): Maaştaki gibi her kanal YAKAYA göre de
+      // ikiye bölünür → 4 satır: Mavi/Beyaz × Nakit/Banka(Resmi).
+      // DEĞİŞTİ (kullanıcı talebi): Avanslar artık MUHASEBE alanına (nakitAvans/
+      // resmiAvans) DEĞİL, "bekleyen" alanına yazılır. Bu sayede avans girişi
+      // muhasebeyi ETKİLEMEZ; muhasebeye yalnızca ÖDEME yapılınca işlenir.
+      //   bekleyenAlan  -> girişte yazılan, ödenmeyi bekleyen avans
+      //   alan          -> ödeme yapılınca muhasebeye kopyalanan gerçek alan
       const kanallar = [
-        { id: 'nakit', ad: 'Personel Nakit Avansı', alan: 'nakitAvans' },
-        { id: 'resmi', ad: 'Personel Resmi Avansı', alan: 'resmiAvans' },
+        { id: 'nakit', etiket: 'Nakit Avansı', alan: 'nakitAvans', bekleyenAlan: 'bekleyenNakitAvans' },
+        { id: 'resmi', etiket: 'Banka Avansı', alan: 'resmiAvans', bekleyenAlan: 'bekleyenResmiAvans' },
       ];
-      return kanallar.map(kanal => {
-        // Her iki yakadan, o ay görünür TÜM personel; tutarı 0 olanlar da
-        // kişi listesinde tutulur (satır açılınca 0'lar gizlenir).
-        const kisiler = (personnelList || [])
-          .filter(p => p.position !== 'Firma Sahibi' && isPersonnelVisibleInMonth(p, yil, ay))
-          .map(p => {
-            const yaka = YAKA_FILTRELERI.beyaz(p) ? 'beyaz' : 'mavi';
-            const tutar = parseFloat((avansVeri[yaka][p.id] || {})[kanal.alan]) || 0;
-            return { person: p, yaka, tutar };
+      const yakalar = [
+        { id: 'mavi', ad: 'Mavi Yaka' },
+        { id: 'beyaz', ad: 'Beyaz Yaka' },
+      ];
+      // Sıra: Mavi Nakit, Mavi Banka, Beyaz Nakit, Beyaz Banka
+      const satirlar = [];
+      yakalar.forEach(yaka => {
+        kanallar.forEach(kanal => {
+          // Yalnızca bu yakanın o ay görünür personeli
+          const kisiler = (personnelList || [])
+            .filter(p => p.position !== 'Firma Sahibi' && isPersonnelVisibleInMonth(p, yil, ay) && YAKA_FILTRELERI[yaka.id](p))
+            .map(p => {
+              // Ödeme öncesi tutar bekleyen alandan; ödeme sonrası muhasebeye
+              // kopyalandığı için gerçek alan da fallback olarak okunur.
+              const rec = avansVeri[yaka.id][p.id] || {};
+              const tutar = parseFloat(rec[kanal.bekleyenAlan]) || parseFloat(rec[kanal.alan]) || 0;
+              return { person: p, yaka: yaka.id, tutar };
+            });
+          const toplam = kisiler.reduce((t, k) => t + k.tutar, 0);
+          // Kalem kimliğine YAKA da eklendi ki 4 satır ayrı ayrı ödenebilsin
+          const kalemId = `avans_${yaka.id}_${kanal.id}_${yil}_${ay}`;
+          const mahsup = islemler.find(i => !i.silindi && i.defterId === seciliDefterId && i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalemId);
+          const vadeTarihi = `${odemeAyi}-20`; // her ayın 20'si
+          // YENİ (kullanıcı talebi): 1 Eylül 2026 (sistem devri) ÖNCESİ avanslar
+          // ARTIK HİÇ GÖSTERİLMEZ (eski girişler Ödemeler bölümünde yer almaz).
+          const devir = vadeTarihi < SISTEM_DEVIR_TARIHI;
+          if (devir) return; // devir öncesi satır üretme
+          satirlar.push({
+            id: kalemId, kanal: kanal.id, alan: kanal.alan, bekleyenAlan: kanal.bekleyenAlan, yaka: yaka.id,
+            ad: `${yaka.ad} ${kanal.etiket}`,
+            kaynakEtiket: `${AY_ADLARI[ay - 1]} ${yil} avansı`,
+            vadeTarihi, devir,
+            tutar: toplam,
+            kisiler,
+            odendi: devir || !!mahsup,
+            odemeTarihi: mahsup?.tarih || null,
           });
-        const toplam = kisiler.reduce((t, k) => t + k.tutar, 0);
-        const kalemId = `avans_${kanal.id}_${yil}_${ay}`;
-        const mahsup = islemler.find(i => !i.silindi && i.defterId === seciliDefterId && i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalemId);
-        return {
-          id: kalemId, kanal: kanal.id, alan: kanal.alan,
-          ad: kanal.ad,
-          kaynakEtiket: `${AY_ADLARI[ay - 1]} ${yil} avansı`,
-          vadeTarihi: `${odemeAyi}-20`, // kullanıcı talebi: her ayın 20'si
-          tutar: toplam,
-          kisiler,
-          odendi: !!mahsup,
-          odemeTarihi: mahsup?.tarih || null,
-        };
+        });
       });
+      return satirlar;
     }, [seciliDefter?.tur, avansVeri, personnelList, islemler, seciliDefterId, odemeAyi]);
 
     // AVANS ÖDEMESİ — kaynak hesap seçilir; varsayılan: Nakit avans için
@@ -6156,6 +6179,26 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         });
         addSystemLog?.('Personel Avansı Ödendi',
           `${satir.ad} (${satir.kaynakEtiket}) ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi.`);
+        // ====================================================================
+        // YENİ (kullanıcı talebi): ÖDEME SONRASI MUHASEBEYE İŞLE
+        // ====================================================================
+        // Avans girişi muhasebeyi etkilemiyordu (bekleyen alanda duruyordu).
+        // Ödeme yapıldığı AN, bu satırdaki her personelin bekleyen avansı
+        // muhasebedeki gerçek alana (nakitAvans/resmiAvans) yazılır ve maaş
+        // hesabına dahil olur. Bekleyen alan kayıt olarak korunur.
+        try {
+          const [yil2, ay2] = odemeAyi.split('-').map(Number);
+          const docAdi = satir.yaka === 'beyaz' ? `beyaz_${yil2}_${ay2}` : `${yil2}_${ay2}`;
+          const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', docAdi);
+          const mSnap = await getDoc(mRef);
+          const records = mSnap.exists() ? (mSnap.data().records || {}) : {};
+          satir.kisiler.filter(k => k.tutar > 0).forEach(k => {
+            if (!records[k.person.id]) records[k.person.id] = {};
+            records[k.person.id][satir.alan] = String(k.tutar); // muhasebeye işle
+          });
+          await setDoc(mRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
+        } catch (muhErr) { console.error('Avans muhasebeye işlenemedi:', muhErr); }
+        setAvansYenile(x => x + 1);
         setAvansOdeModal(null);
       } catch (e) { console.error('Avans ödemesi kaydedilemedi:', e); alert('Kaydedilemedi. Lütfen tekrar deneyin.'); }
       finally { setAvansOdeKaydediliyor(false); }
@@ -6164,10 +6207,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // TOPLU AVANS GİRİŞİ (Ödemeler sayfası) — Personel Ödemeleri'ndeki
     // pencereyle aynı mantık: seçim + tek tutar uygulama + kişiye özel tutar.
     // Kanal (Nakit/Resmi) ve yaka (Mavi/Beyaz) pencere içinden değiştirilir.
-    const avansTopluAc = (kanal) => {
-      const yaka = 'mavi';
+    const avansTopluAc = (kanal, baslangicYaka = 'mavi') => {
+      const yaka = baslangicYaka;
       const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p));
-      const alan = kanal === 'resmi' ? 'resmiAvans' : 'nakitAvans';
+      const alan = kanal === 'resmi' ? 'bekleyenResmiAvans' : 'bekleyenNakitAvans';
       const tutarlar = {}; const secim = [];
       kisiler.forEach(p => {
         const mevcut = parseFloat((avansVeri?.[yaka]?.[p.id] || {})[alan]) || 0;
@@ -6178,7 +6221,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     };
     const avansTopluYakaDegistir = (yaka) => {
       if (!avansTopluModal) return;
-      const alan = avansTopluModal.kanal === 'resmi' ? 'resmiAvans' : 'nakitAvans';
+      const alan = avansTopluModal.kanal === 'resmi' ? 'bekleyenResmiAvans' : 'bekleyenNakitAvans';
       const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p));
       const tutarlar = {}; const secim = [];
       kisiler.forEach(p => {
@@ -6190,7 +6233,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     };
     const avansTopluKanalDegistir = (kanal) => {
       if (!avansTopluModal) return;
-      const alan = kanal === 'resmi' ? 'resmiAvans' : 'nakitAvans';
+      const alan = kanal === 'resmi' ? 'bekleyenResmiAvans' : 'bekleyenNakitAvans';
       const yaka = avansTopluModal.yaka;
       const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p));
       const tutarlar = {}; const secim = [];
@@ -6205,7 +6248,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       if (!avansTopluModal) return;
       const { kanal, yaka, secim, tutarlar } = avansTopluModal;
       if (secim.length === 0) { alert('Kaydedilecek personel seçin.'); return; }
-      const alan = kanal === 'resmi' ? 'resmiAvans' : 'nakitAvans';
+      // DEĞİŞTİ (kullanıcı talebi): Giriş MUHASEBEYE değil BEKLEYEN alana yazılır.
+      // Muhasebeye yalnızca "Öde" ile ödeme yapılınca işlenir (avansOde).
+      const alan = kanal === 'resmi' ? 'bekleyenResmiAvans' : 'bekleyenNakitAvans';
       const [yil, ay] = odemeAyi.split('-').map(Number);
       const docAdi = yaka === 'beyaz' ? `beyaz_${yil}_${ay}` : `${yil}_${ay}`;
       setAvansTopluKaydediliyor(true);
@@ -7385,7 +7430,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                   </div>
                                   <div className="flex items-center gap-1 shrink-0">
                                     <button type="button"
-                                      onClick={e => { e.stopPropagation(); avansTopluAc(a.kanal); }}
+                                      onClick={e => { e.stopPropagation(); avansTopluAc(a.kanal, a.yaka); }}
                                       className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black rounded-lg transition">Avans Gir</button>
                                     <button type="button"
                                       onClick={e => { e.stopPropagation(); if (!(a.tutar > 0)) { alert('Bu ay girilmiş avans yok (₺0). Önce "Avans Gir" ile avans yazın.'); return; } setAvansOdeModal({ satir: a, kaynakDefterId: avansVarsayilanKaynak(a.kanal), tarih: bugunStr() }); }}
@@ -7561,7 +7606,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                               <div key={a.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
                                 <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
                                 <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{a.ad} — {a.kaynakEtiket} (₺{paraFmt(a.tutar)})</span>
-                                <span className="text-[10px] font-black text-emerald-700 shrink-0">{a.odemeTarihi ? trh(a.odemeTarihi) : 'Ödendi'} ✓</span>
+                                <span className="text-[10px] font-black text-emerald-700 shrink-0">{a.devir ? 'Devir (sistem öncesi)' : (a.odemeTarihi ? trh(a.odemeTarihi) : 'Ödendi')} ✓</span>
                               </div>
                             ))}
                             {odenenMaaslar.map(m => (
@@ -9761,7 +9806,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     <span>Personel Adı</span><span className="text-right w-24">Mevcut Avans</span><span className="text-right w-28">Yeni Avans (₺)</span>
                   </div>
                   {kisiler.map(p2 => {
-                    const alan = m2.kanal === 'resmi' ? 'resmiAvans' : 'nakitAvans';
+                    const alan = m2.kanal === 'resmi' ? 'bekleyenResmiAvans' : 'bekleyenNakitAvans';
                     const mevcut = parseFloat((avansVeri?.[m2.yaka]?.[p2.id] || {})[alan]) || 0;
                     const secili = m2.secim.includes(p2.id);
                     return (
