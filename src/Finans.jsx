@@ -4713,8 +4713,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // borçlu defterine yazılan mahsup çıkışı (alacakMahsup) da ciro/gider
     // sayılmaz; yalnızca alacağı azaltır.
     const borcluDefterIdSet = new Set(defterler.filter(d => d.tur === 'Borçlu').map(d => d.id));
+    // YENİ (kullanıcı talebi): "BORÇ" kategorisiyle işlenen kayıtlar (borç
+    // alma / borç verme) genel ciroyu ETKİLEMEZ — kredi taksit ödemeleri
+    // (krediMahsup) ile aynı mantık. Büyük/küçük harf ve "Borç Alınan" /
+    // "Borç Verilen" gibi alt kategoriler de kapsanır; sadece kategori adı
+    // "BORÇ" ile BAŞLIYORSA dışlanır (başka kelime içinde geçen "borç"
+    // yanlışlıkla eşleşmesin diye tam kelime/başlangıç eşleşmesi kullanılır).
+    const borcKategorisiMi = (i) => (i.kategori || '').trim().toLocaleUpperCase('tr-TR').startsWith('BORÇ');
     const ciroyaGirer = (i) => !i.silindi && !otomatikMaasKaydi(i) && !i.isVirman && !i.krediMahsup && !i.odemeMahsup && !i.devirKaydi
-      && !i.alacakMahsup
+      && !i.alacakMahsup && !borcKategorisiMi(i)
       && !(i.tip === 'giris' && borcluDefterIdSet.has(i.defterId));
 
     // ========================================================================
@@ -8578,6 +8585,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             { ad: 'Araç', alt: ['Yakıt', 'Bakım', 'Lastik', 'Sigorta', 'HGS/OGS', 'Ceza'] },
             { ad: 'Personel', alt: ['Maaş', 'Avans', 'Prim', 'SGK'] },
             { ad: 'Kira', alt: [] },
+            // YENİ (kullanıcı talebi): BORÇ kategorisi — bir yerden borç
+            // ALINDIĞINDA ya da birine borç VERİLDİĞİNDE kullanılır. Bu
+            // kategoriyle işlenen tutar genel ciro/gelir-gider hesabını
+            // ETKİLEMEZ (kredi taksit ödemeleri gibi ayrı tutulur).
+            { ad: 'Borç', alt: ['Borç Alınan', 'Borç Verilen'] },
             { ad: 'Fatura', alt: ['Elektrik', 'Su', 'Doğalgaz', 'İnternet', 'Telefon'] },
             { ad: 'Malzeme', alt: [] },
             { ad: 'Yemek', alt: [] },
