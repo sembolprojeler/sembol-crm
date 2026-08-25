@@ -4285,6 +4285,27 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const [devirModal, setDevirModal] = useState(null);
     const [devirKaydediliyor, setDevirKaydediliyor] = useState(false);
     // ========================================================================
+    // YENİ (kullanıcı talebi): ALACAK TAKİBİ (BORÇLU DEFTERİ) STATE'LERİ
+    // ========================================================================
+    // Borçlu defteri artık gelir/gider girişi değil, Ödemeler sayfası gibi
+    // bir ALACAK TAKİP modülüdür: borçlular (Personel/Müşteri/Kurum) kalem
+    // olarak eklenir, isteğe göre taksitlendirilir, tahsilatta para seçilen
+    // hesaba işlenir ve ANCAK O ZAMAN ciroya girer. İcra takibi de buradan.
+    const bosAlacakKalemi = { id: '', ad: '', tur: 'musteri', toplamTutar: '', taksitSayisi: '', ilkTarih: bugunStr(), not: '', icra: null };
+    const [alacakForm, setAlacakForm] = useState(null);          // null = kapalı
+    const [tahsilModal, setTahsilModal] = useState(null);        // { kalem, taksit, hedefDefterId, tarih, tutar }
+    const [tahsilKaydediliyor, setTahsilKaydediliyor] = useState(false);
+    const [alacakAyi, setAlacakAyi] = useState(bugunStr().slice(0, 7));
+    const [mevcutBorclularAcik, setMevcutBorclularAcik] = useState(false);
+    const [acikAlacakKalemi, setAcikAlacakKalemi] = useState(null);
+    // Üç borçlu türü — rozet renkleriyle
+    const ALACAK_TURLERI = [
+      { id: 'personel', ad: 'Personel', rozet: 'bg-purple-600', yumusak: 'bg-purple-50 border-purple-200', yazi: 'text-purple-700' },
+      { id: 'musteri',  ad: 'Müşteri',  rozet: 'bg-emerald-600', yumusak: 'bg-emerald-50 border-emerald-200', yazi: 'text-emerald-700' },
+      { id: 'kurum',    ad: 'Kurum',    rozet: 'bg-sky-600', yumusak: 'bg-sky-50 border-sky-200', yazi: 'text-sky-700' },
+    ];
+    const alacakTuru = (id) => ALACAK_TURLERI.find(t => t.id === id) || ALACAK_TURLERI[1];
+    // ========================================================================
     // YENİ (kullanıcı talebi): MOBİL HIZLI KAYIT ÇUBUĞU
     // ========================================================================
     // Telefonda, banka uygulamalarındaki gibi tek satırdan işlem girilir:
@@ -4663,7 +4684,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // Bunlar sayılsaydı her ödeme hem gelir hem gider olarak görünür, ciro şişerdi.
     // DEĞİŞTİ (kullanıcı talebi): devir kayıtları (devirKaydi) CİROYA GİRMEZ —
     // açılış bakiyesidir, o ayın gelir/giderini şişirmemelidir.
-    const ciroyaGirer = (i) => !i.silindi && !i.isVirman && !i.krediMahsup && !i.odemeMahsup && !i.devirKaydi;
+    // ========================================================================
+    // YENİ (kullanıcı talebi): ALACAK (BORÇLU DEFTERİ) CİRO KURALI
+    // ========================================================================
+    // Borçlu (Tahsil Bekleyen) defterine yazılan GELİRLER henüz tahsil
+    // edilmemiş ALACAKTIR — ciroya girmez. Gelir ancak tahsil edilip gerçek
+    // bir hesaba (Kasa/Banka) geçtiğinde ciroya eklenir. Tahsilat sırasında
+    // borçlu defterine yazılan mahsup çıkışı (alacakMahsup) da ciro/gider
+    // sayılmaz; yalnızca alacağı azaltır.
+    const borcluDefterIdSet = new Set(defterler.filter(d => d.tur === 'Borçlu').map(d => d.id));
+    const ciroyaGirer = (i) => !i.silindi && !i.isVirman && !i.krediMahsup && !i.odemeMahsup && !i.devirKaydi
+      && !i.alacakMahsup
+      && !(i.tip === 'giris' && borcluDefterIdSet.has(i.defterId));
 
     // ========================================================================
     // KREDİ MOTORU
@@ -5084,6 +5116,175 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         setHizliTutar(''); setHizliAciklama(''); setHizliKategori('Diğer');
       } catch (e) { console.error('Hızlı kayıt başarısız:', e); alert('Kaydedilemedi. Lütfen tekrar deneyin.'); }
       finally { setHizliKaydediliyor(false); }
+    };
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): ALACAK MOTORU
+    // ========================================================================
+    // Bir borçlu kaleminin taksit planını üretir. taksitSayisi boş/1 ise tek
+    // vade (peşin alacak); >1 ise aylık taksitler. Kısmi tahsilat desteklenir:
+    // taksit ancak toplam tahsilat tutara ulaşınca kapanır. Devir kuralı
+    // BURADA UYGULANMAZ — alacaklar gerçek alacaktır, eski vadeler gecikmiş
+    // görünmelidir.
+    const alacakBilgi = (defter, kalem) => {
+      const toplam = parseFloat(kalem.toplamTutar) || 0;
+      const adet = Math.max(1, parseInt(kalem.taksitSayisi) || 1);
+      const taksitTutar = Math.round((toplam / adet) * 100) / 100;
+      // Bu kaleme yapılan tahsilat mahsupları (borçlu defterindeki çıkışlar)
+      const tahsilatlar = defterIslemleri(defter?.id)
+        .filter(i => !i.silindi && i.tip === 'cikis' && i.alacakMahsup && i.alacakKalemId === kalem.id);
+      const taksitTahsil = {}; const taksitSonTarih = {};
+      tahsilatlar.forEach(i => {
+        const n = parseInt(i.taksitNo); if (isNaN(n)) return;
+        taksitTahsil[n] = (taksitTahsil[n] || 0) + (parseFloat(i.tutar) || 0);
+        if (!taksitSonTarih[n] || (i.tarih || '') > taksitSonTarih[n]) taksitSonTarih[n] = i.tarih || null;
+      });
+      const plan = [];
+      if (kalem.ilkTarih) {
+        const [y, a, g] = kalem.ilkTarih.split('-').map(Number);
+        for (let n = 1; n <= adet; n++) {
+          const t = new Date(y, (a - 1) + (n - 1), 1);
+          const son = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+          t.setDate(Math.min(g, son));
+          const tarihStr = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+          // Kuruş farkı son taksite eklenir ki toplam birebir tutsun
+          const tutar = n === adet ? Math.round((toplam - taksitTutar * (adet - 1)) * 100) / 100 : taksitTutar;
+          const tahsil = taksitTahsil[n] || 0;
+          const odendi = tahsil >= tutar - 0.01;
+          plan.push({ no: n, tarih: tarihStr, tutar, odendi,
+                      odenenTutar: tahsil, kalan: Math.max(0, tutar - tahsil),
+                      kismi: !odendi && tahsil > 0.01,
+                      odemeTarihi: taksitSonTarih[n] || null,
+                      gecikmis: !odendi && tarihStr < bugunStr() });
+        }
+      }
+      const toplamTahsil = tahsilatlar.reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+      const gecikmisler = plan.filter(pp => pp.gecikmis);
+      return { ad: kalem.ad, tur: kalem.tur, toplam, adet, plan, toplamTahsil,
+               kalanAlacak: Math.max(0, toplam - toplamTahsil),
+               tahsilAdet: plan.filter(pp => pp.odendi).length,
+               gecikmisAdet: gecikmisler.length,
+               gecikmisTutar: gecikmisler.reduce((t, pp) => t + pp.kalan, 0),
+               siradaki: plan.find(pp => !pp.odendi) || null };
+    };
+    // Defterdeki TÜM borçluların özeti
+    const alacakDefterBilgi = (defter) => {
+      const kalemler = defter?.alacaklar || [];
+      const detaylar = kalemler.map(kalem => ({ kalem, bilgi: alacakBilgi(defter, kalem) }));
+      const buAyOn = alacakAyi;
+      return {
+        kalemSayisi: kalemler.length,
+        detaylar,
+        toplamAlacak: detaylar.reduce((t, d) => t + d.bilgi.toplam, 0),
+        toplamTahsil: detaylar.reduce((t, d) => t + d.bilgi.toplamTahsil, 0),
+        kalanAlacak: detaylar.reduce((t, d) => t + d.bilgi.kalanAlacak, 0),
+        gecikmisAdet: detaylar.reduce((t, d) => t + d.bilgi.gecikmisAdet, 0),
+        gecikmisTutar: detaylar.reduce((t, d) => t + d.bilgi.gecikmisTutar, 0),
+        icradaAdet: kalemler.filter(k => k.icra).length,
+        buAyBekleyen: detaylar.reduce((t, d) => t + d.bilgi.plan.filter(pp => !pp.odendi && pp.tarih.startsWith(buAyOn)).reduce((x, pp) => x + pp.kalan, 0), 0),
+      };
+    };
+
+    // YENİ BORÇLU KAYDET / DÜZENLE — kalemler defter dokümanındaki
+    // "alacaklar" dizisinde tutulur (odemeler/krediler ile aynı desen).
+    const alacakKaydet = async () => {
+      if (!seciliDefter || !alacakForm) return;
+      if (!alacakForm.ad.trim()) { alert('Borçlu adını girin (örn: Melike Özdemir / X Ltd. Şti.).'); return; }
+      if (!(parseFloat(alacakForm.toplamTutar) > 0)) { alert('Geçerli bir alacak tutarı girin.'); return; }
+      if (!alacakForm.ilkTarih) { alert('İlk vade tarihini seçin.'); return; }
+      const mevcut = seciliDefter.alacaklar || [];
+      const kalem = {
+        ...alacakForm,
+        id: alacakForm.id || `al_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+        toplamTutar: String(parseFloat(alacakForm.toplamTutar)),
+        taksitSayisi: parseInt(alacakForm.taksitSayisi) > 1 ? String(parseInt(alacakForm.taksitSayisi)) : '',
+        tur: ['personel', 'musteri', 'kurum'].includes(alacakForm.tur) ? alacakForm.tur : 'musteri',
+      };
+      const yeniListe = alacakForm.id ? mevcut.map(k => k.id === kalem.id ? kalem : k) : [...mevcut, kalem];
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), { alacaklar: yeniListe });
+        addSystemLog?.('Alacak Kalemi', `${seciliDefter.ad}: "${kalem.ad}" ${alacakForm.id ? 'güncellendi' : 'eklendi'} (₺${paraFmt(kalem.toplamTutar)}${kalem.taksitSayisi ? ` • ${kalem.taksitSayisi} taksit` : ' • peşin'}).`);
+        setAlacakForm(null);
+      } catch (e) { console.error(e); alert('Borçlu kaydedilemedi.'); }
+    };
+
+    // BORÇLU SİL — tahsilat yapılmışsa ek uyarı (ödemeler/kredi ile aynı kural)
+    const alacakSil = async (kalemId) => {
+      const kalem = (seciliDefter.alacaklar || []).find(k => k.id === kalemId);
+      if (!kalem) return;
+      const bilgi = alacakBilgi(seciliDefter, kalem);
+      if (bilgi.toplamTahsil > 0.01 &&
+          !window.confirm(`"${kalem.ad}" borçlusundan ₺${paraFmt(bilgi.toplamTahsil)} tahsilat yapılmış.\n\nKalemi silerseniz tahsilat kayıtları defterde KALIR ama hangi borçluya ait oldukları listede görünmez.\n\nYine de silmek istiyor musunuz?`)) return;
+      if (!window.confirm(`"${kalem.ad}" borçlu kaydı silinsin mi?`)) return;
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), {
+          alacaklar: (seciliDefter.alacaklar || []).filter(k => k.id !== kalemId),
+        });
+        addSystemLog?.('Alacak Kalemi Silindi', `${seciliDefter.ad}: "${kalem.ad}" kaldırıldı.`);
+      } catch (e) { console.error(e); alert('Silinemedi.'); }
+    };
+
+    // İCRA İŞLEMİ — başlat / geri al. Kalem üstünde icra tarihi tutulur;
+    // listede kırmızı "İCRADA" rozeti görünür, plan ve tahsilat aynen sürer.
+    const alacakIcra = async (kalemId, baslat) => {
+      const kalem = (seciliDefter.alacaklar || []).find(k => k.id === kalemId);
+      if (!kalem) return;
+      if (baslat && !window.confirm(`"${kalem.ad}" için icra işlemi başlatılsın mı?\n\nKalem "İCRADA" olarak işaretlenir; tahsilat yapılabilir olmaya devam eder.`)) return;
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), {
+          alacaklar: (seciliDefter.alacaklar || []).map(k => k.id === kalemId ? { ...k, icra: baslat ? bugunStr() : null } : k),
+        });
+        addSystemLog?.(baslat ? 'İcra İşlemi Başlatıldı' : 'İcra Kaydı Kaldırıldı',
+          `${seciliDefter.ad}: "${kalem.ad}"${baslat ? ' icraya verildi.' : ' icra işareti kaldırıldı.'}`);
+      } catch (e) { console.error(e); alert('Güncellenemedi.'); }
+    };
+
+    // TAHSİLAT — paranın YÖNÜ ödemenin tersidir:
+    //   1) Seçilen HEDEF hesaba GİRİŞ yazılır (gerçek gelir — CİROYA GİRER,
+    //      kullanıcının istediği: "ödemeyi alınca genel ciroya ekle").
+    //   2) Borçlu defterine alacakMahsup ÇIKIŞI yazılır (alacak azalır,
+    //      ciro/gider sayılmaz). Kısmi tahsilat desteklenir.
+    const alacakTahsilEt = async () => {
+      if (!tahsilModal) return;
+      if (!tahsilModal.hedefDefterId) { alert('Paranın girdiği hesabı seçin.'); return; }
+      const t = tahsilModal.taksit;
+      const kalan = t.kalan ?? t.tutar;
+      const tutar = parseFloat(tahsilModal.tutar ?? kalan) || 0;
+      if (tutar <= 0) { alert('Geçerli bir tutar girin.'); return; }
+      if (tutar > kalan + 0.01) { alert(`Kalan alacaktan fazla tahsilat girilemez.\n\nBu taksit için kalan: ₺${paraFmt(kalan)}`); return; }
+      const kismiOdeme = tutar < kalan - 0.01;
+      const kalacak = Math.max(0, kalan - tutar);
+      const kismiNot = kismiOdeme ? ` (kısmi tahsilat — kalan ₺${paraFmt(kalacak)})` : '';
+      const hedef = defterler.find(d => d.id === tahsilModal.hedefDefterId);
+      const odemeId = `alacak_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const ortak = {
+        tarih: tahsilModal.tarih || bugunStr(),
+        kategori: 'Tahsilat', etiketler: [], odemeId,
+        taksitNo: t.no, alacakKalemId: tahsilModal.kalem.id,
+        alacakDefterId: seciliDefter.id, kaynak: 'Alacak Tahsilatı',
+        kismiOdeme, createdAt: new Date().toISOString(),
+        by: currentUser?.fullName || 'Sistem',
+      };
+      setTahsilKaydediliyor(true);
+      try {
+        // 1) HEDEF hesaba GİRİŞ — gerçek gelir, ciroya girer
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak, tip: 'giris', tutar, defterId: tahsilModal.hedefDefterId,
+          odemeYontemi: defterdenOdemeYontemi(tahsilModal.hedefDefterId),
+          aciklama: `${tahsilModal.kalem.ad} — ${t.no}. taksit tahsilatı${kismiNot}`,
+        });
+        // 2) BORÇLU defterine mahsup ÇIKIŞI — alacak azalır, ciroya girmez
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak, tip: 'cikis', tutar, defterId: seciliDefter.id,
+          alacakMahsup: true,
+          odemeYontemi: defterdenOdemeYontemi(tahsilModal.hedefDefterId),
+          aciklama: `${tahsilModal.kalem.ad} ${t.no}. taksit tahsil edildi${kismiNot} → ${hedef?.ad || 'hesap'}`,
+        });
+        addSystemLog?.(kismiOdeme ? 'Kısmi Tahsilat Yapıldı' : 'Tahsilat Yapıldı',
+          `${tahsilModal.kalem.ad}: ${t.no}. taksit ₺${paraFmt(tutar)} — ${hedef?.ad || '-'} hesabına alındı ve ciroya eklendi.${kismiOdeme ? ` Kalan: ₺${paraFmt(kalacak)}` : ''}`);
+        setTahsilModal(null);
+      } catch (e) { console.error('Tahsilat kaydedilemedi:', e); alert('Tahsilat kaydedilemedi. Lütfen tekrar deneyin.'); }
+      finally { setTahsilKaydediliyor(false); }
     };
 
     const devirKaydet = async () => {
@@ -5771,6 +5972,40 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       return () => { iptal = true; };
     }, [seciliDefter?.tur, maasKaynakAy]);
 
+    // ========================================================================
+    // YENİ (kullanıcı talebi): PERSONEL AVANS ÖDEMESİ (her ayın 20'si)
+    // ========================================================================
+    // Maaş satırları gibi ama iki AVANS satırı: NAKİT AVANS ve RESMİ AVANS.
+    // Vade her ayın 20'sidir; tutar sıfır olsa bile satırlar hep görünür.
+    // Tutarlar, görüntülenen AYIN muhasebe dokümanındaki nakitAvans/resmiAvans
+    // hücrelerinden toplanır — muhasebe ekranıyla AYNI veridir. Satıra
+    // tıklayınca kişi bazlı avanslar açılır; "Avans Gir" düğmesi Personel
+    // Ödemeleri'ndeki toplu avans penceresinin aynısını burada açar.
+    const [avansVeri, setAvansVeri] = useState(null);            // { mavi:{}, beyaz:{}, anahtar }
+    const [avansYenile, setAvansYenile] = useState(0);           // toplu giriş sonrası tazeleme sayacı
+    const [acikAvansSatiri, setAcikAvansSatiri] = useState(null);
+    const [avansOdeModal, setAvansOdeModal] = useState(null);    // { satir, kaynakDefterId, tarih }
+    const [avansOdeKaydediliyor, setAvansOdeKaydediliyor] = useState(false);
+    const [avansTopluModal, setAvansTopluModal] = useState(null);// { kanal, yaka, secim, tutarlar, toplu, arama }
+    const [avansTopluKaydediliyor, setAvansTopluKaydediliyor] = useState(false);
+
+    // Görüntülenen AYIN muhasebe dokümanlarını oku (avans hücreleri için)
+    useEffect(() => {
+      if (seciliDefter?.tur !== 'Ödemeler') return;
+      let iptal = false;
+      const [ay2y, ay2a] = odemeAyi.split('-').map(Number);
+      const anahtar = `${ay2y}_${ay2a}`;
+      (async () => {
+        try {
+          const oku = (ad) => getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'maas', ad))
+            .then(sn => sn.exists() ? (sn.data().records || {}) : {}).catch(() => ({}));
+          const [mavi, beyaz] = await Promise.all([oku(anahtar), oku(`beyaz_${anahtar}`)]);
+          if (!iptal) setAvansVeri({ mavi, beyaz, anahtar });
+        } catch (e) { console.error('Avans verisi okunamadı:', e); }
+      })();
+      return () => { iptal = true; };
+    }, [seciliDefter?.tur, odemeAyi, avansYenile]);
+
     // İki otomatik maaş satırı (mavi + beyaz)
     const AY_ADLARI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
     const maasSatirlari = useMemo(() => {
@@ -5840,6 +6075,160 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         });
       }).filter(sa => sa.kisiler.length > 0);
     }, [seciliDefter?.tur, maasVeri, maasKaynakAy, personnelList, islemler, seciliDefterId, odemeAyi]);
+
+    // ========================================================================
+    // YENİ: İKİ AVANS SATIRI (NAKİT + RESMİ) — her ayın 20'si
+    // ========================================================================
+    const YAKA_FILTRELERI = {
+      mavi: (p) => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)),
+      beyaz: (p) => p.collarType === 'Beyaz Yaka',
+    };
+    const avansSatirlari = useMemo(() => {
+      if (seciliDefter?.tur !== 'Ödemeler' || !avansVeri) return [];
+      const [yil, ay] = odemeAyi.split('-').map(Number);
+      if (avansVeri.anahtar !== `${yil}_${ay}`) return []; // eski ayın verisi sızmasın
+      const kanallar = [
+        { id: 'nakit', ad: 'Personel Nakit Avansı', alan: 'nakitAvans' },
+        { id: 'resmi', ad: 'Personel Resmi Avansı', alan: 'resmiAvans' },
+      ];
+      return kanallar.map(kanal => {
+        // Her iki yakadan, o ay görünür TÜM personel; tutarı 0 olanlar da
+        // kişi listesinde tutulur (satır açılınca 0'lar gizlenir).
+        const kisiler = (personnelList || [])
+          .filter(p => p.position !== 'Firma Sahibi' && isPersonnelVisibleInMonth(p, yil, ay))
+          .map(p => {
+            const yaka = YAKA_FILTRELERI.beyaz(p) ? 'beyaz' : 'mavi';
+            const tutar = parseFloat((avansVeri[yaka][p.id] || {})[kanal.alan]) || 0;
+            return { person: p, yaka, tutar };
+          });
+        const toplam = kisiler.reduce((t, k) => t + k.tutar, 0);
+        const kalemId = `avans_${kanal.id}_${yil}_${ay}`;
+        const mahsup = islemler.find(i => !i.silindi && i.defterId === seciliDefterId && i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalemId);
+        return {
+          id: kalemId, kanal: kanal.id, alan: kanal.alan,
+          ad: kanal.ad,
+          kaynakEtiket: `${AY_ADLARI[ay - 1]} ${yil} avansı`,
+          vadeTarihi: `${odemeAyi}-20`, // kullanıcı talebi: her ayın 20'si
+          tutar: toplam,
+          kisiler,
+          odendi: !!mahsup,
+          odemeTarihi: mahsup?.tarih || null,
+        };
+      });
+    }, [seciliDefter?.tur, avansVeri, personnelList, islemler, seciliDefterId, odemeAyi]);
+
+    // AVANS ÖDEMESİ — kaynak hesap seçilir; varsayılan: Nakit avans için
+    // Sembol Nakliyat'ın NAKİT defteri, Resmi avans için BANKA defteri.
+    const avansVarsayilanKaynak = (kanal) => {
+      const tur = kanal === 'nakit' ? 'Nakit' : 'Banka';
+      const d = defterler.find(x => x.blok === 'Sembol Nakliyat' && x.tur === tur)
+             || defterler.find(x => x.tur === tur);
+      return d?.id || '';
+    };
+    const avansOde = async () => {
+      if (!avansOdeModal) return;
+      const satir = avansOdeModal.satir;
+      const tutar = satir.tutar;
+      if (!(tutar > 0)) { alert('Bu ay girilmiş avans yok (toplam ₺0). Önce "Avans Gir" ile avans yazın.'); return; }
+      if (!avansOdeModal.kaynakDefterId) { alert('Ödemenin yapıldığı hesabı seçin.'); return; }
+      const kaynak = defterler.find(d => d.id === avansOdeModal.kaynakDefterId);
+      const odemeId = `avanso_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      const ortak = {
+        tarih: avansOdeModal.tarih || bugunStr(),
+        kategori: 'Avans', etiketler: [], odemeId,
+        odemeKalemId: satir.id, odemeDefterId: seciliDefter.id,
+        kaynak: 'Personel Avans', createdAt: new Date().toISOString(),
+        by: currentUser?.fullName || 'Sistem',
+      };
+      setAvansOdeKaydediliyor(true);
+      try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak, tip: 'cikis', tutar, odemeMahsup: false,
+          defterId: avansOdeModal.kaynakDefterId,
+          odemeYontemi: defterdenOdemeYontemi(avansOdeModal.kaynakDefterId),
+          aciklama: `${satir.ad} — ${satir.kaynakEtiket}`,
+        });
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          ...ortak, tip: 'giris', tutar, odemeMahsup: true,
+          defterId: seciliDefter.id,
+          odemeYontemi: defterdenOdemeYontemi(avansOdeModal.kaynakDefterId),
+          aciklama: `${satir.ad} (${satir.kaynakEtiket}) ← ${kaynak?.ad || 'hesap'}`,
+        });
+        addSystemLog?.('Personel Avansı Ödendi',
+          `${satir.ad} (${satir.kaynakEtiket}) ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi.`);
+        setAvansOdeModal(null);
+      } catch (e) { console.error('Avans ödemesi kaydedilemedi:', e); alert('Kaydedilemedi. Lütfen tekrar deneyin.'); }
+      finally { setAvansOdeKaydediliyor(false); }
+    };
+
+    // TOPLU AVANS GİRİŞİ (Ödemeler sayfası) — Personel Ödemeleri'ndeki
+    // pencereyle aynı mantık: seçim + tek tutar uygulama + kişiye özel tutar.
+    // Kanal (Nakit/Resmi) ve yaka (Mavi/Beyaz) pencere içinden değiştirilir.
+    const avansTopluAc = (kanal) => {
+      const yaka = 'mavi';
+      const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p));
+      const alan = kanal === 'resmi' ? 'resmiAvans' : 'nakitAvans';
+      const tutarlar = {}; const secim = [];
+      kisiler.forEach(p => {
+        const mevcut = parseFloat((avansVeri?.[yaka]?.[p.id] || {})[alan]) || 0;
+        tutarlar[p.id] = mevcut > 0 ? String(mevcut) : '';
+        if (mevcut > 0) secim.push(p.id);
+      });
+      setAvansTopluModal({ kanal, yaka, secim, tutarlar, toplu: '', arama: '' });
+    };
+    const avansTopluYakaDegistir = (yaka) => {
+      if (!avansTopluModal) return;
+      const alan = avansTopluModal.kanal === 'resmi' ? 'resmiAvans' : 'nakitAvans';
+      const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p));
+      const tutarlar = {}; const secim = [];
+      kisiler.forEach(p => {
+        const mevcut = parseFloat((avansVeri?.[yaka]?.[p.id] || {})[alan]) || 0;
+        tutarlar[p.id] = mevcut > 0 ? String(mevcut) : '';
+        if (mevcut > 0) secim.push(p.id);
+      });
+      setAvansTopluModal(m => ({ ...m, yaka, secim, tutarlar, arama: '' }));
+    };
+    const avansTopluKanalDegistir = (kanal) => {
+      if (!avansTopluModal) return;
+      const alan = kanal === 'resmi' ? 'resmiAvans' : 'nakitAvans';
+      const yaka = avansTopluModal.yaka;
+      const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p));
+      const tutarlar = {}; const secim = [];
+      kisiler.forEach(p => {
+        const mevcut = parseFloat((avansVeri?.[yaka]?.[p.id] || {})[alan]) || 0;
+        tutarlar[p.id] = mevcut > 0 ? String(mevcut) : '';
+        if (mevcut > 0) secim.push(p.id);
+      });
+      setAvansTopluModal(m => ({ ...m, kanal, secim, tutarlar }));
+    };
+    const avansTopluKaydet = async () => {
+      if (!avansTopluModal) return;
+      const { kanal, yaka, secim, tutarlar } = avansTopluModal;
+      if (secim.length === 0) { alert('Kaydedilecek personel seçin.'); return; }
+      const alan = kanal === 'resmi' ? 'resmiAvans' : 'nakitAvans';
+      const [yil, ay] = odemeAyi.split('-').map(Number);
+      const docAdi = yaka === 'beyaz' ? `beyaz_${yil}_${ay}` : `${yil}_${ay}`;
+      setAvansTopluKaydediliyor(true);
+      try {
+        const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', docAdi);
+        const mSnap = await getDoc(mRef);
+        const records = mSnap.exists() ? (mSnap.data().records || {}) : {};
+        let toplam = 0;
+        secim.forEach(id => {
+          if (!records[id]) records[id] = {};
+          const ham = (tutarlar[id] ?? '').toString().trim();
+          const deger = parseFloat(ham);
+          records[id][alan] = (ham === '' || !(deger > 0)) ? '' : String(deger);
+          if (deger > 0) toplam += deger;
+        });
+        await setDoc(mRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
+        addSystemLog?.('Toplu Avans Girişi (Ödemeler)',
+          `${yaka === 'beyaz' ? 'Beyaz' : 'Mavi'} Yaka — ${AY_ADLARI[ay - 1]} ${yil}: ${secim.length} personele toplam ₺${toplam.toLocaleString('tr-TR', { minimumFractionDigits: 2 })} ${kanal === 'resmi' ? 'resmi' : 'nakit'} avans işlendi.`);
+        setAvansTopluModal(null);
+        setAvansYenile(x => x + 1); // satır tutarları anında tazelensin
+      } catch (e) { console.error('Toplu avans kaydedilemedi:', e); alert('Kaydedilemedi. Lütfen tekrar deneyin.'); }
+      finally { setAvansTopluKaydediliyor(false); }
+    };
 
     if (!seciliDefter) {
       // ====================================================================
@@ -6939,10 +7328,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   };
                   const bekleyenMaaslar = maasSatirlari.filter(m => !m.odendi);
                   const odenenMaaslar = maasSatirlari.filter(m => m.odendi);
-                  // Maaşlar + kalem vadeleri tek sırada: tarihe göre en yakın üstte
+                  // YENİ (kullanıcı talebi): iki AVANS satırı (nakit + resmi),
+                  // her ayın 20'si vadeli — tutar 0 olsa da hep görünür.
+                  const bekleyenAvanslar = avansSatirlari.filter(a => !a.odendi);
+                  const odenenAvanslar = avansSatirlari.filter(a => a.odendi);
+                  // Maaşlar + avanslar + kalem vadeleri tek sırada: tarihe göre en yakın üstte
                   const bekleyenBirlesik = [
                     ...bekleyen.map(x => ({ tip: 'vade', tarih: x.vade.tarih, x })),
                     ...bekleyenMaaslar.map(m => ({ tip: 'maas', tarih: m.vadeTarihi, m })),
+                    ...bekleyenAvanslar.map(a => ({ tip: 'avans', tarih: a.vadeTarihi, a })),
                   ].sort((a, b) => a.tarih.localeCompare(b.tarih));
                   const trh = (t) => t?.split('-').reverse().join('.');
                   return (
@@ -6952,7 +7346,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                         <button type="button" onClick={() => ayDegistir(-1)} className="p-2 hover:bg-white/10 rounded-lg transition"><ChevronLeft className="w-5 h-5" /></button>
                         <div className="text-center">
                           <div className="font-black text-base">{ayBaslik} Ödemeleri</div>
-                          <div className="text-[10px] font-bold text-white/60">{bekleyenBirlesik.length} bekleyen • {odenen.length + odenenMaaslar.length} ödenen</div>
+                          <div className="text-[10px] font-bold text-white/60">{bekleyenBirlesik.length} bekleyen • {odenen.length + odenenMaaslar.length + odenenAvanslar.length} ödenen</div>
                         </div>
                         <button type="button" onClick={() => ayDegistir(1)} className="p-2 hover:bg-white/10 rounded-lg transition"><ChevronRight className="w-5 h-5" /></button>
                       </div>
@@ -6963,6 +7357,59 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                           <div className="p-4 text-center text-xs font-bold text-neutral-400 bg-neutral-50 rounded-xl border border-dashed border-neutral-300">Bu ay bekleyen ödeme yok.</div>
                         )}
                         {bekleyenBirlesik.map((satir, i) => {
+                          // ==========================================================
+                          // YENİ (kullanıcı talebi): AVANS SATIRI — amber renkli.
+                          // Tıklayınca kişi bazlı avanslar açılır; "Avans Gir" toplu
+                          // pencereyi, "Öde" varsayılan hesapla ödeme penceresini açar.
+                          // ==========================================================
+                          if (satir.tip === 'avans') {
+                            const a = satir.a;
+                            const acikA = acikAvansSatiri === a.id;
+                            const avansliKisiler = a.kisiler.filter(k => k.tutar > 0);
+                            return (
+                              <div key={a.id} className="rounded-xl border border-amber-300 bg-amber-50 overflow-hidden">
+                                <div className="flex items-center gap-2 p-2.5 flex-wrap cursor-pointer hover:bg-amber-100/60 transition"
+                                  onClick={() => setAcikAvansSatiri(acikA ? null : a.id)}>
+                                  <Banknote className="w-4 h-4 text-amber-700 shrink-0" />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="font-black text-sm text-neutral-800 flex items-center gap-2 flex-wrap">
+                                      {a.ad}
+                                      <span className="text-[8px] font-black bg-amber-600 text-white px-1.5 py-0.5 rounded-full">OTOMATİK • MUHASEBEDEN</span>
+                                    </div>
+                                    <div className="text-[10px] font-bold text-neutral-500">
+                                      {a.kaynakEtiket} • Vade: {trh(a.vadeTarihi)} • {avansliKisiler.length} personel
+                                    </div>
+                                  </div>
+                                  <div className="text-right shrink-0">
+                                    <div className={`font-black tabular-nums ${a.tutar > 0 ? 'text-amber-700' : 'text-neutral-400'}`}>₺{paraFmt(a.tutar)}</div>
+                                  </div>
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button type="button"
+                                      onClick={e => { e.stopPropagation(); avansTopluAc(a.kanal); }}
+                                      className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black rounded-lg transition">Avans Gir</button>
+                                    <button type="button"
+                                      onClick={e => { e.stopPropagation(); if (!(a.tutar > 0)) { alert('Bu ay girilmiş avans yok (₺0). Önce "Avans Gir" ile avans yazın.'); return; } setAvansOdeModal({ satir: a, kaynakDefterId: avansVarsayilanKaynak(a.kanal), tarih: bugunStr() }); }}
+                                      className={`px-3 py-1.5 text-xs font-black rounded-lg transition ${a.tutar > 0 ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : 'bg-neutral-200 text-neutral-400 cursor-not-allowed'}`}>Öde</button>
+                                    <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${acikA ? 'rotate-180' : ''}`} />
+                                  </div>
+                                </div>
+                                {acikA && (
+                                  <div className="border-t border-amber-200 bg-white p-2 max-h-56 overflow-y-auto space-y-1">
+                                    {avansliKisiler.length === 0 && (
+                                      <p className="text-[11px] font-bold text-neutral-400 text-center py-3">Bu ay bu kanaldan avans girilmemiş. "Avans Gir" ile ekleyin.</p>
+                                    )}
+                                    {avansliKisiler.map(k => (
+                                      <div key={k.person.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-amber-50/60 border border-amber-100">
+                                        <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full shrink-0 ${k.yaka === 'beyaz' ? 'bg-neutral-500' : 'bg-blue-600'}`}>{k.yaka === 'beyaz' ? 'BEYAZ' : 'MAVİ'}</span>
+                                        <span className="flex-1 min-w-0 text-xs font-bold text-neutral-700 truncate">{k.person.fullName || k.person.name}</span>
+                                        <span className="text-xs font-black tabular-nums text-amber-700 shrink-0">₺{paraFmt(k.tutar)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          }
                           if (satir.tip === 'maas') {
                             const m = satir.m;
                             const acikM = acikMaasSatiri === m.id;
@@ -7103,12 +7550,20 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       </div>
 
                       {/* ÖDENENLER — en altta ayrı bölüm */}
-                      {(odenen.length > 0 || odenenMaaslar.length > 0) && (
+                      {(odenen.length > 0 || odenenMaaslar.length > 0 || odenenAvanslar.length > 0) && (
                         <div className="mt-3 border-t-2 border-dashed border-emerald-300 pt-2">
                           <div className="text-[10px] font-black text-emerald-700 uppercase mb-1.5 flex items-center gap-1.5">
                             <CheckCircle className="w-3.5 h-3.5" /> Ödenenler ({odenen.length + odenenMaaslar.length})
                           </div>
                           <div className="space-y-1">
+                            {/* YENİ: ödenen avans satırları */}
+                            {odenenAvanslar.map(a => (
+                              <div key={a.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
+                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{a.ad} — {a.kaynakEtiket} (₺{paraFmt(a.tutar)})</span>
+                                <span className="text-[10px] font-black text-emerald-700 shrink-0">{a.odemeTarihi ? trh(a.odemeTarihi) : 'Ödendi'} ✓</span>
+                              </div>
+                            ))}
                             {odenenMaaslar.map(m => (
                               <div key={m.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
                                 <Users className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
@@ -7223,6 +7678,242 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             YENİ (kullanıcı talebi): Aynı kural artık KREDİ defterinde de
             geçerli — Krediler sayfası Ödemeler ile aynı aylık mantığa
             geçtiği için günlük işlemler bölümü orada da gösterilmez. */}
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): ALACAK TAKİBİ PANELİ (BORÇLU DEFTERİ)
+            ==================================================================
+            Borçlu defteri artık Ödemeler sayfası gibi çalışır ama yön terstir:
+            firmanın ALACAKLARI takip edilir. Personel/Müşteri/Kurum türünde
+            borçlular eklenir, istenirse taksitlendirilir; tahsilatta para
+            seçilen hesaba girer ve ANCAK O ZAMAN ciroya eklenir. İcra takibi
+            ve kısmi tahsilat desteklenir. */}
+        {seciliDefter.tur === 'Borçlu' && (() => {
+          const ad2 = alacakDefterBilgi(seciliDefter);
+          const trh = (t) => t?.split('-').reverse().join('.');
+          const [ky, km] = alacakAyi.split('-').map(Number);
+          const ayBaslik = `${AY_ADLARI[km - 1]} ${ky}`;
+          const ayDegistir = (yon) => {
+            const d = new Date(ky, km - 1 + yon, 1);
+            setAlacakAyi(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+          };
+          // Seçili aya düşen taksitler (tüm borçlulardan), güne göre sıralı
+          const ayinTaksitleri = [];
+          ad2.detaylar.forEach(({ kalem, bilgi }) => {
+            bilgi.plan.forEach(t => { if (t.tarih.startsWith(alacakAyi)) ayinTaksitleri.push({ kalem, bilgi, t }); });
+          });
+          ayinTaksitleri.sort((a, b) => a.t.tarih.localeCompare(b.t.tarih));
+          const bekleyenler = ayinTaksitleri.filter(x => !x.t.odendi);
+          const tahsilEdilenler = ayinTaksitleri.filter(x => x.t.odendi);
+          return (
+            <div className="bg-white rounded-2xl border-2 border-rose-200 overflow-hidden">
+              {/* BAŞLIK */}
+              <div className="bg-rose-600 text-white px-4 py-3 flex items-center justify-between gap-2 flex-wrap">
+                <div className="font-black flex items-center gap-2 text-sm">
+                  <UserMinus className="w-4 h-4" /> Alacak Takibi
+                  <span className="text-[10px] font-bold text-white/70">{ad2.kalemSayisi} borçlu</span>
+                  {ad2.icradaAdet > 0 && <span className="text-[10px] font-black bg-black/40 px-2 py-0.5 rounded-full">{ad2.icradaAdet} İCRADA</span>}
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button type="button" onClick={() => setMevcutBorclularAcik(v => !v)}
+                    className={`px-3 py-1.5 text-[11px] font-black rounded-lg transition flex items-center gap-1.5 ${
+                      mevcutBorclularAcik ? 'bg-white text-rose-700 hover:bg-rose-50' : 'bg-rose-800 text-white hover:bg-rose-900'}`}>
+                    <ClipboardList className="w-3.5 h-3.5" /> {mevcutBorclularAcik ? 'Aylık Görünüm' : 'Mevcut Borçlular'}
+                  </button>
+                  <button type="button" onClick={() => setAlacakForm({ ...bosAlacakKalemi })}
+                    className="px-3 py-1.5 bg-white text-rose-700 text-[11px] font-black rounded-lg hover:bg-rose-50 transition flex items-center gap-1.5">
+                    <PlusCircle className="w-3.5 h-3.5" /> Yeni Borçlu
+                  </button>
+                </div>
+              </div>
+
+              {/* BOŞ DURUM */}
+              {ad2.kalemSayisi === 0 && (
+                <div className="p-4">
+                  <div className="text-center py-8 border border-dashed border-neutral-300 rounded-xl">
+                    <UserMinus className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-neutral-400">Henüz borçlu eklenmemiş.</p>
+                    <p className="text-[11px] font-medium text-neutral-400 mt-1">"Yeni Borçlu" ile Personel / Müşteri / Kurum alacaklarınızı tek tek tanımlayın; isterseniz taksitlendirin.</p>
+                  </div>
+                </div>
+              )}
+
+              {/* ÜST ÖZET */}
+              {ad2.kalemSayisi > 0 && (
+                <div className="grid grid-cols-3 gap-2 p-4 pb-0">
+                  <div className="bg-rose-50 rounded-xl p-2.5 border border-rose-200">
+                    <div className="text-[9px] font-black uppercase text-rose-600">Kalan Alacak</div>
+                    <div className="text-sm font-black text-rose-700">₺{paraFmt(ad2.kalanAlacak)}</div>
+                  </div>
+                  <div className="bg-emerald-50 rounded-xl p-2.5 border border-emerald-200">
+                    <div className="text-[9px] font-black uppercase text-emerald-600">Tahsil Edilen</div>
+                    <div className="text-sm font-black text-emerald-700">₺{paraFmt(ad2.toplamTahsil)}</div>
+                  </div>
+                  <div className={`rounded-xl p-2.5 border ${ad2.gecikmisAdet > 0 ? 'bg-red-50 border-red-200' : 'bg-neutral-50 border-neutral-200'}`}>
+                    <div className={`text-[9px] font-black uppercase ${ad2.gecikmisAdet > 0 ? 'text-red-600' : 'text-neutral-500'}`}>Gecikmiş</div>
+                    <div className={`text-sm font-black ${ad2.gecikmisAdet > 0 ? 'text-red-700' : 'text-neutral-500'}`}>
+                      {ad2.gecikmisAdet > 0 ? `₺${paraFmt(ad2.gecikmisTutar)}` : 'Yok'}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* GÖRÜNÜM 1: AYLIK TAHSİLATLAR */}
+              {ad2.kalemSayisi > 0 && !mevcutBorclularAcik && (
+                <div className="p-4">
+                  <div className="flex items-center justify-between gap-2 bg-neutral-900 text-white rounded-xl px-2 py-2 mb-2">
+                    <button type="button" onClick={() => ayDegistir(-1)} className="p-2 hover:bg-white/10 rounded-lg transition"><ChevronLeft className="w-5 h-5" /></button>
+                    <div className="text-center">
+                      <div className="font-black text-base">{ayBaslik} Tahsilatları</div>
+                      <div className="text-[10px] font-bold text-white/60">{bekleyenler.length} bekleyen • {tahsilEdilenler.length} tahsil edildi</div>
+                    </div>
+                    <button type="button" onClick={() => ayDegistir(1)} className="p-2 hover:bg-white/10 rounded-lg transition"><ChevronRight className="w-5 h-5" /></button>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    {bekleyenler.length === 0 && (
+                      <div className="p-4 text-center text-xs font-bold text-neutral-400 bg-neutral-50 rounded-xl border border-dashed border-neutral-300">Bu ay bekleyen tahsilat yok.</div>
+                    )}
+                    {bekleyenler.map(({ kalem, bilgi, t }) => {
+                      const tr2 = alacakTuru(kalem.tur);
+                      return (
+                        <div key={`${kalem.id}_${t.no}`} className={`flex items-center gap-2 p-2.5 rounded-xl border flex-wrap ${t.gecikmis ? 'border-red-300 bg-red-50' : tr2.yumusak}`}>
+                          <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full shrink-0 ${tr2.rozet}`}>{tr2.ad.toUpperCase()}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-black text-sm text-neutral-800 truncate">
+                              {kalem.ad}
+                              {bilgi.adet > 1 && <span className="text-neutral-500 font-bold"> — {AY_ADLARI[Number(t.tarih.slice(5, 7)) - 1]} Taksiti ({t.no}/{bilgi.adet})</span>}
+                            </div>
+                            <div className="text-[10px] font-bold text-neutral-500">
+                              Vade: {trh(t.tarih)}
+                              {t.gecikmis && <span className="ml-1 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
+                              {kalem.icra && <span className="ml-1 text-[9px] font-black bg-black text-white px-1.5 py-0.5 rounded-full">İCRADA • {trh(kalem.icra)}</span>}
+                              {t.kismi && <span className="ml-1 text-[9px] font-black bg-sky-600 text-white px-1.5 py-0.5 rounded-full">KISMİ • ₺{paraFmt(t.odenenTutar)} alındı</span>}
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <div className={`font-black tabular-nums ${t.gecikmis ? 'text-red-700' : tr2.yazi}`}>₺{paraFmt(t.kalan ?? t.tutar)}</div>
+                            {t.kismi && <div className="text-[9px] font-bold text-neutral-400 line-through">₺{paraFmt(t.tutar)}</div>}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button type="button" onClick={() => setTahsilModal({ kalem, taksit: t, hedefDefterId: '', tarih: bugunStr(), tutar: String(t.kalan ?? t.tutar) })}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg transition">Tahsil Et</button>
+                            {!kalem.icra && (
+                              <button type="button" onClick={() => alacakIcra(kalem.id, true)}
+                                title="Ödeme alınamazsa icra takibi başlat"
+                                className="px-2 py-1.5 bg-neutral-800 hover:bg-black text-white text-[10px] font-black rounded-lg transition">İcra</button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* TAHSİL EDİLENLER */}
+                  {tahsilEdilenler.length > 0 && (
+                    <div className="mt-3 border-t-2 border-dashed border-emerald-300 pt-2">
+                      <div className="text-[10px] font-black text-emerald-700 uppercase mb-1.5 flex items-center gap-1.5">
+                        <CheckCircle className="w-3.5 h-3.5" /> Tahsil Edilenler ({tahsilEdilenler.length})
+                      </div>
+                      <div className="space-y-1">
+                        {tahsilEdilenler.map(({ kalem, bilgi, t }) => (
+                          <div key={`${kalem.id}_${t.no}`} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
+                            <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">
+                              {kalem.ad}{bilgi.adet > 1 ? ` — ${t.no}/${bilgi.adet}` : ''} • ₺{paraFmt(t.tutar)}
+                            </span>
+                            <span className="text-[10px] font-black text-emerald-700 shrink-0">{t.odemeTarihi ? trh(t.odemeTarihi) : 'Alındı'} ✓</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* GÖRÜNÜM 2: MEVCUT BORÇLULAR */}
+              {ad2.kalemSayisi > 0 && mevcutBorclularAcik && (
+                <div className="p-4 space-y-3">
+                  {ad2.detaylar.map(({ kalem, bilgi }) => {
+                    const tr2 = alacakTuru(kalem.tur);
+                    const acik = acikAlacakKalemi === kalem.id;
+                    const yuzde = bilgi.toplam > 0 ? Math.round((bilgi.toplamTahsil / bilgi.toplam) * 100) : 0;
+                    return (
+                      <div key={kalem.id} className={`rounded-xl border-2 overflow-hidden ${kalem.icra ? 'border-neutral-800' : bilgi.gecikmisAdet > 0 ? 'border-red-300' : 'border-neutral-200'}`}>
+                        <div className={`p-3 flex items-center gap-3 cursor-pointer transition flex-wrap ${bilgi.gecikmisAdet > 0 ? 'bg-red-50 hover:bg-red-100' : 'bg-neutral-50 hover:bg-neutral-100'}`}
+                          onClick={() => setAcikAlacakKalemi(acik ? null : kalem.id)}>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-black text-black text-sm flex items-center gap-2 flex-wrap">
+                              <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full ${tr2.rozet}`}>{tr2.ad.toUpperCase()}</span>
+                              {kalem.ad}
+                              {kalem.icra && <span className="text-[9px] font-black bg-black text-white px-1.5 py-0.5 rounded-full">İCRADA • {trh(kalem.icra)}</span>}
+                              {bilgi.gecikmisAdet > 0 && <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">{bilgi.gecikmisAdet} GECİKMİŞ</span>}
+                            </div>
+                            <div className="text-[11px] font-bold text-neutral-500 mt-0.5">
+                              Toplam ₺{paraFmt(bilgi.toplam)} • {bilgi.adet > 1 ? `${bilgi.adet} taksit` : 'peşin'} • {bilgi.tahsilAdet}/{bilgi.adet} tahsil edildi
+                            </div>
+                            <div className="flex items-center gap-2 mt-1">
+                              <div className="h-1.5 bg-neutral-200 rounded-full overflow-hidden flex-1 max-w-[140px]">
+                                <div className="h-full bg-emerald-500" style={{ width: `${yuzde}%` }}></div>
+                              </div>
+                              <span className={`text-[11px] font-black ${bilgi.kalanAlacak > 0 ? 'text-rose-700' : 'text-emerald-700'}`}>
+                                {bilgi.kalanAlacak > 0 ? `₺${paraFmt(bilgi.kalanAlacak)} kaldı` : 'Kapandı ✓'}
+                              </span>
+                            </div>
+                            {kalem.not && <p className="text-[10px] font-medium text-neutral-400 italic mt-0.5">{kalem.not}</p>}
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            {bilgi.siradaki && (
+                              <button type="button"
+                                onClick={e => { e.stopPropagation(); setTahsilModal({ kalem, taksit: bilgi.siradaki, hedefDefterId: '', tarih: bugunStr(), tutar: String(bilgi.siradaki.kalan ?? bilgi.siradaki.tutar) }); }}
+                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition">Tahsil Et</button>
+                            )}
+                            {!kalem.icra ? (
+                              <button type="button" onClick={e => { e.stopPropagation(); alacakIcra(kalem.id, true); }}
+                                className="px-2 py-1.5 bg-neutral-800 hover:bg-black text-white text-[10px] font-black rounded-lg transition">İcra</button>
+                            ) : (
+                              <button type="button" onClick={e => { e.stopPropagation(); alacakIcra(kalem.id, false); }}
+                                className="px-2 py-1.5 bg-white border border-neutral-400 text-neutral-700 hover:bg-neutral-100 text-[10px] font-black rounded-lg transition">İcradan Çıkar</button>
+                            )}
+                            <button type="button" onClick={e => { e.stopPropagation(); setAlacakForm({ ...bosAlacakKalemi, ...kalem }); }}
+                              className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle"><Edit className="w-3.5 h-3.5" /></button>
+                            <button type="button" onClick={e => { e.stopPropagation(); alacakSil(kalem.id); }}
+                              className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Borçluyu sil"><Trash2 className="w-3.5 h-3.5" /></button>
+                            <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${acik ? 'rotate-180' : ''}`} />
+                          </div>
+                        </div>
+                        {acik && (
+                          <div className="p-3 bg-white border-t border-neutral-200 max-h-64 overflow-y-auto space-y-1">
+                            {bilgi.plan.map(t => (
+                              <div key={t.no} className={`flex items-center gap-2 p-2 rounded-lg border text-xs ${
+                                t.odendi ? 'bg-emerald-50 border-emerald-200' : t.gecikmis ? 'bg-red-50 border-red-200' : t.kismi ? 'bg-sky-50 border-sky-200' : 'bg-white border-neutral-200'}`}>
+                                <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${
+                                  t.odendi ? 'bg-emerald-600 text-white' : t.gecikmis ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>{t.no}</span>
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-black text-black">₺{paraFmt(t.odendi ? t.tutar : (t.kalan ?? t.tutar))}</div>
+                                  <div className={`text-[10px] font-bold ${t.gecikmis ? 'text-red-600' : 'text-neutral-500'}`}>
+                                    Vade: {trh(t.tarih)}
+                                    {t.odendi && t.odemeTarihi ? ` • Tahsil: ${trh(t.odemeTarihi)}` : t.gecikmis ? ' • GECİKMİŞ' : ''}
+                                    {t.kismi && <span className="ml-1 text-[9px] font-black bg-sky-600 text-white px-1.5 py-0.5 rounded-full">KISMİ • ₺{paraFmt(t.odenenTutar)}</span>}
+                                  </div>
+                                </div>
+                                {t.odendi ? (
+                                  <span className="text-[10px] font-black text-emerald-700 flex items-center gap-1 shrink-0"><CheckCircle className="w-3.5 h-3.5" /> TAHSİL EDİLDİ</span>
+                                ) : (
+                                  <button type="button" onClick={() => setTahsilModal({ kalem, taksit: t, hedefDefterId: '', tarih: bugunStr(), tutar: String(t.kalan ?? t.tutar) })}
+                                    className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition shrink-0">Tahsil Et</button>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
         {seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi' && (<>
         {/* KALDIRILDI (kullanıcı talebi): AY ÖZETİ ŞERİDİ — aşağıdaki blok
             false ile kapatıldı; geri istenirse false -> true yapılır. */}
@@ -8781,6 +9472,339 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         )}
 
         {/* İŞLEM EKLE/DÜZENLE PENCERESİ */}
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): YENİ BORÇLU / BORÇLUYU DÜZENLE PENCERESİ
+            ================================================================== */}
+        {alacakForm && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2">
+                  <UserMinus className="w-5 h-5 text-rose-600" /> {alacakForm.id ? 'Borçluyu Düzenle' : 'Yeni Borçlu'}
+                </h3>
+                <button onClick={() => setAlacakForm(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Borçlu Adı *</label>
+                  <input value={alacakForm.ad} onChange={e => setAlacakForm({ ...alacakForm, ad: e.target.value })}
+                    placeholder="Örn: Melike Özdemir / X Lojistik Ltd. Şti."
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-rose-500 text-sm" /></div>
+
+                {/* ÜÇ BORÇLU TÜRÜ: Personel / Müşteri / Kurum */}
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Borçlu Türü *</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {ALACAK_TURLERI.map(t => (
+                      <button key={t.id} type="button" onClick={() => setAlacakForm({ ...alacakForm, tur: t.id })}
+                        className={`p-2.5 rounded-xl text-xs font-black transition border ${
+                          alacakForm.tur === t.id ? `${t.rozet} text-white border-transparent` : 'bg-white text-neutral-500 border-neutral-300 hover:bg-neutral-50'}`}>
+                        {t.ad}
+                      </button>
+                    ))}
+                  </div></div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Toplam Alacak (₺) *</label>
+                    <input type="number" inputMode="decimal" value={alacakForm.toplamTutar}
+                      onChange={e => setAlacakForm({ ...alacakForm, toplamTutar: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-rose-500 text-sm font-black" /></div>
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Taksit Sayısı</label>
+                    <input type="number" inputMode="numeric" value={alacakForm.taksitSayisi}
+                      onChange={e => setAlacakForm({ ...alacakForm, taksitSayisi: e.target.value })}
+                      placeholder="Boş = peşin"
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-rose-500 text-sm" /></div>
+                </div>
+                {parseInt(alacakForm.taksitSayisi) > 1 && parseFloat(alacakForm.toplamTutar) > 0 && (
+                  <p className="text-[11px] font-bold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg p-2">
+                    Aylık taksit: ₺{paraFmt(Math.round((parseFloat(alacakForm.toplamTutar) / parseInt(alacakForm.taksitSayisi)) * 100) / 100)} × {parseInt(alacakForm.taksitSayisi)} ay
+                  </p>
+                )}
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlk Vade Tarihi *</label>
+                  <input type="date" value={alacakForm.ilkTarih} onChange={e => setAlacakForm({ ...alacakForm, ilkTarih: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-rose-500 text-sm" />
+                  <p className="text-[10px] font-bold text-neutral-400 mt-1">Taksitliyse sonraki taksitler her ay aynı güne düşer.</p></div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
+                  <input value={alacakForm.not || ''} onChange={e => setAlacakForm({ ...alacakForm, not: e.target.value })}
+                    placeholder="Opsiyonel açıklama (iş, sözleşme, dosya no...)"
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-rose-500 text-sm" /></div>
+
+                <button onClick={alacakKaydet}
+                  className="w-full py-3 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                  <CheckCircle className="w-4 h-4" /> {alacakForm.id ? 'Güncelle' : 'Borçluyu Ekle'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): TAHSİLAT PENCERESİ
+            Paranın hangi hesaba girdiği burada seçilir; tahsilat o hesaba
+            GELİR olarak yazılır ve CİROYA O ANDA EKLENİR. Kısmi tahsilat
+            desteklenir — taksit ancak tamamı alınınca kapanır. */}
+        {tahsilModal && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2"><Banknote className="w-5 h-5 text-emerald-600" /> Tahsilat Yap</h3>
+                <button onClick={() => setTahsilModal(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl">
+                  <div className="font-black text-rose-900 flex items-center gap-2 flex-wrap">
+                    <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full ${alacakTuru(tahsilModal.kalem.tur).rozet}`}>{alacakTuru(tahsilModal.kalem.tur).ad.toUpperCase()}</span>
+                    {tahsilModal.kalem.ad}
+                    {tahsilModal.kalem.icra && <span className="text-[9px] font-black bg-black text-white px-1.5 py-0.5 rounded-full">İCRADA</span>}
+                  </div>
+                  <div className="text-[11px] font-bold text-rose-600">
+                    {tahsilModal.taksit.no}. taksit • Vade: {tahsilModal.taksit.tarih.split('-').reverse().join('.')}
+                    {tahsilModal.taksit.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
+                  </div>
+                  {tahsilModal.taksit.kismi && (
+                    <div className="mt-2 pt-2 border-t border-rose-200 grid grid-cols-3 gap-2 text-center">
+                      <div><div className="text-[9px] font-black uppercase text-neutral-500">Taksit</div>
+                        <div className="text-xs font-black text-neutral-700">₺{paraFmt(tahsilModal.taksit.tutar)}</div></div>
+                      <div><div className="text-[9px] font-black uppercase text-emerald-600">Alınan</div>
+                        <div className="text-xs font-black text-emerald-700">₺{paraFmt(tahsilModal.taksit.odenenTutar)}</div></div>
+                      <div><div className="text-[9px] font-black uppercase text-red-600">Kalan</div>
+                        <div className="text-xs font-black text-red-700">₺{paraFmt(tahsilModal.taksit.kalan)}</div></div>
+                    </div>
+                  )}
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tahsil Edilen Tutar (₺) *</label>
+                  <input type="number" inputMode="decimal" value={tahsilModal.tutar}
+                    onChange={e => setTahsilModal({ ...tahsilModal, tutar: e.target.value })}
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-lg font-black" />
+                  {(() => {
+                    const kalan = tahsilModal.taksit.kalan ?? tahsilModal.taksit.tutar;
+                    const girilen = parseFloat(tahsilModal.tutar) || 0;
+                    const kalacak = Math.max(0, kalan - girilen);
+                    return (
+                      <div className="mt-1.5 space-y-1.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <button type="button" onClick={() => setTahsilModal({ ...tahsilModal, tutar: String(kalan) })}
+                            className="px-2.5 py-1 bg-neutral-800 hover:bg-black text-white text-[10px] font-black rounded-lg transition">Kalanın Tamamı (₺{paraFmt(kalan)})</button>
+                          {[0.5, 0.25].map(oran => (
+                            <button key={oran} type="button" onClick={() => setTahsilModal({ ...tahsilModal, tutar: String(Math.round(kalan * oran * 100) / 100) })}
+                              className="px-2.5 py-1 bg-neutral-200 hover:bg-neutral-300 text-neutral-700 text-[10px] font-black rounded-lg transition">%{oran * 100}</button>
+                          ))}
+                        </div>
+                        {girilen > kalan + 0.01 && <p className="text-[11px] font-black text-red-600">Kalan alacaktan fazla giremezsiniz. Kalan: ₺{paraFmt(kalan)}</p>}
+                        {girilen > 0 && girilen < kalan - 0.01 && (
+                          <p className="text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                            <b>Kısmi tahsilat yapıyorsunuz.</b> Bu tahsilattan sonra <b>₺{paraFmt(kalacak)}</b> alacak kalacak ve taksit <b>kapanmayacak</b>.
+                          </p>
+                        )}
+                        {girilen >= kalan - 0.01 && girilen <= kalan + 0.01 && kalan > 0 && (
+                          <p className="text-[11px] font-bold text-emerald-700">Bu tahsilatla taksit <b>tamamen kapanacak</b>.</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                {/* PARANIN GİRDİĞİ HESAP — kullanıcının istediği hedef seçim */}
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Para hangi hesaba girdi? *</label>
+                  <select value={tahsilModal.hedefDefterId}
+                    onChange={e => setTahsilModal({ ...tahsilModal, hedefDefterId: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm bg-white">
+                    <option value="">Hesap seçin...</option>
+                    {defterler.filter(d => d.tur !== 'Borçlu' && d.tur !== 'Ödemeler' && d.tur !== 'Kredi').map(d => (
+                      <option key={d.id} value={d.id}>{d.ad} — {d.blok || 'Genel'} (₺{paraFmt(defterBakiye(d.id))})</option>
+                    ))}
+                  </select></div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tahsilat Tarihi</label>
+                  <input type="date" value={tahsilModal.tarih} onChange={e => setTahsilModal({ ...tahsilModal, tarih: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm" /></div>
+
+                <p className="text-[11px] font-medium text-neutral-500 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
+                  Onayladığınızda seçtiğiniz hesaba <b>₺{paraFmt(parseFloat(tahsilModal.tutar) || 0)} GELİR</b> yazılır ve tutar <b>o anda ciroya eklenir</b>; borçlunun alacağı aynı tutarda azalır.
+                </p>
+
+                <button onClick={alacakTahsilEt} disabled={tahsilKaydediliyor}
+                  className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                  <CheckCircle className="w-4 h-4" /> {tahsilKaydediliyor ? 'Kaydediliyor...' : 'Tahsilatı Kaydet'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): AVANS ÖDEME PENCERESİ
+            Varsayılan hesap: Nakit avans -> Sembol Nakliyat NAKİT defteri,
+            Resmi avans -> Sembol Nakliyat BANKA defteri. Duruma göre başka
+            hesap da seçilebilir. */}
+        {avansOdeModal && (
+          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-black text-black flex items-center gap-2"><Banknote className="w-5 h-5 text-amber-600" /> Avans Ödemesi</h3>
+                <button onClick={() => setAvansOdeModal(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="space-y-3">
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl">
+                  <div className="font-black text-amber-900">{avansOdeModal.satir.ad}</div>
+                  <div className="text-[11px] font-bold text-amber-600">{avansOdeModal.satir.kaynakEtiket} • Vade: {avansOdeModal.satir.vadeTarihi.split('-').reverse().join('.')}</div>
+                  <div className="text-2xl font-black text-amber-800 mt-1">₺{paraFmt(avansOdeModal.satir.tutar)}</div>
+                  <div className="text-[10px] font-bold text-neutral-500">{avansOdeModal.satir.kisiler.filter(k => k.tutar > 0).length} personelin avans toplamı — muhasebeden otomatik</div>
+                </div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
+                  <select value={avansOdeModal.kaynakDefterId}
+                    onChange={e => setAvansOdeModal({ ...avansOdeModal, kaynakDefterId: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-sm bg-white">
+                    <option value="">Hesap seçin...</option>
+                    {defterler.filter(d => d.tur !== 'Borçlu' && d.tur !== 'Ödemeler' && d.tur !== 'Kredi').map(d => (
+                      <option key={d.id} value={d.id}>{d.ad} — {d.blok || 'Genel'} (₺{paraFmt(defterBakiye(d.id))})</option>
+                    ))}
+                  </select>
+                  <p className="text-[10px] font-bold text-neutral-400 mt-1">
+                    Varsayılan: {avansOdeModal.satir.kanal === 'nakit' ? 'Sembol Nakliyat NAKİT defteri' : 'Sembol Nakliyat BANKA defteri'} — duruma göre değiştirebilirsiniz.
+                  </p></div>
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ödeme Tarihi</label>
+                  <input type="date" value={avansOdeModal.tarih} onChange={e => setAvansOdeModal({ ...avansOdeModal, tarih: e.target.value })}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-sm" /></div>
+
+                <p className="text-[11px] font-medium text-neutral-500 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
+                  Onayladığınızda seçilen hesaptan <b>₺{paraFmt(avansOdeModal.satir.tutar)} çıkış</b> yazılır; satır Ödenenler bölümüne iner. Bu hareket ciroda <b>çift sayılmaz</b>.
+                </p>
+
+                <button onClick={avansOde} disabled={avansOdeKaydediliyor}
+                  className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                  <CheckCircle className="w-4 h-4" /> {avansOdeKaydediliyor ? 'Kaydediliyor...' : 'Avansı Öde'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): TOPLU AVANS GİR (ÖDEMELER SAYFASI)
+            Personel Ödemeleri'ndeki pencerenin aynısı: kanal (Nakit/Resmi) ve
+            yaka (Mavi/Beyaz) sekmeleri, arama, toplu tutar uygulama, kişiye
+            özel tutar. Kaydedilen değer muhasebe dokümanına yazılır ve satır
+            toplamı anında güncellenir. */}
+        {avansTopluModal && (() => {
+          const m2 = avansTopluModal;
+          const alanEtiket = m2.kanal === 'resmi' ? 'Resmi Avans' : 'Nakit Avans';
+          const kisiler = (personnelList || [])
+            .filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[m2.yaka](p))
+            .filter(p => !m2.arama.trim() || (p.fullName || p.name || '').toLocaleLowerCase('tr-TR').includes(m2.arama.toLocaleLowerCase('tr-TR')))
+            .sort((a, b) => (a.fullName || a.name || '').localeCompare(b.fullName || b.name || '', 'tr'));
+          const tumu = kisiler.length > 0 && kisiler.every(p => m2.secim.includes(p.id));
+          const seciliToplam = m2.secim.reduce((t, id) => t + (parseFloat(m2.tutarlar[id]) || 0), 0);
+          const [ty, ta] = odemeAyi.split('-').map(Number);
+          return (
+            <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl animate-in zoom-in-95 max-h-[90vh] flex flex-col overflow-hidden">
+                <div className="flex items-center justify-between p-4 border-b border-neutral-200 shrink-0">
+                  <div>
+                    <h3 className="font-black text-black flex items-center gap-2"><UserPlus className="w-5 h-5 text-blue-600" /> Toplu Avans Gir</h3>
+                    <p className="text-[11px] font-bold text-neutral-400">{m2.yaka === 'beyaz' ? 'Beyaz Yaka' : 'Mavi Yaka'} • {AY_ADLARI[ta - 1]} {ty} • {alanEtiket}</p>
+                  </div>
+                  <button onClick={() => setAvansTopluModal(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+                </div>
+
+                <div className="p-4 space-y-2.5 shrink-0">
+                  {/* KANAL + YAKA SEKMELERİ */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-2 gap-1 p-1 bg-neutral-100 rounded-xl">
+                      {[{ id: 'nakit', ad: 'Nakit Avans' }, { id: 'resmi', ad: 'Resmi Avans' }].map(k => (
+                        <button key={k.id} type="button" onClick={() => avansTopluKanalDegistir(k.id)}
+                          className={`py-1.5 text-[11px] font-black rounded-lg transition ${m2.kanal === k.id ? 'bg-amber-600 text-white' : 'text-neutral-500 hover:text-black'}`}>{k.ad}</button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1 p-1 bg-neutral-100 rounded-xl">
+                      {[{ id: 'mavi', ad: 'Mavi Yaka' }, { id: 'beyaz', ad: 'Beyaz Yaka' }].map(y => (
+                        <button key={y.id} type="button" onClick={() => avansTopluYakaDegistir(y.id)}
+                          className={`py-1.5 text-[11px] font-black rounded-lg transition ${m2.yaka === y.id ? 'bg-blue-600 text-white' : 'text-neutral-500 hover:text-black'}`}>{y.ad}</button>
+                      ))}
+                    </div>
+                  </div>
+                  {/* TOPLU TUTAR + ARAMA */}
+                  <div className="flex gap-2">
+                    <input type="number" inputMode="decimal" value={m2.toplu}
+                      onChange={e => setAvansTopluModal({ ...m2, toplu: e.target.value })}
+                      placeholder="Seçili personele uygulanacak tutar (₺)"
+                      className="flex-1 min-w-0 p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                    <button type="button"
+                      onClick={() => {
+                        const deger = parseFloat(m2.toplu);
+                        if (!(deger >= 0)) { alert('Geçerli bir tutar girin.'); return; }
+                        const tutarlar = { ...m2.tutarlar };
+                        m2.secim.forEach(id => { tutarlar[id] = deger > 0 ? String(deger) : ''; });
+                        setAvansTopluModal({ ...m2, tutarlar });
+                      }}
+                      className="shrink-0 px-3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-black rounded-xl transition">
+                      Seçililere Uygula ({m2.secim.length})
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input value={m2.arama} onChange={e => setAvansTopluModal({ ...m2, arama: e.target.value })}
+                      placeholder="Personel adı ile ara..."
+                      className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                </div>
+
+                {/* PERSONEL LİSTESİ */}
+                <div className="flex-1 overflow-y-auto px-4">
+                  <div className="grid grid-cols-[auto_1fr_auto_auto] gap-2 items-center px-2 py-2 text-[10px] font-black uppercase text-neutral-400 border-b border-neutral-200 sticky top-0 bg-white">
+                    <input type="checkbox" checked={tumu}
+                      onChange={() => setAvansTopluModal({ ...m2, secim: tumu ? m2.secim.filter(id => !kisiler.some(p => p.id === id)) : [...new Set([...m2.secim, ...kisiler.map(p => p.id)])] })}
+                      className="w-4 h-4 accent-blue-600" />
+                    <span>Personel Adı</span><span className="text-right w-24">Mevcut Avans</span><span className="text-right w-28">Yeni Avans (₺)</span>
+                  </div>
+                  {kisiler.map(p2 => {
+                    const alan = m2.kanal === 'resmi' ? 'resmiAvans' : 'nakitAvans';
+                    const mevcut = parseFloat((avansVeri?.[m2.yaka]?.[p2.id] || {})[alan]) || 0;
+                    const secili = m2.secim.includes(p2.id);
+                    return (
+                      <div key={p2.id} className={`grid grid-cols-[auto_1fr_auto_auto] gap-2 items-center px-2 py-2 border-b border-neutral-100 ${secili ? 'bg-blue-50/50' : ''}`}>
+                        <input type="checkbox" checked={secili}
+                          onChange={() => setAvansTopluModal({ ...m2, secim: secili ? m2.secim.filter(id => id !== p2.id) : [...m2.secim, p2.id] })}
+                          className="w-4 h-4 accent-blue-600" />
+                        <span className="text-sm font-bold text-neutral-800 truncate">
+                          {p2.fullName || p2.name}
+                          {mevcut > 0 && <span className="ml-1.5 text-[8px] font-black bg-amber-400 text-amber-900 px-1.5 py-0.5 rounded">MEVCUT AVANS</span>}
+                        </span>
+                        <span className="text-right w-24 text-xs font-bold text-neutral-500 tabular-nums">{mevcut > 0 ? `₺${paraFmt(mevcut)}` : '—'}</span>
+                        <input type="number" inputMode="decimal" value={m2.tutarlar[p2.id] ?? ''}
+                          onChange={e => {
+                            const tutarlar = { ...m2.tutarlar, [p2.id]: e.target.value };
+                            // Tutar yazılınca kişi kendiliğinden seçilir
+                            const secim = e.target.value && !secili ? [...m2.secim, p2.id] : m2.secim;
+                            setAvansTopluModal({ ...m2, tutarlar, secim });
+                          }}
+                          placeholder="0"
+                          className="w-28 p-2 border border-neutral-300 rounded-lg text-right text-sm font-black outline-none focus:ring-2 focus:ring-blue-500" />
+                      </div>
+                    );
+                  })}
+                  {kisiler.length === 0 && <p className="text-center text-xs font-bold text-neutral-400 py-6">Personel bulunamadı.</p>}
+                </div>
+
+                <div className="flex items-center justify-between gap-2 p-4 border-t border-neutral-200 shrink-0 flex-wrap">
+                  <span className="text-xs font-black text-neutral-600">{m2.secim.length} personel seçili • Toplam: <span className="text-blue-700">₺{paraFmt(seciliToplam)}</span></span>
+                  <div className="flex gap-2">
+                    <button type="button" onClick={() => setAvansTopluModal(null)}
+                      className="px-4 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 text-sm font-black rounded-xl transition">Vazgeç</button>
+                    <button type="button" onClick={avansTopluKaydet} disabled={avansTopluKaydediliyor}
+                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white text-sm font-black rounded-xl transition">
+                      {avansTopluKaydediliyor ? 'Kaydediliyor...' : 'Kaydet'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {showIslemForm && (
           <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in overflow-y-auto">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 my-8">
