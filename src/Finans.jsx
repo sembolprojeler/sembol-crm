@@ -4324,6 +4324,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // Not (açıklama) ve Kategori yan yana.
     const [hizliAciklama, setHizliAciklama] = useState('');
     const [hizliKategori, setHizliKategori] = useState('Diğer');
+    // YENİ (kullanıcı talebi): Mobilde kategori seçimi artık pencere ile —
+    // alt kategoriler de görünür ve tıklanabilir olsun diye.
+    const [hizliKatSecici, setHizliKatSecici] = useState(false);
     const [hizliKaydediliyor, setHizliKaydediliyor] = useState(false);
     // YENİ (kullanıcı talebi): Satıra tıklanınca Düzenle/Sil düğmeleri açılır.
     // Tek seferde yalnız bir satır açık kalır; tekrar tıklanınca kapanır.
@@ -4673,7 +4676,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // sonrası katılır. (Listeleme filtrelenmez — eski kayıtlar hep görünür.)
     // DEĞİŞTİ (kullanıcı talebi): yumuşak silinen işlemler (silindi=true)
     // hiçbir hesapta sayılmaz — listede etiketle görünmeye devam ederler.
-    const hesabaKatilir = (i) => !i.silindi && (!canliDonemde || ((i.tarih || '') >= SISTEM_DEVIR_TARIHI));
+    // AYRICA: eski "Maaş Tablosu (Oto)" otomatik senkron kayıtları (maaş/avans)
+    // artık ne hesaba katılır ne de listede görünür. Maaş ve avanslar YALNIZCA
+    // Ödemeler defterinden "Öde" ile ödendiğinde Sembol Nakliyat hesaplarına
+    // düşer (kaynak: 'Personel Avans' / defterden yapılan ödeme).
+    const otomatikMaasKaydi = (i) => i.kaynak === 'Maaş Tablosu (Oto)' || !!i.maasKaynakId;
+    const hesabaKatilir = (i) => !i.silindi && !otomatikMaasKaydi(i) && (!canliDonemde || ((i.tarih || '') >= SISTEM_DEVIR_TARIHI));
 
     // DEĞİŞTİ: Bakiye artık yalnızca canlı döneme dahil işlemlerden hesaplanır.
     const defterBakiye = (dId) => defterIslemleri(dId).filter(hesabaKatilir).reduce((t, i) => t + (i.tip === 'giris' ? 1 : -1) * (parseFloat(i.tutar) || 0), 0);
@@ -4705,7 +4713,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // borçlu defterine yazılan mahsup çıkışı (alacakMahsup) da ciro/gider
     // sayılmaz; yalnızca alacağı azaltır.
     const borcluDefterIdSet = new Set(defterler.filter(d => d.tur === 'Borçlu').map(d => d.id));
-    const ciroyaGirer = (i) => !i.silindi && !i.isVirman && !i.krediMahsup && !i.odemeMahsup && !i.devirKaydi
+    const ciroyaGirer = (i) => !i.silindi && !otomatikMaasKaydi(i) && !i.isVirman && !i.krediMahsup && !i.odemeMahsup && !i.devirKaydi
       && !i.alacakMahsup
       && !(i.tip === 'giris' && borcluDefterIdSet.has(i.defterId));
 
@@ -5162,18 +5170,23 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           // Kuruş farkı son taksite eklenir ki toplam birebir tutsun
           const tutar = n === adet ? Math.round((toplam - taksitTutar * (adet - 1)) * 100) / 100 : taksitTutar;
           const tahsil = taksitTahsil[n] || 0;
-          const odendi = tahsil >= tutar - 0.01;
-          plan.push({ no: n, tarih: tarihStr, tutar, odendi,
-                      odenenTutar: tahsil, kalan: Math.max(0, tutar - tahsil),
-                      kismi: !odendi && tahsil > 0.01,
+          // YENİ (kullanıcı talebi): 1 Eylül 2026 ÖNCESİ vadeler tahsil edilmiş
+          // sayılır (devir); borçlu defterinde bekleyen olarak GÖSTERİLMEZ.
+          const devir = tarihStr < SISTEM_DEVIR_TARIHI;
+          const odendi = devir || tahsil >= tutar - 0.01;
+          plan.push({ no: n, tarih: tarihStr, tutar, odendi, devir,
+                      odenenTutar: tahsil, kalan: devir ? 0 : Math.max(0, tutar - tahsil),
+                      kismi: !devir && !odendi && tahsil > 0.01,
                       odemeTarihi: taksitSonTarih[n] || null,
                       gecikmis: !odendi && tarihStr < bugunStr() });
         }
       }
       const toplamTahsil = tahsilatlar.reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+      // DEVİR taksitler (1 Eylül öncesi) tahsil edilmiş sayılır: kalan alacaktan düşülür
+      const devirToplam = plan.filter(pp => pp.devir).reduce((t, pp) => t + pp.tutar, 0);
       const gecikmisler = plan.filter(pp => pp.gecikmis);
       return { ad: kalem.ad, tur: kalem.tur, toplam, adet, plan, toplamTahsil,
-               kalanAlacak: Math.max(0, toplam - toplamTahsil),
+               kalanAlacak: Math.max(0, toplam - toplamTahsil - devirToplam),
                tahsilAdet: plan.filter(pp => pp.odendi).length,
                gecikmisAdet: gecikmisler.length,
                gecikmisTutar: gecikmisler.reduce((t, pp) => t + pp.kalan, 0),
@@ -5201,8 +5214,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           const borc = parseFloat(personelBorclari[p.id]?.borclanma) || 0;
           if (borc <= 0.01) return;
           const kalem = { id: `oto_personel_${p.id}`, ad: p.fullName || p.name || 'Personel',
-            tur: 'personel', toplamTutar: String(borc), taksitSayisi: '', ilkTarih: bugunStr(),
-            not: 'Şirkete borç (personel profilinden otomatik)', icra: null, otomatik: true, kaynak: 'personel' };
+            tur: 'personel', toplamTutar: String(borc), taksitSayisi: '',
+            // Personel şirket borcu güncel/canlı borçtur; devir sonrası tarihle
+            // gösterilir ki 1 Eylül devir kuralına takılıp gizlenmesin.
+            ilkTarih: bugunStr() >= SISTEM_DEVIR_TARIHI ? bugunStr() : SISTEM_DEVIR_TARIHI,
+            not: 'Şirkete borç (personel profilinden otomatik)', icra: null, otomatik: true, kaynak: 'personel', personId: p.id };
           otoDetaylar.push({ kalem, bilgi: alacakBilgi(defter, kalem) });
         });
         // --- 2) Tamamlanmış ama ödenmemiş müşteri işleri (cari bazında) ---
@@ -5210,6 +5226,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         (jobs || []).forEach(j => {
           // Yalnızca TAMAMLANMIŞ işler; ödeme alınmamış kalan bakiye
           if (j.status !== 'completed') return;
+          // YENİ (kullanıcı talebi): 1 Eylül 2026 ÖNCESİ tamamlanan işler devir
+          // sayılır (tahsil edilmiş kabul); borçlu defterinde gösterilmez.
+          if ((j.date || j.completedDate || '') < SISTEM_DEVIR_TARIHI) return;
           const anlasma = parseFloat(j.totalAmount ?? j.agreedPrice ?? j.price) || 0;
           const tahsil = parseFloat(j.collectedAmount ?? j.paidAmount) || 0;
           const kalan = anlasma - tahsil;
@@ -5303,7 +5322,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     //      ciro/gider sayılmaz). Kısmi tahsilat desteklenir.
     const alacakTahsilEt = async () => {
       if (!tahsilModal) return;
-      if (!tahsilModal.hedefDefterId) { alert('Paranın girdiği hesabı seçin.'); return; }
+      // Maaştan kesme yolunda hesap seçimi gerekmez; sadece nakit girişinde şart
+      const _maastan = tahsilModal.kalem.tur === 'personel' && (tahsilModal.tahsilSekli || 'hesap').startsWith('maas');
+      if (!_maastan && !tahsilModal.hedefDefterId) { alert('Paranın girdiği hesabı seçin.'); return; }
       const t = tahsilModal.taksit;
       const kalan = t.kalan ?? t.tutar;
       const tutar = parseFloat(tahsilModal.tutar ?? kalan) || 0;
@@ -5312,6 +5333,47 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const kismiOdeme = tutar < kalan - 0.01;
       const kalacak = Math.max(0, kalan - tutar);
       const kismiNot = kismiOdeme ? ` (kısmi tahsilat — kalan ₺${paraFmt(kalacak)})` : '';
+      // ======================================================================
+      // YENİ (kullanıcı talebi): PERSONEL — MAAŞTAN KESEREK TAHSİLAT
+      // ======================================================================
+      // tahsilSekli 'maas_nakit' / 'maas_banka' ise para hesaba GİRMEZ.
+      // Bunun yerine: (1) personelin şirket borcu (borclanma) düşürülür,
+      // (2) o ayki maaşının ilgili kanalından kesinti işlenir (maasKesintiNakit
+      // / maasKesintiBanka), (3) defter geliri yazılmaz — ciro şişmez.
+      const tahsilSekli = tahsilModal.tahsilSekli || 'hesap';
+      if (tahsilModal.kalem.tur === 'personel' && tahsilSekli.startsWith('maas')) {
+        const personId = tahsilModal.kalem.personId;
+        if (!personId) { alert('Bu borçlu bir personele bağlı değil; maaştan kesilemez. "Hesaba Nakit" seçin.'); return; }
+        setTahsilKaydediliyor(true);
+        try {
+          // 1) Şirket borcunu (maas_yearly borclanma) düş
+          const yilStr = String(new Date().getFullYear());
+          const yRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas_yearly', yilStr);
+          const ySnap = await getDoc(yRef);
+          const yRec = ySnap.exists() ? (ySnap.data().records || {}) : {};
+          const mevcutBorc = parseFloat(yRec[personId]?.borclanma) || 0;
+          yRec[personId] = { ...(yRec[personId] || {}), borclanma: String(Math.max(0, mevcutBorc - tutar)) };
+          await setDoc(yRef, { records: yRec }, { merge: true });
+          // 2) O ayki maaş kanalına kesinti işle (mavi/beyaz doc'u kişiye göre bul)
+          const [ky, kmo] = odemeAyi.split('-').map(Number);
+          const kesintiAlan = tahsilSekli === 'maas_banka' ? 'maasKesintiBanka' : 'maasKesintiNakit';
+          for (const docAdi of [`${ky}_${kmo}`, `beyaz_${ky}_${kmo}`]) {
+            const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', docAdi);
+            const mSnap = await getDoc(mRef);
+            if (!mSnap.exists()) continue;
+            const recs = mSnap.data().records || {};
+            if (!recs[personId]) continue; // bu kişi bu yakada değil
+            recs[personId][kesintiAlan] = String((parseFloat(recs[personId][kesintiAlan]) || 0) + tutar);
+            await setDoc(mRef, { records: recs, updatedAt: new Date().toISOString() }, { merge: true });
+            break;
+          }
+          addSystemLog?.('Personel Borcu Maaştan Kesildi',
+            `${tahsilModal.kalem.ad}: ₺${paraFmt(tutar)} borç, ${tahsilSekli === 'maas_banka' ? 'Kalan Banka' : 'Kalan Nakit'} maaşından kesilerek tahsil edildi.${kismiOdeme ? ` Kalan borç: ₺${paraFmt(kalacak)}` : ''}`);
+          setTahsilModal(null);
+        } catch (e) { console.error('Maaştan kesinti başarısız:', e); alert('İşlem kaydedilemedi. Lütfen tekrar deneyin.'); }
+        finally { setTahsilKaydediliyor(false); }
+        return; // hesaba nakit akışına girme
+      }
       const hedef = defterler.find(d => d.id === tahsilModal.hedefDefterId);
       const odemeId = `alacak_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       const ortak = {
@@ -6423,12 +6485,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 .reduce((t, d) => t + defterBakiye(d.id), 0);
               // DEĞİŞTİ (kullanıcı talebi): blok çerçevesi ve başlık altı
               // ayırıcı KALINLAŞTIRILDI — bloklar birbirinden net ayrışıyor.
+              // YENİ (kullanıcı talebi): her bloğun kendi rengi var —
+              // Sembol Nakliyat KIRMIZI, Depoevim MAVİ, Genel/diğerleri YEŞİL.
+              const blokRenk = blokAdi === 'Sembol Nakliyat'
+                ? { cerceve: 'border-red-500', simge: 'bg-red-600' }
+                : blokAdi === 'Depoevim'
+                ? { cerceve: 'border-blue-500', simge: 'bg-blue-600' }
+                : { cerceve: 'border-emerald-500', simge: 'bg-emerald-600' };
               return (
-                <div key={blokAdi} className="border-2 border-neutral-400 rounded-2xl overflow-hidden bg-neutral-100/70 shadow-sm">
+                <div key={blokAdi} className={`border-2 ${blokRenk.cerceve} rounded-2xl overflow-hidden bg-neutral-100/70 shadow-sm`}>
                   {/* BLOK BAŞLIĞI */}
                   <div className="px-3 sm:px-4 py-2.5 bg-white border-b-2 border-neutral-300 flex items-center justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="w-1.5 h-5 rounded-full bg-emerald-600 shrink-0"></span>
+                      <span className={`w-1.5 h-5 rounded-full ${blokRenk.simge} shrink-0`}></span>
                       <span className="font-black text-sm text-black truncate">{blokAdi}</span>
                       <span className="text-[10px] font-bold text-neutral-400 shrink-0">{blokDefterleri.length} defter</span>
                     </div>
@@ -6570,13 +6639,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           {/* ==================================================================
               TAŞINDI (kullanıcı talebi): GENEL ÖZET KARTI ARTIK EN ALTTA
               ================================================================== */}
-          {/* ÜST ÖZET — tüm defterlerin genel durumu */}
-          <div className="bg-gradient-to-r from-emerald-700 via-teal-800 to-neutral-900 rounded-2xl p-5 md:p-6 text-white shadow-lg">
+          {/* DEĞİŞTİ (kullanıcı talebi): koyu yeşil gradyan KALDIRILDI; arka plan
+              ŞEFFAF (üst tarafa uyumlu açık zemin) ve kart mobilde %20 küçültüldü
+              ([zoom:0.8]). Metinler koyu zemin yerine açık zemine göre. */}
+          <div className="[zoom:0.8] sm:[zoom:1] bg-transparent border-2 border-neutral-200 rounded-2xl p-5 md:p-6 text-neutral-800 shadow-sm">
             <div className="flex items-center gap-2 mb-4">
-              <BookOpen className="w-5 h-5 sm:w-6 sm:h-6 shrink-0" />
-              <h2 className="text-lg sm:text-xl font-black">Defter</h2>
+              <BookOpen className="w-5 h-5 sm:w-6 sm:h-6 shrink-0 text-emerald-700" />
+              <h2 className="text-lg sm:text-xl font-black text-black">Defter</h2>
               {/* Alt başlık telefonda gizlenir — tek satıra sığmıyordu */}
-              <span className="hidden sm:inline text-xs font-bold text-white/60">Kasa, cari ve borç/alacak takibi</span>
+              <span className="hidden sm:inline text-xs font-bold text-neutral-400">Kasa, cari ve borç/alacak takibi</span>
             </div>
             {/* ==============================================================
                 YENİ: DÖNEM FİLTRESİ
@@ -6591,8 +6662,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <button key={d.id} type="button" onClick={() => setOzetDonem(d.id)}
                   className={`px-2.5 sm:px-3 py-1.5 rounded-lg text-[10px] sm:text-[11px] font-black whitespace-nowrap transition shrink-0 border ${
                     ozetDonem === d.id
-                      ? 'bg-white text-emerald-800 border-white'
-                      : 'bg-white/10 text-white/70 border-white/10 hover:bg-white/20 hover:text-white'
+                      ? 'bg-emerald-600 text-white border-emerald-600'
+                      : 'bg-neutral-100 text-neutral-500 border-neutral-200 hover:bg-neutral-200 hover:text-black'
                   }`}>
                   {d.ad}
                 </button>
@@ -6603,7 +6674,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               const a = donemAraligi(ozetDonem);
               const gg = (t) => t.split('-').reverse().join('.');
               return (
-                <div className="text-[10px] font-bold text-white/50 mb-2">
+                <div className="text-[10px] font-bold text-neutral-400 mb-2">
                   {a ? (a.bas === a.bit ? gg(a.bas) : `${gg(a.bas)} — ${gg(a.bit)}`) : 'Tüm kayıtlar'}
                   {' • '}{ozetIslemleri.filter(ciroyaGirer).length} işlem
                 </div>
@@ -6620,17 +6691,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     hizalanır, alt alta okunması kolaylaşır
                 ============================================================== */}
             <div className="flex flex-col sm:grid sm:grid-cols-3 gap-2 sm:gap-3">
-              <div className="bg-white/10 rounded-xl p-2.5 sm:p-3 border border-white/10 flex sm:block items-center justify-between gap-2">
-                <div className="text-[10px] font-black uppercase text-emerald-300 flex items-center gap-1 shrink-0"><ArrowDownRight className="w-3.5 h-3.5" /> Toplam Giriş</div>
-                <div className="text-base sm:text-lg md:text-2xl font-black sm:mt-1 tabular-nums text-right">₺{paraFmt(toplamGiris)}</div>
+              <div className="bg-emerald-50 rounded-xl p-2.5 sm:p-3 border border-emerald-200 flex sm:block items-center justify-between gap-2">
+                <div className="text-[10px] font-black uppercase text-emerald-600 flex items-center gap-1 shrink-0"><ArrowDownRight className="w-3.5 h-3.5" /> Toplam Giriş</div>
+                <div className="text-base sm:text-lg md:text-2xl font-black sm:mt-1 tabular-nums text-right text-emerald-700">₺{paraFmt(toplamGiris)}</div>
               </div>
-              <div className="bg-white/10 rounded-xl p-2.5 sm:p-3 border border-white/10 flex sm:block items-center justify-between gap-2">
-                <div className="text-[10px] font-black uppercase text-red-300 flex items-center gap-1 shrink-0"><ArrowUpRight className="w-3.5 h-3.5" /> Toplam Çıkış</div>
-                <div className="text-base sm:text-lg md:text-2xl font-black sm:mt-1 tabular-nums text-right">₺{paraFmt(toplamCikis)}</div>
+              <div className="bg-red-50 rounded-xl p-2.5 sm:p-3 border border-red-200 flex sm:block items-center justify-between gap-2">
+                <div className="text-[10px] font-black uppercase text-red-600 flex items-center gap-1 shrink-0"><ArrowUpRight className="w-3.5 h-3.5" /> Toplam Çıkış</div>
+                <div className="text-base sm:text-lg md:text-2xl font-black sm:mt-1 tabular-nums text-right text-red-700">₺{paraFmt(toplamCikis)}</div>
               </div>
-              <div className="bg-white/10 rounded-xl p-2.5 sm:p-3 border border-white/10 flex sm:block items-center justify-between gap-2">
-                <div className="text-[10px] font-black uppercase text-white/70 flex items-center gap-1 shrink-0"><Wallet className="w-3.5 h-3.5" /> Net Bakiye</div>
-                <div className={`text-base sm:text-lg md:text-2xl font-black sm:mt-1 tabular-nums text-right ${netBakiye >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>₺{paraFmt(netBakiye)}</div>
+              <div className="bg-neutral-100 rounded-xl p-2.5 sm:p-3 border border-neutral-200 flex sm:block items-center justify-between gap-2">
+                <div className="text-[10px] font-black uppercase text-neutral-500 flex items-center gap-1 shrink-0"><Wallet className="w-3.5 h-3.5" /> Net Bakiye</div>
+                <div className={`text-base sm:text-lg md:text-2xl font-black sm:mt-1 tabular-nums text-right ${netBakiye >= 0 ? 'text-emerald-700' : 'text-red-600'}`}>₺{paraFmt(netBakiye)}</div>
               </div>
             </div>
 
@@ -6641,18 +6712,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 "bugünkü kredi borcu" diye bir şey olmaz.
                 ============================================================== */}
             {krediDefterleri.length > 0 && (
-              <div className="mt-3 bg-violet-500/20 border border-violet-300/30 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="mt-3 bg-violet-50 border border-violet-200 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <Landmark className="w-4 h-4 text-violet-200" />
+                  <Landmark className="w-4 h-4 text-violet-600" />
                   <div>
-                    <div className="text-[10px] font-black uppercase text-violet-200">Toplam Kredi Borcu</div>
-                    <div className="text-[10px] font-bold text-white/50">{krediDefterleri.length} kredi hesabı • tüm zamanlar</div>
+                    <div className="text-[10px] font-black uppercase text-violet-700">Toplam Kredi Borcu</div>
+                    <div className="text-[10px] font-bold text-neutral-400">{krediDefterleri.length} kredi hesabı • tüm zamanlar</div>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-base sm:text-lg md:text-2xl font-black text-violet-100 tabular-nums">₺{paraFmt(toplamKrediBorcu)}</div>
+                  <div className="text-base sm:text-lg md:text-2xl font-black text-violet-700 tabular-nums">₺{paraFmt(toplamKrediBorcu)}</div>
                   {toplamGecikmis > 0 && (
-                    <div className="text-[10px] font-black text-red-300">{toplamGecikmis} gecikmiş taksit</div>
+                    <div className="text-[10px] font-black text-red-600">{toplamGecikmis} gecikmiş taksit</div>
                   )}
                 </div>
               </div>
@@ -6660,18 +6731,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
 
             {/* YENİ: BEKLEYEN ÖDEMELER — bu ay vadesi gelen + gecikmişler */}
             {odemeDefterleri.length > 0 && (toplamBuAyBekleyen > 0 || toplamGecikmisOdeme > 0) && (
-              <div className="mt-2 bg-orange-500/20 border border-orange-300/30 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="mt-2 bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
                 <div className="flex items-center gap-2">
-                  <CalendarDays className="w-4 h-4 text-orange-200" />
+                  <CalendarDays className="w-4 h-4 text-orange-600" />
                   <div>
-                    <div className="text-[10px] font-black uppercase text-orange-200">Bu Ay Bekleyen Ödemeler</div>
-                    <div className="text-[10px] font-bold text-white/50">{odemeDefterleri.length} ödeme defteri</div>
+                    <div className="text-[10px] font-black uppercase text-orange-700">Bu Ay Bekleyen Ödemeler</div>
+                    <div className="text-[10px] font-bold text-neutral-400">{odemeDefterleri.length} ödeme defteri</div>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-base sm:text-lg md:text-2xl font-black text-orange-100 tabular-nums">₺{paraFmt(toplamBuAyBekleyen)}</div>
+                  <div className="text-base sm:text-lg md:text-2xl font-black text-orange-700 tabular-nums">₺{paraFmt(toplamBuAyBekleyen)}</div>
                   {toplamGecikmisOdeme > 0 && (
-                    <div className="text-[10px] font-black text-red-300">{toplamGecikmisOdeme} gecikmiş ödeme</div>
+                    <div className="text-[10px] font-black text-red-600">{toplamGecikmisOdeme} gecikmiş ödeme</div>
                   )}
                 </div>
               </div>
@@ -6837,6 +6908,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // listesinin gerçekten görüneceği defter türlerinde yapılır.
     const islemBolumuGerekli = seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi';
     const dIslemler = !islemBolumuGerekli ? [] : defterIslemleri(seciliDefterId)
+      // YENİ (kullanıcı talebi): eski "Maaş Tablosu (Oto)" otomatik kayıtları
+      // listede GÖRÜNMEZ. Maaş/avans yalnızca Ödemeler'den ödenince görünür.
+      .filter(i => !otomatikMaasKaydi(i))
       // YENİ: GÜNLÜK FİLTRE — en başta uygulanır ki arama ve kategori
       // filtreleri yalnızca o günün hareketleri içinde çalışsın.
       .filter(i => !gunFiltreAktif || i.tarih === seciliGun)
@@ -7909,8 +7983,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                     })}
                   </div>
 
-                  {/* TAHSİL EDİLENLER */}
-                  {tahsilEdilenler.length > 0 && (
+                  {/* KALDIRILDI (kullanıcı talebi): "Tahsil Edilenler" listesi
+                      artık gösterilmiyor — yalnızca tahsil edilemeyen (bekleyen)
+                      borçlular görünür. Blok false ile kapatıldı; geri istenirse
+                      false -> tahsilEdilenler.length > 0 yapmak yeterli. */}
+                  {false && tahsilEdilenler.length > 0 && (
                     <div className="mt-3 border-t-2 border-dashed border-emerald-300 pt-2">
                       <div className="text-[10px] font-black text-emerald-700 uppercase mb-1.5 flex items-center gap-1.5">
                         <CheckCircle className="w-3.5 h-3.5" /> Tahsil Edilenler ({tahsilEdilenler.length})
@@ -8489,6 +8566,78 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             KATMAN NOTU: z-[9999] kullanılıyor. Bu pencereyi açan İŞLEM FORMU
             z-[9997] olduğu için, daha düşük bir değerde (z-50) formun ARKASINDA
             kalıyor ve ekranda hiç görünmüyordu. 9999 dosyadaki en yüksek değer. */}
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): MOBİL HIZLI KATEGORİ SEÇİCİ PENCERESİ
+            ==================================================================
+            Ana kategoriler ve altındaki alt kategoriler tek tek tıklanabilir.
+            Masaüstündeki kategori seçici mantığıyla aynı; alttan açılır kart. */}
+        {hizliKatSecici && (() => {
+          const KATEGORI_AGACI = [
+            { ad: 'Nakliyat', alt: ['Şehir İçi', 'Şehirlerarası', 'Depo-Depo'] },
+            { ad: 'Depoevim', alt: ['Eşya Depolama', 'Ambalaj', 'Kurulum'] },
+            { ad: 'Araç', alt: ['Yakıt', 'Bakım', 'Lastik', 'Sigorta', 'HGS/OGS', 'Ceza'] },
+            { ad: 'Personel', alt: ['Maaş', 'Avans', 'Prim', 'SGK'] },
+            { ad: 'Kira', alt: [] },
+            { ad: 'Fatura', alt: ['Elektrik', 'Su', 'Doğalgaz', 'İnternet', 'Telefon'] },
+            { ad: 'Malzeme', alt: [] },
+            { ad: 'Yemek', alt: [] },
+            { ad: 'Vergi', alt: ['KDV', 'Stopaj', 'Gelir Vergisi'] },
+            { ad: 'Tahsilat', alt: [] },
+            { ad: 'Diğer', alt: [] },
+          ];
+          return (
+            <div className="fixed inset-0 bg-black/70 z-[9999] flex items-end sm:items-center justify-center p-0 sm:p-4"
+              onClick={() => setHizliKatSecici(false)}>
+              <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[85vh] flex flex-col overflow-hidden"
+                onClick={e => e.stopPropagation()}>
+                <div className="flex items-center justify-between p-4 border-b border-neutral-200 shrink-0">
+                  <h3 className="font-black text-black flex items-center gap-2"><Tag className="w-5 h-5 text-emerald-600" /> Kategori Seç</h3>
+                  <button onClick={() => setHizliKatSecici(false)} className="p-1.5 rounded-lg hover:bg-neutral-100 transition"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+                  {KATEGORI_AGACI.map(kat => {
+                    const anaSecili = hizliKategori === kat.ad;
+                    return (
+                      <div key={kat.ad} className={`rounded-xl border-2 overflow-hidden ${anaSecili ? 'border-emerald-500' : 'border-neutral-200'}`}>
+                        <button type="button"
+                          onClick={() => { setHizliKategori(kat.ad); setHizliKatSecici(false); }}
+                          className={`w-full flex items-center justify-between gap-2 px-3.5 py-3 text-left transition ${anaSecili ? 'bg-emerald-50' : 'bg-neutral-50 hover:bg-neutral-100'}`}>
+                          <span className="font-black text-sm text-neutral-800 flex items-center gap-2">
+                            {anaSecili && <CheckCircle className="w-4 h-4 text-emerald-600" />}{kat.ad}
+                          </span>
+                          {kat.alt.length > 0 && <span className="text-[10px] font-bold text-neutral-400">{kat.alt.length} alt</span>}
+                        </button>
+                        {kat.alt.length > 0 && (
+                          <div className="p-2 flex flex-wrap gap-1.5 bg-white border-t border-neutral-100">
+                            {kat.alt.map(a => {
+                              const deger = `${kat.ad} • ${a}`;
+                              const altSecili = hizliKategori === deger;
+                              return (
+                                <button key={a} type="button"
+                                  onClick={() => { setHizliKategori(deger); setHizliKatSecici(false); }}
+                                  className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition ${
+                                    altSecili ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-neutral-600 border-neutral-300 hover:bg-emerald-50'}`}>
+                                  {altSecili && '✓ '}{a}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="p-3 border-t border-neutral-200 shrink-0">
+                  <button type="button" onClick={() => { setHizliKategori('Diğer'); setHizliKatSecici(false); }}
+                    className="w-full py-3 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl transition">
+                    Kategorisiz (Diğer) kapat
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {showEtiketSecici && (
           <div className="fixed inset-0 bg-black/70 z-[9999] flex items-end sm:items-center justify-center p-0 sm:p-4">
             <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[85vh] flex flex-col overflow-hidden">
@@ -9517,14 +9666,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   <input value={hizliAciklama} onChange={e => setHizliAciklama(e.target.value)}
                     placeholder="Not (açıklama)"
                     className="flex-1 min-w-0 p-2 rounded-lg bg-black/25 text-white placeholder-white/45 text-sm font-bold outline-none focus:ring-2 focus:ring-white/40" />
-                  <select value={hizliKategori} onChange={e => setHizliKategori(e.target.value)}
-                    className="shrink-0 w-[38%] p-2 rounded-lg bg-black/25 text-white text-sm font-bold outline-none focus:ring-2 focus:ring-white/40">
-                    {/* YENİ (kullanıcı talebi): Nakliyat, Depoevim ve Araç
-                        kategorileri eklendi — en çok kullanılanlar başa alındı. */}
-                    {['Nakliyat', 'Depoevim', 'Araç', 'Diğer', 'Yakıt', 'Yemek', 'Malzeme', 'Bakım', 'Personel', 'Kira', 'Fatura', 'Vergi', 'Tahsilat'].map(k => (
-                      <option key={k} value={k} className="text-black">{k}</option>
-                    ))}
-                  </select>
+                  {/* DEĞİŞTİ (kullanıcı talebi): Native select yerine PENCERE açan
+                      buton — masaüstündeki gibi ana kategoriler ve alt kategoriler
+                      tıklanabilir görünür. */}
+                  <button type="button" onClick={() => setHizliKatSecici(true)}
+                    className="shrink-0 w-[38%] p-2 rounded-lg bg-black/25 text-white text-sm font-bold outline-none focus:ring-2 focus:ring-white/40 flex items-center justify-between gap-1">
+                    <span className="truncate">{hizliKategori || 'Kategori'}</span>
+                    <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-70" />
+                  </button>
                 </div>
               )}
               <div className="flex items-center gap-2 p-2">
@@ -9782,7 +9931,36 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   })()}
                 </div>
 
-                {/* PARANIN GİRDİĞİ HESAP — kullanıcının istediği hedef seçim */}
+                {/* YENİ (kullanıcı talebi): PERSONEL için MAAŞTAN KESME seçeneği.
+                    Personel türü borçluda tahsilat ya bir hesaba nakit girişi ya
+                    da personelin MAAŞINDAN (Kalan Nakit / Kalan Banka) kesilerek
+                    yapılır. Maaştan kesince defter gelir yazılmaz; borç düşer. */}
+                {tahsilModal.kalem.tur === 'personel' && (
+                  <div>
+                    <label className="text-xs font-bold text-neutral-600 block mb-1">Tahsilat Şekli *</label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { id: 'hesap', ad: 'Hesaba Nakit' },
+                        { id: 'maas_nakit', ad: 'Maaş • Nakit' },
+                        { id: 'maas_banka', ad: 'Maaş • Banka' },
+                      ].map(y => (
+                        <button key={y.id} type="button" onClick={() => setTahsilModal({ ...tahsilModal, tahsilSekli: y.id })}
+                          className={`p-2 rounded-xl text-[11px] font-black transition border ${
+                            (tahsilModal.tahsilSekli || 'hesap') === y.id ? 'bg-purple-600 text-white border-transparent' : 'bg-white text-neutral-500 border-neutral-300 hover:bg-neutral-50'}`}>
+                          {y.ad}
+                        </button>
+                      ))}
+                    </div>
+                    {(tahsilModal.tahsilSekli || 'hesap').startsWith('maas') && (
+                      <p className="text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg p-2 mt-1.5">
+                        Bu tutar personelin <b>{tahsilModal.tahsilSekli === 'maas_banka' ? 'Kalan Banka' : 'Kalan Nakit'}</b> maaşından kesilecek. Kasaya para girişi olmaz; yalnızca borç düşer ve maaş kesintisi işlenir.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {/* PARANIN GİRDİĞİ HESAP — maaştan kesmede gizlenir */}
+                {(tahsilModal.kalem.tur !== 'personel' || (tahsilModal.tahsilSekli || 'hesap') === 'hesap') && (
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Para hangi hesaba girdi? *</label>
                   <select value={tahsilModal.hedefDefterId}
                     onChange={e => setTahsilModal({ ...tahsilModal, hedefDefterId: e.target.value })}
@@ -9792,6 +9970,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                       <option key={d.id} value={d.id}>{d.ad} — {d.blok || 'Genel'} (₺{paraFmt(defterBakiye(d.id))})</option>
                     ))}
                   </select></div>
+                )}
 
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Tahsilat Tarihi</label>
                   <input type="date" value={tahsilModal.tarih} onChange={e => setTahsilModal({ ...tahsilModal, tarih: e.target.value })}
