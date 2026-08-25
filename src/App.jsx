@@ -4086,11 +4086,17 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         if (!cacheSnap.empty) {
           yaz(cacheSnap, 'önbellek');
           if (tazelemeGerekli) {
-            try {
-              const serverSnap = await getDocs(tumIslerSorgu);
-              yaz(serverSnap, 'güncellendi');
-              localStorage.setItem(TAZELEME_ANAHTARI, String(Date.now()));
-            } catch (e) { console.warn('Geçmiş tazelenemedi:', e); }
+            // HIZLANDIRMA (kullanıcı talebi): 24 saatlik TAM sunucu tazelemesi
+            // eskiden önbellek yazımının HEMEN ardından başlıyordu ve açılışı
+            // yine kilitliyordu. Artık 5 sn ERTELENİR — ekran önbellekten
+            // anında dolar, binlerce kaydın ağ okuması arkadan sessizce gelir.
+            setTimeout(async () => {
+              try {
+                const serverSnap = await getDocs(tumIslerSorgu);
+                yaz(serverSnap, 'güncellendi');
+                localStorage.setItem(TAZELEME_ANAHTARI, String(Date.now()));
+              } catch (e) { console.warn('Geçmiş tazelenemedi:', e); }
+            }, 5000);
           }
           return;
         }
@@ -4108,8 +4114,30 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       }
     }, [firebaseUser]);
 
-    // Oturum açılır açılmaz tüm geçmiş arka planda yüklenir (tek sefer)
-    useEffect(() => { if (firebaseUser) tumGecmisiYukle(); }, [firebaseUser, tumGecmisiYukle]);
+    // ========================================================================
+    // HIZLANDIRMA (kullanıcı talebi — "açılış 2-3 dk sürüyor"):
+    // ========================================================================
+    // ESKİ DAVRANIŞ: Tam geçmiş (~17.000 kayıt), anonim oturum açılır açılmaz
+    // — yani kullanıcı HENÜZ GİRİŞ EKRANINDAYKEN — indirilmeye başlıyordu.
+    // Önbellek boşsa (ilk kurulum, gizli sekme, iOS'un IndexedDB'yi silmesi)
+    // ya da 24 saatlik tazeleme zamanı geldiyse, binlerce kaydın ağdan çekilip
+    // işlenmesi telefonda ana iş parçacığını kilitliyor; giriş ekranı ve
+    // anasayfa dakikalarca geç geliyordu.
+    // YENİ DAVRANIŞ:
+    //   1) Arşiv, kullanıcı GERÇEKTEN OTURUM AÇTIKTAN sonra başlar — giriş
+    //      ekranı ve anasayfanın ilk boyaması ağır işten tamamen kurtuldu.
+    //   2) Başlatma 1,5 sn ertelenir (tarayıcı boşta kalınca): önce ekran
+    //      çizilir, arşiv sessizce arkadan gelir. Son 30 günün canlı
+    //      dinleyicisi zaten açık olduğu için güncel işler ANINDA görünür;
+    //      yalnızca eski kayıtlar birkaç saniye gecikmeli dolar.
+    //   3) İçerik ve veri akışı DEĞİŞMEDİ — yalnızca zamanlama değişti.
+    useEffect(() => {
+      if (!firebaseUser || !isAuthenticated) return;
+      const idleBaslat = window.requestIdleCallback || ((cb) => setTimeout(cb, 1500));
+      const idleIptal = window.cancelIdleCallback || clearTimeout;
+      const tanitici = idleBaslat(() => tumGecmisiYukle());
+      return () => idleIptal(tanitici);
+    }, [firebaseUser, isAuthenticated, tumGecmisiYukle]);
 
     // ========================================================================
     // DÖNEM YÜKLEYİCİ (takvim, cari/müşteri profili gibi ekranlar için)
