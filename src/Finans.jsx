@@ -4293,6 +4293,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // hesaba işlenir ve ANCAK O ZAMAN ciroya girer. İcra takibi de buradan.
     const bosAlacakKalemi = { id: '', ad: '', tur: 'musteri', toplamTutar: '', taksitSayisi: '', ilkTarih: bugunStr(), not: '', icra: null };
     const [alacakForm, setAlacakForm] = useState(null);          // null = kapalı
+    // YENİ (kullanıcı talebi): Yeni Borçlu formunda Personel/Müşteri arama kutusu
+    const [borcluAramaP, setBorcluAramaP] = useState(''); // personel arama metni
+    const [borcluAramaM, setBorcluAramaM] = useState(''); // müşteri/cari arama metni
+    // YENİ: Personel şirket borçları (maas_yearly'den canlı) — otomatik borçlu
+    const [personelBorclari, setPersonelBorclari] = useState({});
     const [tahsilModal, setTahsilModal] = useState(null);        // { kalem, taksit, hedefDefterId, tarih, tutar }
     const [tahsilKaydediliyor, setTahsilKaydediliyor] = useState(false);
     const [alacakAyi, setAlacakAyi] = useState(bugunStr().slice(0, 7));
@@ -4621,7 +4626,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       const u2 = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), snap => {
         setIslemler(snap.docs.map(d => ({ id: d.id, ...d.data() })));
       });
-      return () => { u1(); u2(); };
+      // YENİ (kullanıcı talebi): Personel ŞİRKET BORÇLARI (maas_yearly/{yıl} →
+      // records[personId].borclanma) canlı dinlenir. Borcu olan personel
+      // Borçlu defterinde OTOMATİK görünür; borç sıfırlanınca listeden düşer.
+      const yilStr = String(new Date().getFullYear());
+      const u3 = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'maas_yearly', yilStr), snap => {
+        setPersonelBorclari(snap.exists() ? (snap.data().records || {}) : {});
+      });
+      return () => { u1(); u2(); u3(); };
     }, []);
 
     // --- Hesaplamalar ---
@@ -5171,17 +5183,62 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const alacakDefterBilgi = (defter) => {
       const kalemler = defter?.alacaklar || [];
       const detaylar = kalemler.map(kalem => ({ kalem, bilgi: alacakBilgi(defter, kalem) }));
+      // ======================================================================
+      // YENİ (kullanıcı talebi): OTOMATİK BORÇLULAR
+      // ======================================================================
+      // 1) PERSONEL: maas_yearly'deki şirket borcu (borclanma) > 0 olan her
+      //    personel otomatik borçlu olarak eklenir. Borç sıfırlanınca düşer.
+      // 2) MÜŞTERİ: işi TAMAMLANMIŞ ama tahsil edilmemiş (kalan bakiye > 0)
+      //    her cari otomatik borçlu olur. İş tamamlanmadan GÖRÜNMEZ; bakiye
+      //    sıfırlanınca (ödeme alınınca) listeden düşer.
+      // Bu kalemler "otomatik" işaretlidir; elle silinmez/düzenlenmez, kaynak
+      // veriden canlı gelir. Tahsilat yine yapılabilir.
+      const otoDetaylar = [];
+      // Yalnızca Sembol Nakliyat blokundaki Borçlu defterine otomatik doldur
+      if (defter?.tur === 'Borçlu') {
+        // --- 1) Personel borçları ---
+        (personnelList || []).forEach(p => {
+          const borc = parseFloat(personelBorclari[p.id]?.borclanma) || 0;
+          if (borc <= 0.01) return;
+          const kalem = { id: `oto_personel_${p.id}`, ad: p.fullName || p.name || 'Personel',
+            tur: 'personel', toplamTutar: String(borc), taksitSayisi: '', ilkTarih: bugunStr(),
+            not: 'Şirkete borç (personel profilinden otomatik)', icra: null, otomatik: true, kaynak: 'personel' };
+          otoDetaylar.push({ kalem, bilgi: alacakBilgi(defter, kalem) });
+        });
+        // --- 2) Tamamlanmış ama ödenmemiş müşteri işleri (cari bazında) ---
+        const cariHarita = new Map();
+        (jobs || []).forEach(j => {
+          // Yalnızca TAMAMLANMIŞ işler; ödeme alınmamış kalan bakiye
+          if (j.status !== 'completed') return;
+          const anlasma = parseFloat(j.totalAmount ?? j.agreedPrice ?? j.price) || 0;
+          const tahsil = parseFloat(j.collectedAmount ?? j.paidAmount) || 0;
+          const kalan = anlasma - tahsil;
+          if (kalan <= 0.01) return; // ödeme alındıysa borçlu değil
+          const tel = (j.customerPhone || '').replace(/\D/g, '') || (j.customerName || 'musteri');
+          const m = cariHarita.get(tel);
+          if (m) { m.kalan += kalan; if ((j.date || '') > m.tarih) { m.ad = j.customerName || m.ad; m.tarih = j.date; } }
+          else cariHarita.set(tel, { ad: j.customerName || 'Müşteri', tel, kalan, tarih: j.date || bugunStr() });
+        });
+        cariHarita.forEach((c, tel) => {
+          const kalem = { id: `oto_musteri_${tel}`, ad: c.ad, tur: 'musteri',
+            toplamTutar: String(c.kalan), taksitSayisi: '', ilkTarih: c.tarih,
+            not: 'Tamamlanan iş — ödeme alınmadı (cariden otomatik)', icra: null,
+            otomatik: true, kaynak: 'musteri', tel };
+          otoDetaylar.push({ kalem, bilgi: alacakBilgi(defter, kalem) });
+        });
+      }
+      const tumDetaylar = [...detaylar, ...otoDetaylar];
       const buAyOn = alacakAyi;
       return {
-        kalemSayisi: kalemler.length,
-        detaylar,
-        toplamAlacak: detaylar.reduce((t, d) => t + d.bilgi.toplam, 0),
-        toplamTahsil: detaylar.reduce((t, d) => t + d.bilgi.toplamTahsil, 0),
-        kalanAlacak: detaylar.reduce((t, d) => t + d.bilgi.kalanAlacak, 0),
-        gecikmisAdet: detaylar.reduce((t, d) => t + d.bilgi.gecikmisAdet, 0),
-        gecikmisTutar: detaylar.reduce((t, d) => t + d.bilgi.gecikmisTutar, 0),
-        icradaAdet: kalemler.filter(k => k.icra).length,
-        buAyBekleyen: detaylar.reduce((t, d) => t + d.bilgi.plan.filter(pp => !pp.odendi && pp.tarih.startsWith(buAyOn)).reduce((x, pp) => x + pp.kalan, 0), 0),
+        kalemSayisi: tumDetaylar.length,
+        detaylar: tumDetaylar,
+        toplamAlacak: tumDetaylar.reduce((t, d) => t + d.bilgi.toplam, 0),
+        toplamTahsil: tumDetaylar.reduce((t, d) => t + d.bilgi.toplamTahsil, 0),
+        kalanAlacak: tumDetaylar.reduce((t, d) => t + d.bilgi.kalanAlacak, 0),
+        gecikmisAdet: tumDetaylar.reduce((t, d) => t + d.bilgi.gecikmisAdet, 0),
+        gecikmisTutar: tumDetaylar.reduce((t, d) => t + d.bilgi.gecikmisTutar, 0),
+        icradaAdet: tumDetaylar.filter(d => d.kalem.icra).length,
+        buAyBekleyen: tumDetaylar.reduce((t, d) => t + d.bilgi.plan.filter(pp => !pp.odendi && pp.tarih.startsWith(buAyOn)).reduce((x, pp) => x + pp.kalan, 0), 0),
       };
     };
 
@@ -7911,17 +7968,28 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                 onClick={e => { e.stopPropagation(); setTahsilModal({ kalem, taksit: bilgi.siradaki, hedefDefterId: '', tarih: bugunStr(), tutar: String(bilgi.siradaki.kalan ?? bilgi.siradaki.tutar) }); }}
                                 className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition">Tahsil Et</button>
                             )}
-                            {!kalem.icra ? (
-                              <button type="button" onClick={e => { e.stopPropagation(); alacakIcra(kalem.id, true); }}
-                                className="px-2 py-1.5 bg-neutral-800 hover:bg-black text-white text-[10px] font-black rounded-lg transition">İcra</button>
+                            {/* YENİ (kullanıcı talebi): OTOMATİK borçlularda (personel
+                                şirket borcu / tamamlanmış ödenmemiş müşteri işi)
+                                Düzenle/Sil GİZLİ — kayıt kaynak veriden canlı gelir,
+                                borç sıfırlanınca listeden kendiliğinden düşer. İcra
+                                ve tahsilat yine yapılabilir. */}
+                            {kalem.otomatik ? (
+                              <span className="text-[9px] font-black bg-neutral-200 text-neutral-500 px-2 py-1 rounded-lg" title={kalem.kaynak === 'personel' ? 'Personel profilindeki şirket borcundan otomatik' : 'Tamamlanan iş cari bakiyesinden otomatik'}>OTOMATİK</span>
                             ) : (
-                              <button type="button" onClick={e => { e.stopPropagation(); alacakIcra(kalem.id, false); }}
-                                className="px-2 py-1.5 bg-white border border-neutral-400 text-neutral-700 hover:bg-neutral-100 text-[10px] font-black rounded-lg transition">İcradan Çıkar</button>
+                              <>
+                                {!kalem.icra ? (
+                                  <button type="button" onClick={e => { e.stopPropagation(); alacakIcra(kalem.id, true); }}
+                                    className="px-2 py-1.5 bg-neutral-800 hover:bg-black text-white text-[10px] font-black rounded-lg transition">İcra</button>
+                                ) : (
+                                  <button type="button" onClick={e => { e.stopPropagation(); alacakIcra(kalem.id, false); }}
+                                    className="px-2 py-1.5 bg-white border border-neutral-400 text-neutral-700 hover:bg-neutral-100 text-[10px] font-black rounded-lg transition">İcradan Çıkar</button>
+                                )}
+                                <button type="button" onClick={e => { e.stopPropagation(); setAlacakForm({ ...bosAlacakKalemi, ...kalem }); }}
+                                  className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle"><Edit className="w-3.5 h-3.5" /></button>
+                                <button type="button" onClick={e => { e.stopPropagation(); alacakSil(kalem.id); }}
+                                  className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Borçluyu sil"><Trash2 className="w-3.5 h-3.5" /></button>
+                              </>
                             )}
-                            <button type="button" onClick={e => { e.stopPropagation(); setAlacakForm({ ...bosAlacakKalemi, ...kalem }); }}
-                              className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle"><Edit className="w-3.5 h-3.5" /></button>
-                            <button type="button" onClick={e => { e.stopPropagation(); alacakSil(kalem.id); }}
-                              className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Borçluyu sil"><Trash2 className="w-3.5 h-3.5" /></button>
                             <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${acik ? 'rotate-180' : ''}`} />
                           </div>
                         </div>
@@ -9530,22 +9598,86 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <button onClick={() => setAlacakForm(null)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
               </div>
               <div className="space-y-3">
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Borçlu Adı *</label>
-                  <input value={alacakForm.ad} onChange={e => setAlacakForm({ ...alacakForm, ad: e.target.value })}
-                    placeholder="Örn: Melike Özdemir / X Lojistik Ltd. Şti."
-                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-rose-500 text-sm" /></div>
-
                 {/* ÜÇ BORÇLU TÜRÜ: Personel / Müşteri / Kurum */}
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Borçlu Türü *</label>
                   <div className="grid grid-cols-3 gap-2">
                     {ALACAK_TURLERI.map(t => (
-                      <button key={t.id} type="button" onClick={() => setAlacakForm({ ...alacakForm, tur: t.id })}
+                      <button key={t.id} type="button" onClick={() => { setAlacakForm({ ...alacakForm, tur: t.id }); setBorcluAramaP(''); setBorcluAramaM(''); }}
                         className={`p-2.5 rounded-xl text-xs font-black transition border ${
                           alacakForm.tur === t.id ? `${t.rozet} text-white border-transparent` : 'bg-white text-neutral-500 border-neutral-300 hover:bg-neutral-50'}`}>
                         {t.ad}
                       </button>
                     ))}
                   </div></div>
+
+                {/* YENİ (kullanıcı talebi): PERSONEL SEÇME ARAMASI
+                    Tür "Personel" iken isim serbest yazılmaz; listeden aranıp
+                    seçilir, seçilince ad kutusuna otomatik yazılır. */}
+                {alacakForm.tur === 'personel' && !alacakForm.id && (
+                  <div>
+                    <label className="text-xs font-bold text-neutral-600 block mb-1">Personel Ara ve Seç</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input value={borcluAramaP} onChange={e => setBorcluAramaP(e.target.value)}
+                        placeholder="Personel adı yazın..."
+                        className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-purple-500" />
+                    </div>
+                    {borcluAramaP.trim().length >= 1 && (
+                      <div className="mt-1 max-h-40 overflow-y-auto border border-neutral-200 rounded-xl divide-y divide-neutral-100">
+                        {(personnelList || [])
+                          .filter(p => p.position !== 'Firma Sahibi' && (p.fullName || p.name || '').toLocaleLowerCase('tr-TR').includes(borcluAramaP.toLocaleLowerCase('tr-TR')))
+                          .slice(0, 20)
+                          .map(p => (
+                            <button key={p.id} type="button"
+                              onClick={() => { setAlacakForm({ ...alacakForm, ad: p.fullName || p.name }); setBorcluAramaP(''); }}
+                              className="w-full text-left px-3 py-2 text-sm font-bold text-neutral-700 hover:bg-purple-50 flex items-center gap-2">
+                              <User className="w-3.5 h-3.5 text-purple-600" /> {p.fullName || p.name}
+                              <span className="text-[10px] font-medium text-neutral-400">{p.position}</span>
+                            </button>
+                          ))}
+                        {(personnelList || []).filter(p => p.position !== 'Firma Sahibi' && (p.fullName || p.name || '').toLocaleLowerCase('tr-TR').includes(borcluAramaP.toLocaleLowerCase('tr-TR'))).length === 0 && (
+                          <div className="px-3 py-2 text-xs font-bold text-neutral-400">Personel bulunamadı.</div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* YENİ (kullanıcı talebi): MÜŞTERİ (CARİ) SEÇME ARAMASI */}
+                {alacakForm.tur === 'musteri' && !alacakForm.id && (
+                  <div>
+                    <label className="text-xs font-bold text-neutral-600 block mb-1">Müşteri (Cari) Ara ve Seç</label>
+                    <div className="relative">
+                      <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input value={borcluAramaM} onChange={e => setBorcluAramaM(e.target.value)}
+                        placeholder="Müşteri adı veya telefon yazın..."
+                        className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-500" />
+                    </div>
+                    {borcluAramaM.trim().length >= 2 && (
+                      <div className="mt-1 max-h-40 overflow-y-auto border border-neutral-200 rounded-xl divide-y divide-neutral-100">
+                        {(() => {
+                          const kl = aramaNormalize(borcluAramaM).split(' ').filter(Boolean);
+                          const qr = borcluAramaM.replace(/\D/g, '');
+                          const sonuc = cariListesi.filter(c => (kl.length > 0 && kl.every(k => c.adNorm.includes(k))) || (qr.length >= 3 && c.telNorm.includes(qr))).slice(0, 20);
+                          if (sonuc.length === 0) return <div className="px-3 py-2 text-xs font-bold text-neutral-400">Cari bulunamadı.</div>;
+                          return sonuc.map(c => (
+                            <button key={c.tel} type="button"
+                              onClick={() => { setAlacakForm({ ...alacakForm, ad: c.ad, not: (alacakForm.not || '') || `Tel: ${c.tel}` }); setBorcluAramaM(''); }}
+                              className="w-full text-left px-3 py-2 text-sm font-bold text-neutral-700 hover:bg-emerald-50 flex items-center justify-between gap-2">
+                              <span className="flex items-center gap-2 min-w-0"><User className="w-3.5 h-3.5 text-emerald-600 shrink-0" /> <span className="truncate">{c.ad}</span></span>
+                              <span className="text-[10px] font-medium text-neutral-400 shrink-0">{c.tel} • {c.isSayisi} iş</span>
+                            </button>
+                          ));
+                        })()}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Borçlu Adı *</label>
+                  <input value={alacakForm.ad} onChange={e => setAlacakForm({ ...alacakForm, ad: e.target.value })}
+                    placeholder="Örn: Melike Özdemir / X Lojistik Ltd. Şti."
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-rose-500 text-sm" /></div>
 
                 <div className="grid grid-cols-2 gap-2">
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Toplam Alacak (₺) *</label>
