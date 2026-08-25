@@ -1795,6 +1795,13 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
     { baslik: 'KAMYONLAR', etiketler: ['34 HPA 843', '34 KTS 305', '34 KUD 891', '34 NAR 456', '34 NPH 332', '34 PCY 589'] },
     { baslik: 'KİRALAR', etiketler: ['ALT KAYNARCA DEPO', 'BAŞAKŞEHİR DEPO', 'ÇEKMEKÖY DEPO', 'ÇINARDERE DEPO', 'DERNEK DEPO', 'DUDULLU DEPO', 'KARTAL DEPO', 'KURFALI DEPO', 'MERKEZ DEPO', 'MERKEZ OFİS', 'SAPANBAĞLARI DEPO', 'ÜST KAYNARCA DEPO', 'YEŞİLBAĞLAR DEPO'] },
     { baslik: 'KREDİ', etiketler: ['ARAÇ KREDİSİ', 'TAKSİTLİ BORÇLAR'] },
+    // YENİ (kullanıcı talebi): BORÇ kategorisi — bir hesaptan/kişiden borç
+    // ALINDIĞINDA veya birine borç VERİLDİĞİNDE bu kategori kullanılır. Bu
+    // kategoriyle işlenen tutarlar CİROYU (toplam gelir/gider) ETKİLEMEZ;
+    // yalnızca ilgili defterin bakiyesinde görünür. Böylece "bugün 50.000 TL
+    // borç aldım" işlemi gelir tablosunu şişirmez, gerçek net kâr bozulmaz —
+    // kredi taksit ödemeleri (krediMahsup) ile aynı mantık.
+    { baslik: 'BORÇ', etiketler: ['BORÇ ALINAN', 'BORÇ VERİLEN'] },
     { baslik: 'KREDİ KARTI', etiketler: ['ALBARAKA KART', 'EN PARA', 'GARANTİ KART', 'KUVEYTTÜRK KART'] },
     { baslik: 'MAAŞ', etiketler: ['AVANS', 'İCRA KESİNTİ', 'MESAİ', 'MESAİ - PRİM', 'YOL'] },
     { baslik: 'MALZEME', etiketler: ['BANT', 'KAĞIT', 'KOLİ', 'PAT PAT', 'POŞET', 'STREÇ', 'YATAK KILIFI'] },
