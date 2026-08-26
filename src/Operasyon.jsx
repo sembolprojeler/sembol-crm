@@ -4580,15 +4580,29 @@ export const haftalikMesaiKarari = ({ tarihStr, girisVarMi, cikisVarMi = false, 
 
   // ---------------------------------------------------------------- GELDİ
   if (girisVarMi) {
-    // KURAL 4: Pazar günü geldiyse VE haftanın diğer 6 günü de gelinmişse -> FG
+    // ======================================================================
+    // KURAL 4 (kullanıcı talebi — beyaz yaka Pazar/FG):
+    // ======================================================================
+    // Personel Pazartesiden hafta sonuna (Pazar dâhil) HER GÜN gelmişse o
+    // hafta 7 gün çalışmış olur; zorunlu 6 günün üstüne çıktığı için Pazar
+    // günü FG (Fazla Gün) verilir.
+    // Hafta içinde haftalık iznini başka bir gün kullandıysa (Pazar dışı bir
+    // gün gelinmemişse) toplam 6 gün çalışmış olur — bu durumda FG VERİLMEZ,
+    // Pazar normal çalışma günü (G) sayılır.
     if (gunAdiBu === 'Pazar') {
       const digerAltiGun = haftaGunleri.filter(g => g.tarihStr !== tarihStr);
-      const hepsiGelmis = digerAltiGun.length === 6 && digerAltiGun.every(gelmisSayilir);
+      // Gelinmemiş gün: izinli değil, geldi kodu yok ve hiç okutma yok
+      const gelinmeyenler = digerAltiGun.filter(g => {
+        if (g.kod && MESAI_IZIN_KODLARI.includes(g.kod)) return true;  // mazeretli izin = çalışılmadı
+        if (g.kod === 'Hİ' || g.kod === 'D') return true;
+        return !gelmisSayilir(g);
+      });
+      const hepsiGelmis = digerAltiGun.length === 6 && gelinmeyenler.length === 0;
       if (hepsiGelmis) {
-        return { status: 'FG', aciklama: 'Hafta boyunca 7 gün çalışıldı → Pazar günü Fazla Gün (FG) önerildi.' };
+        return { status: 'FG', aciklama: 'Pazartesi–Pazar 7 gün kesintisiz çalışıldı (zorunlu 6 günün üstü) → Pazar günü Fazla Gün (FG).' };
       }
       // Hafta içinde eksik gün varsa Pazar normal çalışma günüdür
-      return { status: 'G', aciklama: 'Pazar günü giriş yapıldı; hafta içinde gelinmeyen gün olduğu için normal Geldi önerildi.' };
+      return { status: 'G', aciklama: `Pazar günü giriş yapıldı; haftalık izin hafta içinde kullanıldığı için (${gelinmeyenler.length} gün gelinmedi) FG verilmedi → Geldi.` };
     }
     return { status: 'G', aciklama: 'QR/kod ile giriş yapıldı → Geldi.' };
   }
@@ -4604,12 +4618,35 @@ export const haftalikMesaiKarari = ({ tarihStr, girisVarMi, cikisVarMi = false, 
   }
 
   // ------------------------------------------------------------- GELMEDİ
-  // Haftanın BU GÜNDEN ÖNCEKİ günlerine bakılır: daha önce Hİ verilmiş mi?
+  // ========================================================================
+  // DÜZELTME (kullanıcı talebi — beyaz yaka haftalık izin/devamsızlık):
+  // ========================================================================
+  // KURAL: Bir personel haftada 6 gün gelmek zorundadır (7 günün 1'i haftalık
+  // izin). Buna göre:
+  //   • Hafta içinde GELİNMEYEN İLK gün          -> Hİ (haftalık izin)
+  //   • GELİNMEYEN İKİNCİ ve sonraki günler      -> D  (devamsızlık)
+  // ESKİ HATA: "ikinci gün" tespiti YALNIZCA puantaja daha önce Hİ yazılmış
+  // olmasına bakıyordu (g.kod === 'Hİ'). Öneri henüz kaydedilmemişse (ki
+  // normal akışta öneriler kullanıcı onaylayana kadar kaydedilmez) ikinci,
+  // üçüncü gelmeme günü de Hİ görünüyordu; personel 5 gün çalışmış olsa bile
+  // devamsızlık yazılmıyordu.
+  // YENİ MANTIK: Haftanın bu günden ÖNCEKİ günlerine bakılır ve "gerçekten
+  // gelinmemiş" gün var mı diye sayılır — kaydedilmiş Hİ kodu VEYA hiç
+  // giriş/çıkış/geldi kodu olmayan gün. Böyle bir gün varsa bu gün ikinci
+  // gelmemedir -> Devamsızlık. Yoksa haftanın ilk gelmemesidir -> Haftalık İzin.
+  // İzinli (Yİ/Bİ/Üİ/R/İB) günler bu sayıma girmez; onlar mazeretli izindir.
   const oncekiGunler = haftaGunleri.filter(g => g.tarihStr < tarihStr);
-  const oncedenHaftalikIzin = oncekiGunler.some(g => g.kod === 'Hİ');
+  const gelmemisSayilir = (g) => {
+    if (g.kod && MESAI_IZIN_KODLARI.includes(g.kod)) return false; // mazeretli izin
+    if (g.kod === 'Hİ' || g.kod === 'D') return true;              // kaydedilmiş gelmeme
+    if (g.kod && MESAI_GELDI_KODLARI.includes(g.kod)) return false; // geldi kodu var
+    if (g.tarihStr < MESAI_KURAL_BASLANGIC) return false;          // kural öncesi: bilinmiyor
+    return !g.girisVarMi && !g.cikisVarMi;                          // hiç okutma yok -> gelmemiş
+  };
+  const oncekiGelmemeSayisi = oncekiGunler.filter(gelmemisSayilir).length;
 
-  if (oncedenHaftalikIzin) {
-    return { status: 'D', aciklama: `Bu hafta haftalık izin zaten kullanılmış (${gunAdiBu} günü giriş yok) → Devamsızlık.` };
+  if (oncekiGelmemeSayisi > 0) {
+    return { status: 'D', aciklama: `Bu hafta haftalık izin zaten kullanıldı (${oncekiGelmemeSayisi}. gelmeme) — ${gunAdiBu} günü de gelinmedi → Devamsızlık (haftada 6 gün çalışma kuralı).` };
   }
   // Bu hafta ilk kez gelinmemiş -> haftalık izin
   return { status: 'Hİ', aciklama: `Bu hafta ilk kez giriş yapılmadı → Haftalık İzin (${gunAdiBu}).` };
