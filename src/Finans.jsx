@@ -6071,13 +6071,25 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       // olarak listede kalır — hangi güne bakarsanız bakın, "Tüm Zamanlar"da
       // da en üstte durur. Sıralama: en ESKİ bekleyen en üstte (en çok geciken
       // önce görünsün), aynı gün içindekiler saate göre.
+      //
+      // İKİ SINIR (kullanıcı talebi):
+      //   1) KAPATMA TARİHİ: 23.08.2026 ve ÖNCESİ tüm geciken ödemeler
+      //      "alınmış" kabul edilir ve listede GÖSTERİLMEZ (eski birikmiş
+      //      kayıtlar ekranı doldurmasın). Tek satırdan yönetilir.
+      //   2) GELECEK TARİH: Günü GELMEMİŞ işler gösterilmez. Bugün 26.08 ise
+      //      27.08 ve sonrası listede yer almaz; günü geldikçe kendiliğinden
+      //      görünür. Ödemesi kapanmazsa ertesi gün "1 GÜN GECİKTİ" olur.
+      const BEKLEYEN_KAPATMA_TARIHI = '2026-08-23'; // bu tarih DAHİL kapatıldı
+      const bugunBek = bugunStr();
       return (jobs || [])
         .filter(j => j && j.status !== 'completed' && j.status !== 'cancelled' && !j.endJobDetails)
+        .filter(j => (j.date || '') > BEKLEYEN_KAPATMA_TARIHI)   // 23.08 ve öncesi kapatıldı
+        .filter(j => (j.date || '') <= bugunBek)                 // günü gelmeyen görünmez
         .map(j => ({
           ...j,
           bekleyenTutar: Math.max(0, (parseFloat(j.price) || 0) - (parseFloat(j.deposit) || 0)),
           // Kaç gün geciktiği (bugüne göre); 0 = bugünün işi
-          gecikmeGunu: Math.max(0, Math.round((new Date(bugunStr()) - new Date(j.date || bugunStr())) / 86400000)),
+          gecikmeGunu: Math.max(0, Math.round((new Date(bugunBek) - new Date(j.date || bugunBek)) / 86400000)),
         }))
         // ====================================================================
         // YENİ: ÜCRETSİZ ASANSÖR İŞLERİ LİSTELENMEZ (kullanıcı talebi)
@@ -7013,7 +7025,37 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     // kayıtta asıl gecikme buydu. Artık bu hesaplar yalnızca işlem
     // listesinin gerçekten görüneceği defter türlerinde yapılır.
     const islemBolumuGerekli = seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi';
-    const dIslemler = !islemBolumuGerekli ? [] : defterIslemleri(seciliDefterId)
+    const dIslemler = !islemBolumuGerekli ? [] : [
+      ...defterIslemleri(seciliDefterId),
+      // ======================================================================
+      // DEĞİŞTİ (kullanıcı talebi): TAŞINAN ÖDEMELER ARTIK BLOK DEĞİL
+      // ======================================================================
+      // Eskiden başka deftere taşınan ödemeler listenin üstünde tek bir toplu
+      // blok olarak duruyordu ("49 iş"). Artık her biri NORMAL BİR İŞLEM SATIRI
+      // gibi davranır ve KENDİ GÜNÜNE göre listede sıralanır.
+      // Bunlar SANAL satırlardır: veritabanında kayıt değiller, yalnızca bilgi
+      // amaçlı gösterilirler. Bakiye, ciro, gün toplamları ve tüm hesaplar
+      // ayrı kaynaklardan (defterIslemleri / gunIslemleri) beslendiği için bu
+      // satırların hiçbir hesaba etkisi YOKTUR.
+      ...tasinanOdemeler.map(j => ({
+        id: `tasinan_${j.id}`,
+        _tasinanBilgi: true,                 // render'da özel satır olarak çizilir
+        tarih: j.date,
+        createdAt: j.completedAt || j.date,
+        tip: 'giris',                        // filtre uyumu için (gelir tarafı)
+        tutar: j.tutar,
+        kategori: 'Taşınan Ödeme',
+        etiketler: [],
+        aciklama: `${j.customerName} — (${(j.yontem || '').toUpperCase()} OLARAK ÖDEMEYİ KAPATTI) ${j.hedefEtiket}`,
+        _musteri: j.customerName,
+        _saat: j.time,
+        _tur: j.type,
+        _plaka: j.assignedVehiclePlate,
+        _kapora: parseFloat(j.deposit) || 0,
+        _yontem: j.yontem,
+        _hedefEtiket: j.hedefEtiket,
+      })),
+    ]
       // YENİ (kullanıcı talebi): eski "Maaş Tablosu (Oto)" otomatik kayıtları
       // listede GÖRÜNMEZ. Maaş/avans yalnızca Ödemeler'den ödenince görünür.
       .filter(i => !otomatikMaasKaydi(i))
@@ -8387,39 +8429,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             </div>
           )}
 
-          {/* ==================================================================
-              YENİ (kullanıcı talebi): BAŞKA DEFTERE TAŞINAN ÖDEME BİLDİRİMİ
-              ==================================================================
-              Banka defterinde bekleyen bir iş, Nakit / Kredi Kartı / Ödeme
-              Alınmadı olarak kapatıldığında parası başka deftere yazılır.
-              Burada yalnızca BİLGİ amaçlı, nereye gittiğini söyleyen bir satır
-              gösterilir — hesaplara etkisi yoktur. */}
-          {tasinanOdemeler.length > 0 && (
-            <div className="border-b border-sky-200 bg-sky-50/50">
-              <div className="px-3 sm:px-4 py-2 text-[10px] font-black uppercase text-sky-700 flex items-center gap-1.5">
-                <ArrowRightLeft className="w-3.5 h-3.5" /> Başka Deftere Taşınan Ödemeler — {tasinanOdemeler.length} iş (bilgi amaçlı, bu deftere işlenmedi)
-              </div>
-              {tasinanOdemeler.map(j => (
-                <div key={`t_${j.id}`} className="grid grid-cols-[1fr_auto] gap-2 px-3 sm:px-4 py-2.5 items-center border-t border-dashed border-sky-200">
-                  <div className="min-w-0">
-                    <div className="font-black text-sm text-neutral-700 break-words">{j.customerName}</div>
-                    <div className="text-[10px] font-bold text-neutral-500">
-                      {j.date ? j.date.split('-').reverse().join('.') : '—'} • {j.time || '—'} • {j.type || 'Nakliye'}
-                      {j.assignedVehiclePlate ? ` • ${j.assignedVehiclePlate}` : ''}
-                      {(parseFloat(j.deposit) || 0) > 0 ? ` • Kapora düşüldü: ₺${paraFmt(parseFloat(j.deposit))}` : ''}
-                    </div>
-                    <div className="text-[10px] font-black text-sky-700 mt-0.5">
-                      ({(j.yontem || '').toUpperCase()} OLARAK ÖDEMEYİ KAPATTI) {j.hedefEtiket}
-                    </div>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="font-black text-sky-700 tabular-nums text-sm sm:text-base">₺{paraFmt(j.tutar)}</div>
-                    <div className="text-[9px] font-black uppercase text-sky-500">Taşındı</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* KALDIRILDI (kullanıcı talebi): "Başka Deftere Taşınan Ödemeler"
+              toplu bloğu kaldırıldı. Bu kayıtlar artık aşağıdaki normal işlem
+              listesinde KENDİ GÜNLERİNE göre sıralı, tek tek görünür. */}
 
           {/* DEĞİŞTİ (kullanıcı talebi): satır ayırıcıları BELİRGİNLEŞTİRİLDİ —
               ince açık gri yerine 2px kalınlığında koyu gri; satırların nerede
@@ -8428,6 +8440,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             {/* YENİ: Tüm Zamanlar modunda yalnızca ilk 'gosterilenSayi' kayıt
                 çizilir (günlük modda zaten tek günün hareketleri var, dilimlenmez). */}
             {(gunFiltreAktif ? dIslemler : dIslemler.slice(0, gosterilenSayi)).map(i => (
+              /* YENİ (kullanıcı talebi): TAŞINAN ÖDEME BİLGİ SATIRI
+                 Başka deftere taşınan ödemeler normal satır gibi ama mavi
+                 tonda, "TAŞINDI" etiketiyle ve tıklanamaz olarak çizilir —
+                 gerçek bir defter kaydı olmadıkları için düzenlenemez/silinemez. */
+              i._tasinanBilgi ? (
+                <div key={i.id} className="grid grid-cols-[60%_40%] sm:grid-cols-[1fr_auto_auto] gap-1.5 sm:gap-2 px-3 sm:px-4 py-3.5 items-center bg-sky-50/40">
+                  <div className="min-w-0">
+                    <div className="sm:hidden mb-0.5">
+                      <span className="text-[9px] font-black uppercase text-sky-600">
+                        TAŞINDI <span className="text-neutral-400 font-bold normal-case">{new Date(i.tarih).toLocaleDateString('tr-TR')}</span>
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="hidden sm:inline text-[11px] font-black text-neutral-400">{new Date(i.tarih).toLocaleDateString('tr-TR')}</span>
+                      <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-100 text-sky-700 border border-sky-200">Taşınan Ödeme</span>
+                      <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 border border-neutral-200">{i._tur || 'Nakliye'}</span>
+                      {i._plaka && <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-50 text-orange-700 border border-orange-200">{i._plaka}</span>}
+                    </div>
+                    <div className="text-xs sm:text-sm font-bold text-neutral-700 mt-0.5 break-words">{i._musteri}</div>
+                    <div className="text-[10px] font-black text-sky-700">
+                      ({(i._yontem || '').toUpperCase()} OLARAK ÖDEMEYİ KAPATTI) {i._hedefEtiket}
+                    </div>
+                    <div className="text-[9px] sm:text-[10px] font-bold text-neutral-400">
+                      {i._saat || '—'}{i._kapora > 0 ? ` • Kapora düşüldü: ₺${paraFmt(i._kapora)}` : ''} • bu deftere işlenmedi
+                    </div>
+                  </div>
+                  <div className="sm:hidden flex items-center justify-center self-stretch">
+                    <span className="font-black tabular-nums text-lg leading-tight text-center text-sky-700">₺{paraFmt(i.tutar)}</span>
+                  </div>
+                  <div className="hidden sm:block text-right w-24 sm:w-28 font-black text-sm sm:text-base text-sky-700">₺{paraFmt(i.tutar)}</div>
+                  <div className="hidden sm:block text-right w-24 sm:w-28"></div>
+                </div>
+              ) : (
               /* DEĞİŞTİ (kullanıcı talebi): Satıra TIKLANINCA Düzenle/Sil açılır.
                  Tıklamadan görünmezler. Açık satır hafif vurgulanır. */
               <div key={i.id}
@@ -8546,6 +8591,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <div className={`hidden sm:block text-right w-24 sm:w-28 font-black text-sm sm:text-base ${i.silindi ? 'line-through text-neutral-300' : 'text-emerald-600'}`}>{i.tip === 'giris' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
                 <div className={`hidden sm:block text-right w-24 sm:w-28 font-black text-sm sm:text-base ${i.silindi ? 'line-through text-neutral-300' : 'text-red-500'}`}>{i.tip === 'cikis' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
               </div>
+              )
             ))}
           </div>
 
