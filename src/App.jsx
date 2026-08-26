@@ -5334,6 +5334,28 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
       try {
         // ====================================================================
+        // YENİ (kullanıcı talebi — 2. ekteki boş "Saat" hücreleri):
+        // ====================================================================
+        // Fazla Mesai (FM) / Eksik Mesai (EM) / F.Gün+Mesai (FGM) SAATE bağlı
+        // kodlardır. Saat girilmezse mesai tablosunda hücre "FM / Saat(boş)"
+        // olarak kalıyor; personelin fazla mesai ücreti hesaplanamıyor — yani
+        // mesai fiilen KAYBOLUYOR. Bu yüzden kaydetmeden önce saat kontrolü
+        // yapılır ve eksikse uyarı verilip kayıt durdurulur.
+        const saatGerekenler = Object.keys(mesaiModalData).filter(pId => {
+          const d = mesaiModalData[pId];
+          if (!['FM', 'EM', 'FGM'].includes(d.status)) return false;
+          const s = String(d.hours ?? '').trim();
+          return s === '' || !(parseFloat(s.replace(',', '.')) > 0);
+        });
+        if (saatGerekenler.length > 0) {
+          const adlar = saatGerekenler
+            .map(pId => (personnelList || []).find(x => String(x.id) === String(pId))?.fullName || pId)
+            .join('\n• ');
+          alert(`Saat girilmemiş mesai var — kayıt yapılmadı.\n\nAşağıdaki personel için Fazla/Eksik Mesai seçili ama SAAT boş:\n\n• ${adlar}\n\nSaat girmezseniz mesai ücreti hesaplanamaz. Lütfen saatleri yazın veya durumu "G - Geldi" olarak değiştirin.`);
+          return;
+        }
+
+        // ====================================================================
         // DÜZELTME (kullanıcı talebi — "operasyon sorumlusu onaylayınca mesai
         // Personel Muhasebe > Mesai tablosunda görünsün, mesai kaçmasın"):
         // ====================================================================
@@ -5373,9 +5395,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             if (!records[pId]) records[pId] = {};
             // 'oneri' yalnızca ekranda gösterim içindir; puantaja yazılmaz
             const { status, hours } = grup[pId];
-            // kaynak: 'isOnay' -> bu hücrenin iş onayından geldiğini belirtir;
-            // Mesai Takip ekranından elle değiştirilmesini ENGELLEMEZ.
-            records[pId][day] = { status, hours: hours || '', kaynak: 'isOnay' };
+            // kaynak: 'isOnay' -> bu hücrenin iş onayından geldiğini belirtir.
+            // manual: true -> bu bir İNSAN KARARIDIR; mesai tablosundaki
+            // otomatik doldurma/temizleme mantığı bu hücreyi SİLMEZ. Yönetici
+            // Mesai Takip ekranından yine elle değiştirebilir.
+            records[pId][day] = { status, hours: hours || '', kaynak: 'isOnay', manual: true };
             yazilanKisi += 1;
           });
           await setDoc(mesaiRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
