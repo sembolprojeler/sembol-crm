@@ -5333,22 +5333,57 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       const day = dateObj.getDate();
 
       try {
-        const mesaiRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${year}_${month}`);
-        const snap = await getDoc(mesaiRef);
-        let records = snap.exists() ? snap.data().records : {};
+        // ====================================================================
+        // DÜZELTME (kullanıcı talebi — "operasyon sorumlusu onaylayınca mesai
+        // Personel Muhasebe > Mesai tablosunda görünsün, mesai kaçmasın"):
+        // ====================================================================
+        // ESKİ HATA: Onaylanan TÜM personel, yaka tipine bakılmadan MAVİ YAKA
+        // dokümanına (mesai/{yıl}_{ay}) yazılıyordu. Finans > Personel Muhasebe
+        // ekranı mavi yakayı bu dokümandan, beyaz yakayı ise 'beyaz_' önekli
+        // dokümandan okur. Dolayısıyla ekipte bir BEYAZ YAKA personel varsa
+        // (operasyon sorumlusu, depo sorumlusu vb.) onun mesaisi yanlış
+        // dokümana gidiyor ve mesai tablosunda HİÇ GÖRÜNMÜYORDU — "mesai
+        // kaçması" tam olarak buydu.
+        // YENİ: Kayıtlar yaka tipine göre AYRILIR ve her biri kendi dokümanına
+        // yazılır. Veri biçimi ({ status, hours }) mesai tablosunun beklediği
+        // biçimle aynı; tablo bunu olduğu gibi okur, gerekirse Mesai Takip
+        // ekranından elle değiştirilebilir (kaynak damgası bunu engellemez).
+        const beyazMi = (pId) => {
+          const p = (personnelList || []).find(x => String(x.id) === String(pId));
+          if (!p) return false;
+          if (p.collarType) return p.collarType === 'Beyaz Yaka';
+          // Yaka tipi girilmemişse pozisyona göre karar ver (sistemin genel kuralı)
+          return !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position);
+        };
 
+        const gruplar = { '': {}, 'beyaz_': {} };
         Object.keys(mesaiModalData).forEach(pId => {
-          if (!records[pId]) records[pId] = {};
-          // 'oneri' yalnızca ekranda gösterim içindir; puantaja yazılmaz
-          const { status, hours } = mesaiModalData[pId];
-          records[pId][day] = { status, hours: hours || '' };
+          const onek = beyazMi(pId) ? 'beyaz_' : '';
+          gruplar[onek][pId] = mesaiModalData[pId];
         });
 
-        await setDoc(mesaiRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
+        let yazilanKisi = 0;
+        for (const onek of Object.keys(gruplar)) {
+          const grup = gruplar[onek];
+          if (Object.keys(grup).length === 0) continue;
+          const mesaiRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${onek}${year}_${month}`);
+          const snap = await getDoc(mesaiRef);
+          const records = snap.exists() ? (snap.data().records || {}) : {};
+          Object.keys(grup).forEach(pId => {
+            if (!records[pId]) records[pId] = {};
+            // 'oneri' yalnızca ekranda gösterim içindir; puantaja yazılmaz
+            const { status, hours } = grup[pId];
+            // kaynak: 'isOnay' -> bu hücrenin iş onayından geldiğini belirtir;
+            // Mesai Takip ekranından elle değiştirilmesini ENGELLEMEZ.
+            records[pId][day] = { status, hours: hours || '', kaynak: 'isOnay' };
+            yazilanKisi += 1;
+          });
+          await setDoc(mesaiRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
+        }
 
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobForMesai.id), { mesaiApproved: true });
 
-        addSystemLog('Mesai Onaylandı', `${jobForMesai.customerName} operasyonundaki personellerin mesai durumları güncellendi.`);
+        addSystemLog('Mesai Onaylandı', `${jobForMesai.customerName} operasyonunda ${yazilanKisi} personelin mesai durumu (${day}.${month}.${year}) Personel Muhasebe mesai tablosuna işlendi.`);
         setShowMesaiModal(false);
         setJobForMesai(null);
       } catch (err) {
