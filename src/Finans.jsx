@@ -6061,12 +6061,24 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const bekleyenIsDefteriId = useMemo(() => odemeIcinDefterBul(defterler, 'Banka')?.id || null, [defterler]);
     const bekleyenIsler = useMemo(() => {
       if (!seciliDefterId || seciliDefterId !== bekleyenIsDefteriId) return [];
-      const gun = gunFiltreAktif ? seciliGun : bugunStr();
+      // ======================================================================
+      // DEĞİŞTİ (kullanıcı talebi): TAMAMLANMAYAN ÖDEMELER HER GÜN GÖRÜNÜR
+      // ======================================================================
+      // ESKİ: Yalnızca bakılan GÜNÜN bekleyen işleri listeleniyordu; dün
+      // tamamlanmayan bir ödeme bugüne geçince listeden kayboluyor, gözden
+      // kaçıyordu.
+      // YENİ: İş sonlandırılana (ya da iptal edilene) kadar TARİHTEN BAĞIMSIZ
+      // olarak listede kalır — hangi güne bakarsanız bakın, "Tüm Zamanlar"da
+      // da en üstte durur. Sıralama: en ESKİ bekleyen en üstte (en çok geciken
+      // önce görünsün), aynı gün içindekiler saate göre.
       return (jobs || [])
-        .filter(j => j && j.date === gun
-          && j.status !== 'completed' && j.status !== 'cancelled'
-          && !j.endJobDetails)
-        .map(j => ({ ...j, bekleyenTutar: Math.max(0, (parseFloat(j.price) || 0) - (parseFloat(j.deposit) || 0)) }))
+        .filter(j => j && j.status !== 'completed' && j.status !== 'cancelled' && !j.endJobDetails)
+        .map(j => ({
+          ...j,
+          bekleyenTutar: Math.max(0, (parseFloat(j.price) || 0) - (parseFloat(j.deposit) || 0)),
+          // Kaç gün geciktiği (bugüne göre); 0 = bugünün işi
+          gecikmeGunu: Math.max(0, Math.round((new Date(bugunStr()) - new Date(j.date || bugunStr())) / 86400000)),
+        }))
         // ====================================================================
         // YENİ: ÜCRETSİZ ASANSÖR İŞLERİ LİSTELENMEZ (kullanıcı talebi)
         // ====================================================================
@@ -6079,8 +6091,46 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         // "eksik veri" demektir ve gözden kaçmaması gerekir.
         // ====================================================================
         .filter(j => !((j.type === 'Asansör' || j.type === 'asansor') && j.bekleyenTutar <= 0))
-        .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
-    }, [jobs, seciliDefterId, bekleyenIsDefteriId, gunFiltreAktif, seciliGun]);
+        .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.time || '').localeCompare(b.time || ''));
+    }, [jobs, seciliDefterId, bekleyenIsDefteriId]);
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): BAŞKA DEFTERE TAŞINAN ÖDEME BİLDİRİMİ
+    // ========================================================================
+    // Banka defterinde "ödemesi bekleniyor" olarak duran bir iş, sonlandırma
+    // sırasında NAKİT / KREDİ KARTI / ÖDEME ALINMADI seçilirse parası başka bir
+    // deftere (Kasa, POS ya da Tahsil Bekleyen) yazılır ve banka defterinden
+    // kaybolur. Nereye gittiği görünmediği için "ödeme kayboldu" izlenimi
+    // oluşuyordu. Artık BİLGİ AMAÇLI, tek satırlık bir bildirim olarak
+    // yalnızca BANKA defterinde gösterilir. Hesaplara hiçbir etkisi yoktur;
+    // yalnızca son 30 günün kayıtları listelenir ki liste şişmesin.
+    const tasinanOdemeler = useMemo(() => {
+      if (!seciliDefterId || seciliDefterId !== bekleyenIsDefteriId) return [];
+      const bugun = bugunStr();
+      const [by, bm, bg] = bugun.split('-').map(Number);
+      const otuzGunOnce = new Date(by, bm - 1, bg - 30);
+      const sinir = `${otuzGunOnce.getFullYear()}-${String(otuzGunOnce.getMonth() + 1).padStart(2, '0')}-${String(otuzGunOnce.getDate()).padStart(2, '0')}`;
+      const hedefAd = (yontem) => {
+        if (yontem === 'Nakit') return 'NAKİT DEFTERİNE TAŞINDI';
+        if (yontem === 'Kredi Kartı' || yontem === 'KrediKarti') return 'KREDİ KARTI DEFTERİNE TAŞINDI';
+        if (yontem === 'Ödeme Alınmadı') return 'TAHSİL BEKLEYEN (BORÇLU) DEFTERİNE TAŞINDI';
+        return null;
+      };
+      return (jobs || [])
+        .filter(j => {
+          if (!j || j.status !== 'completed' || !j.endJobDetails) return false;
+          if ((j.date || '') < sinir) return false;                       // yalnızca son 30 gün
+          const y = j.endJobDetails.paymentMethod;
+          return y === 'Nakit' || y === 'Kredi Kartı' || y === 'KrediKarti' || y === 'Ödeme Alınmadı';
+        })
+        .map(j => ({
+          ...j,
+          tutar: Math.max(0, (parseFloat(j.price) || 0) - (parseFloat(j.deposit) || 0)),
+          yontem: j.endJobDetails.paymentMethod,
+          hedefEtiket: hedefAd(j.endJobDetails.paymentMethod),
+        }))
+        .sort((a, b) => (b.date || '').localeCompare(a.date || ''));      // en yeni üstte
+    }, [jobs, seciliDefterId, bekleyenIsDefteriId]);
 
     // ========================================================================
     // YENİ: ÖDEMELER DEFTERİ — AYLIK GÖRÜNÜM + OTOMATİK MAAŞ SATIRLARI
@@ -8310,18 +8360,61 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                 <Clock className="w-3.5 h-3.5" /> Ödemesi Bekleniyor — {bekleyenIsler.length} iş (sonlanınca yöntemine göre deftere işlenir)
               </div>
               {bekleyenIsler.map(j => (
-                <div key={j.id} className="grid grid-cols-[1fr_auto] gap-2 px-3 sm:px-4 py-2.5 items-center opacity-60 border-t border-dashed border-amber-200">
+                <div key={j.id} className={`grid grid-cols-[1fr_auto] gap-2 px-3 sm:px-4 py-2.5 items-center border-t border-dashed border-amber-200 ${j.gecikmeGunu > 0 ? 'bg-red-50/60' : 'opacity-60'}`}>
                   <div className="min-w-0">
-                    <div className="font-black text-sm text-neutral-700 break-words">{j.customerName}</div>
+                    <div className="font-black text-sm text-neutral-700 break-words flex items-center gap-1.5 flex-wrap">
+                      {j.customerName}
+                      {/* YENİ: geçmiş günden devreden bekleyen ödeme vurgulanır */}
+                      {j.gecikmeGunu > 0 && (
+                        <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">
+                          {j.gecikmeGunu} GÜN GECİKTİ
+                        </span>
+                      )}
+                    </div>
                     <div className="text-[10px] font-bold text-neutral-500">
-                      {j.time || '—'} • {j.type || 'Nakliye'}
+                      {/* Tarih eklendi: hangi güne ait olduğu artık belli */}
+                      {j.date ? j.date.split('-').reverse().join('.') : '—'} • {j.time || '—'} • {j.type || 'Nakliye'}
                       {j.assignedVehiclePlate ? ` • ${j.assignedVehiclePlate}` : ''}
                       {(parseFloat(j.deposit) || 0) > 0 ? ` • Kapora düşüldü: ₺${paraFmt(parseFloat(j.deposit))}` : ''}
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <div className="font-black text-amber-700 tabular-nums text-sm sm:text-base">₺{paraFmt(j.bekleyenTutar)}</div>
-                    <div className="text-[9px] font-black uppercase text-amber-500">Bekleniyor</div>
+                    <div className={`font-black tabular-nums text-sm sm:text-base ${j.gecikmeGunu > 0 ? 'text-red-700' : 'text-amber-700'}`}>₺{paraFmt(j.bekleyenTutar)}</div>
+                    <div className={`text-[9px] font-black uppercase ${j.gecikmeGunu > 0 ? 'text-red-500' : 'text-amber-500'}`}>Bekleniyor</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ==================================================================
+              YENİ (kullanıcı talebi): BAŞKA DEFTERE TAŞINAN ÖDEME BİLDİRİMİ
+              ==================================================================
+              Banka defterinde bekleyen bir iş, Nakit / Kredi Kartı / Ödeme
+              Alınmadı olarak kapatıldığında parası başka deftere yazılır.
+              Burada yalnızca BİLGİ amaçlı, nereye gittiğini söyleyen bir satır
+              gösterilir — hesaplara etkisi yoktur. */}
+          {tasinanOdemeler.length > 0 && (
+            <div className="border-b border-sky-200 bg-sky-50/50">
+              <div className="px-3 sm:px-4 py-2 text-[10px] font-black uppercase text-sky-700 flex items-center gap-1.5">
+                <ArrowRightLeft className="w-3.5 h-3.5" /> Başka Deftere Taşınan Ödemeler — {tasinanOdemeler.length} iş (bilgi amaçlı, bu deftere işlenmedi)
+              </div>
+              {tasinanOdemeler.map(j => (
+                <div key={`t_${j.id}`} className="grid grid-cols-[1fr_auto] gap-2 px-3 sm:px-4 py-2.5 items-center border-t border-dashed border-sky-200">
+                  <div className="min-w-0">
+                    <div className="font-black text-sm text-neutral-700 break-words">{j.customerName}</div>
+                    <div className="text-[10px] font-bold text-neutral-500">
+                      {j.date ? j.date.split('-').reverse().join('.') : '—'} • {j.time || '—'} • {j.type || 'Nakliye'}
+                      {j.assignedVehiclePlate ? ` • ${j.assignedVehiclePlate}` : ''}
+                      {(parseFloat(j.deposit) || 0) > 0 ? ` • Kapora düşüldü: ₺${paraFmt(parseFloat(j.deposit))}` : ''}
+                    </div>
+                    <div className="text-[10px] font-black text-sky-700 mt-0.5">
+                      ({(j.yontem || '').toUpperCase()} OLARAK ÖDEMEYİ KAPATTI) {j.hedefEtiket}
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="font-black text-sky-700 tabular-nums text-sm sm:text-base">₺{paraFmt(j.tutar)}</div>
+                    <div className="text-[9px] font-black uppercase text-sky-500">Taşındı</div>
                   </div>
                 </div>
               ))}
