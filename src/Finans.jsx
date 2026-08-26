@@ -1939,6 +1939,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     const [prevMonthData, setPrevMonthData] = useState({}); // YENİ EKLENDİ
     const [isSaving, setIsSaving] = useState(false);
     const [isDataLoaded, setIsDataLoaded] = useState(false);
+    // YENİ (kullanıcı talebi): İş onaylama tahtasından mesai işlendiğinde bu
+    // tablo açıkken de görülebilsin diye elle YENİLE sayacı. Sayaç artınca
+    // aşağıdaki okuma effect'i yeniden çalışır ve güncel mesai gelir.
+    const [mesaiYenile, setMesaiYenile] = useState(0);
     const currentDayRef = React.useRef(null);
 
     const docPrefix = collarType === 'Mavi Yaka' ? '' : 'beyaz_';
@@ -2091,7 +2095,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         }
       };
       fetchMesai();
-    }, [currentMonth, currentYear, db, appId, docPrefix, collarType, personnelList, daysInMonth]);
+    }, [currentMonth, currentYear, db, appId, docPrefix, collarType, personnelList, daysInMonth, mesaiYenile]);
 
     useEffect(() => {
       if (!isDataLoaded) return;
@@ -2385,7 +2389,17 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             <thead className="sticky top-0 z-30 shadow-md">
               <tr>
                 <th colSpan={daysInMonth + 7} className="bg-blue-600 text-white font-black py-2 border-b-2 border-neutral-400 text-sm md:text-lg tracking-wider">
-                  {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} {collarType.toUpperCase()} MESAİ LİSTESİ
+                  <span className="inline-flex items-center gap-3">
+                    {months.find(m => m.val === currentMonth)?.label.toUpperCase()} {currentYear} {collarType.toUpperCase()} MESAİ LİSTESİ
+                    {/* YENİ (kullanıcı talebi): İş onaylama tahtasında mesai
+                        onaylandıysa, bu tablo açıkken de güncel veriyi çekmek
+                        için elle yenileme düğmesi. */}
+                    <button type="button" onClick={() => setMesaiYenile(x => x + 1)}
+                      title="İş onaylarından gelen mesaileri yeniden yükle"
+                      className="text-[10px] font-black bg-white/20 hover:bg-white/30 px-2.5 py-1 rounded-lg transition normal-case tracking-normal">
+                      Yenile
+                    </button>
+                  </span>
                 </th>
               </tr>
               <tr>
