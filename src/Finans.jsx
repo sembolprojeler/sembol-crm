@@ -2097,20 +2097,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       fetchMesai();
     }, [currentMonth, currentYear, db, appId, docPrefix, collarType, personnelList, daysInMonth, mesaiYenile]);
 
+    // ========================================================================
+    // KRİTİK DÜZELTME (kullanıcı talebi — "iş onayındaki mesai tabloya
+    // aktarılmıyor"):
+    // ========================================================================
+    // SORUNUN KÖKÜ: Aşağıdaki otomatik kaydetme, tablo AÇILDIĞI ANDA da
+    // çalışıyordu. Okunan veri 1 saniye sonra olduğu gibi geri yazılıyor ve
+    // `records` alanı TÜMÜYLE değiştiriliyordu (merge:true yalnızca üst seviye
+    // alanları birleştirir, records'un içini değil). Sonuç: Finans > Personel
+    // Muhasebe > Mesai ekranı açıkken (veya sekmede açık bırakılmışken)
+    // operasyon sorumlusu iş onayı yaptığında, bu ekranın elindeki ESKİ veri
+    // onayın üstüne yazılıp yeni mesaiyi SİLİYORDU. "Aktarım olmuyor"
+    // şikâyetinin sebebi buydu.
+    // ÇÖZÜM: Kaydetme yalnızca kullanıcı tabloda GERÇEKTEN bir hücre
+    // değiştirdiğinde yapılır (degisiklikVar bayrağı). İlk yükleme ya da
+    // dışarıdan gelen tazeleme artık hiçbir şeyi geri yazmaz.
+    const [degisiklikVar, setDegisiklikVar] = useState(false);
+
     useEffect(() => {
       if (!isDataLoaded) return;
+      if (!degisiklikVar) return; // Kullanıcı değişikliği yoksa YAZMA
       const timeoutId = setTimeout(async () => {
         setIsSaving(true);
         try {
           const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${docPrefix}${currentYear}_${currentMonth}`);
           await setDoc(docRef, { records: mesaiData, updatedAt: new Date().toISOString() }, { merge: true });
+          setDegisiklikVar(false);
         } catch (e) {
           console.error("Otomatik kaydetme hatası:", e);
         }
         setTimeout(() => setIsSaving(false), 800);
       }, 1000);
       return () => clearTimeout(timeoutId);
-    }, [mesaiData, docPrefix]);
+    }, [mesaiData, docPrefix, degisiklikVar]);
 
     // OTOMATİK PAZAR GÜNÜ MESAİ KONTROLÜ (7 GÜN KURALI)
     useEffect(() => {
@@ -2176,11 +2195,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
       });
 
       if (hasChanges) {
+          // Otomatik Pazar/FGM düzeltmesi bir SİSTEM kararıdır; kaydedilmesi
+          // gerekir. Bu yüzden değişiklik bayrağı burada da açılır.
+          setDegisiklikVar(true);
           setMesaiData(newData);
       }
     }, [mesaiData, isDataLoaded, collarType, currentMonth, currentYear, daysInMonth, prevMonthData, targetPersonnelList]);
 
     const handleCellChange = (personId, day, value) => {
+      setDegisiklikVar(true); // Kullanıcı düzenledi -> kaydetme serbest
       setMesaiData(prev => ({
         ...prev,
         [personId]: {
@@ -2192,6 +2215,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
     };
 
     const handleHoursChange = (personId, day, hours) => {
+        setDegisiklikVar(true); // Kullanıcı düzenledi -> kaydetme serbest
         setMesaiData(prev => ({
             ...prev,
             [personId]: {
@@ -6544,7 +6568,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               // oluşuyordu; bu geçersiz HTML'dir ve tarayıcı yapıyı bozar.
               // Bu yüzden kart <div role="button"> oldu; klavye ile açılabilmesi
               // için tabIndex ve Enter/Space desteği eklendi.
-              const defteriAc = () => { setSeciliDefterId(d.id); setDetayArama(''); setKategoriFiltre('Tümü'); setSeciliGun(bugunStr()); setGunFiltreAktif(true); };
+              // DEĞİŞTİ (kullanıcı talebi): NAKİT ve BANKA defterleri her
+              // açılışta "Tüm Zamanlar" ile gelir (gün filtresi kapalı) —
+              // kasa/banka hareketlerinin tamamı ilk bakışta görünsün.
+              // Diğer defter türlerinde (Kredi Kartı, Borçlu vb.) eski
+              // davranış korunur: bugün seçili olarak açılır.
+              const defteriAc = () => {
+                setSeciliDefterId(d.id);
+                setDetayArama('');
+                setKategoriFiltre('Tümü');
+                setSeciliGun(bugunStr());
+                setGunFiltreAktif(!(d.tur === 'Nakit' || d.tur === 'Banka'));
+              };
               return (
                 <div key={d.id} role="button" tabIndex={0}
                   onClick={defteriAc}
@@ -8210,7 +8245,14 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
               {yaklasanAcik && (
                 <div className="border-t border-neutral-100 divide-y divide-neutral-100">
                   {liste.map((y, i) => (
-                    <button key={i} type="button" onClick={() => setSeciliDefterId(y.defterId)}
+                    <button key={i} type="button" onClick={() => {
+                      // Aynı kural (kullanıcı talebi): Nakit/Banka defterleri
+                      // "Tüm Zamanlar" ile açılır, diğerleri bugün seçili.
+                      const hedef = defterler.find(x => x.id === y.defterId);
+                      setSeciliDefterId(y.defterId);
+                      setSeciliGun(bugunStr());
+                      setGunFiltreAktif(!(hedef?.tur === 'Nakit' || hedef?.tur === 'Banka'));
+                    }}
                       className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-neutral-50 transition">
                       <span className="text-[9px] font-black text-red-600 uppercase shrink-0 w-10">Gider</span>
                       <span className="flex-1 min-w-0">
