@@ -4397,6 +4397,18 @@ const saatMetniSayiyaCevir = (deger) => {
     // alt kategoriler de görünür ve tıklanabilir olsun diye.
     const [hizliKatSecici, setHizliKatSecici] = useState(false);
     const [hizliKaydediliyor, setHizliKaydediliyor] = useState(false);
+    // ========================================================================
+    // YENİ (kullanıcı talebi): HIZLI KAYIT ÇUBUĞUNU KAYITTAN SONRA YENİDEN AKTİFLEŞTİR
+    // ------------------------------------------------------------------------
+    // Bir ödeme girişi/çıkışı kaydedildikten sonra tutar kutusu boşalıyordu
+    // ama ODAK (focus) kutuda KALMIYORDU — mobilde bu, klavyenin kapanmasına
+    // ve kullanıcının bir sonraki tutarı yazabilmek için kutuya TEKRAR
+    // dokunması gerekmesine yol açıyordu ("bar tekrar aktif olmuyor" hissi).
+    // Bu ref ile kayıttan hemen sonra kutuya programatik olarak yeniden
+    // odaklanılır; klavye açık kalır ve aynı ekranda art arda birden fazla
+    // gelir/gider girilebilir.
+    // ========================================================================
+    const hizliTutarInputRef = useRef(null);
     // YENİ (kullanıcı talebi): Satıra tıklanınca Düzenle/Sil düğmeleri açılır.
     // Tek seferde yalnız bir satır açık kalır; tekrar tıklanınca kapanır.
     const [acikIslemId, setAcikIslemId] = useState(null);
@@ -5210,6 +5222,12 @@ const saatMetniSayiyaCevir = (deger) => {
         });
         addSystemLog?.('Defter İşlemi (Hızlı)', `${seciliDefter?.ad}: ${hizliTip === 'giris' ? 'PARA GİRİŞİ' : 'PARA ÇIKIŞI'} ₺${paraFmt(tutar)} (${hizliKategori}).`);
         setHizliTutar(''); setHizliAciklama(''); setHizliKategori('Diğer');
+        // YENİ (kullanıcı talebi): Kayıt tamamlanır tamamlanmaz tutar kutusuna
+        // yeniden odaklanılır — bar "tekrar aktif" olur, klavye kapanmaz ve
+        // aynı ekranda hemen bir sonraki gelir/gider tutarı yazılabilir.
+        // setTimeout(...,0): state güncellemesi (input'un boşalması) ekrana
+        // yansıdıktan HEMEN SONRA odaklanmayı garanti eder.
+        setTimeout(() => hizliTutarInputRef.current?.focus(), 0);
       } catch (e) { console.error('Hızlı kayıt başarısız:', e); alert('Kaydedilemedi. Lütfen tekrar deneyin.'); }
       finally { setHizliKaydediliyor(false); }
     };
@@ -9956,7 +9974,7 @@ const saatMetniSayiyaCevir = (deger) => {
                 </div>
               )}
               <div className="flex items-center gap-2 p-2">
-                <input type="number" inputMode="decimal" value={hizliTutar}
+                <input ref={hizliTutarInputRef} type="number" inputMode="decimal" value={hizliTutar}
                   onChange={e => setHizliTutar(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') hizliKaydet(); }}
                   placeholder={hizliTip === 'giris' ? 'Gelir tutarı (₺)' : hizliTip === 'virman' ? 'Transfer tutarı (₺)' : 'Gider tutarı (₺)'}
