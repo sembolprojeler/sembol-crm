@@ -6199,6 +6199,52 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       ? Math.round((sahaPuanDonem.reduce((t, x) => t + x.puan, 0) / sahaPuanDonem.length) * 10) / 10
       : 0;
 
+    // ========================================================================
+    // YENİ (kullanıcı talebi): "OPERASYON" POZİSYONU İÇİN PERFORMANS ÖZETİ
+    // ------------------------------------------------------------------------
+    // Operasyon pozisyonundaki personel bizzat bir işe EKİP ÜYESİ olarak
+    // atanmaz — koordinatördür. Bu yüzden bu personelin profilinde üstteki
+    // 4 kart (Yapılan İş / Alınan Yorum / Hasarlı İş / Saha Puanı) KİŞİSEL
+    // değil, ŞİRKET GENELİ rakamlar gösterir. Diğer tüm pozisyonlarda (Mavi/
+    // Beyaz Yaka ekip üyeleri) eski davranış AYNEN korunur — bu blok sadece
+    // isOperasyonPozisyonu true iken devreye girer, aksi halde hiç çalışmaz.
+    // Seçili dönem filtresi (Bu Hafta/Bu Ay/Geçen Ay/Bu Sene/Tüm Zamanlar)
+    // buradaki hesaplarda da AYNEN uygulanır (periodStart/periodEnd).
+    // ========================================================================
+    const isOperasyonPozisyonu = person?.position === 'Operasyon';
+
+    // Şirket genelindeki TÜM Nakliye+Depo işleri (Asansör hariç — sistemdeki
+    // "nakliyeVeyaDepo" kuralıyla birebir aynı: tip belirtilmemişse Nakliye sayılır)
+    const tumNakliyeDepoIsleriDonem = isOperasyonPozisyonu ? jobs.filter(j => {
+      const nakliyeVeyaDepo = j.type === 'Depo' || j.type === 'Nakliye' || !j.type;
+      if (!nakliyeVeyaDepo) return false;
+      const d = new Date(j.date);
+      if (periodStart && d < periodStart) return false;
+      if (periodEnd && d > periodEnd) return false;
+      return true;
+    }) : [];
+
+    // "Yapılan İş" (Operasyon): tamamlanan iş sayısı — iptal edilenler zaten
+    // status !== 'completed' olduğu için otomatik hariç kalır.
+    const operasyonYapilanIsSayisi = tumNakliyeDepoIsleriDonem.filter(j => j.status === 'completed').length;
+
+    // "Alınan Yorum" (Operasyon): puan TOPLAMI değil, tüm ekiplerin aldığı
+    // yorum/değerlendirme SAYISI (kaç işe yorum/puan onaylandığı).
+    const operasyonAlinanYorumSayisi = tumNakliyeDepoIsleriDonem.filter(j => j.pointsApproved && j.reviewImage).length;
+
+    // "Hasarlı İş" (Operasyon): tüm ekiplerin toplam hasarlı iş sayısı
+    const operasyonHasarliIsSayisi = tumNakliyeDepoIsleriDonem.filter(j => j.endJobDetails?.damageStatus === 'Hasar var').length;
+
+    // "Saha Puanı" (Operasyon): ortalama puan yerine TOPLAM SAHA DENETİMİ sayısı
+    // (şirket geneli, seçili döneme göre — kimin denetlendiğinden bağımsız).
+    const operasyonSahaDenetimSayisi = isOperasyonPozisyonu ? sahaDenetimleri.filter(dn => {
+      const d = dn.jobDate ? new Date(dn.jobDate) : (dn.denetimTarihi ? new Date(dn.denetimTarihi) : null);
+      if (!d) return false;
+      if (periodStart && d < periodStart) return false;
+      if (periodEnd && d > periodEnd) return false;
+      return true;
+    }).length : 0;
+
     const recentJobs = personJobs.slice(0, 5);
     const recentReviewedJobs = personJobs.filter(j => j.pointsApproved && j.reviewImage).slice(0, 5);
 
@@ -6210,7 +6256,29 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       if (periodEnd && d > periodEnd) return false;
       return true;
     });
-    const periodFazlaMesaiSayisi = personMesaiForPeriod.filter(m => ['FG', 'FGM', 'FM'].includes(m.code)).length;
+    // ========================================================================
+    // DEĞİŞTİ (kullanıcı talebi): "Fazla Mesai" kartı artık gün SAYISI değil,
+    // Personel Muhasebe (Finans) ekranındaki "toplam fazla mesai saati" ile
+    // BİREBİR AYNI mantıkla hesaplanan SAAT TOPLAMIdır: FM ve FGM saatleri
+    // toplanır, EM (eksik mesai) saatleri çıkarılır.
+    // HATA DÜZELTMESİ: m.hours değeri virgüllü saklanan saatlerden (örn. "4,5")
+    // App.jsx'te parseFloat() ile üretiliyordu; parseFloat virgülü ondalık
+    // ayıracı saymadığı için "4,5" -> 4 gibi HATALI kesiliyordu (App.jsx'teki
+    // kaynak da ayrıca düzeltildi). Burada ek güvence olarak aynı çevrim
+    // tekrar güvenli şekilde uygulanır.
+    // ========================================================================
+    const saatMetniSayiyaCevirLokal = (deger) => {
+      if (deger === null || deger === undefined || deger === '') return 0;
+      const n = parseFloat(String(deger).replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    };
+    const periodFazlaMesaiSaati = personMesaiForPeriod.reduce((toplam, m) => {
+      if (m.code === 'FM' || m.code === 'FGM') return toplam + saatMetniSayiyaCevirLokal(m.hours);
+      if (m.code === 'EM') return toplam - saatMetniSayiyaCevirLokal(m.hours);
+      return toplam;
+    }, 0);
+    // Ekranda: tam sayıysa düz ("8"), değilse virgüllü ("4,5") gösterilir
+    const periodFazlaMesaiSayisi = periodFazlaMesaiSaati % 1 === 0 ? periodFazlaMesaiSaati : periodFazlaMesaiSaati.toFixed(1).replace('.', ',');
     // YENİ: Sadece "Fazla Gün" (FG) sayısı
     const periodFazlaGunSayisi = personMesaiForPeriod.filter(m => m.code === 'FG').length;
     // YENİ: "Fazla Gün + Mesai" toplamı — hem tam fazla gün (FG) hem fazla gün+mesai (FGM) birlikte
@@ -6287,8 +6355,16 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
     })();
     const periodRaporGunSayisi = personMesaiForPeriod.filter(m => m.code === 'R').length;
     const periodDevamsizlikSayisi = personMesaiForPeriod.filter(m => m.code === 'D').length;
-    const periodUcretsizIzinSayisi = personMesaiForPeriod.filter(m => m.code === 'Üİ').length;
-    const periodUcretliIzinSayisi = personMesaiForPeriod.filter(m => m.code === 'Yİ').length;
+    // DEĞİŞTİ (kullanıcı talebi): Personel Muhasebe ekranıyla (Finans.jsx)
+    // BİREBİR AYNI koda entegre edildi. Finans tarafında "Ücretsiz İzin"
+    // hem 'Üİ' HEM 'İB' (İşi Bıraktı) kodunu kapsıyordu — burada sadece 'Üİ'
+    // sayılıyordu, 'İB' eksikti. Artık ikisi de sayılıyor.
+    const periodUcretsizIzinSayisi = personMesaiForPeriod.filter(m => m.code === 'Üİ' || m.code === 'İB').length;
+    // DEĞİŞTİ: "Ücretli İzin" artık TÜM ücretli izin türlerini kapsıyor:
+    // Yıllık İzin (Yİ), Bayram İzni (Bİ), Haftalık İzin (Hİ). Öncesinde
+    // yalnızca Yıllık İzin (Yİ) sayılıyordu; Bayram/Haftalık izin kodları
+    // hiç sayaca yansımıyordu.
+    const periodUcretliIzinSayisi = personMesaiForPeriod.filter(m => ['Yİ', 'Bİ', 'Hİ'].includes(m.code)).length;
 
     // YENİ: Özellikler bölümü sadece Mavi Yaka'da gösterilir; Temizlik Görevlisi ve
     // Asansör Operatörü hariç.
@@ -7827,37 +7903,52 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
           </div>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200 text-center">
-              <span className="text-3xl font-black text-black block">{periodJobsCount}</span>
+              {/* DEĞİŞTİ (kullanıcı talebi): Operasyon pozisyonunda KİŞİSEL değil,
+                  şirket geneli "tamamlanan Nakliye+Depo işi" sayısı gösterilir
+                  (iptal edilenler status !== 'completed' olduğu için otomatik hariç). */}
+              <span className="text-3xl font-black text-black block">{isOperasyonPozisyonu ? operasyonYapilanIsSayisi : periodJobsCount}</span>
               <span className="text-xs font-bold text-neutral-500">Yapılan İş</span>
+              {isOperasyonPozisyonu && <span className="block text-[9px] font-bold text-neutral-400 mt-0.5">Tüm ekipler • Nakliye+Depo</span>}
             </div>
             <div className="bg-yellow-50 p-4 rounded-xl border border-yellow-200 text-center">
-              {/* YENİ: Alınan Yorum = Mavi Yaka Puantaj tablosundaki toplam puan (puantaj dokümanından okunur). Yüklenene kadar iş bazlı değer gösterilir. */}
-              {(() => {
+              {/* DEĞİŞTİ (kullanıcı talebi): Operasyon pozisyonunda puan TOPLAMI
+                  değil, tüm ekiplerin aldığı yorum/değerlendirme SAYISI gösterilir.
+                  Diğer pozisyonlarda eski davranış (puantaj puan toplamı) korunur. */}
+              {isOperasyonPozisyonu ? (
+                <span className="text-3xl font-black text-yellow-600 block">{operasyonAlinanYorumSayisi}</span>
+              ) : (() => {
                 const _v = puantajPointsTotal !== null ? puantajPointsTotal : periodYorumPuani;
                 return <span className="text-3xl font-black text-yellow-600 block">{_v % 1 === 0 ? _v : _v.toFixed(1).replace('.', ',')}</span>;
               })()}
               <span className="text-xs font-bold text-yellow-700">Alınan Yorum</span>
+              {isOperasyonPozisyonu && <span className="block text-[9px] font-bold text-yellow-500 mt-0.5">Tüm ekipler</span>}
             </div>
-            {/* YENİ: Ekibine hasar kaydı yazılmış iş sayısı */}
+            {/* YENİ: Ekibine hasar kaydı yazılmış iş sayısı (Operasyon'da: tüm ekipler) */}
             <div className="bg-red-50 p-4 rounded-xl border border-red-200 text-center">
-              <span className="text-3xl font-black text-red-600 block">{periodDamagesCount}</span>
+              <span className="text-3xl font-black text-red-600 block">{isOperasyonPozisyonu ? operasyonHasarliIsSayisi : periodDamagesCount}</span>
               <span className="text-xs font-bold text-red-700">Hasarlı İş</span>
+              {isOperasyonPozisyonu && <span className="block text-[9px] font-bold text-red-400 mt-0.5">Tüm ekipler</span>}
             </div>
             {/* YENİ: SAHA PUANI — şeflerin saha denetiminde verdiği 1-5 puanların ortalaması.
-                Hiç puan verilmemiş personelde her zaman 0 görünür. */}
+                Hiç puan verilmemiş personelde her zaman 0 görünür.
+                DEĞİŞTİ (kullanıcı talebi): Operasyon pozisyonunda ortalama puan yerine
+                TOPLAM SAHA DENETİMİ SAYISI (şirket geneli, döneme göre) gösterilir. */}
             <div className="bg-purple-50 p-4 rounded-xl border border-purple-200 text-center">
               <span className="text-3xl font-black text-purple-700 block">
-                {sahaPuanOrtalamasi % 1 === 0 ? sahaPuanOrtalamasi : String(sahaPuanOrtalamasi).replace('.', ',')}
+                {isOperasyonPozisyonu ? operasyonSahaDenetimSayisi : (sahaPuanOrtalamasi % 1 === 0 ? sahaPuanOrtalamasi : String(sahaPuanOrtalamasi).replace('.', ','))}
               </span>
               <span className="text-xs font-bold text-purple-700">Saha Puanı</span>
               <span className="block text-[9px] font-bold text-purple-400 mt-0.5">
-                {sahaPuanDonem.length > 0 ? `${sahaPuanDonem.length} denetim • 5 üzerinden` : 'Henüz şef denetimi yok'}
+                {isOperasyonPozisyonu
+                  ? 'Toplam saha denetimi (tüm ekipler)'
+                  : (sahaPuanDonem.length > 0 ? `${sahaPuanDonem.length} denetim • 5 üzerinden` : 'Henüz şef denetimi yok')}
               </span>
             </div>
             {/* YENİ: Mesai/puantaj tabanlı sayaçlar */}
             <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-center">
               <span className="text-3xl font-black text-blue-600 block">{periodFazlaMesaiSayisi}</span>
               <span className="text-xs font-bold text-blue-700">Fazla Mesai</span>
+              <span className="block text-[9px] font-bold text-blue-400 mt-0.5">Toplam saat (Personel Muhasebe ile aynı)</span>
             </div>
             {/* YENİ: Fazla Gün (FG) + Fazla Gün+Mesai (FGM) toplamı */}
             <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-200 text-center">
