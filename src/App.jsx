@@ -4259,6 +4259,30 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // ========================================================================
     const jobOnbellekRef = useRef({});
     const jobIlkYuklemeRef = useRef(true);
+    // ==========================================================================
+    // HATA DÜZELTMESİ (kullanıcı bildirimi — "durmadan bildirim geliyor",
+    // 2021 tarihli eski bir iş için "🆕 Yeni İş Kaydı" bildirimi gelmesi):
+    // ==========================================================================
+    // KÖK NEDEN: `jobs` = canliIsler (son 30 gün, anlık) + arsivIsler (TÜM
+    // geçmiş, ~17.000 kayıt) birleşimidir. Bu bildirim effect'i SADECE İLK
+    // ÇALIŞMASINDA (jobIlkYuklemeRef) önbelleği doldurup bildirim üretmeden
+    // çıkıyordu — ama bu ilk çalışma, `arsivIsler` DAHA YÜKLENMEDEN, yalnızca
+    // `canliIsler` (son 30 gün) doluyken gerçekleşiyordu (arşiv 1,5 sn sonra
+    // arka planda, tembel/idle yüklemeyle geliyor). Arşiv birkaç saniye sonra
+    // dolunca `jobs` state'i binlerce eski kayıtla birden büyüyor; bu effect
+    // TEKRAR çalışıyor ama artık "ilk yükleme" değil (bayrak zaten düştü) —
+    // önbellekte hiç olmayan (çünkü ilk doldurmada henüz yoktular) TÜM o eski
+    // işler "yeni eklenen iş" sanılıp her biri için bildirim gönderiliyordu.
+    // Aynı şey, eski bir aya/müşteri profiline gidilip donemIsleriYukle() ile
+    // ek geçmiş yüklendiğinde de tekrar oluşabiliyordu.
+    // ÇÖZÜM: Kalıcı ve en güvenli çözüm olarak, kaydın GERÇEKTEN AÇILDIĞI ana
+    // (createdAt) göre bir KESME TARİHİ eklendi. 1 Eylül 2026'dan ÖNCE
+    // açılmış hiçbir iş kaydı için (arşiv ne zaman/nasıl yüklenirse yüklensin)
+    // artık bildirim ÜRETİLMEZ. createdAt alanı yoksa (çok eski kayıt) da
+    // güvenli tarafta kalınıp bildirim üretilmez.
+    // ==========================================================================
+    const IS_BILDIRIM_BASLANGIC = '2026-09-01T00:00:00';
+    const isKaydiBildirimUygun = (j) => !!j.createdAt && j.createdAt >= IS_BILDIRIM_BASLANGIC;
     useEffect(() => {
       if (jobs.length === 0) return; // Henüz veri gelmedi
       const yetkiliMi = jobBildirimYetkisiVarMi();
@@ -4278,9 +4302,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
       jobs.forEach(j => {
         const onceki = jobOnbellekRef.current[j.id];
+        const bildirimUygun = isKaydiBildirimUygun(j);
         if (!onceki) {
-          // Yeni eklenen iş (önbellekte hiç yoktu)
-          if (yetkiliMi) {
+          // Yeni eklenen iş (önbellekte hiç yoktu) — VEYA arşiv/dönem yükleyicisi
+          // ile SONRADAN merkeze giren ESKİ bir kayıt olabilir; kesme tarihi
+          // ikisini ayırt eder.
+          if (yetkiliMi && bildirimUygun) {
             const otomatikAsansorMu = j.contractDetails === 'Otomatik Oluşturulan Asansör Kurulum Kaydı';
             const cokGunluDevamKaydiMi = (j.price === '0' || j.price === 0) && j.type !== 'Asansör';
             if (!otomatikAsansorMu && !cokGunluDevamKaydiMi) {
@@ -4290,7 +4317,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             }
           }
         } else {
-          if (yetkiliMi) {
+          if (yetkiliMi && bildirimUygun) {
             if (j.status === 'cancelled' && onceki.status !== 'cancelled') {
               bildirimGonder('❌ İş İptal Edildi',
                 `${tarihGunAdi(j.date)}\n${j.type} Kaydı • ${j.customerName || 'İsimsiz müşteri'}\nİptal eden: ${j.cancelledBy || 'Bilinmiyor'}`,
@@ -4301,7 +4328,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 { tag: `is-tarih-${j.id}` });
             }
           }
-          if (opYetkisiVarMi() && j.endJobDetails?.damageStatus === 'Hasar var' && onceki.hasar !== 'Hasar var') {
+          if (opYetkisiVarMi() && bildirimUygun && j.endJobDetails?.damageStatus === 'Hasar var' && onceki.hasar !== 'Hasar var') {
             bildirimGonder('⚠️ Hasarlı İş Bildirimi', `${j.customerName || 'Bir müşteri'} işinde hasar bildirimi yapıldı.`, { tag: `hasar-${j.id}` });
           }
         }
