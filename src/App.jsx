@@ -3790,10 +3790,23 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
         // Bildirimler: yalnızca ilk yüklemeden SONRAKİ değişikliklerde (sayfa
         // ilk açıldığında mevcut kayıtlar için bildirim üretilmez).
+        // ====================================================================
+        // YENİ (kullanıcı talebi): 1 EYLÜL 2026 KESME TARİHİ
+        // --------------------------------------------------------------------
+        // Sistemde birikmiş ESKİ hatırlatmalar (1 Eylül 2026'dan ÖNCE açılmış
+        // kayıtlar) için artık bildirim/hatırlatma ÜRETİLMEZ — geçmişte kalan
+        // yığın bildirim spam'i olarak gelmesin. Yalnızca bu tarihten SONRA
+        // AÇILAN (oluşturulan) hatırlatma kayıtları bildirim üretmeye devam
+        // eder. Ölçüt kaydın "createdAt" alanıdır (hatırlatmanın AÇILDIĞI an),
+        // "tarih" (hatırlatmanın vadesi) değil — kullanıcı "ondan sonra açılan
+        // kayıtlar bildirim olarak gelsin" dedi; açılış anı esas alınır.
+        // ====================================================================
+        const HATIRLATMA_BILDIRIM_BASLANGIC = '2026-09-01T00:00:00';
         if (!hatirlatmaIlkYuklemeRef.current) {
           snap.docChanges().forEach(chg => {
             const h = chg.doc.data();
-            if ((chg.type === 'added' || chg.type === 'modified') && !h.tamamlandi && h.tarih && h.tarih <= bugunStr) {
+            const acilisZamaniUygun = h.createdAt && h.createdAt >= HATIRLATMA_BILDIRIM_BASLANGIC;
+            if ((chg.type === 'added' || chg.type === 'modified') && !h.tamamlandi && h.tarih && h.tarih <= bugunStr && acilisZamaniUygun) {
               bildirimGonder('🗓️ Hatırlatma', h.aciklama || 'Bugüne ait bir hatırlatmanız var.', { tag: `hatirlatma-${chg.doc.id}` });
             }
           });
@@ -3846,6 +3859,24 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       if (posAccess && typeof posAccess['operasyon'] === 'boolean') return posAccess['operasyon'];
       const rankAccess = positionModules?.[currentUser?.rank];
       if (rankAccess && typeof rankAccess['operasyon'] === 'boolean') return rankAccess['operasyon'];
+      return false;
+    };
+    // ==========================================================================
+    // YENİ (kullanıcı talebi): FİNANS BİLDİRİM YETKİSİ
+    // opYetkisiVarMi() ile birebir aynı desen — yalnızca 'finance' modülü için.
+    // Defter işlemi (para girişi/çıkışı/transfer) bildirimlerini kimin göreceğini
+    // belirler; aşağıdaki defterIslemleri bildirim effect'i bunu kullanır.
+    // ==========================================================================
+    const finansBildirimYetkisiVarMi = () => {
+      if (currentUser?.employmentStatus === 'Pasif') return false;
+      if (currentUser?.fullName === 'Sistem Yöneticisi' || currentUser?.position === 'Firma Sahibi') return true;
+      if (currentUser?.permissions?.modules && typeof currentUser.permissions.modules['finance'] === 'boolean') {
+        return currentUser.permissions.modules['finance'];
+      }
+      const posAccess = positionModules?.[currentUser?.position];
+      if (posAccess && typeof posAccess['finance'] === 'boolean') return posAccess['finance'];
+      const rankAccess = positionModules?.[currentUser?.rank];
+      if (rankAccess && typeof rankAccess['finance'] === 'boolean') return rankAccess['finance'];
       return false;
     };
 
@@ -3972,6 +4003,21 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [showEndJobModal, setShowEndJobModal] = useState(false);
     const [jobToEnd, setJobToEnd] = useState(null);
     const [endJobError, setEndJobError] = useState('');
+    // ==========================================================================
+    // HATA DÜZELTMESİ (kullanıcı bildirimi — deftere aynı işten mükerrer/kopya
+    // gelir kaydı düşmesi, örn. aynı "Teslim kodu" ile art arda ₺56.000 satırları):
+    // ==========================================================================
+    // KÖK NEDEN: "Kodu Doğrula ve İşi Bitir" butonu submitEndJob'u (async) ÇAĞIRIRKEN
+    // hiçbir kilit/disabled durumu yoktu. Personel mobilde butona hızlıca birkaç kez
+    // dokunursa (yavaş internet, çift tıklama vb.) submitEndJob AYNI ANDA birden fazla
+    // kez çalışıyordu. shared.jsx > defterGelirKaydet() içindeki mükerrer koruması
+    // "önce oku (var mı?) sonra yaz" mantığıyla çalışıyor; iki çağrı da aynı anda
+    // okuma yaptığında ikisi de "kayıt yok" görüp İKİSİ DE yeni satır ekliyordu —
+    // yani aynı iş için deftere kopya gelir kaydı düşüyordu.
+    // ÇÖZÜM: Gönderim sırasında bu kilit true yapılır; submitEndJob başında ikinci
+    // bir çağrı gelirse hemen durdurulur, buton da bu sırada devre dışı bırakılır.
+    // ==========================================================================
+    const [endJobKaydediliyor, setEndJobKaydediliyor] = useState(false);
     const [endJobData, setEndJobData] = useState({ 
       paymentMethod: 'Banka', // DEĞİŞTİ: varsayılan Banka — listede de ilk seçenek 
       damageStatus: 'Hasarsız teslim edildi', 
@@ -4301,6 +4347,66 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       vehicles.forEach(v => vehicleOnbellekRef.current.add(v.id));
     }, [vehicles]);
 
+    // ==========================================================================
+    // YENİ (kullanıcı talebi): FİNANS > DEFTER İŞLEMİ BİLDİRİMİ
+    // --------------------------------------------------------------------------
+    // Bir deftere PARA GİRİŞİ / PARA ÇIKIŞI / TRANSFER (Virman) kaydedildiğinde
+    // Finans bildirim yetkisi olan kullanıcılara tarayıcı bildirimi gider.
+    // jobs/tasks/vehicles ile AYNI "diff tabanlı" desen: ilk yüklemede bildirim
+    // ÜRETİLMEZ (mevcut geçmiş kayıtlar spam üretmesin), yalnızca SONRADAN
+    // eklenen yeni kayıtlar bildirim üretir.
+    //
+    // OKUMA MALİYETİ: defterIslemleri zamanla büyüyen bir koleksiyondur ve
+    // jobs/tasks/vehicles'ın aksine App.jsx'te zaten yüklü bir state'e binemez
+    // (Finans verisi burada tutulmuyor) — bu yüzden TEK yeni, KAPSAMI DARALTILMIŞ
+    // bir dinleyicidir: yalnızca en YENİ 100 kayıt (orderBy + limit) dinlenir.
+    //
+    // ÇİFT BİLDİRİM ENGELİ: Bazı işlemler (Virman, Tahsilat, Taksit/Maaş/Avans
+    // Ödemesi) iki bacaklı yazılır (kaynak + hedef/mahsup). Aynı olay için İKİ
+    // ayrı bildirim gitmesin diye ikinci bacak (isVirman+giris, alacakMahsup,
+    // krediMahsup, odemeMahsup) ve devir/açılış kaydı (devirKaydi) bastırılır.
+    // ==========================================================================
+    const islemOnbellekRef = useRef(new Set());
+    const islemIlkYuklemeRef = useRef(true);
+    useEffect(() => {
+      if (!isAuthenticated) return;
+      const qIslem = query(
+        collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'),
+        orderBy('createdAt', 'desc'),
+        limit(100)
+      );
+      const unsub = onSnapshot(qIslem, snap => {
+        if (islemIlkYuklemeRef.current) {
+          // İlk dolduruşta bildirim ÜRETME — sadece önbelleği doldur (kıyas tabanı)
+          snap.docs.forEach(d => islemOnbellekRef.current.add(d.id));
+          islemIlkYuklemeRef.current = false;
+          return;
+        }
+        const yetkiliMi = finansBildirimYetkisiVarMi();
+        snap.docChanges().forEach(chg => {
+          if (chg.type !== 'added') return; // Yalnızca YENİ eklenen kayıtlar
+          if (islemOnbellekRef.current.has(chg.doc.id)) return;
+          islemOnbellekRef.current.add(chg.doc.id);
+          if (!yetkiliMi) return;
+          const d = chg.doc.data();
+          if (d.silindi) return; // Yumuşak silinmiş kayıt bildirim üretmez
+          if (d.isVirman && d.tip === 'giris') return;               // Transfer: tek bildirim (çıkış bacağından)
+          if (d.alacakMahsup || d.krediMahsup || d.odemeMahsup) return; // Mahsup bacağı
+          if (d.devirKaydi) return;                                   // Açılış/devir kaydı bir "işlem" değil
+          const tutarStr = `₺${(parseFloat(d.tutar) || 0).toLocaleString('tr-TR')}`;
+          const yapan = d.by || 'Bilinmiyor';
+          if (d.isVirman) {
+            bildirimGonder('🔁 Hesaplar Arası Transfer', `${d.aciklama || ''} • ${tutarStr}\nİşlemi yapan: ${yapan}`, { tag: `defter-virman-${d.virmanId || chg.doc.id}` });
+          } else if (d.tip === 'giris') {
+            bildirimGonder('💰 Para Girişi (Defter)', `${d.aciklama || d.kategori || 'Gelir kaydı'} • ${tutarStr}\nİşlemi yapan: ${yapan}`, { tag: `defter-giris-${chg.doc.id}` });
+          } else if (d.tip === 'cikis') {
+            bildirimGonder('💸 Para Çıkışı (Defter)', `${d.aciklama || d.kategori || 'Gider kaydı'} • ${tutarStr}\nİşlemi yapan: ${yapan}`, { tag: `defter-cikis-${chg.doc.id}` });
+          }
+        });
+      }, () => {});
+      return () => unsub();
+    }, [isAuthenticated]);
+
     // YENİ: Sayfa kataloğu (Ana Şema) — kişiye özel yetki ekranında listelenen sayfalar
     const [moduleCatalog, setModuleCatalog] = useState(VARSAYILAN_MODUL_KATALOGU);
     // YENİ: Logo önbelleği — Firebase'den marka ayarları gelene kadar (özellikle
@@ -4579,7 +4685,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               const dayData = dayMap[dayNum];
               const code = typeof dayData === 'object' && dayData !== null ? dayData.status : dayData;
               // YENİ: FGM/FM/EM saat bilgisini de taşı (Finans mesai ücreti hesabıyla birebir eşleşmesi için)
-              const hours = (typeof dayData === 'object' && dayData !== null) ? (parseFloat(dayData.hours) || 0) : 0;
+              // HATA DÜZELTMESİ: saat virgüllü ondalık olarak saklanıyor (örn. "4,5").
+              // parseFloat virgülü ondalık ayıracı saymadığı için parseFloat("4,5") -> 4
+              // gibi HATALI kesiliyordu (Personel Profili > Performans Özeti'ndeki
+              // "Fazla Mesai" saatinin ve Finans tarafındaki toplamların eksik
+              // görünmesine sebep oluyordu). Virgül noktaya çevrilip öyle parse edilir.
+              const hours = (typeof dayData === 'object' && dayData !== null) ? (parseFloat(String(dayData.hours ?? '').replace(',', '.')) || 0) : 0;
               flat.push({ personId, year: parseInt(m[1]), month: parseInt(m[2]), day: parseInt(dayNum), code, hours });
             });
           });
@@ -6138,6 +6249,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const handleOpenEndJobModal = (job) => {
       setJobToEnd(job);
       setEndJobError('');
+      setEndJobKaydediliyor(false); // Mükerrer-önleme kilidi her açılışta sıfırlanır
       setEndJobData({ 
         paymentMethod: 'Banka', // DEĞİŞTİ: varsayılan Banka — listede de ilk seçenek damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], deliveryImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '',
         elevatorSetup: 'Evet', elevatorSetupReason: '', elevatorImages: [], elevatorIssue: 'Hayır', elevatorIssueReason: '', vehicleIssue: 'Hayır', vehicleIssueReason: '',
@@ -6188,7 +6300,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
   const submitEndJob = async (e) => {
       e.preventDefault();
       if (!firebaseUser) return;
-      
+      // MÜKERRER-ÖNLEME: işlem zaten sürüyorsa (ör. butona hızlı art arda
+      // dokunuldu) ikinci çağrı burada durdurulur; deftere kopya kayıt düşmez.
+      if (endJobKaydediliyor) return;
+      setEndJobKaydediliyor(true);
+      // Kilidin hangi çıkış yolundan (hatalı kod / hata fırlaması / başarı)
+      // geçilirse geçilsin MUTLAKA açılması için tüm gövde try/finally içine alındı.
+      try {
+
       if (jobToEnd.type !== 'Asansör') {
         const userCode = (endJobData.enteredCode || '').toString().trim().toUpperCase();
         const realCode = (jobToEnd.deliveryCode || '').toString().trim().toUpperCase();
@@ -6285,6 +6404,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       });
       setShowEndJobModal(false); 
       setJobToEnd(null);
+      } finally {
+        // Başarı, erken çıkış veya hata — hepsinde kilit açılır ki
+        // (bu iş için modal tekrar açılırsa) yeniden gönderim yapılabilsin.
+        setEndJobKaydediliyor(false);
+      }
     };
 
     const handleGenerateMessage = async (job) => {
@@ -9464,8 +9588,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     </div>
                   </div>
 
-                  <button type="button" onClick={submitEndJob} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
-                    <CheckCircle className="w-5 h-5" /> {jobToEnd.type === 'Asansör' ? 'Asansör İşini Sonlandır' : 'Kodu Doğrula ve İşi Bitir'}
+                  {/* HATA DÜZELTMESİ: buton artık kaydediliyorken disabled — hızlı art arda
+                      dokunma (çift tıklama) submitEndJob'u ikinci kez tetikleyemez, bu da
+                      deftere aynı işten kopya/mükerrer gelir kaydı düşmesini önler. */}
+                  <button type="button" onClick={submitEndJob} disabled={endJobKaydediliyor} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2 disabled:opacity-60 disabled:cursor-not-allowed">
+                    {endJobKaydediliyor
+                      ? (<><Loader2 className="w-5 h-5 animate-spin" /> Kaydediliyor...</>)
+                      : (<><CheckCircle className="w-5 h-5" /> {jobToEnd.type === 'Asansör' ? 'Asansör İşini Sonlandır' : 'Kodu Doğrula ve İşi Bitir'}</>)}
                   </button>
                 </div>
               </div>
