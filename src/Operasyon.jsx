@@ -19559,9 +19559,24 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                             const etiketMetni = fazlaGibi ? 'Fazla Mesai' : st.label;
                             const etiketRenk = fazlaGibi ? 'bg-blue-100 text-blue-700' : st.color;
                             return (
-                              <div className="flex flex-col gap-0.5 min-w-[120px]">
-                                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full w-fit whitespace-nowrap ${etiketRenk}`}>{etiketMetni}{pd.hours ? ` • ${pd.hours} sa` : ''}</span>
-                                <span className="text-[9px] font-black text-neutral-400 flex items-center gap-1 whitespace-nowrap"><CheckCircle className="w-2.5 h-2.5 text-green-600" /> Düzenleme yapıldı</span>
+                              // YENİ (kullanıcı talebi): Operasyon sorumlusu ekip mesailerini onayladıktan
+                              // sonra İK burada "2. doğrulamayı" yapıyor. Bu yüzden "Düzenleme yapıldı"
+                              // rozeti artık KİLİT değil — yanına Edit butonu eklendi ki İK, mevcut manuel
+                              // kaydı tekrar açıp değiştirebilsin. durumKaydet() zaten aynı kaydın üzerine
+                              // yazabildiği (manual:true olarak tekrar işaretlediği) için ek bir Firestore
+                              // değişikliği gerekmedi; sadece bu buton eklenerek erişim açıldı.
+                              <div className="flex items-center gap-1.5 min-w-[120px]">
+                                <div className="flex flex-col gap-0.5">
+                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full w-fit whitespace-nowrap ${etiketRenk}`}>{etiketMetni}{pd.hours ? ` • ${pd.hours} sa` : ''}</span>
+                                  <span className="text-[9px] font-black text-neutral-400 flex items-center gap-1 whitespace-nowrap"><CheckCircle className="w-2.5 h-2.5 text-green-600" /> Düzenleme yapıldı</span>
+                                </div>
+                                <button
+                                  onClick={() => setDurumDuzenle({ kayit: g, status: pd.status || 'G', hours: pd.hours || '' })}
+                                  className="p-1 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition shrink-0"
+                                  title="Mesai durumunu tekrar düzenle (İK 2. doğrulama)"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
                               </div>
                             );
                           }
