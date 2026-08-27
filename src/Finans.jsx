@@ -10484,11 +10484,29 @@ const saatMetniSayiyaCevir = (deger) => {
                     <select value={islemForm.hedefDefterId || seciliDefterId || ''}
                       onChange={e => setIslemForm({ ...islemForm, hedefDefterId: e.target.value })}
                       className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
-                      {defterler
-                        .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
-                        .map(d => (
-                          <option key={d.id} value={d.id}>{d.ad} — {defterTuruEtiket(d.tur)}</option>
-                        ))}
+                      {/* ==========================================================
+                          YENİ (kullanıcı talebi): Hesaplar artık düz liste değil,
+                          ana Defterler ekranındaki gibi BLOKLARA göre gruplanmış
+                          gösteriliyor. <optgroup label="..."> kullanılır; tarayıcı
+                          bunu açılır listede AYIRICI BAŞLIK olarak gösterir, böylece
+                          blok adı (Sembol Nakliyat / Depoevim / Genel) görünür olur.
+                          Bloklar DEFTER_BLOKLARI sırasıyla (Sembol Nakliyat > Depoevim
+                          > Genel) listelenir; blok içi sıralama eskisi gibi isme göre
+                          alfabetiktir. Boş bloklar hiç çizilmez.
+                          ========================================================== */}
+                      {DEFTER_BLOKLARI.map(blokAdi => {
+                        const blokDefterleri = defterler
+                          .filter(d => defterBlogu(d) === blokAdi)
+                          .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+                        if (blokDefterleri.length === 0) return null; // Boş blok gösterilmez
+                        return (
+                          <optgroup key={blokAdi} label={blokAdi}>
+                            {blokDefterleri.map(d => (
+                              <option key={d.id} value={d.id}>{d.ad} — {defterTuruEtiket(d.tur)}</option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
                     </select>
                     {/* Başka hesap seçildiyse taşınacağı açıkça belirtilir */}
                     {islemForm.hedefDefterId && islemForm.hedefDefterId !== seciliDefterId && (
