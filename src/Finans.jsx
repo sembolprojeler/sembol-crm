@@ -10636,6 +10636,45 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                   </select></div>
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Not</label>
                   <input value={defterForm.not} onChange={e => setDefterForm({ ...defterForm, not: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" /></div>
+
+                {/* ==============================================================
+                    YENİ (kullanıcı talebi): DEPOEVİM CRM ENTEGRASYON PANELİ
+                    ==============================================================
+                    DİKKAT: Defter formu iki ayrı yerde render ediliyor — biri
+                    listede, biri detay ekranında. Panel önce yalnızca listeye
+                    eklenmişti; detaydan "Düzenle" ile açılan bu pencerede
+                    görünmüyordu. Aynı panel buraya da eklendi. */}
+                {seciliDefterId && defterForm.tur === 'Banka' && (
+                  <div className="p-3 bg-indigo-50 border-2 border-indigo-200 rounded-xl space-y-2">
+                    <div className="text-xs font-black text-indigo-800 flex items-center gap-1.5">
+                      <ArrowRightLeft className="w-4 h-4" /> Depoevim CRM Entegrasyonu
+                    </div>
+                    <p className="text-[11px] font-medium text-indigo-700">
+                      Depoevim CRM tahsilatlarının bu deftere otomatik <b>GELİR</b> olarak düşmesi için aşağıdaki iki kimliği kopyalayıp Depoevim projesindeki <b>sembolKoprusu.js</b> dosyasına yapıştırın.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0 p-2 bg-white rounded-lg border border-indigo-200">
+                        <div className="text-[9px] font-black uppercase text-indigo-400">Defter ID (HEDEF_DEFTER_ID)</div>
+                        <div className="text-[11px] font-mono font-bold text-neutral-700 truncate">{seciliDefterId}</div>
+                      </div>
+                      <button type="button" onClick={() => panoyaKopyala(seciliDefterId, 'entg_defter2')}
+                        className="shrink-0 px-2.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black rounded-lg transition">
+                        {kopyalanan === 'entg_defter2' ? 'Kopyalandı ✓' : 'Kopyala'}
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 min-w-0 p-2 bg-white rounded-lg border border-indigo-200">
+                        <div className="text-[9px] font-black uppercase text-indigo-400">Uygulama ID (SEMBOL_APP_ID)</div>
+                        <div className="text-[11px] font-mono font-bold text-neutral-700 truncate">{appId}</div>
+                      </div>
+                      <button type="button" onClick={() => panoyaKopyala(appId, 'entg_app2')}
+                        className="shrink-0 px-2.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black rounded-lg transition">
+                        {kopyalanan === 'entg_app2' ? 'Kopyalandı ✓' : 'Kopyala'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 <button onClick={handleSaveDefter} className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-xl transition">Kaydet</button>
               </div>
             </div>
