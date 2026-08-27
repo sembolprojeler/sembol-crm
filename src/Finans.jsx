@@ -10,6 +10,32 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
   // YENİ: Hazır etiket ağacı ve kullanıcı etiketlerinin Firestore referansı.
   VARSAYILAN_ETIKET_GRUPLARI, tumVarsayilanEtiketler, defterEtiketleriRef, GARANTI_MAAS_SABLON_BASE64, odemeIcinDefterBul } from './shared.jsx';
 
+// ==========================================================================
+// HATA DÜZELTMESİ (kullanıcı bildirimi): "İş Onaylama Tahtası"ndan onaylanan
+// Fazla/Eksik Mesai saatleri (örn. Ahmet Öztürk, 26.08 → 4,5 saat) Personel
+// Muhasebe > Mesai tablosunda görünmüyor / maaşa yansımıyordu.
+//
+// KÖK NEDEN: Mesai saatleri sistemde VİRGÜLLÜ ondalık olarak saklanıyor
+// (örn. "4,5"). JavaScript'in parseFloat() fonksiyonu virgülü ondalık ayıracı
+// olarak TANIMAZ; parseFloat("4,5") sonucu 4.5 değil, SADECE 4 döner (virgülden
+// sonrasını tamamen keser). Bu yüzden saat hem ekranda eksik görünüyor hem de
+// maaş hesabına eksik/yanlış yansıyordu. Aynı sorun sayı (number) tipindeki
+// giriş kutusunda da vardı: <input type="number"> virgüllü bir değeri GEÇERSİZ
+// sayıp kutuyu tamamen BOŞ ("Saat" placeholder) gösteriyordu — onaylanan 4,5
+// saat kaydedilmiş olsa bile ekranda hiç görünmüyordu.
+//
+// ÇÖZÜM: Tüm dosyada saat metnini sayıya çevirirken bu tek yardımcı fonksiyon
+// kullanılır; virgülü noktaya çevirip güvenli şekilde parseFloat yapar.
+// Mevcut kayıtlardaki veri biçimi (virgüllü string) DEĞİŞTİRİLMEDİ, sadece
+// okuma/yazma sırasında doğru yorumlanması sağlandı.
+// ==========================================================================
+const saatMetniSayiyaCevir = (deger) => {
+  if (deger === null || deger === undefined || deger === '') return 0;
+  const normal = String(deger).trim().replace(',', '.'); // "4,5" -> "4.5"
+  const sayi = parseFloat(normal);
+  return isNaN(sayi) ? 0 : sayi;
+};
+
   // ==========================================================================
   // YENİ BİLEŞEN: MAAŞ RAPORU (Genel Ciro Raporu sayfasındaki 2. sekme)
   // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir; mevcut hiçbir koda
@@ -81,9 +107,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           else if (val.status === 'R') raporSay++;
           else if (val.status === 'Üİ' || val.status === 'İB') ucretsizIzin++;
           else if (val.status === 'FG') fazlaGun++;
-          else if (val.status === 'FGM') { fazlaGun++; toplamMesaiSaati += parseFloat(val.hours) || 0; }
-          else if (val.status === 'FM') toplamMesaiSaati += parseFloat(val.hours) || 0;
-          else if (val.status === 'EM') toplamMesaiSaati -= parseFloat(val.hours) || 0;
+          else if (val.status === 'FGM') { fazlaGun++; toplamMesaiSaati += saatMetniSayiyaCevir(val.hours); }
+          else if (val.status === 'FM') toplamMesaiSaati += saatMetniSayiyaCevir(val.hours);
+          else if (val.status === 'EM') toplamMesaiSaati -= saatMetniSayiyaCevir(val.hours);
         } else {
           if (val === 'D') devamsiz++;
           else if (val === 'R') raporSay++;
@@ -2235,9 +2261,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
             else if (val.status === 'FG') counts.FG++;
             else if (val.status === 'D') counts.D++;
             else if (['R', 'Hİ', 'Yİ', 'Bİ', 'Üİ', 'İB'].includes(val.status)) counts.I++;
-            else if (val.status === 'FM') { counts.G++; counts.FM_H += parseFloat(val.hours) || 0; }
-            else if (val.status === 'EM') { counts.G++; counts.EM_H += parseFloat(val.hours) || 0; }
-            else if (val.status === 'FGM') { counts.FG++; counts.FM_H += parseFloat(val.hours) || 0; }
+            else if (val.status === 'FM') { counts.G++; counts.FM_H += saatMetniSayiyaCevir(val.hours); }
+            else if (val.status === 'EM') { counts.G++; counts.EM_H += saatMetniSayiyaCevir(val.hours); }
+            else if (val.status === 'FGM') { counts.FG++; counts.FM_H += saatMetniSayiyaCevir(val.hours); }
         } else {
              // Eski veri yapısı uyumluluğu
             if (val && val.startsWith('G')) counts.G++;
@@ -2526,8 +2552,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
                                 <input
                                   type="number"
                                   placeholder="Saat"
-                                  value={hours}
-                                  onChange={(e) => handleHoursChange(person.id, d, e.target.value)}
+                                  /* HATA DÜZELTMESİ: "hours" Firestore'da VİRGÜLLÜ saklanıyor (örn. "4,5").
+                                     <input type="number"> virgüllü değeri GEÇERSİZ sayıp kutuyu BOŞ
+                                     gösteriyordu — onaylanan saat kayıtlı olsa bile ekranda "Saat"
+                                     placeholder'ı görünüyordu (Ahmet Öztürk 26.08 örneği). Ekranda NOKTA
+                                     ile gösterilir; veri biçimi (virgüllü) değişmez. */
+                                  value={String(hours ?? '').replace(',', '.')}
+                                  onChange={(e) => handleHoursChange(person.id, d, e.target.value.replace('.', ','))}
                                   className={`w-full h-4 md:h-5 text-center text-[8px] md:text-[10px] font-bold outline-none ${val === 'FM' || val === 'FGM' ? 'bg-blue-50 text-blue-800 placeholder-blue-300' : 'bg-yellow-50 text-yellow-800 placeholder-yellow-300'} border-t border-neutral-200/50`}
                                   style={{ MozAppearance: 'textfield' }}
                                 />
@@ -3150,9 +3181,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
           // (o gün için ödeme yapılmaz) işlenir.
           else if (val.status === 'Üİ' || val.status === 'İB') ucretsizIzinCount++;
           else if (val.status === 'FG') fazlaGunCount++;
-          else if (val.status === 'FGM') { fazlaGunCount++; toplamMesaiSaati += parseFloat(val.hours) || 0; }
-          else if (val.status === 'FM') toplamMesaiSaati += parseFloat(val.hours) || 0;
-          else if (val.status === 'EM') toplamMesaiSaati -= parseFloat(val.hours) || 0;
+          else if (val.status === 'FGM') { fazlaGunCount++; toplamMesaiSaati += saatMetniSayiyaCevir(val.hours); }
+          else if (val.status === 'FM') toplamMesaiSaati += saatMetniSayiyaCevir(val.hours);
+          else if (val.status === 'EM') toplamMesaiSaati -= saatMetniSayiyaCevir(val.hours);
         } else {
           if (val === 'D') devamsiz++;
           else if (val === 'R') raporCount++;
@@ -4173,9 +4204,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
         else if (val.status === 'R') raporSay++;
         else if (val.status === 'Üİ' || val.status === 'İB') ucretsizIzin++;
         else if (val.status === 'FG') fazlaGun++;
-        else if (val.status === 'FGM') { fazlaGun++; toplamMesaiSaati += parseFloat(val.hours) || 0; }
-        else if (val.status === 'FM') toplamMesaiSaati += parseFloat(val.hours) || 0;
-        else if (val.status === 'EM') toplamMesaiSaati -= parseFloat(val.hours) || 0;
+        else if (val.status === 'FGM') { fazlaGun++; toplamMesaiSaati += saatMetniSayiyaCevir(val.hours); }
+        else if (val.status === 'FM') toplamMesaiSaati += saatMetniSayiyaCevir(val.hours);
+        else if (val.status === 'EM') toplamMesaiSaati -= saatMetniSayiyaCevir(val.hours);
       } else {
         if (val === 'D') devamsiz++;
         else if (val === 'R') raporSay++;
