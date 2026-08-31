@@ -6108,8 +6108,28 @@ const saatMetniSayiyaCevir = (deger) => {
     // kapatılınca yöntemine göre ilgili deftere gerçek satır olarak düşer.
     // ========================================================================
     const bekleyenIsDefteriId = useMemo(() => odemeIcinDefterBul(defterler, 'Banka')?.id || null, [defterler]);
+    // ========================================================================
+    // YENİ (kullanıcı talebi): "Ödemesi Bekleniyor" bölümü artık SADECE Banka
+    // defterinde değil, Nakit (Kasa) ve Kredi Kartı (İşyerim POS) defterlerinde
+    // de BİREBİR AYNI tasarım ve sıralamayla görünür. Aşağıdaki bekleyenIsler
+    // AYNI JSX bloğuyla render edildiği için (bkz. render kısmı) ayrı bir
+    // tasarım kodu yazmaya gerek kalmadı — hangi defter seçiliyse o üçünden
+    // biri mi diye bakılıyor.
+    // NOT: "Başka Deftere Taşınan Ödeme Bildirimi" (tasinanOdemeler, aşağıda)
+    // BİLİNÇLİ OLARAK bu kümeye dahil EDİLMEDİ — o bildirim "bu iş bankaya
+    // değil başka bir deftere taşındı" anlamına geldiği için sadece Banka'da
+    // anlamlıdır; Nakit/Kredi Kartı defterinde göstermek kendi kendine
+    // gönderme gibi kafa karıştırıcı olurdu.
+    // ========================================================================
+    const bekleyenIslerGorunurDefterIdleri = useMemo(() => {
+      const idler = new Set();
+      const bankaD = odemeIcinDefterBul(defterler, 'Banka'); if (bankaD) idler.add(bankaD.id);
+      const nakitD = odemeIcinDefterBul(defterler, 'Nakit'); if (nakitD) idler.add(nakitD.id);
+      const posD = odemeIcinDefterBul(defterler, 'Kredi Kartı'); if (posD) idler.add(posD.id);
+      return idler;
+    }, [defterler]);
     const bekleyenIsler = useMemo(() => {
-      if (!seciliDefterId || seciliDefterId !== bekleyenIsDefteriId) return [];
+      if (!seciliDefterId || !bekleyenIslerGorunurDefterIdleri.has(seciliDefterId)) return [];
       // ======================================================================
       // DEĞİŞTİ (kullanıcı talebi): TAMAMLANMAYAN ÖDEMELER HER GÜN GÖRÜNÜR
       // ======================================================================
@@ -6153,7 +6173,7 @@ const saatMetniSayiyaCevir = (deger) => {
         // ====================================================================
         .filter(j => !((j.type === 'Asansör' || j.type === 'asansor') && j.bekleyenTutar <= 0))
         .sort((a, b) => (a.date || '').localeCompare(b.date || '') || (a.time || '').localeCompare(b.time || ''));
-    }, [jobs, seciliDefterId, bekleyenIsDefteriId]);
+    }, [jobs, seciliDefterId, bekleyenIslerGorunurDefterIdleri]);
 
     // ========================================================================
     // YENİ (kullanıcı talebi): BAŞKA DEFTERE TAŞINAN ÖDEME BİLDİRİMİ
@@ -6679,17 +6699,18 @@ const saatMetniSayiyaCevir = (deger) => {
               // oluşuyordu; bu geçersiz HTML'dir ve tarayıcı yapıyı bozar.
               // Bu yüzden kart <div role="button"> oldu; klavye ile açılabilmesi
               // için tabIndex ve Enter/Space desteği eklendi.
-              // DEĞİŞTİ (kullanıcı talebi): NAKİT ve BANKA defterleri her
-              // açılışta "Tüm Zamanlar" ile gelir (gün filtresi kapalı) —
-              // kasa/banka hareketlerinin tamamı ilk bakışta görünsün.
-              // Diğer defter türlerinde (Kredi Kartı, Borçlu vb.) eski
-              // davranış korunur: bugün seçili olarak açılır.
+              // DEĞİŞTİ (kullanıcı talebi): NAKİT, BANKA ve KREDİ KARTI defterleri
+              // artık HEPSİ her açılışta "Tüm Zamanlar" ile gelir (gün filtresi
+              // kapalı) — üçü de aynı görünüm/sıralama/tasarımla davranır.
+              // 'Kasa' da NAKİT'in eski (geriye uyumlu) adıdır, o da dahil edilir.
+              // Diğer defter türlerinde (Borçlu, Kredi, Ödemeler) eski davranış
+              // korunur: bugün seçili olarak açılır.
               const defteriAc = () => {
                 setSeciliDefterId(d.id);
                 setDetayArama('');
                 setKategoriFiltre('Tümü');
                 setSeciliGun(bugunStr());
-                setGunFiltreAktif(!(d.tur === 'Nakit' || d.tur === 'Banka'));
+                setGunFiltreAktif(!(d.tur === 'Nakit' || d.tur === 'Kasa' || d.tur === 'Banka' || d.tur === 'Kredi Kartı'));
               };
               return (
                 <div key={d.id} role="button" tabIndex={0}
@@ -8428,12 +8449,13 @@ const saatMetniSayiyaCevir = (deger) => {
                 <div className="border-t border-neutral-100 divide-y divide-neutral-100">
                   {liste.map((y, i) => (
                     <button key={i} type="button" onClick={() => {
-                      // Aynı kural (kullanıcı talebi): Nakit/Banka defterleri
-                      // "Tüm Zamanlar" ile açılır, diğerleri bugün seçili.
+                      // Aynı kural (kullanıcı talebi): Nakit/Banka/Kredi Kartı
+                      // defterleri "Tüm Zamanlar" ile açılır, diğerleri bugün
+                      // seçili. 'Kasa' Nakit'in eski (geriye uyumlu) adıdır.
                       const hedef = defterler.find(x => x.id === y.defterId);
                       setSeciliDefterId(y.defterId);
                       setSeciliGun(bugunStr());
-                      setGunFiltreAktif(!(hedef?.tur === 'Nakit' || hedef?.tur === 'Banka'));
+                      setGunFiltreAktif(!(hedef?.tur === 'Nakit' || hedef?.tur === 'Kasa' || hedef?.tur === 'Banka' || hedef?.tur === 'Kredi Kartı'));
                     }}
                       className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-neutral-50 transition">
                       <span className="text-[9px] font-black text-red-600 uppercase shrink-0 w-10">Gider</span>
@@ -9284,18 +9306,33 @@ const saatMetniSayiyaCevir = (deger) => {
                     onChange={e => setVirmanForm({ ...virmanForm, hedefDefterId: e.target.value })}
                     className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-slate-700 text-sm bg-white">
                     <option value="">Hedef hesap seçin...</option>
-                    {defterler
-                      .filter(d => d.id !== seciliDefterId)
-                      .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'))
-                      .map(d => (
-                        <option key={d.id} value={d.id}>
-                          {/* DEĞİŞTİ (kullanıcı talebi): İkinci alanda TÜR yerine
-                              BLOK yazıyor. "BANKA — Banka" gibi kendini tekrar
-                              eden bir etiket yerine "BANKA — Sembol Nakliyat"
-                              gösteriliyor; hangi şirkete ait olduğu anlaşılıyor. */}
-                          {d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})
-                        </option>
-                      ))}
+                    {/* ==========================================================
+                        YENİ (kullanıcı talebi): Hesap Türü seçicisiyle (İşlemi
+                        Düzenle formu) AYNI desen — hesaplar düz liste yerine
+                        BLOKLARA (Sembol Nakliyat / Depoevim / Genel) göre
+                        gruplanmış gösteriliyor. <optgroup label="..."> tarayıcıda
+                        ayırıcı başlık olarak render edilir. Kaynak hesap (kendine
+                        transfer engeli) ve alfabetik sıralama AYNEN korunur.
+                        ========================================================== */}
+                    {DEFTER_BLOKLARI.map(blokAdi => {
+                      const blokDefterleri = defterler
+                        .filter(d => d.id !== seciliDefterId && defterBlogu(d) === blokAdi)
+                        .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+                      if (blokDefterleri.length === 0) return null; // Boş blok gösterilmez
+                      return (
+                        <optgroup key={blokAdi} label={blokAdi}>
+                          {blokDefterleri.map(d => (
+                            <option key={d.id} value={d.id}>
+                              {/* DEĞİŞTİ (kullanıcı talebi): İkinci alanda TÜR yerine
+                                  BLOK yazıyor. "BANKA — Banka" gibi kendini tekrar
+                                  eden bir etiket yerine "BANKA — Sembol Nakliyat"
+                                  gösteriliyor; hangi şirkete ait olduğu anlaşılıyor. */}
+                              {d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
                   </select>
                   {defterler.length < 2 && (
                     <p className="text-[11px] font-bold text-red-600 mt-1.5">
