@@ -1739,6 +1739,56 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
     );
   };
 
+  // ==========================================================================
+  // HATA DÜZELTMESİ (kullanıcı bildirimi): "1 Eylül 2026 ve sonrasına ben
+  // yazmadığım izinler görünüyor"
+  // --------------------------------------------------------------------------
+  // KÖK NEDEN (AY SINIRI / GÜN NUMARASI ÇAKIŞMASI):
+  // Puantaj verisi Firestore'da AY BAŞINA bir belgede ('mesai/2026_8',
+  // 'mesai/2026_9') ve her belgede AYIN GÜNÜ (1..31) anahtarıyla tutulur.
+  // Tahtalar bir hafta gösterir; hafta iki aya taşarsa (31 Ağustos – 6 Eylül)
+  // iki ayın kayıtları TEK bir nesnede birleştiriliyordu:
+  //     mergedRecords[pId] = { ...agustos[pId], ...eylul[pId] }
+  // Anahtar sadece GÜN NUMARASI olduğu için Ağustos'un 1..6'sı ile Eylül'ün
+  // 1..6'sı AYNI anahtarlara denk geliyordu. Eylül belgesinde o gün için
+  // kayıt yoksa (kullanıcı Eylül'e hiçbir şey girmediyse) Ağustos'un aynı
+  // numaralı gününün kaydı silinmeden kalıyor ve tahta onu EYLÜL hücresinde
+  // gösteriyordu. Yani ekranda görülen izinler HAYALET değil; AĞUSTOS 1–6'ya
+  // girilmiş GERÇEK kayıtların EYLÜL 1–6 hücrelerinde yanlış gösterimiydi.
+  // (Doğrulandı: 31.08 -> D, 01–05.09 -> Hİ/D deseni birebir üretildi.)
+  //
+  // ÖNEMLİ: Firestore'a YAZAN kodlar zaten DOĞRUYDU — her biri günün kendi
+  // ayının belgesine (targetDayObj.monthNum/yearNum) yazıyor. Bu yüzden
+  // veritabanında bozulma YOK, sadece OKUMA/GÖSTERİM hatalıydı. Aşağıdaki
+  // düzeltme yalnızca bellekteki gösterim anahtarını değiştirir; Firestore
+  // şeması ve yazma mantığı AYNEN korunur (Personel Muhasebe ile uyum bozulmaz).
+  //
+  // ÇÖZÜM: Bellekteki mesaiData artık "yıl_ay_gün" bileşik anahtarıyla
+  // adreslenir (ör. '2026_9_1'), böylece Ağustos 1 ile Eylül 1 asla karışmaz.
+  // ==========================================================================
+  // Bir gün nesnesi ({dayNum, monthNum, yearNum}) için bileşik anahtar üretir
+  const mesaiGunAnahtari = (gunObj) => `${gunObj.yearNum}_${gunObj.monthNum}_${gunObj.dayNum}`;
+  // Ay belgelerini bileşik anahtarlı tek nesnede TOPLAR (üzerine yazmaz).
+  // kayitlar: { [personelId]: { [ayinGunu]: hucre } } — belgenin yıl/ayı verilir.
+  const mesaiAyiBirlestir = (hedef, kayitlar, yil, ay) => {
+    for (const pId in (kayitlar || {})) {
+      if (!hedef[pId]) hedef[pId] = {};
+      for (const gun in kayitlar[pId]) {
+        hedef[pId][`${yil}_${ay}_${parseInt(gun, 10)}`] = kayitlar[pId][gun];
+      }
+    }
+    return hedef;
+  };
+  // ==========================================================================
+  // EK DÜZELTME: dateStr artık UTC'ye çevrilmiyor.
+  // toISOString() yerel gece yarısını UTC'ye çevirir; Türkiye (UTC+3) için
+  // tarih BİR GÜN GERİYE kayıyordu (31 Ağustos -> "2026-08-30"). Bu yüzden
+  // "bugün" vurgusu hiç isabet etmiyor ve sistem günlüğüne yanlış tarih
+  // yazılıyordu. Artık tarih, günün kendi yerel yıl/ay/gün alanlarından kurulur.
+  // ==========================================================================
+  const mesaiYerelTarihStr = (gunObj) =>
+    `${gunObj.yearNum}-${String(gunObj.monthNum).padStart(2, '0')}-${String(gunObj.dayNum).padStart(2, '0')}`;
+
   // --- İZİN TAHTASI BİLEŞENİ ---
   export const IzinTahtasiView = ({ personnelList, db, appId, addSystemLog }) => {
     const today = new Date();
@@ -1775,14 +1825,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
     const weekDays = Array.from({ length: 7 }, (_, i) => {
       const d = new Date(weekStart);
       d.setDate(weekStart.getDate() + i);
-      return {
+      const gun = {
         dateObj: d,
         dayNum: d.getDate(),
         monthNum: d.getMonth() + 1,
         yearNum: d.getFullYear(),
-        dateStr: d.toISOString().split('T')[0],
         dayName: ["Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"][d.getDay()]
       };
+      // DÜZELTİLDİ: toISOString() (UTC) yerine yerel tarihten kurulur
+      return { ...gun, dateStr: mesaiYerelTarihStr(gun) };
     });
 
     useEffect(() => {
@@ -1800,18 +1851,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
 
           const mRef1 = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${y1}_${m1}`);
           const mSnap1 = await getDoc(mRef1);
-          let mergedRecords = mSnap1.exists() ? mSnap1.data().records || {} : {};
+          // DÜZELTİLDİ: Kayıtlar artık 'yıl_ay_gün' bileşik anahtarıyla toplanır.
+          // Böylece hafta iki aya taştığında (31 Ağustos – 6 Eylül) Ağustos'un
+          // 1–6'sı Eylül'ün 1–6'sının yerine geçemez.
+          let mergedRecords = {};
+          if (mSnap1.exists()) mesaiAyiBirlestir(mergedRecords, mSnap1.data().records || {}, y1, m1);
 
           // Hafta diğer aya taşıyorsa (Örn: 28 Mayıs - 3 Haziran) iki ayı da birleştir
           if (m1 !== m2) {
              const mRef2 = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${y2}_${m2}`);
              const mSnap2 = await getDoc(mRef2);
              if (mSnap2.exists()) {
-                 const records2 = mSnap2.data().records || {};
-                 for (const pId in records2) {
-                     if (!mergedRecords[pId]) mergedRecords[pId] = {};
-                     mergedRecords[pId] = { ...mergedRecords[pId], ...records2[pId] };
-                 }
+                 mesaiAyiBirlestir(mergedRecords, mSnap2.data().records || {}, y2, m2);
              }
           }
           setMesaiData(mergedRecords);
@@ -1876,12 +1927,16 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
              records[specialLeaveForm.personnelId] = {};
           }
 
+          // docKey 'yil_ay' biçimindedir; yerel gösterim anahtarı için ayrıştırılır
+          const [dkYil, dkAy] = docKey.split('_').map(Number);
           days.forEach(day => {
+             // Firestore şeması AYNEN korunur: ilgili ayın belgesine AYIN GÜNÜ ile yazılır
              records[specialLeaveForm.personnelId][day] = { status: specialLeaveForm.type, hours: '' };
 
              // Eğer şu an görüntülenen mesaiData içinde de varsa anında yansıt
+             // DÜZELTİLDİ: bileşik anahtar ('yıl_ay_gün') kullanılır
              if (!newMesaiData[specialLeaveForm.personnelId]) newMesaiData[specialLeaveForm.personnelId] = {};
-             newMesaiData[specialLeaveForm.personnelId][day] = { status: specialLeaveForm.type, hours: '' };
+             newMesaiData[specialLeaveForm.personnelId][`${dkYil}_${dkAy}_${day}`] = { status: specialLeaveForm.type, hours: '' };
           });
 
           await setDoc(mRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
@@ -1921,9 +1976,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
       const targetDayNum = targetDayObj.dayNum;
       
       // Aynı haftada bu personelin başka bir izni/devamsızlığı var mı kontrol et
+      // DÜZELTİLDİ: bileşik anahtar. Önceden gün numarasıyla bakıldığı için,
+      // iki aya taşan haftada ÖNCEKİ AYIN aynı numaralı günleri de sayılıyor,
+      // "ilk izin Hİ / sonraki D" kararı yanlış çıkıyordu.
       let leaveCountThisWeek = 0;
       weekDays.forEach(wd => {
-         const cell = mesaiData[personId]?.[wd.dayNum];
+         const cell = mesaiData[personId]?.[mesaiGunAnahtari(wd)];
          const status = typeof cell === 'object' && cell !== null ? cell.status : cell;
          if (status === 'Hİ' || status === 'D') {
             leaveCountThisWeek++;
@@ -1931,7 +1989,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
       });
 
       // Zaten bu güne atılmışsa işlem yapma
-      const existingCell = mesaiData[personId]?.[targetDayNum];
+      const existingCell = mesaiData[personId]?.[mesaiGunAnahtari(targetDayObj)];
       const existingStatus = typeof existingCell === 'object' && existingCell !== null ? existingCell.status : existingCell;
       
       if (existingStatus === 'Hİ' || existingStatus === 'D') {
@@ -1942,10 +2000,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
       // İlk atama Haftalık İzin, sonrakiler Devamsızlık
       const newStatus = leaveCountThisWeek === 0 ? 'Hİ' : 'D';
 
-      // Local state'i güncelle
+      // Local state'i güncelle (bileşik anahtar ile)
       const newMesaiData = { ...mesaiData };
       if (!newMesaiData[personId]) newMesaiData[personId] = {};
-      newMesaiData[personId][targetDayNum] = { status: newStatus, hours: '' };
+      newMesaiData[personId][mesaiGunAnahtari(targetDayObj)] = { status: newStatus, hours: '' };
       setMesaiData(newMesaiData);
 
       // Firestore'a kaydet (İlgili ayın dokümanına)
@@ -1978,10 +2036,13 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
        const targetDayNum = targetDayObj.dayNum;
        const p = personnelList.find(x => String(x.id) === String(personId));
 
-       // Local state
+       // Local state (DÜZELTİLDİ: bileşik anahtar — önceden gün numarasıyla
+       // silindiği için, iki aya taşan haftada YANLIŞ AYIN hücresi ekrandan
+       // kaldırılmış gibi görünüyordu)
        const newMesaiData = { ...mesaiData };
-       if (newMesaiData[personId] && newMesaiData[personId][targetDayNum]) {
-          newMesaiData[personId][targetDayNum] = { status: '', hours: '' };
+       const yerelAnahtar = mesaiGunAnahtari(targetDayObj);
+       if (newMesaiData[personId] && newMesaiData[personId][yerelAnahtar]) {
+          newMesaiData[personId][yerelAnahtar] = { status: '', hours: '' };
        }
        setMesaiData(newMesaiData);
 
@@ -2043,12 +2104,15 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
            {/* SOL: GÜNLER (7 KOLON) */}
            <div className="flex-1 flex gap-3 overflow-x-auto custom-scrollbar bg-neutral-100/50 p-3 rounded-2xl border border-neutral-200 h-[420px] lg:h-full shrink-0">
               {weekDays.map((wd, i) => {
-                 const isToday = wd.dateStr === new Date().toISOString().split('T')[0];
+                 // DÜZELTİLDİ: UTC yerine yerel tarih karşılaştırması
+                 const isToday = wd.dateStr === mesaiYerelTarihStr({ yearNum: new Date().getFullYear(), monthNum: new Date().getMonth() + 1, dayNum: new Date().getDate() });
                  const isWeekendDay = i === 6; // Sunday
                  
                  // Bu güne atanan personelleri bul (Tüm Mavi Yaka listesi üzerinden filtrele, displayPersonnel'den değil)
+                 // DÜZELTİLDİ: bileşik anahtar ('yıl_ay_gün') — Eylül hücresinde
+                 // Ağustos'un aynı numaralı gününün izni GÖRÜNMEZ artık.
                  const assignedPersons = maviYakaList.filter(p => {
-                    const cell = mesaiData[p.id]?.[wd.dayNum];
+                    const cell = mesaiData[p.id]?.[mesaiGunAnahtari(wd)];
                     const st = typeof cell === 'object' && cell !== null ? cell.status : cell;
                     return ['Hİ', 'D', 'R', 'Üİ', 'Yİ', 'Bİ'].includes(st);
                  });
@@ -2067,7 +2131,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                        
                        <div className="flex-1 p-2 overflow-y-auto custom-scrollbar space-y-2 bg-neutral-50/50">
                           {assignedPersons.map(p => {
-                             const cell = mesaiData[p.id]?.[wd.dayNum];
+                             const cell = mesaiData[p.id]?.[mesaiGunAnahtari(wd)];
                              const st = typeof cell === 'object' && cell !== null ? cell.status : cell;
                              
                              let cardBg = 'bg-neutral-50', borderColor = 'border-neutral-300', textColor = 'text-neutral-900', badgeBg = 'bg-neutral-600', badgeText = st;
@@ -2152,7 +2216,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                     // Bu personelin bu haftaki izin durumunu kontrol edelim ki görsel olarak farklılaşsın (Opsiyonel)
                     let weekLeaveCount = 0;
                     weekDays.forEach(wd => {
-                       const cell = mesaiData[person.id]?.[wd.dayNum];
+                       // DÜZELTİLDİ: bileşik anahtar (sağ listedeki izin sayısı rozeti)
+                       const cell = mesaiData[person.id]?.[mesaiGunAnahtari(wd)];
                        const st = typeof cell === 'object' && cell !== null ? cell.status : cell;
                        if (['Hİ', 'D', 'R', 'Üİ', 'Yİ', 'Bİ'].includes(st)) weekLeaveCount++;
                     });
@@ -2289,7 +2354,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
         dayNum: d.getDate(),
         monthNum: d.getMonth() + 1,
         yearNum: d.getFullYear(),
-        dateStr: d.toISOString().split('T')[0],
+        // DÜZELTİLDİ: toISOString() (UTC) tarihi bir gün geriye kaydırıyordu
+        dateStr: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
         dayName: ["Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"][d.getDay()]
       };
     });
@@ -2308,18 +2374,19 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
 
           const pRef1 = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${y1}_${m1}`);
           const pSnap1 = await getDoc(pRef1);
-          let mergedRecords = pSnap1.exists() ? pSnap1.data().records || {} : {};
+          // DÜZELTİLDİ (İzin Tahtası ile AYNI hata, burada PUAN verisinde):
+          // kayıtlar 'yıl_ay_gün' bileşik anahtarıyla toplanır; iki aya taşan
+          // haftada önceki ayın aynı numaralı günlerinin puanı bu ayın
+          // hücrelerinde görünmez.
+          let mergedRecords = {};
+          if (pSnap1.exists()) mesaiAyiBirlestir(mergedRecords, pSnap1.data().records || {}, y1, m1);
 
           // Hafta diğer aya taşıyorsa (Örn: 28 Mayıs - 3 Haziran) iki ayı da birleştir
           if (m1 !== m2) {
              const pRef2 = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${y2}_${m2}`);
              const pSnap2 = await getDoc(pRef2);
              if (pSnap2.exists()) {
-                 const records2 = pSnap2.data().records || {};
-                 for (const pId in records2) {
-                     if (!mergedRecords[pId]) mergedRecords[pId] = {};
-                     mergedRecords[pId] = { ...mergedRecords[pId], ...records2[pId] };
-                 }
+                 mesaiAyiBirlestir(mergedRecords, pSnap2.data().records || {}, y2, m2);
              }
           }
           setPuantajData(mergedRecords);
@@ -2516,7 +2583,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                     Personel
                   </th>
                   {weekDays.map((wd) => {
-                    const isToday = wd.dateStr === new Date().toISOString().split('T')[0];
+                    // DÜZELTİLDİ: UTC yerine yerel tarih karşılaştırması
+                    const isToday = wd.dateStr === mesaiYerelTarihStr({ yearNum: new Date().getFullYear(), monthNum: new Date().getMonth() + 1, dayNum: new Date().getDate() });
                     return (
                       <th key={wd.dateStr} className={`p-1 md:p-2 border-b border-r border-neutral-300 text-center w-[9%] md:w-[10%] overflow-hidden ${isToday ? 'bg-yellow-200' : ''}`}>
                         <div className={`text-[10px] md:text-xs font-bold truncate ${isToday ? 'text-yellow-800' : 'text-neutral-500'}`}>{wd.dayName}</div>
@@ -2546,9 +2614,11 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                         </div>
                       </td>
                       {weekDays.map((wd) => {
-                        const pts = parseFloat(puantajData[person.id]?.[wd.dayNum]) || 0;
+                        // DÜZELTİLDİ: bileşik anahtar ('yıl_ay_gün')
+                        const pts = parseFloat(puantajData[person.id]?.[mesaiGunAnahtari(wd)]) || 0;
                         weeklyTotal += pts;
-                        const isToday = wd.dateStr === new Date().toISOString().split('T')[0];
+                        // DÜZELTİLDİ: "bugün" karşılaştırması yerel tarihle
+                        const isToday = wd.dateStr === mesaiYerelTarihStr({ yearNum: new Date().getFullYear(), monthNum: new Date().getMonth() + 1, dayNum: new Date().getDate() });
                         
                         return (
                           <td key={wd.dateStr} className={`p-1 border-r border-neutral-200 text-center align-middle overflow-hidden ${isToday ? 'bg-yellow-50/50' : ''}`}>
@@ -2621,7 +2691,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
         dayNum: d.getDate(),
         monthNum: d.getMonth() + 1,
         yearNum: d.getFullYear(),
-        dateStr: d.toISOString().split('T')[0],
+        // DÜZELTİLDİ: toISOString() (UTC) tarihi bir gün geriye kaydırıyordu
+        dateStr: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
         dayName: ["Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"][d.getDay()]
       };
     });
@@ -2640,18 +2711,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
 
           const mRef1 = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${y1}_${m1}`);
           const mSnap1 = await getDoc(mRef1);
-          let mergedRecords = mSnap1.exists() ? mSnap1.data().records || {} : {};
+          // DÜZELTİLDİ (İzin Tahtası ile AYNI hata): kayıtlar 'yıl_ay_gün'
+          // bileşik anahtarıyla toplanır; iki aya taşan haftada önceki ayın
+          // aynı numaralı günleri bu ayın hücrelerinde görünmez.
+          let mergedRecords = {};
+          if (mSnap1.exists()) mesaiAyiBirlestir(mergedRecords, mSnap1.data().records || {}, y1, m1);
 
           // Hafta diğer aya taşıyorsa (Örn: 28 Mayıs - 3 Haziran) iki ayı da birleştir
           if (m1 !== m2) {
              const mRef2 = doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${y2}_${m2}`);
              const mSnap2 = await getDoc(mRef2);
              if (mSnap2.exists()) {
-                 const records2 = mSnap2.data().records || {};
-                 for (const pId in records2) {
-                     if (!mergedRecords[pId]) mergedRecords[pId] = {};
-                     mergedRecords[pId] = { ...mergedRecords[pId], ...records2[pId] };
-                 }
+                 mesaiAyiBirlestir(mergedRecords, mSnap2.data().records || {}, y2, m2);
              }
           }
           setMesaiData(mergedRecords);
@@ -2714,7 +2785,8 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                     Personel
                   </th>
                   {weekDays.map((wd) => {
-                    const isToday = wd.dateStr === new Date().toISOString().split('T')[0];
+                    // DÜZELTİLDİ: UTC yerine yerel tarih karşılaştırması
+                    const isToday = wd.dateStr === mesaiYerelTarihStr({ yearNum: new Date().getFullYear(), monthNum: new Date().getMonth() + 1, dayNum: new Date().getDate() });
                     return (
                       <th key={wd.dateStr} className={`p-1 md:p-2 border-b border-r border-neutral-300 text-center w-[10%] md:w-[11%] overflow-hidden ${isToday ? 'bg-blue-100' : ''}`}>
                         <div className={`text-[10px] md:text-xs font-bold truncate ${isToday ? 'text-blue-800' : 'text-neutral-500'}`}>{wd.dayName}</div>
@@ -2740,10 +2812,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                         </div>
                       </td>
                       {weekDays.map((wd) => {
-                        const cell = mesaiData[person.id]?.[wd.dayNum];
+                        // DÜZELTİLDİ: bileşik anahtar ('yıl_ay_gün')
+                        const cell = mesaiData[person.id]?.[mesaiGunAnahtari(wd)];
                         const st = typeof cell === 'object' && cell !== null ? cell.status : cell;
                         const hr = typeof cell === 'object' && cell !== null ? cell.hours : '';
-                        const isToday = wd.dateStr === new Date().toISOString().split('T')[0];
+                        // DÜZELTİLDİ: "bugün" karşılaştırması da yerel tarihle yapılır
+                        const isToday = wd.dateStr === mesaiYerelTarihStr({ yearNum: new Date().getFullYear(), monthNum: new Date().getMonth() + 1, dayNum: new Date().getDate() });
                         const option = MESAI_STATUS_OPTIONS.find(o => o.code === st);
                         
                         return (
@@ -18662,6 +18736,38 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
         } catch (e) { /* sessiz geç */ }
       }
 
+      // ======================================================================
+      // YENİ (kullanıcı talebi): QR OKUTMAYAN / KOD GİRMEYEN MAVİ YAKA
+      // PERSONELİ DE BEYAZ YAKADAKİ GİBİ DEĞERLENDİRİLİR
+      // ----------------------------------------------------------------------
+      // SORUN: Yukarıdaki ekip bazlı motor SADECE o gün en az bir kaydı
+      // (giriş veya çıkış) olan mavi yaka personelini değerlendiriyordu
+      // (bkz. yukarıdaki "DÜZELTME (KRİTİK)" notu). Ekibe yazılmış/atanmış
+      // ama QR/kod HİÇ okutmayan bir mavi yaka çalışanı bu motora hiç
+      // girmiyordu; kendisi için hiçbir günlük öneri üretilmiyordu. Beyaz
+      // yakada bu durum zaten doğru çözülmüştü: kaydı olmayan HERKESE
+      // Devamsızlık/Haftalık İzin önerilir. Mavi yakada eksik olan tam
+      // olarak buydu — kullanıcı kuralı: "okutmadıysa geldi işaretleme,
+      // beyaz yakadaki gibi hangi durumdaysa onu göster."
+      // ÇÖZÜM: O gün hiç kaydı OLMAYAN mavi yaka personeli ayrıca tespit
+      // edilip AYNI genel motorla (beyazYakaOnerileriHesapla — yaka
+      // bağımsız çalışır; yalnızca QR kaydına ve çalışma programına bakar)
+      // değerlendirilir. Kaydı OLANLARIN ekip bazlı (çıkış saati, fazla/
+      // eksik mesai) hesabına HİÇ DOKUNULMAZ — yalnızca hiç sonucu
+      // olmayan kişiler için (Object.assign değil, tek tek kontrol ile)
+      // eklenir.
+      // ======================================================================
+      const maviEkipIdSeti = new Set(maviEkip.map(p => String(p.id)));
+      const maviKayitsizlar = maviYaka.filter(p => !maviEkipIdSeti.has(String(p.id)));
+      if (maviKayitsizlar.length > 0) {
+        try {
+          const maviKayitsizSonuc = beyazYakaOnerileriHesapla(maviKayitsizlar, maviKayitlar, tarih) || {};
+          Object.keys(maviKayitsizSonuc).forEach(pid => {
+            if (!maviSonuc[pid]) maviSonuc[pid] = maviKayitsizSonuc[pid];
+          });
+        } catch (e) { /* sessiz geç */ }
+      }
+
       // --- BEYAZ YAKA (yeni sade motor) ---
       // ÖNEMLİ FARK: Beyaz yakada öneri, kaydı OLAN kişilerle sınırlı DEĞİL;
       // takipteki TÜM beyaz yaka personeline uygulanır. Böylece QR okutmayan
@@ -18752,7 +18858,7 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
     // YENİ: fTarih ve beyazYaka eklendi (beyaz yaka önerisi bu ikisine bağlı)
     // YENİ: haftaKayitlari, puantajlar, takiptekiPersonel — haftalık kural motoru
     // YENİ: jobs — ekip (araç) bazlı gruplama bu listeden plaka çözüyor
-  }, [gunlukKayitlar, personnelList, fTarih, beyazYaka, haftaKayitlari, puantajlar, takiptekiPersonel, jobs]);
+  }, [gunlukKayitlar, personnelList, fTarih, beyazYaka, maviYaka, haftaKayitlari, puantajlar, takiptekiPersonel, jobs]);
 
   // RAPORLAMA: seçilen aydaki kayıtlardan kişi bazlı özet çıkarır
   const rapor = useMemo(() => {
@@ -18882,8 +18988,28 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   // yazıldıktan sonra) bu sütunda görünür.
   // NOT: Onay ekranındaki (App.tsx) hesap DEĞİŞMEDİ; orada fazla/eksik mesai
   // önerisi tüm ayrıntısıyla gelmeye devam eder.
+  //
   // ==========================================================================
-  const SADE_ONERI_ESLEME = { FM: 'G', EM: 'G', FGM: 'G', FG: 'G' };
+  // HATA DÜZELTMESİ (kullanıcı bildirimi): "Haftanın her günü gelen personele
+  // FAZLA GÜN yazılması lazım" — ama tabloda "Geldi" görünüyordu.
+  // --------------------------------------------------------------------------
+  // KÖK NEDEN: Haftalık kural motoru (haftalikMesaiKarari) 7 gün kesintisiz
+  // çalışmayı DOĞRU tespit edip 'FG' üretiyordu (izole testle doğrulandı:
+  // 7 gün geldi -> FG, ilk gelmeme -> Hİ, ikinci gelmeme -> D). Ancak
+  // aşağıdaki sadeleştirme eşlemesi, ekrana çizilmeden ÖNCE 'FG' kodunu
+  // 'G' (Geldi) hâline getiriyordu. Yani karar doğruydu, GÖSTERİM yanlıştı.
+  //
+  // DÜZELTME: 'FG' eşlemeden ÇIKARILDI. Gerekçe: FG bir SAAT hesabı değildir —
+  // 7 gün çalışıldığı için kazanılan TAM BİR GÜNdür ve İş Onaylama
+  // Tahtası'ndan saat onayı gerektirmez. Saat hesabı gerektiren FM / EM / FGM
+  // için eski kural (öneri olarak gösterilmez) AYNEN korunuyor; o kısıtın
+  // amacı zaten onaysız saat göstermemekti.
+  //
+  // NOT: Toplu işleme (onerileriPuantajaIsle) HAM öneriyi kullandığı için
+  // FG'yi zaten doğru yazıyordu; bu düzeltme onu görünür ve elle
+  // düzenlenebilir hâle getirir.
+  // ==========================================================================
+  const SADE_ONERI_ESLEME = { FM: 'G', EM: 'G', FGM: 'G' };
   const oneriDurumu = (k) => {
     const dogal = gunlukOneriler[k.dateStr]?.[k.personnelId];
     if (dogal) {
@@ -19673,6 +19799,20 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                           }
                           const gosterilen = pd || on;
                           const st = gosterilen ? durumStili(gosterilen.status) : null;
+                          // ================================================================
+                          // YENİ (kullanıcı talebi bağlamında eklendi): "ÖNERİ FARKLI" ROZETİ
+                          // ----------------------------------------------------------------
+                          // Puantaj (muhasebe) kaydı her zaman YETKİLİ kaynaktır ve öneri
+                          // onu ASLA ezmez. Ancak daha önce OTOMATİK yazılmış (manual:false)
+                          // bir kod, hafta tamamlandıktan sonra güncellenen öneriden farklı
+                          // olabilir — tipik örnek: Pazar günü 'G' yazılmışken hafta 7 güne
+                          // tamamlandığı için önerinin artık 'FG' (Fazla Gün) olması.
+                          // Bu durumda kullanıcı ekranda hâlâ "Geldi" görüp düzeltmenin
+                          // çalışmadığını sanıyordu. Artık fark küçük bir rozetle belirtilir;
+                          // "Önerileri Puantaja İşle" düğmesi bu kaydı günceller
+                          // (elle düzenlenmiş / izin kodlu kayıtlara dokunmaz).
+                          // ================================================================
+                          const oneriFarkli = pd && !pd.manual && on && on.status && on.status !== pd.status;
                           return (
                             <div className="flex items-center gap-1.5 min-w-[120px]">
                               {st ? (() => {
@@ -19685,6 +19825,12 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                                 );
                               })() : <span className="text-[10px] font-bold text-neutral-300 whitespace-nowrap">Girilmemiş</span>}
                               {!pd && on && <span className="text-[8px] font-black text-blue-500 whitespace-nowrap" title="Henüz muhasebeye yazılmadı, QR'a göre önerilen durum">ÖNERİ</span>}
+                              {oneriFarkli && (
+                                <span className="text-[8px] font-black text-amber-600 whitespace-nowrap"
+                                      title={`Muhasebede "${durumStili(pd.status).label}" yazılı, ancak güncel öneri "${durumStili(on.status).label}". Güncellemek için "Önerileri Puantaja İşle" düğmesini kullanın.\n${on.aciklama || ''}`}>
+                                  ÖNERİ: {durumStili(on.status).label}
+                                </span>
+                              )}
                               <button
                                 onClick={() => setDurumDuzenle({ kayit: g, status: gosterilen?.status || 'G', hours: gosterilen?.hours || '' })}
                                 className="p-1 rounded-lg text-neutral-400 hover:text-blue-600 hover:bg-blue-50 transition shrink-0"
