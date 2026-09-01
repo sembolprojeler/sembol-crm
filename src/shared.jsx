@@ -1063,6 +1063,100 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
         </table>
         <p class="note">Not: Onaylanan saatler, ilgili günün puantajına "Üİ – Ücretsiz İzin" olarak işlenir ve maaş hesabından düşülür. Bu dilekçenin imzalı bir örneği personelin özlük dosyasında saklanır.</p>
       `
+    },
+    {
+      // ======================================================================
+      // YENİ (kullanıcı talebi): PERSONEL BORÇ İKRARI VE MAAŞTAN MAHSUP
+      // MUVAFAKATNAMESİ
+      // ----------------------------------------------------------------------
+      // Amaç: Personelin firmadan borç/avans aldığını YAZILI OLARAK KABUL
+      // ETMESİ ve bu borcun maaşından mahsup edilmesine muvafakat vermesi.
+      // Diğer şablonlarla aynı desen: kişi bilgileri (ad, TC, görev, işe giriş)
+      // otomatik dolar; tutar, taksit ve tarih gibi olaya özel alanlar
+      // noktalı çizgi olarak bırakılır (ıslak imzayla elle doldurulur).
+      // Form yalnızca "Tarih" ve "Olay Detayı" (f.note) alanlarını sağladığı
+      // için tutar bilgisi bilinçli olarak boş bırakıldı; f.note varsa
+      // "Borcun Alınma Nedeni / Açıklama" bölümüne basılır.
+      // ======================================================================
+      key: 'borc_ikrari',
+      title: 'Personel Borç İkrarı ve Maaştan Mahsup Muvafakatnamesi',
+      body: (p, f) => `
+        <div class="main-title">PERSONEL BORÇ İKRARI VE MAAŞTAN MAHSUP MUVAFAKATNAMESİ</div>
+        <div class="paragraph" style="text-align:center; font-weight:bold; margin-bottom:14px;">
+          SEMBOL NAKLİYAT DEPOCULUK TİC. LTD. ŞTİ. MÜDÜRLÜĞÜ'NE<br/>
+          <span style="font-weight:normal; font-size:11px;">İNSAN KAYNAKLARI / MUHASEBE DEPARTMANI'NA</span>
+        </div>
+        <table>
+          <tr><td class="label">Belge Tarihi</td><td>${f.date || '..... / ..... / 202...'}</td>
+              <td class="label">Konu</td><td>Borç İkrarı ve Ödeme Taahhüdü</td></tr>
+        </table>
+
+        <div class="section-title">1. Borçlu Personel Bilgileri</div>
+        <table>
+          <tr><td class="label">Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${p.tcNo || ''}</td></tr>
+          <tr><td class="label">Görevi / Unvanı</td><td>${p.position || ''}</td></tr>
+          <tr><td class="label">Kadro / Yaka</td><td>${p.collarType || ''}</td></tr>
+          <tr><td class="label">İşe Giriş Tarihi</td><td>${p.startDate || ''}</td></tr>
+        </table>
+
+        <div class="section-title">2. Alınan Borç Bilgileri</div>
+        <table>
+          <tr><td class="label">Borç Tutarı (Rakamla)</td><td>....................................... TL</td></tr>
+          <tr><td class="label">Borç Tutarı (Yazıyla)</td><td>................................................................ Türk Lirası</td></tr>
+          <tr><td class="label">Borcun Alındığı Tarih</td><td>..... / ..... / 202...</td></tr>
+          <tr><td class="label">Ödeme Şekli</td><td>[ &nbsp; ] Nakit &nbsp;&nbsp; [ &nbsp; ] Banka / Havale &nbsp;&nbsp; [ &nbsp; ] Diğer: ....................</td></tr>
+        </table>
+        ${f.note ? `<div class="section-title">Borcun Alınma Nedeni / Açıklama</div><div class="desc-box">${f.note}</div>` : ''}
+
+        <div class="section-title">3. Geri Ödeme Planı</div>
+        <table>
+          <tr><td class="label">Geri Ödeme Şekli</td><td>[ &nbsp; ] Tek Seferde (Peşin) &nbsp;&nbsp; [ &nbsp; ] Taksitli</td></tr>
+          <tr><td class="label">Taksit Sayısı</td><td>................ ay</td><td class="label">Aylık Taksit Tutarı</td><td>................ TL</td></tr>
+          <tr><td class="label">İlk Kesinti Yapılacak Ay</td><td>............... / 202...</td><td class="label">Son Kesinti Ayı</td><td>............... / 202...</td></tr>
+        </table>
+
+        <div class="section-title">4. Beyan, İkrar ve Muvafakat</div>
+        <div class="paragraph">
+          Yukarıda bilgileri yazılı bulunan <b>${p.fullName || '..............................'}</b> olarak;
+          işvereni bulunduğum <b>SEMBOL NAKLİYAT DEPOCULUK TİC. LTD. ŞTİ.</b>'den yukarıda tutarı ve
+          tarihi belirtilen borcu <b>nakden ve tamamen teslim aldığımı</b> kabul, beyan ve ikrar ederim.
+        </div>
+        <div class="paragraph">
+          Söz konusu borcumun, yukarıdaki geri ödeme planına uygun şekilde <b>her ay ücretimden (maaşımdan)
+          kesinti yapılmak suretiyle mahsup edilmesini</b> hiçbir baskı altında kalmaksızın, kendi hür irademle
+          <b>kabul ve muvafakat ederim.</b> Bu kesintilere ilişkin olarak işverenden herhangi bir hak, alacak
+          veya tazminat talebinde bulunmayacağımı peşinen beyan ederim.
+        </div>
+        <div class="paragraph">
+          Herhangi bir nedenle <b>iş sözleşmemin sona ermesi hâlinde</b>, kalan borç bakiyemin; tarafıma
+          ödenecek olan son ücret, kıdem tazminatı, ihbar tazminatı, kullanılmayan yıllık izin ücreti ve sair
+          tüm alacaklarımdan <b>öncelikle mahsup edilmesini</b> kabul ederim. Bu alacakların borcumu
+          karşılamaması hâlinde, kalan bakiyeyi işten ayrılış tarihinden itibaren <b>en geç ..... gün içinde</b>
+          nakden ve defaten ödeyeceğimi kayıtsız şartsız taahhüt ederim.
+        </div>
+        <div class="paragraph">
+          İşbu belge, tarafımca okunarak ve içeriği tamamen anlaşılarak <b>${f.date || '..... / ..... / 202...'}</b>
+          tarihinde iki nüsha hâlinde imza altına alınmıştır. Bir nüshası tarafıma teslim edilmiştir.
+        </div>
+
+        <div class="section-title">5. İmzalar</div>
+        <table>
+          <tr>
+            <td class="label">Borçlu Personel<br/>(Adı Soyadı / İmza)</td>
+            <td style="height:52px;">${p.fullName || ''}</td>
+            <td class="label">İşveren / Yetkili<br/>(Adı Soyadı / Unvanı / İmza)</td>
+            <td style="height:52px;">......................................</td>
+          </tr>
+        </table>
+        <table>
+          <tr>
+            <td class="label">Şahit 1 (Adı Soyadı / İmza)</td><td style="height:44px;">......................................</td>
+            <td class="label">Şahit 2 (Adı Soyadı / İmza)</td><td style="height:44px;">......................................</td>
+          </tr>
+        </table>
+        <p class="note">Not: Bu belgenin imzalı aslı personelin özlük dosyasında saklanır; bir nüshası personele teslim edilir. Borç tutarı ve kesinti planı ayrıca Muhasebe kayıtlarına ("Personel Borcu" olarak) işlenmelidir. Ücretten yapılacak kesintilerde 4857 sayılı İş Kanunu'nun ücretin korunmasına ilişkin hükümleri ile asgari geçim sınırı gözetilmelidir; uygulamadan önce mali müşavirinize/hukuk danışmanınıza teyit ettirmeniz önerilir.</p>
+      `
     }
   ];
 
