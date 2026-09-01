@@ -5173,7 +5173,26 @@ const saatMetniSayiyaCevir = (deger) => {
       const buAyBit = `${yy}-${String(mm).padStart(2, '0')}-${String(new Date(yy, mm, 0).getDate()).padStart(2, '0')}`;
       const buAyBekleyen = detaylar.reduce((t, d) =>
         t + d.bilgi.plan.filter(p => !p.odendi && p.tarih >= buAyBas && p.tarih <= buAyBit).reduce((s, p) => s + p.kalan, 0), 0);
-      return { detaylar, kalemSayisi: kalemler.length, gecikmisAdet, gecikmisTutar, buAyBekleyen };
+      // ======================================================================
+      // YENİ (kullanıcı talebi): BU AYIN TOPLAM VE ÖDENEN TUTARLARI
+      // ----------------------------------------------------------------------
+      // Defter kartında yalnızca "bu ay bekleyen" (ödenmemiş kalan) görünüyordu.
+      // Artık ayın TAMAMI da görünsün isteniyor:
+      //   buAyToplam  = bu ay vadesi gelen TÜM ödemelerin tutarı (ödenen dahil)
+      //   buAyOdenen  = bunun ödenmiş kısmı (kısmi ödemelerde ödenen parça da sayılır)
+      // Kısmi ödeme doğru yansısın diye ödenen kısım (tutar - kalan) üzerinden
+      // hesaplanır; ödenmiş vadelerde kalan zaten 0'dır.
+      // Mevcut buAyBekleyen alanı DEĞİŞTİRİLMEDİ — onu kullanan yerler (kredi
+      // kartı, üst özet) aynen çalışmaya devam eder.
+      // ======================================================================
+      const buAyVadeleri = detaylar.flatMap(d =>
+        d.bilgi.plan.filter(p => p.tarih >= buAyBas && p.tarih <= buAyBit));
+      const buAyToplam = buAyVadeleri.reduce((t, p) => t + (parseFloat(p.tutar) || 0), 0);
+      const buAyOdenen = buAyVadeleri.reduce((t, p) => t + ((parseFloat(p.tutar) || 0) - (parseFloat(p.kalan) || 0)), 0);
+      const buAyAdet = buAyVadeleri.length;
+      const buAyOdenenAdet = buAyVadeleri.filter(p => p.odendi).length;
+      return { detaylar, kalemSayisi: kalemler.length, gecikmisAdet, gecikmisTutar, buAyBekleyen,
+               buAyToplam, buAyOdenen, buAyAdet, buAyOdenenAdet };
     };
 
     const odemeDefterleri = defterler.filter(d => d.tur === 'Ödemeler');
@@ -6828,14 +6847,33 @@ const saatMetniSayiyaCevir = (deger) => {
                       olarak anlamsızdır; asıl bilgi ne kadar borç kaldığıdır.
                       ========================================================== */}
                   {d.tur === 'Ödemeler' ? (() => {
-                    // ÖDEMELER DEFTERİ: bakiye yerine bu ay bekleyen tutar ve gecikme
+                    // ÖDEMELER DEFTERİ: bakiye yerine bu ayın ödeme durumu
                     const od = odemeDefterBilgi(d);
+                    // DEĞİŞTİ (kullanıcı talebi): Kartta artık sadece kalan değil,
+                    // BU AYIN TOPLAMI da görünür. Büyük rakam ödenmesi gereken
+                    // KALAN tutardır (asıl aksiyon gerektiren bilgi); altında
+                    // ayın toplamı ve ödenen kısmı ikincil satırlarda verilir.
+                    const yuzdeOd = od.buAyToplam > 0 ? Math.round((od.buAyOdenen / od.buAyToplam) * 100) : 0;
                     return (
                       <div className="text-right shrink-0 max-w-[45%] sm:max-w-none sm:min-w-[120px]">
                         <div className={`text-base sm:text-lg font-black tabular-nums ${od.gecikmisAdet > 0 ? 'text-red-600' : 'text-orange-700'}`}>₺{paraFmt(od.buAyBekleyen)}</div>
                         <div className="text-[9px] sm:text-[10px] font-black uppercase text-orange-500 leading-tight">
-                          Bu Ay Bekleyen • {od.kalemSayisi} kalem
+                          Bu Ay Kalan{od.buAyAdet > 0 ? ` • ${od.buAyAdet - od.buAyOdenenAdet}/${od.buAyAdet} ödeme` : ` • ${od.kalemSayisi} kalem`}
                         </div>
+                        {od.buAyAdet > 0 && (
+                          <>
+                            <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden mt-1">
+                              <div className="h-full bg-orange-500" style={{ width: `${yuzdeOd}%` }}></div>
+                            </div>
+                            {/* Bu ayın TOPLAMI ve ödenen kısmı */}
+                            <div className="text-[9px] font-bold text-neutral-500 mt-0.5">
+                              Bu ay toplam: ₺{paraFmt(od.buAyToplam)}
+                            </div>
+                            <div className="text-[9px] font-bold text-emerald-600">
+                              Ödenen: ₺{paraFmt(od.buAyOdenen)}
+                            </div>
+                          </>
+                        )}
                         {od.gecikmisAdet > 0 && (
                           <div className="text-[9px] font-black text-red-600 mt-0.5">{od.gecikmisAdet} gecikmiş • ₺{paraFmt(od.gecikmisTutar)}</div>
                         )}
@@ -7782,10 +7820,19 @@ const saatMetniSayiyaCevir = (deger) => {
                 </div>
               </div>
 
-              {/* ÜST ÖZET: bu ay bekleyen + gecikmiş */}
-              <div className="grid grid-cols-2 gap-2 p-4 pb-0">
+              {/* ÜST ÖZET: bu ay toplam + bu ay kalan + gecikmiş
+                  DEĞİŞTİ (kullanıcı talebi): Ayın TOPLAM ödeme yükü de görünsün
+                  diye üçüncü bir kutu eklendi; içinde ödenen kısım da yazar. */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-4 pb-0">
+                <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
+                  <div className="text-[9px] font-black uppercase text-neutral-500">Bu Ay Toplam</div>
+                  <div className="text-sm font-black text-neutral-800">₺{paraFmt(od.buAyToplam)}</div>
+                  <div className="text-[9px] font-bold text-emerald-600 mt-0.5">
+                    Ödenen: ₺{paraFmt(od.buAyOdenen)}{od.buAyAdet > 0 ? ` • ${od.buAyOdenenAdet}/${od.buAyAdet}` : ''}
+                  </div>
+                </div>
                 <div className="bg-orange-50 rounded-xl p-2.5 border border-orange-200">
-                  <div className="text-[9px] font-black uppercase text-orange-600">Bu Ay Bekleyen</div>
+                  <div className="text-[9px] font-black uppercase text-orange-600">Bu Ay Kalan</div>
                   <div className="text-sm font-black text-orange-700">₺{paraFmt(od.buAyBekleyen)}</div>
                 </div>
                 <div className={`rounded-xl p-2.5 border ${od.gecikmisAdet > 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
