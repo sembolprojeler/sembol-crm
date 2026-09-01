@@ -4750,6 +4750,19 @@ const saatMetniSayiyaCevir = (deger) => {
     //   4) Devirler girilip banka bakiyeleriyle eşleşince canlı takip başlar.
     // Not: SISTEM_DEVIR_TARIHI'nin tek tanımı burasıdır.
     const SISTEM_DEVIR_TARIHI = '2026-09-01';
+    // ========================================================================
+    // YENİ (kullanıcı talebi): DEVİR SÜRECİ TAMAMLANDI
+    // ------------------------------------------------------------------------
+    // Devir (eski uygulamadan bakiye aktarımı) işi bitti. Bakiyesi girilmesi
+    // gereken defterlere devir kaydı yapıldı; geri kalanlar (bakiyesi sıfır
+    // olanlar ve Ödemeler/Krediler gibi kendi iç takibi olan defterler) zaten
+    // devir GEREKTİRMİYOR — bunlar da "yapıldı" kabul edilir.
+    // Bu bayrak true iken defter listesindeki "Devir" düğmesi HİÇBİR defterde
+    // görünmez; böylece yanlışlıkla ikinci/gereksiz bir devir kaydı girilemez.
+    // Yeni bir defter için devir gerekirse bu satırı false yapmak yeterlidir —
+    // devir penceresi ve kaydetme mantığı olduğu gibi duruyor, silinmedi.
+    // ========================================================================
+    const DEVIR_DONEMI_TAMAMLANDI = true;
     // Canlı dönemde miyiz? (bugün devir gününe ulaştı mı — o gün dahil)
     const canliDonemde = bugunStr() >= SISTEM_DEVIR_TARIHI;
     // Bir işlem bakiye/ciro hesaplarına katılır mı?
@@ -4939,6 +4952,24 @@ const saatMetniSayiyaCevir = (deger) => {
     const krediDefterBilgi = (defter) => {
       const kalemler = krediKalemleri(defter);
       const detaylar = kalemler.map(k => ({ kalem: k, bilgi: krediBilgi(defter, k) }));
+      // ======================================================================
+      // YENİ (kullanıcı talebi): BU AY ÖDENECEK TAKSİT TUTARI
+      // ----------------------------------------------------------------------
+      // Kredi defteri kartı toplam KALAN BORCU gösteriyordu (milyonlarca TL);
+      // asıl merak edilen "bu ay cebimizden ne çıkacak" bilgisiydi. Ödemeler
+      // defterindeki buAyBekleyen hesabının BİREBİR AYNISI uygulanır: bu ayın
+      // ilk ve son günü arasında vadesi olan, HENÜZ ÖDENMEMİŞ taksitlerin
+      // KALAN tutarları toplanır (kısmi ödenmişse yalnızca kalanı sayılır).
+      // Mevcut alanların hiçbiri değiştirilmedi; yalnızca yeni alanlar eklendi.
+      // ======================================================================
+      const buAyBas = bugunStr().slice(0, 8) + '01';
+      const [kyy, kmm] = bugunStr().split('-').map(Number);
+      const buAyBit = `${kyy}-${String(kmm).padStart(2, '0')}-${String(new Date(kyy, kmm, 0).getDate()).padStart(2, '0')}`;
+      const buAyBekleyen = detaylar.reduce((t, d) =>
+        t + d.bilgi.plan.filter(p => !p.odendi && p.tarih >= buAyBas && p.tarih <= buAyBit).reduce((s, p) => s + p.kalan, 0), 0);
+      // Gecikmiş taksitlerin TUTARI (Ödemeler kartındaki gibi tutar da gösterilsin)
+      const gecikmisTutar = detaylar.reduce((t, d) =>
+        t + d.bilgi.plan.filter(p => p.gecikmis).reduce((s, p) => s + p.kalan, 0), 0);
       return {
         detaylar,
         kalemSayisi: kalemler.length,
@@ -4947,6 +4978,8 @@ const saatMetniSayiyaCevir = (deger) => {
         toplamGeriOdeme: detaylar.reduce((t, d) => t + d.bilgi.toplamGeriOdeme, 0),
         toplamOdenen: detaylar.reduce((t, d) => t + d.bilgi.odenenTutar, 0),
         gecikmisAdet: detaylar.reduce((t, d) => t + d.bilgi.gecikmisAdet, 0),
+        buAyBekleyen,
+        gecikmisTutar,
       };
     };
 
@@ -6763,24 +6796,64 @@ const saatMetniSayiyaCevir = (deger) => {
                       </div>
                     );
                   })() : d.tur === 'Kredi' ? (() => {
-                    // DEĞİŞTİ: Defterdeki TÜM kredilerin toplamı gösterilir
+                    // DEĞİŞTİ (kullanıcı talebi): Kart artık ÖDEMELER defteriyle
+                    // aynı şekilde "BU AY ÖDENECEK" taksit tutarını ve kredi
+                    // sayısını gösterir. Önceden toplam kalan borç (milyonlar)
+                    // yazıyordu; o bilgi kaybolmasın diye altta küçük punto ile
+                    // ikincil satırda korundu. İlerleme çubuğu aynen duruyor.
                     const kd = krediDefterBilgi(d);
                     const yuzde = kd.toplamGeriOdeme > 0 ? Math.round((kd.toplamOdenen / kd.toplamGeriOdeme) * 100) : 0;
                     return (
                       <div className="text-right shrink-0 max-w-[45%] sm:max-w-none sm:min-w-[120px]">
-                        <div className={`text-base sm:text-lg font-black tabular-nums ${kd.toplamBorc > 0 ? 'text-violet-700' : 'text-emerald-600'}`}>₺{paraFmt(kd.toplamBorc)}</div>
+                        <div className={`text-base sm:text-lg font-black tabular-nums ${kd.gecikmisAdet > 0 ? 'text-red-600' : 'text-violet-700'}`}>₺{paraFmt(kd.buAyBekleyen)}</div>
                         <div className="text-[9px] sm:text-[10px] font-black uppercase text-violet-500 leading-tight">
                           {kd.kalemSayisi === 0 ? 'Kredi Eklenmemiş'
-                            : kd.toplamBorc > 0 ? `Kalan Borç • ${kd.kalemSayisi} kredi`
-                            : 'Tüm Krediler Kapandı'}
+                            : `Bu Ay Ödenecek • ${kd.kalemSayisi} kredi`}
                         </div>
                         {kd.kalemSayisi > 0 && (
                           <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden mt-1">
                             <div className="h-full bg-violet-500" style={{ width: `${yuzde}%` }}></div>
                           </div>
                         )}
+                        {/* Toplam kalan borç ikincil bilgi olarak korunur */}
+                        {kd.kalemSayisi > 0 && (
+                          <div className="text-[9px] font-bold text-neutral-400 mt-0.5">
+                            {kd.toplamBorc > 0 ? `Kalan borç: ₺${paraFmt(kd.toplamBorc)}` : 'Tüm krediler kapandı ✓'}
+                          </div>
+                        )}
                         {kd.gecikmisAdet > 0 && (
-                          <div className="text-[9px] font-black text-red-600 mt-0.5">{kd.gecikmisAdet} gecikmiş taksit</div>
+                          <div className="text-[9px] font-black text-red-600 mt-0.5">{kd.gecikmisAdet} gecikmiş • ₺{paraFmt(kd.gecikmisTutar)}</div>
+                        )}
+                      </div>
+                    );
+                  })() : d.tur === 'Borçlu' || d.tur === 'Diğer' ? (() => {
+                    // ==========================================================
+                    // YENİ (kullanıcı talebi): BORÇLU ("Tahsil Bekleyen") DEFTERİ
+                    // ----------------------------------------------------------
+                    // Bu defterde gelir/gider işlemi tutulmaz; borçlu kalemleri
+                    // defter dokümanındaki "alacaklar" dizisinde durur. Bu yüzden
+                    // klasik bakiye hesabı hep ₺0,00 "BAKİYE SIFIR" çıkıyor ve
+                    // kart hiçbir bilgi vermiyordu.
+                    // Artık kartta, defterin İÇİNDEKİ tahsil edilecek kişilerin
+                    // TOPLAM KALAN ALACAĞI gösterilir — Alacak Takibi ekranının
+                    // üstündeki "KALAN ALACAK" rakamıyla birebir aynı kaynaktan
+                    // (alacakDefterBilgi) gelir, dolayısıyla ikisi hep tutar.
+                    // Ödemeler ve Kredi defterlerindeki desenin aynısı.
+                    // NOT: Blok toplamları defterBakiye() üzerinden hesaplanmaya
+                    // devam eder; alacak bir kasa parası olmadığı için blok
+                    // toplamına EKLENMEZ (eski davranış korundu).
+                    // ==========================================================
+                    const al = alacakDefterBilgi(d);
+                    return (
+                      <div className="text-right shrink-0 max-w-[45%] sm:max-w-none sm:min-w-[120px]">
+                        <div className={`text-base sm:text-lg font-black tabular-nums ${al.kalanAlacak > 0 ? 'text-rose-700' : 'text-emerald-600'}`}>₺{paraFmt(al.kalanAlacak)}</div>
+                        <div className="text-[9px] sm:text-[10px] font-black uppercase text-rose-500 leading-tight">
+                          {al.kalemSayisi === 0 ? 'Borçlu Eklenmemiş'
+                            : al.kalanAlacak > 0 ? `Kalan Alacak • ${al.kalemSayisi} borçlu`
+                            : 'Tüm Alacaklar Tahsil Edildi'}
+                        </div>
+                        {al.gecikmisAdet > 0 && (
+                          <div className="text-[9px] font-black text-red-600 mt-0.5">{al.gecikmisAdet} gecikmiş • ₺{paraFmt(al.gecikmisTutar)}</div>
                         )}
                       </div>
                     );
@@ -6803,11 +6876,14 @@ const saatMetniSayiyaCevir = (deger) => {
                       o gün ve sonrasında aktif olur. Eski uygulamadaki gerçek
                       kalan bakiye buradan girilir; bakiye banka ile eşleşir,
                       ciro etkilenmez. ========================================== */}
-                  {/* DEĞİŞTİ (kullanıcı talebi): Devir düğmesi ARTIK YALNIZCA
-                      1 Eylül 2026'dan itibaren ve DEVİR HENÜZ GİRİLMEMİŞSE
-                      görünür. Devir kaydı bir kez girildiğinde düğme tamamen
-                      kaybolur (yanlışlıkla ikinci devir girilmesin). */}
-                  {canliDonemde && !defterIslemleri(d.id).some(x => x.devirKaydi && !x.silindi) && (
+                  {/* DEĞİŞTİ (kullanıcı talebi): Devir süreci TAMAMLANDI —
+                      DEVIR_DONEMI_TAMAMLANDI bayrağı açıkken düğme hiçbir
+                      defterde çizilmez. Devri yapılmamış defterler de (bakiyesi
+                      sıfır olanlar, Ödemeler/Krediler gibi kendi takibi olanlar)
+                      "yapıldı" sayılır. Eski kurallar (yalnızca canlı dönemde ve
+                      devir kaydı yoksa göster) aşağıda AYNEN duruyor; bayrak
+                      false yapılırsa düğme eskisi gibi çalışmaya devam eder. */}
+                  {!DEVIR_DONEMI_TAMAMLANDI && canliDonemde && !defterIslemleri(d.id).some(x => x.devirKaydi && !x.silindi) && (
                     <button type="button"
                       title="Eski uygulamadaki kalan bakiyeyi devret"
                       onClick={e => { e.stopPropagation(); setDevirModal({ defter: d, tutar: '', yon: 'giris', tarih: bugunStr() < SISTEM_DEVIR_TARIHI ? SISTEM_DEVIR_TARIHI : bugunStr(), not: '' }); }}
@@ -8551,11 +8627,27 @@ const saatMetniSayiyaCevir = (deger) => {
           <div className="divide-y-2 divide-neutral-200">
             {/* YENİ: Tüm Zamanlar modunda yalnızca ilk 'gosterilenSayi' kayıt
                 çizilir (günlük modda zaten tek günün hareketleri var, dilimlenmez). */}
-            {(gunFiltreAktif ? dIslemler : dIslemler.slice(0, gosterilenSayi)).map(i => (
-              /* YENİ (kullanıcı talebi): TAŞINAN ÖDEME BİLGİ SATIRI
-                 Başka deftere taşınan ödemeler normal satır gibi ama mavi
-                 tonda, "TAŞINDI" etiketiyle ve tıklanamaz olarak çizilir —
-                 gerçek bir defter kaydı olmadıkları için düzenlenemez/silinemez. */
+            {/* ================================================================
+                YENİ (kullanıcı talebi): GÜN DEĞİŞİMİ AYIRICISI
+                ----------------------------------------------------------------
+                "Tüm Zamanlar" görünümünde liste tarihe göre YENİDEN ESKİYE
+                sıralıdır; 1 Eylül kayıtları bitip 31 Ağustos'a geçilen yer
+                belli olmuyordu. Artık her gün değişiminde iki kırmızı çizgi
+                arasında, ALTINDA BAŞLAYAN günün etiketi küçük bir rozetle
+                gösterilir (ör. "31 Ağustos 2026 Pazartesi").
+                Günlük (tek gün) görünümünde zaten tek tarih olduğu için
+                ayırıcı çizilmez.
+                NOT: Üst kapsayıcıdaki `divide-y-2` her kardeş öğeye gri üst
+                kenarlık koyduğu için, hem ayırıcının hem de hemen altındaki
+                satırın üst kenarlığı satır içi stille sıfırlanır; böylece
+                kırmızı çizginin etrafında istenmeyen gri çizgiler oluşmaz.
+                ================================================================ */}
+            {(() => {
+              const _liste = gunFiltreAktif ? dIslemler : dIslemler.slice(0, gosterilenSayi);
+              return _liste.map((i, _idx) => {
+                const _oncekiTarih = _idx > 0 ? _liste[_idx - 1].tarih : null;
+                const _gunDegisti = !gunFiltreAktif && _oncekiTarih && _oncekiTarih !== i.tarih;
+                const _satir = (
               i._tasinanBilgi ? (
                 <div key={i.id} className="grid grid-cols-[60%_40%] sm:grid-cols-[1fr_auto_auto] gap-1.5 sm:gap-2 px-3 sm:px-4 py-3.5 items-center bg-sky-50/40">
                   <div className="min-w-0">
@@ -8704,7 +8796,24 @@ const saatMetniSayiyaCevir = (deger) => {
                 <div className={`hidden sm:block text-right w-24 sm:w-28 font-black text-sm sm:text-base ${i.silindi ? 'line-through text-neutral-300' : 'text-red-500'}`}>{i.tip === 'cikis' ? `₺${paraFmt(parseFloat(i.tutar))}` : ''}</div>
               </div>
               )
-            ))}
+                );
+                if (!_gunDegisti) return _satir;
+                return (
+                  <React.Fragment key={`gunayirici_${i.id}`}>
+                    {/* Kırmızı gün ayırıcı: iki çizgi arasında o günün etiketi */}
+                    <div style={{ borderTopWidth: 0 }} className="flex items-center gap-2 px-3 sm:px-4 py-2 bg-red-50/70">
+                      <span className="flex-1 h-[2px] bg-red-500 rounded-full" />
+                      <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wide text-red-700 bg-white border-2 border-red-400 rounded-full px-2.5 py-0.5 whitespace-nowrap shadow-sm">
+                        {gunEtiketi(i.tarih)}
+                      </span>
+                      <span className="flex-1 h-[2px] bg-red-500 rounded-full" />
+                    </div>
+                    {/* Ayırıcının hemen altındaki satırın gri üst çizgisi kapatılır */}
+                    {React.cloneElement(_satir, { style: { ..._satir.props.style, borderTopWidth: 0 } })}
+                  </React.Fragment>
+                );
+              });
+            })()}
           </div>
 
           {/* ==============================================================
@@ -8914,6 +9023,12 @@ const saatMetniSayiyaCevir = (deger) => {
                   <button onClick={() => setHizliKatSecici(false)} className="p-1.5 rounded-lg hover:bg-neutral-100 transition"><X className="w-5 h-5" /></button>
                 </div>
                 <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+                  {/* DEĞİŞTİ (kullanıcı talebi): ALT KATEGORİLER KALDIRILDI.
+                      Bu seçici de artık tek katmanlı — yalnızca ana kategoriler
+                      listelenir ve doğrudan seçilir. Alt kategori seçimi
+                      "ANA • ALT" biçiminde birleşik bir değer kaydediyordu;
+                      artık yalnızca ana kategori adı kaydedilir. Eskiden bu
+                      biçimde kaydedilmiş işlemler bozulmaz, aynen görünür. */}
                   {KATEGORI_AGACI.map(kat => {
                     const anaSecili = hizliKategori === kat.ad;
                     return (
@@ -8924,24 +9039,7 @@ const saatMetniSayiyaCevir = (deger) => {
                           <span className="font-black text-sm text-neutral-800 flex items-center gap-2">
                             {anaSecili && <CheckCircle className="w-4 h-4 text-emerald-600" />}{kat.ad}
                           </span>
-                          {kat.alt.length > 0 && <span className="text-[10px] font-bold text-neutral-400">{kat.alt.length} alt</span>}
                         </button>
-                        {kat.alt.length > 0 && (
-                          <div className="p-2 flex flex-wrap gap-1.5 bg-white border-t border-neutral-100">
-                            {kat.alt.map(a => {
-                              const deger = `${kat.ad} • ${a}`;
-                              const altSecili = hizliKategori === deger;
-                              return (
-                                <button key={a} type="button"
-                                  onClick={() => { setHizliKategori(deger); setHizliKatSecici(false); }}
-                                  className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition ${
-                                    altSecili ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-neutral-600 border-neutral-300 hover:bg-emerald-50'}`}>
-                                  {altSecili && '✓ '}{a}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        )}
                       </div>
                     );
                   })}
@@ -8993,9 +9091,37 @@ const saatMetniSayiyaCevir = (deger) => {
                   // penceredeki includes() kontrolleri değişmeden çalışsın.
                   const secili = [islemForm.kategori].filter(Boolean);
 
-                  // ARAMA MODU: gruplar göz ardı edilir, düz sonuç listesi çıkar.
+                  // ==================================================================
+                  // DEĞİŞTİ (kullanıcı talebi): ARTIK YALNIZCA ANA KATEGORİLER
+                  // ------------------------------------------------------------------
+                  // Önceden liste iki katmanlıydı: açılıp kapanan grup başlıkları ve
+                  // içlerinde alt kategoriler (ARAÇ > 34 MIA 813, KİRALAR > MERKEZ
+                  // DEPO gibi). Artık alt kategoriler GÖSTERİLMEZ; seçici tek katman,
+                  // düz bir ana kategori listesidir.
+                  //
+                  // ÖNEMLİ AYRIM: 'KİŞİLER' ve 'GENEL' gerçek birer kategori DEĞİL,
+                  // yalnızca görsel gruplama başlıklarıdır (shared.jsx'te
+                  // tumVarsayilanEtiketler() bu ikisini listeden çıkarır ve seçici de
+                  // onlara "(tümü)" düğmesi vermez). Dolayısıyla onların altındaki
+                  // YAKIT, MAZOT, VERGİ, KAPORA, MUSTAFA BEŞİNCİ gibi kayıtlar alt
+                  // kategori değil, ZATEN ANA KATEGORİDİR — bu yüzden listede kalırlar.
+                  // Aksi halde en çok kullanılan kategoriler kaybolurdu.
+                  //
+                  // NOT: Daha önce alt kategoriyle (örn. "34 NDD 433") kaydedilmiş
+                  // işlemler bozulmaz; kayıtlı değerleri aynen durur ve listelerde
+                  // görünmeye devam eder. Yalnızca yeni seçimlerde sunulmazlar.
+                  // Araç bilgisi için işlem formundaki ayrı "Araç Plakası" alanı var.
+                  // ==================================================================
+                  const anaKategoriler = [];
+                  VARSAYILAN_ETIKET_GRUPLARI.forEach(grup => {
+                    const sanalBaslik = grup.baslik === 'KİŞİLER' || grup.baslik === 'GENEL';
+                    if (sanalBaslik) anaKategoriler.push(...grup.etiketler); // bunlar zaten ana kategori
+                    else anaKategoriler.push(grup.baslik);                   // alt kategorileri atlanır
+                  });
+
+                  // ARAMA MODU: aynı ana kategori listesi içinde arar.
                   if (q) {
-                    const tumu = [...tumVarsayilanEtiketler(), ...ozelEtiketler]
+                    const tumu = [...anaKategoriler, ...ozelEtiketler]
                       .filter(e => e.toLocaleLowerCase('tr-TR').includes(q))
                       .sort((a, b) => a.localeCompare(b, 'tr-TR'));
                     if (tumu.length === 0) {
@@ -9019,60 +9145,27 @@ const saatMetniSayiyaCevir = (deger) => {
                     );
                   }
 
-                  // NORMAL MOD: katlanır gruplar + en altta özel etiketler
+                  // NORMAL MOD: tek katman — düz ana kategori listesi + özel etiketler
                   return (
                     <>
-                      {VARSAYILAN_ETIKET_GRUPLARI.map(grup => {
-                        const acik = !!acikGruplar[grup.baslik];
-                        // Grup başlığı da bir etiket olabilir (örn. KAMYONLAR),
-                        // ama KİŞİLER/GENEL yalnızca gruplama amaçlı sanal başlıklar.
-                        const sanalBaslik = grup.baslik === 'KİŞİLER' || grup.baslik === 'GENEL';
-                        const grupSeciliSayi = grup.etiketler.filter(e => secili.includes(e)).length;
-
-                        return (
-                          <div key={grup.baslik} className="border border-neutral-200 rounded-xl overflow-hidden">
-                            <button type="button" onClick={() => setAcikGruplar({ ...acikGruplar, [grup.baslik]: !acik })}
-                              className="w-full px-3 py-2.5 bg-neutral-50 hover:bg-neutral-100 flex items-center justify-between transition">
-                              <span className="text-xs font-black text-black flex items-center gap-2">
-                                {grup.baslik}
-                                {grupSeciliSayi > 0 && (
-                                  <span className="text-[9px] font-black bg-emerald-600 text-white rounded-full px-1.5">{grupSeciliSayi}</span>
-                                )}
-                              </span>
-                              <span className="flex items-center gap-2">
-                                <span className="text-[10px] font-bold text-neutral-400">{grup.etiketler.length}</span>
-                                {acik ? <ChevronDown className="w-4 h-4 text-neutral-500" /> : <ChevronRight className="w-4 h-4 text-neutral-500" />}
-                              </span>
+                      <div className="border border-neutral-200 rounded-xl overflow-hidden">
+                        <div className="px-3 py-2.5 bg-neutral-50 text-xs font-black text-black flex items-center justify-between">
+                          <span>ANA KATEGORİLER</span>
+                          <span className="text-[10px] font-bold text-neutral-400">{anaKategoriler.length}</span>
+                        </div>
+                        <div className="p-2.5 flex flex-wrap gap-1.5">
+                          {anaKategoriler.map(e => (
+                            <button key={e} type="button" onClick={() => etiketToggle(e)}
+                              className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition ${
+                                secili.includes(e)
+                                  ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : 'bg-white text-neutral-700 border-neutral-300 hover:border-emerald-400'
+                              }`}>
+                              {secili.includes(e) && '✓ '}{e}
                             </button>
-
-                            {acik && (
-                              <div className="p-2.5 flex flex-wrap gap-1.5">
-                                {/* Grup başlığının kendisi de seçilebilir (sanal başlıklar hariç) */}
-                                {!sanalBaslik && (
-                                  <button type="button" onClick={() => etiketToggle(grup.baslik)}
-                                    className={`text-[11px] font-black px-2.5 py-1.5 rounded-lg border transition ${
-                                      secili.includes(grup.baslik)
-                                        ? 'bg-emerald-600 text-white border-emerald-600'
-                                        : 'bg-neutral-900 text-white border-neutral-900 hover:bg-neutral-700'
-                                    }`}>
-                                    {secili.includes(grup.baslik) && '✓ '}{grup.baslik} (tümü)
-                                  </button>
-                                )}
-                                {grup.etiketler.map(e => (
-                                  <button key={e} type="button" onClick={() => etiketToggle(e)}
-                                    className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition ${
-                                      secili.includes(e)
-                                        ? 'bg-emerald-600 text-white border-emerald-600'
-                                        : 'bg-white text-neutral-700 border-neutral-300 hover:border-emerald-400'
-                                    }`}>
-                                    {secili.includes(e) && '✓ '}{e}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                          ))}
+                        </div>
+                      </div>
 
                       {/* KULLANICI ETİKETLERİ — silme düğmesi yalnızca burada var */}
                       {ozelEtiketler.length > 0 && (
