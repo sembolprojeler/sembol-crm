@@ -4814,8 +4814,24 @@ const saatMetniSayiyaCevir = (deger) => {
     // "BORÇ" ile BAŞLIYORSA dışlanır (başka kelime içinde geçen "borç"
     // yanlışlıkla eşleşmesin diye tam kelime/başlangıç eşleşmesi kullanılır).
     const borcKategorisiMi = (i) => (i.kategori || '').trim().toLocaleUpperCase('tr-TR').startsWith('BORÇ');
+    // ========================================================================
+    // YENİ (kullanıcı talebi): ALACAK TAHSİLATLARI CİROYA GİRMEZ
+    // ------------------------------------------------------------------------
+    // "Tahsil Bekleyen" defterinden yapılan tahsilatta hedef hesaba bir GELİR
+    // satırı yazılır. Bu satır PARANIN HESABA GİRDİĞİNİ gösterir (bakiye doğru
+    // kalsın diye şart) ama YENİ BİR GELİR DEĞİLDİR: ilgili iş tamamlandığında
+    // ciroya zaten bir kez yazılmıştı. Tahsilat, o alacağın nakde dönmesidir.
+    // Ciroya ikinci kez eklenirse Nakliye ve Depoevim gelirleri ÇİFT SAYILIR.
+    // Bu yüzden tahsilat girişleri ciro/gelir hesaplarının tamamından dışlanır.
+    // Bakiye (hesabaKatilir) ETKİLENMEZ — para hesapta görünmeye devam eder.
+    //
+    // GERİYE UYUM: Bu değişiklikten ÖNCE yapılmış tahsilatlarda yeni bayrak
+    // yoktur; onlar da dışlansın diye ek olarak kaynak alanı kontrol edilir
+    // (tahsilat kayıtları her zaman kaynak: 'Alacak Tahsilatı' ile yazılır).
+    // ========================================================================
+    const alacakTahsilatiMi = (i) => i.tahsilatKaydi === true || i.kaynak === 'Alacak Tahsilatı';
     const ciroyaGirer = (i) => !i.silindi && !otomatikMaasKaydi(i) && !i.isVirman && !i.krediMahsup && !i.odemeMahsup && !i.devirKaydi
-      && !i.alacakMahsup && !borcKategorisiMi(i)
+      && !i.alacakMahsup && !borcKategorisiMi(i) && !alacakTahsilatiMi(i)
       && !(i.tip === 'giris' && borcluDefterIdSet.has(i.defterId));
 
     // ========================================================================
@@ -5349,17 +5365,44 @@ const saatMetniSayiyaCevir = (deger) => {
           otoDetaylar.push({ kalem, bilgi: alacakBilgi(defter, kalem) });
         });
         // --- 2) Tamamlanmış ama ödenmemiş müşteri işleri (cari bazında) ---
+        // ====================================================================
+        // HATA DÜZELTMESİ (kullanıcı bildirimi): "Bugün taşınan müşteriler
+        // borçlu listesinde çıkıyor; oysa carisi ₺0 ve ödeme alınmıştı."
+        // --------------------------------------------------------------------
+        // KÖK NEDEN: Tahsil edilen tutar `j.collectedAmount ?? j.paidAmount`
+        // alanlarından okunuyordu. Bu iki alan projede HİÇBİR YERDE YAZILMIYOR
+        // (arama ile doğrulandı) — yani her zaman undefined, dolayısıyla
+        // tahsil = 0 ve kalan = anlaşma tutarı çıkıyordu. Sonuç: ödemesi
+        // NAKİT/HAVALE/KREDİ KARTI ile TAM ALINMIŞ her tamamlanmış iş bile
+        // borçlu listesine düşüyordu (örn. Serkan er — cari bakiyesi ₺0).
+        //
+        // ÇÖZÜM: Ödemenin alınıp alınmadığının sistemdeki GERÇEK kaynağı,
+        // iş sonlandırma ekranında seçilen `endJobDetails.paymentMethod`
+        // alanıdır ("Nakit" / "Banka / Havale" / "Kredi Kartı" /
+        // "Ödeme Alınmadı"). Artık borçlu listesine YALNIZCA açıkça
+        // "Ödeme Alınmadı" seçilen işler girer. Aynı ölçüt, bu dosyadaki
+        // `tasinanOdemeler` hesabında da kullanılıyor — iki yer artık tutarlı.
+        //
+        // Kalan tutar da sistemin geri kalanıyla aynı formülle bulunur:
+        // (fiyat - kapora). Kapora alınmış işlerde yalnızca bakiyesi borç
+        // sayılır. Eski alanlar (totalAmount/agreedPrice) yedek olarak durur.
+        // ====================================================================
         const cariHarita = new Map();
         (jobs || []).forEach(j => {
-          // Yalnızca TAMAMLANMIŞ işler; ödeme alınmamış kalan bakiye
+          // Yalnızca TAMAMLANMIŞ işler
           if (j.status !== 'completed') return;
+          // Ödeme durumu iş sonlandırma ekranından gelir; kaydı yoksa borç sayılmaz
+          if (!j.endJobDetails) return;
+          // SADECE "Ödeme Alınmadı" işaretlenen işler borçlu listesine girer
+          if (j.endJobDetails.paymentMethod !== 'Ödeme Alınmadı') return;
           // YENİ (kullanıcı talebi): 1 Eylül 2026 ÖNCESİ tamamlanan işler devir
           // sayılır (tahsil edilmiş kabul); borçlu defterinde gösterilmez.
           if ((j.date || j.completedDate || '') < SISTEM_DEVIR_TARIHI) return;
-          const anlasma = parseFloat(j.totalAmount ?? j.agreedPrice ?? j.price) || 0;
-          const tahsil = parseFloat(j.collectedAmount ?? j.paidAmount) || 0;
-          const kalan = anlasma - tahsil;
-          if (kalan <= 0.01) return; // ödeme alındıysa borçlu değil
+          // Kalan borç = fiyat - kapora (sistemin diğer yerleriyle aynı hesap)
+          const anlasma = parseFloat(j.price ?? j.totalAmount ?? j.agreedPrice) || 0;
+          const kapora = parseFloat(j.deposit) || 0;
+          const kalan = anlasma - kapora;
+          if (kalan <= 0.01) return; // bakiye yoksa borçlu değil
           const tel = (j.customerPhone || '').replace(/\D/g, '') || (j.customerName || 'musteri');
           const m = cariHarita.get(tel);
           if (m) { m.kalan += kalan; if ((j.date || '') > m.tarih) { m.ad = j.customerName || m.ad; m.tarih = j.date; } }
@@ -5443,8 +5486,9 @@ const saatMetniSayiyaCevir = (deger) => {
     };
 
     // TAHSİLAT — paranın YÖNÜ ödemenin tersidir:
-    //   1) Seçilen HEDEF hesaba GİRİŞ yazılır (gerçek gelir — CİROYA GİRER,
-    //      kullanıcının istediği: "ödemeyi alınca genel ciroya ekle").
+    //   1) Seçilen HEDEF hesaba GİRİŞ yazılır (para hesaba girer, bakiye artar
+    //      — ama CİROYA GİRMEZ; iş tamamlandığında ciroya zaten yazılmıştı,
+    //      tahsilat o alacağın nakde dönmesidir. Bkz. ciroyaGirer/tahsilatKaydi).
     //   2) Borçlu defterine alacakMahsup ÇIKIŞI yazılır (alacak azalır,
     //      ciro/gider sayılmaz). Kısmi tahsilat desteklenir.
     const alacakTahsilEt = async () => {
@@ -5513,9 +5557,11 @@ const saatMetniSayiyaCevir = (deger) => {
       };
       setTahsilKaydediliyor(true);
       try {
-        // 1) HEDEF hesaba GİRİŞ — gerçek gelir, ciroya girer
+        // 1) HEDEF hesaba GİRİŞ — para hesaba girer (bakiye artar) ama
+        //    tahsilatKaydi bayrağı sayesinde CİROYA/gelir raporlarına GİRMEZ.
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
           ...ortak, tip: 'giris', tutar, defterId: tahsilModal.hedefDefterId,
+          tahsilatKaydi: true,
           odemeYontemi: defterdenOdemeYontemi(tahsilModal.hedefDefterId),
           aciklama: `${tahsilModal.kalem.ad} — ${t.no}. taksit tahsilatı${kismiNot}`,
         });
@@ -5527,7 +5573,7 @@ const saatMetniSayiyaCevir = (deger) => {
           aciklama: `${tahsilModal.kalem.ad} ${t.no}. taksit tahsil edildi${kismiNot} → ${hedef?.ad || 'hesap'}`,
         });
         addSystemLog?.(kismiOdeme ? 'Kısmi Tahsilat Yapıldı' : 'Tahsilat Yapıldı',
-          `${tahsilModal.kalem.ad}: ${t.no}. taksit ₺${paraFmt(tutar)} — ${hedef?.ad || '-'} hesabına alındı ve ciroya eklendi.${kismiOdeme ? ` Kalan: ₺${paraFmt(kalacak)}` : ''}`);
+          `${tahsilModal.kalem.ad}: ${t.no}. taksit ₺${paraFmt(tutar)} — ${hedef?.ad || '-'} hesabına alındı (ciroya eklenmez).${kismiOdeme ? ` Kalan: ₺${paraFmt(kalacak)}` : ''}`);
         setTahsilModal(null);
       } catch (e) { console.error('Tahsilat kaydedilemedi:', e); alert('Tahsilat kaydedilemedi. Lütfen tekrar deneyin.'); }
       finally { setTahsilKaydediliyor(false); }
@@ -10100,7 +10146,18 @@ const saatMetniSayiyaCevir = (deger) => {
             küçülür, Transfer'in metni gizlenip yalnız simge kalır ve dokunma
             yüksekliği korunur (py-3.5). Güvenli alan (iPhone alt çubuğu) için
             pb-[env(safe-area-inset-bottom)] eklendi. */}
-        {seciliDefter.tur !== 'Ödemeler' && (
+        {/* ==================================================================
+            DEĞİŞTİ (kullanıcı talebi): BORÇLU DEFTERİNDE İŞLEM ÇUBUĞU YOK
+            ------------------------------------------------------------------
+            "Tahsil Bekleyen" (Borçlu) defterinde gelir/gider/transfer kaydı
+            tutulmaz; kalemler defterin "alacaklar" dizisinde durur ve yalnızca
+            "Yeni Borçlu" ile eklenir, tahsilat da "Tahsil Et" ile yapılır.
+            Bu yüzden alttaki GELİR / GİDER / TRANSFER çubuğu bu defterde
+            gizlenir — yanlışlıkla buraya serbest işlem girilmesi önlenir.
+            'Diğer', Borçlu türünün eski (geriye uyumlu) adıdır, o da dahildir.
+            Ödemeler defterindeki mevcut gizleme kuralı AYNEN korunmuştur.
+            ================================================================== */}
+        {seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Borçlu' && seciliDefter.tur !== 'Diğer' && (
         <div className="fixed bottom-0 left-0 right-0 z-40 pointer-events-none pb-[max(1rem,env(safe-area-inset-bottom))]">
           {/* ==============================================================
               YENİ (kullanıcı talebi): MOBİL HIZLI KAYIT ÇUBUĞU
@@ -10429,7 +10486,7 @@ const saatMetniSayiyaCevir = (deger) => {
                     className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500 text-sm" /></div>
 
                 <p className="text-[11px] font-medium text-neutral-500 bg-neutral-50 p-2.5 rounded-lg border border-neutral-200">
-                  Onayladığınızda seçtiğiniz hesaba <b>₺{paraFmt(parseFloat(tahsilModal.tutar) || 0)} GELİR</b> yazılır ve tutar <b>o anda ciroya eklenir</b>; borçlunun alacağı aynı tutarda azalır.
+                  Onayladığınızda seçtiğiniz hesaba <b>₺{paraFmt(parseFloat(tahsilModal.tutar) || 0)}</b> girer ve hesap bakiyesi artar; borçlunun alacağı aynı tutarda azalır. Bu tutar <b>ciroya (Nakliye/Depoevim gelirlerine) eklenmez</b> — ilgili iş tamamlandığında ciroya zaten yazılmıştı, bu yalnızca alacağın tahsilidir.
                 </p>
 
                 <button onClick={alacakTahsilEt} disabled={tahsilKaydediliyor}
