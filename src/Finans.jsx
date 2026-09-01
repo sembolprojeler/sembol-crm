@@ -7256,6 +7256,31 @@ const saatMetniSayiyaCevir = (deger) => {
                       <p className="text-[11px] font-medium text-indigo-700">
                         Depoevim CRM tahsilatlarının bu deftere otomatik <b>GELİR</b> olarak düşmesi için aşağıdaki iki kimliği kopyalayıp Depoevim projesindeki <b>sembolKoprusu.js</b> dosyasına yapıştırın.
                       </p>
+                      {/* ==========================================================
+                          YENİ (kullanıcı talebi): SİLME SENKRONİZASYONU SÖZLEŞMESİ
+                          ----------------------------------------------------------
+                          Depoevim'de bir tahsilat silindiğinde burada da düşmeli,
+                          AMA kayıt yok olmamalı — "silinmiştir" damgası ile
+                          görünmeye devam etmeli. Bu ekranın tarafı hazırdır:
+                          aşağıdaki üç alan yazıldığı anda satır otomatik olarak
+                          soluklaşır, "DEPOEVİM CRM'DE SİLİNDİ" rozeti alır,
+                          bakiye ve ciro hesaplarından düşer ama "Silinen"
+                          sekmesinde listelenmeye devam eder.
+                          Köprünün yapması gereken TEK ŞEY: kaydı silmek yerine
+                          güncellemek (updateDoc) — asla deleteDoc kullanmamak.
+                          ========================================================== */}
+                      <div className="p-2 bg-white rounded-lg border border-indigo-200">
+                        <div className="text-[9px] font-black uppercase text-indigo-400 mb-1">Silme Senkronizasyonu</div>
+                        <p className="text-[10px] font-medium text-neutral-600 leading-snug">
+                          Depoevim'de bir tahsilat silindiğinde köprü, ilgili kaydı <b>silmemeli</b>; şu üç alanı yazacak şekilde <b>güncellemelidir</b>:
+                        </p>
+                        <pre className="mt-1 p-2 bg-neutral-900 text-emerald-300 rounded-md text-[9px] font-mono overflow-x-auto leading-relaxed">{`silindi: true,
+silmeKaynagi: 'Depoevim CRM',
+silinmeTarihi: new Date().toISOString()`}</pre>
+                        <p className="text-[10px] font-medium text-neutral-500 mt-1 leading-snug">
+                          Bu yazıldığı anda kayıt burada <b>"DEPOEVİM CRM'DE SİLİNDİ"</b> damgası alır; bakiye ve ciroya dahil edilmez, <b>"Silinen"</b> sekmesinden görüntülenebilir.
+                        </p>
+                      </div>
                       <div className="flex items-center gap-2">
                         <div className="flex-1 min-w-0 p-2 bg-white rounded-lg border border-indigo-200">
                           <div className="text-[9px] font-black uppercase text-indigo-400">Defter ID (HEDEF_DEFTER_ID)</div>
@@ -7337,6 +7362,8 @@ const saatMetniSayiyaCevir = (deger) => {
       // Transferler (isVirman) gelir ve gider listelerinden çıkarılır; kendi
       // sekmelerinde görünürler.
       .filter(i => hareketFiltre === 'tumu'
+        // YENİ: yalnızca silinmiş (damgalanmış) kayıtlar
+        || (hareketFiltre === 'silinen' && i.silindi)
         || (hareketFiltre === 'transfer' && i.isVirman)
         || (hareketFiltre === 'giris' && i.tip === 'giris' && !i.isVirman)
         || (hareketFiltre === 'cikis' && i.tip === 'cikis' && !i.isVirman))
@@ -8688,7 +8715,7 @@ const saatMetniSayiyaCevir = (deger) => {
                   "Gelir" sekmesindeyken "hareket yok" demek yanıltıcı olurdu —
                   o gün gider olabilir ama gelir olmayabilir. */}
               {hareketFiltre !== 'tumu'
-                ? `Bu ${gunFiltreAktif ? 'günde' : 'defterde'} ${hareketFiltre === 'giris' ? 'gelir' : hareketFiltre === 'cikis' ? 'gider' : 'transfer'} kaydı yok. "Tümü" sekmesine bakabilirsiniz.`
+                ? `Bu ${gunFiltreAktif ? 'günde' : 'defterde'} ${hareketFiltre === 'giris' ? 'gelir' : hareketFiltre === 'cikis' ? 'gider' : hareketFiltre === 'silinen' ? 'silinmiş' : 'transfer'} kaydı yok. "Tümü" sekmesine bakabilirsiniz.`
                 : gunFiltreAktif
                   ? `${gunEtiketi(seciliGun)} tarihinde hareket yok. Oklarla başka bir güne geçin veya "Tüm Zamanlar"a bakın.`
                   : 'Kayıt bulunamadı. Alttaki butonlarla ilk işlemi ekleyin.'}
@@ -8818,8 +8845,16 @@ const saatMetniSayiyaCevir = (deger) => {
                     </span>
                   </div>
                   <div className="flex items-center gap-2 flex-wrap">
-                    {/* YENİ: silinen/düzenlenen işlemler satırda etiketlenir */}
-                    {i.silindi && <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white">İŞLEM SİLİNDİ</span>}
+                    {/* YENİ: silinen/düzenlenen işlemler satırda etiketlenir.
+                        DEĞİŞTİ (kullanıcı talebi): Kaynak sistemde (Depoevim CRM)
+                        silinen kayıtlar, buradan ELLE silinenlerden ayırt edilsin
+                        diye farklı bir rozet alır. Köprü, silme bilgisini
+                        silmeKaynagi alanıyla gönderir (bkz. silinme dipnotu). */}
+                    {i.silindi && (
+                      i.silmeKaynagi
+                        ? <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-700 text-white">{String(i.silmeKaynagi).toLocaleUpperCase('tr-TR')}'DE SİLİNDİ</span>
+                        : <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white">İŞLEM SİLİNDİ</span>
+                    )}
                     {!i.silindi && i.duzenlendi && <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-blue-600 text-white">DÜZENLENDİ</span>}
                     <span className="hidden sm:inline text-[11px] font-black text-neutral-400">{new Date(i.tarih).toLocaleDateString('tr-TR')}</span>
                     {/* MOBİL: etiket yazıları küçültüldü — sol sütun %60'a
@@ -8899,7 +8934,10 @@ const saatMetniSayiyaCevir = (deger) => {
                   )}
                   {i.silindi && (
                     <div className="text-[10px] font-bold text-red-400 mt-0.5">
-                      İşlem silindi{i.silinmeTarihi ? ` • ${new Date(i.silinmeTarihi).toLocaleDateString('tr-TR')}` : ''}{i.silen ? ` • ${i.silen}` : ''} — hesaplara dahil edilmiyor
+                      {i.silmeKaynagi
+                        ? `${i.silmeKaynagi} tarafında silindi`
+                        : 'İşlem silindi'}
+                      {i.silinmeTarihi ? ` • ${new Date(i.silinmeTarihi).toLocaleDateString('tr-TR')}` : ''}{i.silen ? ` • ${i.silen}` : ''} — kayıt saklanıyor, hesaplara dahil edilmiyor
                     </div>
                   )}
                 </div>
@@ -9036,17 +9074,23 @@ const saatMetniSayiyaCevir = (deger) => {
               giris: havuz.filter(i => i.tip === 'giris' && !i.isVirman).length,
               cikis: havuz.filter(i => i.tip === 'cikis' && !i.isVirman).length,
               transfer: havuz.filter(i => i.isVirman).length,
+              // YENİ (kullanıcı talebi): silinmiş kayıtların sayısı
+              silinen: havuz.filter(i => i.silindi).length,
             };
             const sekmeler = [
               { id: 'tumu', ad: 'Tümü', aktif: 'bg-neutral-900 text-white', pasif: 'text-neutral-500 hover:bg-neutral-100' },
               { id: 'giris', ad: 'Gelir', aktif: 'bg-emerald-600 text-white', pasif: 'text-emerald-700 hover:bg-emerald-50' },
               { id: 'cikis', ad: 'Gider', aktif: 'bg-red-600 text-white', pasif: 'text-red-600 hover:bg-red-50' },
               { id: 'transfer', ad: 'Transfer', aktif: 'bg-slate-800 text-white', pasif: 'text-slate-600 hover:bg-slate-100' },
+              // YENİ (kullanıcı talebi): "Silinenleri görelim" — silinen kayıtlar
+              // veritabanından KALDIRILMAZ, yalnızca damgalanır; bu sekme onları
+              // tek tuşla listeler.
+              { id: 'silinen', ad: 'Silinen', aktif: 'bg-rose-600 text-white', pasif: 'text-rose-600 hover:bg-rose-50' },
             ];
             // DEĞİŞTİ (kullanıcı talebi): bu bölge MOBİLDE %15 küçültüldü
             // ([zoom:0.85]); masaüstünde boyut aynı (sm:[zoom:1]).
             return (
-              <div className="[zoom:0.85] sm:[zoom:1] grid grid-cols-4 gap-1.5 px-2.5 sm:px-3 pb-2.5 sm:pb-3 border-t border-neutral-100 pt-2.5">
+              <div className="[zoom:0.85] sm:[zoom:1] grid grid-cols-5 gap-1.5 px-2.5 sm:px-3 pb-2.5 sm:pb-3 border-t border-neutral-100 pt-2.5">
                 {sekmeler.map(sk => (
                   <button key={sk.id} type="button" onClick={() => setHareketFiltre(sk.id)}
                     className={`py-2 rounded-xl text-[10px] sm:text-[11px] font-black transition flex flex-col items-center justify-center leading-tight ${
