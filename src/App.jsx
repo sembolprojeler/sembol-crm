@@ -54,6 +54,14 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
     { id: 'addInfo', label: 'Bilgilendirme Ekle' },
     { id: 'mySpecialTasks', label: 'Özel Görevlerim' },
     { id: 'addJob', label: 'Satış Bölümü' },
+    // YENİ (kullanıcı talebi): Satış Bölümü'nün ALT SAYFALARI ayrı ayrı
+    // yetkilendirilebilir. Bir alt sayfanın yetkisi kişiye özel VERİLMEMİŞSE,
+    // üst "Satış Bölümü" (addJob) yetkisini miras alır (bkz. altSatisErisimi).
+    // Böylece mevcut kullanıcılar kilitlenmez; sadece kısıtlamak isteyen
+    // yönetici ilgili alt sayfayı buradan kapatır.
+    { id: 'satisMusteriKayit', label: 'Satış: Müşteri Kayıt' },
+    { id: 'satisMusteriHavuzu', label: 'Satış: Müşteri Havuzu' },
+    { id: 'satisSahaPortfoy', label: 'Satış: Saha Portföy' },
     { id: 'operasyon', label: 'Operasyon Bölümü' },
     { id: 'jobList', label: 'İş Listesi' },
     { id: 'customers', label: 'Müşteri Listesi' },
@@ -6632,6 +6640,35 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const showAddInfo = checkAccess('addInfo');
     const showMySpecialTasks = checkAccess('mySpecialTasks');
     const showAddJob = checkAccess('addJob');
+    // ========================================================================
+    // YENİ (kullanıcı talebi): SATIŞ ALT SAYFA YETKİLERİ
+    // ------------------------------------------------------------------------
+    // Kural 1: Üst "Satış Bölümü" (addJob) yetkisi YOKSA, hiçbir alt sayfa
+    //          görünmez (alt sayfa yetkisi açık olsa bile). Alt sayfa üst
+    //          bölümün içindedir; bölüme erişimi olmayan alt sayfayı da görmez.
+    // Kural 2: addJob VARSA: alt sayfa yetkisi kişiye özel olarak açıkça
+    //          BELİRTİLMİŞSE o değer geçerlidir (açık/kapalı). BELİRTİLMEMİŞSE
+    //          üst bölüm yetkisini miras alır (varsayılan: görünür). Böylece
+    //          mevcut kullanıcılar bozulmaz; yönetici yalnızca kısmak istediği
+    //          alt sayfayı Yetkilendirme'den kapatır.
+    // ========================================================================
+    const altSatisErisimi = (altKey) => {
+      if (!showAddJob) return false; // üst bölüm kapalıysa alt sayfalar da kapalı
+      // Kişiye özel açık bir tercih varsa ona uy
+      if (currentUser?.permissions?.modules && typeof currentUser.permissions.modules[altKey] === 'boolean') {
+        return currentUser.permissions.modules[altKey];
+      }
+      // Pozisyon/rütbe seviyesinde tanımlıysa ona uy
+      const posAccess = positionModules?.[currentUser?.position];
+      if (posAccess && typeof posAccess[altKey] === 'boolean') return posAccess[altKey];
+      const rankAccess = positionModules?.[currentUser?.rank];
+      if (rankAccess && typeof rankAccess[altKey] === 'boolean') return rankAccess[altKey];
+      // Hiç tanımlı değilse üst bölümü miras al (görünür)
+      return true;
+    };
+    const showSatisMusteriKayit = altSatisErisimi('satisMusteriKayit');
+    const showSatisMusteriHavuzu = altSatisErisimi('satisMusteriHavuzu');
+    const showSatisSahaPortfoy = altSatisErisimi('satisSahaPortfoy');
     const showJobList = checkAccess('jobList');
     const showCustomers = checkAccess('customers');
     const showPersonnel = checkAccess('personnel');
@@ -7304,6 +7341,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 
                 {isAddJobSubMenuOpen && (
                   <div className="flex flex-col gap-1 pl-4 mt-1 animate-in slide-in-from-top-2">
+                    {/* YENİ (kullanıcı talebi): Alt sayfalar artık kendi yetkilerine
+                        göre görünür. Yetkisi olmayan alt sayfa menüde çıkmaz. */}
+                    {showSatisMusteriKayit && (<>
                     {/* YENİ: Nakliye Kayıt, Depo Kayıt ve Asansör Kayıt artık TEK SAYFA
                         ("Müşteri Kayıt") altında birleştirildi. Üç ayrı menü öğesi yerine
                         tek giriş noktası var; sayfanın içinde üstte 3 geçiş butonu bulunur
@@ -7324,23 +7364,28 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${['addNakliye', 'addDepo', 'addAsansor'].includes(activeTab) ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Kayıt
                     </button>
+                    </>)}
                     {/* YENİ: MÜŞTERİ HAVUZU — telefon/WhatsApp/Instagram/Gmail kanallarından
                         gelen tüm müşteri adaylarının toplandığı havuz ekranı */}
+                    {showSatisMusteriHavuzu && (
                     <button
                       onClick={() => { setActiveTab('musteriHavuzu'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'musteriHavuzu' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'musteriHavuzu' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Havuzu
                     </button>
+                    )}
                     {/* YENİ: SAHA PORTFÖY — Satış Bölümü'nün EN ALTINDA. Saha pazarlama
                         ekibinin iş ortağı portföyü: emlak ofisleri, site yönetimleri,
                         ziyaret takibi, komisyon/teminat carisi ve kartvizit arşivi. */}
+                    {showSatisSahaPortfoy && (
                     <button
                       onClick={() => { setActiveTab('sahaPortfoy'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'sahaPortfoy' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'sahaPortfoy' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Saha Portföy
                     </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -8077,12 +8122,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'myComplaint' && showMyComplaint && <MyComplaintSubmitView currentUser={currentUser} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'addInfo' && showAddInfo && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} onBack={() => setActiveTab('notifications')} />}
             
-            {/* YENİ: MÜŞTERİ HAVUZU EKRANI — Satış Bölümü yetkisiyle görünür */}
-            {activeTab === 'musteriHavuzu' && showAddJob &&
+            {/* YENİ: MÜŞTERİ HAVUZU EKRANI — kendi alt yetkisiyle görünür */}
+            {activeTab === 'musteriHavuzu' && showSatisMusteriHavuzu &&
               <MusteriHavuzuView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
 
-            {/* YENİ: SAHA PORTFÖY EKRANI — saha pazarlama ekibinin iş ortağı portföyü */}
-            {activeTab === 'sahaPortfoy' && showAddJob &&
+            {/* YENİ: SAHA PORTFÖY EKRANI — kendi alt yetkisiyle görünür */}
+            {activeTab === 'sahaPortfoy' && showSatisSahaPortfoy &&
               <SahaPortfoyView personnelList={personnelList} currentUser={currentUser} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
 
             {/* YENİ: HATIRLATMALAR EKRANI — takvim mantığıyla görev/not takibi.
@@ -8090,7 +8135,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'hatirlatmalar' && showHatirlatmalar &&
               <HatirlatmalarView jobs={jobs} personnelList={personnelList} vehicles={vehicles} currentUser={currentUser} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
 
-            {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showAddJob &&
+            {(activeTab === 'addNakliye' || activeTab === 'addDepo' || activeTab === 'addAsansor') && showSatisMusteriKayit &&
               <div className="space-y-4">
                 {/* ============================================================
                     YENİ: MÜŞTERİ KAYIT — 3 GEÇİŞ SEKMESİ
