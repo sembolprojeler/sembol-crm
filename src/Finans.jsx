@@ -8286,32 +8286,53 @@ const saatMetniSayiyaCevir = (deger) => {
                     {bekleyenler.map(({ kalem, bilgi, t }) => {
                       const tr2 = alacakTuru(kalem.tur);
                       return (
-                        <div key={`${kalem.id}_${t.no}`} className={`flex items-center gap-2 p-2.5 rounded-xl border flex-wrap ${t.gecikmis ? 'border-red-300 bg-red-50' : tr2.yumusak}`}>
-                          <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full shrink-0 ${tr2.rozet}`}>{tr2.ad.toUpperCase()}</span>
-                          <div className="flex-1 min-w-0">
-                            <div className="font-black text-sm text-neutral-800 truncate">
-                              {kalem.ad}
-                              {bilgi.adet > 1 && <span className="text-neutral-500 font-bold"> — {AY_ADLARI[Number(t.tarih.slice(5, 7)) - 1]} Taksiti ({t.no}/{bilgi.adet})</span>}
-                            </div>
-                            <div className="text-[10px] font-bold text-neutral-500">
-                              Vade: {trh(t.tarih)}
-                              {t.gecikmis && <span className="ml-1 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
-                              {kalem.icra && <span className="ml-1 text-[9px] font-black bg-black text-white px-1.5 py-0.5 rounded-full">İCRADA • {trh(kalem.icra)}</span>}
-                              {t.kismi && <span className="ml-1 text-[9px] font-black bg-sky-600 text-white px-1.5 py-0.5 rounded-full">KISMİ • ₺{paraFmt(t.odenenTutar)} alındı</span>}
+                        /* ================================================================
+                           DÜZELTİLDİ (kullanıcı talebi): MOBİLDE İSİM VE TUTAR KESİLİYORDU
+                           ----------------------------------------------------------------
+                           ESKİ DÜZEN: rozet + isim + tutar + 2 düğme HEPSİ tek satırdaydı.
+                           Telefonda (~340px) rozet, tutar ve düğmeler sabit genişlik
+                           kapladığı için ortadaki isim alanına neredeyse hiç yer kalmıyor,
+                           "truncate" ile "Emir ...", "İSMAİ...", "ÇEK..." diye kesiliyordu.
+                           YENİ DÜZEN: Mobilde satır İKİ KATA ayrılır —
+                             1. kat: rozet + TAM isim (kesilmez, gerekirse alt satıra sarar)
+                             2. kat: solda tutar, sağda "Tahsil Et" / "İcra" düğmeleri
+                           sm ve üzeri ekranlarda (masaüstü) ESKİ TEK SATIR düzeni aynen
+                           korunur; hiçbir veri veya davranış değişmedi, sadece yerleşim.
+                           ================================================================ */
+                        <div key={`${kalem.id}_${t.no}`} className={`flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 rounded-xl border ${t.gecikmis ? 'border-red-300 bg-red-50' : tr2.yumusak}`}>
+                          {/* 1. KAT (mobil) / SOL BLOK (masaüstü): rozet + isim + vade */}
+                          <div className="flex items-start gap-2 min-w-0 flex-1">
+                            <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${tr2.rozet}`}>{tr2.ad.toUpperCase()}</span>
+                            <div className="flex-1 min-w-0">
+                              {/* break-words: mobilde uzun isim kesilmek yerine alt satıra sarar */}
+                              <div className="font-black text-sm text-neutral-800 break-words sm:truncate">
+                                {kalem.ad}
+                                {bilgi.adet > 1 && <span className="text-neutral-500 font-bold"> — {AY_ADLARI[Number(t.tarih.slice(5, 7)) - 1]} Taksiti ({t.no}/{bilgi.adet})</span>}
+                              </div>
+                              <div className="text-[10px] font-bold text-neutral-500 flex flex-wrap items-center gap-1 mt-0.5">
+                                <span>Vade: {trh(t.tarih)}</span>
+                                {t.gecikmis && <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
+                                {kalem.icra && <span className="text-[9px] font-black bg-black text-white px-1.5 py-0.5 rounded-full">İCRADA • {trh(kalem.icra)}</span>}
+                                {t.kismi && <span className="text-[9px] font-black bg-sky-600 text-white px-1.5 py-0.5 rounded-full">KISMİ • ₺{paraFmt(t.odenenTutar)} alındı</span>}
+                              </div>
                             </div>
                           </div>
-                          <div className="text-right shrink-0">
-                            <div className={`font-black tabular-nums ${t.gecikmis ? 'text-red-700' : tr2.yazi}`}>₺{paraFmt(t.kalan ?? t.tutar)}</div>
-                            {t.kismi && <div className="text-[9px] font-bold text-neutral-400 line-through">₺{paraFmt(t.tutar)}</div>}
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button type="button" onClick={() => setTahsilModal({ kalem, taksit: t, hedefDefterId: '', tarih: bugunStr(), tutar: String(t.kalan ?? t.tutar) })}
-                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg transition">Tahsil Et</button>
-                            {!kalem.icra && (
-                              <button type="button" onClick={() => alacakIcra(kalem.id, true)}
-                                title="Ödeme alınamazsa icra takibi başlat"
-                                className="px-2 py-1.5 bg-neutral-800 hover:bg-black text-white text-[10px] font-black rounded-lg transition">İcra</button>
-                            )}
+                          {/* 2. KAT (mobil) / SAĞ BLOK (masaüstü): tutar + düğmeler */}
+                          <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+                            <div className="text-left sm:text-right">
+                              {/* whitespace-nowrap: tutar asla bölünmez/kesilmez */}
+                              <div className={`font-black tabular-nums whitespace-nowrap ${t.gecikmis ? 'text-red-700' : tr2.yazi}`}>₺{paraFmt(t.kalan ?? t.tutar)}</div>
+                              {t.kismi && <div className="text-[9px] font-bold text-neutral-400 line-through whitespace-nowrap">₺{paraFmt(t.tutar)}</div>}
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button type="button" onClick={() => setTahsilModal({ kalem, taksit: t, hedefDefterId: '', tarih: bugunStr(), tutar: String(t.kalan ?? t.tutar) })}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg transition whitespace-nowrap">Tahsil Et</button>
+                              {!kalem.icra && (
+                                <button type="button" onClick={() => alacakIcra(kalem.id, true)}
+                                  title="Ödeme alınamazsa icra takibi başlat"
+                                  className="px-2 py-1.5 bg-neutral-800 hover:bg-black text-white text-[10px] font-black rounded-lg transition">İcra</button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       );
@@ -8352,10 +8373,14 @@ const saatMetniSayiyaCevir = (deger) => {
                     const yuzde = bilgi.toplam > 0 ? Math.round((bilgi.toplamTahsil / bilgi.toplam) * 100) : 0;
                     return (
                       <div key={kalem.id} className={`rounded-xl border-2 overflow-hidden ${kalem.icra ? 'border-neutral-800' : bilgi.gecikmisAdet > 0 ? 'border-red-300' : 'border-neutral-200'}`}>
-                        <div className={`p-3 flex items-center gap-3 cursor-pointer transition flex-wrap ${bilgi.gecikmisAdet > 0 ? 'bg-red-50 hover:bg-red-100' : 'bg-neutral-50 hover:bg-neutral-100'}`}
+                        {/* DÜZELTİLDİ (aynı mobil sorunu): düğme grubu mobilde
+                            bilgi bloğunu daraltıyordu. Artık mobilde alt satıra
+                            geçer, isim ve tutarlar tam genişlikte görünür.
+                            sm ve üzerinde eski yan yana düzen korunur. */}
+                        <div className={`p-3 flex flex-col sm:flex-row sm:items-center gap-3 cursor-pointer transition ${bilgi.gecikmisAdet > 0 ? 'bg-red-50 hover:bg-red-100' : 'bg-neutral-50 hover:bg-neutral-100'}`}
                           onClick={() => setAcikAlacakKalemi(acik ? null : kalem.id)}>
                           <div className="flex-1 min-w-0">
-                            <div className="font-black text-black text-sm flex items-center gap-2 flex-wrap">
+                            <div className="font-black text-black text-sm flex items-center gap-2 flex-wrap break-words">
                               <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full ${tr2.rozet}`}>{tr2.ad.toUpperCase()}</span>
                               {kalem.ad}
                               {kalem.icra && <span className="text-[9px] font-black bg-black text-white px-1.5 py-0.5 rounded-full">İCRADA • {trh(kalem.icra)}</span>}
@@ -8374,11 +8399,11 @@ const saatMetniSayiyaCevir = (deger) => {
                             </div>
                             {kalem.not && <p className="text-[10px] font-medium text-neutral-400 italic mt-0.5">{kalem.not}</p>}
                           </div>
-                          <div className="flex items-center gap-1 shrink-0">
+                          <div className="flex items-center gap-1 flex-wrap sm:flex-nowrap sm:shrink-0">
                             {bilgi.siradaki && (
                               <button type="button"
                                 onClick={e => { e.stopPropagation(); setTahsilModal({ kalem, taksit: bilgi.siradaki, hedefDefterId: '', tarih: bugunStr(), tutar: String(bilgi.siradaki.kalan ?? bilgi.siradaki.tutar) }); }}
-                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition">Tahsil Et</button>
+                                className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg transition whitespace-nowrap">Tahsil Et</button>
                             )}
                             {/* YENİ (kullanıcı talebi): OTOMATİK borçlularda (personel
                                 şirket borcu / tamamlanmış ödenmemiş müşteri işi)
