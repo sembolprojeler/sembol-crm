@@ -3377,6 +3377,118 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
   const [ziyaretForm, setZiyaretForm] = useState({ tarih: bugunStr(), not: '' });
   const [cariForm, setCariForm] = useState({ tip: 'komisyon', tutar: '', aciklama: '' });
 
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): SAHA RANDEVU SİSTEMİ
+  // --------------------------------------------------------------------------
+  // İş akışı: Saha pazarlamacı, bir firmayı portföye eklemeden ÖNCE randevu
+  // alır → takvimden takip eder → görüşmeye gider → "Gidildi → Portföye Ekle"
+  // ile görüşme bilgileri HAZIR DOLDURULMUŞ portföy formuna aktarılır.
+  // Randevular 'sahaRandevular' koleksiyonunda tutulur; takvim, Hatırlatmalar
+  // sayfasındaki takvimle aynı tasarım dilindedir (ay ızgarası + gün simgeleri
+  // + seçili günün listesi).
+  // Durumlar: bekliyor → gidildi | iptal. Tarihi geçmiş "bekliyor" randevular
+  // takvimde ve listede KIRMIZI uyarıyla öne çıkar (unutulan görüşme kalmasın).
+  // ==========================================================================
+  const [randevular, setRandevular] = useState([]);
+  const [randevuFormAcik, setRandevuFormAcik] = useState(false);
+  const [randevuDuzenlenenId, setRandevuDuzenlenenId] = useState(null);
+  const [randevuKaydediliyor, setRandevuKaydediliyor] = useState(false);
+  const [randevuSilinecekId, setRandevuSilinecekId] = useState(null);
+  const bosRandevuForm = {
+    firmaAdi: '', tip: 'Emlak Ofisi', yetkili: '', telefon: '', bolge: '', adres: '',
+    tarih: bugunStr(), saat: '10:00', atanan: currentUser?.fullName || '', not: '',
+  };
+  const [randevuForm, setRandevuForm] = useState(bosRandevuForm);
+  // Takvim: görüntülenen ay + seçili gün
+  const [rTakvim, setRTakvim] = useState(() => { const d = new Date(); return { yil: d.getFullYear(), ay: d.getMonth() }; });
+  const [rSecilenGun, setRSecilenGun] = useState(bugunStr());
+
+  // Randevuları canlı dinle
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular'), (snap) => {
+      setRandevular(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error('Saha randevuları yüklenemedi:', err));
+    return () => unsub();
+  }, []);
+
+  // Randevu kaydet (yeni / düzenle)
+  const randevuKaydet = async () => {
+    if (!randevuForm.firmaAdi.trim()) { alert('Firma adı girin.'); return; }
+    if (!randevuForm.tarih) { alert('Randevu tarihi seçin.'); return; }
+    setRandevuKaydediliyor(true);
+    try {
+      if (randevuDuzenlenenId) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', randevuDuzenlenenId), { ...randevuForm });
+        addSystemLog?.('Saha Randevu', `${randevuForm.firmaAdi} randevusu güncellendi (${randevuForm.tarih} ${randevuForm.saat}).`);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular'), {
+          ...randevuForm, durum: 'bekliyor',
+          olusturan: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(),
+        });
+        addSystemLog?.('Saha Randevu', `Yeni randevu: ${randevuForm.firmaAdi} — ${randevuForm.tarih} ${randevuForm.saat} (${randevuForm.atanan}).`);
+      }
+      setRSecilenGun(randevuForm.tarih); // kaydedince takvim o güne odaklansın
+      setRandevuFormAcik(false); setRandevuDuzenlenenId(null); setRandevuForm(bosRandevuForm);
+    } catch (e) { console.error(e); alert('Randevu kaydedilemedi.'); }
+    finally { setRandevuKaydediliyor(false); }
+  };
+
+  // Durum değiştir: iptal / tekrar bekliyor
+  const randevuDurum = async (r, durum) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', r.id), {
+        durum, ...(durum === 'gidildi' ? { gidilmeTarihi: new Date().toISOString() } : {}),
+      });
+      addSystemLog?.('Saha Randevu', `${r.firmaAdi} randevusu: ${durum === 'gidildi' ? 'GİDİLDİ' : durum === 'iptal' ? 'İPTAL edildi' : 'tekrar beklemeye alındı'}.`);
+    } catch (e) { console.error(e); alert('Güncellenemedi.'); }
+  };
+
+  const randevuSil = async () => {
+    if (!randevuSilinecekId) return;
+    try {
+      const r = randevular.find(x => x.id === randevuSilinecekId);
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', randevuSilinecekId));
+      addSystemLog?.('Saha Randevu', `${r?.firmaAdi || ''} randevusu silindi.`);
+    } catch (e) { console.error(e); }
+    setRandevuSilinecekId(null);
+  };
+
+  // ANA AKIŞ (kullanıcı talebi): Görüşmeye gidildi → firma bilgileri hazır
+  // doldurulmuş şekilde "Portföye Ekle" formu açılır; ikinci kez yazmaya
+  // gerek kalmaz. Randevu 'gidildi' + portföye aktarıldı olarak işaretlenir.
+  const randevudanPortfoyeEkle = async (r) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', r.id), {
+        durum: 'gidildi', gidilmeTarihi: new Date().toISOString(), portfoyeAktarildi: true,
+      });
+    } catch (e) { console.error(e); }
+    setForm({
+      ...bosForm,
+      firmaAdi: r.firmaAdi || '', tip: r.tip || 'Emlak Ofisi', yetkili: r.yetkili || '',
+      telefon: r.telefon || '', bolge: r.bolge || '', adres: r.adres || '',
+      portfoySahibi: r.atanan || currentUser?.fullName || '',
+      notlar: r.not ? `Randevu notu (${r.tarih} ${r.saat || ''}): ${r.not}` : '',
+    });
+    setDuzenlenenId(null); setFormAcik(true);
+    addSystemLog?.('Saha Randevu', `${r.firmaAdi} görüşmesi yapıldı → Portföye Ekle formu açıldı.`);
+  };
+
+  // Takvim yardımcıları (Hatırlatmalar sayfasındaki desenle aynı)
+  const R_AYLAR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+  const R_GUNLER = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
+  const rHucreler = useMemo(() => {
+    const ilkIndex = (new Date(rTakvim.yil, rTakvim.ay, 1).getDay() + 6) % 7; // Pazartesi başlangıç
+    const gunSayisi = new Date(rTakvim.yil, rTakvim.ay + 1, 0).getDate();
+    return [...Array(ilkIndex).fill(null), ...Array.from({ length: gunSayisi }, (_, i) => i + 1)];
+  }, [rTakvim]);
+  const rGunRandevulari = (tarihStr) => randevular
+    .filter(r => r.tarih === tarihStr)
+    .sort((a, b) => (a.saat || '').localeCompare(b.saat || ''));
+  const rSecilenGunListesi = rGunRandevulari(rSecilenGun);
+  // Gecikmiş = tarihi geçmiş ama hâlâ "bekliyor" (görüşmeye gidilmemiş)
+  const rGecikmisler = randevular.filter(r => r.durum === 'bekliyor' && r.tarih < bugunStr());
+  const rBugunkuler = randevular.filter(r => r.durum === 'bekliyor' && r.tarih === bugunStr());
+
   const bosForm = {
     firmaAdi: '', tip: 'Emlak Ofisi', yetkili: '', telefon: '', bolge: '', adres: '',
     portfoySahibi: currentUser?.fullName || '', durum: 'Aday',
@@ -3540,7 +3652,11 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
     const yediGunOnce = new Date(); yediGunOnce.setDate(yediGunOnce.getDate() - 7);
     return partnerlar.reduce((s, p) => s + (p.ziyaretler || []).filter(z => new Date(z.tarih) >= yediGunOnce).length, 0);
   })();
-  const bekleyenRandevu = partnerlar.filter(p => p.sonrakiRandevu && p.sonrakiRandevu >= bugunStr() && p.durum !== 'Anlaşıldı' && p.durum !== 'Pasif').length;
+  // DEĞİŞTİ (kullanıcı talebi): "Bekleyen Randevu" artık YENİ randevu
+  // sisteminden sayılır (bekliyor + günü gelmemiş/bugün) ve partner kartına
+  // elle girilmiş eski "sonraki randevu" tarihleri de eklenir (geriye uyum).
+  const bekleyenRandevu = randevular.filter(r => r.durum === 'bekliyor' && r.tarih >= bugunStr()).length
+    + partnerlar.filter(p => p.sonrakiRandevu && p.sonrakiRandevu >= bugunStr() && p.durum !== 'Anlaşıldı' && p.durum !== 'Pasif').length;
   const toplamKomisyon = partnerlar.reduce((s, p) => s + cariOzet(p).komisyon, 0);
   const acikTeminat = partnerlar.reduce((s, p) => s + cariOzet(p).teminat, 0);
 
@@ -3556,10 +3672,18 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
           <h2 className="text-2xl font-black text-black flex items-center gap-2"><Handshake className="w-7 h-7 text-red-600" /> Saha Portföy</h2>
           <p className="text-sm text-neutral-500 font-medium mt-1">Emlak ofisleri, site yönetimleri ve iş ortakları — ziyaret, anlaşma, komisyon ve teminat takibi tek yerde.</p>
         </div>
-        <button type="button" onClick={() => { setForm({ ...bosForm, portfoySahibi: currentUser?.fullName || '' }); setDuzenlenenId(null); setFormAcik(true); }}
-          className="px-5 py-3 bg-red-600 hover:bg-red-700 text-white font-black rounded-2xl shadow-lg shadow-red-600/25 transition flex items-center gap-2 shrink-0">
-          <PlusCircle className="w-5 h-5" /> Portföye Ekle
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* YENİ (kullanıcı talebi): Randevu Ekle — Portföye Ekle'nin SOLUNDA.
+              Akış: önce randevu alınır, görüşmeye gidilir, sonra portföye eklenir. */}
+          <button type="button" onClick={() => { setRandevuForm({ ...bosRandevuForm, tarih: rSecilenGun || bugunStr(), atanan: currentUser?.fullName || '' }); setRandevuDuzenlenenId(null); setRandevuFormAcik(true); }}
+            className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl shadow-lg shadow-indigo-600/25 transition flex items-center gap-2">
+            <CalendarDays className="w-5 h-5" /> Randevu Ekle
+          </button>
+          <button type="button" onClick={() => { setForm({ ...bosForm, portfoySahibi: currentUser?.fullName || '' }); setDuzenlenenId(null); setFormAcik(true); }}
+            className="px-5 py-3 bg-red-600 hover:bg-red-700 text-white font-black rounded-2xl shadow-lg shadow-red-600/25 transition flex items-center gap-2">
+            <PlusCircle className="w-5 h-5" /> Portföye Ekle
+          </button>
+        </div>
       </div>
 
       {/* ÖZET ŞERİT */}
@@ -3570,6 +3694,214 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
         <div className="p-3 rounded-2xl border-2 bg-white border-neutral-200"><p className="text-[9px] font-black uppercase text-yellow-600 flex items-center gap-1"><CalendarDays className="w-3 h-3" /> Bekleyen Randevu</p><p className="text-xl font-black text-yellow-700">{bekleyenRandevu}</p></div>
         <div className="p-3 rounded-2xl border-2 bg-white border-neutral-200 col-span-2 md:col-span-1"><p className="text-[9px] font-black uppercase text-neutral-400 flex items-center gap-1"><Wallet className="w-3 h-3" /> Komisyon / Teminat</p><p className="text-sm font-black text-green-700">{tl(toplamKomisyon)} <span className="text-neutral-300">/</span> <span className="text-orange-600">{tl(acikTeminat)}</span></p></div>
       </div>
+
+      {/* ==================================================================
+          YENİ (kullanıcı talebi): RANDEVU TAKVİMİ
+          ------------------------------------------------------------------
+          Hatırlatmalar sayfasındaki takvimle aynı tasarım dili: ay ızgarası,
+          gün hücrelerinde durum simgeleri, altında seçili günün listesi.
+          Simgeler: bekleyen randevu = mavi saat, gidilen = yeşil tik,
+          iptal = gri çarpı, tarihi geçmiş bekleyen = kırmızı ünlem.
+          ================================================================== */}
+      <div className="bg-white rounded-3xl shadow-sm border border-neutral-200 p-4 md:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h3 className="text-lg font-black flex items-center gap-2"><CalendarDays className="w-5 h-5 text-indigo-600" /> Randevu Takvimi</h3>
+          {/* Saha pazarlamacının güne başlarken göreceği hızlı durum bantları */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {rBugunkuler.length > 0 && (
+              <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-300">
+                Bugün {rBugunkuler.length} randevunuz var
+              </span>
+            )}
+            {rGecikmisler.length > 0 && (
+              <button type="button" onClick={() => setRSecilenGun(rGecikmisler[0].tarih)}
+                className="text-[10px] font-black px-2.5 py-1 rounded-full bg-red-100 text-red-700 border border-red-300 hover:bg-red-200 transition">
+                ⚠ {rGecikmisler.length} gecikmiş randevu — gidilmedi mi?
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* AY GEZGİNİ */}
+        <div className="flex items-center justify-between mb-3">
+          <button type="button" onClick={() => setRTakvim(t => { const d = new Date(t.yil, t.ay - 1, 1); return { yil: d.getFullYear(), ay: d.getMonth() }; })} className="p-2 hover:bg-neutral-100 rounded-xl transition"><ChevronLeft className="w-5 h-5" /></button>
+          <h4 className="text-base font-black">{R_AYLAR[rTakvim.ay]} {rTakvim.yil}</h4>
+          <button type="button" onClick={() => setRTakvim(t => { const d = new Date(t.yil, t.ay + 1, 1); return { yil: d.getFullYear(), ay: d.getMonth() }; })} className="p-2 hover:bg-neutral-100 rounded-xl transition"><ChevronRight className="w-5 h-5" /></button>
+        </div>
+        <div className="grid grid-cols-7 gap-1.5 mb-1.5">
+          {R_GUNLER.map(g => <div key={g} className="text-center text-[11px] font-black text-neutral-400 py-1">{g}</div>)}
+        </div>
+        <div className="grid grid-cols-7 gap-1.5">
+          {rHucreler.map((gun, i) => {
+            if (gun === null) return <div key={`rb${i}`} />;
+            const tarihStr = `${rTakvim.yil}-${String(rTakvim.ay + 1).padStart(2, '0')}-${String(gun).padStart(2, '0')}`;
+            const gunRnd = rGunRandevulari(tarihStr);
+            const secili = tarihStr === rSecilenGun;
+            const buGun = tarihStr === bugunStr();
+            const gecikmisVar = gunRnd.some(r => r.durum === 'bekliyor' && tarihStr < bugunStr());
+            return (
+              <button key={gun} type="button" onClick={() => setRSecilenGun(tarihStr)}
+                className={`relative min-h-[54px] p-1.5 rounded-xl border-2 text-left transition flex flex-col justify-between
+                  ${secili ? 'bg-indigo-50 border-indigo-500 shadow-md' : gecikmisVar ? 'bg-red-50/60 border-red-200 hover:border-red-400' : 'bg-white border-neutral-200 hover:border-neutral-400'}
+                  ${buGun && !secili ? 'border-indigo-300' : ''}`}>
+                <span className={`text-sm font-black ${buGun ? 'text-indigo-600' : 'text-neutral-700'}`}>{gun}</span>
+                {gunRnd.length > 0 && (
+                  <span className="flex flex-wrap items-center gap-0.5">
+                    {gunRnd.slice(0, 4).map((r, x) => (
+                      r.durum === 'gidildi'
+                        ? <CheckCircle key={x} className="w-3.5 h-3.5 text-green-600" title={`${r.saat || ''} ${r.firmaAdi} — Gidildi`} />
+                        : r.durum === 'iptal'
+                          ? <XCircle key={x} className="w-3.5 h-3.5 text-neutral-300" title={`${r.firmaAdi} — İptal`} />
+                          : tarihStr < bugunStr()
+                            ? <AlertTriangle key={x} className="w-3.5 h-3.5 text-red-500" title={`${r.firmaAdi} — Gecikmiş (gidilmedi)`} />
+                            : <Clock key={x} className="w-3.5 h-3.5 text-indigo-500" title={`${r.saat || ''} ${r.firmaAdi} — Bekliyor`} />
+                    ))}
+                    {gunRnd.length > 4 && <span className="text-[8px] font-black text-neutral-500">+{gunRnd.length - 4}</span>}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-[10px] font-bold text-neutral-500">
+          <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-indigo-500" /> Bekleyen randevu</span>
+          <span className="flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 text-red-500" /> Gecikmiş (gidilmedi)</span>
+          <span className="flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5 text-green-600" /> Gidildi</span>
+          <span className="flex items-center gap-1"><XCircle className="w-3.5 h-3.5 text-neutral-300" /> İptal</span>
+        </div>
+
+        {/* SEÇİLİ GÜNÜN RANDEVULARI */}
+        <div className="mt-4 border-t border-neutral-100 pt-3">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-black text-neutral-700">
+              {new Date(rSecilenGun + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' })}
+              <span className="text-neutral-400"> • {rSecilenGunListesi.length} randevu</span>
+            </h4>
+            <button type="button" onClick={() => { setRandevuForm({ ...bosRandevuForm, tarih: rSecilenGun, atanan: currentUser?.fullName || '' }); setRandevuDuzenlenenId(null); setRandevuFormAcik(true); }}
+              className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 rounded-xl text-xs font-black transition flex items-center gap-1.5">
+              <PlusCircle className="w-4 h-4" /> Bu Güne Randevu Ekle
+            </button>
+          </div>
+          {rSecilenGunListesi.length === 0 ? (
+            <p className="text-xs font-medium text-neutral-400 py-4 text-center">Bu güne randevu yok.</p>
+          ) : (
+            <div className="space-y-2">
+              {rSecilenGunListesi.map(r => {
+                const gecikmis = r.durum === 'bekliyor' && r.tarih < bugunStr();
+                return (
+                  <div key={r.id} className={`rounded-xl border-2 p-3 flex flex-col sm:flex-row sm:items-center gap-2 ${
+                    r.durum === 'gidildi' ? 'border-green-200 bg-green-50/60'
+                    : r.durum === 'iptal' ? 'border-neutral-200 bg-neutral-50 opacity-60'
+                    : gecikmis ? 'border-red-300 bg-red-50/70' : 'border-indigo-200 bg-indigo-50/40'}`}>
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      <span className="shrink-0 text-xs font-black bg-neutral-900 text-white rounded-lg px-2 py-1">{r.saat || '--:--'}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-black text-sm text-neutral-800 break-words flex items-center gap-1.5 flex-wrap">
+                          {r.firmaAdi}
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-white border border-neutral-200 text-neutral-500">{r.tip}</span>
+                          {r.durum === 'gidildi' && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-600 text-white">GİDİLDİ{r.portfoyeAktarildi ? ' • PORTFÖYDE' : ''}</span>}
+                          {r.durum === 'iptal' && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-neutral-400 text-white">İPTAL</span>}
+                          {gecikmis && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-red-600 text-white">GECİKMİŞ</span>}
+                        </div>
+                        <div className="text-[11px] font-bold text-neutral-500 mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                          {r.yetkili && <span className="flex items-center gap-1"><User className="w-3 h-3" />{r.yetkili}</span>}
+                          {r.telefon && <a href={`tel:${r.telefon}`} className="flex items-center gap-1 text-indigo-600 hover:underline"><Phone className="w-3 h-3" />{r.telefon}</a>}
+                          {r.bolge && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{r.bolge}</span>}
+                          {r.atanan && <span className="flex items-center gap-1 text-purple-600"><Handshake className="w-3 h-3" />{r.atanan}</span>}
+                        </div>
+                        {r.not && <p className="text-[11px] font-medium text-neutral-500 italic mt-1">{r.not}</p>}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap sm:shrink-0">
+                      {r.durum === 'bekliyor' && (
+                        <>
+                          {/* ANA AKIŞ: görüşme yapıldı → bilgiler hazır dolu portföy formu açılır */}
+                          <button type="button" onClick={() => randevudanPortfoyeEkle(r)}
+                            className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-[10px] font-black rounded-lg transition whitespace-nowrap flex items-center gap-1">
+                            <CheckCircle className="w-3.5 h-3.5" /> Gidildi → Portföye Ekle
+                          </button>
+                          <button type="button" onClick={() => randevuDurum(r, 'gidildi')}
+                            title="Görüşme yapıldı ama şimdilik portföye eklenmeyecek"
+                            className="px-2.5 py-1.5 bg-white border border-green-400 text-green-700 hover:bg-green-50 text-[10px] font-black rounded-lg transition whitespace-nowrap">Sadece Gidildi</button>
+                          <button type="button" onClick={() => randevuDurum(r, 'iptal')}
+                            className="px-2.5 py-1.5 bg-white border border-neutral-300 text-neutral-500 hover:bg-neutral-100 text-[10px] font-black rounded-lg transition">İptal</button>
+                        </>
+                      )}
+                      {r.durum === 'iptal' && (
+                        <button type="button" onClick={() => randevuDurum(r, 'bekliyor')}
+                          className="px-2.5 py-1.5 bg-white border border-indigo-300 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black rounded-lg transition">Tekrar Aktifleştir</button>
+                      )}
+                      <button type="button" onClick={() => { setRandevuForm({ firmaAdi: r.firmaAdi || '', tip: r.tip || 'Emlak Ofisi', yetkili: r.yetkili || '', telefon: r.telefon || '', bolge: r.bolge || '', adres: r.adres || '', tarih: r.tarih, saat: r.saat || '', atanan: r.atanan || '', not: r.not || '' }); setRandevuDuzenlenenId(r.id); setRandevuFormAcik(true); }}
+                        className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle"><Edit className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => setRandevuSilinecekId(r.id)}
+                        className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Sil"><Trash2 className="w-4 h-4" /></button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* RANDEVU FORMU (yeni / düzenle) */}
+      {randevuFormAcik && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setRandevuFormAcik(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-lg text-indigo-700 flex items-center gap-2"><CalendarDays className="w-5 h-5" /> {randevuDuzenlenenId ? 'Randevuyu Düzenle' : 'Yeni Randevu'}</h3>
+              <button type="button" onClick={() => setRandevuFormAcik(false)} className="p-2 hover:bg-neutral-100 rounded-xl transition"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="sm:col-span-2"><label className="text-[10px] font-black uppercase text-neutral-400">Firma Adı *</label>
+                <input value={randevuForm.firmaAdi} onChange={e => setRandevuForm({ ...randevuForm, firmaAdi: e.target.value })} placeholder="Örn: İstanbul Kepenk" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-600" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Tip</label>
+                <select value={randevuForm.tip} onChange={e => setRandevuForm({ ...randevuForm, tip: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm bg-white outline-none">
+                  {PARTNER_TIPLERI.map(t => <option key={t.id} value={t.id}>{t.id}</option>)}
+                </select></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Yetkili</label>
+                <input value={randevuForm.yetkili} onChange={e => setRandevuForm({ ...randevuForm, yetkili: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Telefon</label>
+                <input value={randevuForm.telefon} onChange={e => setRandevuForm({ ...randevuForm, telefon: e.target.value })} inputMode="tel" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Bölge</label>
+                <input value={randevuForm.bolge} onChange={e => setRandevuForm({ ...randevuForm, bolge: e.target.value })} placeholder="Örn: Başakşehir" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div className="sm:col-span-2"><label className="text-[10px] font-black uppercase text-neutral-400">Adres</label>
+                <input value={randevuForm.adres} onChange={e => setRandevuForm({ ...randevuForm, adres: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Tarih *</label>
+                <input type="date" value={randevuForm.tarih} onChange={e => setRandevuForm({ ...randevuForm, tarih: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Saat</label>
+                <input type="time" value={randevuForm.saat} onChange={e => setRandevuForm({ ...randevuForm, saat: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div className="sm:col-span-2"><label className="text-[10px] font-black uppercase text-neutral-400">Görüşmeye Gidecek (Saha Pazarlamacı)</label>
+                <select value={randevuForm.atanan} onChange={e => setRandevuForm({ ...randevuForm, atanan: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm bg-white outline-none">
+                  <option value="">— Seçin —</option>
+                  {satisPersonelleri.map(s => <option key={s} value={s}>{s}</option>)}
+                </select></div>
+              <div className="sm:col-span-2"><label className="text-[10px] font-black uppercase text-neutral-400">Not (görüşme amacı, dikkat edilecekler)</label>
+                <textarea value={randevuForm.not} onChange={e => setRandevuForm({ ...randevuForm, not: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none h-16 resize-none" /></div>
+            </div>
+            <button type="button" onClick={randevuKaydet} disabled={randevuKaydediliyor}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl transition flex items-center justify-center gap-2 disabled:opacity-50">
+              {randevuKaydediliyor ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
+              {randevuDuzenlenenId ? 'Randevuyu Güncelle' : 'Randevuyu Kaydet'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* RANDEVU SİLME ONAYI */}
+      {randevuSilinecekId && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setRandevuSilinecekId(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-5 space-y-3 text-center" onClick={e => e.stopPropagation()}>
+            <AlertTriangle className="w-10 h-10 text-red-500 mx-auto" />
+            <p className="font-black text-neutral-800">Randevu silinsin mi?</p>
+            <p className="text-xs font-medium text-neutral-500">Bu işlem geri alınamaz. Görüşme yapıldıysa silmek yerine "Gidildi" olarak işaretleyin.</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setRandevuSilinecekId(null)} className="flex-1 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl transition">Vazgeç</button>
+              <button type="button" onClick={randevuSil} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl transition">Sil</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* FİLTRELER */}
       <div className="bg-white p-3 rounded-2xl shadow-sm border border-neutral-200 flex flex-wrap items-center gap-2">
