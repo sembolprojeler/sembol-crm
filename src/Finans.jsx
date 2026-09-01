@@ -6345,9 +6345,19 @@ const saatMetniSayiyaCevir = (deger) => {
       return { yil: d.getFullYear(), ay: d.getMonth() + 1 };
     }, [odemeAyi]);
 
-    // Kaynak ayın maaş + mesai dokümanlarını oku (yalnızca Ödemeler defteri açıkken)
+    // ========================================================================
+    // DEĞİŞTİ (kullanıcı talebi): Maaş/avans satırları artık YALNIZCA Ödemeler
+    // defteri AÇIKKEN değil, sistemde bir Ödemeler defteri VARSA hesaplanır.
+    // Gerekçe: Defter anasayfasındaki ÖDEMELER kartının "bu ay toplam / ödenen
+    // / kalan" rakamlarına maaş ve avanslar da dahil edilecek. Kart, defter
+    // açılmadan çizildiği için bu verinin orada da hazır olması gerekiyor.
+    // Mahsup (ödendi mi?) araması artık seçili deftere değil, ÖDEMELER
+    // defterinin kendi kimliğine bakar — liste ekranında seçili defter yoktur.
+    // ========================================================================
+    const odemeDefteriId = odemeDefterleri[0]?.id || null;
+    // Kaynak ayın maaş + mesai dokümanlarını oku (Ödemeler defteri mevcutsa)
     useEffect(() => {
-      if (seciliDefter?.tur !== 'Ödemeler') return;
+      if (!odemeDefteriId) return;
       let iptal = false;
       const { yil, ay } = maasKaynakAy;
       const anahtar = `${yil}_${ay}`;
@@ -6363,7 +6373,7 @@ const saatMetniSayiyaCevir = (deger) => {
         } catch (e) { console.error('Maaş verisi okunamadı:', e); }
       })();
       return () => { iptal = true; };
-    }, [seciliDefter?.tur, maasKaynakAy]);
+    }, [odemeDefteriId, maasKaynakAy]);
 
     // ========================================================================
     // YENİ (kullanıcı talebi): PERSONEL AVANS ÖDEMESİ (her ayın 20'si)
@@ -6401,8 +6411,22 @@ const saatMetniSayiyaCevir = (deger) => {
 
     // İki otomatik maaş satırı (mavi + beyaz)
     const AY_ADLARI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+    // ========================================================================
+    // YENİ (kullanıcı talebi bağlamında): Defter LİSTESİNE dönüldüğünde ödeme
+    // ayı içinde bulunulan aya sıfırlanır. Gerekçe: ÖDEMELER kartındaki
+    // "bu ay" rakamları maasSatirlari/avansSatirlari üzerinden odemeAyi'na
+    // bağlıdır. Kullanıcı defter içinde başka bir aya gidip listeye dönerse,
+    // kart o eski ayı göstermeye devam ederdi. Sıfırlayınca kart her zaman
+    // içinde bulunulan ayı gösterir; defteri tekrar açtığında da güncel aydan
+    // başlar (daha doğal davranış).
+    // ========================================================================
+    useEffect(() => {
+      if (!seciliDefterId) setOdemeAyi(bugunStr().slice(0, 7));
+    }, [seciliDefterId]);
+
     const maasSatirlari = useMemo(() => {
-      if (seciliDefter?.tur !== 'Ödemeler' || !maasVeri) return [];
+      // DEĞİŞTİ: defter açık olmasa da (liste ekranı) hesaplanır
+      if (!odemeDefteriId || !maasVeri) return [];
       const { yil, ay } = maasKaynakAy;
       if (maasVeri.kaynakAnahtar !== `${yil}_${ay}`) return []; // eski ayın verisi ekrana sızmasın
       const yakalar = [
@@ -6448,7 +6472,7 @@ const saatMetniSayiyaCevir = (deger) => {
           // kimliği kanalsızdı (maas_mavi_YYYY_M); o kayıt bulunursa her iki
           // kanal da ödenmiş sayılır — eski aylar bozulmaz.
           const eskiKalemId = `maas_${yaka.id}_${yil}_${ay}`;
-          const mahsup = islemler.find(i => !i.silindi && i.defterId === seciliDefterId && i.tip === 'giris' && i.odemeMahsup &&
+          const mahsup = islemler.find(i => !i.silindi && i.defterId === odemeDefteriId && i.tip === 'giris' && i.odemeMahsup &&
             (i.odemeKalemId === kalemId || i.odemeKalemId === eskiKalemId));
           return {
             id: kalemId, yaka: yaka.id, kanal: kanal.id,
@@ -6467,7 +6491,7 @@ const saatMetniSayiyaCevir = (deger) => {
           };
         });
       }).filter(sa => sa.kisiler.length > 0);
-    }, [seciliDefter?.tur, maasVeri, maasKaynakAy, personnelList, islemler, seciliDefterId, odemeAyi]);
+    }, [odemeDefteriId, maasVeri, maasKaynakAy, personnelList, islemler, odemeAyi]);
 
     // ========================================================================
     // YENİ: İKİ AVANS SATIRI (NAKİT + RESMİ) — her ayın 20'si
@@ -6477,7 +6501,8 @@ const saatMetniSayiyaCevir = (deger) => {
       beyaz: (p) => p.collarType === 'Beyaz Yaka',
     };
     const avansSatirlari = useMemo(() => {
-      if (seciliDefter?.tur !== 'Ödemeler' || !avansVeri) return [];
+      // DEĞİŞTİ: defter açık olmasa da (liste ekranı) hesaplanır
+      if (!odemeDefteriId || !avansVeri) return [];
       const [yil, ay] = odemeAyi.split('-').map(Number);
       if (avansVeri.anahtar !== `${yil}_${ay}`) return []; // eski ayın verisi sızmasın
       // DEĞİŞTİ (kullanıcı talebi): Maaştaki gibi her kanal YAKAYA göre de
@@ -6512,7 +6537,7 @@ const saatMetniSayiyaCevir = (deger) => {
           const toplam = kisiler.reduce((t, k) => t + k.tutar, 0);
           // Kalem kimliğine YAKA da eklendi ki 4 satır ayrı ayrı ödenebilsin
           const kalemId = `avans_${yaka.id}_${kanal.id}_${yil}_${ay}`;
-          const mahsup = islemler.find(i => !i.silindi && i.defterId === seciliDefterId && i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalemId);
+          const mahsup = islemler.find(i => !i.silindi && i.defterId === odemeDefteriId && i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalemId);
           const vadeTarihi = `${odemeAyi}-20`; // her ayın 20'si
           // YENİ (kullanıcı talebi): 1 Eylül 2026 (sistem devri) ÖNCESİ avanslar
           // ARTIK HİÇ GÖSTERİLMEZ (eski girişler Ödemeler bölümünde yer almaz).
@@ -6531,7 +6556,7 @@ const saatMetniSayiyaCevir = (deger) => {
         });
       });
       return satirlar;
-    }, [seciliDefter?.tur, avansVeri, personnelList, islemler, seciliDefterId, odemeAyi]);
+    }, [odemeDefteriId, avansVeri, personnelList, islemler, odemeAyi]);
 
     // AVANS ÖDEMESİ — kaynak hesap seçilir; varsayılan: Nakit avans için
     // Sembol Nakliyat'ın NAKİT defteri, Resmi avans için BANKA defteri.
@@ -6849,28 +6874,48 @@ const saatMetniSayiyaCevir = (deger) => {
                   {d.tur === 'Ödemeler' ? (() => {
                     // ÖDEMELER DEFTERİ: bakiye yerine bu ayın ödeme durumu
                     const od = odemeDefterBilgi(d);
-                    // DEĞİŞTİ (kullanıcı talebi): Kartta artık sadece kalan değil,
-                    // BU AYIN TOPLAMI da görünür. Büyük rakam ödenmesi gereken
-                    // KALAN tutardır (asıl aksiyon gerektiren bilgi); altında
-                    // ayın toplamı ve ödenen kısmı ikincil satırlarda verilir.
-                    const yuzdeOd = od.buAyToplam > 0 ? Math.round((od.buAyOdenen / od.buAyToplam) * 100) : 0;
+                    // ==========================================================
+                    // DEĞİŞTİ (kullanıcı talebi): MAAŞ ve AVANSLAR DA DAHİL
+                    // ----------------------------------------------------------
+                    // odemeDefterBilgi yalnızca defterin kendi ödeme planı
+                    // kalemlerini (kira, firma ödemesi vb.) sayar. Oysa defter
+                    // içindeki aylık listede bunların yanında MUHASEBEDEN gelen
+                    // otomatik satırlar da var: Mavi/Beyaz Yaka Kalan Banka ve
+                    // Nakit maaşları ile 4 avans satırı. Kart bunları saymadığı
+                    // için toplam eksik görünüyordu (ör. 17 kalem yazarken
+                    // listede 25 satır vardı). Artık o satırlar da eklenir;
+                    // böylece kart, defter içindeki sayfayla birebir tutar.
+                    // Bu satırlar sentetiktir (defter.odemeler içinde yer
+                    // almazlar), dolayısıyla ÇİFT SAYIM riski yoktur.
+                    // ==========================================================
+                    const ekSatirlar = [...maasSatirlari, ...avansSatirlari];
+                    const ekToplam = ekSatirlar.reduce((t, s) => t + (parseFloat(s.tutar) || 0), 0);
+                    const ekOdenen = ekSatirlar.filter(s => s.odendi).reduce((t, s) => t + (parseFloat(s.tutar) || 0), 0);
+                    const ekBekleyen = ekToplam - ekOdenen;
+
+                    const buAyToplam = od.buAyToplam + ekToplam;
+                    const buAyOdenen = od.buAyOdenen + ekOdenen;
+                    const buAyKalan = od.buAyBekleyen + ekBekleyen;
+                    const buAyAdet = od.buAyAdet + ekSatirlar.length;
+                    const buAyOdenenAdet = od.buAyOdenenAdet + ekSatirlar.filter(s => s.odendi).length;
+                    const yuzdeOd = buAyToplam > 0 ? Math.round((buAyOdenen / buAyToplam) * 100) : 0;
                     return (
                       <div className="text-right shrink-0 max-w-[45%] sm:max-w-none sm:min-w-[120px]">
-                        <div className={`text-base sm:text-lg font-black tabular-nums ${od.gecikmisAdet > 0 ? 'text-red-600' : 'text-orange-700'}`}>₺{paraFmt(od.buAyBekleyen)}</div>
+                        <div className={`text-base sm:text-lg font-black tabular-nums ${od.gecikmisAdet > 0 ? 'text-red-600' : 'text-orange-700'}`}>₺{paraFmt(buAyKalan)}</div>
                         <div className="text-[9px] sm:text-[10px] font-black uppercase text-orange-500 leading-tight">
-                          Bu Ay Kalan{od.buAyAdet > 0 ? ` • ${od.buAyAdet - od.buAyOdenenAdet}/${od.buAyAdet} ödeme` : ` • ${od.kalemSayisi} kalem`}
+                          Bu Ay Kalan{buAyAdet > 0 ? ` • ${buAyAdet - buAyOdenenAdet}/${buAyAdet} ödeme` : ` • ${od.kalemSayisi} kalem`}
                         </div>
-                        {od.buAyAdet > 0 && (
+                        {buAyAdet > 0 && (
                           <>
                             <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden mt-1">
                               <div className="h-full bg-orange-500" style={{ width: `${yuzdeOd}%` }}></div>
                             </div>
-                            {/* Bu ayın TOPLAMI ve ödenen kısmı */}
+                            {/* Bu ayın TOPLAMI (maaş + avans dahil) ve ödenen kısmı */}
                             <div className="text-[9px] font-bold text-neutral-500 mt-0.5">
-                              Bu ay toplam: ₺{paraFmt(od.buAyToplam)}
+                              Bu ay toplam: ₺{paraFmt(buAyToplam)}
                             </div>
                             <div className="text-[9px] font-bold text-emerald-600">
-                              Ödenen: ₺{paraFmt(od.buAyOdenen)}
+                              Ödenen: ₺{paraFmt(buAyOdenen)}
                             </div>
                           </>
                         )}
@@ -7848,19 +7893,31 @@ silinmeTarihi: new Date().toISOString()`}</pre>
               </div>
 
               {/* ÜST ÖZET: bu ay toplam + bu ay kalan + gecikmiş
-                  DEĞİŞTİ (kullanıcı talebi): Ayın TOPLAM ödeme yükü de görünsün
-                  diye üçüncü bir kutu eklendi; içinde ödenen kısım da yazar. */}
+                  DEĞİŞTİ (kullanıcı talebi): Rakamlara MAAŞ ve AVANS satırları
+                  da dahil edildi (aşağıdaki aylık listede görünen her şey).
+                  Böylece bu özet, defter anasayfasındaki ÖDEMELER kartıyla
+                  birebir aynı toplamı gösterir. */}
+              {(() => {
+                const ekSatirlar = [...maasSatirlari, ...avansSatirlari];
+                const ekToplam = ekSatirlar.reduce((t, s) => t + (parseFloat(s.tutar) || 0), 0);
+                const ekOdenen = ekSatirlar.filter(s => s.odendi).reduce((t, s) => t + (parseFloat(s.tutar) || 0), 0);
+                const ozetToplam = od.buAyToplam + ekToplam;
+                const ozetOdenen = od.buAyOdenen + ekOdenen;
+                const ozetKalan = od.buAyBekleyen + (ekToplam - ekOdenen);
+                const ozetAdet = od.buAyAdet + ekSatirlar.length;
+                const ozetOdenenAdet = od.buAyOdenenAdet + ekSatirlar.filter(s => s.odendi).length;
+                return (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 p-4 pb-0">
                 <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
                   <div className="text-[9px] font-black uppercase text-neutral-500">Bu Ay Toplam</div>
-                  <div className="text-sm font-black text-neutral-800">₺{paraFmt(od.buAyToplam)}</div>
+                  <div className="text-sm font-black text-neutral-800">₺{paraFmt(ozetToplam)}</div>
                   <div className="text-[9px] font-bold text-emerald-600 mt-0.5">
-                    Ödenen: ₺{paraFmt(od.buAyOdenen)}{od.buAyAdet > 0 ? ` • ${od.buAyOdenenAdet}/${od.buAyAdet}` : ''}
+                    Ödenen: ₺{paraFmt(ozetOdenen)}{ozetAdet > 0 ? ` • ${ozetOdenenAdet}/${ozetAdet}` : ''}
                   </div>
                 </div>
                 <div className="bg-orange-50 rounded-xl p-2.5 border border-orange-200">
                   <div className="text-[9px] font-black uppercase text-orange-600">Bu Ay Kalan</div>
-                  <div className="text-sm font-black text-orange-700">₺{paraFmt(od.buAyBekleyen)}</div>
+                  <div className="text-sm font-black text-orange-700">₺{paraFmt(ozetKalan)}</div>
                 </div>
                 <div className={`rounded-xl p-2.5 border ${od.gecikmisAdet > 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
                   <div className={`text-[9px] font-black uppercase ${od.gecikmisAdet > 0 ? 'text-red-600' : 'text-emerald-600'}`}>Gecikmiş</div>
@@ -7869,6 +7926,8 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                   </div>
                 </div>
               </div>
+                );
+              })()}
 
               {/* ==============================================================
                   YENİ (kullanıcı talebi): KALICI KİRA ZAM UYARISI
