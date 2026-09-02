@@ -17237,7 +17237,7 @@ export const mesaiTakibeDahil = (p) => !!p && p.employmentStatus !== 'Pasif' && 
 // Sorun oluşturmaz, çünkü çağrı fonksiyon GÖVDESİNİN içindedir; modül
 // tamamen yüklendikten sonra çalışır. Dosyanın üstüne taşımayın.
 // ============================================================================
-export const beyazYakaOnerileriHesapla = (personeller, qrKayitlari, tarihStr) => {
+export const beyazYakaOnerileriHesapla = (personeller, qrKayitlari, tarihStr, atananIsSeti = null) => {
   const sonuc = {};
   (personeller || []).forEach(person => {
     const giris = (qrKayitlari || []).find(k => String(k.personnelId) === String(person.id) && k.type === 'giris');
@@ -17265,6 +17265,25 @@ export const beyazYakaOnerileriHesapla = (personeller, qrKayitlari, tarihStr) =>
         aciklama: `Giriş kaydı yok ama ${cikis.timeStr} çıkış basılmış → şehir dışı görevden dönüş kabul edildi; 1 Fazla Gün (FG) eklendi.`,
         kaynak: cikis.method || 'cikis',
         gecikmeliCikis: true,
+      };
+      return;
+    }
+    // ====================================================================
+    // YENİ (kullanıcı talebi): İŞ ATANMIŞ AMA HİÇ BASMAMIŞ → ŞEHİR DIŞI SEFER
+    // ====================================================================
+    // Nakliye personeli il dışına gidince o gün ne giriş ne çıkış basabiliyor.
+    // O gün kendisine iş atanmışsa: yola gitmiş demektir → DEVAMSIZ/İZİN değil,
+    // 1 FAZLA GÜN (FG). atananIsSeti verilmemişse (gerçek beyaz yaka ofis
+    // personeli çağrısı) bu koşul çalışmaz; onlar için izin/devamsızlık akışı
+    // aynen sürer. Fotoğraftaki 3 kişi (34 PCY 589 ekibi) bu daldan FG alır.
+    // ====================================================================
+    if (atananIsSeti && atananIsSeti.has(String(person.id))) {
+      sonuc[person.id] = {
+        status: 'FG', hours: '',
+        girisSaati: null, cikisSaati: null,
+        aciklama: 'O gün iş atanmış ama giriş/çıkış basılmamış → şehir dışı nakliye seferi kabul edildi; 1 Fazla Gün (FG) eklendi.',
+        kaynak: 'sefer',
+        seferKaydi: true,
       };
       return;
     }
@@ -17997,7 +18016,7 @@ export const gununProgrami = (person, tarihStr) => {
 // ANA FONKSİYON: ekip için öneri üretir
 // personeller: [{id, fullName, calismaProgrami, collarType}], qrKayitlari: o güne ait QR kayıtları
 // Döner: { [personelId]: { status, hours, girisSaati, cikisSaati, aciklama, ekipCikis } }
-export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr) => {
+export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr, atananIsSeti = null) => {
   const sonuc = {};
   const kayitBul = (pId, tip) => qrKayitlari.find(k => String(k.personnelId) === String(pId) && k.type === tip);
 
@@ -18040,6 +18059,29 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr) => {
         kaynak: cikis.method || 'cikis',
         // Bu bayrak arayüzde uyarı rozeti göstermek için kullanılır
         gecikmeliCikis: true,
+      };
+      return;
+    }
+
+    // ====================================================================
+    // YENİ (kullanıcı talebi): İŞ ATANMIŞ AMA HİÇ BASMAYAN → ŞEHİR DIŞI SEFER
+    // ====================================================================
+    // Durum: Personel il dışına nakliye seferine gidiyor; o gün NE GİRİŞ NE
+    // ÇIKIŞ basabiliyor (yolda). Ama o gün kendisine bir İŞ ATANMIŞ.
+    // Kural: İş atanmış + o gün hiç QR/kod kaydı yok → personel yola gitmiş
+    // demektir; DEVAMSIZ değil, 1 FAZLA GÜN (FG) eklenir. (Kullanıcının
+    // fotoğraftaki uyguladığı sonuç: "Fazla Gün".)
+    // atananIsSeti: o gün en az bir işe atanmış personel id'lerinin kümesi.
+    // Küme verilmemişse (null) eski davranış korunur; bu koşul hiç çalışmaz.
+    // ====================================================================
+    if (!giris && atananIsSeti && atananIsSeti.has(String(person.id))) {
+      // İzin günündeyse yine de fazla gün mantıklıdır (izinde bile sefere gitmiş)
+      sonuc[person.id] = {
+        status: 'FG', hours: '',
+        girisSaati: null, cikisSaati: cikis?.timeStr || null, ekipCikis: ekipCikisSaati,
+        aciklama: 'O gün iş atanmış ama giriş/çıkış basılmamış → şehir dışı nakliye seferi kabul edildi; 1 Fazla Gün (FG) eklendi.',
+        kaynak: 'sefer',
+        seferKaydi: true,
       };
       return;
     }
@@ -18499,6 +18541,20 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   // YENİ: Araç/Ekip filtresi — seçilen araçla sahaya çıkan personeller listelenir
   const [fArac, setFArac] = useState('hepsi');
   const [raporAy, setRaporAy] = useState(mesaiBugunStr().slice(0, 7)); // YYYY-AA
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): RAPORLAMA SIRALAMA + YAKA AYRIMI
+  // --------------------------------------------------------------------------
+  // raporSirala: hangi sütuna göre sıralanacak ('saat' = toplam saat,
+  //   'gun' = mesai günü, 'ad' = isim). Varsayılan 'saat' azalan — kullanıcı
+  //   "en çok mesai yapan sırayla görünsün" dedi.
+  // raporYon: 'desc' (çoktan aza) / 'asc' (azdan çoğa). Başlığa tekrar
+  //   tıklanınca yön değişir.
+  // raporYaka: rapor tablosunu yakaya göre ayırır ('ayrik' = Beyaz/Mavi ayrı
+  //   bloklar, 'hepsi' = tek liste, 'beyaz'/'mavi' = yalnız o yaka).
+  // ==========================================================================
+  const [raporSirala, setRaporSirala] = useState('saat');
+  const [raporYon, setRaporYon] = useState('desc');
+  const [raporYaka, setRaporYaka] = useState('ayrik');
 
   // ============================================================================
   // FIRESTORE OKUMA OPTİMİZASYONU (ÖNEMLİ)
@@ -18727,11 +18783,19 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
         });
 
         try {
+          // YENİ: O gün en az bir işe atanmış personel id kümesi. Motor bunu
+          // kullanarak "hiç basmamış ama iş atanmış" kişiyi Devamsız yerine
+          // şehir dışı seferi (Fazla Gün) olarak değerlendirir.
+          const oGunAtananlar = new Set();
+          (jobs || []).forEach(is => {
+            if (is.date !== tarih) return;
+            ekipIdleriCoz(is).forEach(id => oGunAtananlar.add(id));
+          });
           ekipGruplari.forEach(grup => {
-            Object.assign(maviSonuc, mesaiOnerileriHesapla(grup, maviKayitlar, tarih) || {});
+            Object.assign(maviSonuc, mesaiOnerileriHesapla(grup, maviKayitlar, tarih, oGunAtananlar) || {});
           });
           if (aracsizlar.length > 0) {
-            Object.assign(maviSonuc, mesaiOnerileriHesapla(aracsizlar, maviKayitlar, tarih) || {});
+            Object.assign(maviSonuc, mesaiOnerileriHesapla(aracsizlar, maviKayitlar, tarih, oGunAtananlar) || {});
           }
         } catch (e) { /* sessiz geç */ }
       }
@@ -18761,7 +18825,16 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       const maviKayitsizlar = maviYaka.filter(p => !maviEkipIdSeti.has(String(p.id)));
       if (maviKayitsizlar.length > 0) {
         try {
-          const maviKayitsizSonuc = beyazYakaOnerileriHesapla(maviKayitsizlar, maviKayitlar, tarih) || {};
+          // O gün iş atanmış id kümesi (fotoğraftaki 34 PCY 589 ekibi gibi
+          // hiç basmayan ama sefere gidenler için — Devamsız yerine Fazla Gün).
+          const kayitsizAtananSet = new Set();
+          (jobs || []).forEach(is => {
+            if (is.date !== tarih) return;
+            const idler = [...(is.assignedPersonnelIds || [])];
+            if (is.assignedPersonnelId) idler.push(is.assignedPersonnelId);
+            idler.forEach(id => kayitsizAtananSet.add(String(id)));
+          });
+          const maviKayitsizSonuc = beyazYakaOnerileriHesapla(maviKayitsizlar, maviKayitlar, tarih, kayitsizAtananSet) || {};
           Object.keys(maviKayitsizSonuc).forEach(pid => {
             if (!maviSonuc[pid]) maviSonuc[pid] = maviKayitsizSonuc[pid];
           });
@@ -18895,10 +18968,38 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
         }
       });
       const ortGiris = girisSay ? `${String(Math.floor(girisDkToplam / girisSay / 60)).padStart(2, '0')}:${String(Math.round(girisDkToplam / girisSay) % 60).padStart(2, '0')}` : '—';
-      return { ...kisi, gunSayisi: kisi.gunler.size, toplamSaat: (toplamDk / 60).toFixed(1).replace('.', ','), ortGiris };
+      // toplamSaatSayi: sıralama/karşılaştırma için sayısal değer (virgülsüz).
+      // toplamSaat: ekranda gösterilen virgüllü metin (biçim korunur).
+      const toplamSaatSayi = toplamDk / 60;
+      return { ...kisi, gunSayisi: kisi.gunler.size, toplamSaatSayi, toplamSaat: toplamSaatSayi.toFixed(1).replace('.', ','), ortGiris };
     }).sort((a, b) => b.gunSayisi - a.gunSayisi);
     // personnelList eklendi: uzaktan çalışan filtresi bu listeye bakıyor
   }, [aylikKayitlar, personnelList]);
+
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): Raporu seçilen ölçüt + yöne göre sıralar.
+  // ==========================================================================
+  const raporSirala_fn = useMemo(() => {
+    const yon = raporYon === 'asc' ? 1 : -1;
+    const kopya = [...rapor];
+    kopya.sort((a, b) => {
+      if (raporSirala === 'ad') return a.ad.localeCompare(b.ad, 'tr-TR') * yon;
+      if (raporSirala === 'gun') return (a.gunSayisi - b.gunSayisi) * yon;
+      // varsayılan: toplam saat (sayısal)
+      return ((a.toplamSaatSayi || 0) - (b.toplamSaatSayi || 0)) * yon;
+    });
+    return kopya;
+  }, [rapor, raporSirala, raporYon]);
+
+  // Beyaz/Mavi ayrı bloklar için yakaya göre ayrılmış listeler
+  const raporBeyaz = useMemo(() => raporSirala_fn.filter(r => r.yaka === 'Beyaz Yaka'), [raporSirala_fn]);
+  const raporMavi = useMemo(() => raporSirala_fn.filter(r => r.yaka !== 'Beyaz Yaka'), [raporSirala_fn]);
+
+  // Başlığa tıklayınca sıralama ölçütünü/yönünü değiştirir
+  const raporBasligaTikla = (kolon) => {
+    if (raporSirala === kolon) { setRaporYon(y => (y === 'desc' ? 'asc' : 'desc')); }
+    else { setRaporSirala(kolon); setRaporYon(kolon === 'ad' ? 'asc' : 'desc'); }
+  };
 
   // ---------------------------------------------------------------------------
   // "BİRLİKTE" SÜTUNU — EKİP BAZLI (yalnızca Mavi Yaka)
@@ -19932,36 +20033,95 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       )}
 
       {/* 4) RAPORLAMA — aylık kişi bazlı özet */}
-      {sekme === 'rapor' && (
+      {sekme === 'rapor' && (() => {
+        // ======================================================================
+        // YENİ (kullanıcı talebi): Sıralanabilir başlıklar + yaka ayrımı.
+        // "Toplam Saat"e tıklayınca en çok mesai yapan en üstte; tekrar
+        // tıklayınca ters sıralanır. "Beyaz / Mavi ayrı" görünümünde iki blok
+        // ayrı ayrı, her biri kendi içinde sıralı listelenir.
+        // ======================================================================
+        const okIsareti = (kolon) => raporSirala === kolon ? (raporYon === 'desc' ? ' ↓' : ' ↑') : '';
+        // Tekrar eden satır çizimi (tek yerden)
+        const raporSatiri = (r, sira) => (
+          <tr key={r.ad} className="border-b border-neutral-100 hover:bg-neutral-50">
+            <td className="py-2.5 pr-3 text-xs font-black">
+              {/* Sıra rozeti: ilk 3 madalya renginde (en çok mesai yapan öne çıksın) */}
+              <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[9px] mr-1.5 ${sira === 1 ? 'bg-amber-400 text-white' : sira === 2 ? 'bg-neutral-300 text-neutral-700' : sira === 3 ? 'bg-orange-300 text-white' : 'bg-neutral-100 text-neutral-400'}`}>{sira}</span>
+              {r.ad}
+            </td>
+            <td className="py-2.5 pr-3"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${r.yaka === 'Mavi Yaka' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-200 text-neutral-700'}`}>{r.yaka || '—'}</span></td>
+            <td className="py-2.5 pr-3 text-xs font-black">{r.gunSayisi} gün</td>
+            <td className="py-2.5 pr-3 text-xs font-black text-emerald-700">{r.toplamSaat} saat</td>
+            <td className="py-2.5 pr-3 text-xs font-bold">{r.ortGiris}</td>
+            <td className="py-2.5 pr-3 text-xs font-bold text-emerald-700"><span className="flex items-center gap-1"><Camera className="w-3.5 h-3.5" /> {r.kamera}</span></td>
+            <td className="py-2.5 pr-3 text-xs font-bold text-amber-700"><span className="flex items-center gap-1"><Keyboard className="w-3.5 h-3.5" /> {r.manuel}</span></td>
+          </tr>
+        );
+        // Tıklanabilir başlık satırı (tekrar kullanılabilir)
+        const baslikSatiri = (
+          <tr className="text-[10px] font-black text-neutral-400 uppercase border-b border-neutral-200 select-none">
+            <th className="py-2 pr-3 cursor-pointer hover:text-neutral-700" onClick={() => raporBasligaTikla('ad')}>Personel{okIsareti('ad')}</th>
+            <th className="py-2 pr-3">Yaka</th>
+            <th className="py-2 pr-3 cursor-pointer hover:text-neutral-700" onClick={() => raporBasligaTikla('gun')}>Mesai Günü{okIsareti('gun')}</th>
+            <th className="py-2 pr-3 cursor-pointer hover:text-emerald-700 text-emerald-600" onClick={() => raporBasligaTikla('saat')} title="En çok mesai yapanı sıralamak için tıklayın">Toplam Saat{okIsareti('saat')}</th>
+            <th className="py-2 pr-3">Ort. Giriş</th><th className="py-2 pr-3">Kamera</th><th className="py-2 pr-3">Elle Giriş</th>
+          </tr>
+        );
+        const blokTablo = (liste) => (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>{baslikSatiri}</thead>
+              <tbody>
+                {liste.length === 0
+                  ? <tr><td colSpan={7} className="py-8 text-center text-xs font-bold text-neutral-400">Bu ay için kayıt yok.</td></tr>
+                  : liste.map((r, i) => raporSatiri(r, i + 1))}
+              </tbody>
+            </table>
+          </div>
+        );
+        return (
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
           <div className="flex flex-wrap items-center gap-3 mb-4">
             <label className="text-xs font-black text-neutral-500 flex items-center gap-2"><Calendar className="w-4 h-4" /> Rapor Ayı:</label>
             <input type="month" value={raporAy} onChange={e => setRaporAy(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-black" />
+            {/* YENİ: Yaka görünümü seçici */}
+            <div className="flex items-center gap-1 ml-auto bg-neutral-100 rounded-xl p-1">
+              {[
+                { id: 'ayrik', ad: 'Beyaz / Mavi Ayrı' },
+                { id: 'hepsi', ad: 'Hepsi' },
+                { id: 'beyaz', ad: 'Beyaz Yaka' },
+                { id: 'mavi', ad: 'Mavi Yaka' },
+              ].map(o => (
+                <button key={o.id} onClick={() => setRaporYaka(o.id)}
+                  className={`px-3 py-1.5 rounded-lg text-[10px] font-black transition ${raporYaka === o.id ? 'bg-white shadow text-neutral-800' : 'text-neutral-500 hover:text-neutral-700'}`}>{o.ad}</button>
+              ))}
+            </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead><tr className="text-[10px] font-black text-neutral-400 uppercase border-b border-neutral-200">
-                <th className="py-2 pr-3">Personel</th><th className="py-2 pr-3">Yaka</th><th className="py-2 pr-3">Mesai Günü</th><th className="py-2 pr-3">Toplam Saat</th><th className="py-2 pr-3">Ort. Giriş</th><th className="py-2 pr-3">Kamera</th><th className="py-2 pr-3">Elle Giriş</th>
-              </tr></thead>
-              <tbody>
-                {rapor.length === 0 && <tr><td colSpan={7} className="py-8 text-center text-xs font-bold text-neutral-400">Bu ay için kayıt yok.</td></tr>}
-                {rapor.map(r => (
-                  <tr key={r.ad} className="border-b border-neutral-100 hover:bg-neutral-50">
-                    <td className="py-2.5 pr-3 text-xs font-black">{r.ad}</td>
-                    <td className="py-2.5 pr-3"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full ${r.yaka === 'Mavi Yaka' ? 'bg-blue-100 text-blue-700' : 'bg-neutral-200 text-neutral-700'}`}>{r.yaka}</span></td>
-                    <td className="py-2.5 pr-3 text-xs font-black">{r.gunSayisi} gün</td>
-                    <td className="py-2.5 pr-3 text-xs font-black text-emerald-700">{r.toplamSaat} saat</td>
-                    <td className="py-2.5 pr-3 text-xs font-bold">{r.ortGiris}</td>
-                    <td className="py-2.5 pr-3 text-xs font-bold text-emerald-700 flex items-center gap-1"><Camera className="w-3.5 h-3.5" /> {r.kamera}</td>
-                    {/* Elle giriş sayısı yüksekse personelin kamerası kontrol edilebilir */}
-                    <td className="py-2.5 pr-3 text-xs font-bold text-amber-700"><span className="flex items-center gap-1"><Keyboard className="w-3.5 h-3.5" /> {r.manuel}</span></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+
+          {/* En çok mesai yapan kişi vurgusu (sıralama saate göreyken) */}
+          {raporSirala === 'saat' && raporYon === 'desc' && raporSirala_fn.length > 0 && (
+            <div className="mb-3 text-[11px] font-bold text-neutral-500">
+              🏆 Bu ay en çok mesai yapan: <span className="text-emerald-700 font-black">{raporSirala_fn[0].ad}</span> — {raporSirala_fn[0].toplamSaat} saat
+            </div>
+          )}
+
+          {raporYaka === 'ayrik' ? (
+            <div className="space-y-6">
+              <div>
+                <h4 className="text-xs font-black text-neutral-700 mb-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-neutral-400"></span> Beyaz Yaka <span className="text-neutral-400 font-bold">({raporBeyaz.length} kişi)</span></h4>
+                {blokTablo(raporBeyaz)}
+              </div>
+              <div>
+                <h4 className="text-xs font-black text-blue-700 mb-2 flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-blue-500"></span> Mavi Yaka <span className="text-neutral-400 font-bold">({raporMavi.length} kişi)</span></h4>
+                {blokTablo(raporMavi)}
+              </div>
+            </div>
+          ) : (
+            blokTablo(raporYaka === 'beyaz' ? raporBeyaz : raporYaka === 'mavi' ? raporMavi : raporSirala_fn)
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {/* Ortak modallar */}
       {/* YENİ: MESAİ DURUMU DÜZENLEME MODALI
