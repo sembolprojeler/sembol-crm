@@ -1633,6 +1633,101 @@ const saatMetniSayiyaCevir = (deger) => {
       addSystemLog?.('Prim Sıralaması İndirildi', `${collarType} ${ayEtiketi} ${currentYear} • ${liste.length} kişilik 20 puan üstü sıralama Excel olarak indirildi.`);
     };
 
+    // ==========================================================================
+    // YENİ (kullanıcı talebi): İLK 3 "ZİRVEDEKİLER" SERTİFİKASI (A4 PDF)
+    // --------------------------------------------------------------------------
+    // Ay kapatma ekranındaki ilk 3 personeli (1./2./3. sıra), ikinci ekran
+    // görüntüsündeki tasarımla — bordo zemin, altın çelenkli madalyon içinde
+    // profil fotoğrafı, altında isim şeridi — A4 dikey bir sayfaya dizer ve
+    // yazdırma/PDF penceresi açar (projede zaten kullanılan window.print()
+    // yöntemi; kullanıcı "PDF olarak kaydet"i seçince A4 PDF iner).
+    // YERLEŞİM (2. ekrandaki gibi): üstte yan yana 1. ve 2., altta ortada 3.
+    // Fotoğraf id ile personnelList'ten (profileImage) çekilir; fotoğrafı
+    // olmayan için baş harf rozeti gösterilir (kırılmaz).
+    // ==========================================================================
+    const zirveSertifikasiIndir = () => {
+      if (!monthCloseModalData) return;
+      const w = monthCloseModalData.winners || { rank1: [], rank2: [], rank3: [] };
+      const sirali = [
+        { p: w.rank1?.[0], sira: 1 },
+        { p: w.rank2?.[0], sira: 2 },
+        { p: w.rank3?.[0], sira: 3 },
+      ].filter(x => x.p);
+      if (sirali.length === 0) { alert('İlk 3 sıralamada personel bulunmuyor.'); return; }
+      const ayEtiketi = (months.find(m => m.val === currentMonth)?.label || String(currentMonth)).toLocaleUpperCase('tr-TR');
+      const fotoBul = (id) => (personnelList.find(pp => String(pp.id) === String(id))?.profileImage) || '';
+
+      const madalyon = (kisi, sira) => {
+        const foto = fotoBul(kisi.id);
+        const bas = (kisi.name || '?').trim().charAt(0).toLocaleUpperCase('tr-TR');
+        const siraRenk = sira === 1 ? '#FFD54A' : sira === 2 ? '#D9D9D9' : '#E8A55B';
+        const icerik = foto
+          ? `<image href="${foto}" x="0" y="0" width="200" height="230" preserveAspectRatio="xMidYMid slice" clip-path="url(#arch${sira})" />`
+          : `<rect x="0" y="0" width="200" height="230" fill="#7a1220" clip-path="url(#arch${sira})"/><text x="100" y="140" text-anchor="middle" font-size="90" font-weight="bold" fill="#e8c98a" font-family="Georgia,serif">${bas}</text>`;
+        return `
+        <div class="kart">
+          <div class="sira-rozet" style="background:${siraRenk};">${sira}</div>
+          <svg viewBox="0 0 300 300" width="230" height="230" xmlns="http://www.w3.org/2000/svg">
+            <defs><clipPath id="arch${sira}"><path d="M0,230 L0,90 A100,100 0 0,1 200,90 L200,230 Z"/></clipPath></defs>
+            <g fill="#d4af37" transform="translate(6,150)">
+              ${[0,1,2,3,4,5].map(i=>`<ellipse cx="18" cy="${-i*22}" rx="16" ry="8" transform="rotate(-35 18 ${-i*22})"/>`).join('')}
+            </g>
+            <g fill="#d4af37" transform="translate(294,150) scale(-1,1)">
+              ${[0,1,2,3,4,5].map(i=>`<ellipse cx="18" cy="${-i*22}" rx="16" ry="8" transform="rotate(-35 18 ${-i*22})"/>`).join('')}
+            </g>
+            <g transform="translate(50,20)">
+              <path d="M0,230 L0,90 A100,100 0 0,1 200,90 L200,230 Z" fill="none" stroke="#d4af37" stroke-width="8"/>
+              ${icerik}
+            </g>
+          </svg>
+          <div class="isim-serit">${(kisi.name || '').toLocaleUpperCase('tr-TR')}</div>
+        </div>`;
+      };
+
+      const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
+      <title>${ayEtiketi}_${currentYear}_Zirvedekiler</title>
+      <style>
+        @page { size: A4 portrait; margin: 0; }
+        * { margin:0; padding:0; box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+        body { width:210mm; height:297mm; font-family:'Georgia','Times New Roman',serif;
+          background:radial-gradient(circle at 50% 30%, #7a1220 0%, #4a0a13 70%, #300109 100%);
+          color:#fff; display:flex; flex-direction:column; align-items:center; padding:22mm 14mm; }
+        .baslik { font-size:52px; font-weight:bold; letter-spacing:3px; text-align:center; line-height:1.05; }
+        .alt-baslik { font-size:40px; font-weight:bold; letter-spacing:6px; text-align:center; margin-bottom:6mm; }
+        .ust-sira { display:flex; justify-content:center; gap:26mm; margin-top:8mm; }
+        .alt-sira { display:flex; justify-content:center; margin-top:6mm; }
+        .kart { position:relative; display:flex; flex-direction:column; align-items:center; }
+        .sira-rozet { position:absolute; top:-6px; left:50%; transform:translateX(-50%); z-index:2;
+          width:34px; height:34px; border-radius:50%; color:#4a0a13; font-weight:bold; font-size:18px;
+          display:flex; align-items:center; justify-content:center; box-shadow:0 2px 6px rgba(0,0,0,.4); border:2px solid #fff; }
+        .isim-serit { margin-top:-6px; background:linear-gradient(180deg,#f7e9c4,#e6c883);
+          color:#5a3a12; font-weight:bold; font-size:17px; letter-spacing:1px; padding:8px 22px;
+          border-radius:6px; box-shadow:0 3px 8px rgba(0,0,0,.4); border:2px solid #b8860b; white-space:nowrap; max-width:230px; overflow:hidden; text-overflow:ellipsis; text-align:center; }
+        .dilek { margin-top:auto; font-size:24px; font-weight:bold; letter-spacing:1px; text-align:center; }
+        .web { font-size:16px; letter-spacing:3px; color:#e8c98a; margin-top:8px; }
+      </style></head>
+      <body>
+        <div class="baslik">${ayEtiketi} AYI</div>
+        <div class="alt-baslik">ZİRVEDEKİLER</div>
+        <div class="ust-sira">
+          ${sirali.filter(x => x.sira <= 2).map(x => madalyon(x.p, x.sira)).join('')}
+        </div>
+        <div class="alt-sira">
+          ${sirali.filter(x => x.sira === 3).map(x => madalyon(x.p, x.sira)).join('')}
+        </div>
+        <div class="dilek">BAŞARILARINIZIN DEVAMINI DİLERİZ.</div>
+        <div class="web">www.sembolnakliyat.com</div>
+        <script>
+          window.onload = () => { setTimeout(() => { window.print(); }, 700); };
+        </script>
+      </body></html>`;
+
+      const pw = window.open('', '_blank');
+      if (!pw) { alert('Açılır pencere engellendi. Lütfen tarayıcı ayarlarından izin verin.'); return; }
+      pw.document.open(); pw.document.write(html); pw.document.close();
+      addSystemLog?.('Zirvedekiler Sertifikası', `${ayEtiketi} ${currentYear} • ilk 3 personel sertifikası (A4 PDF) oluşturuldu.`);
+    };
+
     const confirmCloseMonth = async () => {
        try {
            const puantajRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${docPrefix}${currentYear}_${currentMonth}`);
@@ -1883,7 +1978,14 @@ const saatMetniSayiyaCevir = (deger) => {
                 
                 {/* 1. Kısım: Dereceye Girenler */}
                 <div className="bg-purple-50 rounded-2xl p-5 border border-purple-100">
-                    <h4 className="font-black text-purple-900 text-lg mb-4 flex items-center gap-2 border-b border-purple-200 pb-2">🏆 En Çok Puan Alanlar (Bonus Puanlar)</h4>
+                    <div className="flex items-center justify-between gap-2 mb-4 border-b border-purple-200 pb-2">
+                        <h4 className="font-black text-purple-900 text-lg flex items-center gap-2">🏆 En Çok Puan Alanlar (Bonus Puanlar)</h4>
+                        {/* YENİ (kullanıcı talebi): İlk 3'ün fotoğraflı A4 sertifikasını indir */}
+                        <button onClick={zirveSertifikasiIndir}
+                            className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-white text-[11px] font-black rounded-lg transition shadow-sm">
+                            <Download className="w-3.5 h-3.5" /> Zirvedekiler (PDF)
+                        </button>
+                    </div>
                     <div className="space-y-3">
                         <div className="flex items-start gap-3 bg-white p-3 rounded-xl border border-yellow-300 shadow-sm">
                             <span className="text-2xl">🥇</span>
