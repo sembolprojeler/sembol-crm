@@ -1587,6 +1587,52 @@ const saatMetniSayiyaCevir = (deger) => {
       setShowMonthCloseModal(true);
     };
 
+    // ==========================================================================
+    // YENİ (kullanıcı talebi): 20 PUAN ÜSTÜ SIRALAMAYI EXCEL OLARAK İNDİR
+    // --------------------------------------------------------------------------
+    // Ay kapatma ekranındaki tüm 20+ puan sıralamasını (ham puan, kazanılan
+    // bonus, net puan ve gelecek aya yansıyacak prim tutarıyla birlikte) tek
+    // tıkla indirir. Projede zaten kullanılan yöntemin (UTF-8 BOM'lu CSV)
+    // aynısı — Excel bu dosyayı Türkçe karakterlerle sorunsuz açar. Ayrı bir
+    // kütüphane gerekmez; mevcut maaş tablosu indirmesiyle birebir aynı desen.
+    // ==========================================================================
+    const primSiralamaExcelIndir = () => {
+      if (!monthCloseModalData) return;
+      const liste = monthCloseModalData.over20Sorted || monthCloseModalData.over20 || [];
+      const ayEtiketi = months.find(m => m.val === currentMonth)?.label || currentMonth;
+      // Excel'in ; ayıracını doğru yorumlaması için başa "sep=;" satırı, Türkçe
+      // karakterler için başa BOM eklenir.
+      let csv = 'sep=;\n';
+      csv += `${collarType} — ${ayEtiketi} ${currentYear} • 20 Puan Üstü Prim Sıralaması\n\n`;
+      csv += ['Sıra', 'Personel', 'Ham Puan', 'Kazanılan Bonus', 'Net Puan', 'Gelecek Ay Primi (Net × 0.5)'].join(';') + '\n';
+      liste.forEach((p, idx) => {
+        const prim = monthCloseModalData.nextMonthPrims?.[p.id];
+        csv += [
+          idx + 1,
+          `"${(p.name || '').replace(/"/g, '""')}"`,
+          p.rawScore ?? '',
+          p.bonusScore ? `+${p.bonusScore}` : '0',
+          p.finalScore ?? '',
+          (typeof prim === 'number' ? prim.toLocaleString('tr-TR', { maximumFractionDigits: 1 }) : ''),
+        ].join(';') + '\n';
+      });
+      // Özet satırları
+      csv += '\n';
+      csv += `Toplam Yorum;${monthCloseModalData.yorumSayisi ?? ''}\n`;
+      csv += `20 Puan ve Üzeri Kişi;${(monthCloseModalData.over20 || []).length}\n`;
+      const toplamPrim = liste.reduce((t, p) => t + (monthCloseModalData.nextMonthPrims?.[p.id] || 0), 0);
+      csv += `Toplam Dağıtılacak Prim;${toplamPrim.toLocaleString('tr-TR', { maximumFractionDigits: 1 })}\n`;
+
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `${collarType.replace(' ', '_')}_Prim_Siralamasi_${ayEtiketi}_${currentYear}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      addSystemLog?.('Prim Sıralaması İndirildi', `${collarType} ${ayEtiketi} ${currentYear} • ${liste.length} kişilik 20 puan üstü sıralama Excel olarak indirildi.`);
+    };
+
     const confirmCloseMonth = async () => {
        try {
            const puantajRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${docPrefix}${currentYear}_${currentMonth}`);
@@ -1889,7 +1935,15 @@ const saatMetniSayiyaCevir = (deger) => {
 
                     {/* YENİ: 20 puan ve üzeri yorum alan HERKESİN tam sıralaması (bonus dahil net puanla) */}
                     <div className="mt-4 pt-4 border-t border-purple-200">
-                        <p className="text-xs font-black text-purple-800 mb-2 uppercase tracking-wide">📋 20 Puan Üstü Tüm Sıralama</p>
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                            <p className="text-xs font-black text-purple-800 uppercase tracking-wide">📋 20 Puan Üstü Tüm Sıralama</p>
+                            {/* YENİ (kullanıcı talebi): Bu sıralamanın tamamını Excel olarak indir */}
+                            <button onClick={primSiralamaExcelIndir}
+                                disabled={(monthCloseModalData.over20Sorted || []).length === 0}
+                                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-[11px] font-black rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
+                                <Download className="w-3.5 h-3.5" /> Excel İndir
+                            </button>
+                        </div>
                         <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar">
                             {(monthCloseModalData.over20Sorted || []).length > 0 ? monthCloseModalData.over20Sorted.map((p, idx) => (
                                 <div key={p.id} className="flex items-center gap-2 bg-white rounded-lg border border-purple-100 px-3 py-2">
