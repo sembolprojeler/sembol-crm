@@ -6072,35 +6072,57 @@ const saatMetniSayiyaCevir = (deger) => {
       if (!satir || !seciliDefter) return;
       if (!maasOdeModal.kaynakDefterId) { alert('Maaşın hangi hesaptan ödendiğini seçin.'); return; }
       const kaynak = defterler.find(d => d.id === maasOdeModal.kaynakDefterId);
-      const tutar = satir.tutar;
-      if (tutar <= 0) { alert('Ödenecek tutar sıfır — muhasebede zaten kapatılmış görünüyor.'); return; }
+      // ====================================================================
+      // YENİ (kullanıcı talebi): KISMİ ÖDEME + PERSONEL/DEFTER ETİKETİ
+      // --------------------------------------------------------------------
+      // Tek personellik ödemede kullanıcı kalandan az girebilir (kısmi). Bu
+      // durumda yalnızca girilen tutar deftere düşer, muhasebede o kanalın
+      // "ödenenTutar"ı BİRİKTİRİLİR ve tik atılmaz; kalan azalır, satır
+      // "KISMİ" olarak açık kalır. Tam ödemede eski davranış (tik atılır).
+      // Toplu satırda (birden çok kişi) kısmi girilemez — tam tutar ödenir.
+      // Deftere yazılan çıkış PERSONEL etiketli (ekipSefi/ekipSefiId) ve
+      // kaynak DEFTER TÜRÜ etiketiyle (Banka/Nakit) açıklanır.
+      // ====================================================================
+      const tekKisi = satir.kisiler.length === 1 ? satir.kisiler[0] : null;
+      const girilen = tekKisi
+        ? (parseFloat(String(maasOdeModal.tutar ?? satir.tutar).replace(',', '.')) || 0)
+        : satir.tutar;
+      const tutar = girilen;
+      if (tutar <= 0) { alert('Ödenecek tutar sıfır — geçerli bir tutar girin.'); return; }
+      if (tutar > satir.tutar + 0.01) { alert('Girilen tutar kalandan fazla olamaz.'); return; }
+      const kismiMi = tekKisi && tutar < satir.tutar - 0.01; // tam değilse kısmi
       setMaasKaydediliyor(true);
       try {
         const odemeId = `odeme_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        // Kaynak defterin türü (Banka/Nakit) etiket olarak açıklamaya yazılır
+        const defterTuruEtiketi = kaynak?.tur === 'Nakit' || kaynak?.tur === 'Kasa' ? 'Nakit'
+          : kaynak?.tur === 'Banka' ? 'Banka' : (kaynak?.tur || 'Hesap');
+        const kanalAd = satir.kanal === 'banka' ? 'Banka' : satir.kanal === 'nakit' ? 'Nakit' : 'Maaş';
         const ortak = {
           tarih: bugunStr(), kategori: 'Personel Maaşı', etiketler: ['Maaş'],
           odemeId, vadeNo: 1, odemeKalemId: satir.id, odemeDefterId: seciliDefter.id,
           kaynak: 'Maaş Ödemesi (Oto)', createdAt: new Date().toISOString(),
           by: currentUser?.fullName || 'Sistem',
         };
+        // Personel etiketi (tek kişilik ödemede)
+        const etiketAlanlari = tekKisi
+          ? { ekipSefi: tekKisi.person?.fullName || '', ekipSefiId: tekKisi.person?.id || null }
+          : {};
+        const kismiNot = kismiMi ? ' • KISMİ ÖDEME' : '';
+        const kisiAd = tekKisi ? (tekKisi.person?.fullName || '') + ' — ' : '';
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
-          ...ortak, tip: 'cikis', tutar, odemeMahsup: false,
+          ...ortak, ...etiketAlanlari, tip: 'cikis', tutar, odemeMahsup: false,
           defterId: maasOdeModal.kaynakDefterId,
           odemeYontemi: defterdenOdemeYontemi(maasOdeModal.kaynakDefterId),
-          aciklama: `${satir.ad} (${satir.kaynakEtiket})`,
+          aciklama: `${kisiAd}${kanalAd} Maaşı (${satir.kaynakEtiket}) • ${defterTuruEtiketi}${kismiNot}`,
         });
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
-          ...ortak, tip: 'giris', tutar, odemeMahsup: true,
+          ...ortak, ...etiketAlanlari, tip: 'giris', tutar, odemeMahsup: true,
           defterId: seciliDefter.id,
           odemeYontemi: defterdenOdemeYontemi(maasOdeModal.kaynakDefterId),
-          aciklama: `${satir.ad} (${satir.kaynakEtiket}) ← ${kaynak?.ad || 'hesap'}`,
+          aciklama: `${kisiAd}${kanalAd} Maaşı (${satir.kaynakEtiket})${kismiNot} ← ${kaynak?.ad || 'hesap'}`,
         });
-        // 2) Muhasebe tikleri
-        // DEĞİŞTİ (kullanıcı talebi): satırlar banka/nakit olarak ayrıldığı
-        // için artık yalnızca ödenen KANALIN tiki atılır. Örn. "Mavi Yaka
-        // Kalan Banka" ödenince nakit kalanlar açık kalır ve kendi satırından
-        // ayrıca ödenir. Kanalsız eski satırlarla karşılaşılırsa (geriye
-        // uyum) eskisi gibi iki tik birden atılır.
+        // 2) Muhasebe kayıtları
         const { yil, ay } = maasKaynakAy;
         const docAdi = satir.yaka === 'beyaz' ? `beyaz_${yil}_${ay}` : `${yil}_${ay}`;
         const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', docAdi);
@@ -6109,15 +6131,24 @@ const saatMetniSayiyaCevir = (deger) => {
         satir.kisiler.forEach(k => {
           if (!records[k.person.id]) records[k.person.id] = {};
           const r = records[k.person.id];
-          const bankaTik = () => { if (!r.bankaOdendi) { r.bankaOdendi = true; r.bankaOdenenTutar = String(Math.max(0, k.bankaKalan).toFixed(2)); } };
-          const nakitTik = () => { if (!r.nakitOdendi) { r.nakitOdendi = true; r.nakitOdenenTutar = String(Math.max(0, k.kalanNakit).toFixed(2)); } };
-          if (satir.kanal === 'banka') bankaTik();
-          else if (satir.kanal === 'nakit') nakitTik();
-          else { bankaTik(); nakitTik(); }
+          // TAM ödeme: tik at + o kanalın tamamını ödenen olarak yaz
+          const bankaTikTam = () => { if (!r.bankaOdendi) { r.bankaOdendi = true; r.bankaOdenenTutar = String(Math.max(0, k.bankaKalan).toFixed(2)); } };
+          const nakitTikTam = () => { if (!r.nakitOdendi) { r.nakitOdendi = true; r.nakitOdenenTutar = String(Math.max(0, k.kalanNakit).toFixed(2)); } };
+          // KISMİ ödeme: tik ATMA, ödenen tutarı BİRİKTİR (kalan otomatik azalır)
+          const bankaKismi = () => { const onceki = parseFloat(r.bankaOdenenTutar) || 0; r.bankaOdenenTutar = String((onceki + tutar).toFixed(2)); };
+          const nakitKismi = () => { const onceki = parseFloat(r.nakitOdenenTutar) || 0; r.nakitOdenenTutar = String((onceki + tutar).toFixed(2)); };
+          if (kismiMi) {
+            if (satir.kanal === 'banka') bankaKismi();
+            else if (satir.kanal === 'nakit') nakitKismi();
+          } else {
+            if (satir.kanal === 'banka') bankaTikTam();
+            else if (satir.kanal === 'nakit') nakitTikTam();
+            else { bankaTikTam(); nakitTikTam(); }
+          }
         });
         await setDoc(mRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
-        addSystemLog?.('Maaş Ödemesi Yapıldı',
-          `${satir.ad} (${satir.kaynakEtiket}) ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi; ${satir.kisiler.length} personelin ${satir.kanal || 'banka+nakit'} tikleri atıldı.`);
+        addSystemLog?.(kismiMi ? 'Maaş Kısmi Ödeme' : 'Maaş Ödemesi Yapıldı',
+          `${satir.ad} (${satir.kaynakEtiket}) ₺${paraFmt(tutar)}${kismiMi ? ' KISMİ' : ''} — ${kaynak?.ad || '-'} (${defterTuruEtiketi}) hesabından ödendi.`);
         setMaasOdeModal(null);
       } catch (e) {
         console.error('Maaş ödemesi kaydedilemedi:', e);
@@ -6596,11 +6627,23 @@ const saatMetniSayiyaCevir = (deger) => {
           .map(p => {
             const row = veriKaynagi.maas[p.id] || {};
             const hes = maasKisiHesabi(p, row, veriKaynagi.mesai[p.id], yil, ay);
+            // ============================================================
+            // YENİ (kullanıcı talebi): KISMİ ÖDEME KALANI DÜŞSÜN
+            // ------------------------------------------------------------
+            // hes.bankaKalan/kalanNakit tam tutardır; kısmi ödemede biriken
+            // bankaOdenenTutar/nakitOdenenTutar bekleyenden düşülür. Tik
+            // (bankaOdendi/nakitOdendi) yalnızca TAM kapanınca atılır; kısmi
+            // ödemede tik atılmaz, satır azalmış kalanla açık kalır.
+            // ============================================================
+            const bankaKismiOdenen = parseFloat(row.bankaOdenenTutar) || 0;
+            const nakitKismiOdenen = parseFloat(row.nakitOdenenTutar) || 0;
             // Muhasebede tik ATILMAMIŞ kısımlar hâlâ ödenecek demektir
-            const bankaBekleyen = row.bankaOdendi ? 0 : Math.max(0, hes.bankaKalan);
-            const nakitBekleyen = row.nakitOdendi ? 0 : Math.max(0, hes.kalanNakit);
+            const bankaBekleyen = row.bankaOdendi ? 0 : Math.max(0, hes.bankaKalan - bankaKismiOdenen);
+            const nakitBekleyen = row.nakitOdendi ? 0 : Math.max(0, hes.kalanNakit - nakitKismiOdenen);
             return { person: p, bankaKalan: hes.bankaKalan, kalanNakit: hes.kalanNakit,
                      bankaOdendi: !!row.bankaOdendi, nakitOdendi: !!row.nakitOdendi,
+                     // Kısmi ödeme bilgisi (satırda "KISMİ" rozeti için)
+                     bankaKismiOdenen, nakitKismiOdenen,
                      // YENİ: kanal bazlı bekleyenler ayrı tutulur ki banka ve
                      // nakit satırları kendi tutarlarını gösterebilsin
                      bankaBekleyen, nakitBekleyen,
@@ -6621,7 +6664,7 @@ const saatMetniSayiyaCevir = (deger) => {
         ];
         return kanallar.map(kanal => {
           // Kişi listesinde bekleyen, yalnızca bu kanalın kalanıdır
-          const kanalKisiler = kisiler.map(k => ({ ...k, bekleyen: kanal.id === 'banka' ? k.bankaBekleyen : k.nakitBekleyen }));
+          const kanalKisiler = kisiler.map(k => ({ ...k, bekleyen: kanal.id === 'banka' ? k.bankaBekleyen : k.nakitBekleyen, kismiOdenen: kanal.id === 'banka' ? k.bankaKismiOdenen : k.nakitKismiOdenen }));
           const toplamBekleyen = kanalKisiler.reduce((t, k) => t + k.bekleyen, 0);
           const kalemId = `maas_${yaka.id}_${yil}_${ay}_${kanal.id}`;
           // GERİYE UYUM: eski tek-satır döneminde yapılmış ödemelerin kalem
@@ -6739,12 +6782,53 @@ const saatMetniSayiyaCevir = (deger) => {
       };
       setAvansOdeKaydediliyor(true);
       try {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
-          ...ortak, tip: 'cikis', tutar, odemeMahsup: false,
-          defterId: avansOdeModal.kaynakDefterId,
-          odemeYontemi: defterdenOdemeYontemi(avansOdeModal.kaynakDefterId),
-          aciklama: `${satir.ad} — ${satir.kaynakEtiket}`,
-        });
+        // ====================================================================
+        // DEĞİŞTİ (kullanıcı talebi): DEFTERE HER PERSONEL AYRI + ETİKETLİ DÜŞER
+        // --------------------------------------------------------------------
+        // ESKİ: Kaynak deftere TEK bir toplu gider satırı yazılıyordu
+        //   ("Mavi Yaka Nakit Avansı" gibi) — hangi personele ne ödendiği
+        //   defterde görünmüyordu.
+        // YENİ: Bu avans satırındaki HER personel için AYRI bir gider (çıkış)
+        //   satırı yazılır; satıra personel ETİKETLENİR (ekipSefi/ekipSefiId),
+        //   böylece defterde adı tıklanınca profiline gidilir. Açıklama net:
+        //   "Ahmet Öztürk — Nakit Avans (Eylül 2026)" gibi.
+        //   Doğru deftere gitme kuralı DEĞİŞMEDİ: Nakit avans → Nakit defteri,
+        //   Resmi avans → Banka (öncelik Sembol Nakliyat/GARANTİ) — kaynak
+        //   defter zaten avansVarsayilanKaynak ile bu kurala göre seçili gelir.
+        //
+        // avansTuruEtiket: satırın kanalına göre okunur ad. 'resmi' → Resmi
+        //   Avans, diğer → Nakit Avans.
+        // ====================================================================
+        const avansTuruEtiket = satir.kanal === 'resmi' ? 'Resmi Avans' : 'Nakit Avans';
+        const odenenKisiler = satir.kisiler.filter(k => k.tutar > 0);
+        // Personeli işlem kaydına bağlamak için id çözümü (profil linki için)
+        const kisiIdBul = (k) => k.person?.id || k.id || null;
+
+        if (odenenKisiler.length > 0) {
+          // Her personel için AYRI gider satırı — personel etiketli
+          for (const k of odenenKisiler) {
+            const pid = kisiIdBul(k);
+            const pad = k.person?.fullName || k.ad || 'Personel';
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+              ...ortak, tip: 'cikis', tutar: k.tutar, odemeMahsup: false,
+              defterId: avansOdeModal.kaynakDefterId,
+              odemeYontemi: defterdenOdemeYontemi(avansOdeModal.kaynakDefterId),
+              // Personel etiketi: defterde adı görünür + tıklanınca profile gider
+              ekipSefi: pad, ekipSefiId: pid,
+              aciklama: `${pad} — ${avansTuruEtiket} (${satir.kaynakEtiket})`,
+            });
+          }
+        } else {
+          // Kişi listesi boşsa (beklenmez) eski davranış: tek toplu satır
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+            ...ortak, tip: 'cikis', tutar, odemeMahsup: false,
+            defterId: avansOdeModal.kaynakDefterId,
+            odemeYontemi: defterdenOdemeYontemi(avansOdeModal.kaynakDefterId),
+            aciklama: `${satir.ad} — ${satir.kaynakEtiket}`,
+          });
+        }
+        // Ödemeler defterine tek mahsup (giriş) bacağı — muhasebe dengesi için
+        // (ay içindeki "ödendi" durumunu bu tek kayıt belirler; bölmeye gerek yok)
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
           ...ortak, tip: 'giris', tutar, odemeMahsup: true,
           defterId: seciliDefter.id,
@@ -6752,7 +6836,7 @@ const saatMetniSayiyaCevir = (deger) => {
           aciklama: `${satir.ad} (${satir.kaynakEtiket}) ← ${kaynak?.ad || 'hesap'}`,
         });
         addSystemLog?.('Personel Avansı Ödendi',
-          `${satir.ad} (${satir.kaynakEtiket}) ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi.`);
+          `${satir.ad} (${satir.kaynakEtiket}) ₺${paraFmt(tutar)} — ${kaynak?.ad || '-'} hesabından ödendi; ${odenenKisiler.length} personel ayrı ayrı etiketlenerek deftere işlendi.`);
         // ====================================================================
         // YENİ (kullanıcı talebi): ÖDEME SONRASI MUHASEBEYE İŞLE
         // ====================================================================
@@ -8284,7 +8368,13 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                                   <div className="border-t border-purple-200 bg-white divide-y divide-neutral-100">
                                     {m.kisiler.map(k => (
                                       <div key={k.person.id} className={`flex items-center justify-between gap-2 px-3 py-1.5 text-xs ${k.bekleyen <= 0.01 ? 'opacity-50' : ''}`}>
-                                        <span className="font-bold text-neutral-700 truncate">{k.person.fullName}</span>
+                                        <span className="font-bold text-neutral-700 truncate flex items-center gap-1.5">
+                                          {k.person.fullName}
+                                          {/* YENİ (kullanıcı talebi): kısmi ödeme yapılmış kişi rozetlenir */}
+                                          {k.bekleyen > 0.01 && (k.kismiOdenen || 0) > 0.01 && (
+                                            <span className="text-[8px] font-black bg-sky-600 text-white px-1.5 py-0.5 rounded-full shrink-0">KISMİ • ₺{paraFmt(k.kismiOdenen)} alındı</span>
+                                          )}
+                                        </span>
                                         <span className="font-black tabular-nums text-purple-800 shrink-0">
                                           {k.bekleyen <= 0.01 ? 'Ödendi ✓' : `₺${paraFmt(k.bekleyen)}`}
                                           {/* DEĞİŞTİ: satır tek kanala ait olduğundan yalnızca o kanalın
@@ -11450,6 +11540,43 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                   <div>{maasOdeModal.satir.kisiler.length} personel • Kalan {maasOdeModal.satir.kanal === 'banka' ? 'banka' : maasOdeModal.satir.kanal === 'nakit' ? 'nakit' : 'banka + nakit'} toplamı</div>
                   <div className="text-lg font-black tabular-nums mt-1">₺{paraFmt(maasOdeModal.satir.tutar)}</div>
                 </div>
+                {/* ================================================================
+                    YENİ (kullanıcı talebi): KISMİ ÖDEME
+                    ----------------------------------------------------------------
+                    Tek personellik ödemede (kisiler.length === 1) tutar
+                    değiştirilebilir. Kalandan AZ girilirse kısmi ödeme yapılır:
+                    o kadarı deftere düşer, kalan güncellenir ve satır "KISMİ"
+                    olarak açık kalır. Tam girilirse tik atılır (eski davranış).
+                    Toplu satırlarda (birden çok kişi) bu alan gösterilmez; orada
+                    her kişi kendi satırından ayrı ayrı ödenir.
+                    ================================================================ */}
+                {maasOdeModal.satir.kisiler.length === 1 && (
+                  <div>
+                    <label className="text-xs font-bold text-neutral-600 block mb-1">Ödenecek Tutar (₺) — kısmi ödeme için azaltabilirsiniz</label>
+                    <input type="number" inputMode="decimal" min="0" step="any"
+                      value={maasOdeModal.tutar ?? String(maasOdeModal.satir.tutar)}
+                      onChange={e => setMaasOdeModal({ ...maasOdeModal, tutar: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-500 text-sm font-black" />
+                    {/* Hızlı seçim: kalanın tamamı / yarısı */}
+                    <div className="flex gap-1.5 mt-1.5">
+                      <button type="button" onClick={() => setMaasOdeModal({ ...maasOdeModal, tutar: String(maasOdeModal.satir.tutar) })}
+                        className="px-2.5 py-1 bg-purple-100 text-purple-700 text-[10px] font-black rounded-lg hover:bg-purple-200 transition">Tamamı (₺{paraFmt(maasOdeModal.satir.tutar)})</button>
+                      <button type="button" onClick={() => setMaasOdeModal({ ...maasOdeModal, tutar: (maasOdeModal.satir.tutar / 2).toFixed(2) })}
+                        className="px-2.5 py-1 bg-neutral-100 text-neutral-600 text-[10px] font-black rounded-lg hover:bg-neutral-200 transition">Yarısı</button>
+                    </div>
+                    {(() => {
+                      const gir = parseFloat(String(maasOdeModal.tutar ?? maasOdeModal.satir.tutar).replace(',', '.')) || 0;
+                      const kalanSonra = maasOdeModal.satir.tutar - gir;
+                      if (gir > maasOdeModal.satir.tutar + 0.01) {
+                        return <p className="text-[11px] font-black text-red-600 mt-1.5">⚠ Girilen tutar kalandan fazla olamaz.</p>;
+                      }
+                      if (gir > 0 && kalanSonra > 0.01) {
+                        return <p className="text-[11px] font-bold text-amber-700 mt-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">Kısmi ödeme yapıyorsunuz. Bu ödemeden sonra <b>₺{paraFmt(kalanSonra)}</b> kalacak; satır <b>KISMİ</b> olarak açık kalır.</p>;
+                      }
+                      return null;
+                    })()}
+                  </div>
+                )}
                 <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaptan ödendi? *</label>
                   <select value={maasOdeModal.kaynakDefterId} onChange={e => setMaasOdeModal({ ...maasOdeModal, kaynakDefterId: e.target.value })}
                     className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-purple-500 text-sm">
@@ -11458,13 +11585,21 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                       .map(d => <option key={d.id} value={d.id}>{d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})</option>)}
                   </select></div>
                 <div className="text-[10px] font-bold text-neutral-500 bg-neutral-50 rounded-lg p-2.5 border border-neutral-200">
-                  Onayladığınızda Muhasebe ekranındaki {maasOdeModal.satir.kisiler.filter(k => k.bekleyen > 0.01).length} personelin
-                  banka ve nakit ödeme tikleri otomatik atılır; oradaki kalanlar sıfırlanır.
+                  Onayladığınızda seçtiğiniz hesaptan çıkış yazılır ve personel <b>etiketlenerek</b> deftere işlenir. Tam ödemede Muhasebe tikleri atılır; kısmi ödemede yalnızca ödenen tutar düşer, kalan açık kalır.
                 </div>
-                <button onClick={maasOde} disabled={maasKaydediliyor}
-                  className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition">
-                  {maasKaydediliyor ? 'Kaydediliyor...' : `₺${paraFmt(maasOdeModal.satir.tutar)} Ödemeyi Onayla`}
-                </button>
+                {(() => {
+                  const gir = maasOdeModal.satir.kisiler.length === 1
+                    ? (parseFloat(String(maasOdeModal.tutar ?? maasOdeModal.satir.tutar).replace(',', '.')) || 0)
+                    : maasOdeModal.satir.tutar;
+                  const gecersiz = !(gir > 0) || gir > maasOdeModal.satir.tutar + 0.01;
+                  const kismi = gir > 0 && gir < maasOdeModal.satir.tutar - 0.01;
+                  return (
+                    <button onClick={maasOde} disabled={maasKaydediliyor || gecersiz}
+                      className="w-full py-3 bg-purple-600 hover:bg-purple-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition">
+                      {maasKaydediliyor ? 'Kaydediliyor...' : `₺${paraFmt(gir)} ${kismi ? 'Kısmi ' : ''}Ödemeyi Onayla`}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           </div>
