@@ -754,6 +754,92 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
       `
     },
     {
+      // ======================================================================
+      // YENİ (kullanıcı talebi): ŞOFÖRLER İÇİN ARAÇ KAZASI VE HASAR TESPİT
+      // TUTANAĞI
+      // ----------------------------------------------------------------------
+      // Amaç: Şoför, şirket aracını kullanırken KAZA yaptığında; hem KARŞI
+      // tarafta (üçüncü şahıs araç/mülk) hem BİZİM araçta oluşan hasarın
+      // tespiti ve kusur/kesinti kaydı. Diğer tutanaklarla AYNI desen:
+      // kişi + araç bilgileri otomatik dolar, olaya özel alanlar (plaka,
+      // tarih, hasar bedeli) noktalı çizgi bırakılır. f.note varsa olayın
+      // oluş şekli bölümüne basılır.
+      // ======================================================================
+      key: 'arac_kaza_hasar',
+      title: 'Şoförler İçin Araç Kazası ve Hasar Tespit Tutanağı',
+      body: (p, f) => `
+        <div class="main-title">SEMBOL NAKLİYAT ARAÇ KAZASI VE HASAR TESPİT TUTANAĞI</div>
+        <table>
+          <tr><td class="label">Tutanak Tarihi</td><td>${f.date || '..... / ..... / 202...'}</td></tr>
+          <tr><td class="label">Kaza Tarihi ve Saati</td><td>..... / ..... / 202... - ..... : .....</td></tr>
+          <tr><td class="label">Kazanın Gerçekleştiği Yer</td><td>................................................................................. (Örn: E-5 Kadıköy mevkii, müşteri sitesi otoparkı, dar sokak vb.)</td></tr>
+        </table>
+
+        <div class="section-title">1. Sürücü (Şoför) ve Şirket Aracı Bilgileri</div>
+        <table>
+          <tr><td class="label">Şoförün Adı Soyadı</td><td>${p.fullName || ''}</td></tr>
+          <tr><td class="label">T.C. Kimlik No</td><td>${p.tcNo || ''}</td></tr>
+          <tr><td class="label">Görevi</td><td>${p.position || ''}</td></tr>
+          <tr><td class="label">Ehliyet Sınıfı / No</td><td>................................ / ................................</td></tr>
+          <tr><td class="label">Şirket Aracının Plakası</td><td>........ - ................... - ........</td></tr>
+          <tr><td class="label">Araç Marka / Model</td><td>................................................................</td></tr>
+        </table>
+
+        <div class="section-title">2. Karşı Taraf / Üçüncü Şahıs Bilgileri (Varsa)</div>
+        <table>
+          <tr><td class="label">Kaza Tek Taraflı mı?</td><td>[ &nbsp; ] Evet (yalnız şirket aracı) &nbsp;&nbsp; [ &nbsp; ] Hayır, karşı taraf var</td></tr>
+          <tr><td class="label">Karşı Sürücü Adı Soyadı</td><td>....................................................</td></tr>
+          <tr><td class="label">Karşı Araç Plakası</td><td>........ - ................... - ........</td></tr>
+          <tr><td class="label">Karşı Taraf Telefonu</td><td>................................................</td></tr>
+          <tr><td class="label">Karşı Taraf Sigorta / Poliçe</td><td>................................................................</td></tr>
+        </table>
+
+        <div class="section-title">3. Hasar Tespiti</div>
+        <table>
+          <tr><td class="label">Şirket Aracındaki Hasar</td><td>............................................................................................. (Örn: Ön tampon, sağ ön çamurluk, far kırığı vb.)</td></tr>
+          <tr><td class="label">Karşı Araç / 3. Şahıs Hasarı</td><td>............................................................................................. (Örn: Karşı aracın arka kaputu, bahçe duvarı, direk vb.)</td></tr>
+          <tr><td class="label">Yaralanma Var mı?</td><td>[ &nbsp; ] Yok &nbsp;&nbsp; [ &nbsp; ] Var → Açıklama: ....................................................</td></tr>
+          <tr><td class="label">Tahmini Toplam Hasar Bedeli</td><td>................................ TL</td></tr>
+        </table>
+
+        <div class="section-title">4. Resmi İşlemler</div>
+        <table>
+          <tr><td class="label">Kaza Tespit Tutanağı Tutuldu mu?</td><td>[ &nbsp; ] Anlaşmalı (taraflar) &nbsp;&nbsp; [ &nbsp; ] Trafik Polisi/Jandarma &nbsp;&nbsp; [ &nbsp; ] Tutulmadı</td></tr>
+          <tr><td class="label">Alkol/Uyuşturucu Testi</td><td>[ &nbsp; ] Yapıldı (Temiz) &nbsp;&nbsp; [ &nbsp; ] Yapıldı (Pozitif) &nbsp;&nbsp; [ &nbsp; ] Yapılmadı</td></tr>
+          <tr><td class="label">Sigortaya Bildirim (Kasko/Trafik)</td><td>[ &nbsp; ] Yapıldı &nbsp;&nbsp; [ &nbsp; ] Yapılacak &nbsp;&nbsp; Dosya No: ........................</td></tr>
+          <tr><td class="label">Çekici Gerekti mi?</td><td>[ &nbsp; ] Hayır &nbsp;&nbsp; [ &nbsp; ] Evet → Nereye: ....................................</td></tr>
+        </table>
+
+        <div class="section-title">5. Kazanın Oluş Şekli ve Detayı (Nasıl Oldu?)</div>
+        <div class="paragraph">Yukarıda yeri ve zamanı belirtilen kaza, aşağıda anlatıldığı şekilde meydana gelmiştir:</div>
+        <div class="desc-box" style="min-height:60px;">${f.note ? f.note : '................................................................................................................................................................................<br/>................................................................................................................................................................................<br/>................................................................................................................................................................................'}</div>
+        <p class="note">(Örn: Müşteri sitesine geri manevra yaparken, arkadaki park halindeki araca çarpıldı. / Yağmurlu havada öndeki araca arkadan çarpıldı.)</p>
+
+        <div class="section-title">6. Kusur Durumu ve Şoförün Beyanı</div>
+        <table>
+          <tr><td class="label">Kusur Kimde?</td><td>[ &nbsp; ] Tamamen şoförümüzde &nbsp;&nbsp; [ &nbsp; ] Karşı tarafta &nbsp;&nbsp; [ &nbsp; ] Karşılıklı (paylaşımlı) &nbsp;&nbsp; [ &nbsp; ] Tespit edilemedi</td></tr>
+        </table>
+        <div class="paragraph">
+          Yukarıda anlatılan kazanın; <b>kendi kusurum / dikkatsizliğim / trafik kurallarına uymamam</b> neticesinde meydana geldiğini kabul ettiğim hâllerde; şirket aracında oluşan ve <b>kasko/sigorta tarafından karşılanmayan</b> hasar bedelinin (muafiyet, hasarsızlık kaybı vb. dâhil) ve varsa karşı tarafa ödenen tazminatın, tespit edilecek kusur oranım nispetinde <b>maaşımdan, avansımdan veya doğacak hak edişlerimden kesilmesini</b> kendi hür irademle kabul ve beyan ederim. Kaza anında araçta bulunan yükün/eşyanın güvenliğinden de sorumlu olduğumu bilmekteyim.
+        </div>
+        <p class="note">(Şoför, kusur kabulü hâlinde kendi el yazısıyla "Kaza kusurumdan olmuştur, oluşan zararın kusurum oranında maaşımdan kesilmesini kabul ediyorum" yazarak imzalar. İmzalamazsa yetkili "İmzadan İmtina Etti" yazıp şahitlere onaylatır.)</p>
+        <div class="desc-box" style="min-height:40px;"></div>
+
+        <div class="section-title">7. İmzalar</div>
+        <table>
+          <tr>
+            <td class="label">Şoför (Adı Soyadı / İmza)</td><td style="height:48px;">${p.fullName || ''}</td>
+            <td class="label">Tutanağı Düzenleyen Yetkili</td><td style="height:48px;">......................................</td>
+          </tr>
+          <tr>
+            <td class="label">Görgü Tanığı 1 (Şahit)</td><td style="height:44px;">......................................</td>
+            <td class="label">Görgü Tanığı 2 (Şahit)</td><td style="height:44px;">......................................</td>
+          </tr>
+        </table>
+        <p class="note">Not: Bu tutanağın imzalı aslı personelin özlük dosyasında saklanır. Kaza fotoğrafları, kaza tespit tutanağı ve sigorta/eksper evrakları bu belgeye eklenmelidir. Ücretten yapılacak kesintilerde 4857 sayılı İş Kanunu'nun ücretin korunmasına ilişkin hükümleri gözetilmeli; uygulamadan önce mali müşavirinize/hukuk danışmanınıza teyit ettirmeniz önerilir.</p>
+      `
+    },
+    {
       key: 'maddi_hasar',
       title: 'Personel İçin Maddi Hasar Tespit Tutanağı',
       body: (p, f) => `
