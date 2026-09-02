@@ -3003,26 +3003,47 @@ const saatMetniSayiyaCevir = (deger) => {
                       </div>
                     </td>
                     )}
-                    {g('finans') && (
-                      <td className={`border-r border-neutral-300 px-0.5 py-0.5 align-middle ${row.bankaOdendi ? 'bg-green-200' : 'bg-yellow-100'}`}>
+                    {g('finans') && (() => {
+                      // ============================================================
+                      // YENİ (kullanıcı talebi): KISMİ ÖDEME PERSONEL MUHASEBEDE DE DÜŞER
+                      // ------------------------------------------------------------
+                      // c.bankaKalan tam tutardır. Ödemeler ekranından yapılan kısmi
+                      // ödemede biriken bankaOdenenTutar buradan da düşülür; böylece
+                      // iki ekran birbirini tutar. Tik atılmışsa (tam ödeme) 0/Ödendi
+                      // görünür. Bakiye 0 (veya altı) ise her zaman "Ödendi" sayılır.
+                      // ============================================================
+                      const bKismi = parseFloat(row.bankaOdenenTutar) || 0;
+                      const bGoster = Math.max(0, c.bankaKalan - bKismi);
+                      const bKapandi = row.bankaOdendi || bGoster <= 0.01;
+                      const bKismiVar = !bKapandi && bKismi > 0.01;
+                      return (
+                      <td className={`border-r border-neutral-300 px-0.5 py-0.5 align-middle ${bKapandi ? 'bg-green-200' : bKismiVar ? 'bg-sky-100' : 'bg-yellow-100'}`}>
                       <div className="flex items-center justify-center gap-1">
-                        <span className={`font-black ${row.bankaOdendi ? 'text-green-800 line-through opacity-70' : 'text-yellow-900'}`}>{c.bankaKalan.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
-                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'bankaOdendi', 'bankaOdenenTutar', c.bankaKalan)} className={`p-0.5 shrink-0 rounded transition ${row.bankaOdendi ? 'text-green-700' : 'text-yellow-600/50 hover:text-yellow-800'}`} title={row.bankaOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
+                        <span className={`font-black ${bKapandi ? 'text-green-800 line-through opacity-70' : bKismiVar ? 'text-sky-800' : 'text-yellow-900'}`} title={bKismiVar ? `Kısmi: ₺${paraFmt(bKismi)} ödendi, ₺${paraFmt(bGoster)} kaldı` : ''}>{bKapandi ? 'Ödendi' : bGoster.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
+                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'bankaOdendi', 'bankaOdenenTutar', c.bankaKalan)} className={`p-0.5 shrink-0 rounded transition ${bKapandi ? 'text-green-700' : 'text-yellow-600/50 hover:text-yellow-800'}`} title={bKapandi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
                           <CheckCircle className="w-3 h-3" />
                         </button>
                       </div>
                     </td>
-                    )}
-                    {g('finans') && (
-                      <td style={{ borderRight: '3px solid #16a34a' }} className={`px-0.5 py-0.5 align-middle ${row.nakitOdendi ? 'bg-green-300' : 'bg-orange-100'}`}>
+                      );
+                    })()}
+                    {g('finans') && (() => {
+                      // Nakit hücresi — banka ile aynı kısmi ödeme mantığı
+                      const nKismi = parseFloat(row.nakitOdenenTutar) || 0;
+                      const nGoster = Math.max(0, c.kalanNakit - nKismi);
+                      const nKapandi = row.nakitOdendi || nGoster <= 0.01;
+                      const nKismiVar = !nKapandi && nKismi > 0.01;
+                      return (
+                      <td style={{ borderRight: '3px solid #16a34a' }} className={`px-0.5 py-0.5 align-middle ${nKapandi ? 'bg-green-300' : nKismiVar ? 'bg-sky-100' : 'bg-orange-100'}`}>
                       <div className="flex items-center justify-center gap-1">
-                        <span className={`font-black ${row.nakitOdendi ? 'text-green-900 line-through opacity-70' : 'text-orange-900'}`}>{c.kalanNakit.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
-                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'nakitOdendi', 'nakitOdenenTutar', c.kalanNakit)} className={`p-0.5 shrink-0 rounded transition ${row.nakitOdendi ? 'text-green-800' : 'text-orange-600/50 hover:text-orange-800'}`} title={row.nakitOdendi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
+                        <span className={`font-black ${nKapandi ? 'text-green-900 line-through opacity-70' : nKismiVar ? 'text-sky-800' : 'text-orange-900'}`} title={nKismiVar ? `Kısmi: ₺${paraFmt(nKismi)} ödendi, ₺${paraFmt(nGoster)} kaldı` : ''}>{nKapandi ? 'Ödendi' : nGoster.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
+                        <button type="button" onClick={() => handlePaymentToggle(person.id, 'nakitOdendi', 'nakitOdenenTutar', c.kalanNakit)} className={`p-0.5 shrink-0 rounded transition ${nKapandi ? 'text-green-800' : 'text-orange-600/50 hover:text-orange-800'}`} title={nKapandi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
                           <CheckCircle className="w-3 h-3" />
                         </button>
                       </div>
                     </td>
-                    )}
+                      );
+                    })()}
                   </tr>
                 );
               })}
