@@ -15,17 +15,24 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
   // YENİ: Kaporayı banka defterine gelir olarak yazar.
   defterKaporaKaydet, HasarCozumBelgeleri } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
-import { AddInfoView, CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, IzinTahtasiView, PuantajTahtasiView, MaterialListView, DamagedJobsView, CancelledJobsView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, ComplaintsView, PersonelTahtasiView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, IsMerkeziView, SahaRaporlamasiView, IsKilavuzuView, HatirlatmalarView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './Operasyon.jsx';
+import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJobsView, CancelledJobsView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, IsMerkeziView, IsKilavuzuView, HatirlatmalarView } from './OperasyonIsler.jsx';
+import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './OperasyonPersonel.jsx';
+import { MaterialListView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView } from './OperasyonAracMalzeme.jsx';
+import { AddInfoView, ComplaintsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, SahaRaporlamasiView } from './OperasyonInsanKaynaklari.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
 // NOT: Mesai Takip modülü artık ayrı bir dosya değil; kullanıcı isteğiyle
-// Operasyon Bölümü'nün parçası olarak Operasyon.jsx içine taşındı
-// (yukarıdaki Operasyon.jsx import satırından geliyor).
+// Operasyon Bölümü'nün parçası olarak OperasyonPersonel.jsx içine taşındı
+// (yukarıdaki OperasyonPersonel.jsx import satırından geliyor).
 // NOT: MusteriHavuzuView ve SahaPortfoyView artık ayrı dosyalar değil;
 // kullanıcı isteğiyle Satış Bölümü'nün parçası olarak Satis.jsx içine taşındı
 // (yukarıdaki Satis.jsx import satırından geliyorlar).
 // NOT: HatirlatmalarView ve IsKilavuzuView artık ayrı dosyalar değil;
-// kullanıcı isteğiyle Operasyon Bölümü'nün parçası olarak Operasyon.jsx
-// içine taşındı (yukarıdaki Operasyon.jsx import satırından geliyorlar).
+// kullanıcı isteğiyle Operasyon Bölümü'nün parçası olarak OperasyonIsler.jsx
+// içine taşındı (yukarıdaki OperasyonIsler.jsx import satırından geliyorlar).
+// NOT: 2026-09 itibarıyla dev haldeki Operasyon.jsx dört dosyaya bölündü:
+// OperasyonIsler.jsx, OperasyonPersonel.jsx, OperasyonAracMalzeme.jsx,
+// OperasyonInsanKaynaklari.jsx. Eski dosya, geri dönüş ihtimaline karşı
+// Operasyon_yedek.jsx adıyla (hiçbir yerden import edilmeden) saklanıyor.
 
   // ============================================================================
   // YENİ: MARKA LOGOSU BİLEŞENİ
