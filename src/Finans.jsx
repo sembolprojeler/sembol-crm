@@ -56,6 +56,101 @@ const saatMetniSayiyaCevir = (deger) => {
 // Sayıyı Türkçe para biçiminde yazar (örn. 12345.6 -> "12.345,60")
 const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// ==========================================================================
+// YENİ (kullanıcı talebi): PERSONEL BORCU — BORÇLU DEFTERİ İLE TEK RAKAM
+// ==========================================================================
+// SORUN: Ahmet Öztürk'ün ₺40.000 borcundan ₺10.000 kısmi tahsil edildi.
+// Borçlu defteri doğru gösteriyordu (kalan ₺30.000) ama Personel Muhasebe >
+// Mavi Yaka Maaş tablosundaki BORÇ sütunu hâlâ ₺40.000 diyordu.
+//
+// KÖK NEDEN: İki ekran AYNI veriyi farklı okuyordu.
+//  • BORÇ sütunu ham `maas_yearly/{yıl} → records[personId].borclanma`
+//    alanını gösteriyordu. Bu alan "alınan toplam borç"tur.
+//  • Borçlu defteri ise bu toplamdan, defterIslemleri'ndeki tahsilat
+//    mahsuplarını (alacakMahsup) düşerek KALAN borcu hesaplıyordu.
+//  • "Hesaba Nakit" ile yapılan tahsilat borclanma alanını DÜŞÜRMEZ; yalnızca
+//    mahsup kaydı yazar. (Maaştan kesme yolu ise borclanma'yı doğrudan
+//    düşürür ve mahsup kaydı yazmaz — o yol zaten tutarlıydı.)
+//
+// ÇÖZÜM: BORÇ sütunu artık borçlu defteriyle BİREBİR aynı formülü kullanır:
+//        kalan borç = borclanma - (o personele ait tahsilat mahsupları)
+// Böylece kısmi tahsilat yapıldığı anda sütundaki rakam da değişir.
+// Borçlu defterinin kodu DEĞİŞTİRİLMEDİ; tek doğruluk kaynağı o kaldı.
+//
+// NOT: Otomatik personel borç kalemlerinin id'si `oto_personel_{personId}`
+// biçimindedir (bkz. alacakDefterBilgi). personId bu id'den çözülür.
+// ==========================================================================
+const OTO_PERSONEL_KALEM_ONEKI = 'oto_personel_';
+
+// Tüm personelin tahsil edilmiş borç toplamlarını canlı döner: { [personId]: tutar }
+const usePersonelBorcTahsilatlari = () => {
+  const [tahsilatlar, setTahsilatlar] = useState({});
+  useEffect(() => {
+    // defterIslemleri koleksiyonu canlı dinlenir; tahsilat yapıldığı anda
+    // BORÇ sütunu kendiliğinden güncellenir (sayfa yenilemeye gerek yok).
+    const durdur = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), snap => {
+      const harita = {};
+      snap.docs.forEach(d => {
+        const i = d.data();
+        // Yalnızca silinmemiş, personel borcuna ait tahsilat mahsupları sayılır
+        if (i.silindi || !i.alacakMahsup) return;
+        const kalemId = String(i.alacakKalemId || '');
+        if (!kalemId.startsWith(OTO_PERSONEL_KALEM_ONEKI)) return;
+        const personId = kalemId.slice(OTO_PERSONEL_KALEM_ONEKI.length);
+        harita[personId] = (harita[personId] || 0) + (parseFloat(i.tutar) || 0);
+      });
+      setTahsilatlar(harita);
+    }, err => console.warn('Personel borç tahsilatları okunamadı:', err));
+    return () => durdur();
+  }, []);
+  return tahsilatlar;
+};
+
+// Ham borç ve tahsil edilen tutardan KALAN borcu hesaplar (negatife düşmez)
+const personelKalanBorc = (hamBorc, tahsilEdilen) =>
+  Math.max(0, (parseFloat(hamBorc) || 0) - (parseFloat(tahsilEdilen) || 0));
+
+// --------------------------------------------------------------------------
+// BORÇ HÜCRESİ (maaş tablosu) — ayrı bileşen olarak tutuldu ki tablo satırı
+// daha da şişmesin ve mantık tek yerden okunabilsin.
+// DAVRANIŞ:
+//  • Kutuda gösterilen ve düzenlenen değer KALAN borçtur (defterle aynı).
+//  • Tahsilat varsa altında "₺10.000 tahsil edildi • toplam ₺40.000" notu
+//    çıkar; yönetici rakamın nereden geldiğini görür.
+//  • Yönetici kutuya yazarsa yazdığı tutar KALAN borç kabul edilir; arka
+//    planda ham borç = yazılan + tahsil edilen olarak saklanır. Böylece
+//    borçlu defteriyle iki ekran hep aynı kalanı gösterir.
+// --------------------------------------------------------------------------
+const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
+  const kalan = personelKalanBorc(hamBorc, tahsilEdilen);
+  const tahsilVar = (parseFloat(tahsilEdilen) || 0) > 0.01;
+  return (
+    <div className="flex flex-col items-stretch">
+      <input
+        type="number"
+        value={kalan || ''}
+        // Yazılan değer KALAN borçtur; tahsil edilen eklenerek ham borç saklanır
+        onChange={e => {
+          const yeniKalan = parseFloat(e.target.value);
+          const guvenli = isNaN(yeniKalan) ? 0 : Math.max(0, yeniKalan);
+          onDegisim(e.target.value === '' ? '' : String(guvenli + (parseFloat(tahsilEdilen) || 0)));
+        }}
+        className={`w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-red-100 focus:ring-1 focus:ring-red-400 rounded font-bold ${tahsilVar ? 'text-sky-700' : 'text-red-700'}`}
+        placeholder="0"
+        title={tahsilVar
+          ? `Borçlu defteriyle aynı: toplam ₺${paraFmt(hamBorc)} borçtan ₺${paraFmt(tahsilEdilen)} tahsil edildi, kalan ₺${paraFmt(kalan)}.`
+          : 'Tüm yıl boyunca geçerlidir. Yıl sonunda sıfırlanır.'}
+      />
+      {/* Kısmi tahsilat varsa şeffaflık için küçük bilgi satırı */}
+      {tahsilVar && (
+        <span className="text-[7px] font-black text-sky-600 leading-none text-center pb-0.5">
+          ₺{paraFmt(tahsilEdilen)} tahsil • top. ₺{paraFmt(hamBorc)}
+        </span>
+      )}
+    </div>
+  );
+};
+
   // ==========================================================================
   // YENİ BİLEŞEN: MAAŞ RAPORU (Genel Ciro Raporu sayfasındaki 2. sekme)
   // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir; mevcut hiçbir koda
@@ -2988,7 +3083,12 @@ const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits:
                     )}
                     {g('hakedis') && (
                       <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-red-50/50">
-                      <input type="number" value={(yearlyData[person.id] && yearlyData[person.id].borclanma) || ''} onChange={e => handleYearlyChange(person.id, 'borclanma', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-red-100 focus:ring-1 focus:ring-red-400 rounded text-red-700 font-bold" placeholder="0" title="Tüm yıl boyunca geçerlidir. Yıl sonunda sıfırlanır." />
+                      {/* DEĞİŞTİ: Ham borç yerine BORÇLU DEFTERİYLE AYNI kalan borç gösterilir */}
+                      <PersonelBorcHucresi
+                        hamBorc={(yearlyData[person.id] && yearlyData[person.id].borclanma) || ''}
+                        tahsilEdilen={borcTahsilatlari[person.id] || 0}
+                        onDegisim={(yeniHamBorc) => handleYearlyChange(person.id, 'borclanma', yeniHamBorc)}
+                      />
                     </td>
                     )}
                     {g('hakedis') && (
@@ -3104,6 +3204,11 @@ const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits:
     const [yearlyData, setYearlyData] = useState({});
     const [isSaving, setIsSaving] = useState(false);
     const [isDataLoaded, setIsDataLoaded] = useState(false);
+
+    // YENİ: Borçlu defterindeki tahsilatlar canlı okunur. BORÇ sütunu bu
+    // veriyle "borclanma - tahsil edilen" formülünü kullanır; böylece iki
+    // ekran tek rakam gösterir ve kısmi tahsilat anında yansır.
+    const borcTahsilatlari = usePersonelBorcTahsilatlari();
 
     const docPrefix = collarType === 'Mavi Yaka' ? '' : 'beyaz_';
 
@@ -3533,7 +3638,8 @@ const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits:
               c.mesaiUcretiSaf.toFixed(2),  // YENİ: Prim payı düşülmüş saf mesai ücreti
               c.yemek,
               c.yol,
-              yRow.borclanma || 0,
+              // DEĞİŞTİ: CSV'de de ekrandaki (ve borçlu defterindeki) KALAN borç yazılır
+              personelKalanBorc(yRow.borclanma, borcTahsilatlari[person.id] || 0).toFixed(2),
               c.icraKesintisi.toFixed(2),
               c.bankaKalan.toFixed(2),
               c.kalanNakit.toFixed(2)
