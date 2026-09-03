@@ -10,7 +10,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   // Eskiden IBAN bu dosyada sabit yazılıydı ve panelden değiştirilemiyordu.
   aktifBankaBilgiMetni,
   // YENİ: IBAN Paylaş penceresi için varsayılan hesap nesnesi ve IBAN biçimleyici.
-  aktifBankaHesabi, ibanBicimle } from './shared.jsx';
+  aktifBankaHesabi, ibanBicimle,
+  // YENİ: Çok günlü iş (1. gün / 2. gün) rozeti ve grup fiyatı gösterimi
+  isGunEtiketi, isDevamGunuMu, isGrupFiyat, isGrupKapora, isAracEtiketi, isYardimciKayitMi } from './shared.jsx';
 import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from './OperasyonPersonel.jsx';
 
 
@@ -1106,7 +1108,21 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                   Bu tarihte kayıtlı herhangi bir operasyon bulunmuyor.
                 </div>
               ) : (
-                jobsByDate[selectedDate].map(job => (
+                jobsByDate[selectedDate].map(job => {
+                  // ============================================================
+                  // YENİ (kullanıcı talebi): ÇOK GÜNLÜ İŞ GÖSTERİMİ
+                  // Her gün ayrı kart olarak kalır (ekip/araç her gün ayrı gider)
+                  // ama kart artık işin kaçıncı günü olduğunu söyler ve devam
+                  // günlerinde de işin GERÇEK fiyatını gösterir. Veritabanında
+                  // devam gününün price alanı ₺0'dır (ciro bir kez sayılır);
+                  // burada yalnızca gösterim için grup fiyatı okunur.
+                  // ============================================================
+                  const gunEtiketi = isGunEtiketi(job, jobs);            // "2. Gün / 3" ya da null
+                  const aracEtiketi = isAracEtiketi(job);                // YENİ: "2. Araç / 2" ya da null
+                  const devamGunu = isYardimciKayitMi(job, jobs);        // 2. gün / 2. araç gibi yardımcı kayıt mı
+                  const gosterFiyat = isGrupFiyat(job, jobs);            // İşin gerçek fiyatı
+                  const gosterKapora = isGrupKapora(job, jobs);          // Ana işin kaporası
+                  return (
                   <div key={job.id} className={`bg-white p-3.5 rounded-xl shadow-sm border ${job.status === 'cancelled' ? 'border-red-400 bg-red-50/40' : job.isSpecial ? 'border-yellow-400 ring-1 ring-yellow-100 bg-yellow-50/20' : 'border-neutral-200 hover:border-red-400'} flex flex-col gap-2.5 transition group`}>
                     <div className="flex justify-between items-center gap-2">
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -1117,6 +1133,18 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                         <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold text-white uppercase tracking-wider ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
                           {job.type || 'Nakliye'}
                         </span>
+                        {/* YENİ: Çok günlü işte gün rozeti — "1. GÜN / 2" */}
+                        {gunEtiketi && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider bg-purple-600 text-white shadow-sm" title="Bu iş birden fazla gün sürüyor; her gün için ekip ve mesai ayrı işlenir, ciro tek sayılır.">
+                            {gunEtiketi}
+                          </span>
+                        )}
+                        {/* YENİ: Aynı güne birden fazla araç gidiyorsa araç rozeti — "1. ARAÇ / 2" */}
+                        {aracEtiketi && (
+                          <span className="text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider bg-sky-600 text-white shadow-sm" title="Bu işe aynı gün birden fazla araç gidiyor; her araca ayrı ekip atanır ve mesai ayrı kapatılır, ciro ve teslim kodu tektir.">
+                            {aracEtiketi}
+                          </span>
+                        )}
                         <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
                           job.status === 'completed' ? 'bg-black text-white' :
                           job.status === 'in-progress' ? 'bg-red-600 text-white shadow-sm' :
@@ -1127,12 +1155,15 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                         </span>
                         <span className="text-[10px] font-black text-neutral-600 flex items-center gap-1 ml-1"><Clock className="w-3 h-3" /> {job.time}</span>
                       </div>
-                      {job.price && (
+                      {/* DEĞİŞTİ: Devam gününde de işin gerçek fiyatı görünür (ciroya girmez) */}
+                      {(job.price || gosterFiyat > 0) && (
                         <div className="text-right shrink-0 leading-none">
-                          <span className="block text-sm font-black text-green-600">₺{parseInt(job.price).toLocaleString('tr-TR')}</span>
-                          {/* YENİ: Kapora girilmişse Takvim kartında da gösterilsin */}
-                          {job.deposit && (
-                            <span className="block text-[10px] font-bold text-green-500 mt-1">Kapora: ₺{parseInt(job.deposit).toLocaleString('tr-TR')}</span>
+                          <span className="block text-sm font-black text-green-600">₺{gosterFiyat.toLocaleString('tr-TR')}</span>
+                          {gosterKapora > 0 && (
+                            <span className="block text-[10px] font-bold text-green-500 mt-1">Kapora: ₺{gosterKapora.toLocaleString('tr-TR')}</span>
+                          )}
+                          {devamGunu && (
+                            <span className="block text-[9px] font-bold text-purple-600 mt-1" title="Fiyat ve kapora ana kayda (1. gün, 1. araç) kayıtlıdır; bu kayda ayrıca tutar yazılmaz.">ana kayıtta sayılır</span>
                           )}
                         </div>
                       )}
@@ -1282,7 +1313,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                       </div>
                     </div>
                   </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>
