@@ -2619,3 +2619,143 @@ export const bildirimGonder = (title, body, opts = {}) => {
     setTimeout(() => { try { bildirim.close(); } catch (e) {} }, 10000);
   } catch (e) { console.error('Bildirim gönderilemedi:', e); }
 };
+
+// ============================================================================
+// YENİ (kullanıcı talebi): ÇOK GÜNLÜ İŞ — "1. GÜN / 2. GÜN" BAĞLANTILI KAYITLAR
+// ============================================================================
+// SAHA GERÇEĞİ: Bir nakliye 2-3 gün sürebilir. Ekip ve araç her gün ayrı gider,
+// her gün için ayrı görev ataması ve mesai onayı yapılır. Bu yüzden her gün
+// için AYRI iş dokümanı açılması doğrudur ve KORUNMUŞTUR.
+//
+// SORUN: Günler arasında hiçbir bağ yoktu. 2. gün "₺0 tutarlı ayrı bir iş"
+// gibi görünüyordu; müşteri profilinde "2 kayıt" sayılıyor, kapora eklerken
+// yanlışlıkla ₺0'lık güne yazılabiliyordu.
+//
+// TASARIM KARARI — CİRO TEK SAYILIR:
+//   • 2. ve sonraki günlerin `price` ve `deposit` alanı VERİTABANINDA ₺0 olarak
+//     KALIR. Böylece ciro, cari bakiye, borçlu listesi, kasa raporları gibi
+//     "price toplayan" HİÇBİR hesap değişmez; iş ciroya bir kez girer.
+//   • Ekranda ise tüm günler aynı fiyatı gösterir: bunun için `grupFiyat`
+//     alanı ve aşağıdaki yardımcılar kullanılır. Yani "gösterilen" fiyat ile
+//     "sayılan" fiyat bilinçli olarak ayrılmıştır.
+//   • Kapora her zaman 1. güne (ana işe) yazılır; kapora penceresi devam
+//     günlerini listelemez.
+//
+// YENİ DOKÜMAN ALANLARI (App.jsx'te kayıt açılırken yazılır):
+//   isGrupId   : gruptaki tüm günlerde aynı (teslim kodu ile aynı değer)
+//   gunNo      : 1, 2, 3 ...
+//   toplamGun  : işin kaç gün sürdüğü
+//   grupFiyat  : işin gerçek fiyatı (her günde yazılı; yalnızca GÖSTERİM için)
+//   anaIsId    : devam günlerinde / araç kopyalarında ana kaydın doküman kimliği
+//   aracNo     : 1, 2, 3 ... (aynı güne giden kaçıncı araç) — YENİ
+//   toplamArac : o gün işe kaç araç gidiyor — YENİ
+//
+// ESKİ KAYITLAR (bu alanlar yok): Aynı teslim kodunu paylaşan, daha erken
+// tarihli ve fiyatı > 0 olan bir kayıt varsa, fiyatı ₺0 olan kayıt devam günü
+// sayılır. Böylece bugüne kadar açılmış çok günlü işler de doğru gruplanır.
+// ============================================================================
+
+// Sistemin otomatik ürettiği asansör kurulum kaydı mı? (gruplamaya girmez)
+export const otomatikAsansorKaydiMi = (j) =>
+  j?.type === 'Asansör' && typeof j?.contractDetails === 'string' && j.contractDetails.includes('Otomatik Oluşturulan Asansör');
+
+// Bir işin grubundaki (aynı teslim kodu) GERÇEK gün kayıtları — asansör hariç
+const _isGrupUyeleri = (job, tumIsler = []) => {
+  const anahtar = job?.isGrupId || job?.deliveryCode;
+  if (!anahtar) return [job].filter(Boolean);
+  return (tumIsler || [])
+    .filter(o => (o.isGrupId || o.deliveryCode) === anahtar && !otomatikAsansorKaydiMi(o) && o.status !== 'cancelled' && isAracNo(o) === 1) // araç kopyaları gün sayımına girmez
+    .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+};
+
+// Kaçıncı gün? (yeni alan yoksa gruptaki tarih sırasından bulunur)
+export const isGunNo = (job, tumIsler = []) => {
+  const n = parseInt(job?.gunNo);
+  if (n >= 1) return n;
+  const uyeler = _isGrupUyeleri(job, tumIsler);
+  const idx = uyeler.findIndex(o => o.id === job?.id);
+  return idx >= 0 ? idx + 1 : 1;
+};
+
+// İş toplam kaç gün? (yeni alan yoksa gruptaki üye sayısından bulunur)
+export const isToplamGun = (job, tumIsler = []) => {
+  const n = parseInt(job?.toplamGun);
+  if (n >= 1) return n;
+  return Math.max(1, _isGrupUyeleri(job, tumIsler).length);
+};
+
+// ----------------------------------------------------------------------------
+// YENİ (kullanıcı talebi): AYNI GÜNE BİRDEN FAZLA ARAÇ — "1. ARAÇ / 2. ARAÇ"
+// ----------------------------------------------------------------------------
+// Bir işe aynı gün 2 kamyon gidebilir. Kayıt formundaki "Araç Sayısı" kadar
+// AYNI güne kopya doküman açılır (aracNo: 1, 2, ...). Her kopya ayrı ekip
+// alır ve mesaisi ayrı kapatılır; ancak fiyat/kapora yalnızca 1. araçta
+// (ana kayıtta) yazılıdır — ciro, cari ve teslim kodu TEK'tir.
+// Kopyaların price/deposit alanı ₺0'dır; ekranda grupFiyat gösterilir.
+// ----------------------------------------------------------------------------
+export const isAracNo = (job) => Math.max(1, parseInt(job?.aracNo) || 1);
+export const isToplamArac = (job) => Math.max(1, parseInt(job?.toplamArac) || 1);
+// Bu kayıt bir araç kopyası mı (2. araç, 3. araç ...)?
+export const isAracKopyasiMi = (job) => isAracNo(job) > 1;
+// Takvim rozeti: "2. Araç / 2" — tek araçlı işte null
+export const isAracEtiketi = (job) => {
+  const toplam = isToplamArac(job);
+  if (toplam <= 1) return null;
+  return `${isAracNo(job)}. Araç / ${toplam}`;
+};
+
+// Bu kayıt bir "devam günü" mü (2. gün, 3. gün ...)? Ana iş değilse true.
+export const isDevamGunuMu = (job, tumIsler = []) => {
+  if (!job) return false;
+  // Yeni kayıtlar: alan açıkça yazılıdır
+  if (job.gunNo !== undefined && job.gunNo !== null && job.gunNo !== '') return parseInt(job.gunNo) > 1;
+  // Eski kayıtlar: fiyatı 0 ve aynı teslim kodunda daha erken tarihli fiyatlı kayıt varsa
+  if (!job.deliveryCode || otomatikAsansorKaydiMi(job)) return false;
+  if ((parseFloat(job.price) || 0) > 0) return false;
+  return (tumIsler || []).some(o =>
+    o.id !== job.id && o.deliveryCode === job.deliveryCode && !otomatikAsansorKaydiMi(o) &&
+    (o.date || '') < (job.date || '') && (parseFloat(o.price) || 0) > 0);
+};
+
+// YARDIMCI KAYIT: ana kayıt olmayan her şey — devam günü VEYA araç kopyası.
+// Fiyat/kapora/ciro/cari hesaplarında bu kayıtlar "1. gün 1. araç"a bağlıdır.
+export const isYardimciKayitMi = (job, tumIsler = []) =>
+  isDevamGunuMu(job, tumIsler) || isAracKopyasiMi(job);
+
+// Grubun ANA işini (1. gün, 1. araç) döner; ana işin kendisi verilirse kendini döner
+export const isAnaIsiBul = (job, tumIsler = []) => {
+  if (!job) return null;
+  if (!isYardimciKayitMi(job, tumIsler)) return job;
+  if (job.anaIsId) { const a = (tumIsler || []).find(o => o.id === job.anaIsId); if (a) return a; }
+  const uyeler = _isGrupUyeleri(job, tumIsler);
+  // Ana iş: gunNo === 1 olan, yoksa fiyatı > 0 olan en erken kayıt
+  // Ana iş: 1. gün + 1. araç olan; yoksa fiyatı > 0 olan en erken kayıt
+  return uyeler.find(o => parseInt(o.gunNo) === 1 && isAracNo(o) === 1) || uyeler.find(o => (parseFloat(o.price) || 0) > 0) || uyeler[0] || job;
+};
+
+// GÖSTERİLECEK fiyat: devam gününde bile işin gerçek fiyatı (ciroya girmez!)
+export const isGrupFiyat = (job, tumIsler = []) => {
+  if (!job) return 0;
+  if (job.grupFiyat !== undefined && job.grupFiyat !== null && job.grupFiyat !== '') return parseFloat(job.grupFiyat) || 0;
+  const ana = isAnaIsiBul(job, tumIsler);
+  return parseFloat(ana?.price) || 0;
+};
+
+// GÖSTERİLECEK kapora: her zaman ana işin (1. gün) kaporası
+export const isGrupKapora = (job, tumIsler = []) => {
+  const ana = isAnaIsiBul(job, tumIsler);
+  return parseFloat(ana?.deposit) || 0;
+};
+
+// Takvim rozeti: "1. Gün / 2" — tek günlük işte null döner (rozet çıkmaz)
+export const isGunEtiketi = (job, tumIsler = []) => {
+  const toplam = isToplamGun(job, tumIsler);
+  if (toplam <= 1) return null;
+  return `${isGunNo(job, tumIsler)}. Gün / ${toplam}`;
+};
+
+// Listeyi "tek iş = tek satır" hâline getirir: devam günleri çıkarılır.
+// Müşteri profili, kapora seçimi gibi "işi bir bütün" gören ekranlar için.
+// DEĞİŞTİ: Devam günlerinin yanında ARAÇ KOPYALARI da çıkarılır (2 kamyon = 1 iş).
+export const anaIsleriFiltrele = (isler = []) =>
+  (isler || []).filter(j => !isYardimciKayitMi(j, isler));
