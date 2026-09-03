@@ -110,6 +110,97 @@ const usePersonelBorcTahsilatlari = () => {
 const personelKalanBorc = (hamBorc, tahsilEdilen) =>
   Math.max(0, (parseFloat(hamBorc) || 0) - (parseFloat(tahsilEdilen) || 0));
 
+// ==========================================================================
+// YENİ (kullanıcı talebi): DEFTERDEN YAPILAN EKSTRA PERSONEL ÖDEMELERİ
+// ==========================================================================
+// İHTİYAÇ: Personele avans dışında, elden/havaleyle EKSTRA para verilebiliyor
+// (örn. Ahmet Öztürk'e ₺49.000). Bu ödeme Defter > işlem olarak giriliyor ve
+// personele etiketleniyor, ama Mavi Yaka Maaş tablosundaki KALAN NAKİT /
+// KALAN BANKA sütunlarından ve alttaki "KALAN ÖDENECEK TOPLAM" satırından
+// düşmüyordu. Sonuç: ay sonunda ödenecek toplam, gerçekte ödenmesi gerekenden
+// fazla görünüyor ve eşleştirme yapılamıyordu.
+//
+// ÇÖZÜM: Deftere elle girilmiş, bir personele ETİKETLENMİŞ gider (çıkış)
+// kayıtları toplanır ve maaş tablosunda ilgili kanaldan düşülür:
+//   • odemeYontemi 'Nakit'          -> KALAN NAKİT'ten düşer
+//   • diğer yöntemler (Banka/Havale, Kredi Kartı, Çek, Diğer) -> KALAN BANKA
+//
+// ÇİFT SAYIM KORUMASI (kritik): Ödemeler ekranındaki OTOMATİK akışlar (maaş
+// ödemesi, toplu avans) deftere kayıt yazarken AYNI ZAMANDA muhasebeye de
+// işliyor (bankaOdenenTutar / nakitOdenenTutar / nakitAvans / resmiAvans).
+// O kayıtlar burada tekrar düşülürse tutar iki kez inerdi. Bu yüzden
+// otomatik akış izi taşıyan kayıtlar (odemeKalemId, alacakKalemId,
+// odemeMahsup, alacakMahsup, tahsilatKaydi veya bilinen `kaynak` değerleri)
+// HARİÇ TUTULUR. Yalnızca elle girilen ekstra ödemeler sayılır.
+// ==========================================================================
+// Otomatik akışların yazdığı `kaynak` değerleri — bunlar muhasebeye zaten işli
+const OTOMATIK_ODEME_KAYNAKLARI = ['Maaş Ödemesi (Oto)', 'Personel Avans', 'Alacak Tahsilatı'];
+
+// Bir defter kaydı "elle girilmiş ekstra personel ödemesi" mi?
+const ekstraPersonelOdemesiMi = (i) => {
+  if (!i || i.silindi) return false;
+  if (i.tip !== 'cikis') return false;              // Yalnızca personele ÇIKAN para
+  if (!i.ekipSefiId) return false;                  // Personele etiketlenmemişse ilgisiz
+  // Otomatik akış izleri -> muhasebeye zaten işlendi, tekrar düşülmez
+  if (i.odemeMahsup || i.alacakMahsup || i.tahsilatKaydi) return false;
+  if (i.odemeKalemId || i.alacakKalemId) return false;
+  if (i.kaynak && OTOMATIK_ODEME_KAYNAKLARI.includes(i.kaynak)) return false;
+  return true;
+};
+
+// Seçili maaş ayına ait ekstra ödemeleri kanal bazında canlı döner:
+// { [personId]: { nakit: 0, banka: 0, toplam: 0 } }
+const usePersonelEkstraOdemeler = (yil, ay) => {
+  const [ekstralar, setEkstralar] = useState({});
+  useEffect(() => {
+    const ayOneki = `${yil}-${String(ay).padStart(2, '0')}`; // 'YYYY-AA'
+    const durdur = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), snap => {
+      const harita = {};
+      snap.docs.forEach(d => {
+        const i = d.data();
+        if (!ekstraPersonelOdemesiMi(i)) return;
+        // Yalnızca görüntülenen maaş ayındaki ödemeler o ayın maaşından düşer
+        if (!String(i.tarih || '').startsWith(ayOneki)) return;
+        const pid = String(i.ekipSefiId);
+        const tutar = parseFloat(i.tutar) || 0;
+        if (!harita[pid]) harita[pid] = { nakit: 0, banka: 0, toplam: 0 };
+        // Nakit ödendiyse nakit kanalından, aksi halde banka kanalından düşer
+        if ((i.odemeYontemi || 'Nakit') === 'Nakit') harita[pid].nakit += tutar;
+        else harita[pid].banka += tutar;
+        harita[pid].toplam += tutar;
+      });
+      setEkstralar(harita);
+    }, err => console.warn('Ekstra personel ödemeleri okunamadı:', err));
+    return () => durdur();
+  }, [yil, ay]);
+  return ekstralar;
+};
+
+// --------------------------------------------------------------------------
+// ORTAK KANAL HESABI — Kalan Banka / Kalan Nakit için TEK doğruluk kaynağı
+// --------------------------------------------------------------------------
+// Aynı hesap 4 yerde kullanılıyordu (banka hücresi, nakit hücresi, alt toplam
+// satırı, CSV). Tek fonksiyona alındı ki dördü asla birbirinden ayrışmasın.
+// ESKİ HATA: Alt toplam satırı kısmi ödemeleri DÜŞMÜYORDU; yalnızca tik
+// atılmış (tam ödenmiş) kalemleri hariç tutuyordu. Bu yüzden kısmi ödeme
+// yapıldığında hücredeki rakam azalıyor ama alttaki toplam sabit kalıyordu.
+// --------------------------------------------------------------------------
+const maasKanalDurumu = ({ tamTutar = 0, kismiOdenen = 0, ekstraOdenen = 0, tikAtildi = false }) => {
+  const tam = parseFloat(tamTutar) || 0;
+  // Ödemeler ekranından biriken kısmi ödeme + deftere elle girilen ekstra ödeme
+  const odenen = (parseFloat(kismiOdenen) || 0) + (parseFloat(ekstraOdenen) || 0);
+  const kalanHam = tam - odenen;
+  const kalan = tikAtildi ? 0 : Math.max(0, kalanHam);
+  const kapandi = tikAtildi || kalan <= 0.01;
+  return {
+    kalan,                                        // Ekranda ve toplamda gösterilecek tutar
+    kapandi,                                      // "Ödendi" olarak kapandı mı
+    odenen,                                       // Bu kanaldan toplam ödenen
+    kismiVar: !kapandi && odenen > 0.01,          // Kısmi ödeme rozeti gösterilsin mi
+    asim: Math.max(0, -kalanHam),                 // Fazla ödeme (kalanı aştıysa)
+  };
+};
+
 // --------------------------------------------------------------------------
 // BORÇ HÜCRESİ (maaş tablosu) — ayrı bileşen olarak tutuldu ki tablo satırı
 // daha da şişmesin ve mantık tek yerden okunabilsin.
@@ -3131,15 +3222,20 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                       // ödemede biriken bankaOdenenTutar buradan da düşülür; böylece
                       // iki ekran birbirini tutar. Tik atılmışsa (tam ödeme) 0/Ödendi
                       // görünür. Bakiye 0 (veya altı) ise her zaman "Ödendi" sayılır.
+                      // DEĞİŞTİ: Deftere elle girilen EKSTRA personel ödemeleri de
+                      // (banka/havale kanalı) artık bu tutardan düşülür ve hesap
+                      // ortak maasKanalDurumu fonksiyonundan gelir.
                       // ============================================================
                       const bKismi = parseFloat(row.bankaOdenenTutar) || 0;
-                      const bGoster = Math.max(0, c.bankaKalan - bKismi);
-                      const bKapandi = row.bankaOdendi || bGoster <= 0.01;
-                      const bKismiVar = !bKapandi && bKismi > 0.01;
+                      const bEkstra = (ekstraOdemeler[person.id]?.banka) || 0;
+                      const bDurum = maasKanalDurumu({ tamTutar: c.bankaKalan, kismiOdenen: bKismi, ekstraOdenen: bEkstra, tikAtildi: row.bankaOdendi });
+                      const bGoster = bDurum.kalan;
+                      const bKapandi = bDurum.kapandi;
+                      const bKismiVar = bDurum.kismiVar;
                       return (
                       <td className={`border-r border-neutral-300 px-0.5 py-0.5 align-middle ${bKapandi ? 'bg-green-200' : bKismiVar ? 'bg-sky-100' : 'bg-yellow-100'}`}>
                       <div className="flex items-center justify-center gap-1">
-                        <span className={`font-black ${bKapandi ? 'text-green-800 line-through opacity-70' : bKismiVar ? 'text-sky-800' : 'text-yellow-900'}`} title={bKismiVar ? `Kısmi: ₺${paraFmt(bKismi)} ödendi, ₺${paraFmt(bGoster)} kaldı` : ''}>{bKapandi ? 'Ödendi' : bGoster.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
+                        <span className={`font-black ${bKapandi ? 'text-green-800 line-through opacity-70' : bKismiVar ? 'text-sky-800' : 'text-yellow-900'}`} title={bKismiVar ? `Kısmi: ₺${paraFmt(bDurum.odenen)} ödendi${bEkstra > 0.01 ? ` (₺${paraFmt(bEkstra)} defterden ekstra)` : ''}, ₺${paraFmt(bGoster)} kaldı` : ''}>{bKapandi ? 'Ödendi' : bGoster.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
                         <button type="button" onClick={() => handlePaymentToggle(person.id, 'bankaOdendi', 'bankaOdenenTutar', c.bankaKalan)} className={`p-0.5 shrink-0 rounded transition ${bKapandi ? 'text-green-700' : 'text-yellow-600/50 hover:text-yellow-800'}`} title={bKapandi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
                           <CheckCircle className="w-3 h-3" />
                         </button>
@@ -3148,15 +3244,17 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                       );
                     })()}
                     {g('finans') && (() => {
-                      // Nakit hücresi — banka ile aynı kısmi ödeme mantığı
+                      // Nakit hücresi — banka ile aynı kısmi ödeme + ekstra ödeme mantığı
                       const nKismi = parseFloat(row.nakitOdenenTutar) || 0;
-                      const nGoster = Math.max(0, c.kalanNakit - nKismi);
-                      const nKapandi = row.nakitOdendi || nGoster <= 0.01;
-                      const nKismiVar = !nKapandi && nKismi > 0.01;
+                      const nEkstra = (ekstraOdemeler[person.id]?.nakit) || 0;
+                      const nDurum = maasKanalDurumu({ tamTutar: c.kalanNakit, kismiOdenen: nKismi, ekstraOdenen: nEkstra, tikAtildi: row.nakitOdendi });
+                      const nGoster = nDurum.kalan;
+                      const nKapandi = nDurum.kapandi;
+                      const nKismiVar = nDurum.kismiVar;
                       return (
                       <td style={{ borderRight: '3px solid #16a34a' }} className={`px-0.5 py-0.5 align-middle ${nKapandi ? 'bg-green-300' : nKismiVar ? 'bg-sky-100' : 'bg-orange-100'}`}>
                       <div className="flex items-center justify-center gap-1">
-                        <span className={`font-black ${nKapandi ? 'text-green-900 line-through opacity-70' : nKismiVar ? 'text-sky-800' : 'text-orange-900'}`} title={nKismiVar ? `Kısmi: ₺${paraFmt(nKismi)} ödendi, ₺${paraFmt(nGoster)} kaldı` : ''}>{nKapandi ? 'Ödendi' : nGoster.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
+                        <span className={`font-black ${nKapandi ? 'text-green-900 line-through opacity-70' : nKismiVar ? 'text-sky-800' : 'text-orange-900'}`} title={nKismiVar ? `Kısmi: ₺${paraFmt(nDurum.odenen)} ödendi${nEkstra > 0.01 ? ` (₺${paraFmt(nEkstra)} defterden ekstra)` : ''}, ₺${paraFmt(nGoster)} kaldı` : ''}>{nKapandi ? 'Ödendi' : nGoster.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
                         <button type="button" onClick={() => handlePaymentToggle(person.id, 'nakitOdendi', 'nakitOdenenTutar', c.kalanNakit)} className={`p-0.5 shrink-0 rounded transition ${nKapandi ? 'text-green-800' : 'text-orange-600/50 hover:text-orange-800'}`} title={nKapandi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
                           <CheckCircle className="w-3 h-3" />
                         </button>
@@ -3210,6 +3308,10 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     // ekran tek rakam gösterir ve kısmi tahsilat anında yansır.
     const borcTahsilatlari = usePersonelBorcTahsilatlari();
 
+    // YENİ: Deftere elle girilen EKSTRA personel ödemeleri (avans/maaş akışı
+    // dışında verilen para) seçili maaş ayı için canlı okunur. Kalan Nakit /
+    // Kalan Banka hücreleri ve alttaki KALAN ÖDENECEK TOPLAM bu veriyi düşer.
+    const ekstraOdemeler = usePersonelEkstraOdemeler(currentYear, currentMonth);
     const docPrefix = collarType === 'Mavi Yaka' ? '' : 'beyaz_';
 
     const months = [
@@ -3594,6 +3696,16 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     // Böylece alttaki toplam satırı her zaman "KALAN ÖDENECEK" tutarı gösterir;
     // bir kaleme tik atıldığında ilgili sütunun toplamı anında azalır,
     // tik kaldırıldığında tutar toplama geri eklenir.
+    // ------------------------------------------------------------------------
+    // HATA DÜZELTMESİ + YENİ KURAL (kullanıcı talebi):
+    // ESKİ HALİ: Toplam yalnızca TAM ödenmiş (tik atılmış) kalemleri hariç
+    //   tutuyordu. Kısmi ödemeler hücrede düşüyor ama TOPLAMDA düşmüyordu;
+    //   iki rakam birbirini tutmuyordu.
+    // YENİ HALİ: Toplam, hücrelerle BİREBİR aynı maasKanalDurumu hesabını
+    //   kullanır. Böylece hem Ödemeler ekranından yapılan kısmi ödemeler hem
+    //   de deftere elle girilen EKSTRA personel ödemeleri toplamdan düşer ve
+    //   "toplam yapılacak ödeme" eşleştirmesi doğru çalışır.
+    // ------------------------------------------------------------------------
     let totalKalanBanka = 0;
     let totalKalanNakit = 0;
     let totalYol = 0;
@@ -3602,10 +3714,12 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     targetPersonnelList.forEach(person => {
         const c = calcRow(person.id);
         const row = maasData[person.id] || {}; // Ödeme tiki durumları bu satırda tutulur
+        const eks = ekstraOdemeler[person.id] || {}; // Defterden yapılan ekstra ödemeler
         if (!row.yemekOdendi) totalYemek += c.yemek;          // Yemek ödenmediyse toplama ekle
         if (!row.yolOdendi) totalYol += c.yol;                // Yol ödenmediyse toplama ekle
-        if (!row.bankaOdendi) totalKalanBanka += c.bankaKalan; // Banka ödenmediyse toplama ekle
-        if (!row.nakitOdendi) totalKalanNakit += c.kalanNakit; // Nakit ödenmediyse toplama ekle
+        // Kalan tutarlar hücrelerdeki ile aynı fonksiyondan gelir (tek kaynak)
+        totalKalanBanka += maasKanalDurumu({ tamTutar: c.bankaKalan, kismiOdenen: row.bankaOdenenTutar, ekstraOdenen: eks.banka || 0, tikAtildi: row.bankaOdendi }).kalan;
+        totalKalanNakit += maasKanalDurumu({ tamTutar: c.kalanNakit, kismiOdenen: row.nakitOdenenTutar, ekstraOdenen: eks.nakit || 0, tikAtildi: row.nakitOdendi }).kalan;
     });
 
     const handleDownloadCSV = () => {
@@ -3641,8 +3755,10 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
               // DEĞİŞTİ: CSV'de de ekrandaki (ve borçlu defterindeki) KALAN borç yazılır
               personelKalanBorc(yRow.borclanma, borcTahsilatlari[person.id] || 0).toFixed(2),
               c.icraKesintisi.toFixed(2),
-              c.bankaKalan.toFixed(2),
-              c.kalanNakit.toFixed(2)
+              // DEĞİŞTİ: CSV'de de ekrandaki KALAN tutarlar yazılır (kısmi +
+              // defterden yapılan ekstra ödemeler düşülmüş hâli)
+              maasKanalDurumu({ tamTutar: c.bankaKalan, kismiOdenen: (maasData[person.id] || {}).bankaOdenenTutar, ekstraOdenen: (ekstraOdemeler[person.id] || {}).banka || 0, tikAtildi: (maasData[person.id] || {}).bankaOdendi }).kalan.toFixed(2),
+              maasKanalDurumu({ tamTutar: c.kalanNakit, kismiOdenen: (maasData[person.id] || {}).nakitOdenenTutar, ekstraOdenen: (ekstraOdemeler[person.id] || {}).nakit || 0, tikAtildi: (maasData[person.id] || {}).nakitOdendi }).kalan.toFixed(2)
           ];
           csvContent += rowData.join(";") + "\n";
       });
