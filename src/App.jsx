@@ -13,7 +13,9 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
   // YENİ: İş kapandığında kalan bakiyeyi ilgili deftere gelir olarak yazar.
   defterGelirKaydet,
   // YENİ: Kaporayı banka defterine gelir olarak yazar.
-  defterKaporaKaydet, HasarCozumBelgeleri } from './shared.jsx';
+  defterKaporaKaydet, HasarCozumBelgeleri,
+  // YENİ: Çok günlü iş (1. gün / 2. gün) yardımcıları — düzenleme koruması için
+  isDevamGunuMu, isGunNo, isToplamGun, isYardimciKayitMi, isAracKopyasiMi, isAracNo, isToplamArac } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
 import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJobsView, CancelledJobsView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, IsMerkeziView, IsKilavuzuView, HatirlatmalarView } from './OperasyonIsler.jsx';
 import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './OperasyonPersonel.jsx';
@@ -4506,7 +4508,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       extraLoadingAddresses: [], selectedDepo: '', 
       toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '',
       extraUnloadingAddresses: [], wallMounting: [], esyaDurumu: [],
-      date: new Date().toISOString().split('T')[0], time: '09:00', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
+      date: new Date().toISOString().split('T')[0], time: '09:00', durationDays: '1', aracSayisi: '1', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: '' // YENİ: aracSayisi varsayılan 1
     });
 
     const isAddingCengizRef = React.useRef(false);
@@ -5939,13 +5941,43 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           // DÜZELTME: Düzenlemede orijinal kayıt zamanı (createdAt) korunur; ayrıca
           // "en son ne zaman / kim güncelledi" bilgisi de kayda işlenir.
           const mevcut = jobs.find(j => j.id === editingJobId);
+          // ==================================================================
+          // YENİ (çok günlü iş koruması):
+          //  a) DEVAM GÜNÜ düzenleniyorsa fiyat/kapora ₺0'da tutulur. Aksi
+          //     halde 2. güne de ₺64.000 yazılır ve ciro iki kez sayılırdı.
+          //  b) ANA İŞ (1. gün) düzenlenip fiyatı değişirse, kardeş günlerdeki
+          //     gösterim fiyatı (grupFiyat) da eşitlenir; takvimde tüm günler
+          //     yeni fiyatı gösterir.
+          // ==================================================================
+          // DEĞİŞTİ: Devam günü VEYA araç kopyası -> "yardımcı kayıt"; fiyat/kapora ana kayıtta kalır
+          const devamGunuMu = isYardimciKayitMi(mevcut, jobs);
+          if (devamGunuMu && ((parseFloat(jobData.price) || 0) > 0 || (parseFloat(jobData.deposit) || 0) > 0)) {
+            const neden = isAracKopyasiMi(mevcut) ? `${isAracNo(mevcut)}. aracıdır` : `${isGunNo(mevcut, jobs)}. günüdür`;
+            alert(`Bu kayıt işin ${neden}.\n\nFiyat ve kapora yalnızca ana kayda (1. gün, 1. araç) girilir; ciro bir kez sayılır. Bu kayda yazdığınız tutar kaydedilmeyecek.`);
+            jobData.price = '0';
+            jobData.deposit = '0';
+          }
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', editingJobId), {
             ...jobData,
+            // Ana işte gösterim fiyatı gerçek fiyatla aynı tutulur
+            ...(devamGunuMu ? {} : { grupFiyat: jobData.price || '0' }),
             createdAt: mevcut?.createdAt || jobData.createdAt || new Date().toISOString(),
             createdBy: mevcut?.createdBy || jobData.createdBy || (currentUser?.fullName || 'Sistem'),
             updatedAt: new Date().toISOString(),
             updatedBy: currentUser?.fullName || 'Sistem'
           });
+          // (b) Kardeş günlerin gösterim fiyatını eşitle — yalnızca ana iş düzenlendiyse
+          if (!devamGunuMu && mevcut && (isToplamGun(mevcut, jobs) > 1 || isToplamArac(mevcut) > 1)) {
+            const grupAnahtar = mevcut.isGrupId || mevcut.deliveryCode;
+            const kardesler = jobs.filter(o => o.id !== mevcut.id && (o.isGrupId || o.deliveryCode) === grupAnahtar && isYardimciKayitMi(o, jobs));
+            for (const k of kardesler) {
+              try {
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', k.id), {
+                  grupFiyat: jobData.price || '0', anaIsId: mevcut.id, isGrupId: grupAnahtar,
+                });
+              } catch (e) { console.warn('Kardeş gün fiyatı eşitlenemedi:', k.id, e); }
+            }
+          }
           addSystemLog('Kayıt Güncellendi', `${formData.customerName} müşterisine ait iş güncellendi.`);
 
           // YENİ: Kapora düzenlendiyse defter kaydı da güncellenir.
@@ -5963,13 +5995,41 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           const newDeliveryCode = Math.random().toString(36).substring(2, 8).toUpperCase();
           savedDeliveryCode = newDeliveryCode; // Panelde göstermek/mesajda kullanmak için sakla
           
+          // ==================================================================
+          // YENİ (kullanıcı talebi): ÇOK GÜNLÜ İŞ — GÜNLER BİRBİRİNE BAĞLANIR
+          // ------------------------------------------------------------------
+          // Her gün için AYRI doküman açma düzeni KORUNDU (ekip/araç her gün
+          // ayrı atanır, mesai her gün ayrı onaylanır). DEĞİŞEN: günler artık
+          // birbirini tanır. Her dokümana isGrupId / gunNo / toplamGun /
+          // grupFiyat / anaIsId yazılır; takvimde "1. Gün / 2" rozeti çıkar,
+          // müşteri profili ve kapora penceresi işi TEK iş olarak görür.
+          //
+          // CİRO TEK SAYILIR: 2. ve sonraki günlerin price/deposit alanı
+          // BİLEREK ₺0 bırakıldı. Ciro, cari ve borçlu hesapları price alanını
+          // topladığı için iş yalnızca 1. gün üzerinden bir kez sayılır. Ekranda
+          // fiyat göstermek için `grupFiyat` alanı kullanılır (bkz. shared.jsx
+          // isGrupFiyat). Kapora her zaman 1. güne yazılır.
+          // ==================================================================
+          // ==================================================================
+          // YENİ (kullanıcı talebi): ARAÇ SAYISI — AYNI GÜNE KOPYA KAYITLAR
+          // ------------------------------------------------------------------
+          // Formdaki "Araç Sayısı" (1-7) kadar, HER GÜN için kopya doküman açılır:
+          // aracNo 1, 2, ... Her kopya ayrı ekip alır, mesaisi ayrı kapatılır.
+          // Fiyat/kapora YALNIZCA 1. gün 1. araca yazılır -> ciro/cari/teslim
+          // kodu tek. Kopyalarda price/deposit ₺0, gösterim için grupFiyat.
+          // ==================================================================
+          const aracSayisi = Math.min(7, Math.max(1, parseInt(formData.aracSayisi || '1') || 1));
+          let anaIsId = null; // ANA kaydın (1. gün, 1. araç) kimliği — diğerlerine bağlanır
           for (let i = 0; i < duration; i++) {
             const jobDate = new Date(formData.date);
             jobDate.setDate(jobDate.getDate() + i);
             const dateStr = jobDate.toISOString().split('T')[0];
 
-            const currentPrice = i === 0 ? jobData.price : '0';
-            const currentDeposit = i === 0 ? jobData.deposit : '0';
+            for (let v = 1; v <= aracSayisi; v++) {
+            // Fiyat ve kapora yalnızca ANA kayıtta (1. gün + 1. araç)
+            const anaKayitMi = i === 0 && v === 1;
+            const currentPrice = anaKayitMi ? jobData.price : '0';
+            const currentDeposit = anaKayitMi ? jobData.deposit : '0';
             
             const primaryJob = { 
               ...jobData, 
@@ -5983,10 +6043,20 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               status: 'pending', 
               endJobDetails: null,
               deliveryCode: newDeliveryCode,
+              // --- Çok günlü iş bağlantı alanları (tek günlük işte de yazılır; toplamGun=1) ---
+              isGrupId: newDeliveryCode,          // Gruptaki tüm günlerde aynı
+              gunNo: i + 1,                       // 1, 2, 3 ...
+              toplamGun: duration,                // İş kaç gün sürüyor
+              grupFiyat: jobData.price || '0',    // Yalnızca GÖSTERİM için; ciroya girmez
+              aracNo: v,                          // YENİ: aynı güne giden kaçıncı araç (1, 2, ...)
+              toplamArac: aracSayisi,             // YENİ: o gün işe kaç araç gidiyor
+              anaIsId: anaIsId,                   // Ana kayıtta null (kendisi ana iştir)
               createdBy: currentUser?.fullName || 'Sistem',
               createdAt: new Date().toISOString()
             };
             const _yeniIsRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), primaryJob);
+            // ANA kayıt (1. gün, 1. araç) kaydedildikten sonra kimliği saklanır; diğerleri buna bağlanır
+            if (anaKayitMi) anaIsId = _yeniIsRef.id;
             // YENİ: Kapora girildiyse BANKA defterine gelir olarak yazılır.
             // Yalnızca kaporası olan ilk gün için çalışır: çok günlü kayıtlarda
             // 2. günden sonrası deposit '0' olarak açıldığı için kayıt atılmaz.
@@ -5999,11 +6069,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               });
             }
             
-            if(i === 0) {
-              addSystemLog('Yeni İş Kaydı', `${formData.customerName} için ${duration} günlük yeni bir ${recordType} kaydı oluşturuldu.`);
+            if (anaKayitMi) {
+              addSystemLog('Yeni İş Kaydı', `${formData.customerName} için ${duration} günlük${aracSayisi > 1 ? `, ${aracSayisi} araçlı` : ''} yeni bir ${recordType} kaydı oluşturuldu.`);
             }
 
-            if (recordType !== 'Asansör' && i === 0) {
+            // Otomatik asansör kaydı yalnızca ANA kayıt için açılır (araç kopyalarında tekrarlanmaz)
+            if (recordType !== 'Asansör' && anaKayitMi) {
               const createAsansor = async (sourceAddr, installType) => {
                 await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'), {
                   type: 'Asansör', customerType: formData.customerType, tcNo: formData.tcNo, taxNo: formData.taxNo, customerName: formData.customerName, customerPhone: formData.customerPhone, altPhone: formData.altPhone, date: dateStr, time: formData.time, price: '0', deposit: '0', deliveryCode: newDeliveryCode, contractDetails: 'Otomatik Oluşturulan Asansör Kurulum Kaydı', notes: '', team: 'Atanmadı', assignedPersonnelId: null, assignedPersonnelIds: [], teamNames: [], status: 'pending', endJobDetails: null, createdBy: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(), fromFloor: sourceAddr.floor, fromDistance: sourceAddr.distance, fromDistanceUnit: sourceAddr.distanceUnit, fromPacking: 'Kendi İşimiz', fromRoomCount: installType, fromProvince: sourceAddr.province || '', fromDistrict: sourceAddr.district || '', fromAddress: sourceAddr.address || '', toProvince: '', toDistrict: '', toAddress: '', toFloor: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', extraLoadingAddresses: [], extraUnloadingAddresses: []
@@ -6023,11 +6094,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 if (addr.transportMethod === 'Dış Cephe Asansörü') await createAsansor(addr, 'Boşaltma Kurulum');
               }
             }
+            } // araç döngüsü sonu
           }
         }
         
         setFormData({
-          isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', extraLoadingAddresses: [], selectedDepo: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', extraUnloadingAddresses: [], wallMounting: [], esyaDurumu: [], date: new Date().toISOString().split('T')[0], time: '09:00', durationDays: '1', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
+          isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', depoDirection: 'toDepo', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', extraLoadingAddresses: [], selectedDepo: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', extraUnloadingAddresses: [], wallMounting: [], esyaDurumu: [], date: new Date().toISOString().split('T')[0], time: '09:00', durationDays: '1', aracSayisi: '1', price: '', deposit: '', team: 'Atanmadı', contractDetails: '', notes: ''
         });
         // YENİ: Önceki takvim yönlendirmesi iptal edildi. Bunun yerine altta
         // "Müşteri Kaydınız Oluşturuldu" paneli açılır (WA bilgilendirme + sözleşme indirme seçenekli).
