@@ -201,6 +201,26 @@ const maasKanalDurumu = ({ tamTutar = 0, kismiOdenen = 0, ekstraOdenen = 0, tikA
   };
 };
 
+// ==========================================================================
+// YENİ (kullanıcı talebi): ÖDEMELER EKRANINDA ALFABETİK PERSONEL SIRASI
+// ==========================================================================
+// SORUN: Ödemeler ekranındaki personel listeleri (Mavi/Beyaz Yaka Kalan
+// Banka, Kalan Nakit, Nakit Avansı, Banka Avansı) hiç sıralanmıyordu;
+// kişiler Firestore'dan geldiği rastgele sırada diziliyordu. Bu yüzden aynı
+// kişiyi her listede farklı yerde aramak gerekiyordu.
+//
+// ÇÖZÜM: Tüm bu listeler artık TEK ortak sıralayıcıyı kullanır. Sıralama
+// Türkçe alfabeye göredir ('tr' locale) — yani Ç, Ğ, İ, Ö, Ş, Ü harfleri
+// doğru yere oturur (örn. "Çetin" C'den sonra, "İlyas" I'dan sonra gelir).
+// Maaş tablosundaki (Personel Muhasebe) sıralama da aynı karşılaştırmayı
+// kullanıyor; böylece iki ekran birebir aynı sırayı gösterir.
+// ==========================================================================
+const personelAdiKarsilastir = (a, b) =>
+  (a?.fullName || '').localeCompare(b?.fullName || '', 'tr');
+
+// Personel dizisini adına göre alfabetik sıralar (özgün diziyi bozmaz)
+const personelAdaGoreSirala = (liste) => [...(liste || [])].sort(personelAdiKarsilastir);
+
 // --------------------------------------------------------------------------
 // BORÇ HÜCRESİ (maaş tablosu) — ayrı bileşen olarak tutuldu ki tablo satırı
 // daha da şişmesin ve mantık tek yerden okunabilsin.
@@ -716,7 +736,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     filteredJobs.forEach(job => {
       const creator = job.createdBy || 'Sistem / Bilinmeyen';
       if (!reportData[creator]) {
-        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0, cancelledNakliyeCount: 0, cancelledDepoCount: 0, cancelledAsansorCount: 0 };
+        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0 };
       }
       const price = Number(job.price) || 0;
       reportData[creator].count += 1;
@@ -742,12 +762,12 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       if (!inPeriod) return;
       const creator = job.createdBy || 'Sistem / Bilinmeyen';
       if (!reportData[creator]) {
-        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0, cancelledNakliyeCount: 0, cancelledDepoCount: 0, cancelledAsansorCount: 0 };
+        reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0 };
       }
+      // DEĞİŞTİ: Yalnızca TOPLAM iptal adedi tutulur. Tür bazlı iptal sayaçları
+      // (Nakliye/Depo/Asansör) artık üretilmiyor; kullanıcı talebi gereği
+      // iptaller hiçbir tür kırılımına yansımaz, sadece adet olarak görünür.
       reportData[creator].cancelledCount = (reportData[creator].cancelledCount || 0) + 1;
-      if (job.type === 'Nakliye') reportData[creator].cancelledNakliyeCount = (reportData[creator].cancelledNakliyeCount || 0) + 1;
-      else if (job.type === 'Depo') reportData[creator].cancelledDepoCount = (reportData[creator].cancelledDepoCount || 0) + 1;
-      else if (job.type === 'Asansör') reportData[creator].cancelledAsansorCount = (reportData[creator].cancelledAsansorCount || 0) + 1;
     });
 
     const summaryList = Object.keys(reportData)
@@ -772,10 +792,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         return d.getFullYear() === selectedYear && (d.getMonth() + 1) === selectedMonth;
       }
     });
+    // DEĞİŞTİ: Yalnızca toplam iptal adedi hesaplanır; tür kırılımı gösterilmediği
+    // için ayrıca sayılmaz (iptaller Nakliye/Depo/Asansör sayılarını artırmaz).
     const totalCancelled = cancelledJobsInPeriod.length;
-    const cancelledNakliye = cancelledJobsInPeriod.filter(j => j.type === 'Nakliye').length;
-    const cancelledDepo = cancelledJobsInPeriod.filter(j => j.type === 'Depo').length;
-    const cancelledAsansor = cancelledJobsInPeriod.filter(j => j.type === 'Asansör').length;
 
     // YENİ: Hasarlı İşler (aynı dönem/tip filtresine göre, Nakliye/Depo ayrı gösterim için)
     const damagedJobsInPeriod = jobs.filter(job => {
@@ -906,13 +925,17 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
             <div className="flex items-start gap-4">
               <div className="p-4 bg-red-50 text-red-600 rounded-2xl shrink-0"><Ban className="w-8 h-8" /></div>
               <div className="flex-1">
-                <p className="text-neutral-500 text-sm font-bold mb-1">Dönem İçinde İptal Edilen İşler <span className="text-[10px] font-medium text-neutral-400">(ciro ve toplam iş sayısına dahil değildir)</span></p>
-                <p className="text-3xl font-black text-red-600 mb-2">{totalCancelled} <span className="text-sm font-medium text-neutral-400">Adet</span></p>
-                <div className="flex flex-wrap gap-2">
-                  <span className="text-xs font-bold bg-red-50 text-red-600 px-2.5 py-1 rounded-lg border border-red-100">{cancelledNakliye} Nakliye</span>
-                  <span className="text-xs font-bold bg-blue-50 text-blue-600 px-2.5 py-1 rounded-lg border border-blue-100">{cancelledDepo} Depo</span>
-                  <span className="text-xs font-bold bg-green-50 text-green-600 px-2.5 py-1 rounded-lg border border-green-100">{cancelledAsansor} Asansör</span>
-                </div>
+                {/* ============================================================
+                    DEĞİŞTİ (kullanıcı talebi): İPTALLER SADECE ADET OLARAK
+                    ------------------------------------------------------------
+                    İptal edilen iş "hiç kaydedilmemiş" gibi ele alınır: ciroya,
+                    toplam iş sayısına ve Nakliye/Depo/Asansör kırılımlarına
+                    girmez. Bu kartta da artık tür kırılımı (Nakliye/Depo/
+                    Asansör rozetleri) GÖSTERİLMEZ; yalnızca kaç iş iptal
+                    edildiği görünür.
+                    ============================================================ */}
+                <p className="text-neutral-500 text-sm font-bold mb-1">Dönem İçinde İptal Edilen İşler <span className="text-[10px] font-medium text-neutral-400">(ciroya ve toplam iş sayısına dahil değildir)</span></p>
+                <p className="text-3xl font-black text-red-600">{totalCancelled} <span className="text-sm font-medium text-neutral-400">Adet</span></p>
               </div>
             </div>
           </div>
@@ -976,17 +999,15 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                           <span className="bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{item.asansorCount} Asn.</span>
                         </div>
                       )}
-                      {/* YENİ: İptal edilen iş sayısı (ciro ve toplam işe dahil değildir) */}
+                      {/* DEĞİŞTİ (kullanıcı talebi): İptal yalnızca ADET olarak gösterilir.
+                          Tür kırılımı (Nak./Depo/Asn.) kaldırıldı; iptaller personelin
+                          getirdiği ciroya ve toplam iş sayısına hiçbir şekilde girmez. */}
                       {item.cancelledCount > 0 && (
                         <div className="flex flex-col items-center gap-1 mt-1.5">
-                          <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-lg border border-red-200 text-[10px] font-black flex items-center gap-1">
+                          <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded-lg border border-red-200 text-[10px] font-black flex items-center gap-1"
+                            title="İptal edilen işler ciroya ve toplam iş sayısına dahil değildir; yalnızca bilgi amaçlı gösterilir.">
                             <Ban className="w-3 h-3" /> {item.cancelledCount} İş İptali
                           </span>
-                          <div className="flex items-center justify-center gap-1.5 text-[9px] font-bold">
-                            <span className="bg-red-50 text-red-600 px-1.5 py-0.5 rounded border border-red-100">{item.cancelledNakliyeCount || 0} Nak.</span>
-                            <span className="bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{item.cancelledDepoCount || 0} Depo</span>
-                            <span className="bg-green-50 text-green-600 px-1.5 py-0.5 rounded border border-green-100">{item.cancelledAsansorCount || 0} Asn.</span>
-                          </div>
                         </div>
                       )}
                     </td>
@@ -4790,6 +4811,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [tahsilKaydediliyor, setTahsilKaydediliyor] = useState(false);
     const [alacakAyi, setAlacakAyi] = useState(bugunStr().slice(0, 7));
     const [mevcutBorclularAcik, setMevcutBorclularAcik] = useState(false);
+    // YENİ (kullanıcı talebi): "Tüm Zamanları Göster" — ay filtresi kapatılır,
+    // tüm bekleyen tahsilatlar tek listede (blok bazlı, en yeniden en eskiye) görünür
+    const [alacakTumZamanlar, setAlacakTumZamanlar] = useState(false);
     const [acikAlacakKalemi, setAcikAlacakKalemi] = useState(null);
     // Üç borçlu türü — rozet renkleriyle
     const ALACAK_TURLERI = [
@@ -4798,6 +4822,24 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       { id: 'kurum',    ad: 'Kurum',    rozet: 'bg-sky-600', yumusak: 'bg-sky-50 border-sky-200', yazi: 'text-sky-700' },
     ];
     const alacakTuru = (id) => ALACAK_TURLERI.find(t => t.id === id) || ALACAK_TURLERI[1];
+    // ========================================================================
+    // YENİ (kullanıcı talebi): ALACAK LİSTESİ BLOK SIRALAMASI
+    // ------------------------------------------------------------------------
+    // Bekleyen tahsilatlar artık karışık değil, üç blok hâlinde listelenir:
+    //   1) PERSONELLER  2) KURUMLAR  3) MÜŞTERİLER
+    // Her blok kendi içinde EN YENİDEN EN ESKİYE (vade tarihi) sıralanır; aynı
+    // vadede kalem adına göre alfabetik (Türkçe) dizilir ki sıra kararlı olsun.
+    // ========================================================================
+    const ALACAK_BLOK_SIRASI = ['personel', 'kurum', 'musteri'];
+    const alacakBlokIndeksi = (tur) => { const i = ALACAK_BLOK_SIRASI.indexOf(tur); return i === -1 ? ALACAK_BLOK_SIRASI.length : i; };
+    // Taksit satırlarını ({kalem, bilgi, t}) blok + tarih(yeniden eskiye) + ad ile sıralar
+    const alacakSatirlariniSirala = (satirlar) => [...satirlar].sort((a, b) => {
+      const blok = alacakBlokIndeksi(a.kalem.tur) - alacakBlokIndeksi(b.kalem.tur);
+      if (blok !== 0) return blok;                                         // Önce blok
+      const tarih = (b.t.tarih || '').localeCompare(a.t.tarih || '');      // Sonra en yeni vade üstte
+      if (tarih !== 0) return tarih;
+      return (a.kalem.ad || '').localeCompare(b.kalem.ad || '', 'tr');   // Eşitse ada göre
+    });
     // ========================================================================
     // YENİ (kullanıcı talebi): MOBİL HIZLI KAYIT ÇUBUĞU
     // ========================================================================
@@ -6885,8 +6927,12 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       ];
       return yakalar.flatMap(yaka => {
         const veriKaynagi = maasVeri[yaka.id];
-        const kisiler = (personnelList || [])
-          .filter(p => p.position !== 'Firma Sahibi' && yaka.filtre(p) && isPersonnelVisibleInMonth(p, yil, ay))
+        const kisiler = personelAdaGoreSirala(
+          (personnelList || [])
+            .filter(p => p.position !== 'Firma Sahibi' && yaka.filtre(p) && isPersonnelVisibleInMonth(p, yil, ay))
+          )
+          // YENİ: Liste Türkçe alfabetik sırada (Kalan Banka ve Kalan Nakit
+          // satırları aynı `kisiler` dizisinden türediği için ikisi de sıralı)
           .map(p => {
             const row = veriKaynagi.maas[p.id] || {};
             const hes = maasKisiHesabi(p, row, veriKaynagi.mesai[p.id], yil, ay);
@@ -6986,9 +7032,11 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const satirlar = [];
       yakalar.forEach(yaka => {
         kanallar.forEach(kanal => {
-          // Yalnızca bu yakanın o ay görünür personeli
-          const kisiler = (personnelList || [])
-            .filter(p => p.position !== 'Firma Sahibi' && isPersonnelVisibleInMonth(p, yil, ay) && YAKA_FILTRELERI[yaka.id](p))
+          // Yalnızca bu yakanın o ay görünür personeli — YENİ: alfabetik sırada
+          const kisiler = personelAdaGoreSirala(
+            (personnelList || [])
+              .filter(p => p.position !== 'Firma Sahibi' && isPersonnelVisibleInMonth(p, yil, ay) && YAKA_FILTRELERI[yaka.id](p))
+            )
             .map(p => {
               // Ödeme öncesi tutar bekleyen alandan; ödeme sonrası muhasebeye
               // kopyalandığı için gerçek alan da fallback olarak okunur.
@@ -8894,14 +8942,20 @@ silinmeTarihi: new Date().toISOString()`}</pre>
             const d = new Date(ky, km - 1 + yon, 1);
             setAlacakAyi(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
           };
-          // Seçili aya düşen taksitler (tüm borçlulardan), güne göre sıralı
+          // DEĞİŞTİ (kullanıcı talebi):
+          //  • "Tüm Zamanlar" açıksa ay filtresi uygulanmaz, tüm taksitler gelir.
+          //  • Sıralama artık eskiden-yeniye değil: BLOK (Personel > Kurum > Müşteri)
+          //    ve her blok içinde EN YENİDEN EN ESKİYE (alacakSatirlariniSirala).
           const ayinTaksitleri = [];
           ad2.detaylar.forEach(({ kalem, bilgi }) => {
-            bilgi.plan.forEach(t => { if (t.tarih.startsWith(alacakAyi)) ayinTaksitleri.push({ kalem, bilgi, t }); });
+            bilgi.plan.forEach(t => {
+              if (alacakTumZamanlar || t.tarih.startsWith(alacakAyi)) ayinTaksitleri.push({ kalem, bilgi, t });
+            });
           });
-          ayinTaksitleri.sort((a, b) => a.t.tarih.localeCompare(b.t.tarih));
-          const bekleyenler = ayinTaksitleri.filter(x => !x.t.odendi);
-          const tahsilEdilenler = ayinTaksitleri.filter(x => x.t.odendi);
+          const bekleyenler = alacakSatirlariniSirala(ayinTaksitleri.filter(x => !x.t.odendi));
+          const tahsilEdilenler = alacakSatirlariniSirala(ayinTaksitleri.filter(x => x.t.odendi));
+          // Başlık: ay adı ya da "Tüm Zamanlar"
+          const listeBaslik = alacakTumZamanlar ? 'Tüm Zamanlar' : ayBaslik;
           return (
             <div className="bg-white rounded-2xl border-2 border-rose-200 overflow-hidden">
               {/* BAŞLIK */}
@@ -8959,21 +9013,45 @@ silinmeTarihi: new Date().toISOString()`}</pre>
               {ad2.kalemSayisi > 0 && !mevcutBorclularAcik && (
                 <div className="p-4">
                   <div className="flex items-center justify-between gap-2 bg-neutral-900 text-white rounded-xl px-2 py-2 mb-2">
-                    <button type="button" onClick={() => ayDegistir(-1)} className="p-2 hover:bg-white/10 rounded-lg transition"><ChevronLeft className="w-5 h-5" /></button>
+                    {/* Ay okları "Tüm Zamanlar" açıkken pasifleşir (ay filtresi yok) */}
+                    <button type="button" onClick={() => ayDegistir(-1)} disabled={alacakTumZamanlar} className="p-2 hover:bg-white/10 rounded-lg transition disabled:opacity-30 disabled:hover:bg-transparent"><ChevronLeft className="w-5 h-5" /></button>
                     <div className="text-center">
-                      <div className="font-black text-base">{ayBaslik} Tahsilatları</div>
+                      <div className="font-black text-base">{listeBaslik} Tahsilatları</div>
                       <div className="text-[10px] font-bold text-white/60">{bekleyenler.length} bekleyen • {tahsilEdilenler.length} tahsil edildi</div>
                     </div>
-                    <button type="button" onClick={() => ayDegistir(1)} className="p-2 hover:bg-white/10 rounded-lg transition"><ChevronRight className="w-5 h-5" /></button>
+                    <div className="flex items-center gap-1">
+                      <button type="button" onClick={() => ayDegistir(1)} disabled={alacakTumZamanlar} className="p-2 hover:bg-white/10 rounded-lg transition disabled:opacity-30 disabled:hover:bg-transparent"><ChevronRight className="w-5 h-5" /></button>
+                      {/* YENİ: Tüm Zamanları Göster / Aylık Görünüm anahtarı */}
+                      <button type="button" onClick={() => setAlacakTumZamanlar(v => !v)}
+                        title={alacakTumZamanlar ? 'Aylık görünüme dön' : 'Ay filtresini kaldır, tüm bekleyen tahsilatları göster'}
+                        className={`px-2.5 py-1.5 text-[10px] font-black rounded-lg transition whitespace-nowrap ${alacakTumZamanlar ? 'bg-white text-neutral-900 hover:bg-neutral-200' : 'bg-white/15 text-white hover:bg-white/25'}`}>
+                        {alacakTumZamanlar ? 'Aylık' : 'Tüm Zamanlar'}
+                      </button>
+                    </div>
                   </div>
 
                   <div className="space-y-1.5">
                     {bekleyenler.length === 0 && (
-                      <div className="p-4 text-center text-xs font-bold text-neutral-400 bg-neutral-50 rounded-xl border border-dashed border-neutral-300">Bu ay bekleyen tahsilat yok.</div>
+                      <div className="p-4 text-center text-xs font-bold text-neutral-400 bg-neutral-50 rounded-xl border border-dashed border-neutral-300">{alacakTumZamanlar ? 'Bekleyen tahsilat yok.' : 'Bu ay bekleyen tahsilat yok.'}</div>
                     )}
-                    {bekleyenler.map(({ kalem, bilgi, t }) => {
+                    {bekleyenler.map(({ kalem, bilgi, t }, idx) => {
                       const tr2 = alacakTuru(kalem.tur);
+                      // YENİ: Blok başlığı — bu satırın türü öncekinden farklıysa bloğun ilk satırıdır
+                      const blokBasi = idx === 0 || bekleyenler[idx - 1].kalem.tur !== kalem.tur;
+                      const blokAdet = bekleyenler.filter(x => x.kalem.tur === kalem.tur).length;
+                      const blokToplam = bekleyenler.filter(x => x.kalem.tur === kalem.tur).reduce((sum, x) => sum + (x.t.kalan ?? x.t.tutar), 0);
                       return (
+                        <React.Fragment key={`${kalem.id}_${t.no}`}>
+                        {blokBasi && (
+                          <div className={`flex items-center justify-between px-2.5 pt-2 pb-1 ${idx > 0 ? 'mt-2 border-t border-dashed border-neutral-300' : ''}`}>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`w-2 h-2 rounded-full ${tr2.rozet}`}></span>
+                              <span className={`text-[10px] font-black uppercase tracking-wide ${tr2.yazi}`}>{tr2.ad}ler</span>
+                              <span className="text-[10px] font-bold text-neutral-400">({blokAdet})</span>
+                            </div>
+                            <span className={`text-[10px] font-black tabular-nums ${tr2.yazi}`}>₺{paraFmt(blokToplam)}</span>
+                          </div>
+                        )}
                         /* ================================================================
                            DÜZELTİLDİ (kullanıcı talebi): MOBİLDE İSİM VE TUTAR KESİLİYORDU
                            ----------------------------------------------------------------
@@ -8987,7 +9065,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                            sm ve üzeri ekranlarda (masaüstü) ESKİ TEK SATIR düzeni aynen
                            korunur; hiçbir veri veya davranış değişmedi, sadece yerleşim.
                            ================================================================ */
-                        <div key={`${kalem.id}_${t.no}`} className={`flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 rounded-xl border ${t.gecikmis ? 'border-red-300 bg-red-50' : tr2.yumusak}`}>
+                        <div className={`flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 rounded-xl border ${t.gecikmis ? 'border-red-300 bg-red-50' : tr2.yumusak}`}>
                           {/* 1. KAT (mobil) / SOL BLOK (masaüstü): rozet + isim + vade */}
                           <div className="flex items-start gap-2 min-w-0 flex-1">
                             <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${tr2.rozet}`}>{tr2.ad.toUpperCase()}</span>
@@ -9023,6 +9101,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                             </div>
                           </div>
                         </div>
+                        </React.Fragment>
                       );
                     })}
                   </div>
