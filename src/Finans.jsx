@@ -36,6 +36,26 @@ const saatMetniSayiyaCevir = (deger) => {
   return isNaN(sayi) ? 0 : sayi;
 };
 
+// ==========================================================================
+// HATA DÜZELTMESİ (kullanıcı bildirimi): Personel Muhasebe > Mavi Yaka Maaş
+// tablosunda Ağustos ayına geçince uygulama "paraFmt is not defined" hatası
+// ile çöküyordu.
+//
+// KÖK NEDEN: paraFmt fonksiyonu daha önce SADECE Defter bileşeninin İÇİNDE
+// yerel (local) olarak tanımlıydı. Maaş tablosundaki Banka/Nakit hücreleri
+// ise KISMİ ÖDEME olan bir personel bulunduğunda ipucu (tooltip) metnini
+// paraFmt ile biçimlendirmeye çalışıyordu. Eylül gibi kısmi ödeme kaydı
+// olmayan aylarda bu satır hiç çalışmadığı için hata görünmüyor; Ağustos'ta
+// kısmi ödeme kaydı olduğu için fonksiyon çağrılıyor ve tanımsız olduğundan
+// tüm sayfa çöküyordu.
+//
+// ÇÖZÜM: paraFmt dosya (modül) seviyesinde bir kez tanımlandı; artık bu
+// dosyadaki TÜM bileşenler güvenle kullanabilir. Defter bileşeni içindeki
+// mevcut yerel tanım aynı biçimde olduğu için davranış değişmez.
+// ==========================================================================
+// Sayıyı Türkçe para biçiminde yazar (örn. 12345.6 -> "12.345,60")
+const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
   // ==========================================================================
   // YENİ BİLEŞEN: MAAŞ RAPORU (Genel Ciro Raporu sayfasındaki 2. sekme)
   // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir; mevcut hiçbir koda
