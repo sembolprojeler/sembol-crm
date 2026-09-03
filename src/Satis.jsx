@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
-import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul } from './shared.jsx';
+import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul,
+  // YENİ: Çok günlü iş (1. gün / 2. gün) — profilde tek iş gösterimi ve kapora koruması
+  anaIsleriFiltrele, isToplamGun, isToplamArac } from './shared.jsx';
 
   // ============================================================================
   // YENİ: Ortak Bölüm Başlığı Bileşeni (SectionHeader)
@@ -22,6 +24,52 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
       </div>
       {/* Başlığın sağına eklenebilecek opsiyonel alan (örn. depo seçimi) */}
       {rightSlot}
+    </div>
+  );
+
+  // ============================================================================
+  // YENİ (kullanıcı talebi): KAPORA — HANGİ İŞE GİRİLECEĞİ SORULUR
+  // ============================================================================
+  // SORUN: "Kapora Ekle" butonu, müşterinin bekleyen işleri arasından TARİHİ EN
+  // YENİ olanı sessizce seçiyordu (bekleyenler[0]). Bir müşterinin açıkta iki
+  // işi varsa kapora yanlış işe yazılabiliyordu. Ekran görüntüsündeki durum
+  // tam olarak buydu: 04.09 tarihli ₺0 tutarlı iş seçilmiş, oysa kapora
+  // 03.09 tarihli ₺64.000'lik işe ait.
+  //
+  // ÇÖZÜM: Bekleyen iş SAYISI 1'den fazlaysa pencerede iş seçimi sorulur;
+  // seçim yapılmadan kaydetmeye izin verilmez. Seçilen işin fiyatı, mevcut
+  // kaporası ve KALAN BAKİYESİ ekranda gösterilir; %20 önerisi de seçilen işe
+  // göre yeniden hesaplanır. Tek bekleyen iş varsa eski davranış korunur
+  // (otomatik seçilir, kullanıcıya fazladan soru sorulmaz).
+  // ============================================================================
+  // Bir işin kalan bakiyesi = fiyat - mevcut kapora (sistemin diğer yerleriyle aynı)
+  const kaporaIsKalanBakiye = (is) =>
+    Math.max(0, (parseFloat(is?.price) || 0) - (parseFloat(is?.deposit) || 0));
+
+  // Seçim listesinde görünecek okunur etiket: tarih • tür • tutar • kalan
+  const kaporaIsEtiketi = (is) => {
+    const tarih = (is?.date || '').split('-').reverse().join('.');
+    const fiyat = (parseFloat(is?.price) || 0).toLocaleString('tr-TR');
+    const kalan = kaporaIsKalanBakiye(is).toLocaleString('tr-TR');
+    const kapora = parseFloat(is?.deposit) || 0;
+    return `${tarih} • ${is?.type || 'Nakliye'} • İş: ₺${fiyat}${kapora > 0 ? ` • Kapora: ₺${kapora.toLocaleString('tr-TR')}` : ''} • Kalan: ₺${kalan}`;
+  };
+
+  // Bekleyen işler arasından seçim yaptıran açılır liste (ayrı bileşen)
+  const KaporaIsSecici = ({ isler, seciliId, onSec }) => (
+    <div>
+      <label className="text-xs font-bold text-neutral-600 block mb-1">
+        Kapora hangi işe girilsin? * <span className="text-amber-700">({isler.length} açık iş)</span>
+      </label>
+      <select value={seciliId} onChange={e => onSec(e.target.value)}
+        className="w-full p-3 border-2 border-amber-400 rounded-xl bg-white outline-none focus:ring-2 focus:ring-amber-500 text-sm font-bold">
+        {/* Seçim yapılmadan kaydedilmesin diye boş seçenek başta durur */}
+        <option value="">— İş seçin —</option>
+        {isler.map(j => <option key={j.id} value={j.id}>{kaporaIsEtiketi(j)}</option>)}
+      </select>
+      <p className="text-[10px] font-bold text-amber-700 mt-1">
+        Bu müşterinin açıkta birden fazla işi var; kapora yalnızca seçtiğiniz işin bakiyesinden düşer.
+      </p>
     </div>
   );
 
@@ -181,9 +229,10 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                 </div>
               </div>
 
-              {/* SATIR 3: Tarih + Saat + İşlem Süresi — 3 eşit sütun, küçültülmüş ve hizalı, birbirine taşmaz */}
+              {/* SATIR 3: Tarih + Saat + İşlem Süresi + Araç Sayısı — 4 eşit sütun, hizalı, birbirine taşmaz */}
+              {/* DEĞİŞTİ (kullanıcı talebi): 3 sütun -> 4 sütun; "Araç Sayısı" eklendi (1-7, varsayılan 1). */}
               {/* min-w-0 + w-full taşmayı engeller, ortak küçük punto (text-sm) ile hepsi aynı görünür */}
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                 <div className="min-w-0">
                   <label className={`${labelCls} text-center`}>Tarih *</label>
                   <input required type="date" name="date" value={formData.date} onChange={handleInputChange} className="w-full min-w-0 h-11 box-border appearance-none px-1 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-[11px] md:text-sm text-center [text-align-last:center]" />
@@ -196,6 +245,22 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                   <label className={`${labelCls} text-center`}>İşlem Süresi *</label>
                   <select name="durationDays" value={formData.durationDays || '1'} onChange={handleInputChange} className="w-full min-w-0 h-11 box-border px-1 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-bold text-[11px] md:text-sm text-center [text-align-last:center]">
                     {[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>{d} Gün</option>)}
+                  </select>
+                </div>
+                {/* ==============================================================
+                    YENİ: ARAÇ SAYISI (kullanıcı talebi)
+                    Aynı gün işe kaç kamyon gidiyor? 2 seçilirse iş aynı güne
+                    "1. Araç" ve "2. Araç" olarak KOPYALANIR: bilgiler ve fiyat
+                    ekranda aynı görünür, her araca ayrı ekip atanır ve mesai
+                    ayrı kapatılır. Ciro, cari ve teslim kodu TEK'tir (kopyaların
+                    fiyatı veritabanında ₺0'dır, bkz. shared.jsx isAracKopyasiMi).
+                    ============================================================== */}
+                <div className="min-w-0">
+                  <label className={`${labelCls} text-center`}>Araç Sayısı *</label>
+                  <select name="aracSayisi" value={formData.aracSayisi || '1'} onChange={handleInputChange}
+                    title="Aynı gün işe giden kamyon sayısı. 2 ve üzeri seçilirse iş takvimde araç sayısı kadar görünür; ciro tek sayılır."
+                    className="w-full min-w-0 h-11 box-border px-1 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-bold text-[11px] md:text-sm text-center [text-align-last:center]">
+                    {[1, 2, 3, 4, 5, 6, 7].map(a => <option key={a} value={a}>{a} Araç</option>)}
                   </select>
                 </div>
               </div>
@@ -1115,6 +1180,17 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
       .sort((a, b) => new Date(b.date) - new Date(a.date));
 
     // ======================================================================
+    // YENİ (kullanıcı talebi): ÇOK GÜNLÜ İŞ PROFİLDE TEK KAYIT
+    // ----------------------------------------------------------------------
+    // 2 günlük bir nakliye takvimde 2 kart (1. Gün / 2. Gün) olarak durur ama
+    // müşteri açısından TEK iştir. Bu yüzden profildeki "Yaptığı İşler" ve
+    // kapora penceresi devam günlerini (2. gün, 3. gün ...) listelemez; ana
+    // işi "2 günlük" rozetiyle gösterir. Cari/ekstre hesapları zaten price
+    // alanından beslendiği ve devam gününde price ₺0 olduğu için değişmez.
+    // ======================================================================
+    const customerAnaIsler = anaIsleriFiltrele(customerJobs);
+
+    // ======================================================================
     // YENİ: SAHA DENETİMLERİ — Bu müşterinin işlerine şeflerin yaptığı denetimler.
     // İş kartında "Saha Denetim Raporunu Gör" butonuyla tüm detay (fotoğraf/video,
     // personel puanları, şef notları, kayıt doğruluğu) pencerede açılır.
@@ -1151,6 +1227,8 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
     const [showKaporaModal, setShowKaporaModal] = useState(false);
     const [kaporaForm, setKaporaForm] = useState({ tutar: '', defterId: '', jobId: '' });
     const [kaporaDefterler, setKaporaDefterler] = useState([]);
+    // YENİ: Kapora penceresinde seçilebilecek bekleyen işler (birden fazlaysa sorulur)
+    const [kaporaIsler, setKaporaIsler] = useState([]);
     const [kaporaKaydediliyor, setKaporaKaydediliyor] = useState(false);
     const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
     const [manualEntryForm, setManualEntryForm] = useState({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
@@ -1430,18 +1508,21 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                 <PlusCircle className="w-3.5 h-3.5" /> Tahsilat Ekle
               </button>
               {/* ==========================================================
-                  YENİ: KAPORA EKLE (kullanıcı talebi)
-                  Açılınca: müşterinin SON BEKLEYEN işi bulunur, %20'si
-                  önerilen tutar olarak dolu gelir (değiştirilebilir) ve
-                  defter listesi okunup BANKA hesabı önseçili gelir.
+                  KAPORA EKLE (kullanıcı talebi)
+                  DEĞİŞTİ: Eskiden müşterinin SON bekleyen işi sessizce
+                  seçiliyordu; açıkta iki iş varsa kapora yanlış işe
+                  yazılabiliyordu. Artık bekleyen işlerin TAMAMI pencereye
+                  taşınır: tek iş varsa otomatik seçilir (eski davranış),
+                  birden fazlaysa kullanıcıya hangi işe girileceği sorulur.
                   ========================================================== */}
               <button type="button" onClick={async () => {
-                // Son bekleyen iş: sonlandırılmamış + iptal edilmemiş, tarihi en yeni
-                const bekleyenler = customerJobs
+                // Bekleyen işler: sonlandırılmamış + iptal edilmemiş, tarihi en yeni önce
+                // YENİ: Çok günlü işin DEVAM günleri (₺0 tutarlı 2. gün vb.) listelenmez;
+                // kapora her zaman ANA işe (1. gün) yazılır ve onun bakiyesinden düşer.
+                const bekleyenler = anaIsleriFiltrele(customerJobs)
                   .filter(j => j.status !== 'completed' && j.status !== 'cancelled' && !j.endJobDetails)
                   .sort((a, b) => new Date(b.date) - new Date(a.date));
-                const sonIs = bekleyenler[0];
-                if (!sonIs) { alert('Bu müşterinin bekleyen (sonlandırılmamış) işi yok. Kapora, bekleyen bir işe bağlanır.'); return; }
+                if (bekleyenler.length === 0) { alert('Bu müşterinin bekleyen (sonlandırılmamış) işi yok. Kapora, bekleyen bir işe bağlanır.'); return; }
                 // Defterleri oku ve Banka hesabını önseç (NAKLİYE öncelikli)
                 let defterListesi = [];
                 try {
@@ -1452,9 +1533,13 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                 } catch (e) { console.error('Defterler okunamadı:', e); }
                 setKaporaDefterler(defterListesi);
                 const bankaDefteri = odemeIcinDefterBul(defterListesi, 'Banka');
-                // %20 öneri: işin fiyatının beşte biri, tam sayıya yuvarlanır
-                const oneri = Math.round((parseFloat(sonIs.price) || 0) * 0.20);
-                setKaporaForm({ tutar: oneri ? String(oneri) : '', defterId: bankaDefteri?.id || defterListesi[0]?.id || '', jobId: sonIs.id });
+                // Seçilebilecek işler pencereye taşınır
+                setKaporaIsler(bekleyenler);
+                // TEK iş varsa otomatik seç; BİRDEN FAZLAYSA seçim kullanıcıya bırakılır
+                const tekIs = bekleyenler.length === 1 ? bekleyenler[0] : null;
+                // %20 öneri: yalnızca iş belliyse hesaplanır (tam sayıya yuvarlanır)
+                const oneri = tekIs ? Math.round((parseFloat(tekIs.price) || 0) * 0.20) : 0;
+                setKaporaForm({ tutar: oneri ? String(oneri) : '', defterId: bankaDefteri?.id || defterListesi[0]?.id || '', jobId: tekIs?.id || '' });
                 setShowKaporaModal(true);
               }} className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
                 <Wallet className="w-3.5 h-3.5" /> Kapora Ekle
@@ -1510,10 +1595,14 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
           <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2 justify-between">
             <span className="flex items-center gap-2"><ClipboardList className="w-6 h-6 text-blue-500" /> Yaptığı İşler</span>
-            <span className="text-xs bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200 font-bold text-neutral-500">{customerJobs.length} kayıt</span>
+            {/* DEĞİŞTİ: Sayı, devam günleri hariç ANA iş sayısıdır (2 günlük iş = 1 kayıt) */}
+            <span className="text-xs bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200 font-bold text-neutral-500">{customerAnaIsler.length} kayıt</span>
           </h3>
           <div className="space-y-3">
-            {customerJobs.map(job => {
+            {customerAnaIsler.map(job => {
+              // YENİ: Çok günlü işte kaç gün sürdüğü / kaç araç gittiği rozet olarak gösterilir
+              const toplamGun = isToplamGun(job, customerJobs);
+              const toplamArac = isToplamArac(job);
               // YENİ: Cutoff tarihinden önceki işler cari amaçlı "Tamamlandı" olarak gösterilir
               const forcedComplete = isBeforeCariCutoff(job.date);
               const statusLabel = forcedComplete
@@ -1535,6 +1624,18 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                       <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase tracking-wider shrink-0 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
                         {job.type || 'Nakliye'}
                       </span>
+                      {/* YENİ: Çok günlü iş rozeti — takvimde her gün ayrı kart olsa da burada tek iş */}
+                      {toplamGun > 1 && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-black text-white uppercase tracking-wider shrink-0 bg-purple-600" title={`Bu iş ${toplamGun} gün sürüyor. Takvimde her gün ayrı kart olarak görünür; ciro ve kapora tek iş üzerinden sayılır.`}>
+                          {toplamGun} Günlük
+                        </span>
+                      )}
+                      {/* YENİ: Aynı güne birden fazla araç gidiyorsa rozet */}
+                      {toplamArac > 1 && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-black text-white uppercase tracking-wider shrink-0 bg-sky-600" title={`Bu işe ${toplamArac} araç gidiyor. Takvimde araç sayısı kadar kart görünür; ciro ve teslim kodu tektir.`}>
+                          {toplamArac} Araç
+                        </span>
+                      )}
                       <div>
                         <span className="font-bold text-black text-sm block">{job.date} {job.time ? `- ${job.time}` : ''}</span>
                         <span className={`text-[10px] font-bold uppercase ${forcedComplete || job.status === 'completed' ? 'text-black' : job.status === 'in-progress' ? 'text-red-600' : job.status === 'cancelled' ? 'text-neutral-400' : 'text-neutral-500'}`}>
@@ -1982,15 +2083,34 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                  tanır ve asla üzerine yazmaz (shared.tsx koruması).
             ================================================================== */}
         {showKaporaModal && (() => {
-          const kaporaIsi = customerJobs.find(j => j.id === kaporaForm.jobId);
-          if (!kaporaIsi) return null;
-          const fiyat = parseFloat(kaporaIsi.price) || 0;
-          const mevcutKapora = parseFloat(kaporaIsi.deposit) || 0;
+          // DEĞİŞTİ: Artık iş seçilmemiş de olabilir (birden fazla açık iş varsa
+          // kullanıcı seçene kadar boş kalır). Bu yüzden 'return null' KALDIRILDI;
+          // aksi halde pencere hiç açılmazdı.
+          const kaporaIsi = customerJobs.find(j => j.id === kaporaForm.jobId) || null;
+          const cokIsVar = kaporaIsler.length > 1;
+          const fiyat = parseFloat(kaporaIsi?.price) || 0;
+          const mevcutKapora = parseFloat(kaporaIsi?.deposit) || 0;
           const girilen = parseFloat(kaporaForm.tutar) || 0;
           const seciliDefter = kaporaDefterler.find(d => d.id === kaporaForm.defterId);
+          // Seçilen işin kalan bakiyesi — kapora bu tutardan düşer
+          const kalanBakiye = Math.max(0, fiyat - mevcutKapora);
+          // İş seçilince %20 önerisi o işe göre yeniden hesaplanır
+          const isSec = (jobId) => {
+            const secilen = kaporaIsler.find(j => j.id === jobId);
+            const oneri = secilen ? Math.round((parseFloat(secilen.price) || 0) * 0.20) : 0;
+            setKaporaForm(f => ({ ...f, jobId, tutar: oneri ? String(oneri) : '' }));
+          };
           const kaydet = async () => {
+            // YENİ: İş seçilmeden kapora kaydedilemez
+            if (!kaporaIsi) { alert('Kaporanın hangi işe girileceğini seçin.'); return; }
             if (!(girilen > 0)) { alert('Geçerli bir kapora tutarı girin.'); return; }
             if (!kaporaForm.defterId) { alert('Kaporanın yazılacağı hesabı seçin.'); return; }
+            // YENİ: Kapora, seçilen işin kalan bakiyesini aşamaz (yanlış iş
+            // seçimini de erken yakalar). Fiyatı 0 olan işlerde kontrol atlanır.
+            if (fiyat > 0 && girilen > kalanBakiye + 0.01) {
+              alert(`Girilen kapora, seçilen işin kalan bakiyesinden fazla.\n\nİş tutarı: ₺${fiyat.toLocaleString('tr-TR')}\nMevcut kapora: ₺${mevcutKapora.toLocaleString('tr-TR')}\nKalan bakiye: ₺${kalanBakiye.toLocaleString('tr-TR')}\n\nDoğru işi seçtiğinizden emin olun.`);
+              return;
+            }
             setKaporaKaydediliyor(true);
             try {
               const bugun = new Date().toISOString().split('T')[0];
@@ -2035,12 +2155,25 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                   <button onClick={() => setShowKaporaModal(false)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
                 </div>
                 <div className="space-y-3">
-                  {/* Bağlanan iş özeti */}
-                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-800">
-                    <div className="font-black text-sm">{kaporaIsi.customerName}</div>
-                    <div>{kaporaIsi.date?.split('-').reverse().join('.')} • {kaporaIsi.type || 'Nakliye'} • İş tutarı: ₺{fiyat.toLocaleString('tr-TR')}</div>
-                    {mevcutKapora > 0 && <div>Mevcut kapora: ₺{mevcutKapora.toLocaleString('tr-TR')}</div>}
-                  </div>
+                  {/* YENİ: Açıkta birden fazla iş varsa hangi işe girileceği sorulur */}
+                  {cokIsVar && (
+                    <KaporaIsSecici isler={kaporaIsler} seciliId={kaporaForm.jobId} onSec={isSec} />
+                  )}
+
+                  {/* Bağlanan iş özeti — yalnızca iş seçiliyse gösterilir */}
+                  {kaporaIsi ? (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-800">
+                      <div className="font-black text-sm">{kaporaIsi.customerName}</div>
+                      <div>{kaporaIsi.date?.split('-').reverse().join('.')} • {kaporaIsi.type || 'Nakliye'} • İş tutarı: ₺{fiyat.toLocaleString('tr-TR')}</div>
+                      {mevcutKapora > 0 && <div>Mevcut kapora: ₺{mevcutKapora.toLocaleString('tr-TR')}</div>}
+                      {/* YENİ: Kaporanın düşeceği bakiye net görünsün */}
+                      <div>Bu işin kalan bakiyesi: <b>₺{kalanBakiye.toLocaleString('tr-TR')}</b></div>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-xl text-xs font-bold text-neutral-500 text-center">
+                      Devam etmek için yukarıdan bir iş seçin.
+                    </div>
+                  )}
 
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Kapora Tutarı (₺) *</label>
                     <input type="number" inputMode="decimal" value={kaporaForm.tutar}
@@ -2057,16 +2190,19 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
                     <p className="text-[10px] font-bold text-neutral-400 mt-1">Banka hesabı önseçili gelir; nakit veya kredi kartı alındıysa değiştirin.</p>
                   </div>
 
-                  {girilen > 0 && (
+                  {girilen > 0 && kaporaIsi && (
                     <div className="text-[11px] font-bold text-neutral-600 bg-neutral-50 rounded-lg p-2.5 border border-neutral-200 space-y-0.5">
                       <div>Deftere yazılacak: <b className="text-emerald-700">+₺{girilen.toLocaleString('tr-TR')}</b> (bugün, {seciliDefter?.ad || '-'})</div>
+                      {/* Hangi işe işlendiği burada da tekrar yazılır — yanlış iş seçimi göze çarpsın */}
+                      <div>İşlenecek iş: <b>{kaporaIsi.date?.split('-').reverse().join('.')} • ₺{fiyat.toLocaleString('tr-TR')}</b></div>
                       <div>İşin yeni kaporası: <b>₺{(mevcutKapora + girilen).toLocaleString('tr-TR')}</b> • Kalan bakiye: <b>₺{Math.max(0, fiyat - mevcutKapora - girilen).toLocaleString('tr-TR')}</b></div>
                     </div>
                   )}
 
-                  <button onClick={kaydet} disabled={kaporaKaydediliyor}
+                  {/* Buton, iş seçilmeden ve tutar girilmeden pasif kalır */}
+                  <button onClick={kaydet} disabled={kaporaKaydediliyor || !kaporaIsi || !(girilen > 0)}
                     className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition">
-                    {kaporaKaydediliyor ? 'Kaydediliyor...' : 'Kaporayı Kaydet'}
+                    {kaporaKaydediliyor ? 'Kaydediliyor...' : !kaporaIsi ? 'Önce iş seçin' : 'Kaporayı Kaydet'}
                   </button>
                 </div>
               </div>
@@ -2474,6 +2610,7 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
           deposit: kapora ? String(parseFloat(String(kapora).replace(',', '.')) || '') : '',
           notes: [ekInfo, canceledNote].filter(Boolean).join(' | ').trim(),
           durationDays: '1',
+          aracSayisi: '1', // YENİ: havuzdan aktarımda varsayılan tek araç
           isSpecial: false,
           deliveryCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
           // Ekip bilgisi BOŞ bırakılır
