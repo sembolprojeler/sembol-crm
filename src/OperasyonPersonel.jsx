@@ -8051,6 +8051,53 @@ export const gelmemeKarari = (baglam) => {
 
 const GEC_GELIS_TOLERANS_DK = 15;
 
+// ============================================================================
+// YENİ (kullanıcı kuralı): EKİP BAZLI ERKEN BAŞLANGIÇ MESAİSİ
+// ============================================================================
+// SAHA GERÇEĞİ: Bazı ekipler sabah 07:00'dan önce yola çıkıyor. QR girişi
+// 07:00'da açıldığı için bu personel kod okutamıyor ve erken başladığı saatler
+// mesaiye hiç yansımıyordu.
+//
+// KULLANICI KURALLARI:
+//  1) QR girişi artık 05:00'da açılır (aşağıdaki QR_GIRIS_ACILIS_DK).
+//  2) Erken başlangıç mesaisi EKİP BAZLIDIR ve YALNIZCA şu şartta işler:
+//     o gün o ekipte giriş basmış HERKESİN girişi 07:00'dan ÖNCE olmalıdır.
+//     Ekipten tek bir kişinin erken okutması kimseye mesai kazandırmaz.
+//  3) Şart sağlanırsa her personele KENDİ giriş saatine göre mesai eklenir:
+//     program başlangıcı (genelde 08:00) ile kendi girişi arasındaki fark.
+//       06:00 giriş -> 2 saat | 05:30 giriş -> 2,5 saat | 05:00 giriş -> 3 saat
+//  4) Üst sınır 3 saattir (05:00'dan önce elle girilmiş bir kayıt istismara
+//     yol açmasın diye).
+//
+// NOT: Giriş basmamış (devamsız) ekip arkadaşı bu kontrolü BOZMAZ; o kişi
+// zaten o gün ekiple yola çıkmamıştır, kararı ayrı motor verir.
+// ============================================================================
+export const QR_GIRIS_ACILIS_DK = 5 * 60;          // 05:00 — QR giriş butonunun açıldığı saat
+export const ERKEN_BASLANGIC_SINIR_DK = 7 * 60;    // 07:00 — bu saatten önceki girişler "erken"dir
+export const ERKEN_BASLANGIC_MAX_SAAT = 3;         // Eklenebilecek en fazla erken mesai (05:00 -> 3 sa)
+
+// Ekipte giriş basan HERKES 07:00'dan önce mi basmış? (kural 2)
+export const ekipErkenBaslangicVarMi = (personeller, qrKayitlari) => {
+  const girisDakikalari = (personeller || [])
+    .map(p => (qrKayitlari || []).find(k => String(k.personnelId) === String(p?.id) && k.type === 'giris'))
+    .filter(Boolean)                       // Giriş basmayanlar hesaba katılmaz
+    .map(k => mesaiDk(k.timeStr));
+  if (girisDakikalari.length === 0) return false;   // Hiç giriş yoksa erken başlangıç yok
+  // every: TEK bir kişi 07:00 veya sonrasında bastıysa ekip erken çıkmamıştır
+  return girisDakikalari.every(dk => dk < ERKEN_BASLANGIC_SINIR_DK);
+};
+
+// Kişinin KENDİ giriş saatine göre eklenecek erken mesai saatini döner (kural 3)
+export const erkenBaslangicSaati = (girisSaat, programBaslangic) => {
+  if (!girisSaat) return 0;
+  const girisDk = mesaiDk(girisSaat);
+  if (girisDk >= ERKEN_BASLANGIC_SINIR_DK) return 0; // 07:00 sonrası girişe erken mesai yok
+  const fark = mesaiDk(programBaslangic || '08:00') - girisDk;
+  if (fark <= 0) return 0;
+  // Fazla mesaide olduğu gibi yarım saate AŞAĞI yuvarlanır (06:20 -> 1,5 sa)
+  return Math.min(ERKEN_BASLANGIC_MAX_SAAT, asagiYarim(fark));
+};
+
 
 
 // Bir personelin o güne ait programını (izin günü / erken çıkış dahil) çözer
@@ -8084,6 +8131,11 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr, atanan
   // ertesi güne taştığı belli olsun diye yanına (+1 gün) notu eklenir.
   const ekipCikisSaati = ekipCikisDk === null ? null
     : `${String(Math.floor((ekipCikisDk % 1440) / 60)).padStart(2, '0')}:${String(ekipCikisDk % 60).padStart(2, '0')}${ekipCikisDk >= 1440 ? ' (+1 gün)' : ''}`;
+
+  // 1-B) YENİ: EKİP ERKEN BAŞLANGIÇ ŞARTI (kullanıcı kuralı)
+  // Bu ekipte giriş basan HERKES 07:00'dan önce bastıysa true olur. Yalnızca
+  // bu durumda aşağıda kişilere kendi giriş saatine göre erken mesai eklenir.
+  const ekipErkenBasladi = ekipErkenBaslangicVarMi(personeller, qrKayitlari);
 
   personeller.forEach(person => {
     const giris = kayitBul(person.id, 'giris');
@@ -8166,6 +8218,18 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr, atanan
     const eksikGiris = gecDk > GEC_GELIS_TOLERANS_DK ? yukariYarim(gecDk) : 0;
 
     // ======================================================================
+    // YENİ KURAL: ERKEN BAŞLANGIÇ MESAİSİ (ekip şartına bağlı)
+    // ----------------------------------------------------------------------
+    // ekipErkenBasladi yalnızca ekipte giriş basan HERKES 07:00'dan önce
+    // bastıysa true'dur. Şart sağlanmazsa (ör. ekipten biri 07:30'da bastı)
+    // erken basan kişiye de mesai EKLENMEZ — eski davranış aynen korunur:
+    // erken gelen ödüllendirilmez, 08:00'de basmış sayılır.
+    // Şart sağlanırsa kişinin KENDİ girişine göre saat eklenir:
+    //   06:00 -> 2 sa | 05:30 -> 2,5 sa | 05:00 -> 3 sa
+    // ======================================================================
+    const erkenFazla = ekipErkenBasladi ? erkenBaslangicSaati(giris.timeStr, prog.baslangic) : 0;
+
+    // ======================================================================
     // KURAL 2: ÇIKIŞ
     //  • FAZLA MESAİ ekip bazlıdır: ekip birlikte döndüğü için EN ERKEN çıkış
     //    esas alınır ve yarım saate AŞAĞI yuvarlanır.
@@ -8201,12 +8265,17 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr, atanan
       }
     }
 
-    // KURAL 4: NET = fazla - eksik
-    const net = fazlaCikis - (eksikGiris + eksikCikis);
+    // KURAL 4: NET = (fazla çıkış + erken başlangıç) - eksikler
+    // DEĞİŞTİ: Erken başlangıç mesaisi de artık fazla tarafa eklenir.
+    // ÖNEMLİ: Erken başlangıç, çıkış 17:00-18:00 "normal pencere"sinde olsa
+    // bile geçerlidir; kişi sabah gerçekten 2-3 saat fazla çalışmıştır.
+    const net = fazlaCikis + erkenFazla - (eksikGiris + eksikCikis);
     const detay = [];
     if (eksikGiris > 0) detay.push(`geç geliş ${eksikGiris} sa`);
     if (eksikCikis > 0) detay.push(`erken çıkış ${eksikCikis} sa`);
     if (fazlaCikis > 0) detay.push(`fazla çalışma ${fazlaCikis} sa`);
+    // Erken başlangıç açıklamada ayrıca gösterilir ki yönetici nedenini görsün
+    if (erkenFazla > 0) detay.push(`erken başlangıç ${String(erkenFazla).replace('.', ',')} sa (ekip ${giris.timeStr} yola çıktı)`);
 
     if (net >= 0.5) {
       sonuc[person.id] = { status: 'FM', hours: String(net).replace('.', ','), girisSaati: giris.timeStr, cikisSaati: cikis?.timeStr || null, ekipCikis: ekipCikisSaati, aciklama: `Ekip çıkışı ${ekipCikisSaati} (program ${prog.bitis})${detay.length ? ' • ' + detay.join(', ') : ''} → net ${net} saat fazla mesai.`, kaynak: giris.method };
@@ -8373,15 +8442,18 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
 
   // ==========================================================================
   // SAAT KURALLARI
-  //  • GİRİŞ: her gün 07:00'dan itibaren basılabilir. Öncesinde buton pasiftir.
-  //    (Erken basılsa bile mesai hesabı 08:00 kabul eder; bu kural öneri
-  //     motorunda zaten uygulanıyor, burada yalnızca butonun açılma saati var.)
+  //  • GİRİŞ: DEĞİŞTİ (kullanıcı kuralı) — artık her gün 05:00'dan itibaren
+  //    basılabilir. Sebep: bazı ekipler 07:00'dan önce yola çıktığı için QR
+  //    okutamıyordu. Erken basan personelin saatleri, ekip şartı sağlanırsa
+  //    öneri motorunda ERKEN BAŞLANGIÇ MESAİSİ olarak eklenir
+  //    (bkz. ekipErkenBaslangicVarMi / erkenBaslangicSaati).
   //  • ÇIKIŞ: iş gece yarısını aşabildiği için, DÜN giriş yapıp çıkış
   //    yapmamış personel ertesi gün 07:00'a kadar çıkışını basabilir.
-  //    Bu durumda kayıt DÜNÜN tarihine yazılır, bugüne değil.
+  //    Bu durumda kayıt DÜNÜN tarihine yazılır, bugüne değil. (DEĞİŞMEDİ —
+  //    gece eşiği 07:00 olarak korunur, yalnızca giriş saati öne alındı.)
   // ==========================================================================
   const suAnDk = (() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); })();
-  const GUN_BASLANGIC_DK = 7 * 60; // 07:00
+  const GUN_BASLANGIC_DK = 7 * 60; // 07:00 — yalnızca "dünün çıkışı" eşiği için kullanılır
 
   const dunkuKayitlar = kayitlarim.filter(k => k.dateStr === mesaiDunStr());
   const dunGiris = dunkuKayitlar.find(k => k.type === 'giris') || null;
@@ -8389,7 +8461,7 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
   // Dün girmiş, çıkmamış ve saat henüz 07:00 olmamışsa "dünün çıkışı" bekleniyor
   const bekleyenDunCikisi = !!dunGiris && !dunCikis && suAnDk < GUN_BASLANGIC_DK;
 
-  const girisAcik = suAnDk >= GUN_BASLANGIC_DK; // 07:00 öncesi giriş yapılamaz
+  const girisAcik = suAnDk >= QR_GIRIS_ACILIS_DK; // 05:00 öncesi giriş yapılamaz
   // NOT: "BUGÜN / DÜN ÖZETİ" kartları kullanıcı isteğiyle kaldırıldığı için
   // dunku / gunDurumu / bugunOzet / dunOzet hesapları temizlendi.
 
@@ -8440,13 +8512,13 @@ export const MesaiOnayButonlari = ({ currentUser }) => {
           <button
             onClick={() => setModalTipi('giris')}
             disabled={!girisAcik}
-            title={!girisAcik ? 'Mesai girişi her gün 07:00’dan itibaren yapılabilir' : ''}
+            title={!girisAcik ? 'Mesai girişi her gün 05:00’dan itibaren yapılabilir' : ''}
             className={`py-4 px-4 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition ${girisAcik
               ? 'text-white bg-gradient-to-r from-green-500 via-green-600 to-emerald-700 shadow-lg shadow-green-600/40 hover:scale-[1.02] active:scale-95'
               : 'text-neutral-400 bg-neutral-100 border-2 border-dashed border-neutral-300 cursor-not-allowed'}`}
           >
             <span className={`w-9 h-9 rounded-full flex items-center justify-center ${girisAcik ? 'bg-white/20' : 'bg-neutral-200'}`}><LogIn className="w-5 h-5" /></span>
-            {girisAcik ? 'MESAİ GİRİŞ ONAYLA' : 'GİRİŞ 07:00’DA AÇILIR'}
+            {girisAcik ? 'MESAİ GİRİŞ ONAYLA' : 'GİRİŞ 05:00’DA AÇILIR'}
             <QrCode className="w-5 h-5 opacity-80" />
           </button>
         )}
