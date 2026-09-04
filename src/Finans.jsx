@@ -8,7 +8,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
   // YENİ: Avans ve maaş ödemelerini ilgili deftere gider olarak yazar.
   defterPersonelGiderKaydet,
   // YENİ: Hazır etiket ağacı ve kullanıcı etiketlerinin Firestore referansı.
-  VARSAYILAN_ETIKET_GRUPLARI, tumVarsayilanEtiketler, defterEtiketleriRef, GARANTI_MAAS_SABLON_BASE64, odemeIcinDefterBul } from './shared.jsx';
+  VARSAYILAN_ETIKET_GRUPLARI, tumVarsayilanEtiketler, defterEtiketleriRef, GARANTI_MAAS_SABLON_BASE64, odemeIcinDefterBul,
+  // YENİ: Masaüstü ve mobilde AYNI kategori listesi (yönetilebilir)
+  TEMEL_KATEGORILER, kategoriSecenekleriOlustur, temelKategoriMi } from './shared.jsx';
 
 // ==========================================================================
 // HATA DÜZELTMESİ (kullanıcı bildirimi): "İş Onaylama Tahtası"ndan onaylanan
@@ -4943,7 +4945,10 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [acikOdemeKalemi, setAcikOdemeKalemi] = useState(null);
 
     // YENİ: Kredi kalemi formu ve akordiyon durumu (Ödemeler ile aynı desen)
-    const bosKrediKalemi = { id: '', ad: '', bankaAdi: '', anaPara: '', toplamGeriOdeme: '', taksitSayisi: '', aylikTaksit: '', ilkTaksitTarihi: bugunStr(), not: '' };
+    // YENİ (kullanıcı talebi): hedefDefterId — ana paranın yatırılacağı hesap.
+    // Kredi kullandırıldığında para gerçekten bir hesaba girer; bu alan hangi
+    // hesaba girdiğini tutar (bkz. krediKalemiKaydet içindeki kullandırım kaydı).
+    const bosKrediKalemi = { id: '', ad: '', bankaAdi: '', anaPara: '', toplamGeriOdeme: '', taksitSayisi: '', aylikTaksit: '', ilkTaksitTarihi: bugunStr(), not: '', hedefDefterId: '' };
     const [krediKalemForm, setKrediKalemForm] = useState(null); // null = kapalı
     const [acikKrediKalemi, setAcikKrediKalemi] = useState(null);
     // YENİ (kullanıcı talebi): Kredi sayfası Ödemeler sayfasıyla aynı mantığa
@@ -4970,6 +4975,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     // Kullanıcının sonradan eklediği etiketler — Firestore'da saklanır ki
     // bir sonraki işlemde hazır olarak gelsin.
     const [ozelEtiketler, setOzelEtiketler] = useState([]);
+    // YENİ: Kullanıcının listeden KALDIRDIĞI temel kategoriler (aynı dokümanda `gizli`)
+    const [gizliKategoriler, setGizliKategoriler] = useState([]);
     // Hangi grupların açık olduğu. Varsayılanda hepsi kapalı; 88 etiket
     // birden açılırsa pencere okunamaz hale gelir.
     const [acikGruplar, setAcikGruplar] = useState({});
@@ -4979,48 +4986,84 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     useEffect(() => {
       const unsub = onSnapshot(defterEtiketleriRef(db, appId), snap => {
         setOzelEtiketler(snap.exists() ? (snap.data().liste || []) : []);
+        // YENİ: gizlenen temel kategoriler de aynı dokümandan okunur
+        setGizliKategoriler(snap.exists() ? (snap.data().gizli || []) : []);
       }, err => console.error('Etiketler okunamadı:', err));
       return () => unsub();
     }, []);
 
-    // Yeni etiket ekle. Hazır listede veya özel listede varsa tekrar eklenmez.
-    const etiketEkle = async () => {
+    // ========================================================================
+    // YENİ (kullanıcı talebi): TEK ORTAK KATEGORİ LİSTESİ
+    // ------------------------------------------------------------------------
+    // Masaüstü seçici de mobil seçici de ARTIK BU LİSTEYİ kullanır. Liste
+    // shared.jsx'teki TEMEL_KATEGORILER'den başlar; kullanıcının eklediği
+    // kategoriler sona eklenir, kaldırdıkları çıkarılır. Böylece iki cihaz
+    // asla farklı seçenek göstermez.
+    // ========================================================================
+    const kategoriSecenekleri = kategoriSecenekleriOlustur(ozelEtiketler, gizliKategoriler);
+
+    // Yeni kategori ekle. Listede zaten varsa tekrar eklenmez, doğrudan seçilir.
+    // `mod` = 'form' (masaüstü işlem formu) | 'hizli' (mobil hızlı kayıt çubuğu)
+    const etiketEkle = async (mod = 'form') => {
       const ad = yeniEtiket.trim().toLocaleUpperCase('tr-TR');
       if (!ad) return;
-      const mevcut = [...tumVarsayilanEtiketler(), ...ozelEtiketler].map(e => e.toLocaleUpperCase('tr-TR'));
-      if (mevcut.includes(ad)) {
-        // Zaten varsa yeni kayıt açmak yerine doğrudan seçili hale getirilir.
-        // Zaten varsa doğrudan kategori olarak seçilir.
-        setIslemForm({ ...islemForm, kategori: ad });
+      // Seçim yapıldıktan sonra doğru alana yazıp doğru pencereyi kapatır
+      const secVeKapat = (deger) => {
+        if (mod === 'hizli') { setHizliKategori(deger); setHizliKatSecici(false); }
+        else { setIslemForm({ ...islemForm, kategori: deger }); setShowEtiketSecici(false); }
         setYeniEtiket('');
-        setShowEtiketSecici(false);
+      };
+      // DEĞİŞTİ: Karşılaştırma artık kısa ortak liste üzerinden yapılır
+      const mevcut = kategoriSecenekleri.map(e => e.toLocaleUpperCase('tr-TR'));
+      if (mevcut.includes(ad)) { secVeKapat(ad); return; }
+      // Daha önce KALDIRILMIŞ bir temel kategori yeniden eklenmek istenirse
+      // yeni kayıt açmak yerine gizlilikten çıkarılır (kopya oluşmaz).
+      if (temelKategoriMi(ad)) {
+        const yeniGizli = gizliKategoriler.filter(e => e.toLocaleUpperCase('tr-TR') !== ad);
+        try {
+          await setDoc(defterEtiketleriRef(db, appId), { gizli: yeniGizli, updatedAt: new Date().toISOString() }, { merge: true });
+          addSystemLog?.('Kategori Geri Eklendi', `"${ad}" temel kategorisi listeye geri alındı.`);
+          secVeKapat(TEMEL_KATEGORILER.find(k => k.toLocaleUpperCase('tr-TR') === ad) || ad);
+        } catch (e) { console.error('Kategori geri eklenemedi:', e); alert('Kategori eklenemedi.'); }
         return;
       }
       const yeniListe = [...ozelEtiketler, ad].sort((a, b) => a.localeCompare(b, 'tr-TR'));
       try {
         await setDoc(defterEtiketleriRef(db, appId), { liste: yeniListe, updatedAt: new Date().toISOString() }, { merge: true });
-        // Eklenen kategori otomatik seçilir ve pencere kapanır.
-        setIslemForm({ ...islemForm, kategori: ad });
-        setYeniEtiket('');
-        setShowEtiketSecici(false);
-        addSystemLog?.('Defter Etiketi Eklendi', `"${ad}" etiketi hazır etiketler listesine eklendi.`);
+        addSystemLog?.('Kategori Eklendi', `"${ad}" kategorisi listeye eklendi (masaüstü ve mobilde görünür).`);
+        secVeKapat(ad);
       } catch (e) {
-        console.error('Etiket eklenemedi:', e);
-        alert('Etiket eklenemedi. Bağlantınızı kontrol edin.');
+        console.error('Kategori eklenemedi:', e);
+        alert('Kategori eklenemedi. Bağlantınızı kontrol edin.');
       }
     };
 
-    // Özel etiketi listeden kaldır. SADECE kullanıcı eklediği etiketler
-    // silinebilir; hazır etiketler kodda tanımlı olduğu için silinmez.
-    // Geçmiş işlemlerdeki etiket metni SİLİNMEZ — o kayıtlar bozulmaz.
+    // ========================================================================
+    // DEĞİŞTİ (kullanıcı talebi): HER KATEGORİ KALDIRILABİLİR
+    // ------------------------------------------------------------------------
+    // Eskiden yalnızca kullanıcının eklediği etiketler silinebiliyordu.
+    // Artık temel kategoriler de listeden çıkarılabilir: kod değişmediği için
+    // silinmezler, `gizli` dizisine eklenerek seçicide GÖSTERİLMEZ olurlar.
+    // İstenirse aynı adı yeniden ekleyerek geri alınabilir (bkz. etiketEkle).
+    // Geçmiş işlemlerdeki kategori metni HER İKİ durumda da SİLİNMEZ.
+    // ========================================================================
     const etiketKaldir = async (ad) => {
-      if (!window.confirm(`"${ad}" etiketi hazır listeden kaldırılacak. Geçmiş işlemlerdeki etiket yazısı silinmez. Emin misiniz?`)) return;
-      const yeniListe = ozelEtiketler.filter(e => e !== ad);
+      const temel = temelKategoriMi(ad);
+      if (!window.confirm(`"${ad}" kategorisi seçim listesinden kaldırılacak.\n\nGeçmiş işlemlerdeki kategori yazısı silinmez.${temel ? ' Aynı adı tekrar ekleyerek geri alabilirsiniz.' : ''}\n\nEmin misiniz?`)) return;
       try {
-        await setDoc(defterEtiketleriRef(db, appId), { liste: yeniListe, updatedAt: new Date().toISOString() }, { merge: true });
-        addSystemLog?.('Defter Etiketi Kaldırıldı', `"${ad}" etiketi hazır listeden çıkarıldı.`);
+        if (temel) {
+          // Temel kategori: gizlenenler listesine eklenir
+          const yeniGizli = [...gizliKategoriler.filter(e => e.toLocaleUpperCase('tr-TR') !== ad.toLocaleUpperCase('tr-TR')), ad];
+          await setDoc(defterEtiketleriRef(db, appId), { gizli: yeniGizli, updatedAt: new Date().toISOString() }, { merge: true });
+        } else {
+          // Kullanıcı kategorisi: listeden tamamen çıkarılır
+          const yeniListe = ozelEtiketler.filter(e => e !== ad);
+          await setDoc(defterEtiketleriRef(db, appId), { liste: yeniListe, updatedAt: new Date().toISOString() }, { merge: true });
+        }
+        addSystemLog?.('Kategori Kaldırıldı', `"${ad}" kategorisi seçim listesinden çıkarıldı.`);
       } catch (e) {
-        console.error('Etiket kaldırılamadı:', e);
+        console.error('Kategori kaldırılamadı:', e);
+        alert('Kategori kaldırılamadı.');
       }
     };
 
@@ -6195,6 +6238,28 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       if (!(parseFloat(f.toplamGeriOdeme) > 0)) { alert('"Toplam Geri Ödeme" girilmelidir.'); return; }
       if (!(parseInt(f.taksitSayisi) > 0)) { alert('"Taksit Sayısı" girilmelidir.'); return; }
       if (!f.ilkTaksitTarihi) { alert('"İlk Taksit Tarihi" seçilmelidir.'); return; }
+      // ====================================================================
+      // YENİ (kullanıcı talebi): ANA PARA SEÇİLEN HESABA AKTARILIR
+      // --------------------------------------------------------------------
+      // Kredi çekildiğinde ana para gerçekten bir banka/kasa hesabına girer.
+      // Bu yüzden yeni kredi eklenirken hedef hesap seçilir ve o hesaba GİRİŞ
+      // kaydı yazılır (bakiye artar).
+      //
+      // CİRO ŞİŞMEZ: Bu para bir HASILAT değil, bir BORÇLANMADIR. Kayıt
+      // krediMahsup:true bayrağıyla yazılır; ciroyaGirer bu bayraklı kayıtları
+      // dışlar (kredi taksit ödemesindeki mahsup bacağıyla birebir aynı
+      // mantık). Böylece hesap bakiyesi doğru artar ama gelir/ciro raporları
+      // etkilenmez.
+      //
+      // Kullandırım kaydı YALNIZCA YENİ kredi eklenirken bir kez yazılır;
+      // krediyi sonradan düzenlemek ikinci bir para girişi oluşturmaz.
+      // ====================================================================
+      const yeniKrediMi = !(f.id && f.id !== '__eski__');
+      const anaParaTutar = parseFloat(f.anaPara) || 0;
+      if (yeniKrediMi && anaParaTutar > 0 && !f.hedefDefterId) {
+        alert('Ana para girdiniz. Bu tutarın hangi hesaba yatırıldığını "Ana Para Hangi Hesaba Yatırıldı?" alanından seçin.');
+        return;
+      }
       const mevcut = krediKalemleri(seciliDefter).filter(k => k.id !== '__eski__');
       const kalem = { ...f, id: f.id && f.id !== '__eski__' ? f.id : `kr_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
       const yeniListe = (f.id && f.id !== '__eski__')
@@ -6202,6 +6267,28 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         : [...mevcut, kalem];
       try {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), { krediler: yeniListe });
+        // Ana para hedef hesaba GİRİŞ olarak işlenir (ciroya girmez)
+        if (yeniKrediMi && anaParaTutar > 0 && f.hedefDefterId) {
+          const hedef = defterler.find(d => d.id === f.hedefDefterId);
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+            defterId: f.hedefDefterId,
+            tip: 'giris',
+            tutar: anaParaTutar,
+            tarih: f.ilkTaksitTarihi ? bugunStr() : bugunStr(), // Kullandırım bugün işlenir
+            kategori: 'Kredi Kullandırımı',
+            etiketler: [],
+            odemeYontemi: defterdenOdemeYontemi(f.hedefDefterId),
+            krediMahsup: true,               // KRİTİK: ciro toplamlarından dışlanır
+            kaynak: 'Kredi Kullandırımı',
+            krediDefterId: seciliDefter.id,
+            krediKalemId: kalem.id,
+            aciklama: `${kalem.ad || kalem.bankaAdi || 'Kredi'} — ana para kullandırımı (borçlanma, ciroya girmez)`,
+            createdAt: new Date().toISOString(),
+            by: currentUser?.fullName || 'Sistem',
+          });
+          addSystemLog?.('Kredi Kullandırımı',
+            `${kalem.ad || kalem.bankaAdi}: ₺${paraFmt(anaParaTutar)} ana para "${hedef?.ad || '-'}" hesabına aktarıldı. Ciroya dahil edilmedi (borçlanma).`);
+        }
         addSystemLog?.('Kredi Kalemi', `${seciliDefter.ad}: "${kalem.ad || kalem.bankaAdi}" ${f.id ? 'güncellendi' : 'eklendi'} (₺${paraFmt(kalem.toplamGeriOdeme)}).`);
         setKrediKalemForm(null);
       } catch (e) { console.error(e); alert('Kredi kaydedilemedi.'); }
@@ -9803,66 +9890,73 @@ silinmeTarihi: new Date().toISOString()`}</pre>
             ==================================================================
             Ana kategoriler ve altındaki alt kategoriler tek tek tıklanabilir.
             Masaüstündeki kategori seçici mantığıyla aynı; alttan açılır kart. */}
-        {hizliKatSecici && (() => {
-          const KATEGORI_AGACI = [
-            { ad: 'Nakliyat', alt: ['Şehir İçi', 'Şehirlerarası', 'Depo-Depo'] },
-            { ad: 'Depoevim', alt: ['Eşya Depolama', 'Ambalaj', 'Kurulum'] },
-            { ad: 'Araç', alt: ['Yakıt', 'Bakım', 'Lastik', 'Sigorta', 'HGS/OGS', 'Ceza'] },
-            { ad: 'Personel', alt: ['Maaş', 'Avans', 'Prim', 'SGK'] },
-            { ad: 'Kira', alt: [] },
-            // YENİ (kullanıcı talebi): BORÇ kategorisi — bir yerden borç
-            // ALINDIĞINDA ya da birine borç VERİLDİĞİNDE kullanılır. Bu
-            // kategoriyle işlenen tutar genel ciro/gelir-gider hesabını
-            // ETKİLEMEZ (kredi taksit ödemeleri gibi ayrı tutulur).
-            { ad: 'Borç', alt: ['Borç Alınan', 'Borç Verilen'] },
-            { ad: 'Fatura', alt: ['Elektrik', 'Su', 'Doğalgaz', 'İnternet', 'Telefon'] },
-            { ad: 'Malzeme', alt: [] },
-            { ad: 'Yemek', alt: [] },
-            { ad: 'Vergi', alt: ['KDV', 'Stopaj', 'Gelir Vergisi'] },
-            { ad: 'Tahsilat', alt: [] },
-            { ad: 'Diğer', alt: [] },
-          ];
-          return (
-            <div className="fixed inset-0 bg-black/70 z-[9999] flex items-end sm:items-center justify-center p-0 sm:p-4"
-              onClick={() => setHizliKatSecici(false)}>
-              <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[85vh] flex flex-col overflow-hidden"
-                onClick={e => e.stopPropagation()}>
-                <div className="flex items-center justify-between p-4 border-b border-neutral-200 shrink-0">
-                  <h3 className="font-black text-black flex items-center gap-2"><Tag className="w-5 h-5 text-emerald-600" /> Kategori Seç</h3>
-                  <button onClick={() => setHizliKatSecici(false)} className="p-1.5 rounded-lg hover:bg-neutral-100 transition"><X className="w-5 h-5" /></button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
-                  {/* DEĞİŞTİ (kullanıcı talebi): ALT KATEGORİLER KALDIRILDI.
-                      Bu seçici de artık tek katmanlı — yalnızca ana kategoriler
-                      listelenir ve doğrudan seçilir. Alt kategori seçimi
-                      "ANA • ALT" biçiminde birleşik bir değer kaydediyordu;
-                      artık yalnızca ana kategori adı kaydedilir. Eskiden bu
-                      biçimde kaydedilmiş işlemler bozulmaz, aynen görünür. */}
-                  {KATEGORI_AGACI.map(kat => {
-                    const anaSecili = hizliKategori === kat.ad;
-                    return (
-                      <div key={kat.ad} className={`rounded-xl border-2 overflow-hidden ${anaSecili ? 'border-emerald-500' : 'border-neutral-200'}`}>
-                        <button type="button"
-                          onClick={() => { setHizliKategori(kat.ad); setHizliKatSecici(false); }}
-                          className={`w-full flex items-center justify-between gap-2 px-3.5 py-3 text-left transition ${anaSecili ? 'bg-emerald-50' : 'bg-neutral-50 hover:bg-neutral-100'}`}>
-                          <span className="font-black text-sm text-neutral-800 flex items-center gap-2">
-                            {anaSecili && <CheckCircle className="w-4 h-4 text-emerald-600" />}{kat.ad}
-                          </span>
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="p-3 border-t border-neutral-200 shrink-0">
-                  <button type="button" onClick={() => { setHizliKategori('Diğer'); setHizliKatSecici(false); }}
-                    className="w-full py-3 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl transition">
-                    Kategorisiz (Diğer) kapat
+        {hizliKatSecici && (
+          <div className="fixed inset-0 bg-black/70 z-[9999] flex items-end sm:items-center justify-center p-0 sm:p-4"
+            onClick={() => setHizliKatSecici(false)}>
+            <div className="bg-white w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl max-h-[85vh] flex flex-col overflow-hidden"
+              onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 border-b border-neutral-200 shrink-0">
+                <h3 className="font-black text-black flex items-center gap-2"><Tag className="w-5 h-5 text-emerald-600" /> Kategori Seç</h3>
+                <button onClick={() => setHizliKatSecici(false)} className="p-1.5 rounded-lg hover:bg-neutral-100 transition"><X className="w-5 h-5" /></button>
+              </div>
+              {/* ==============================================================
+                  DEĞİŞTİ (kullanıcı talebi): MOBİL DE ORTAK LİSTEYİ KULLANIR
+                  --------------------------------------------------------------
+                  Buradaki kod içine gömülü KATEGORI_AGACI dizisi KALDIRILDI.
+                  Artık masaüstüyle birebir aynı kaynak kullanılıyor
+                  (kategoriSecenekleri -> shared.jsx TEMEL_KATEGORILER + kullanıcı
+                  kategorileri - kaldırılanlar). Mobilde de kategori eklenip
+                  kaldırılabilir; değişiklik iki cihazda anında görünür.
+                  ============================================================== */}
+              <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
+                {kategoriSecenekleri.length === 0 && (
+                  <p className="text-center text-sm font-bold text-neutral-400 py-8">
+                    Listede kategori kalmadı. Aşağıdan yeni kategori ekleyebilirsiniz.
+                  </p>
+                )}
+                {kategoriSecenekleri.map(kat => {
+                  const anaSecili = hizliKategori === kat;
+                  const kullaniciKategorisi = !temelKategoriMi(kat);
+                  return (
+                    <div key={kat} className={`rounded-xl border-2 overflow-hidden flex items-stretch ${anaSecili ? 'border-emerald-500' : kullaniciKategorisi ? 'border-emerald-200' : 'border-neutral-200'}`}>
+                      {/* Sol: kategoriyi seçer */}
+                      <button type="button"
+                        onClick={() => { setHizliKategori(kat); setHizliKatSecici(false); }}
+                        className={`flex-1 flex items-center justify-between gap-2 px-3.5 py-3 text-left transition ${anaSecili ? 'bg-emerald-50' : 'bg-neutral-50 hover:bg-neutral-100'}`}>
+                        <span className="font-black text-sm text-neutral-800 flex items-center gap-2">
+                          {anaSecili && <CheckCircle className="w-4 h-4 text-emerald-600" />}{kat}
+                        </span>
+                      </button>
+                      {/* Sağ: kategoriyi seçim listesinden kaldırır */}
+                      <button type="button" onClick={() => etiketKaldir(kat)}
+                        title={`"${kat}" kategorisini listeden kaldır`}
+                        className="px-3.5 flex items-center justify-center text-neutral-300 hover:text-red-600 hover:bg-red-50 transition border-l border-neutral-200">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              {/* YENİ: Mobilde de yeni kategori eklenebilir */}
+              <div className="p-3 border-t border-neutral-200 shrink-0 space-y-2">
+                <div className="flex gap-2">
+                  <input value={yeniEtiket} onChange={e => setYeniEtiket(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); etiketEkle('hizli'); } }}
+                    placeholder="Yeni kategori adı..."
+                    className="flex-1 min-w-0 p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 uppercase" />
+                  <button type="button" onClick={() => etiketEkle('hizli')} disabled={!yeniEtiket.trim()}
+                    className="shrink-0 px-4 rounded-xl bg-neutral-900 text-white text-xs font-black hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1.5">
+                    <Plus className="w-4 h-4" /> Ekle
                   </button>
                 </div>
+                <button type="button" onClick={() => { setHizliKategori('Diğer'); setHizliKatSecici(false); }}
+                  className="w-full py-3 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl transition">
+                  Kategorisiz (Diğer) kapat
+                </button>
               </div>
             </div>
-          );
-        })()}
+          </div>
+        )}
 
         {showEtiketSecici && (
           <div className="fixed inset-0 bg-black/70 z-[9999] flex items-end sm:items-center justify-center p-0 sm:p-4">
@@ -9896,110 +9990,59 @@ silinmeTarihi: new Date().toISOString()`}</pre>
               <div className="flex-1 overflow-y-auto p-3 space-y-2">
                 {(() => {
                   const q = etiketArama.trim().toLocaleLowerCase('tr-TR');
-                  // Tek seçim: seçili dizi, mevcut kategoriden türetilir ki
-                  // penceredeki includes() kontrolleri değişmeden çalışsın.
                   const secili = [islemForm.kategori].filter(Boolean);
 
                   // ==================================================================
-                  // DEĞİŞTİ (kullanıcı talebi): ARTIK YALNIZCA ANA KATEGORİLER
+                  // DEĞİŞTİ (kullanıcı talebi): MASAÜSTÜ ARTIK MOBİLLE AYNI LİSTE
                   // ------------------------------------------------------------------
-                  // Önceden liste iki katmanlıydı: açılıp kapanan grup başlıkları ve
-                  // içlerinde alt kategoriler (ARAÇ > 34 MIA 813, KİRALAR > MERKEZ
-                  // DEPO gibi). Artık alt kategoriler GÖSTERİLMEZ; seçici tek katman,
-                  // düz bir ana kategori listesidir.
-                  //
-                  // ÖNEMLİ AYRIM: 'KİŞİLER' ve 'GENEL' gerçek birer kategori DEĞİL,
-                  // yalnızca görsel gruplama başlıklarıdır (shared.jsx'te
-                  // tumVarsayilanEtiketler() bu ikisini listeden çıkarır ve seçici de
-                  // onlara "(tümü)" düğmesi vermez). Dolayısıyla onların altındaki
-                  // YAKIT, MAZOT, VERGİ, KAPORA, MUSTAFA BEŞİNCİ gibi kayıtlar alt
-                  // kategori değil, ZATEN ANA KATEGORİDİR — bu yüzden listede kalırlar.
-                  // Aksi halde en çok kullanılan kategoriler kaybolurdu.
-                  //
-                  // NOT: Daha önce alt kategoriyle (örn. "34 NDD 433") kaydedilmiş
-                  // işlemler bozulmaz; kayıtlı değerleri aynen durur ve listelerde
-                  // görünmeye devam eder. Yalnızca yeni seçimlerde sunulmazlar.
-                  // Araç bilgisi için işlem formundaki ayrı "Araç Plakası" alanı var.
+                  // Önceden burada VARSAYILAN_ETIKET_GRUPLARI'ndan türetilen 49
+                  // kalemlik uzun liste vardı (KAMYONLAR, MAZOT, TEREA, YIKAMA,
+                  // ABDULLAH BEŞİNCİ ...). Mobil ise 12 kalemlik kısa listeyi
+                  // gösteriyordu; iki cihaz farklı seçenekler sunuyordu.
+                  // Artık ikisi de shared.jsx'teki ORTAK listeyi kullanır
+                  // (kategoriSecenekleri). Her kategori kaldırılabilir, yenisi
+                  // eklenebilir; değişiklik iki cihazda anında görünür.
                   // ==================================================================
-                  const anaKategoriler = [];
-                  VARSAYILAN_ETIKET_GRUPLARI.forEach(grup => {
-                    const sanalBaslik = grup.baslik === 'KİŞİLER' || grup.baslik === 'GENEL';
-                    if (sanalBaslik) anaKategoriler.push(...grup.etiketler); // bunlar zaten ana kategori
-                    else anaKategoriler.push(grup.baslik);                   // alt kategorileri atlanır
-                  });
+                  const liste = q
+                    ? kategoriSecenekleri.filter(e => e.toLocaleLowerCase('tr-TR').includes(q))
+                    : kategoriSecenekleri;
 
-                  // ARAMA MODU: aynı ana kategori listesi içinde arar.
-                  if (q) {
-                    const tumu = [...anaKategoriler, ...ozelEtiketler]
-                      .filter(e => e.toLocaleLowerCase('tr-TR').includes(q))
-                      .sort((a, b) => a.localeCompare(b, 'tr-TR'));
-                    if (tumu.length === 0) {
-                      return <p className="text-center text-sm font-bold text-neutral-400 py-8">
-                        "{etiketArama}" bulunamadı. Aşağıdan yeni kategori olarak ekleyebilirsiniz.
-                      </p>;
-                    }
-                    return (
-                      <div className="flex flex-wrap gap-1.5">
-                        {tumu.map(e => (
-                          <button key={e} type="button" onClick={() => etiketToggle(e)}
-                            className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition ${
-                              secili.includes(e)
-                                ? 'bg-emerald-600 text-white border-emerald-600'
-                                : 'bg-white text-neutral-700 border-neutral-300 hover:border-emerald-400'
-                            }`}>
-                            {secili.includes(e) && '✓ '}{e}
-                          </button>
-                        ))}
-                      </div>
-                    );
+                  if (liste.length === 0) {
+                    return <p className="text-center text-sm font-bold text-neutral-400 py-8">
+                      {q ? `"${etiketArama}" bulunamadı. Aşağıdan yeni kategori olarak ekleyebilirsiniz.`
+                         : 'Listede kategori kalmadı. Aşağıdan yeni kategori ekleyebilirsiniz.'}
+                    </p>;
                   }
 
-                  // NORMAL MOD: tek katman — düz ana kategori listesi + özel etiketler
                   return (
-                    <>
-                      <div className="border border-neutral-200 rounded-xl overflow-hidden">
-                        <div className="px-3 py-2.5 bg-neutral-50 text-xs font-black text-black flex items-center justify-between">
-                          <span>ANA KATEGORİLER</span>
-                          <span className="text-[10px] font-bold text-neutral-400">{anaKategoriler.length}</span>
-                        </div>
-                        <div className="p-2.5 flex flex-wrap gap-1.5">
-                          {anaKategoriler.map(e => (
-                            <button key={e} type="button" onClick={() => etiketToggle(e)}
-                              className={`text-[11px] font-bold px-2.5 py-1.5 rounded-lg border transition ${
-                                secili.includes(e)
-                                  ? 'bg-emerald-600 text-white border-emerald-600'
-                                  : 'bg-white text-neutral-700 border-neutral-300 hover:border-emerald-400'
-                              }`}>
-                              {secili.includes(e) && '✓ '}{e}
-                            </button>
-                          ))}
-                        </div>
+                    <div className="border border-neutral-200 rounded-xl overflow-hidden">
+                      <div className="px-3 py-2.5 bg-neutral-50 text-xs font-black text-black flex items-center justify-between">
+                        <span>KATEGORİLER</span>
+                        <span className="text-[10px] font-bold text-neutral-400">{liste.length}</span>
                       </div>
-
-                      {/* KULLANICI ETİKETLERİ — silme düğmesi yalnızca burada var */}
-                      {ozelEtiketler.length > 0 && (
-                        <div className="border-2 border-emerald-200 rounded-xl overflow-hidden">
-                          <div className="px-3 py-2.5 bg-emerald-50 text-xs font-black text-emerald-900">
-                            EKLEDİĞİNİZ KATEGORİLER ({ozelEtiketler.length})
-                          </div>
-                          <div className="p-2.5 flex flex-wrap gap-1.5">
-                            {ozelEtiketler.map(e => (
-                              <span key={e} className={`inline-flex items-center gap-1 text-[11px] font-bold rounded-lg border transition ${
-                                secili.includes(e) ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-neutral-700 border-neutral-300'
-                              }`}>
-                                <button type="button" onClick={() => etiketToggle(e)} className="pl-2.5 py-1.5">
-                                  {secili.includes(e) && '✓ '}{e}
-                                </button>
-                                <button type="button" onClick={() => etiketKaldir(e)} title="Bu etiketi hazır listeden kaldır"
-                                  className={`pr-2 py-1.5 transition ${secili.includes(e) ? 'hover:text-red-200' : 'hover:text-red-600'}`}>
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </>
+                      <div className="p-2.5 flex flex-wrap gap-1.5">
+                        {liste.map(e => {
+                          const sec = secili.includes(e);
+                          const kullaniciKategorisi = !temelKategoriMi(e);
+                          return (
+                            /* Her kategori: sol taraf seçer, sağdaki çöp kutusu listeden kaldırır */
+                            <span key={e} className={`inline-flex items-center gap-1 text-[11px] font-bold rounded-lg border transition ${
+                              sec ? 'bg-emerald-600 text-white border-emerald-600'
+                                  : kullaniciKategorisi ? 'bg-white text-emerald-800 border-emerald-300' : 'bg-white text-neutral-700 border-neutral-300'
+                            }`}>
+                              <button type="button" onClick={() => etiketToggle(e)} className="pl-2.5 py-1.5">
+                                {sec && '✓ '}{e}
+                              </button>
+                              <button type="button" onClick={() => etiketKaldir(e)}
+                                title={`"${e}" kategorisini seçim listesinden kaldır`}
+                                className={`pr-2 py-1.5 transition ${sec ? 'hover:text-red-200' : 'hover:text-red-600 text-neutral-400'}`}>
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
                   );
                 })()}
               </div>
@@ -10009,10 +10052,10 @@ silinmeTarihi: new Date().toISOString()`}</pre>
               <div className="p-3 border-t border-neutral-200 shrink-0 space-y-2">
                 <div className="flex gap-2">
                   <input value={yeniEtiket} onChange={e => setYeniEtiket(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); etiketEkle(); } }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); etiketEkle('form'); } }}
                     placeholder="Yeni kategori adı..."
                     className="flex-1 min-w-0 p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 uppercase" />
-                  <button type="button" onClick={etiketEkle} disabled={!yeniEtiket.trim()}
+                  <button type="button" onClick={() => etiketEkle('form')} disabled={!yeniEtiket.trim()}
                     className="shrink-0 px-4 rounded-xl bg-neutral-900 text-white text-xs font-black hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1.5">
                     <Plus className="w-4 h-4" /> Ekle
                   </button>
@@ -10387,6 +10430,32 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                     <input type="number" inputMode="decimal" value={krediKalemForm.toplamGeriOdeme} onChange={e => setKrediKalemForm({ ...krediKalemForm, toplamGeriOdeme: e.target.value })}
                       className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm" placeholder="650000" /></div>
                 </div>
+                {/* ==========================================================
+                    YENİ (kullanıcı talebi): ANA PARA HANGİ HESABA YATIRILDI?
+                    Ana para girildiyse hedef hesap zorunludur. Kaydedince o
+                    hesaba GİRİŞ yazılır (bakiye artar) ama kayıt krediMahsup
+                    bayrağıyla yazıldığı için CİROYA GİRMEZ — bu bir hasılat
+                    değil, borçlanmadır. Yalnızca YENİ kredide gösterilir;
+                    düzenlemede ikinci bir para girişi oluşmasın diye gizlenir.
+                    ========================================================== */}
+                {!krediKalemForm.id && (
+                  <div>
+                    <label className="text-xs font-bold text-neutral-600 block mb-1">
+                      Ana Para Hangi Hesaba Yatırıldı? {(parseFloat(krediKalemForm.anaPara) || 0) > 0 && <span className="text-violet-600">*</span>}
+                    </label>
+                    <select value={krediKalemForm.hedefDefterId || ''} onChange={e => setKrediKalemForm({ ...krediKalemForm, hedefDefterId: e.target.value })}
+                      className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-violet-500 text-sm bg-white font-bold">
+                      <option value="">— Hesap seçin —</option>
+                      {/* Kredi ve plan defterleri hariç; para gerçekten bir kasa/banka hesabına girer */}
+                      {defterler.filter(d => d.tur !== 'Kredi' && d.tur !== 'Ödemeler' && d.tur !== 'Borçlu')
+                        .sort((a, b) => (a.ad || '').localeCompare(b.ad || '', 'tr'))
+                        .map(d => <option key={d.id} value={d.id}>{d.ad}{d.tur ? ` — ${d.tur}` : ''}</option>)}
+                    </select>
+                    <p className="text-[10px] font-bold text-violet-700 mt-1">
+                      Ana para bu hesaba gelir olarak <b>eklenmez</b>; bakiyesi artar ama ciro/gelir raporlarına girmez (borçlanma).
+                    </p>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-2">
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Taksit Sayısı *</label>
                     <input type="number" inputMode="numeric" value={krediKalemForm.taksitSayisi} onChange={e => setKrediKalemForm({ ...krediKalemForm, taksitSayisi: e.target.value })}
@@ -10413,6 +10482,12 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                     <div className="text-[11px] font-bold text-violet-800 bg-violet-50 rounded-lg p-2.5 border border-violet-200 space-y-0.5">
                       <div>Aylık taksit: <b>₺{paraFmt(aylik)}</b> × {adet} ay</div>
                       {ana > 0 && <div>Toplam faiz / masraf: <b>₺{paraFmt(Math.max(0, top - ana))}</b></div>}
+                      {/* YENİ: Ana paranın nereye aktarılacağı önizlemede de teyit edilir */}
+                      {!krediKalemForm.id && ana > 0 && krediKalemForm.hedefDefterId && (
+                        <div className="text-emerald-700">
+                          Kaydedince <b>₺{paraFmt(ana)}</b> → <b>{defterler.find(d => d.id === krediKalemForm.hedefDefterId)?.ad || '-'}</b> hesabına girecek (ciroya dahil değil).
+                        </div>
+                      )}
                       {Math.abs(aylik * adet - top) > 1 && <div className="text-amber-700">Uyarı: {adet} × ₺{paraFmt(aylik)} = ₺{paraFmt(aylik * adet)} — toplamla ₺{paraFmt(Math.abs(aylik * adet - top))} fark var.</div>}
                     </div>
                   );
