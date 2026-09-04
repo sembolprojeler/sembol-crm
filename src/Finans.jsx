@@ -5005,29 +5005,40 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     // Yeni kategori ekle. Listede zaten varsa tekrar eklenmez, doğrudan seçilir.
     // `mod` = 'form' (masaüstü işlem formu) | 'hizli' (mobil hızlı kayıt çubuğu)
     const etiketEkle = async (mod = 'form') => {
-      const ad = yeniEtiket.trim().toLocaleUpperCase('tr-TR');
+      // DEĞİŞTİ (kullanıcı talebi): BÜYÜK HARF ZORUNLULUĞU KALDIRILDI.
+      // Kategori adı artık kullanıcının YAZDIĞI GİBİ saklanır ("Tadilat",
+      // "Ofis tadilat" gibi). Eskiden toLocaleUpperCase ile zorla büyütülüp
+      // "TADİLAT" olarak kaydediliyordu.
+      // NOT: Kopya kontrolü hâlâ büyük/küçük harf duyarsızdır — "tadilat"
+      // yazınca "Tadilat" zaten varsa yeni kayıt açılmaz, mevcut olan seçilir.
+      const ad = yeniEtiket.trim();
       if (!ad) return;
+      const adAnahtar = ad.toLocaleUpperCase('tr-TR'); // yalnızca karşılaştırma için
       // Seçim yapıldıktan sonra doğru alana yazıp doğru pencereyi kapatır
       const secVeKapat = (deger) => {
         if (mod === 'hizli') { setHizliKategori(deger); setHizliKatSecici(false); }
         else { setIslemForm({ ...islemForm, kategori: deger }); setShowEtiketSecici(false); }
         setYeniEtiket('');
       };
-      // DEĞİŞTİ: Karşılaştırma artık kısa ortak liste üzerinden yapılır
-      const mevcut = kategoriSecenekleri.map(e => e.toLocaleUpperCase('tr-TR'));
-      if (mevcut.includes(ad)) { secVeKapat(ad); return; }
+      // Karşılaştırma kısa ortak liste üzerinden ve harf duyarsız yapılır.
+      // Zaten varsa listedeki MEVCUT yazımı seçilir (kopya oluşmaz).
+      const zatenVar = kategoriSecenekleri.find(e => e.toLocaleUpperCase('tr-TR') === adAnahtar);
+      if (zatenVar) { secVeKapat(zatenVar); return; }
       // Daha önce KALDIRILMIŞ bir temel kategori yeniden eklenmek istenirse
       // yeni kayıt açmak yerine gizlilikten çıkarılır (kopya oluşmaz).
       if (temelKategoriMi(ad)) {
-        const yeniGizli = gizliKategoriler.filter(e => e.toLocaleUpperCase('tr-TR') !== ad);
+        const yeniGizli = gizliKategoriler.filter(e => e.toLocaleUpperCase('tr-TR') !== adAnahtar);
+        // Geri alınırken kodda tanımlı ÖZGÜN yazım kullanılır ("Yemek", "YEMEK" değil)
+        const ozgunAd = TEMEL_KATEGORILER.find(k => k.toLocaleUpperCase('tr-TR') === adAnahtar) || ad;
         try {
           await setDoc(defterEtiketleriRef(db, appId), { gizli: yeniGizli, updatedAt: new Date().toISOString() }, { merge: true });
-          addSystemLog?.('Kategori Geri Eklendi', `"${ad}" temel kategorisi listeye geri alındı.`);
-          secVeKapat(TEMEL_KATEGORILER.find(k => k.toLocaleUpperCase('tr-TR') === ad) || ad);
+          addSystemLog?.('Kategori Geri Eklendi', `"${ozgunAd}" temel kategorisi listeye geri alındı.`);
+          secVeKapat(ozgunAd);
         } catch (e) { console.error('Kategori geri eklenemedi:', e); alert('Kategori eklenemedi.'); }
         return;
       }
-      const yeniListe = [...ozelEtiketler, ad].sort((a, b) => a.localeCompare(b, 'tr-TR'));
+      // Sıralama Türkçe ve harf duyarsız ('tadilat' ile 'Tadilat' aynı yerde)
+      const yeniListe = [...ozelEtiketler, ad].sort((a, b) => a.localeCompare(b, 'tr-TR', { sensitivity: 'base' }));
       try {
         await setDoc(defterEtiketleriRef(db, appId), { liste: yeniListe, updatedAt: new Date().toISOString() }, { merge: true });
         addSystemLog?.('Kategori Eklendi', `"${ad}" kategorisi listeye eklendi (masaüstü ve mobilde görünür).`);
@@ -9943,7 +9954,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                   <input value={yeniEtiket} onChange={e => setYeniEtiket(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); etiketEkle('hizli'); } }}
                     placeholder="Yeni kategori adı..."
-                    className="flex-1 min-w-0 p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 uppercase" />
+                    className="flex-1 min-w-0 p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600" />
                   <button type="button" onClick={() => etiketEkle('hizli')} disabled={!yeniEtiket.trim()}
                     className="shrink-0 px-4 rounded-xl bg-neutral-900 text-white text-xs font-black hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1.5">
                     <Plus className="w-4 h-4" /> Ekle
@@ -10054,7 +10065,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                   <input value={yeniEtiket} onChange={e => setYeniEtiket(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); etiketEkle('form'); } }}
                     placeholder="Yeni kategori adı..."
-                    className="flex-1 min-w-0 p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600 uppercase" />
+                    className="flex-1 min-w-0 p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-emerald-600" />
                   <button type="button" onClick={() => etiketEkle('form')} disabled={!yeniEtiket.trim()}
                     className="shrink-0 px-4 rounded-xl bg-neutral-900 text-white text-xs font-black hover:bg-neutral-800 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-1.5">
                     <Plus className="w-4 h-4" /> Ekle
