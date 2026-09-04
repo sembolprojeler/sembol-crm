@@ -2582,6 +2582,58 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   // ortalama puan, kayıt doğruluğu dağılımı), şef bazlı performans ve puanlanan
   // personel dökümü bir arada sunulur.
   // ==========================================================================
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): DENETİMDE BİREYSEL PERSONEL NOTLARI GÖRÜNÜR
+  // ==========================================================================
+  // SORUN: Şef denetim sırasında bir personele özel not yazdığında
+  // (personelPuanlari[].ozelNot) bu not ekranda GÖRÜNMÜYORDU. Yalnızca
+  // personel rozetinin yanına küçük bir konuşma balonu simgesi konuyor ve
+  // notun kendisi tarayıcı ipucunda (title) gizli kalıyordu. Yönetici
+  // ekranda gezerken notun varlığını fark etse bile içeriğini okuyamıyordu.
+  //
+  // ÇÖZÜM: Puan rozetlerinin altına, notu olan personeller için ayrı bir blok
+  // eklendi. Her satırda personelin adı, aldığı puan ve şefin yazdığı notun
+  // TAM METNİ görünür. Notu olmayan personeller bu blokta listelenmez;
+  // hiç not yoksa blok hiç çizilmez (ekran kalabalıklaşmaz).
+  //
+  // Ayrı bileşen olarak tutuldu ki denetim kartı daha da şişmesin.
+  // ==========================================================================
+  const DenetimBireyselNotlari = ({ personelPuanlari = [] }) => {
+    // Yalnızca şefin gerçekten not yazdığı personeller
+    const notlular = (personelPuanlari || []).filter(pp => (pp.ozelNot || '').trim());
+    if (notlular.length === 0) return null;
+    return (
+      <div className="pl-7 mb-2">
+        <p className="text-[9px] font-black text-amber-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+          <MessageSquareText className="w-3 h-3" /> Şefin personel notları ({notlular.length})
+        </p>
+        <div className="space-y-1.5">
+          {notlular.map((pp, i) => {
+            const puan = parseInt(pp.puan) || 0;
+            // Puan rengi, puan rozetleriyle aynı ölçek (5 yeşil ... 1-2 kırmızı)
+            const puanRenk = puan >= 5 ? 'bg-green-100 text-green-800 border-green-300'
+              : puan === 4 ? 'bg-lime-100 text-lime-800 border-lime-300'
+              : puan === 3 ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
+              : 'bg-red-100 text-red-800 border-red-300';
+            return (
+              <div key={i} className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
+                {/* Kime yazıldığı ve kaç puan aldığı */}
+                <span className={`inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded border shrink-0 ${puanRenk}`}>
+                  {pp.personelAdi}
+                  {puan > 0 && <span className="flex items-center gap-0.5">{puan}<Star className="w-2.5 h-2.5 fill-current" /></span>}
+                </span>
+                {/* Notun TAM metni — kesilmez, gerekirse alt satıra sarar */}
+                <p className="flex-1 min-w-0 text-[11px] font-bold text-amber-900 break-words leading-snug pt-0.5">
+                  {pp.ozelNot}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   export const SahaRaporlamasiView = ({ personnelList = [], db, appId, setViewingImage, jobs = [], onViewCari }) => {
     const aylarTR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
     const buAy = new Date().toISOString().substring(0, 7); // YYYY-MM
@@ -2942,11 +2994,21 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                           </div>
                         )}
 
-                        {/* Şefin genel raporu */}
+                        {/* YENİ: Şefin tek tek personellere yazdığı bireysel notlar.
+                            Eskiden yalnızca rozetin title ipucunda gizliydi; artık
+                            notun tam metni ekranda okunabiliyor. */}
+                        <DenetimBireyselNotlari personelPuanlari={d.personelPuanlari} />
+
+                        {/* Şefin genel raporu (tüm ekip için tek not) */}
                         {(d.genelRapor || '').trim() && (
-                          <p className="pl-7 text-[11px] font-bold text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-lg p-2.5">
-                            {d.genelRapor}
-                          </p>
+                          <div className="pl-7">
+                            <p className="text-[9px] font-black text-neutral-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                              <ClipboardCheck className="w-3 h-3" /> Genel rapor
+                            </p>
+                            <p className="text-[11px] font-bold text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-lg p-2.5">
+                              {d.genelRapor}
+                            </p>
+                          </div>
                         )}
 
                         {/* ============================================================
