@@ -2759,3 +2759,53 @@ export const isGunEtiketi = (job, tumIsler = []) => {
 // DEĞİŞTİ: Devam günlerinin yanında ARAÇ KOPYALARI da çıkarılır (2 kamyon = 1 iş).
 export const anaIsleriFiltrele = (isler = []) =>
   (isler || []).filter(j => !isYardimciKayitMi(j, isler));
+
+// ============================================================================
+// YENİ (kullanıcı talebi): TEK ORTAK KATEGORİ LİSTESİ (masaüstü + mobil)
+// ============================================================================
+// SORUN: Kategori seçici iki ayrı kaynaktan besleniyordu.
+//  • Masaüstü: VARSAYILAN_ETIKET_GRUPLARI'ndan türetilen 49 kalemlik uzun
+//    liste (ARAÇ, KAMYONLAR, MAZOT, ABDULLAH BEŞİNCİ, TEREA, YIKAMA ...).
+//  • Mobil: kod içine gömülü 12 kalemlik kısa liste (Nakliyat, Depoevim, ...).
+// Aynı işlem iki cihazda farklı kategori seçenekleri gösteriyordu.
+//
+// ÇÖZÜM: Kullanıcının istediği KISA liste tek doğruluk kaynağı yapıldı ve iki
+// seçici de buradan besleniyor. Liste artık yönetilebilir:
+//  • Yeni kategori eklenebilir  -> Firestore'daki `liste` dizisine yazılır
+//  • Kategori kaldırılabilir    -> temel kategori ise `gizli` dizisine eklenir,
+//                                  kullanıcı eklediyse `liste`den çıkarılır
+// Her iki alan da defterEtiketleri dokümanında tutulur; değişiklik canlı
+// dinlendiği için masaüstü ve mobil anında aynı listeyi gösterir.
+//
+// GERİYE UYUM: Eskiden MAZOT, TEREA, 34 NDD 433 gibi kategorilerle kaydedilmiş
+// işlemler BOZULMAZ; kayıtlı kategori metni aynen durur ve listelerde görünür.
+// Bu liste yalnızca YENİ seçimlerde nelerin sunulacağını belirler.
+// ============================================================================
+export const TEMEL_KATEGORILER = [
+  'Nakliyat', 'Depoevim', 'Araç', 'Personel', 'Kira', 'Borç',
+  'Fatura', 'Malzeme', 'Yemek', 'Vergi', 'Tahsilat', 'Diğer',
+];
+
+// Karşılaştırmalar Türkçe büyük harfle yapılır ("araç" = "ARAÇ" sayılsın)
+const _katAnahtar = (s) => String(s || '').trim().toLocaleUpperCase('tr-TR');
+
+// Seçicilerde gösterilecek NİHAİ listeyi üretir.
+// temel liste - gizlenenler + kullanıcının eklediği kategoriler (tekrarsız)
+export const kategoriSecenekleriOlustur = (ozelKategoriler = [], gizliKategoriler = []) => {
+  const gizli = new Set((gizliKategoriler || []).map(_katAnahtar));
+  const sonuc = [];
+  const eklendi = new Set();
+  const ekle = (ad) => {
+    const a = _katAnahtar(ad);
+    if (!a || gizli.has(a) || eklendi.has(a)) return;
+    eklendi.add(a);
+    sonuc.push(ad);
+  };
+  TEMEL_KATEGORILER.forEach(ekle);          // Sabit sıra korunur (Nakliyat önce)
+  (ozelKategoriler || []).forEach(ekle);    // Kullanıcının eklediği en sonda
+  return sonuc;
+};
+
+// Bu kategori kod içinde tanımlı temel kategorilerden biri mi?
+export const temelKategoriMi = (ad) =>
+  TEMEL_KATEGORILER.some(k => _katAnahtar(k) === _katAnahtar(ad));
