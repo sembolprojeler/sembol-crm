@@ -61,6 +61,28 @@ const saatMetniSayiyaCevir = (deger) => {
 const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 // ==========================================================================
+// YENİ (kullanıcı talebi): NAKİT KÜSURAT YUVARLAMA (yalnızca KALAN NAKİT)
+// ==========================================================================
+// SAHA GERÇEĞİ: Nakit elden ödendiği için kuruşlu/küsuratlı tutar verilemiyor.
+// KURAL: Kalan nakit her zaman BİR ÜST 50 TL'ye yuvarlanır. Böylece tutar
+// daima 50 veya 00 ile biter ve personelin aleyhine olmaz (hep yukarı).
+//   28.575  -> 28.600      18.240  -> 18.250
+//   30.000  -> 30.000 (tam katsa değişmez)
+//   26.466,67 -> 26.500
+//
+// KAPSAM: Yalnızca NAKİT sütunu. Banka tutarları havale ile gittiği için
+// KURUŞUNA KADAR aynen kalır — bilerek yuvarlanmaz.
+// Sıfır ve altındaki değerler (borçlu çıkan personel) olduğu gibi bırakılır;
+// yuvarlama borcu yapay olarak azaltmasın.
+// ==========================================================================
+const NAKIT_YUVARLAMA_ADIMI = 50;
+const nakitYuvarla = (tutar) => {
+  const n = parseFloat(tutar) || 0;
+  if (n <= 0) return n;                      // Negatif/sıfır dokunulmaz
+  return Math.ceil(n / NAKIT_YUVARLAMA_ADIMI) * NAKIT_YUVARLAMA_ADIMI;
+};
+
+// ==========================================================================
 // YENİ (kullanıcı talebi): PERSONEL BORCU — BORÇLU DEFTERİ İLE TEK RAKAM
 // ==========================================================================
 // SORUN: Ahmet Öztürk'ün ₺40.000 borcundan ₺10.000 kısmi tahsil edildi.
@@ -406,7 +428,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       // büyük olamaz (Maaş Tablosu'ndaki effect bunu garanti eder; yine de
       // güvenlik için burada da sınırlanır).
       const hasarKesinti = Math.min(parseFloat(row.hasarKesinti) || 0, primTL);
-      const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcretiToplam - hasarKesinti;
+      // YENİ: Nakit bir üst 50 TL'ye yuvarlanır (elden ödeme küsuratı olmasın)
+      const kalanNakit = nakitYuvarla(netMaas - hesaplananBanka - nakitAvans + mesaiUcretiToplam - hasarKesinti);
 
       // ====================================================================
       // YENİ: SİGORTA MALİYETİ
@@ -3879,7 +3902,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       
       // Kalan Nakit: (Hak edilen maaş) - Bankaya Yatan Kısım - Nakit Avans + Mesai Ücreti
       // YENİ: - Hasar Kesintisi (prim nakit ödendiği için kesinti Kalan Nakit'ten düşer)
-      const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcreti - hasarKesinti;
+      // YENİ: Nakit bir üst 50 TL'ye yuvarlanır (elden ödeme küsuratı olmasın)
+      const kalanNakit = nakitYuvarla(netMaas - hesaplananBanka - nakitAvans + mesaiUcreti - hasarKesinti);
 
       return { 
         nakitAvans, resmiAvans, gunlukSaat, toplamSaat, mesaiGunSayisi, 
@@ -4858,7 +4882,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const primTL = (maas / 200) * prim;
     const netMaas = (maas / 30) * mesaiGunSayisi;
     const hasarKesinti = Math.min(parseFloat(row.hasarKesinti) || 0, primTL);
-    const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcretiToplam - hasarKesinti;
+    // YENİ: Nakit bir üst 50 TL'ye yuvarlanır (elden ödeme küsuratı olmasın)
+    const kalanNakit = nakitYuvarla(netMaas - hesaplananBanka - nakitAvans + mesaiUcretiToplam - hasarKesinti);
     // HATA DÜZELTMESİ (kullanıcı bildirimi): Ödemeler sayfasında İcra satırları
     // hiç görünmüyordu. Kök neden: bu fonksiyon icraKesintisi'ni HESAPLIYOR ama
     // dönüş nesnesine KOYMUYORDU. icraSatirlari `hes.icraKesintisi` okuduğu için
@@ -5518,6 +5543,28 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
 
     // --- Hesaplamalar ---
     const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// ==========================================================================
+// YENİ (kullanıcı talebi): NAKİT KÜSURAT YUVARLAMA (yalnızca KALAN NAKİT)
+// ==========================================================================
+// SAHA GERÇEĞİ: Nakit elden ödendiği için kuruşlu/küsuratlı tutar verilemiyor.
+// KURAL: Kalan nakit her zaman BİR ÜST 50 TL'ye yuvarlanır. Böylece tutar
+// daima 50 veya 00 ile biter ve personelin aleyhine olmaz (hep yukarı).
+//   28.575  -> 28.600      18.240  -> 18.250
+//   30.000  -> 30.000 (tam katsa değişmez)
+//   26.466,67 -> 26.500
+//
+// KAPSAM: Yalnızca NAKİT sütunu. Banka tutarları havale ile gittiği için
+// KURUŞUNA KADAR aynen kalır — bilerek yuvarlanmaz.
+// Sıfır ve altındaki değerler (borçlu çıkan personel) olduğu gibi bırakılır;
+// yuvarlama borcu yapay olarak azaltmasın.
+// ==========================================================================
+const NAKIT_YUVARLAMA_ADIMI = 50;
+const nakitYuvarla = (tutar) => {
+  const n = parseFloat(tutar) || 0;
+  if (n <= 0) return n;                      // Negatif/sıfır dokunulmaz
+  return Math.ceil(n / NAKIT_YUVARLAMA_ADIMI) * NAKIT_YUVARLAMA_ADIMI;
+};
     // PERFORMANS (kullanıcı talebi: pencereler geç açılıyordu):
     // defterIslemleri aynı render içinde 8-10 kez çağrılıyor ve her çağrıda
     // TÜM işlem kayıtları baştan filtreleniyordu. Kayıt sayısı büyüdükçe
