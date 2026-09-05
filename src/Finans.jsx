@@ -1862,6 +1862,16 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const primler = monthCloseModalData.nextMonthPrims || {};
       const esc = (x) => String(x ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
       const sayi = (n) => (n || 0).toLocaleString('tr-TR', { maximumFractionDigits: 1 });
+      // HATA DÜZELTMESİ (kullanıcı bildirimi: "yazdır tuşuna tıklamıyor"):
+      // Burada bugunStr() çağrılıyordu ama o fonksiyon BAŞKA bir bileşende
+      // (FinansDefterView) tanımlı; bu bileşende (PuantajView) mevcut değil.
+      // Tıklamada sessiz bir ReferenceError oluşuyor, pencere hiç açılmıyordu.
+      // Tarih artık yerel olarak burada üretiliyor (toISOString UTC'ye çevirip
+      // gece yarısına yakın saatlerde günü kaydırdığı için kullanılmıyor).
+      const bugunTR = (() => {
+        const d = new Date();
+        return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+      })();
       const toplamPrim = liste.reduce((t, p) => t + (primler[p.id] || 0), 0);
       const toplamNet = liste.reduce((t, p) => t + (p.finalScore || 0), 0);
 
@@ -1911,7 +1921,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         </style></head><body>
         <div class="baslik">
           <h1>${esc(collarType)} — Prim Sıralaması ve Dağıtımı</h1>
-          <div class="meta">${esc(ayEtiketi)} ${currentYear} dönemi &nbsp;•&nbsp; 20 puan ve üzeri personel &nbsp;•&nbsp; Liste tarihi: ${(bugunStr() || '').split('-').reverse().join('.')}</div>
+          <div class="meta">${esc(ayEtiketi)} ${currentYear} dönemi &nbsp;•&nbsp; 20 puan ve üzeri personel &nbsp;•&nbsp; Liste tarihi: ${bugunTR}</div>
         </div>
         <div class="ozet">
           <div class="kutu"><span>Toplam Yorum</span><b>${monthCloseModalData.yorumSayisi ?? 0}</b></div>
