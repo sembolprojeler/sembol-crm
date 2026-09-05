@@ -1789,7 +1789,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
               "İcrası Var mı?" = Evet seçilince açılır. Personelin icra
               dosyasındaki TOPLAM borç buraya yazılır. Sistem her ay maaştan
               kesilen icra tutarını (hesaplanan bankanın %25'i) Ödemeler
-              sayfasında ayın 6'sında ödeme kalemi olarak üretir; her ödeme
+              sayfasında ayın 7'sinde ödeme kalemi olarak üretir; her ödeme
               bu toplamdan düşer, borç bitince kalem artık gösterilmez.
               Kalan tutar Personel Muhasebe > "İCRA TOPLAM" sütununda izlenir.
               ================================================================== */}
@@ -1803,7 +1803,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
               </div>
               <div className="flex items-end">
                 <p className="text-[11px] font-bold text-red-700 bg-white border border-red-200 rounded-lg p-2.5 w-full">
-                  Her ayın 6'sında Ödemeler sayfasında "İcra Ödemesi" kalemi oluşur. Ödendikçe bu toplam azalır; sıfırlanınca kalem kaybolur.
+                  Her ayın 7'sinde Ödemeler sayfasında "İcra Kesintisi" kalemi oluşur. Ödendikçe bu toplam azalır; sıfırlanınca kalem kaybolur.
                 </p>
               </div>
             </div>
@@ -8093,6 +8093,25 @@ export const gelmemeKarari = (baglam) => {
 const GEC_GELIS_TOLERANS_DK = 15;
 
 // ============================================================================
+// YENİ (kullanıcı talebi): İŞE BAŞLAMA TARİHİNDEN ÖNCE MESAİ SATIRI ÇIKMASIN
+// ============================================================================
+// SORUN: Mesai Takip tablosu, o gün QR okutmamış HERKES için "Devamsız"
+// satırı üretiyordu. Personelin işe başlama tarihi (startDate) hiç kontrol
+// edilmediği için henüz işe girmemiş kişiler de geçmiş günlerde "Devamsız"
+// olarak listeleniyordu. Örnek: Farhat Bazarov 05.09'da başladı ama 04.09
+// tablosunda Devamsızlık bloğunda görünüyordu — o gün şirkette değildi ve
+// haksız yere devamsız sayılıyordu (puantaja işlenirse maaşı da etkilerdi).
+//
+// KURAL: Bakılan gün, personelin işe başlama tarihinden ÖNCE ise o kişi için
+// satır hiç üretilmez. Başlama tarihi girilmemiş eski kayıtlar etkilenmez.
+// ============================================================================
+export const personelOGunCalisiyorMu = (person, tarihStr) => {
+  const bas = person?.startDate;
+  if (!bas || !tarihStr) return true;   // Bilgi yoksa engelleme (eski kayıtlar bozulmasın)
+  return tarihStr >= bas;               // 'YYYY-AA-GG' metinleri doğrudan karşılaştırılır
+};
+
+// ============================================================================
 // YENİ (kullanıcı kuralı): EKİP BAZLI ERKEN BAŞLANGIÇ MESAİSİ
 // ============================================================================
 // SAHA GERÇEĞİ: Bazı ekipler sabah 07:00'dan önce yola çıkıyor. QR girişi
@@ -8999,7 +9018,9 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       // eklenir.
       // ======================================================================
       const maviEkipIdSeti = new Set(maviEkip.map(p => String(p.id)));
-      const maviKayitsizlar = maviYaka.filter(p => !maviEkipIdSeti.has(String(p.id)));
+      // YENİ: O gün henüz işe başlamamış personel için öneri (Devamsızlık)
+      // üretilmez; yoksa geçmiş günlerde haksız devamsız görünürdü.
+      const maviKayitsizlar = maviYaka.filter(p => !maviEkipIdSeti.has(String(p.id)) && personelOGunCalisiyorMu(p, tarih));
       if (maviKayitsizlar.length > 0) {
         try {
           // O gün iş atanmış id kümesi (fotoğraftaki 34 PCY 589 ekibi gibi
@@ -9027,8 +9048,10 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       // kayıtsız kişileri eklemek ekip hesabını bozar.
       const beyazKayitlar = oGunkuTumKayitlar.filter(k => k.collarType === 'Beyaz Yaka');
       let beyazSonuc = {};
-      if (beyazYaka.length > 0) {
-        try { beyazSonuc = beyazYakaOnerileriHesapla(beyazYaka, beyazKayitlar, tarih) || {}; } catch (e) { /* sessiz geç */ }
+      // YENİ: O gün henüz işe başlamamış beyaz yaka da değerlendirmeye girmez
+      const beyazDegerlendirilecek = beyazYaka.filter(p => personelOGunCalisiyorMu(p, tarih));
+      if (beyazDegerlendirilecek.length > 0) {
+        try { beyazSonuc = beyazYakaOnerileriHesapla(beyazDegerlendirilecek, beyazKayitlar, tarih) || {}; } catch (e) { /* sessiz geç */ }
       }
 
       if (Object.keys(maviSonuc).length || Object.keys(beyazSonuc).length) {
@@ -9749,6 +9772,9 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                       .filter(pp => fYaka === 'hepsi' || mesaiYakaTipi(pp) === fYaka);
                     gunler.forEach(tarih => {
                       hedefPersonel.forEach(pp => {
+                        // YENİ: O gün henüz işe başlamamış personel için satır üretilmez
+                        // (yoksa geçmiş günlerde haksız "Devamsız" olarak görünürdü)
+                        if (!personelOGunCalisiyorMu(pp, tarih)) return;
                         const anahtar = `${pp.id}__${tarih}`;
                         if (gruplar.has(anahtar)) return; // Kaydı var, atla
                         gruplar.set(anahtar, {
