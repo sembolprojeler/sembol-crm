@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp , Banknote, UserMinus, Settings, FileText } from 'lucide-react';
+import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp , Banknote, UserMinus, Settings, FileText, Copy } from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 // DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
 // Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
@@ -10,7 +10,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, gecerliMaas
   // YENİ: Hazır etiket ağacı ve kullanıcı etiketlerinin Firestore referansı.
   VARSAYILAN_ETIKET_GRUPLARI, tumVarsayilanEtiketler, defterEtiketleriRef, GARANTI_MAAS_SABLON_BASE64, odemeIcinDefterBul,
   // YENİ: Masaüstü ve mobilde AYNI kategori listesi (yönetilebilir)
-  TEMEL_KATEGORILER, kategoriSecenekleriOlustur, temelKategoriMi } from './shared.jsx';
+  TEMEL_KATEGORILER, kategoriSecenekleriOlustur, temelKategoriMi,
+  // YENİ: İcra ödemesinde IBAN'ı okunaklı göstermek için
+  ibanBicimle } from './shared.jsx';
 
 // ==========================================================================
 // HATA DÜZELTMESİ (kullanıcı bildirimi): "İş Onaylama Tahtası"ndan onaylanan
@@ -12130,6 +12132,53 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                         ? `İcra kesintisi • Kalan toplam icra borcu ₺${paraFmt(icraKalanBorc(maasOdeModal.satir.kisiler[0]?.person))}`
                         : `${maasOdeModal.satir.kisiler.length} personel • icra kesintileri toplamı`)
                     : `${maasOdeModal.satir.kisiler.length} personel • Kalan ${maasOdeModal.satir.kanal === 'banka' ? 'banka' : maasOdeModal.satir.kanal === 'nakit' ? 'nakit' : 'banka + nakit'} toplamı`}</div>
+                  {/* ============================================================
+                      YENİ (kullanıcı talebi): İCRANIN ÖDENECEĞİ IBAN
+                      ------------------------------------------------------------
+                      Personel kaydındaki icra IBAN bilgisi burada gösterilir ve
+                      tek tuşla panoya kopyalanır; Finans havaleyi yaparken
+                      personel kartına gitmek zorunda kalmaz. IBAN girilmemişse
+                      uyarı çıkar (personel kaydından eklenmesi gerekir).
+                      ============================================================ */}
+                  {maasOdeModal.satir.kanal === 'icra' && maasOdeModal.satir.kisiler.map(k => {
+                    const p = k.person || {};
+                    const iban = (p.icraIban || '').trim();
+                    return (
+                      <div key={p.id} className="mt-2 bg-white/15 rounded-lg p-2 space-y-1">
+                        {maasOdeModal.satir.kisiler.length > 1 && (
+                          <div className="text-[10px] font-black opacity-90">{p.fullName}</div>
+                        )}
+                        {iban ? (
+                          <>
+                            {/* IBAN — tıklanınca panoya kopyalanır */}
+                            <button type="button" onClick={() => panoyaKopyala(iban, `icra_iban_${p.id}`)}
+                              className="w-full flex items-center justify-between gap-2 bg-white/20 hover:bg-white/30 rounded-md px-2 py-1.5 transition text-left">
+                              <span className="font-mono text-[11px] font-black tracking-wide truncate">{ibanBicimle(iban)}</span>
+                              <span className="shrink-0 text-[9px] font-black flex items-center gap-1">
+                                {kopyalanan === `icra_iban_${p.id}` ? <>Kopyalandı ✓</> : <><Copy className="w-3 h-3" /> Kopyala</>}
+                              </span>
+                            </button>
+                            {p.icraIbanSahibi && (
+                              <div className="text-[10px] font-bold opacity-90">Alıcı: {p.icraIbanSahibi}</div>
+                            )}
+                            {p.icraDosyaNo && (
+                              <button type="button" onClick={() => panoyaKopyala(p.icraDosyaNo, `icra_dosya_${p.id}`)}
+                                className="w-full flex items-center justify-between gap-2 bg-white/10 hover:bg-white/20 rounded-md px-2 py-1 transition text-left">
+                                <span className="text-[10px] font-bold truncate">Açıklama: {p.icraDosyaNo}</span>
+                                <span className="shrink-0 text-[9px] font-black">
+                                  {kopyalanan === `icra_dosya_${p.id}` ? 'Kopyalandı ✓' : 'Kopyala'}
+                                </span>
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <div className="text-[10px] font-bold bg-amber-400/30 rounded-md px-2 py-1.5">
+                            IBAN girilmemiş — Personel kaydı &gt; İcra bölümünden ekleyin.
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                   <div className="text-lg font-black tabular-nums mt-1">₺{paraFmt(maasOdeModal.satir.tutar)}</div>
                 </div>
                 {/* ================================================================
