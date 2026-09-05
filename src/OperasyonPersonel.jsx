@@ -1580,7 +1580,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       fullName: '', email: '', password: '', position: positions?.[0] || 'Şoför', rank: ranks?.[0] || 'Standart',
       collarType: 'Mavi Yaka', employmentStatus: 'Aktif',
       personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '', birthDate: '',
-      bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', icraToplamBorc: '', startDate: new Date().toISOString().split('T')[0],
+      bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', icraToplamBorc: '', icraIban: '', icraIbanSahibi: '', icraDosyaNo: '', startDate: new Date().toISOString().split('T')[0],
       // YENİ: Deneme maaşı ve deneme süresi (ay). Boş bırakılırsa deneme uygulanmaz.
       denemeMaasi: '', denemeSuresi: '',
       // YENİ: Haftalık çalışma programı (gün sayısı, günlük saat, izin günü, erken çıkış)
@@ -1617,7 +1617,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         fullName: '', email: '', password: '', position: positions?.[0] || 'Şoför', rank: ranks?.[0] || 'Standart',
         collarType: 'Mavi Yaka', employmentStatus: 'Aktif',
         personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '', birthDate: '',
-        bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', icraToplamBorc: '', startDate: new Date().toISOString().split('T')[0],
+        bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', icraToplamBorc: '', icraIban: '', icraIbanSahibi: '', icraDosyaNo: '', startDate: new Date().toISOString().split('T')[0],
         // YENİ: Kayıt sonrası deneme alanları da sıfırlanır
         denemeMaasi: '', denemeSuresi: ''
       });
@@ -1805,6 +1805,27 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                 <p className="text-[11px] font-bold text-red-700 bg-white border border-red-200 rounded-lg p-2.5 w-full">
                   Her ayın 7'sinde Ödemeler sayfasında "İcra Kesintisi" kalemi oluşur. Ödendikçe bu toplam azalır; sıfırlanınca kalem kaybolur.
                 </p>
+              </div>
+              {/* ==============================================================
+                  YENİ (kullanıcı talebi): İCRANIN ÖDENECEĞİ IBAN
+                  Ödeme sırasında Finans'ın parayı nereye göndereceği burada
+                  tutulur. Ödemeler > İcra Kesintisi penceresinde bu bilgiler
+                  tek tuşla kopyalanabilir şekilde görünür.
+                  ============================================================== */}
+              <div>
+                <label className="block text-sm font-bold text-red-800 mb-1">İcra IBAN</label>
+                <input type="text" value={formData.icraIban || ''} onChange={e => setFormData({...formData, icraIban: e.target.value})}
+                  className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition bg-white font-mono text-sm" placeholder="TR00 0000 0000 0000 0000 0000 00" />
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-red-800 mb-1">IBAN Sahibi / İcra Dairesi</label>
+                <input type="text" value={formData.icraIbanSahibi || ''} onChange={e => setFormData({...formData, icraIbanSahibi: e.target.value})}
+                  className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition bg-white" placeholder="Örn: İstanbul 12. İcra Müdürlüğü" />
+              </div>
+              <div className="md:col-span-2">
+                <label className="block text-sm font-bold text-red-800 mb-1">Dosya / Açıklama Notu (isteğe bağlı)</label>
+                <input type="text" value={formData.icraDosyaNo || ''} onChange={e => setFormData({...formData, icraDosyaNo: e.target.value})}
+                  className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition bg-white" placeholder="Örn: 2026/1234 E. — havale açıklamasına yazılacak" />
               </div>
             </div>
           )}
@@ -2183,6 +2204,22 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                     <div className="text-[11px] font-bold text-red-700 bg-white border border-red-200 rounded-lg p-2.5 flex flex-col justify-center gap-0.5">
                       <span>Bugüne kadar ödenen: <b>₺{(parseFloat(editingUser.icraOdenenToplam) || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</b></span>
                       <span>Kalan icra borcu: <b>₺{Math.max(0, (parseFloat(editingUser.icraToplamBorc) || 0) - (parseFloat(editingUser.icraOdenenToplam) || 0)).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</b></span>
+                    </div>
+                    {/* YENİ: İcranın ödeneceği IBAN — Ödemeler penceresinde kopyalanabilir görünür */}
+                    <div>
+                      <label className="block text-sm font-bold text-red-800 mb-1">İcra IBAN</label>
+                      <input type="text" value={editingUser.icraIban || ''} onChange={e => setEditingUser({...editingUser, icraIban: e.target.value})}
+                        className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition bg-white font-mono text-sm" placeholder="TR00 0000 0000 0000 0000 0000 00" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-red-800 mb-1">IBAN Sahibi / İcra Dairesi</label>
+                      <input type="text" value={editingUser.icraIbanSahibi || ''} onChange={e => setEditingUser({...editingUser, icraIbanSahibi: e.target.value})}
+                        className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition bg-white" placeholder="Örn: İstanbul 12. İcra Müdürlüğü" />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-bold text-red-800 mb-1">Dosya / Açıklama Notu (isteğe bağlı)</label>
+                      <input type="text" value={editingUser.icraDosyaNo || ''} onChange={e => setEditingUser({...editingUser, icraDosyaNo: e.target.value})}
+                        className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition bg-white" placeholder="Örn: 2026/1234 E. — havale açıklamasına yazılacak" />
                     </div>
                   </div>
                 )}
