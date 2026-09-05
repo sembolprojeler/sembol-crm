@@ -12,7 +12,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   // YENİ: IBAN Paylaş penceresi için varsayılan hesap nesnesi ve IBAN biçimleyici.
   aktifBankaHesabi, ibanBicimle,
   // YENİ: Çok günlü iş (1. gün / 2. gün) rozeti ve grup fiyatı gösterimi
-  isGunEtiketi, isDevamGunuMu, isGrupFiyat, isGrupKapora, isAracEtiketi, isYardimciKayitMi } from './shared.jsx';
+  isGunEtiketi, isDevamGunuMu, isGrupFiyat, isGrupKapora, isAracEtiketi, isYardimciKayitMi,
+  // YENİ: Fotoğraf eksik uyarısı ve ekipler arası destek
+  isFotografEksikleri, isDestekIdleri, isTamEkipIdleri, destekPersoneliMi, isAsilEkipIdleri } from './shared.jsx';
 import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from './OperasyonPersonel.jsx';
 
 
@@ -1712,6 +1714,15 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
 
     // YENİ: "Ekibi Düzenle" modalı — ekipten sistemli/sistem dışı personel ekleme-çıkarma
     const [editingTeamJob, setEditingTeamJob] = useState(null);
+    // YENİ: Destek penceresi — hangi işe takviye personel gönderiliyor
+    const [destekJob, setDestekJob] = useState(null);
+    const [destekSecim, setDestekSecim] = useState([]);   // seçilen personel kimlikleri
+    const [destekKaydediliyor, setDestekKaydediliyor] = useState(false);
+
+    // Destek penceresi açıldığında mevcut destekçiler işaretli gelir
+    useEffect(() => {
+      setDestekSecim(destekJob ? isDestekIdleri(destekJob) : []);
+    }, [destekJob]);
     const [teamManualNameInput, setTeamManualNameInput] = useState('');
 
     const getTeamSystemNames = (job) => (job.assignedPersonnelIds || []).map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
@@ -2084,6 +2095,25 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                     <div className="text-[11px] font-bold text-neutral-700 bg-white p-1.5 rounded border border-neutral-200 shadow-sm flex items-center gap-1">
                       <User className="w-3.5 h-3.5 text-blue-600" /> {job.team}
                     </div>
+                    {/* ==========================================================
+                        YENİ (kullanıcı talebi): DESTEĞE GELEN PERSONEL
+                        Başka ekipten bu işe destek olarak gönderilen kişiler
+                        ekip listesinin altında ayrı rozetle görünür. Böylece
+                        kartta "bu işe kim takviye geldi" tek bakışta okunur.
+                        ========================================================== */}
+                    {isDestekIdleri(job).length > 0 && (
+                      <div className="mt-1 flex flex-wrap items-center gap-1 bg-cyan-50 border border-cyan-200 rounded p-1.5">
+                        <span className="text-[9px] font-black text-cyan-700 uppercase flex items-center gap-1">
+                          <Users className="w-3 h-3" /> Destek:
+                        </span>
+                        {(job.destekKayitlari || []).map(k => (
+                          <span key={k.personelId} className="text-[9px] font-black bg-cyan-600 text-white px-1.5 py-0.5 rounded"
+                            title={`${k.kaynakEkip || 'Diğer ekip'} ekibinden destek geldi`}>
+                            {k.adSoyad}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {/* End Job Details */}
@@ -2113,6 +2143,29 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                      ) : (
                        <div className="text-xs text-neutral-400 italic text-center py-2">Sonlandırma detayı yok.</div>
                      )}
+                     {/* ============================================================
+                         YENİ (kullanıcı talebi): FOTOĞRAF PAYLAŞILMADI UYARISI
+                         İş sonlandırıldığı hâlde KASA ve/veya TESLİM fotoğrafı
+                         yüklenmemişse kartta kırmızı uyarı çıkar. Böylece hangi
+                         ekibin fotoğraf paylaşmadığı yöneticiye anında görünür.
+                         ============================================================ */}
+                     {(() => {
+                       const foto = isFotografEksikleri(job);
+                       if (!foto.eksikVar) return null;
+                       return (
+                         <div className="flex items-start gap-1.5 bg-red-50 border border-red-300 rounded-lg p-2">
+                           <AlertTriangle className="w-3.5 h-3.5 text-red-600 shrink-0 mt-0.5" />
+                           <div className="min-w-0">
+                             <p className="text-[10px] font-black text-red-700 leading-tight">
+                               {foto.eksikler.join(' ve ')} paylaşılmamış
+                             </p>
+                             <p className="text-[9px] font-bold text-red-500 leading-tight mt-0.5">
+                               İş sonlandırıldı ama ekip {foto.eksikler.length === 2 ? 'bu görselleri' : 'bu görseli'} yüklemedi.
+                             </p>
+                           </div>
+                         </div>
+                       );
+                     })()}
                      {/* YENİ: Ekip şefinin yüklediği kasa/hasar/asansör medyalarının görüntülenmesi */}
                      {setViewingImage && (job.endJobDetails?.truckImages || job.endJobDetails?.deliveryImages || job.endJobDetails?.damageImages || job.endJobDetails?.elevatorImages) && (
                        <div className="flex flex-wrap gap-1.5">
@@ -2186,21 +2239,24 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                       </div>
                     )}
 
-                    {!job.mesaiApproved ? (
-                      <button onClick={() => handleOpenMesaiModal(job)} className="w-full py-2 bg-blue-50 text-blue-700 font-bold text-xs rounded-lg hover:bg-blue-100 transition flex justify-center items-center gap-1.5 border border-blue-200">
-                        <Clock className="w-4 h-4" /> Mesai Onayla
-                      </button>
-                    ) : (
-                      <div className="w-full flex items-center gap-1.5">
-                        <div className="flex-1 py-2 bg-blue-100 text-blue-700 font-bold text-xs rounded-lg flex justify-center items-center gap-1.5 border border-blue-200 opacity-60">
-                          <CheckCircle className="w-4 h-4" /> Mesai Onaylandı
-                        </div>
-                        {/* YENİ: Yanlış girilen mesaiyi düzeltmek için küçük düzenleme butonu */}
-                        <button onClick={() => handleOpenMesaiModal(job)} title="Mesaiyi Düzenle" className="p-2 bg-white border border-blue-300 text-blue-700 rounded-lg hover:bg-blue-50 transition shadow-sm shrink-0">
-                          <Edit className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
+                    {/* ============================================================
+                        DEĞİŞTİ (kullanıcı talebi): "MESAİ ONAYLA" -> "DESTEK"
+                        ------------------------------------------------------------
+                        Mesai onayı buradan KALDIRILDI. Mesai zaten QR giriş/çıkış
+                        kayıtlarından hesaplanıyor ve İnsan Kaynakları > Mesai Takip
+                        / Puantaj Takip ekranlarından girilip düzenlenebiliyor;
+                        bu yüzden iş kartında ikinci bir onay adımı gerekmiyor.
+                        Yerine DESTEK bölümü geldi: işi biten veya boşta olan
+                        personel bu işe takviye olarak gönderilir.
+                        ============================================================ */}
+                    <button onClick={() => setDestekJob(job)}
+                      className={`w-full py-2 font-bold text-xs rounded-lg transition flex justify-center items-center gap-1.5 border ${
+                        isDestekIdleri(job).length > 0
+                          ? 'bg-cyan-100 text-cyan-800 border-cyan-300 hover:bg-cyan-200'
+                          : 'bg-cyan-50 text-cyan-700 border-cyan-200 hover:bg-cyan-100'}`}>
+                      <Users className="w-4 h-4" />
+                      {isDestekIdleri(job).length > 0 ? `Destek • ${isDestekIdleri(job).length} kişi` : 'Destek Ekle'}
+                    </button>
 
                     {job.endJobDetails?.damageStatus !== 'Hasar var' && (
                       <button onClick={() => setMarkDamageJobId(job.id)} className="w-full py-2 bg-orange-50 text-orange-700 font-bold text-xs rounded-lg hover:bg-orange-100 transition flex justify-center items-center gap-1.5 border border-orange-200">
@@ -2402,6 +2458,135 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       })()}
 
       {/* YENİ: Ekibi Düzenle Modalı */}
+      {/* ======================================================================
+          YENİ (kullanıcı talebi): DESTEK PENCERESİ
+          ----------------------------------------------------------------------
+          Aynı gün İŞİ BİTMİŞ veya HİÇ İŞİ OLMAYAN (boşta) mavi yaka personel
+          listelenir; seçilenler bu işe TAKVİYE olarak eklenir.
+          Sonuçları:
+           • İş kartındaki ekip listesinde "Destek" rozetiyle görünürler
+           • Puan onay ekranında "Ekstra Destek" olarak işaretli gelirler
+           • MESAİ: destek veren kişi artık İLK ekibine göre değil, EN SON
+             dahil olduğu bu ekibin çıkışına göre hesaplanır. Kaynak ekipten
+             düşüldüğü için orada kalanların ortalamasını da bozmaz.
+          ====================================================================== */}
+      {destekJob && (() => {
+        const bugununIsleri = (jobs || []).filter(j => j.date === destekJob.date && j.status !== 'cancelled');
+        // Bu işin kendi ekibi zaten burada; aday olamaz
+        const buIsinEkibi = new Set(isTamEkipIdleri(destekJob));
+        // Mavi yaka süzgeci (mesai hesabı yalnızca mavi yakada işler)
+        const maviMi = (p) => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position));
+        const adaylar = (personnelList || [])
+          .filter(p => maviMi(p) && !buIsinEkibi.has(String(p.id)))
+          .map(p => {
+            // Kişinin o günkü asıl işi (varsa) ve o iş bitmiş mi
+            const kendiIsi = bugununIsleri.find(j => isAsilEkipIdleri(j).includes(String(p.id)));
+            const isBitti = !!kendiIsi && (kendiIsi.status === 'completed' || !!kendiIsi.endJobDetails);
+            return {
+              p,
+              kendiIsi,
+              isBitti,
+              // Uygunluk: işi bitmiş VEYA o gün hiç işi yok (boşta)
+              uygun: !kendiIsi || isBitti,
+              durum: !kendiIsi ? 'Boşta' : isBitti ? 'İşi bitti' : 'İşi sürüyor',
+            };
+          })
+          // Önce uygun olanlar, sonra ada göre
+          .sort((a, b) => (b.uygun - a.uygun) || (a.p.fullName || '').localeCompare(b.p.fullName || '', 'tr'));
+        const uygunlar = adaylar.filter(a => a.uygun);
+        const mesgul = adaylar.filter(a => !a.uygun);
+
+        const kaydet = async () => {
+          setDestekKaydediliyor(true);
+          try {
+            // Seçilenler için kaynak ekip bilgisiyle birlikte kayıt üretilir
+            const kayitlar = destekSecim.map(pid => {
+              const a = adaylar.find(x => String(x.p.id) === String(pid));
+              const eski = (destekJob.destekKayitlari || []).find(k => String(k.personelId) === String(pid));
+              return eski || {
+                personelId: String(pid),
+                adSoyad: a?.p.fullName || '',
+                kaynakIsId: a?.kendiIsi?.id || null,
+                kaynakEkip: a?.kendiIsi?.customerName || (a?.kendiIsi ? '' : 'Boşta'),
+                // Zincir sıralaması bu damgaya göre yapılır (2., 3., 4. ekip)
+                eklenmeZamani: new Date().toISOString(),
+                ekleyen: currentUser?.fullName || 'Sistem',
+              };
+            });
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', destekJob.id), {
+              destekPersonelIds: destekSecim.map(String),
+              destekKayitlari: kayitlar,
+            });
+            addSystemLog?.('Destek Personeli',
+              destekSecim.length === 0
+                ? `${destekJob.customerName} işinden tüm destek personeli kaldırıldı.`
+                : `${destekJob.customerName} işine ${kayitlar.map(k => k.adSoyad).join(', ')} destek olarak eklendi. Mesaileri bu ekibin çıkışına göre hesaplanacak.`);
+            setDestekJob(null);
+          } catch (err) { console.error('Destek kaydedilemedi:', err); alert('Destek kaydedilemedi.'); }
+          finally { setDestekKaydediliyor(false); }
+        };
+
+        return (
+          <div className="fixed inset-0 bg-black/70 z-[9999] flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setDestekJob(null)}>
+            <div className="bg-white w-full sm:max-w-lg rounded-t-2xl sm:rounded-2xl max-h-[88vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between p-4 bg-cyan-600 text-white shrink-0">
+                <h3 className="font-black flex items-center gap-2"><Users className="w-5 h-5" /> Destek Personeli</h3>
+                <button onClick={() => setDestekJob(null)} className="p-1.5 rounded-lg hover:bg-white/20 transition"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="p-3 bg-cyan-50 border-b border-cyan-200 shrink-0">
+                <p className="text-sm font-black text-cyan-900">{destekJob.customerName}</p>
+                <p className="text-[11px] font-bold text-cyan-700">{destekJob.date} • {destekJob.team}</p>
+                <p className="text-[10px] font-bold text-cyan-600 mt-1">
+                  Seçilen personel bu ekibe katılır. Mesaisi artık kendi ilk ekibinden değil, BU ekibin çıkış saatinden hesaplanır.
+                </p>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2.5 space-y-1.5">
+                {uygunlar.length === 0 && (
+                  <p className="text-center text-xs font-bold text-neutral-400 py-6">Bu gün işi bitmiş veya boşta personel yok.</p>
+                )}
+                {uygunlar.map(({ p, durum, kendiIsi }) => {
+                  const secili = destekSecim.includes(String(p.id));
+                  return (
+                    <button key={p.id} type="button"
+                      onClick={() => setDestekSecim(v => secili ? v.filter(x => x !== String(p.id)) : [...v, String(p.id)])}
+                      className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border-2 text-left transition ${secili ? 'border-cyan-500 bg-cyan-50' : 'border-neutral-200 bg-white hover:bg-neutral-50'}`}>
+                      <span className={`w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center ${secili ? 'bg-cyan-600 border-cyan-600' : 'border-neutral-300'}`}>
+                        {secili && <CheckCircle className="w-3.5 h-3.5 text-white" />}
+                      </span>
+                      <span className="flex-1 min-w-0">
+                        <span className="block font-black text-sm text-neutral-800 truncate">{p.fullName}</span>
+                        <span className="block text-[10px] font-bold text-neutral-500 truncate">
+                          {p.position || 'Personel'} • {durum}{kendiIsi ? ` (${kendiIsi.customerName})` : ''}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+                {/* İşi süren personel bilgi amaçlı, seçilemez halde en altta */}
+                {mesgul.length > 0 && (
+                  <div className="pt-2 mt-1 border-t border-dashed border-neutral-300">
+                    <p className="text-[9px] font-black text-neutral-400 uppercase mb-1.5">İşi süren personel (seçilemez)</p>
+                    {mesgul.slice(0, 20).map(({ p, kendiIsi }) => (
+                      <div key={p.id} className="flex items-center gap-2 p-2 opacity-50">
+                        <span className="w-5 h-5 rounded border-2 border-neutral-200 shrink-0"></span>
+                        <span className="text-xs font-bold text-neutral-500 truncate">{p.fullName} — {kendiIsi?.customerName}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="p-3 border-t border-neutral-200 shrink-0">
+                <button onClick={kaydet} disabled={destekKaydediliyor}
+                  className="w-full py-3 bg-cyan-600 hover:bg-cyan-700 disabled:opacity-50 text-white font-black rounded-xl transition flex items-center justify-center gap-2">
+                  <CheckCircle className="w-5 h-5" />
+                  {destekKaydediliyor ? 'Kaydediliyor...' : destekSecim.length === 0 ? 'Desteği Kaldır' : `${destekSecim.length} Kişiyi Desteğe Ekle`}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {editingTeamJob && (() => {
         const job = jobs.find(j => j.id === editingTeamJob.id) || editingTeamJob;
         const assignedIds = job.assignedPersonnelIds || [];
