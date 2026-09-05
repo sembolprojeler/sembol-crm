@@ -10,7 +10,9 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   // Eskiden IBAN bu dosyada sabit yazılıydı ve panelden değiştirilemiyordu.
   aktifBankaBilgiMetni,
   // YENİ: IBAN Paylaş penceresi için varsayılan hesap nesnesi ve IBAN biçimleyici.
-  aktifBankaHesabi, ibanBicimle } from './shared.jsx';
+  aktifBankaHesabi, ibanBicimle,
+  // YENİ: Ekipler arası destek — puantajın da destek zincirini bilmesi için
+  personelSonEkipIsi, isTamEkipIdleri, isMesaiEkipIdleri } from './shared.jsx';
 
   export const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -8888,16 +8890,25 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
         // yapar ama onu ÇAĞIRMAZ — o fonksiyon bu satırlardan SONRA tanımlı
         // olduğu için render sırasında henüz erişilebilir değildir.
         // ====================================================================
-        const ekipIdleriCoz = (is) => {
-          const idler = [...(is.assignedPersonnelIds || [])];
-          if (is.assignedPersonnelId && !idler.includes(is.assignedPersonnelId)) idler.push(is.assignedPersonnelId);
-          return idler.map(String);
-        };
+        // ====================================================================
+        // YENİ (kullanıcı talebi): PUANTAJ DA DESTEK ZİNCİRİNİ BİLİYOR
+        // --------------------------------------------------------------------
+        // ESKİ HALİ: Gruplama yalnızca assignedPersonnelIds'e bakıyordu. Bir
+        // personel gün içinde başka ekibe DESTEK'e gönderilse bile puantaj onu
+        // hâlâ İLK ekibinin plakasında sayıyordu. Sonuç: İş Onaylama Tahtası
+        // ile Puantaj Takip aynı kişi için FARKLI fazla mesai gösterebiliyordu.
+        //
+        // YENİ HALİ: Kişinin plakası, personelSonEkipIsi ile bulunan EN SON
+        // dahil olduğu ekibin aracından alınır (2., 3., 4. ekip zinciri dahil).
+        // Böylece iki ekran birebir aynı sonucu üretir: destek veren kişi son
+        // ekibinin çıkışıyla, ekipte kalanlar kendi çıkışlarıyla hesaplanır.
+        // ====================================================================
         const ekipGruplari = new Map(); // plaka -> personel[]
         const aracsizlar = [];
         maviEkip.forEach(p => {
-          const oGunkuIsler = (jobs || []).filter(is => is.date === tarih && ekipIdleriCoz(is).includes(String(p.id)));
-          const plaka = oGunkuIsler.map(is => is.assignedVehiclePlate).filter(Boolean)[0];
+          // Destek zinciri dikkate alınarak kişinin O GÜNKÜ SON ekibi
+          const sonIs = personelSonEkipIsi(p.id, tarih, jobs || []);
+          const plaka = sonIs?.assignedVehiclePlate || null;
           if (plaka) {
             if (!ekipGruplari.has(plaka)) ekipGruplari.set(plaka, []);
             ekipGruplari.get(plaka).push(p);
@@ -8913,7 +8924,10 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
           const oGunAtananlar = new Set();
           (jobs || []).forEach(is => {
             if (is.date !== tarih) return;
-            ekipIdleriCoz(is).forEach(id => oGunAtananlar.add(id));
+            // DEĞİŞTİ: isTamEkipIdleri = asıl ekip + desteğe gelenler.
+            // Desteğe gönderilen kişi de o gün göreve atanmış sayılır; aksi
+            // halde QR basmadıysa haksız yere "Devamsız" işaretlenebilirdi.
+            isTamEkipIdleri(is).forEach(id => oGunAtananlar.add(id));
           });
           ekipGruplari.forEach(grup => {
             Object.assign(maviSonuc, mesaiOnerileriHesapla(grup, maviKayitlar, tarih, oGunAtananlar) || {});
@@ -9134,11 +9148,9 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   // ---------------------------------------------------------------------------
 
   // Bir işin ekip kimlikleri (hem çoklu hem tekil atama alanı desteklenir)
-  const isinEkipIdleri = (is) => {
-    const idler = [...(is.assignedPersonnelIds || [])];
-    if (is.assignedPersonnelId && !idler.includes(is.assignedPersonnelId)) idler.push(is.assignedPersonnelId);
-    return idler.map(String);
-  };
+  // DEĞİŞTİ: Ekip listesine desteğe gelenler de dahil edilir; puantaj
+  // ipuçlarında "kiminle çalıştı" bilgisi destek personelini de gösterir.
+  const isinEkipIdleri = (is) => isTamEkipIdleri(is);
 
   // Kayıt sahibinin o gün birlikte çalıştığı MAVİ YAKA ekip arkadaşları
   // ==========================================================================
@@ -9150,8 +9162,14 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   const personelAraci = (personelId, tarih) => {
     const pid = String(personelId);
     const oGunkuIsler = (jobs || []).filter(is => is.date === tarih && isinEkipIdleri(is).includes(pid));
-    // Bir personel aynı gün birden fazla işe/araca çıkmış olabilir
-    const plakalar = [...new Set(oGunkuIsler.map(is => is.assignedVehiclePlate).filter(Boolean))];
+    // YENİ: Destek zinciri varsa SON ekibin plakası başa alınır — mesai o
+    // araca göre hesaplandığı için ipucunda da ilk sırada görünmelidir.
+    const sonIs = personelSonEkipIsi(pid, tarih, jobs || []);
+    const sonPlaka = sonIs?.assignedVehiclePlate || null;
+    const hamPlakalar = [...new Set(oGunkuIsler.map(is => is.assignedVehiclePlate).filter(Boolean))];
+    const plakalar = sonPlaka
+      ? [sonPlaka, ...hamPlakalar.filter(pl => pl !== sonPlaka)]
+      : hamPlakalar;
     return {
       plakalar,
       isler: oGunkuIsler,
