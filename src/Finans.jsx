@@ -4972,6 +4972,103 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [kopyalanan, setKopyalanan] = useState('');
     // IBAN'ı 4'erli gruplar hâlinde okunaklı yazar: TR12 3456 7890 ...
     const ibanGoster = (iban) => (iban || '').replace(/\s+/g, '').toUpperCase().replace(/(.{4})/g, '$1 ').trim();
+    // ========================================================================
+    // YENİ (kullanıcı talebi): ÖDEME SATIRI — A4 PDF / YAZDIRMA
+    // ------------------------------------------------------------------------
+    // Maaş (Kalan Banka/Nakit), İcra Kesintisi ve Avans satırlarının her biri
+    // için tek tuşla A4 dikey liste üretir. Yeni sekmede açılır ve tarayıcının
+    // yazdırma penceresi gelir; oradan "PDF olarak kaydet" seçilebilir.
+    //
+    // Listede: sıra no, personel adı, (icrada IBAN/alıcı), ödenecek tutar ve
+    // imza sütunu bulunur. Zaten tamamı ödenmiş kişiler "Ödendi ✓" yazar ve
+    // toplama dahil edilmez. Altta genel toplam ve imza alanları vardır.
+    // Projede kullanılan window.print() deseni korunmuştur (ek kütüphane yok).
+    // ========================================================================
+    const odemeSatiriYazdir = (satir) => {
+      if (!satir) return;
+      const icraMi = satir.kanal === 'icra';
+      const kisiler = (satir.kisiler || []);
+      // Yalnızca ödenecek kişiler listelenir; tamamı ödenmişler ayrı gösterilir
+      const bekleyenler = kisiler.filter(k => (k.bekleyen || 0) > 0.01);
+      const odenenler = kisiler.filter(k => (k.bekleyen || 0) <= 0.01);
+      const toplam = bekleyenler.reduce((t, k) => t + (k.bekleyen || 0), 0);
+      const trh = (t) => (t || '').split('-').reverse().join('.');
+      const esc = (x) => String(x ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+      const satirlarHtml = bekleyenler.map((k, i) => `
+        <tr>
+          <td class="c">${i + 1}</td>
+          <td class="ad">${esc((k.person?.fullName || '').toUpperCase())}
+            ${icraMi && k.person?.icraIban ? `<div class="alt">IBAN: ${esc(ibanBicimle(k.person.icraIban))}${k.person?.icraIbanSahibi ? ` &nbsp;•&nbsp; ${esc(k.person.icraIbanSahibi)}` : ''}</div>` : ''}
+            ${icraMi && k.person?.icraDosyaNo ? `<div class="alt">Dosya: ${esc(k.person.icraDosyaNo)}</div>` : ''}
+          </td>
+          ${icraMi ? `<td class="c">${paraFmt(k.icraKalan || 0)}</td>` : ''}
+          <td class="tutar">${paraFmt(k.bekleyen)}</td>
+          <td class="imza"></td>
+        </tr>`).join('');
+
+      const odenenHtml = odenenler.length === 0 ? '' : `
+        <p class="notlar"><b>Bu listede ödemesi tamamlanmış ${odenenler.length} kişi gösterilmemiştir:</b>
+        ${odenenler.map(k => esc(k.person?.fullName || '')).join(', ')}</p>`;
+
+      const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
+        <title>${esc(satir.ad)} — ${esc(satir.kaynakEtiket || '')}</title>
+        <style>
+          @page { size: A4 portrait; margin: 14mm 12mm; }
+          * { box-sizing: border-box; }
+          body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
+          .baslik { border-bottom: 3px solid #111; padding-bottom: 8px; margin-bottom: 10px; }
+          .baslik h1 { font-size: 17px; margin: 0 0 3px; }
+          .baslik .meta { font-size: 11px; color: #444; }
+          .ozet { display: flex; gap: 8px; margin: 10px 0 12px; }
+          .kutu { flex: 1; border: 1px solid #999; border-radius: 4px; padding: 6px 8px; }
+          .kutu span { display: block; font-size: 9px; text-transform: uppercase; color: #555; letter-spacing: .4px; }
+          .kutu b { font-size: 14px; }
+          table { width: 100%; border-collapse: collapse; }
+          th { background: #eee; border: 1px solid #666; padding: 5px 6px; font-size: 10px; text-transform: uppercase; }
+          td { border: 1px solid #666; padding: 5px 6px; font-size: 11px; vertical-align: top; }
+          td.c { text-align: center; width: 28px; }
+          td.ad { font-weight: bold; }
+          td.ad .alt { font-weight: normal; font-size: 9px; color: #444; font-family: monospace; margin-top: 2px; }
+          td.tutar { text-align: right; font-weight: bold; white-space: nowrap; width: 95px; }
+          td.imza { width: 105px; }
+          tfoot td { background: #f3f3f3; font-weight: bold; font-size: 12px; }
+          .notlar { font-size: 9px; color: #555; margin-top: 8px; }
+          .altimza { margin-top: 22px; display: flex; gap: 40px; font-size: 10px; }
+          .altimza div { flex: 1; border-top: 1px solid #111; padding-top: 4px; text-align: center; }
+          tr { page-break-inside: avoid; }
+        </style></head><body>
+        <div class="baslik">
+          <h1>${esc(satir.ad)}</h1>
+          <div class="meta">${esc(satir.kaynakEtiket || '')} &nbsp;•&nbsp; Vade: ${trh(satir.vadeTarihi)} &nbsp;•&nbsp; Liste tarihi: ${trh(bugunStr())}</div>
+        </div>
+        <div class="ozet">
+          <div class="kutu"><span>Kişi Sayısı</span><b>${bekleyenler.length}</b></div>
+          <div class="kutu"><span>Ödenecek Toplam</span><b>₺${paraFmt(toplam)}</b></div>
+          <div class="kutu"><span>Ödeme Türü</span><b>${icraMi ? 'İcra Kesintisi' : satir.kanal === 'banka' ? 'Banka' : satir.kanal === 'nakit' ? 'Nakit' : 'Avans'}</b></div>
+        </div>
+        <table>
+          <thead><tr>
+            <th>#</th><th style="text-align:left">Personel</th>
+            ${icraMi ? '<th>Kalan İcra Borcu</th>' : ''}
+            <th style="text-align:right">Tutar (₺)</th><th>İmza</th>
+          </tr></thead>
+          <tbody>${satirlarHtml || `<tr><td colspan="${icraMi ? 5 : 4}" style="text-align:center;padding:16px">Ödenecek kayıt yok.</td></tr>`}</tbody>
+          <tfoot><tr>
+            <td colspan="${icraMi ? 3 : 2}" style="text-align:right">GENEL TOPLAM</td>
+            <td class="tutar">₺${paraFmt(toplam)}</td><td></td>
+          </tr></tfoot>
+        </table>
+        ${odenenHtml}
+        <div class="altimza"><div>Hazırlayan</div><div>Onaylayan</div><div>Teslim Alan</div></div>
+        <script>window.onload = () => setTimeout(() => window.print(), 400);<\/script>
+      </body></html>`;
+
+      const w = window.open('', '_blank');
+      if (!w) { alert('Yazdırma penceresi açılamadı. Tarayıcınızın açılır pencere engelini kapatın.'); return; }
+      w.document.open(); w.document.write(html); w.document.close();
+    };
+
     // Panoya kopyalama. navigator.clipboard bazı tarayıcı/HTTP ortamlarında
     // çalışmaz; o yüzden eski usul textarea + execCommand yedeği bırakıldı.
     const panoyaKopyala = async (metin, etiket) => {
@@ -8884,6 +8981,13 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                                     <div className={`font-black tabular-nums ${a.tutar > 0 ? 'text-amber-700' : 'text-neutral-400'}`}>₺{paraFmt(a.tutar)}</div>
                                   </div>
                                   <div className="flex items-center gap-1 shrink-0">
+                                    {/* YENİ (kullanıcı talebi): A4 liste yazdır / PDF kaydet */}
+                                    <button type="button"
+                                      onClick={e => { e.stopPropagation(); odemeSatiriYazdir(a); }}
+                                      title="Bu avansın personel listesini A4 olarak yazdır / PDF kaydet"
+                                      className="p-1.5 bg-white border border-amber-300 text-amber-700 hover:bg-amber-50 rounded-lg transition">
+                                      <FileText className="w-4 h-4" />
+                                    </button>
                                     <button type="button"
                                       onClick={e => { e.stopPropagation(); avansTopluAc(a.kanal, a.yaka); }}
                                       className="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black rounded-lg transition">Avans Gir</button>
@@ -8931,6 +9035,12 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                                     <div className="font-black text-purple-800 tabular-nums">₺{paraFmt(m.tutar)}</div>
                                     {vadeYaklasti(m.vadeTarihi) && <div className="text-[9px] font-black text-red-600 animate-pulse">YAKLAŞIYOR</div>}
                                   </div>
+                                  {/* YENİ (kullanıcı talebi): A4 liste yazdır / PDF kaydet */}
+                                  <button type="button" onClick={e => { e.stopPropagation(); odemeSatiriYazdir(m); }}
+                                    title="Bu ödemenin personel listesini A4 olarak yazdır / PDF kaydet"
+                                    className="shrink-0 p-1.5 bg-white border border-purple-300 text-purple-700 hover:bg-purple-50 rounded-lg transition">
+                                    <FileText className="w-4 h-4" />
+                                  </button>
                                   <button type="button" onClick={e => { e.stopPropagation(); setMaasOdeModal({ satir: m, kaynakDefterId: '' }); }}
                                     className="shrink-0 px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-black rounded-lg transition">Öde</button>
                                 </div>
