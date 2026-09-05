@@ -108,6 +108,22 @@ const usePersonelBorcTahsilatlari = () => {
   return tahsilatlar;
 };
 
+// ==========================================================================
+// YENİ (kullanıcı talebi): İCRA TOPLAM BORCU TAKİBİ
+// ==========================================================================
+// Personel dokümanında iki alan tutulur:
+//   icraToplamBorc    -> icra dosyasındaki toplam borç (formdan girilir)
+//   icraOdenenToplam  -> bugüne kadar ödenen (her ödemede artar)
+// Kalan = toplam - ödenen. Kalan 0'a inince Ödemeler'deki icra kalemi kaybolur.
+// Aylık kesinti tutarı maaş tablosundaki İCRA sütunuyla aynıdır (hesaplanan
+// bankanın %25'i) ve kalanı aşamaz.
+// ==========================================================================
+const icraKalanBorc = (person) =>
+  Math.max(0, (parseFloat(person?.icraToplamBorc) || 0) - (parseFloat(person?.icraOdenenToplam) || 0));
+// Bu ay ödenecek icra tutarı: aylık kesinti, kalan borçla sınırlı
+const icraAylikOdenecek = (person, aylikKesinti) =>
+  Math.min(Math.max(0, parseFloat(aylikKesinti) || 0), icraKalanBorc(person));
+
 // Ham borç ve tahsil edilen tutardan KALAN borcu hesaplar (negatife düşmez)
 const personelKalanBorc = (hamBorc, tahsilEdilen) =>
   Math.max(0, (parseFloat(hamBorc) || 0) - (parseFloat(tahsilEdilen) || 0));
@@ -3065,7 +3081,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                 {g('hakedis') && <th className="bg-green-100 text-green-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]" title="Girilen prim saatinin TL karşılığı. Düzenlemek için hücreye tıklayın, saat olarak girin.">PRİM ₺</th>}
                 {g('hakedis') && <th className="bg-purple-200 text-purple-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]" title="Prim payı düşülmüş saf mesai ücreti.">MESAİ ÜCR.</th>}
                 {g('hakedis') && <th className="bg-red-100 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">BORÇ</th>}
-                {g('hakedis') && <th style={{ borderRight: '3px solid #6d28d9' }} className="bg-red-200 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">İCRA</th>}
+                {g('hakedis') && <th className="bg-red-200 text-red-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[60px]">İCRA</th>}
+                {/* YENİ: Personelin KALAN toplam icra borcu (formdaki toplam - ödenenler) */}
+                {g('hakedis') && <th style={{ borderRight: '3px solid #6d28d9' }} className="bg-red-300 text-red-950 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[64px]" title="İcra dosyasındaki toplam borçtan bugüne kadar ödenenler düşülmüş hâli">İCRA TOPLAM</th>}
                 {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[66px]">YEMEK</th>}
                 {g('finans') && <th className="bg-neutral-100 text-neutral-900 font-bold px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[66px]">YOL</th>}
                 {g('finans') && <th className="bg-yellow-200 text-yellow-900 font-black px-0.5 py-1 border-b border-r border-neutral-400 text-[9px] leading-tight w-[66px]">KAL. BANKA</th>}
@@ -3206,7 +3224,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                     </td>
                     )}
                     {g('hakedis') && (
-                      <td style={{ borderRight: '3px solid #6d28d9' }} className={`border-r border-neutral-300 px-0.5 py-0.5 font-black text-center align-middle ${row.icraOdendi ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
+                      <td className={`border-r border-neutral-300 px-0.5 py-0.5 font-black text-center align-middle ${row.icraOdendi ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
                       <div className="flex items-center justify-center gap-1">
                         <span className={row.icraOdendi ? 'line-through opacity-70' : ''}>{c.icraKesintisi.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
                         {c.icraKesintisi > 0 && (
@@ -3217,6 +3235,24 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                       </div>
                     </td>
                     )}
+                    {/* YENİ (kullanıcı talebi): İCRA TOPLAM — kalan icra borcu */}
+                    {g('hakedis') && (() => {
+                      const icraVar = person.icrasiVar === 'Evet' && (parseFloat(person.icraToplamBorc) || 0) > 0;
+                      const kalan = icraKalanBorc(person);
+                      const odenen = parseFloat(person.icraOdenenToplam) || 0;
+                      const bitti = icraVar && kalan <= 0.01;
+                      return (
+                        <td style={{ borderRight: '3px solid #6d28d9' }} className={`border-r border-neutral-300 px-0.5 py-0.5 font-black text-center align-middle text-[10px] ${!icraVar ? 'bg-neutral-50 text-neutral-300' : bitti ? 'bg-green-100 text-green-800' : 'bg-red-200 text-red-900'}`}
+                          title={icraVar ? `Toplam icra borcu ₺${paraFmt(person.icraToplamBorc)} • Ödenen ₺${paraFmt(odenen)} • Kalan ₺${paraFmt(kalan)}` : 'İcra yok'}>
+                          {!icraVar ? '—' : bitti ? 'Bitti ✓' : (
+                            <div className="flex flex-col items-center leading-none">
+                              <span>{kalan.toLocaleString('tr-TR', { maximumFractionDigits: 0 })}</span>
+                              {odenen > 0 && <span className="text-[7px] font-bold text-red-700 mt-0.5">₺{paraFmt(odenen)} ödendi</span>}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })()}
                     {g('finans') && (
                       <td className={`border-r border-neutral-300 px-0.5 py-0.5 ${row.yemekOdendi ? 'bg-green-50' : ''}`}>
                       <div className="flex items-center gap-1">
@@ -3565,6 +3601,24 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const handlePaymentToggle = (personId, field, amountField, amountValue) => {
       const row = maasData[personId] || {};
       const newChecked = !row[field];
+      // ====================================================================
+      // YENİ (kullanıcı talebi): İCRA TİKİ TOPLAM BORCU DA GÜNCELLER
+      // --------------------------------------------------------------------
+      // Maaş tablosundaki İCRA tiki atılınca o ayın kesintisi personelin
+      // icraOdenenToplam alanına EKLENİR, tik kaldırılınca GERİ ALINIR.
+      // Böylece "İCRA TOPLAM" sütunu ve Ödemeler sayfasındaki icra kalemi
+      // tik ile de tutarlı kalır (iki yoldan da ödeme işlenebilir).
+      // ====================================================================
+      if (field === 'icraOdendi') {
+        const person = targetPersonnelList.find(p => p.id === personId);
+        if (person && person.icrasiVar === 'Evet') {
+          const tutar = parseFloat(amountValue) || 0;
+          const onceki = parseFloat(person.icraOdenenToplam) || 0;
+          const yeni = Math.max(0, newChecked ? onceki + tutar : onceki - tutar);
+          updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', personId), { icraOdenenToplam: yeni })
+            .catch(err => console.warn('İcra toplamı güncellenemedi:', err));
+        }
+      }
       setMaasData(prev => ({
         ...prev,
         [personId]: {
@@ -4814,8 +4868,11 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [alacakAyi, setAlacakAyi] = useState(bugunStr().slice(0, 7));
     const [mevcutBorclularAcik, setMevcutBorclularAcik] = useState(false);
     // YENİ (kullanıcı talebi): "Tüm Zamanları Göster" — ay filtresi kapatılır,
-    // tüm bekleyen tahsilatlar tek listede (blok bazlı, en yeniden en eskiye) görünür
-    const [alacakTumZamanlar, setAlacakTumZamanlar] = useState(false);
+    // tüm bekleyen tahsilatlar tek listede (blok bazlı, en yeniden en eskiye) görünür.
+    // DEĞİŞTİ: Varsayılan artık TÜM ZAMANLAR. Borçlu defteri açıldığında hiçbir
+    // alacak ay filtresi yüzünden gizlenmez; geçmiş aylardan kalan borçlar da
+    // ilk bakışta görünür. Kullanıcı isterse "Aylık" düğmesiyle ay görünümüne geçer.
+    const [alacakTumZamanlar, setAlacakTumZamanlar] = useState(true);
     const [acikAlacakKalemi, setAcikAlacakKalemi] = useState(null);
     // Üç borçlu türü — rozet renkleriyle
     const ALACAK_TURLERI = [
@@ -6500,9 +6557,11 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         // Kaynak defterin türü (Banka/Nakit) etiket olarak açıklamaya yazılır
         const defterTuruEtiketi = kaynak?.tur === 'Nakit' || kaynak?.tur === 'Kasa' ? 'Nakit'
           : kaynak?.tur === 'Banka' ? 'Banka' : (kaynak?.tur || 'Hesap');
-        const kanalAd = satir.kanal === 'banka' ? 'Banka' : satir.kanal === 'nakit' ? 'Nakit' : 'Maaş';
+        const icraMi = satir.kanal === 'icra';
+        const kanalAd = icraMi ? 'İcra' : satir.kanal === 'banka' ? 'Banka' : satir.kanal === 'nakit' ? 'Nakit' : 'Maaş';
         const ortak = {
-          tarih: bugunStr(), kategori: 'Personel Maaşı', etiketler: ['Maaş'],
+          // YENİ: İcra ödemesi ayrı kategoriyle yazılır; raporlarda maaştan ayrışır
+          tarih: bugunStr(), kategori: icraMi ? 'İcra Ödemesi' : 'Personel Maaşı', etiketler: icraMi ? ['İcra'] : ['Maaş'],
           odemeId, vadeNo: 1, odemeKalemId: satir.id, odemeDefterId: seciliDefter.id,
           kaynak: 'Maaş Ödemesi (Oto)', createdAt: new Date().toISOString(),
           by: currentUser?.fullName || 'Sistem',
@@ -6517,7 +6576,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           ...ortak, ...etiketAlanlari, tip: 'cikis', tutar, odemeMahsup: false,
           defterId: maasOdeModal.kaynakDefterId,
           odemeYontemi: defterdenOdemeYontemi(maasOdeModal.kaynakDefterId),
-          aciklama: `${kisiAd}${kanalAd} Maaşı (${satir.kaynakEtiket}) • ${defterTuruEtiketi}${kismiNot}`,
+          aciklama: icraMi
+            ? `${kisiAd}İcra Ödemesi (maaştan kesinti) • ${defterTuruEtiketi}${kismiNot}`
+            : `${kisiAd}${kanalAd} Maaşı (${satir.kaynakEtiket}) • ${defterTuruEtiketi}${kismiNot}`,
         });
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
           ...ortak, ...etiketAlanlari, tip: 'giris', tutar, odemeMahsup: true,
@@ -6540,6 +6601,18 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           // KISMİ ödeme: tik ATMA, ödenen tutarı BİRİKTİR (kalan otomatik azalır)
           const bankaKismi = () => { const onceki = parseFloat(r.bankaOdenenTutar) || 0; r.bankaOdenenTutar = String((onceki + tutar).toFixed(2)); };
           const nakitKismi = () => { const onceki = parseFloat(r.nakitOdenenTutar) || 0; r.nakitOdenenTutar = String((onceki + tutar).toFixed(2)); };
+          // ==============================================================
+          // YENİ: İCRA kanalı — maaş satırına icraOdenenTutar BİRİKTİRİLİR,
+          // aylık tutar tamamlanınca tik atılır. Personel dokümanındaki
+          // icraOdenenToplam da artırılır (İCRA TOPLAM sütunu azalır).
+          // ==============================================================
+          if (icraMi) {
+            const onceki = parseFloat(r.icraOdenenTutar) || 0;
+            const yeniAylik = onceki + tutar;
+            r.icraOdenenTutar = String(yeniAylik.toFixed(2));
+            if (!kismiMi || yeniAylik >= (k.icraAylik || 0) - 0.01) r.icraOdendi = true;
+            return;
+          }
           if (kismiMi) {
             if (satir.kanal === 'banka') bankaKismi();
             else if (satir.kanal === 'nakit') nakitKismi();
@@ -6550,6 +6623,17 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           }
         });
         await setDoc(mRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
+        // İcra: personelin toplam ödenen icrası artırılır -> kalan borç düşer
+        if (icraMi && tekKisi?.person?.id) {
+          const p = tekKisi.person;
+          const onceki = parseFloat(p.icraOdenenToplam) || 0;
+          const toplam = parseFloat(p.icraToplamBorc) || 0;
+          const yeni = Math.min(toplam, onceki + tutar); // toplam borcu aşmaz
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', p.id), { icraOdenenToplam: yeni });
+          if (toplam - yeni <= 0.01) {
+            addSystemLog?.('İcra Borcu Tamamlandı', `${p.fullName}: icra borcunun tamamı (₺${paraFmt(toplam)}) ödendi. Ödemeler'de artık icra kalemi oluşmayacak.`);
+          }
+        }
         addSystemLog?.(kismiMi ? 'Maaş Kısmi Ödeme' : 'Maaş Ödemesi Yapıldı',
           `${satir.ad} (${satir.kaynakEtiket}) ₺${paraFmt(tutar)}${kismiMi ? ' KISMİ' : ''} — ${kaynak?.ad || '-'} (${defterTuruEtiketi}) hesabından ödendi.`);
         setMaasOdeModal(null);
@@ -7100,6 +7184,52 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     }, [odemeDefteriId, maasVeri, maasKaynakAy, personnelList, islemler, odemeAyi]);
 
     // ========================================================================
+    // YENİ (kullanıcı talebi): İCRA ÖDEMESİ KALEMLERİ — her ayın 6'sı
+    // ------------------------------------------------------------------------
+    // İcrası olan ve KALAN icra borcu > 0 olan her personel için ayrı bir
+    // ödeme kalemi üretilir: "Rafet Tarakçı — İcra Ödemesi ₺7.500".
+    //   • Tutar = o ayın icra kesintisi (maaş tablosundaki İCRA ile aynı,
+    //     hesaplanan bankanın %25'i), KALAN BORÇLA SINIRLI.
+    //   • Ödendikçe personelin icraOdenenToplam alanı artar; İCRA TOPLAM
+    //     sütunu azalır. Kalan 0 olunca bu kalem ARTIK ÜRETİLMEZ.
+    //   • Kalem, maaş satırlarıyla aynı yapıda (kanal: 'icra') olduğu için
+    //     aynı ödeme penceresi ve kısmi ödeme mantığı kullanılır.
+    // ========================================================================
+    const icraSatirlari = useMemo(() => {
+      if (!odemeDefteriId || !maasVeri) return [];
+      const { yil, ay } = maasKaynakAy;
+      if (maasVeri.kaynakAnahtar !== `${yil}_${ay}`) return [];
+      const yakaBul = (p) => (p.collarType === 'Beyaz Yaka') ? 'beyaz' : 'mavi';
+      return personelAdaGoreSirala(
+        (personnelList || []).filter(p =>
+          p.position !== 'Firma Sahibi' && p.icrasiVar === 'Evet' &&
+          (parseFloat(p.icraToplamBorc) || 0) > 0 && icraKalanBorc(p) > 0.01 &&
+          isPersonnelVisibleInMonth(p, yil, ay))
+      ).map(p => {
+        const yaka = yakaBul(p);
+        const veriKaynagi = maasVeri[yaka];
+        const row = (veriKaynagi?.maas || {})[p.id] || {};
+        const hes = maasKisiHesabi(p, row, (veriKaynagi?.mesai || {})[p.id], yil, ay);
+        const aylik = icraAylikOdenecek(p, hes.icraKesintisi);      // kalanla sınırlı
+        const odenenBuAy = parseFloat(row.icraOdenenTutar) || 0;    // bu ay için ödenmiş kısım
+        const bekleyen = row.icraOdendi ? 0 : Math.max(0, aylik - odenenBuAy);
+        const kalemId = `icra_${p.id}_${yil}_${ay}`;
+        const mahsup = islemler.find(i => !i.silindi && i.defterId === odemeDefteriId && i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalemId);
+        return {
+          id: kalemId, yaka, kanal: 'icra', icra: true,
+          ad: `${p.fullName} — İcra Ödemesi`,
+          kaynakEtiket: `${AY_ADLARI[ay - 1]} ${yil} icra kesintisi • kalan borç ₺${paraFmt(icraKalanBorc(p))}`,
+          vadeTarihi: `${odemeAyi}-06`,
+          tutar: bekleyen,
+          kisiler: [{ person: p, bekleyen, kismiOdenen: odenenBuAy, bankaKalan: 0, kalanNakit: 0, bankaOdendi: true, nakitOdendi: true, icraAylik: aylik }],
+          devir: `${odemeAyi}-06` < SISTEM_DEVIR_TARIHI,
+          odendi: `${odemeAyi}-06` < SISTEM_DEVIR_TARIHI || !!mahsup || bekleyen <= 0.01,
+          odemeTarihi: mahsup?.tarih || null,
+        };
+      }).filter(sa => sa.kisiler[0].icraAylik > 0.01);
+    }, [odemeDefteriId, maasVeri, maasKaynakAy, personnelList, islemler, odemeAyi]);
+
+    // ========================================================================
     // YENİ: İKİ AVANS SATIRI (NAKİT + RESMİ) — her ayın 20'si
     // ========================================================================
     const YAKA_FILTRELERI = {
@@ -7537,7 +7667,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                     // Bu satırlar sentetiktir (defter.odemeler içinde yer
                     // almazlar), dolayısıyla ÇİFT SAYIM riski yoktur.
                     // ==========================================================
-                    const ekSatirlar = [...maasSatirlari, ...avansSatirlari];
+                    const ekSatirlar = [...maasSatirlari, ...icraSatirlari, ...avansSatirlari]; // YENİ: icra kalemleri dahil
                     const ekToplam = ekSatirlar.reduce((t, s) => t + (parseFloat(s.tutar) || 0), 0);
                     const ekOdenen = ekSatirlar.filter(s => s.odendi).reduce((t, s) => t + (parseFloat(s.tutar) || 0), 0);
                     const ekBekleyen = ekToplam - ekOdenen;
@@ -8547,7 +8677,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                   Böylece bu özet, defter anasayfasındaki ÖDEMELER kartıyla
                   birebir aynı toplamı gösterir. */}
               {(() => {
-                const ekSatirlar = [...maasSatirlari, ...avansSatirlari];
+                const ekSatirlar = [...maasSatirlari, ...icraSatirlari, ...avansSatirlari]; // YENİ: icra kalemleri dahil
                 const ekToplam = ekSatirlar.reduce((t, s) => t + (parseFloat(s.tutar) || 0), 0);
                 const ekOdenen = ekSatirlar.filter(s => s.odendi).reduce((t, s) => t + (parseFloat(s.tutar) || 0), 0);
                 const ozetToplam = od.buAyToplam + ekToplam;
@@ -8665,8 +8795,10 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                     const d = new Date(oy, om - 1 + yon, 1);
                     setOdemeAyi(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
                   };
-                  const bekleyenMaaslar = maasSatirlari.filter(m => !m.odendi);
-                  const odenenMaaslar = maasSatirlari.filter(m => m.odendi);
+                  // YENİ: İcra kalemleri maaş satırlarıyla aynı akışta gösterilir (kanal: 'icra')
+                  const tumMaasSatirlari = [...maasSatirlari, ...icraSatirlari];
+                  const bekleyenMaaslar = tumMaasSatirlari.filter(m => !m.odendi);
+                  const odenenMaaslar = tumMaasSatirlari.filter(m => m.odendi);
                   // YENİ (kullanıcı talebi): iki AVANS satırı (nakit + resmi),
                   // her ayın 20'si vadeli — tutar 0 olsa da hep görünür.
                   const bekleyenAvanslar = avansSatirlari.filter(a => !a.odendi);
@@ -8760,10 +8892,11 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                                   <div className="flex-1 min-w-0">
                                     <div className="font-black text-sm text-purple-900 flex items-center gap-1.5 flex-wrap">
                                       {m.ad}
-                                      <span className="text-[9px] font-black bg-purple-200 text-purple-700 px-1.5 py-0.5 rounded-full">OTOMATİK • MUHASEBEDEN</span>
+                                      {/* YENİ: İcra kalemi kırmızı rozetle ayrışır */}
+                                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${m.icra ? 'bg-red-600 text-white' : 'bg-purple-200 text-purple-700'}`}>{m.icra ? 'İCRA • MAAŞTAN KESİNTİ' : 'OTOMATİK • MUHASEBEDEN'}</span>
                                     </div>
                                     {/* DEĞİŞTİ: satır artık tek kanala ait — alt yazı ona göre */}
-                                    <div className="text-[10px] font-bold text-purple-600">{m.kaynakEtiket} • Vade: {trh(m.vadeTarihi)} • {m.kisiler.length} personel • kalan {m.kanal === 'banka' ? 'banka' : m.kanal === 'nakit' ? 'nakit' : 'banka+nakit'} toplamı</div>
+                                    <div className="text-[10px] font-bold text-purple-600">{m.kaynakEtiket} • Vade: {trh(m.vadeTarihi)}{m.icra ? '' : ` • ${m.kisiler.length} personel • kalan ${m.kanal === 'banka' ? 'banka' : m.kanal === 'nakit' ? 'nakit' : 'banka+nakit'} toplamı`}</div>
                                   </div>
                                   <div className="text-right shrink-0">
                                     <div className="font-black text-purple-800 tabular-nums">₺{paraFmt(m.tutar)}</div>
@@ -9150,19 +9283,16 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                             <span className={`text-[10px] font-black tabular-nums ${tr2.yazi}`}>₺{paraFmt(blokToplam)}</span>
                           </div>
                         )}
-                        /* ================================================================
-                           DÜZELTİLDİ (kullanıcı talebi): MOBİLDE İSİM VE TUTAR KESİLİYORDU
-                           ----------------------------------------------------------------
-                           ESKİ DÜZEN: rozet + isim + tutar + 2 düğme HEPSİ tek satırdaydı.
-                           Telefonda (~340px) rozet, tutar ve düğmeler sabit genişlik
-                           kapladığı için ortadaki isim alanına neredeyse hiç yer kalmıyor,
-                           "truncate" ile "Emir ...", "İSMAİ...", "ÇEK..." diye kesiliyordu.
-                           YENİ DÜZEN: Mobilde satır İKİ KATA ayrılır —
-                             1. kat: rozet + TAM isim (kesilmez, gerekirse alt satıra sarar)
-                             2. kat: solda tutar, sağda "Tahsil Et" / "İcra" düğmeleri
-                           sm ve üzeri ekranlarda (masaüstü) ESKİ TEK SATIR düzeni aynen
-                           korunur; hiçbir veri veya davranış değişmedi, sadece yerleşim.
-                           ================================================================ */
+                        {/* HATA DÜZELTMESİ: Bu açıklama JSX içinde süslü parantezsiz
+                            yazıldığı için ekranda METİN olarak basılıyordu; süslü
+                            parantez içine alındı, artık yalnızca kodda durur.
+
+                            MOBİL YERLEŞİM: Telefonda (~340px) rozet, tutar ve düğmeler
+                            sabit genişlik kapladığından ortadaki isim alanına yer kalmıyor
+                            ve "Emir ...", "İSMAİ..." diye kesiliyordu. Bu yüzden mobilde
+                            satır iki kata ayrılır: 1. kat rozet + tam isim, 2. kat solda
+                            tutar sağda düğmeler. sm ve üzerinde eski tek satır düzeni
+                            aynen korunur. */}
                         <div className={`flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 rounded-xl border ${t.gecikmis ? 'border-red-300 bg-red-50' : tr2.yumusak}`}>
                           {/* 1. KAT (mobil) / SOL BLOK (masaüstü): rozet + isim + vade */}
                           <div className="flex items-start gap-2 min-w-0 flex-1">
@@ -11965,7 +12095,10 @@ silinmeTarihi: new Date().toISOString()`}</pre>
               <div className="space-y-3">
                 <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs font-bold text-purple-800">
                   <div className="font-black text-sm">{maasOdeModal.satir.kaynakEtiket}</div>
-                  <div>{maasOdeModal.satir.kisiler.length} personel • Kalan {maasOdeModal.satir.kanal === 'banka' ? 'banka' : maasOdeModal.satir.kanal === 'nakit' ? 'nakit' : 'banka + nakit'} toplamı</div>
+                  {/* YENİ: İcra ödemesinde alt yazı farklı — kalan toplam icra borcu gösterilir */}
+                  <div>{maasOdeModal.satir.kanal === 'icra'
+                    ? `İcra kesintisi • Kalan toplam icra borcu ₺${paraFmt(icraKalanBorc(maasOdeModal.satir.kisiler[0]?.person))}`
+                    : `${maasOdeModal.satir.kisiler.length} personel • Kalan ${maasOdeModal.satir.kanal === 'banka' ? 'banka' : maasOdeModal.satir.kanal === 'nakit' ? 'nakit' : 'banka + nakit'} toplamı`}</div>
                   <div className="text-lg font-black tabular-nums mt-1">₺{paraFmt(maasOdeModal.satir.tutar)}</div>
                 </div>
                 {/* ================================================================
