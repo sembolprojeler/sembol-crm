@@ -4738,7 +4738,13 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const netMaas = (maas / 30) * mesaiGunSayisi;
     const hasarKesinti = Math.min(parseFloat(row.hasarKesinti) || 0, primTL);
     const kalanNakit = netMaas - hesaplananBanka - nakitAvans + mesaiUcretiToplam - hasarKesinti;
-    return { bankaKalan, kalanNakit };
+    // HATA DÜZELTMESİ (kullanıcı bildirimi): Ödemeler sayfasında İcra satırları
+    // hiç görünmüyordu. Kök neden: bu fonksiyon icraKesintisi'ni HESAPLIYOR ama
+    // dönüş nesnesine KOYMUYORDU. icraSatirlari `hes.icraKesintisi` okuduğu için
+    // değer undefined geliyor, aylık tutar 0 çıkıyor ve satır süzülüyordu.
+    // ÇÖZÜM: icraKesintisi (ve hesaplananBanka) dönüşe eklendi. Ek alanlar
+    // mevcut çağrıları etkilemez — eskiden okunan iki alan aynen duruyor.
+    return { bankaKalan, kalanNakit, icraKesintisi, hesaplananBanka };
   };
 
   export const FinansDefterView = ({ currentUser, addSystemLog, onViewCari, onViewVehicle, onViewPersonnel, jobs = [], vehicles = [], personnelList = [] }) => {
