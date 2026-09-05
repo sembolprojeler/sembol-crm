@@ -18,6 +18,27 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
 import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from './OperasyonPersonel.jsx';
 
 
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): İŞE BAŞLAMA TARİHİNDEN ÖNCE LİSTELERDE ÇIKMASIN
+  // ==========================================================================
+  // SORUN: Personel kaydındaki "İşe Başlama Tarihi" (startDate) hiçbir yerde
+  // kontrol edilmiyordu. Örnek: Farhat Bazarov 05.09.2026'da işe başladı ama
+  // 04.09.2026 tarihli Ekip Kurma Tahtası'nda "boşta personel" olarak
+  // görünüyordu — o gün henüz şirkette değildi.
+  //
+  // KURAL: Seçili gün, personelin işe başlama tarihinden ÖNCE ise listelerde
+  // görünmez. Başlama tarihi girilmemiş eski kayıtlar etkilenmez (her zaman
+  // görünür) ki geçmiş veriler bozulmasın.
+  //
+  // NOT: İşten AYRILMA kontrolü (passiveDate) zaten mevcuttu ve korundu;
+  // bu yeni kural onun tarih ekseninde simetriğidir.
+  // ==========================================================================
+  const iseBasladiMi = (person, tarih) => {
+    const bas = person?.startDate;
+    if (!bas || !tarih) return true;   // Tarih bilgisi yoksa engelleme
+    return tarih >= bas;               // 'YYYY-AA-GG' metinleri doğrudan karşılaştırılabilir
+  };
+
   export const CurrentJobsView = ({ jobs, handleEditJob, handleOpenAssignModal, handleGenerateMessage, handleEstimateMaterials, setCancelJobId, setViewingImage, setDeleteJobId }) => {
     const [viewDate, setViewDate] = useState(new Date());
     const [searchQuery, setSearchQuery] = useState(''); // ARAMA STATE'İ EKLENDİ
@@ -2487,8 +2508,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
         // ==================================================================
         const isTarihi = new Date(destekJob.date);
         const aktifMi = (p) => isPersonnelVisibleInMonth(p, isTarihi.getFullYear(), isTarihi.getMonth() + 1);
+        // YENİ: İşin tarihinde henüz işe başlamamış personel desteğe de gönderilemez
         const adaylar = (personnelList || [])
-          .filter(p => maviMi(p) && aktifMi(p) && !buIsinEkibi.has(String(p.id)))
+          .filter(p => maviMi(p) && aktifMi(p) && iseBasladiMi(p, destekJob.date) && !buIsinEkibi.has(String(p.id)))
           .map(p => {
             // Kişinin o günkü asıl işi (varsa) ve o iş bitmiş mi
             const kendiIsi = bugununIsleri.find(j => isAsilEkipIdleri(j).includes(String(p.id)));
@@ -2602,7 +2624,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
         const job = jobs.find(j => j.id === editingTeamJob.id) || editingTeamJob;
         const assignedIds = job.assignedPersonnelIds || [];
         const manualNames = getTeamManualNames(job);
-        const availablePersonnel = personnelList.filter(p => !assignedIds.includes(p.id) && p.employmentStatus !== 'Pasif');
+        // YENİ: İşin tarihinde henüz işe başlamamış personel bu listede de çıkmaz
+        const availablePersonnel = personnelList.filter(p =>
+          !assignedIds.includes(p.id) && p.employmentStatus !== 'Pasif' && iseBasladiMi(p, job.date));
         return (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4" onClick={() => setEditingTeamJob(null)}>
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
@@ -3273,6 +3297,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       if (p.position === 'Firma Sahibi') return false;
       const isCollarMatch = p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operatör'].includes(p.position));
       if (!isCollarMatch) return false;
+      // YENİ: İşe başlama tarihinden ÖNCEKİ günlerde listede görünmez
+      // (örn. 05.09'da başlayan personel 04.09 tahtasında çıkmaz)
+      if (!iseBasladiMi(p, selectedDate)) return false;
       if (p.employmentStatus === 'Aktif') return true;
       // YENİ: İşi bırakan personel, bıraktığı tarihe kadar (o tarih dahil) geçmiş günlerde
       // hâlâ ekip listesinde görünsün; bıraktığı tarihten SONRAKİ günlerde artık hiç görünmesin.
