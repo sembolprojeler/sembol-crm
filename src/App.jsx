@@ -7670,7 +7670,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       onClick={() => { setActiveTab('puantajTahtasi'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'puantajTahtasi' ? 'bg-green-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'puantajTahtasi' ? 'bg-white' : 'bg-green-500'}`}></div> Puantaj Takip
+                      {/* DEĞİŞTİ: Sayfa artık Puantaj + Mesai Takip + İş Onaylama
+                          Tahtası'nı birlikte barındırdığı için adı güncellendi. */}
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'puantajTahtasi' ? 'bg-white' : 'bg-green-500'}`}></div> Puantaj/Mesai Takip
                     </button>
 
                     {/* 2) Saha Raporlaması — şeflerin saha denetimleri */}
@@ -8104,7 +8106,32 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'personelTahtasi' && showOperasyon && <PersonelTahtasiView personnelList={personnelListMuhasebe} setViewingPersonnelProfileId={setViewingPersonnelProfileId} setActiveTab={setActiveTab} jobs={jobs} allPersonnelActions={allPersonnelActions} vehicles={vehicles} allMesaiRecords={allMesaiRecords} />}
             {/* YETKİ: Menü İnsan Kaynakları altına taşındığı için İK yetkisi olan
                 kullanıcılar da bu sayfayı açabilir (Operasyon yetkisi korunur). */}
-            {activeTab === 'puantajTahtasi' && (showOperasyon || showPersonnel) && <PuantajTahtasiView personnelList={personnelListMuhasebe} db={db} appId={appId} />}
+            {/* ==================================================================
+                YENİ (kullanıcı talebi): PUANTAJ / MESAİ TAKİP — TEK SAYFA, 3 SEKME
+                ------------------------------------------------------------------
+                Menüdeki "Puantaj Takip" artık "Puantaj/Mesai Takip" adıyla üç
+                bölümü tek sayfada toplar:
+                  1) Puantaj Takip          (haftalık puan tablosu)
+                  2) Mesai Takip            (QR + konumlu giriş/çıkış)
+                  3) İş Onaylama Tahtası    (günlük operasyon kartları)
+                ÖNEMLİ: Hiçbir sayfa TAŞINMADI. Mesai Takip ve İş Onaylama
+                Tahtası kendi menü girişlerinden de aynen açılmaya devam eder;
+                burada yalnızca aynı bileşenler yeniden gösteriliyor. Sayfa
+                rotaları (activeTab) da değişmedi.
+                ================================================================== */}
+            {activeTab === 'puantajTahtasi' && (showOperasyon || showPersonnel) && (
+              <PuantajMesaiTakipSayfasi
+                showOperasyon={showOperasyon} showPersonnel={showPersonnel}
+                personnelListMuhasebe={personnelListMuhasebe} personnelList={personnelList}
+                db={db} appId={appId} currentUser={currentUser} jobs={jobs} visibleJobs={visibleJobs}
+                onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }}
+                handleEditJob={handleEditJob} setMarkDamageJobId={setMarkDamageJobId}
+                canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal}
+                handleOpenMesaiModal={handleOpenMesaiModal} addSystemLog={addSystemLog}
+                setViewingImage={setViewingImage} handleOpenEndJobModal={handleOpenEndJobModal}
+                isManager={isManager}
+              />
+            )}
             {/* NOT: "Mavi Mesai Tahtası" sayfası menüden kaldırıldığı için render edilmiyor. */}
             
             {/* YENİ: Kayıt sonrası alttan açılan başarı paneli — WhatsApp bilgilendirme ve Sözleşme indirme seçenekleri */}
@@ -10458,6 +10485,77 @@ class SembolErrorBoundary extends React.Component {
 // YENİ: Gerçek dışa aktarım (export default) — AppInternal'i ErrorBoundary
 // içinde render eder. Uygulamanın giriş noktası (main.jsx / index.jsx) hiçbir
 // değişiklik gerektirmez; "import App from './App.jsx'" aynen çalışır.
+// ============================================================================
+// YENİ (kullanıcı talebi): PUANTAJ / MESAİ TAKİP SAYFASI (3 SEKME)
+// ============================================================================
+// Puantaj Takip, Mesai Takip ve İş Onaylama Tahtası tek sayfada sekmelerle
+// toplandı. Hiçbir sayfa taşınmadı; üçü de kendi menü girişlerinden aynen
+// açılmaya devam eder — burada YENİDEN KULLANILIYORLAR (kopya kod yok).
+//
+// Sekmeler kullanıcının yetkisine göre çizilir:
+//   • Puantaj Takip        -> Operasyon veya Personel yetkisi
+//   • Mesai Takip          -> Personel yetkisi
+//   • İş Onaylama Tahtası  -> Operasyon yetkisi
+// Yetkisi olmayan sekme hiç görünmez; açılışta erişilebilir ilk sekme seçilir.
+// ============================================================================
+const PuantajMesaiTakipSayfasi = ({
+  showOperasyon, showPersonnel, personnelListMuhasebe, personnelList, db, appId,
+  currentUser, jobs, visibleJobs, onViewProfile, handleEditJob, setMarkDamageJobId,
+  canApprovePoints, handleOpenApproveModal, handleOpenMesaiModal, addSystemLog,
+  setViewingImage, handleOpenEndJobModal, isManager,
+}) => {
+  // Yetkiye göre gösterilecek sekmeler
+  const sekmeler = [
+    (showOperasyon || showPersonnel) && { id: 'puantaj', ad: 'Puantaj Takip', ikon: Star },
+    showPersonnel && { id: 'mesai', ad: 'Mesai Takip', ikon: Clock },
+    showOperasyon && { id: 'onay', ad: 'İş Onaylama Tahtası', ikon: CheckSquare },
+  ].filter(Boolean);
+
+  const [aktif, setAktif] = useState(sekmeler[0]?.id || 'puantaj');
+  // Yetki değişirse (ör. rol güncellenirse) geçersiz sekmede kalınmaz
+  useEffect(() => {
+    if (!sekmeler.some(sk => sk.id === aktif)) setAktif(sekmeler[0]?.id || 'puantaj');
+  }, [showOperasyon, showPersonnel]);
+
+  if (sekmeler.length === 0) return null;
+
+  return (
+    <div className="space-y-4">
+      {/* Sekme çubuğu — mobilde yatay kaydırılabilir */}
+      <div className="bg-white rounded-2xl border border-neutral-200 p-1.5 flex gap-1.5 overflow-x-auto">
+        {sekmeler.map(sk => {
+          const Ikon = sk.ikon;
+          const secili = aktif === sk.id;
+          return (
+            <button key={sk.id} type="button" onClick={() => setAktif(sk.id)}
+              className={`flex-1 min-w-max whitespace-nowrap px-4 py-2.5 rounded-xl text-sm font-black transition flex items-center justify-center gap-2 ${
+                secili ? 'bg-green-600 text-white shadow-md' : 'text-neutral-500 hover:bg-neutral-100'}`}>
+              <Ikon className="w-4 h-4" /> {sk.ad}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Seçili bölümün içeriği — bileşenler menüdekiyle BİREBİR aynı props ile */}
+      {aktif === 'puantaj' && (
+        <PuantajTahtasiView personnelList={personnelListMuhasebe} db={db} appId={appId} />
+      )}
+      {aktif === 'mesai' && showPersonnel && (
+        <MesaiTakipView personnelList={personnelList} currentUser={currentUser} jobs={jobs} onViewProfile={onViewProfile} />
+      )}
+      {aktif === 'onay' && showOperasyon && (
+        <IsOnaylamaTahtasiView
+          jobs={visibleJobs} handleEditJob={handleEditJob} setMarkDamageJobId={setMarkDamageJobId}
+          canApprovePoints={canApprovePoints} handleOpenApproveModal={handleOpenApproveModal}
+          handleOpenMesaiModal={handleOpenMesaiModal} personnelList={personnelList}
+          db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage}
+          handleOpenEndJobModal={handleOpenEndJobModal} isManager={isManager} currentUser={currentUser}
+        />
+      )}
+    </div>
+  );
+};
+
 export default function App() {
   return (
     <SembolErrorBoundary>
