@@ -7661,8 +7661,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                         sıra ve "Tüm Personel" -> "Personel Listesi" etiketi değişti.
                         ========================================================== */}
 
-                    {/* 1) Mesai Takip — QR + konum doğrulamalı giriş/çıkış takibi */}
-                    <MesaiTakipMenuButonu activeTab={activeTab} setActiveTab={setActiveTab} setIsSidebarOpen={setIsSidebarOpen} />
+                    {/* KALDIRILDI (kullanıcı talebi): "Mesai Takip" menü düğmesi.
+                        Mesai Takip artık "Puantaj/Mesai Takip" sayfasının ilk sekmesi
+                        olduğu için ayrı menü girişi gereksiz kaldı. Sayfa rotası
+                        ('mesaiTakip') ve bileşen SİLİNMEDİ; doğrudan bağlantılar ve
+                        eski yönlendirmeler çalışmaya devam eder.
+                        <MesaiTakipMenuButonu ... /> */}
 
                     {/* 1.b) Puantaj Takip — Operasyon menüsünden buraya taşındı.
                             Eski adı "Puantaj Tahtası"; sayfa rotası değişmedi. */}
@@ -10488,8 +10492,8 @@ class SembolErrorBoundary extends React.Component {
 // ============================================================================
 // YENİ (kullanıcı talebi): PUANTAJ / MESAİ TAKİP SAYFASI (3 SEKME)
 // ============================================================================
-// Puantaj Takip, Mesai Takip ve İş Onaylama Tahtası tek sayfada sekmelerle
-// toplandı. Hiçbir sayfa taşınmadı; üçü de kendi menü girişlerinden aynen
+// Mesai Takip, Puantaj Takip ve İş Onaylama Tahtası tek sayfada sekmelerle
+// toplandı (bu sırayla). Hiçbir sayfa taşınmadı; üçü de kendi menü girişlerinden aynen
 // açılmaya devam eder — burada YENİDEN KULLANILIYORLAR (kopya kod yok).
 //
 // Sekmeler kullanıcının yetkisine göre çizilir:
@@ -10505,9 +10509,11 @@ const PuantajMesaiTakipSayfasi = ({
   setViewingImage, handleOpenEndJobModal, isManager,
 }) => {
   // Yetkiye göre gösterilecek sekmeler
+  // DEĞİŞTİ (kullanıcı talebi): Sıra Mesai Takip -> Puantaj Takip -> İş Onaylama.
+  // Mesai Takip artık ilk sekme; açılışta varsayılan olarak o gelir.
   const sekmeler = [
-    (showOperasyon || showPersonnel) && { id: 'puantaj', ad: 'Puantaj Takip', ikon: Star },
     showPersonnel && { id: 'mesai', ad: 'Mesai Takip', ikon: Clock },
+    (showOperasyon || showPersonnel) && { id: 'puantaj', ad: 'Puantaj Takip', ikon: Star },
     showOperasyon && { id: 'onay', ad: 'İş Onaylama Tahtası', ikon: CheckSquare },
   ].filter(Boolean);
 
