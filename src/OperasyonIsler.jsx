@@ -2476,8 +2476,19 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
         const buIsinEkibi = new Set(isTamEkipIdleri(destekJob));
         // Mavi yaka süzgeci (mesai hesabı yalnızca mavi yakada işler)
         const maviMi = (p) => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position));
+        // ==================================================================
+        // YENİ (kullanıcı talebi): İŞTEN AYRILANLAR LİSTEDE ÇIKMAZ
+        // ------------------------------------------------------------------
+        // Süzgeç, işin TARİHİNE göre çalışır (bugüne göre değil): o ay hâlâ
+        // kadroda olan personel görünür, öncesinde ayrılmış olan görünmez.
+        // Böylece geçmiş bir güne destek girilirken o gün çalışan personel
+        // de doğru şekilde listelenir. isPersonnelVisibleInMonth ayrıca
+        // uzaktan çalışanları da eler (saha işine destek veremezler).
+        // ==================================================================
+        const isTarihi = new Date(destekJob.date);
+        const aktifMi = (p) => isPersonnelVisibleInMonth(p, isTarihi.getFullYear(), isTarihi.getMonth() + 1);
         const adaylar = (personnelList || [])
-          .filter(p => maviMi(p) && !buIsinEkibi.has(String(p.id)))
+          .filter(p => maviMi(p) && aktifMi(p) && !buIsinEkibi.has(String(p.id)))
           .map(p => {
             // Kişinin o günkü asıl işi (varsa) ve o iş bitmiş mi
             const kendiIsi = bugununIsleri.find(j => isAsilEkipIdleri(j).includes(String(p.id)));
