@@ -6607,10 +6607,13 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           // icraOdenenToplam da artırılır (İCRA TOPLAM sütunu azalır).
           // ==============================================================
           if (icraMi) {
+            // Tek kişide girilen tutar (kısmi olabilir), toplu satırda kişinin kendi bekleyeni
+            const kisiTutar = tekKisi ? tutar : (k.bekleyen || 0);
+            if (kisiTutar <= 0.01) return;
             const onceki = parseFloat(r.icraOdenenTutar) || 0;
-            const yeniAylik = onceki + tutar;
+            const yeniAylik = onceki + kisiTutar;
             r.icraOdenenTutar = String(yeniAylik.toFixed(2));
-            if (!kismiMi || yeniAylik >= (k.icraAylik || 0) - 0.01) r.icraOdendi = true;
+            if (yeniAylik >= (k.icraAylik || 0) - 0.01) r.icraOdendi = true;
             return;
           }
           if (kismiMi) {
@@ -6623,15 +6626,20 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           }
         });
         await setDoc(mRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
-        // İcra: personelin toplam ödenen icrası artırılır -> kalan borç düşer
-        if (icraMi && tekKisi?.person?.id) {
-          const p = tekKisi.person;
-          const onceki = parseFloat(p.icraOdenenToplam) || 0;
-          const toplam = parseFloat(p.icraToplamBorc) || 0;
-          const yeni = Math.min(toplam, onceki + tutar); // toplam borcu aşmaz
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', p.id), { icraOdenenToplam: yeni });
-          if (toplam - yeni <= 0.01) {
-            addSystemLog?.('İcra Borcu Tamamlandı', `${p.fullName}: icra borcunun tamamı (₺${paraFmt(toplam)}) ödendi. Ödemeler'de artık icra kalemi oluşmayacak.`);
+        // İcra: HER kişinin toplam ödenen icrası artırılır -> İCRA TOPLAM sütunu düşer.
+        // Tek kişide girilen tutar, toplu satırda kişinin kendi bekleyeni işlenir.
+        if (icraMi) {
+          for (const k of satir.kisiler) {
+            const p = k.person; if (!p?.id) continue;
+            const kisiTutar = tekKisi ? tutar : (k.bekleyen || 0);
+            if (kisiTutar <= 0.01) continue;
+            const onceki = parseFloat(p.icraOdenenToplam) || 0;
+            const toplam = parseFloat(p.icraToplamBorc) || 0;
+            const yeni = Math.min(toplam, onceki + kisiTutar); // toplam borcu aşmaz
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', p.id), { icraOdenenToplam: yeni });
+            if (toplam - yeni <= 0.01) {
+              addSystemLog?.('İcra Borcu Tamamlandı', `${p.fullName}: icra borcunun tamamı (₺${paraFmt(toplam)}) ödendi. Ödemeler'de artık görünmeyecek.`);
+            }
           }
         }
         addSystemLog?.(kismiMi ? 'Maaş Kısmi Ödeme' : 'Maaş Ödemesi Yapıldı',
@@ -7199,34 +7207,47 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       if (!odemeDefteriId || !maasVeri) return [];
       const { yil, ay } = maasKaynakAy;
       if (maasVeri.kaynakAnahtar !== `${yil}_${ay}`) return [];
-      const yakaBul = (p) => (p.collarType === 'Beyaz Yaka') ? 'beyaz' : 'mavi';
-      return personelAdaGoreSirala(
-        (personnelList || []).filter(p =>
-          p.position !== 'Firma Sahibi' && p.icrasiVar === 'Evet' &&
-          (parseFloat(p.icraToplamBorc) || 0) > 0 && icraKalanBorc(p) > 0.01 &&
-          isPersonnelVisibleInMonth(p, yil, ay))
-      ).map(p => {
-        const yaka = yakaBul(p);
-        const veriKaynagi = maasVeri[yaka];
-        const row = (veriKaynagi?.maas || {})[p.id] || {};
-        const hes = maasKisiHesabi(p, row, (veriKaynagi?.mesai || {})[p.id], yil, ay);
-        const aylik = icraAylikOdenecek(p, hes.icraKesintisi);      // kalanla sınırlı
-        const odenenBuAy = parseFloat(row.icraOdenenTutar) || 0;    // bu ay için ödenmiş kısım
-        const bekleyen = row.icraOdendi ? 0 : Math.max(0, aylik - odenenBuAy);
-        const kalemId = `icra_${p.id}_${yil}_${ay}`;
+      // DEĞİŞTİ (kullanıcı talebi): Kişi başına ayrı kalem yerine maaş/avans
+      // satırlarıyla AYNI düzen — yaka bazlı TEK satır, açılınca kişiler.
+      //   "Mavi Yaka İcra Kesintisi"  /  "Beyaz Yaka İcra Kesintisi"
+      // Vade: her ayın 7'si (Ağustos maaşının icrası -> 7 Eylül).
+      const yakalar = [
+        { id: 'mavi',  ad: 'Mavi Yaka İcra Kesintisi',  filtre: (p) => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)) },
+        { id: 'beyaz', ad: 'Beyaz Yaka İcra Kesintisi', filtre: (p) => p.collarType === 'Beyaz Yaka' },
+      ];
+      return yakalar.map(yaka => {
+        const veriKaynagi = maasVeri[yaka.id];
+        // İcrası olan, toplam borcu girilmiş ve KALAN borcu > 0 olan personel
+        const kisiler = personelAdaGoreSirala(
+          (personnelList || []).filter(p =>
+            p.position !== 'Firma Sahibi' && yaka.filtre(p) && p.icrasiVar === 'Evet' &&
+            (parseFloat(p.icraToplamBorc) || 0) > 0 && icraKalanBorc(p) > 0.01 &&
+            isPersonnelVisibleInMonth(p, yil, ay))
+        ).map(p => {
+          const row = (veriKaynagi?.maas || {})[p.id] || {};
+          const hes = maasKisiHesabi(p, row, (veriKaynagi?.mesai || {})[p.id], yil, ay);
+          const icraAylik = icraAylikOdenecek(p, hes.icraKesintisi);   // aylık kesinti, kalanla sınırlı
+          const kismiOdenen = parseFloat(row.icraOdenenTutar) || 0;     // bu ay ödenmiş kısım
+          const bekleyen = row.icraOdendi ? 0 : Math.max(0, icraAylik - kismiOdenen);
+          return { person: p, bekleyen, kismiOdenen, icraAylik, icraKalan: icraKalanBorc(p),
+                   // maaş satırı render'ı bu alanları okuyor; icra için anlamsız -> nötr
+                   bankaKalan: 0, kalanNakit: 0, bankaOdendi: true, nakitOdendi: true };
+        }).filter(k => k.icraAylik > 0.01);
+        const toplamBekleyen = kisiler.reduce((t, k) => t + k.bekleyen, 0);
+        const kalemId = `icra_${yaka.id}_${yil}_${ay}`;
         const mahsup = islemler.find(i => !i.silindi && i.defterId === odemeDefteriId && i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalemId);
         return {
-          id: kalemId, yaka, kanal: 'icra', icra: true,
-          ad: `${p.fullName} — İcra Ödemesi`,
-          kaynakEtiket: `${AY_ADLARI[ay - 1]} ${yil} icra kesintisi • kalan borç ₺${paraFmt(icraKalanBorc(p))}`,
-          vadeTarihi: `${odemeAyi}-06`,
-          tutar: bekleyen,
-          kisiler: [{ person: p, bekleyen, kismiOdenen: odenenBuAy, bankaKalan: 0, kalanNakit: 0, bankaOdendi: true, nakitOdendi: true, icraAylik: aylik }],
-          devir: `${odemeAyi}-06` < SISTEM_DEVIR_TARIHI,
-          odendi: `${odemeAyi}-06` < SISTEM_DEVIR_TARIHI || !!mahsup || bekleyen <= 0.01,
+          id: kalemId, yaka: yaka.id, kanal: 'icra', icra: true,
+          ad: yaka.ad,
+          kaynakEtiket: `${AY_ADLARI[ay - 1]} ${yil} maaşı icrası`,
+          vadeTarihi: `${odemeAyi}-07`,
+          tutar: toplamBekleyen,
+          kisiler,
+          devir: `${odemeAyi}-07` < SISTEM_DEVIR_TARIHI,
+          odendi: `${odemeAyi}-07` < SISTEM_DEVIR_TARIHI || !!mahsup || (kisiler.length > 0 && toplamBekleyen <= 0.01),
           odemeTarihi: mahsup?.tarih || null,
         };
-      }).filter(sa => sa.kisiler[0].icraAylik > 0.01);
+      }).filter(sa => sa.kisiler.length > 0); // İcralı personeli olmayan yaka gösterilmez
     }, [odemeDefteriId, maasVeri, maasKaynakAy, personnelList, islemler, odemeAyi]);
 
     // ========================================================================
@@ -8896,7 +8917,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                                       <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${m.icra ? 'bg-red-600 text-white' : 'bg-purple-200 text-purple-700'}`}>{m.icra ? 'İCRA • MAAŞTAN KESİNTİ' : 'OTOMATİK • MUHASEBEDEN'}</span>
                                     </div>
                                     {/* DEĞİŞTİ: satır artık tek kanala ait — alt yazı ona göre */}
-                                    <div className="text-[10px] font-bold text-purple-600">{m.kaynakEtiket} • Vade: {trh(m.vadeTarihi)}{m.icra ? '' : ` • ${m.kisiler.length} personel • kalan ${m.kanal === 'banka' ? 'banka' : m.kanal === 'nakit' ? 'nakit' : 'banka+nakit'} toplamı`}</div>
+                                    <div className="text-[10px] font-bold text-purple-600">{m.kaynakEtiket} • Vade: {trh(m.vadeTarihi)} • {m.kisiler.length} personel{m.icra ? ' • icra kesintisi toplamı' : ` • kalan ${m.kanal === 'banka' ? 'banka' : m.kanal === 'nakit' ? 'nakit' : 'banka+nakit'} toplamı`}</div>
                                   </div>
                                   <div className="text-right shrink-0">
                                     <div className="font-black text-purple-800 tabular-nums">₺{paraFmt(m.tutar)}</div>
@@ -8922,7 +8943,9 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                                           {/* DEĞİŞTİ: satır tek kanala ait olduğundan yalnızca o kanalın
                                               ayrıntısı gösterilir; kanalsız eski satırda ikisi de çıkar */}
                                           <span className="text-[9px] font-bold text-neutral-400 ml-1">
-                                            ({m.kanal !== 'nakit' && <>B: {k.bankaOdendi ? '✓' : paraFmt(Math.max(0, k.bankaKalan))}</>}{!m.kanal && ' • '}{m.kanal !== 'banka' && <>N: {k.nakitOdendi ? '✓' : paraFmt(Math.max(0, k.kalanNakit))}</>})
+                                            {m.icra
+                                              ? <>(kalan icra borcu ₺{paraFmt(k.icraKalan)})</>
+                                              : <>({m.kanal !== 'nakit' && <>B: {k.bankaOdendi ? '✓' : paraFmt(Math.max(0, k.bankaKalan))}</>}{!m.kanal && ' • '}{m.kanal !== 'banka' && <>N: {k.nakitOdendi ? '✓' : paraFmt(Math.max(0, k.kalanNakit))}</>})</>}
                                           </span>
                                         </span>
                                         {/* YENİ (kullanıcı talebi): KİŞİ BAZLI ÖDEME
@@ -12097,7 +12120,9 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                   <div className="font-black text-sm">{maasOdeModal.satir.kaynakEtiket}</div>
                   {/* YENİ: İcra ödemesinde alt yazı farklı — kalan toplam icra borcu gösterilir */}
                   <div>{maasOdeModal.satir.kanal === 'icra'
-                    ? `İcra kesintisi • Kalan toplam icra borcu ₺${paraFmt(icraKalanBorc(maasOdeModal.satir.kisiler[0]?.person))}`
+                    ? (maasOdeModal.satir.kisiler.length === 1
+                        ? `İcra kesintisi • Kalan toplam icra borcu ₺${paraFmt(icraKalanBorc(maasOdeModal.satir.kisiler[0]?.person))}`
+                        : `${maasOdeModal.satir.kisiler.length} personel • icra kesintileri toplamı`)
                     : `${maasOdeModal.satir.kisiler.length} personel • Kalan ${maasOdeModal.satir.kanal === 'banka' ? 'banka' : maasOdeModal.satir.kanal === 'nakit' ? 'nakit' : 'banka + nakit'} toplamı`}</div>
                   <div className="text-lg font-black tabular-nums mt-1">₺{paraFmt(maasOdeModal.satir.tutar)}</div>
                 </div>
