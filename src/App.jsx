@@ -15,7 +15,9 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
   // YENİ: Kaporayı banka defterine gelir olarak yazar.
   defterKaporaKaydet, HasarCozumBelgeleri,
   // YENİ: Çok günlü iş (1. gün / 2. gün) yardımcıları — düzenleme koruması için
-  isDevamGunuMu, isGunNo, isToplamGun, isYardimciKayitMi, isAracKopyasiMi, isAracNo, isToplamArac } from './shared.jsx';
+  isDevamGunuMu, isGunNo, isToplamGun, isYardimciKayitMi, isAracKopyasiMi, isAracNo, isToplamArac,
+  // YENİ: Ekipler arası destek — mesai ekibi ve destek kimlikleri
+  isMesaiEkipIdleri, isDestekIdleri } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
 import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJobsView, CancelledJobsView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, IsMerkeziView, IsKilavuzuView, HatirlatmalarView } from './OperasyonIsler.jsx';
 import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './OperasyonPersonel.jsx';
@@ -5372,7 +5374,20 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
          // YENİ: Düzenleme ise daha önce verilen puan otomatik gelir, yoksa varsayılan 1
          initialPoints[id] = (job.approvedPoints && job.approvedPoints[id] !== undefined) ? job.approvedPoints[id] : 1;
       });
-      setApproveData({ individualPoints: initialPoints, reviewImage: job.reviewImage || '', supportPersonnelIds: job.supportPersonnelIds || [] });
+      // ====================================================================
+      // YENİ (kullanıcı talebi): DESTEĞE GELENLER PUAN EKRANINDA İŞARETLİ
+      // --------------------------------------------------------------------
+      // İş kartındaki "Destek" bölümünden bu işe gönderilen personel, puan
+      // onay ekranındaki "Ekstra Destek (0,5 Puan)" listesinde OTOMATİK
+      // seçili gelir. Yönetici tekrar tek tek işaretlemek zorunda kalmaz;
+      // isterse kaldırabilir (elle yapılmış seçimler de korunur).
+      // ====================================================================
+      const oncekiDestek = (job.supportPersonnelIds || []).map(String);
+      const operasyonDestegi = isDestekIdleri(job);
+      const birlesikDestek = [...new Set([...oncekiDestek, ...operasyonDestegi])]
+        // Asıl ekipte olan biri ayrıca "ekstra destek" sayılmaz
+        .filter(id => !teamIds.map(String).includes(String(id)));
+      setApproveData({ individualPoints: initialPoints, reviewImage: job.reviewImage || '', supportPersonnelIds: birlesikDestek });
       setShowApproveModal(true);
     };
 
@@ -5419,10 +5434,17 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     
     const handleOpenMesaiModal = async (job) => {
       setJobForMesai(job);
-      const teamIds = job.assignedPersonnelIds ? [...job.assignedPersonnelIds] : [];
-      if (job.assignedPersonnelId && !teamIds.includes(job.assignedPersonnelId)) {
-        teamIds.push(job.assignedPersonnelId);
-      }
+      // ====================================================================
+      // DEĞİŞTİ (kullanıcı talebi): MESAİ EKİBİ = SON DAHİL OLUNAN EKİP
+      // --------------------------------------------------------------------
+      // isMesaiEkipIdleri:
+      //   + bu işe DESTEK gelenleri EKLER (mesaileri bu ekibin çıkışından)
+      //   - bu ekipten ayrılıp BAŞKA ekibe destek gidenleri ÇIKARIR
+      // Böylece destek veren kişi 2., 3. veya 4. ekibe de geçse hep EN SON
+      // bulunduğu ekibin çıkışına göre hesaplanır; ekipte kalanların
+      // ortalaması da ayrılan arkadaşlarından etkilenmez.
+      // ====================================================================
+      const teamIds = isMesaiEkipIdleri(job, job.date, jobs);
 
       const validTeamIds = teamIds.filter(id => {
          const p = personnelList.find(pers => String(pers.id) === String(id));
