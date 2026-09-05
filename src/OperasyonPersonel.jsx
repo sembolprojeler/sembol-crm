@@ -1580,7 +1580,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
       fullName: '', email: '', password: '', position: positions?.[0] || 'Şoför', rank: ranks?.[0] || 'Standart',
       collarType: 'Mavi Yaka', employmentStatus: 'Aktif',
       personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '', birthDate: '',
-      bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', startDate: new Date().toISOString().split('T')[0],
+      bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', icraToplamBorc: '', startDate: new Date().toISOString().split('T')[0],
       // YENİ: Deneme maaşı ve deneme süresi (ay). Boş bırakılırsa deneme uygulanmaz.
       denemeMaasi: '', denemeSuresi: '',
       // YENİ: Haftalık çalışma programı (gün sayısı, günlük saat, izin günü, erken çıkış)
@@ -1617,7 +1617,7 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
         fullName: '', email: '', password: '', position: positions?.[0] || 'Şoför', rank: ranks?.[0] || 'Standart',
         collarType: 'Mavi Yaka', employmentStatus: 'Aktif',
         personalPhone: '', companyPhone: '', iban: '', tcNo: '', setcard: '', address: '', profileImage: '', birthDate: '',
-        bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', startDate: new Date().toISOString().split('T')[0],
+        bankaParasi: '', maas: '', yemek: '', yol: '', sigortaMaliyeti: '', icrasiVar: 'Hayır', icraToplamBorc: '', startDate: new Date().toISOString().split('T')[0],
         // YENİ: Kayıt sonrası deneme alanları da sıfırlanır
         denemeMaasi: '', denemeSuresi: ''
       });
@@ -1783,6 +1783,31 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
               </select>
             </div>
           </div>
+          {/* ==================================================================
+              YENİ (kullanıcı talebi): İCRA TOPLAM BORCU
+              ------------------------------------------------------------------
+              "İcrası Var mı?" = Evet seçilince açılır. Personelin icra
+              dosyasındaki TOPLAM borç buraya yazılır. Sistem her ay maaştan
+              kesilen icra tutarını (hesaplanan bankanın %25'i) Ödemeler
+              sayfasında ayın 6'sında ödeme kalemi olarak üretir; her ödeme
+              bu toplamdan düşer, borç bitince kalem artık gösterilmez.
+              Kalan tutar Personel Muhasebe > "İCRA TOPLAM" sütununda izlenir.
+              ================================================================== */}
+          {formData.icrasiVar === 'Evet' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-red-50 border border-red-200 rounded-xl p-4">
+              <div>
+                <label className="block text-sm font-bold text-red-800 mb-1">İcra Toplam Borcu (TL) *</label>
+                <input type="number" inputMode="decimal" value={formData.icraToplamBorc || ''} onChange={e => setFormData({...formData, icraToplamBorc: e.target.value})}
+                  className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition bg-white" placeholder="Örn: 90000" />
+                <p className="text-[10px] font-bold text-red-600 mt-1">İcra dosyasındaki toplam borç. Aylık kesinti otomatik hesaplanır (hesaplanan bankanın %25'i).</p>
+              </div>
+              <div className="flex items-end">
+                <p className="text-[11px] font-bold text-red-700 bg-white border border-red-200 rounded-lg p-2.5 w-full">
+                  Her ayın 6'sında Ödemeler sayfasında "İcra Ödemesi" kalemi oluşur. Ödendikçe bu toplam azalır; sıfırlanınca kalem kaybolur.
+                </p>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
             <div>
@@ -2147,6 +2172,20 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                     </select>
                   </div>
                 </div>
+                {/* YENİ: İcra Toplam Borcu (düzenleme) — ödenen kısım bilgi olarak gösterilir */}
+                {(editingUser.icrasiVar || 'Hayır') === 'Evet' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-red-50 border border-red-200 rounded-xl p-4">
+                    <div>
+                      <label className="block text-sm font-bold text-red-800 mb-1">İcra Toplam Borcu (TL) *</label>
+                      <input type="number" inputMode="decimal" value={editingUser.icraToplamBorc || ''} onChange={e => setEditingUser({...editingUser, icraToplamBorc: e.target.value})}
+                        className="w-full p-3 border border-red-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition bg-white" placeholder="Örn: 90000" />
+                    </div>
+                    <div className="text-[11px] font-bold text-red-700 bg-white border border-red-200 rounded-lg p-2.5 flex flex-col justify-center gap-0.5">
+                      <span>Bugüne kadar ödenen: <b>₺{(parseFloat(editingUser.icraOdenenToplam) || 0).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</b></span>
+                      <span>Kalan icra borcu: <b>₺{Math.max(0, (parseFloat(editingUser.icraToplamBorc) || 0) - (parseFloat(editingUser.icraOdenenToplam) || 0)).toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</b></span>
+                    </div>
+                  </div>
+                )}
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-x-6 gap-y-4">
                   <div>
