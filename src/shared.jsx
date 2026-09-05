@@ -2809,3 +2809,105 @@ export const kategoriSecenekleriOlustur = (ozelKategoriler = [], gizliKategorile
 // Bu kategori kod içinde tanımlı temel kategorilerden biri mi?
 export const temelKategoriMi = (ad) =>
   TEMEL_KATEGORILER.some(k => _katAnahtar(k) === _katAnahtar(ad));
+
+// ============================================================================
+// YENİ (kullanıcı talebi): EKİPLER ARASI DESTEK (personel takviyesi)
+// ============================================================================
+// SAHA GERÇEĞİ: Bir ekip işini erken bitirir, personeli başka bir ekibe destek
+// olarak gönderilir. Aynı gün içinde bir kişi 2., 3. hatta 4. ekibe geçebilir.
+//
+// VERİ MODELİ (destek ALAN işin dokümanına yazılır):
+//   destekPersonelIds: ['id1','id2']            -> hızlı kontrol için
+//   destekKayitlari:   [{ personelId, adSoyad, kaynakIsId, kaynakEkip,
+//                         eklenmeZamani, ekleyen }]
+//
+// MESAİ KURALI (kritik): Bir personel destek verdiyse günün mesaisi artık İLK
+// ekibine göre değil, EN SON dahil olduğu ekibe göre hesaplanır. Çünkü kişi
+// sahadan o ekiple birlikte ayrılır. Destek vermeyenler eskisi gibi kendi
+// ekiplerinin çıkışına göre hesaplanır — onların ortalaması, ayrılıp giden
+// arkadaşlarından ETKİLENMEZ (o kişi kaynak ekipten düşülür).
+// ============================================================================
+
+// Bir işe destek olarak eklenmiş personel kimlikleri
+export const isDestekIdleri = (job) =>
+  Array.isArray(job?.destekPersonelIds) ? job.destekPersonelIds.map(String) : [];
+
+// Bu personel bu işe destek olarak mı geldi? (asıl ekip üyesi değil)
+export const destekPersoneliMi = (job, personelId) =>
+  isDestekIdleri(job).includes(String(personelId));
+
+// Bir işin asıl (destek hariç) ekip kimlikleri
+export const isAsilEkipIdleri = (job) => {
+  const idler = Array.isArray(job?.assignedPersonnelIds) ? job.assignedPersonnelIds.map(String) : [];
+  if (job?.assignedPersonnelId && !idler.includes(String(job.assignedPersonnelId))) idler.push(String(job.assignedPersonnelId));
+  return idler;
+};
+
+// İşin GÖRÜNEN tam ekibi: asıl ekip + destek gelenler (tekrarsız)
+export const isTamEkipIdleri = (job) => {
+  const hepsi = [...isAsilEkipIdleri(job), ...isDestekIdleri(job)];
+  return [...new Set(hepsi)];
+};
+
+// --------------------------------------------------------------------------
+// Bir personelin O GÜN dahil olduğu SON ekibin işini bulur.
+// Sıralama: destek kaydının eklenme zamanı en geç olan kazanır; hiç destek
+// kaydı yoksa kişinin asıl ekip işi döner. (2., 3., 4. ekip zinciri desteklenir)
+// --------------------------------------------------------------------------
+export const personelSonEkipIsi = (personelId, tarih, isler = []) => {
+  const pid = String(personelId);
+  const gununIsleri = (isler || []).filter(j => j.date === tarih && j.status !== 'cancelled');
+  // Destek olarak gittiği işler, en son eklenen en sonda
+  const destekIsleri = gununIsleri
+    .filter(j => destekPersoneliMi(j, pid))
+    .map(j => ({
+      is: j,
+      zaman: (j.destekKayitlari || []).find(k => String(k.personelId) === pid)?.eklenmeZamani || '',
+    }))
+    .sort((a, b) => String(a.zaman).localeCompare(String(b.zaman)));
+  if (destekIsleri.length > 0) return destekIsleri[destekIsleri.length - 1].is;
+  // Destek yoksa asıl ekibi
+  return gununIsleri.find(j => isAsilEkipIdleri(j).includes(pid)) || null;
+};
+
+// Bu personel o gün BAŞKA bir ekibe destek olarak gitti mi?
+// (kaynak ekibin mesai ortalamasından düşülmesi için kullanılır)
+export const baskaEkibeGittiMi = (personelId, tarih, isler = [], mevcutIsId = null) => {
+  const son = personelSonEkipIsi(personelId, tarih, isler);
+  return !!son && String(son.id) !== String(mevcutIsId);
+};
+
+// --------------------------------------------------------------------------
+// Mesai hesabı için işin NİHAİ ekibi:
+//   + Bu işe destek gelenler EKLENİR
+//   - Bu ekipten ayrılıp başka ekibe destek gidenler ÇIKARILIR
+// Böylece herkes yalnızca EN SON bulunduğu ekibin çıkışına göre hesaplanır.
+// --------------------------------------------------------------------------
+export const isMesaiEkipIdleri = (job, tarih, isler = []) => {
+  // HATA DÜZELTMESİ: Önce yalnızca ASIL ekip süzülüyordu; destek listesi
+  // koşulsuz ekleniyordu. Bu yüzden 2. ekibe destek gidip oradan 3. ekibe
+  // geçen kişi hem 2. hem 3. ekipte sayılıyordu. Artık HER İKİ liste de
+  // "bu kişinin SON ekibi bu iş mi?" kontrolünden geçer.
+  const sonEkibiBuMu = (pid) => !baskaEkibeGittiMi(pid, tarih, isler, job.id);
+  const asil = isAsilEkipIdleri(job).filter(sonEkibiBuMu);
+  const destek = isDestekIdleri(job).filter(sonEkibiBuMu);
+  return [...new Set([...asil, ...destek])];
+};
+
+// --------------------------------------------------------------------------
+// FOTOĞRAF KONTROLÜ (kullanıcı talebi): İş sonlandırıldı ama kasa ve/veya
+// teslim fotoğrafı yüklenmemişse iş kartında uyarı gösterilir.
+// 'Yükleniyor...' geçici değeri fotoğraf sayılmaz.
+// --------------------------------------------------------------------------
+const _gecerliFotolar = (dizi) => (dizi || []).filter(x => x && x !== 'Yükleniyor...');
+
+export const isFotografEksikleri = (job) => {
+  // Yalnızca sonlandırılmış işlerde anlamlıdır
+  if (!job?.endJobDetails) return { eksikVar: false, eksikler: [], kasaVar: false, teslimVar: false };
+  const kasaVar = _gecerliFotolar(job.endJobDetails.truckImages).length > 0;
+  const teslimVar = _gecerliFotolar(job.endJobDetails.deliveryImages).length > 0;
+  const eksikler = [];
+  if (!kasaVar) eksikler.push('Kasa fotoğrafı');
+  if (!teslimVar) eksikler.push('Teslim fotoğrafı');
+  return { eksikVar: eksikler.length > 0, eksikler, kasaVar, teslimVar };
+};
