@@ -1,3 +1,48 @@
+// ============================================================================
+// HATA DÜZELTMESİ (kullanıcı bildirimi): "Failed to execute 'removeChild' on
+// 'Node': The node to be removed is not a child of this node."
+// ============================================================================
+// BELİRTİ: Yeni personel (Farhat Bazarov) çıkış QR'ı okutup kamera açılırken
+// uygulama çöküyor. Diğer personelde olmuyor.
+//
+// KÖK NEDEN: Personelin telefonunda Chrome sayfayı OTOMATİK ÇEVİRİYOR (ekran
+// görüntüsünde arayüz Rusça). Google Translate çeviri yaparken React'in
+// yönettiği metin düğümlerini kendi <font> etiketlerine sarıyor. Kamera
+// açılınca React durum metnini güncellemek istiyor, ama o metin düğümü artık
+// beklediği yerde değil -> removeChild patlıyor -> tüm sayfa "Bir şeyler ters
+// gitti" ekranına düşüyor. Bu, React'in bilinen bir çakışmasıdır
+// (facebook/react #11538) ve yalnızca tarayıcı çevirisi AÇIK kullanıcıları
+// etkiler; bu yüzden diğer personelde görülmüyor.
+//
+// ÇÖZÜM: React ekibinin önerdiği tarayıcı-seviyesi yama. Çeviri motorunun
+// oynadığı düğümlerde removeChild / insertBefore hata fırlatmak yerine
+// sessizce geçer; React bir sonraki çizimde DOM'u zaten düzeltir.
+// Çeviriyi KAPATMADIK: Türkmen/Rus personel arayüzü kendi dilinde okumaya
+// devam eder. Yama yalnızca çeviri açıkken devreye girer, normal kullanımda
+// hiçbir davranışı değiştirmez. Bir kez uygulanır (HMR'da tekrar sarmaz).
+// ============================================================================
+if (typeof Node === 'function' && Node.prototype && !Node.prototype.__sembolCeviriYamasi) {
+  const _removeChild = Node.prototype.removeChild;
+  Node.prototype.removeChild = function (child) {
+    // Çeviri motoru düğümü taşıdıysa: hata fırlatma, düğümü olduğu gibi döndür
+    if (child && child.parentNode !== this) {
+      if (typeof console !== 'undefined') console.warn('[Sembol] Çeviri kaynaklı removeChild uyuşmazlığı yakalandı; sayfa çökmeden devam edildi.');
+      return child;
+    }
+    return _removeChild.apply(this, arguments);
+  };
+  const _insertBefore = Node.prototype.insertBefore;
+  Node.prototype.insertBefore = function (newNode, referenceNode) {
+    // Referans düğüm başka bir ebeveyne taşındıysa: sona ekle, çökme
+    if (referenceNode && referenceNode.parentNode !== this) {
+      if (typeof console !== 'undefined') console.warn('[Sembol] Çeviri kaynaklı insertBefore uyuşmazlığı yakalandı; düğüm sona eklendi.');
+      return this.appendChild(newNode);
+    }
+    return _insertBefore.apply(this, arguments);
+  };
+  Node.prototype.__sembolCeviriYamasi = true;
+}
+
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
