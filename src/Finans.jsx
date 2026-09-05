@@ -1843,6 +1843,106 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     // aynısı — Excel bu dosyayı Türkçe karakterlerle sorunsuz açar. Ayrı bir
     // kütüphane gerekmez; mevcut maaş tablosu indirmesiyle birebir aynı desen.
     // ==========================================================================
+    // ========================================================================
+    // YENİ (kullanıcı talebi): PRİM SIRALAMASI — A4 PDF / YAZDIRMA
+    // ------------------------------------------------------------------------
+    // "20 Puan Üstü Tüm Sıralama" ile "Prime Dönüşüm Hesaplaması" TEK SAYFADA
+    // birleştirilip A4 dikey liste olarak yazdırılır. Her satırda personelin
+    // sırası, adı, ham puanı, kazandığı bonus, net puanı ve gelecek aya
+    // yansıyacak prim tutarı alt alta görünür.
+    //
+    // Projede kullanılan window.print() deseni korunmuştur (ek kütüphane yok);
+    // yazdırma penceresinden "PDF olarak kaydet" seçilebilir.
+    // Excel indirme KALDIRILMADI — yanında durmaya devam eder.
+    // ========================================================================
+    const primSiralamaPdfYazdir = () => {
+      if (!monthCloseModalData) return;
+      const liste = monthCloseModalData.over20Sorted || monthCloseModalData.over20 || [];
+      const ayEtiketi = months.find(m => m.val === currentMonth)?.label || currentMonth;
+      const primler = monthCloseModalData.nextMonthPrims || {};
+      const esc = (x) => String(x ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const sayi = (n) => (n || 0).toLocaleString('tr-TR', { maximumFractionDigits: 1 });
+      const toplamPrim = liste.reduce((t, p) => t + (primler[p.id] || 0), 0);
+      const toplamNet = liste.reduce((t, p) => t + (p.finalScore || 0), 0);
+
+      // İlk üç sırayı madalya rengiyle vurgula
+      const madalya = (i) => (i === 0 ? 'birinci' : i === 1 ? 'ikinci' : i === 2 ? 'ucuncu' : '');
+      const satirlar = liste.map((p, i) => `
+        <tr class="${madalya(i)}">
+          <td class="sira">${i + 1}</td>
+          <td class="ad">${esc(p.name)}</td>
+          <td class="c">${sayi(p.rawScore)}</td>
+          <td class="c bonus">${(p.bonusScore || 0) > 0 ? '+' + sayi(p.bonusScore) : '—'}</td>
+          <td class="c net">${sayi(p.finalScore)}</td>
+          <td class="prim">${sayi(primler[p.id] || 0)}</td>
+        </tr>`).join('');
+
+      const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
+        <title>${esc(collarType)} Prim Sıralaması — ${esc(ayEtiketi)} ${currentYear}</title>
+        <style>
+          @page { size: A4 portrait; margin: 13mm 12mm; }
+          * { box-sizing: border-box; }
+          body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
+          .baslik { border-bottom: 3px solid #6b21a8; padding-bottom: 8px; margin-bottom: 10px; }
+          .baslik h1 { font-size: 17px; margin: 0 0 3px; color: #4c1d95; }
+          .baslik .meta { font-size: 11px; color: #444; }
+          .ozet { display: flex; gap: 7px; margin: 10px 0 12px; }
+          .kutu { flex: 1; border: 1px solid #c4b5fd; border-radius: 4px; padding: 6px 8px; background: #faf5ff; }
+          .kutu span { display: block; font-size: 8.5px; text-transform: uppercase; color: #6d28d9; letter-spacing: .3px; }
+          .kutu b { font-size: 14px; color: #111; }
+          table { width: 100%; border-collapse: collapse; }
+          th { background: #ede9fe; border: 1px solid #7c3aed; padding: 5px 5px; font-size: 9.5px; text-transform: uppercase; color: #4c1d95; }
+          td { border: 1px solid #999; padding: 5px 6px; font-size: 11px; }
+          td.sira { text-align: center; width: 30px; font-weight: bold; }
+          td.ad { font-weight: bold; }
+          td.c { text-align: center; width: 62px; }
+          td.bonus { color: #15803d; font-weight: bold; }
+          td.net { font-weight: bold; background: #f5f3ff; }
+          td.prim { text-align: right; width: 92px; font-weight: bold; color: #15803d; white-space: nowrap; }
+          tr.birinci td { background: #fef9c3; }
+          tr.ikinci td { background: #f4f4f5; }
+          tr.ucuncu td { background: #ffedd5; }
+          tr.birinci td.net, tr.ikinci td.net, tr.ucuncu td.net { background: transparent; }
+          tfoot td { background: #ede9fe; font-weight: bold; font-size: 11.5px; }
+          .kural { font-size: 9.5px; color: #444; margin-top: 8px; border: 1px dashed #999; border-radius: 4px; padding: 6px 8px; }
+          .altimza { margin-top: 20px; display: flex; gap: 36px; font-size: 10px; }
+          .altimza div { flex: 1; border-top: 1px solid #111; padding-top: 4px; text-align: center; }
+          tr { page-break-inside: avoid; }
+        </style></head><body>
+        <div class="baslik">
+          <h1>${esc(collarType)} — Prim Sıralaması ve Dağıtımı</h1>
+          <div class="meta">${esc(ayEtiketi)} ${currentYear} dönemi &nbsp;•&nbsp; 20 puan ve üzeri personel &nbsp;•&nbsp; Liste tarihi: ${(bugunStr() || '').split('-').reverse().join('.')}</div>
+        </div>
+        <div class="ozet">
+          <div class="kutu"><span>Toplam Yorum</span><b>${monthCloseModalData.yorumSayisi ?? 0}</b></div>
+          <div class="kutu"><span>&ge;20 Puan Alan</span><b>${liste.length} kişi</b></div>
+          <div class="kutu"><span>Toplam Net Puan</span><b>${sayi(toplamNet)}</b></div>
+          <div class="kutu"><span>Dağıtılacak Prim</span><b>${sayi(toplamPrim)}</b></div>
+        </div>
+        <table>
+          <thead><tr>
+            <th>#</th><th style="text-align:left">Personel</th><th>Ham Puan</th>
+            <th>Bonus</th><th>Net Puan</th><th style="text-align:right">Prim (Net × 0.5)</th>
+          </tr></thead>
+          <tbody>${satirlar || '<tr><td colspan="6" style="text-align:center;padding:18px">20 puan ve üzeri personel bulunmuyor.</td></tr>'}</tbody>
+          <tfoot><tr>
+            <td colspan="4" style="text-align:right">TOPLAM</td>
+            <td class="c">${sayi(toplamNet)}</td>
+            <td class="prim">${sayi(toplamPrim)}</td>
+          </tr></tfoot>
+        </table>
+        <p class="kural"><b>Prim kuralı:</b> Ayın ilk üçüne sırasıyla +10 / +5 / +3 bonus puan eklenir.
+        Net puan (ham puan + bonus) 0.5 ile çarpılarak gelecek ayın ${esc(collarType)} maaş tablosundaki
+        "PRİM" alanına yazılır.</p>
+        <div class="altimza"><div>Hazırlayan</div><div>Onaylayan</div><div>İnsan Kaynakları</div></div>
+        <script>window.onload = () => setTimeout(() => window.print(), 400);<\/script>
+      </body></html>`;
+
+      const w = window.open('', '_blank');
+      if (!w) { alert('Yazdırma penceresi açılamadı. Tarayıcınızın açılır pencere engelini kapatın.'); return; }
+      w.document.open(); w.document.write(html); w.document.close();
+    };
+
     const primSiralamaExcelIndir = () => {
       if (!monthCloseModalData) return;
       const liste = monthCloseModalData.over20Sorted || monthCloseModalData.over20 || [];
@@ -2286,12 +2386,21 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                     <div className="mt-4 pt-4 border-t border-purple-200">
                         <div className="flex items-center justify-between gap-2 mb-2">
                             <p className="text-xs font-black text-purple-800 uppercase tracking-wide">📋 20 Puan Üstü Tüm Sıralama</p>
-                            {/* YENİ (kullanıcı talebi): Bu sıralamanın tamamını Excel olarak indir */}
-                            <button onClick={primSiralamaExcelIndir}
-                                disabled={(monthCloseModalData.over20Sorted || []).length === 0}
-                                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-[11px] font-black rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
-                                <Download className="w-3.5 h-3.5" /> Excel İndir
-                            </button>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {/* YENİ (kullanıcı talebi): Sıralama + prim tutarları TEK A4 sayfada yazdırılır */}
+                              <button onClick={primSiralamaPdfYazdir}
+                                  disabled={(monthCloseModalData.over20Sorted || []).length === 0}
+                                  title="Sıralamayı ve prim tutarlarını A4 tek sayfa olarak yazdır / PDF kaydet"
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-700 hover:bg-purple-800 text-white text-[11px] font-black rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
+                                  <FileText className="w-3.5 h-3.5" /> A4 PDF Yazdır
+                              </button>
+                              {/* Excel indirme korundu */}
+                              <button onClick={primSiralamaExcelIndir}
+                                  disabled={(monthCloseModalData.over20Sorted || []).length === 0}
+                                  className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-[11px] font-black rounded-lg transition disabled:opacity-40 disabled:cursor-not-allowed">
+                                  <Download className="w-3.5 h-3.5" /> Excel
+                              </button>
+                            </div>
                         </div>
                         <div className="space-y-1.5 max-h-56 overflow-y-auto custom-scrollbar">
                             {(monthCloseModalData.over20Sorted || []).length > 0 ? monthCloseModalData.over20Sorted.map((p, idx) => (
