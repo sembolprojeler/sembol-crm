@@ -7481,10 +7481,32 @@ export const mesaiDokumanAnahtari = (personelVeyaYaka, yil, ay) => `${mesaiDokum
 // ============================================================================
 export const birakmaKoduGecersizMi = (person, tarihStr, kod) => {
   if (kod !== 'İB') return false;
-  if (!person || person.employmentStatus === 'Pasif') return false;  // Hâlâ ayrılmışsa geçerli
-  const bas = person.startDate;
-  if (!bas || !tarihStr) return false;
-  return tarihStr >= bas;   // 'YYYY-AA-GG' metin karşılaştırması
+  if (!person || !tarihStr) return false;
+  // Hâlâ AYRILMIŞ (Pasif) personelde "İB" gerçeği yansıtır — dokunulmaz.
+  if (person.employmentStatus === 'Pasif') return false;
+
+  // ---- Buradan sonrası: personel ŞU AN ÇALIŞIYOR ----
+  // "İşi Bıraktı" kodu yalnızca ayrılmış biri için anlamlıdır. Çalışan bir
+  // personelde kalan İB kayıtları, ayrılış-dönüş sırasında temizlenememiş
+  // artıklardır.
+  //
+  // ÖNEMLİ: İşe geri alma akışı employmentStatus'u 'Aktif' yapıyor ama
+  // startDate'i GÜNCELLEMİYOR (ilk işe giriş tarihi korunuyor). Bu yüzden
+  // yalnızca startDate'e bakan bir kural, startDate'i olmayan kayıtlarda
+  // çalışmıyordu — Radik Ali Aliyev örneğindeki durum buydu.
+  //
+  // Sıra:
+  //  1) Çalışma geçmişinde SON DÖNÜŞ tarihi varsa onu esas al; o tarihten
+  //     önceki İB'ler (gerçekten şirkette olmadığı dönem) KORUNUR, sonrası elenir.
+  //  2) Dönüş kaydı yoksa işe başlama tarihini esas al.
+  //  3) İkisi de yoksa: personel çalışıyor demektir, İB her hâlükârda artıktır.
+  const donusler = Array.isArray(person.calismaGecmisi)
+    ? person.calismaGecmisi.map(x => x?.donus).filter(Boolean).sort()
+    : [];
+  const sonDonus = donusler.length ? donusler[donusler.length - 1] : null;
+  if (sonDonus) return tarihStr >= sonDonus;
+  if (person.startDate) return tarihStr >= person.startDate;
+  return true;   // Çalışan personelde tarih bilgisi yoksa İB gösterilmez
 };
 
 // Bir mesai hücresini okurken geçersiz İB'yi eler (hücre yokmuş gibi davranır)
