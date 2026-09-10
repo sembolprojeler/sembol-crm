@@ -2829,13 +2829,35 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       setEkipBildirimSaat(saat);
       setEkipBildirimMetni(ekipBildirimSablonu(ekipBildirimTipi, saat));
     };
-    // Tek personele WhatsApp aç
-    const personeleBildirimGonder = (kisi) => {
-      let tel = (kisi.phone || kisi.telefon || kisi.phoneNumber || '').replace(/\D/g, '');
-      if (!tel) { alert(`${kisi.fullName} için kayıtlı telefon yok. Personel kaydından ekleyebilirsiniz.`); return; }
+    // ------------------------------------------------------------------
+    // HATA DÜZELTMESİ (kullanıcı bildirimi): "Telefon kayıtlı değil"
+    // Personel kaydındaki telefon alanları `personalPhone` (Kişisel Telefon)
+    // ve `companyPhone` (Şirket Telefonu) adlarını taşıyor. Önceki sürüm
+    // olmayan alanlara (phone / telefon / phoneNumber) baktığı için HERKES
+    // "telefon kayıtlı değil" görünüyordu.
+    //
+    // ÖNCELİK (kullanıcı kuralı): ŞİRKET telefonu varsa o kullanılır; yoksa
+    // KİŞİSEL telefona düşülür. Eski/farklı adlandırmalar da yedek olarak
+    // denenir ki elle girilmiş kayıtlar kaybolmasın.
+    // ------------------------------------------------------------------
+    const personelTelefonu = (kisi) => {
+      const aday = [kisi?.companyPhone, kisi?.personalPhone, kisi?.phone, kisi?.telefon, kisi?.phoneNumber]
+        .map(x => String(x || '').replace(/\D/g, ''))
+        .find(x => x.length >= 10);
+      if (!aday) return null;
+      // Hangi numaranın kullanıldığı arayüzde gösterilsin diye kaynağı da döneriz
+      const sirketMi = String(kisi?.companyPhone || '').replace(/\D/g, '').length >= 10;
+      let tel = aday;
       if (tel.startsWith('0')) tel = '90' + tel.substring(1);
       else if (!tel.startsWith('90')) tel = '90' + tel;
-      window.open(`https://wa.me/${tel}?text=${encodeURIComponent(ekipBildirimMetni)}`, '_blank');
+      return { numara: tel, gosterim: aday, kaynak: sirketMi ? 'Şirket' : 'Kişisel' };
+    };
+
+    // Tek personele WhatsApp aç
+    const personeleBildirimGonder = (kisi) => {
+      const t = personelTelefonu(kisi);
+      if (!t) { alert(`${kisi.fullName} için kayıtlı telefon yok. Personel kaydından "Şirket Telefonu" veya "Kişisel Telefon" alanına ekleyebilirsiniz.`); return; }
+      window.open(`https://wa.me/${t.numara}?text=${encodeURIComponent(ekipBildirimMetni)}`, '_blank');
       setGonderilenler(prev => prev.includes(kisi.id) ? prev : [...prev, kisi.id]);
     };
 
@@ -3310,16 +3332,19 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                 ) : (
                   <div className="space-y-1.5">
                     {ekipUyeleri.map(kisi => {
-                      const tel = (kisi.phone || kisi.telefon || kisi.phoneNumber || '').replace(/\D/g, '');
+                      const t = personelTelefonu(kisi);   // Şirket telefonu öncelikli
                       const gonderildi = gonderilenler.includes(kisi.id);
                       return (
-                        <div key={kisi.id} className={`flex items-center gap-2 p-2 rounded-xl border ${gonderildi ? 'bg-green-50 border-green-300' : tel ? 'bg-white border-neutral-200' : 'bg-amber-50 border-amber-300'}`}>
+                        <div key={kisi.id} className={`flex items-center gap-2 p-2 rounded-xl border ${gonderildi ? 'bg-green-50 border-green-300' : t ? 'bg-white border-neutral-200' : 'bg-amber-50 border-amber-300'}`}>
                           <div className="flex-1 min-w-0">
                             <p className="text-xs font-black text-neutral-800 truncate">{kisi.fullName}</p>
-                            <p className="text-[10px] font-bold text-neutral-500 truncate">{tel ? kisi.phone || kisi.telefon || kisi.phoneNumber : 'Telefon kayıtlı değil'}</p>
+                            {/* Hangi numaraya gideceği ve kaynağı (Şirket/Kişisel) açıkça yazılır */}
+                            <p className="text-[10px] font-bold text-neutral-500 truncate">
+                              {t ? <>{t.gosterim} <span className={t.kaynak === 'Şirket' ? 'text-emerald-600' : 'text-neutral-400'}>• {t.kaynak}</span></> : 'Telefon kayıtlı değil'}
+                            </p>
                           </div>
-                          <button type="button" disabled={!tel} onClick={() => personeleBildirimGonder(kisi)}
-                            className={`shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-black transition flex items-center gap-1 ${!tel ? 'bg-neutral-200 text-neutral-400 cursor-not-allowed' : gonderildi ? 'bg-green-600 text-white' : 'bg-[#25D366] hover:bg-[#1da851] text-white'}`}>
+                          <button type="button" disabled={!t} onClick={() => personeleBildirimGonder(kisi)}
+                            className={`shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-black transition flex items-center gap-1 ${!t ? 'bg-neutral-200 text-neutral-400 cursor-not-allowed' : gonderildi ? 'bg-green-600 text-white' : 'bg-[#25D366] hover:bg-[#1da851] text-white'}`}>
                             {gonderildi ? <><CheckCircle className="w-3 h-3" /> Tekrar</> : <><MessageCircle className="w-3 h-3" /> Gönder</>}
                           </button>
                         </div>
