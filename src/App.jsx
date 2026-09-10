@@ -6895,22 +6895,24 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
 
     // ========================================================================
-    // YENİ (kullanıcı talebi): MOBİLYA USTASI DA İŞİN TÜM DETAYINI GÖRÜR
+    // İŞ GÖRÜNÜRLÜĞÜ (kullanıcı talebi)
     // ------------------------------------------------------------------------
     // Standart mavi yaka personel yalnızca BUGÜNKÜ işlerini görebilir; ileri
-    // tarihli işler ve bildirimleri gizlenir. Ekip Şefi / Heryerden Usta /
-    // Kalfa / Müdür rütbeleri bu kısıttan zaten muaftı.
+    // tarihli işler ve bildirimleri gizlenir.
     //
-    // SAHA GEREKÇESİ: Bir ekipte fiilen İKİ sorumlu vardır — şoför ve mobilya
-    // ustası. İkisinin de işin detayına hâkim olması gerekir ki biri gelmediğinde
-    // diğeri işi eksiksiz yürütebilsin. Bu yüzden MOBİLYA USTASI pozisyonu da
-    // (ana veya ikincil pozisyon olarak) muafiyete eklendi.
+    // MUAF OLANLAR — RÜTBEYE göre belirlenir (pozisyona değil):
+    //   Ekip Şefi • Heryerden Usta • Kalfa • Müdür
+    // Ayrıca Firma Sahibi ve düzenleme yetkisi (canEdit) olanlar muaftır.
+    //
+    // DEĞİŞTİ (kullanıcı talebi): Önceki turda eklenen "Mobilya Ustası"
+    // POZİSYON muafiyeti KALDIRILDI. Ekipte detayı görmesi istenen ikinci kişi
+    // artık KALFA rütbesiyle belirleniyor — böylece kimin göreceğine tek tek
+    // rütbe vererek karar verilir.
     //
     // Kapsam: yalnızca GÖRÜNÜRLÜK. Düzenleme/onay yetkileri değişmedi.
     // ========================================================================
-    const isMobilyaUstasi = currentUser?.position === 'Mobilya Ustası' || currentUser?.secondaryPosition === 'Mobilya Ustası';
     const ustRutbeler = ['Ekip Şefi', 'Heryerden Usta', 'Kalfa', 'Müdür'];
-    const tumDetayGorebilir = ustRutbeler.includes(currentUser?.rank) || isMobilyaUstasi
+    const tumDetayGorebilir = ustRutbeler.includes(currentUser?.rank)
       || currentUser?.position === 'Firma Sahibi' || !!currentUser?.permissions?.canEdit;
     const isStandardBlueCollarApp = isMaviYakaUser && !tumDetayGorebilir;
     
