@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw } from 'lucide-react';
+import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw , Copy} from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, getDocs, where, orderBy, limit } from 'firebase/firestore';
 import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, normalizePozisyon, belgeListesiNormalize, HasarCozumBelgeleri, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar,
   // YENİ: Deneme maaşı alanları — süre seçenekleri ve canlı özet metni.
@@ -2769,6 +2769,76 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
         }
     };
 
+    // ========================================================================
+    // YENİ (kullanıcı talebi): EKİBE TOPLU WHATSAPP BİLDİRİMİ
+    // ------------------------------------------------------------------------
+    // Bazen ekibin erken çıkması, saatin değişmesi veya işin iptali gibi
+    // durumlar oluyor ve bunun O İŞTEKİ personele hızlıca duyurulması gerekiyor.
+    // Bu bölüm HER İŞ İÇİN AYRIDIR: mesaj yalnızca o işin ekibine hazırlanır,
+    // personel adları ve işin bilgileri metne otomatik yerleşir.
+    //
+    // NASIL ÇALIŞIR: WhatsApp'ın web bağlantısı tek seferde birden fazla
+    // numaraya mesaj göndermeye izin vermez. Bu yüzden pencere, ekipteki her
+    // kişi için AYRI bir "Gönder" düğmesi çıkarır; düğmeye basıldıkça o kişinin
+    // sohbeti mesaj hazır şekilde açılır ve satır "gönderildi" olarak işaretlenir.
+    // Böylece kimin bilgilendirildiği takip edilebilir. Metin ayrıca tek tuşla
+    // panoya kopyalanabilir (grup sohbetine yapıştırmak için).
+    //
+    // Telefonu kayıtlı olmayan personel listede uyarıyla gösterilir, atlanmaz.
+    // ========================================================================
+    const [ekipBildirimAcik, setEkipBildirimAcik] = useState(false);
+    const [ekipBildirimTipi, setEkipBildirimTipi] = useState('erkenCikis');
+    const [ekipBildirimMetni, setEkipBildirimMetni] = useState('');
+    const [ekipBildirimSaat, setEkipBildirimSaat] = useState('');
+    const [gonderilenler, setGonderilenler] = useState([]);
+
+    // İşin ekibindeki personeller (destek gelenler dâhil)
+    const ekipUyeleri = useMemo(() => {
+      const idler = isTamEkipIdleri(job);
+      return idler
+        .map(id => personnelList.find(p => String(p.id) === String(id)))
+        .filter(Boolean);
+    }, [job, personnelList]);
+
+    // Hazır mesaj şablonları — işin bilgileri otomatik dolar
+    const ekipBildirimSablonu = (tip, saat) => {
+      const musteri = job.customerName || 'müşteri';
+      const gun = (job.date || '').split('-').reverse().join('.');
+      const arac = job.assignedVehiclePlate ? ` (${job.assignedVehiclePlate})` : '';
+      const bas = `Merhaba, ${gun} tarihli ${musteri} işi${arac} hakkında bilgilendirme:`;
+      if (tip === 'erkenCikis') return `${bas}\n\n⏰ Yarın SABAH ERKEN ÇIKIYORUZ. Buluşma saati: ${saat || '__:__'}\nLütfen saatinde hazır olun ve QR kodunuzu okutmayı unutmayın.\n\nİyi çalışmalar.`;
+      if (tip === 'saatDegisti') return `${bas}\n\n🕐 İŞİN SAATİ DEĞİŞTİ. Yeni buluşma saati: ${saat || '__:__'}\nLütfen planınızı buna göre ayarlayın.\n\nİyi çalışmalar.`;
+      if (tip === 'gecCikis') return `${bas}\n\n🕐 Çıkış saati ileri alındı. Yeni buluşma saati: ${saat || '__:__'}\nErken gelmenize gerek yok.\n\nİyi çalışmalar.`;
+      if (tip === 'iptal') return `${bas}\n\n❌ BU İŞ İPTAL EDİLMİŞTİR. Bu iş için gelmenize gerek yoktur.\nYeni göreviniz ayrıca bildirilecektir.\n\nBilginize.`;
+      return bas;
+    };
+
+    // Pencere açılınca / tip değişince metni tazele
+    const ekipBildirimAc = () => {
+      setEkipBildirimTipi('erkenCikis');
+      setEkipBildirimSaat(job.time || '');
+      setEkipBildirimMetni(ekipBildirimSablonu('erkenCikis', job.time || ''));
+      setGonderilenler([]);
+      setEkipBildirimAcik(true);
+    };
+    const bildirimTipiDegistir = (tip) => {
+      setEkipBildirimTipi(tip);
+      setEkipBildirimMetni(ekipBildirimSablonu(tip, ekipBildirimSaat));
+    };
+    const bildirimSaatiDegistir = (saat) => {
+      setEkipBildirimSaat(saat);
+      setEkipBildirimMetni(ekipBildirimSablonu(ekipBildirimTipi, saat));
+    };
+    // Tek personele WhatsApp aç
+    const personeleBildirimGonder = (kisi) => {
+      let tel = (kisi.phone || kisi.telefon || kisi.phoneNumber || '').replace(/\D/g, '');
+      if (!tel) { alert(`${kisi.fullName} için kayıtlı telefon yok. Personel kaydından ekleyebilirsiniz.`); return; }
+      if (tel.startsWith('0')) tel = '90' + tel.substring(1);
+      else if (!tel.startsWith('90')) tel = '90' + tel;
+      window.open(`https://wa.me/${tel}?text=${encodeURIComponent(ekipBildirimMetni)}`, '_blank');
+      setGonderilenler(prev => prev.includes(kisi.id) ? prev : [...prev, kisi.id]);
+    };
+
     // EKLENEN YENİ METOTLAR: Doğrudan kart üzerinden malzeme ekleme ve çıkarma
     const handleAddCustomMaterial = async () => {
        const matName = newCustomMaterial.name.trim();
@@ -3172,7 +3242,97 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
             <MessageSquareText className="w-3.5 h-3.5" /> Randevu Onayı (SMS)
           </button>
         </div>
+
+        {/* YENİ (kullanıcı talebi): Bu işin EKİBİNE toplu WhatsApp bildirimi */}
+        <div className="p-2 border-t border-neutral-200 shrink-0 bg-white">
+          <button type="button" onClick={ekipBildirimAc}
+            title="Bu işteki personele erken çıkış / saat değişikliği / iptal bilgisi gönder"
+            className="w-full py-2 text-[10px] font-bold rounded-lg transition flex items-center justify-center gap-1.5 bg-[#25D366]/15 hover:bg-[#25D366]/25 text-[#0d6b4f] border border-[#25D366]/40">
+            <MessageCircle className="w-3.5 h-3.5" /> Ekibe Bildirim Gönder ({ekipUyeleri.length} kişi)
+          </button>
+        </div>
       </div>
+
+      {/* ======================================================================
+          YENİ: EKİBE TOPLU BİLDİRİM PENCERESİ (işe özel)
+          ====================================================================== */}
+      {ekipBildirimAcik && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60] p-4" onClick={() => setEkipBildirimAcik(false)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[88vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-4 bg-[#128C7E] flex items-center justify-between shrink-0">
+              <div className="min-w-0">
+                <h3 className="font-black text-white text-sm truncate flex items-center gap-2"><MessageCircle className="w-4 h-4" /> Ekibe Bildirim</h3>
+                <p className="text-[10px] font-bold text-white/80 truncate">{job.customerName} • {(job.date || '').split('-').reverse().join('.')} {job.time || ''}</p>
+              </div>
+              <button onClick={() => setEkipBildirimAcik(false)} className="text-white/70 hover:text-white transition shrink-0"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="p-4 space-y-3 overflow-y-auto custom-scrollbar">
+              {/* Hazır durumlar */}
+              <div>
+                <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider block mb-1.5">Durum</span>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {[['erkenCikis', '⏰ Erken Çıkış'], ['saatDegisti', '🕐 Saat Değişti'], ['gecCikis', '🕐 Geç Çıkış'], ['iptal', '❌ İş İptal']].map(([tip, ad]) => (
+                    <button key={tip} type="button" onClick={() => bildirimTipiDegistir(tip)}
+                      className={`px-2 py-2 rounded-lg text-[11px] font-black border transition ${ekipBildirimTipi === tip ? 'bg-[#128C7E] text-white border-[#128C7E]' : 'bg-white border-neutral-300 text-neutral-600 hover:bg-neutral-50'}`}>{ad}</button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Saat — iptal dışındaki durumlarda */}
+              {ekipBildirimTipi !== 'iptal' && (
+                <div>
+                  <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider block mb-1.5">Buluşma Saati</span>
+                  <input type="time" value={ekipBildirimSaat} onChange={e => bildirimSaatiDegistir(e.target.value)}
+                    className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-[#25D366]" />
+                </div>
+              )}
+
+              {/* Mesaj — düzenlenebilir */}
+              <div>
+                <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider block mb-1.5">Mesaj (düzenleyebilirsiniz)</span>
+                <textarea value={ekipBildirimMetni} onChange={e => setEkipBildirimMetni(e.target.value)}
+                  className="w-full p-2.5 border border-neutral-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-[#25D366] h-32 resize-none" />
+                <button type="button" onClick={() => { navigator.clipboard?.writeText(ekipBildirimMetni); }}
+                  className="mt-1.5 text-[10px] font-black text-neutral-500 hover:text-[#128C7E] flex items-center gap-1">
+                  <Copy className="w-3 h-3" /> Metni kopyala (grup sohbetine yapıştırmak için)
+                </button>
+              </div>
+
+              {/* Ekip listesi — kişi kişi gönder */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-[10px] font-black text-neutral-500 uppercase tracking-wider">Bu İşin Ekibi ({ekipUyeleri.length})</span>
+                  <span className="text-[10px] font-black text-[#128C7E]">{gonderilenler.length} gönderildi</span>
+                </div>
+                {ekipUyeleri.length === 0 ? (
+                  <p className="text-xs font-bold text-neutral-400 text-center py-4">Bu işe atanmış personel yok.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {ekipUyeleri.map(kisi => {
+                      const tel = (kisi.phone || kisi.telefon || kisi.phoneNumber || '').replace(/\D/g, '');
+                      const gonderildi = gonderilenler.includes(kisi.id);
+                      return (
+                        <div key={kisi.id} className={`flex items-center gap-2 p-2 rounded-xl border ${gonderildi ? 'bg-green-50 border-green-300' : tel ? 'bg-white border-neutral-200' : 'bg-amber-50 border-amber-300'}`}>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-black text-neutral-800 truncate">{kisi.fullName}</p>
+                            <p className="text-[10px] font-bold text-neutral-500 truncate">{tel ? kisi.phone || kisi.telefon || kisi.phoneNumber : 'Telefon kayıtlı değil'}</p>
+                          </div>
+                          <button type="button" disabled={!tel} onClick={() => personeleBildirimGonder(kisi)}
+                            className={`shrink-0 px-3 py-1.5 rounded-lg text-[10px] font-black transition flex items-center gap-1 ${!tel ? 'bg-neutral-200 text-neutral-400 cursor-not-allowed' : gonderildi ? 'bg-green-600 text-white' : 'bg-[#25D366] hover:bg-[#1da851] text-white'}`}>
+                            {gonderildi ? <><CheckCircle className="w-3 h-3" /> Tekrar</> : <><MessageCircle className="w-3 h-3" /> Gönder</>}
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <p className="text-[10px] font-bold text-neutral-400 mt-2">WhatsApp tek bağlantıyla çoklu gönderime izin vermez; her kişiye tek tuşla ayrı açılır ve gönderilenler işaretlenir.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* YENİ: Ekibi Düzenle Modalı */}
       {showEditTeamModal && (
@@ -3820,25 +3980,28 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     
     // YENİ EKLENEN: Mavi yaka ve Ekip Şefi OLMAYAN durumu kontrol et
     // ========================================================================
-    // YENİ (kullanıcı talebi): MOBİLYA USTASI DA İŞİN TÜM DETAYINI GÖRÜR
+    // İŞ KARTI DETAY GÖRÜNÜRLÜĞÜ (kullanıcı talebi)
     // ------------------------------------------------------------------------
     // Standart mavi yaka personelde iş kartı KISITLI gösterilir: müşteri adı
     // yerine "Operasyon Görevi" yazar, telefon ve IBAN Paylaş gizlenir, ileri
-    // tarihli işler listelenmez. Ekip Şefi / Heryerden Usta / Kalfa / Müdür
-    // bu kısıttan zaten muaftı.
+    // tarihli işler listelenmez.
     //
-    // SAHA GEREKÇESİ: Bir ekipte fiilen İKİ sorumlu vardır — şoför ve mobilya
-    // ustası. İkisinin de işin detayına hâkim olması gerekir ki biri gelmediğinde
-    // diğeri işi eksiksiz yürütebilsin. Bu yüzden MOBİLYA USTASI pozisyonu da
-    // (ana veya ikincil pozisyon olarak) muafiyete eklendi.
+    // MUAF OLANLAR — RÜTBEYE göre belirlenir (pozisyona değil):
+    //   Ekip Şefi • Heryerden Usta • Kalfa • Müdür
+    // Ayrıca Firma Sahibi ve düzenleme yetkisi (canEdit) olanlar muaftır.
+    //
+    // DEĞİŞTİ (kullanıcı talebi): Önceki turda eklenen "Mobilya Ustası"
+    // POZİSYON muafiyeti KALDIRILDI. Ekipte işin detayına hâkim olması istenen
+    // ikinci kişi, pozisyonuyla değil KALFA rütbesiyle belirleniyor. Böylece
+    // hangi mobilya ustasının detayı göreceğine rütbe vererek karar verilir;
+    // tüm mobilya ustaları otomatik olarak müşteri bilgisine erişmez.
     //
     // NOT: Aynı kural App.jsx'te de var (isStandardBlueCollarApp) ve orada da
     // aynı şekilde güncellendi; iki ekran birbiriyle tutarlı kalır.
     // Kapsam yalnızca GÖRÜNÜRLÜK — düzenleme/onay yetkileri değişmedi.
     // ========================================================================
-    const isMobilyaUstasiKullanici = currentUser?.position === 'Mobilya Ustası' || currentUser?.secondaryPosition === 'Mobilya Ustası';
     const tumDetayGorebilirIsler = ['Ekip Şefi', 'Heryerden Usta', 'Kalfa', 'Müdür'].includes(currentUser?.rank)
-      || isMobilyaUstasiKullanici || currentUser?.position === 'Firma Sahibi' || !!currentUser?.permissions?.canEdit;
+      || currentUser?.position === 'Firma Sahibi' || !!currentUser?.permissions?.canEdit;
     const isStandardBlueCollar = (currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position))) && !tumDetayGorebilirIsler;
 
     const myJobs = jobs.filter(j => {
