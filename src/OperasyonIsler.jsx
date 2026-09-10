@@ -3819,7 +3819,27 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     const todayStr = new Date().toISOString().split('T')[0];
     
     // YENİ EKLENEN: Mavi yaka ve Ekip Şefi OLMAYAN durumu kontrol et
-    const isStandardBlueCollar = (currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position))) && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Heryerden Usta' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
+    // ========================================================================
+    // YENİ (kullanıcı talebi): MOBİLYA USTASI DA İŞİN TÜM DETAYINI GÖRÜR
+    // ------------------------------------------------------------------------
+    // Standart mavi yaka personelde iş kartı KISITLI gösterilir: müşteri adı
+    // yerine "Operasyon Görevi" yazar, telefon ve IBAN Paylaş gizlenir, ileri
+    // tarihli işler listelenmez. Ekip Şefi / Heryerden Usta / Kalfa / Müdür
+    // bu kısıttan zaten muaftı.
+    //
+    // SAHA GEREKÇESİ: Bir ekipte fiilen İKİ sorumlu vardır — şoför ve mobilya
+    // ustası. İkisinin de işin detayına hâkim olması gerekir ki biri gelmediğinde
+    // diğeri işi eksiksiz yürütebilsin. Bu yüzden MOBİLYA USTASI pozisyonu da
+    // (ana veya ikincil pozisyon olarak) muafiyete eklendi.
+    //
+    // NOT: Aynı kural App.jsx'te de var (isStandardBlueCollarApp) ve orada da
+    // aynı şekilde güncellendi; iki ekran birbiriyle tutarlı kalır.
+    // Kapsam yalnızca GÖRÜNÜRLÜK — düzenleme/onay yetkileri değişmedi.
+    // ========================================================================
+    const isMobilyaUstasiKullanici = currentUser?.position === 'Mobilya Ustası' || currentUser?.secondaryPosition === 'Mobilya Ustası';
+    const tumDetayGorebilirIsler = ['Ekip Şefi', 'Heryerden Usta', 'Kalfa', 'Müdür'].includes(currentUser?.rank)
+      || isMobilyaUstasiKullanici || currentUser?.position === 'Firma Sahibi' || !!currentUser?.permissions?.canEdit;
+    const isStandardBlueCollar = (currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position))) && !tumDetayGorebilirIsler;
 
     const myJobs = jobs.filter(j => {
         const isAssigned = j.assignedPersonnelIds?.includes(currentUser.id) || j.assignedPersonnelId === currentUser.id;
