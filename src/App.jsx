@@ -3994,7 +3994,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [markDamageJobId, setMarkDamageJobId] = useState(null);
     // DEĞİŞTİ: cost (Hasar Tutarı ₺) alanı eklendi — hasar kapatılırken maliyet girilir
     // DEĞİŞTİ: files (çözüm belgeleri) eklendi — fotoğraf/PDF/dekont, çoklu ve isteğe bağlı
-    const [resolveDamageModal, setResolveDamageModal] = useState({ isOpen: false, jobId: null, note: '', cost: '', files: [] });
+    // YENİ (kullanıcı talebi): sorumlular = hasar bedelinin kesileceği personel kimlikleri.
+    // Boş bırakılırsa eski davranış geçerlidir (tüm ekibe eşit bölünür).
+    const [resolveDamageModal, setResolveDamageModal] = useState({ isOpen: false, jobId: null, note: '', cost: '', files: [], sorumlular: [] });
     // Kaç dosyanın yüklemesi sürüyor? (>0 iken Kaydet kilitlenir ki yarım dosya kaydedilmesin)
     const [resolveYukleniyor, setResolveYukleniyor] = useState(0);
 
@@ -5937,7 +5939,19 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       //    böylece profildeki "Personel Hareket İşlemleri"nde görünür.
       // ======================================================================
       const hasarTutari = parseFloat(resolveDamageModal.cost) || 0;
-      const ekipIdleri = (job.assignedPersonnelIds || []).filter(Boolean);
+      const isEkibi = (job.assignedPersonnelIds || []).filter(Boolean);
+      // ======================================================================
+      // YENİ (kullanıcı talebi): HASARDAN SORUMLU PERSONEL SEÇİMİ
+      // ----------------------------------------------------------------------
+      // Pencerede sorumlu seçildiyse borç YALNIZCA onlara yazılır ve seçilen
+      // kişi sayısına eşit bölünür:
+      //   • 1 kişi seçildi  -> tutarın TAMAMI o kişiye
+      //   • 2 kişi seçildi  -> tutar ikiye bölünür
+      // Hiç seçim yapılmazsa ESKİ DAVRANIŞ korunur: işe giden tüm ekibe eşit
+      // bölünür (geriye dönük uyumluluk).
+      // ======================================================================
+      const secilenler = (resolveDamageModal.sorumlular || []).filter(Boolean);
+      const ekipIdleri = secilenler.length > 0 ? secilenler : isEkibi;
       let kisiBasi = 0;
 
       if (hasarTutari > 0 && ekipIdleri.length > 0) {
@@ -5957,7 +5971,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               type: 'hasarBorcu',
               title: 'Hasar Borcu Eklendi',
               amount: kisiBasi,
-              note: `${job.customerName} işindeki hasar: ₺${hasarTutari.toLocaleString('tr-TR')} / ${ekipIdleri.length} kişi. Priminden kesilecek.`,
+              note: `${job.customerName} işindeki hasar: ₺${hasarTutari.toLocaleString('tr-TR')} / ${ekipIdleri.length} ${secilenler.length > 0 ? 'sorumlu personel' : 'kişi (tüm ekip)'}. Priminden kesilecek.`,
               jobId: job.id,
               date: new Date().toISOString().split('T')[0],
               createdAt: new Date().toISOString()
@@ -5984,7 +5998,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       });
 
       addSystemLog('Hasar Çözüldü', `${job.customerName} müşterisinin hasar kaydı çözüldü olarak işaretlendi.${hasarTutari > 0 ? ` Maliyet ₺${hasarTutari.toLocaleString('tr-TR')} — ${ekipIdleri.length} kişiye ₺${kisiBasi.toLocaleString('tr-TR')} hasar borcu yazıldı (primden kesilecek).` : ''}`);
-      setResolveDamageModal({ isOpen: false, jobId: null, note: '', cost: '', files: [] });
+      setResolveDamageModal({ isOpen: false, jobId: null, note: '', cost: '', files: [], sorumlular: [] });
     };
 
     // YENİ: Hasarlı İşler "Düzenle" butonu — hasar notunu ve (çözülmüşse) çözüm notunu düzenlemek için modalı açar.
@@ -6879,7 +6893,26 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     );
     
     const isMaviYakaUser = currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position));
-    const isStandardBlueCollarApp = isMaviYakaUser && currentUser?.rank !== 'Ekip Şefi' && currentUser?.rank !== 'Heryerden Usta' && currentUser?.rank !== 'Kalfa' && currentUser?.rank !== 'Müdür' && currentUser?.position !== 'Firma Sahibi' && !currentUser?.permissions?.canEdit;
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): MOBİLYA USTASI DA İŞİN TÜM DETAYINI GÖRÜR
+    // ------------------------------------------------------------------------
+    // Standart mavi yaka personel yalnızca BUGÜNKÜ işlerini görebilir; ileri
+    // tarihli işler ve bildirimleri gizlenir. Ekip Şefi / Heryerden Usta /
+    // Kalfa / Müdür rütbeleri bu kısıttan zaten muaftı.
+    //
+    // SAHA GEREKÇESİ: Bir ekipte fiilen İKİ sorumlu vardır — şoför ve mobilya
+    // ustası. İkisinin de işin detayına hâkim olması gerekir ki biri gelmediğinde
+    // diğeri işi eksiksiz yürütebilsin. Bu yüzden MOBİLYA USTASI pozisyonu da
+    // (ana veya ikincil pozisyon olarak) muafiyete eklendi.
+    //
+    // Kapsam: yalnızca GÖRÜNÜRLÜK. Düzenleme/onay yetkileri değişmedi.
+    // ========================================================================
+    const isMobilyaUstasi = currentUser?.position === 'Mobilya Ustası' || currentUser?.secondaryPosition === 'Mobilya Ustası';
+    const ustRutbeler = ['Ekip Şefi', 'Heryerden Usta', 'Kalfa', 'Müdür'];
+    const tumDetayGorebilir = ustRutbeler.includes(currentUser?.rank) || isMobilyaUstasi
+      || currentUser?.position === 'Firma Sahibi' || !!currentUser?.permissions?.canEdit;
+    const isStandardBlueCollarApp = isMaviYakaUser && !tumDetayGorebilir;
     
     const myTasksForBadge = tasks.filter(t => t.assignee === currentUser?.fullName || t.assignee === 'Tüm Personeller');
     const unreadTasksCount = myTasksForBadge.filter(t => t.status !== 'completed').length;
@@ -10098,7 +10131,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col">
               <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-green-500 shrink-0">
                 <h3 className="font-bold text-lg flex items-center gap-2"><CheckCircle className="w-5 h-5 text-green-500" /> Hasar Sorununu Çöz</h3>
-                <button onClick={() => setResolveDamageModal({ isOpen: false, jobId: null, note: '', cost: '', files: [] })} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+                <button onClick={() => setResolveDamageModal({ isOpen: false, jobId: null, note: '', cost: '', files: [], sorumlular: [] })} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               
               <div className="p-6 overflow-y-auto custom-scrollbar">
@@ -10123,16 +10156,79 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     {/* Açıklama: maliyetsiz çözümde 0 girilebilir */}
                     <p className="text-[11px] font-medium text-neutral-500 mt-1.5">Maliyetsiz çözüm olduysa <b>0</b> girebilirsiniz — kimseye borç yazılmaz.</p>
                     {(() => {
-                      // Canlı önizleme: tutar ve ekip belliyse kişi başı payı göster
+                      // Canlı önizleme: tutar, seçili sorumlular (yoksa tüm ekip) üzerinden
                       const j = jobs.find(x => x.id === resolveDamageModal.jobId);
-                      const ekipSayisi = (j?.assignedPersonnelIds || []).filter(Boolean).length;
+                      const isEkibi = (j?.assignedPersonnelIds || []).filter(Boolean);
+                      const secilenler = (resolveDamageModal.sorumlular || []).filter(Boolean);
+                      const hedef = secilenler.length > 0 ? secilenler : isEkibi;
                       const tutar = parseFloat(resolveDamageModal.cost) || 0;
                       if (tutar <= 0) return null;
-                      if (ekipSayisi === 0) return <p className="text-[11px] font-bold text-red-600 mt-1.5">Bu işe atanmış ekip bulunamadı — tutar girilse de kimseye borç yazılamaz.</p>;
-                      const pay = Math.round((tutar / ekipSayisi) * 100) / 100;
-                      return <p className="text-[11px] font-bold text-red-700 mt-1.5">İşe giden {ekipSayisi} kişiye eşit bölünür: kişi başı ₺{pay.toLocaleString('tr-TR')} hasar borcu yazılır ve yalnızca PRİMLERİNDEN kesilir.</p>;
+                      if (hedef.length === 0) return <p className="text-[11px] font-bold text-red-600 mt-1.5">Bu işe atanmış ekip bulunamadı — tutar girilse de kimseye borç yazılamaz.</p>;
+                      const pay = Math.round((tutar / hedef.length) * 100) / 100;
+                      return <p className="text-[11px] font-bold text-red-700 mt-1.5">
+                        {secilenler.length > 0 ? `Seçilen ${hedef.length} sorumluya` : `İşe giden ${hedef.length} kişiye`} eşit bölünür: kişi başı ₺{pay.toLocaleString('tr-TR')} hasar borcu yazılır ve yalnızca PRİMLERİNDEN kesilir.
+                      </p>;
                     })()}
                   </div>
+
+                  {/* ==============================================================
+                      YENİ (kullanıcı talebi): HASARDAN SORUMLU PERSONEL SEÇİMİ
+                      İşe giden ekip listelenir; işaretlenen kişilere borç yazılır.
+                      Tek kişi seçilirse tutarın TAMAMI ona, iki kişi seçilirse
+                      İKİYE bölünür. Hiç seçilmezse tüm ekibe eşit bölünür
+                      (eski davranış korunur).
+                      ============================================================== */}
+                  {(() => {
+                    const j = jobs.find(x => x.id === resolveDamageModal.jobId);
+                    const isEkibi = (j?.assignedPersonnelIds || []).filter(Boolean);
+                    if (isEkibi.length === 0) return null;
+                    const tutar = parseFloat(resolveDamageModal.cost) || 0;
+                    const secilenler = (resolveDamageModal.sorumlular || []).filter(Boolean);
+                    const sec = (pid) => setResolveDamageModal(prev => {
+                      const v = (prev.sorumlular || []);
+                      return { ...prev, sorumlular: v.includes(pid) ? v.filter(x => x !== pid) : [...v, pid] };
+                    });
+                    return (
+                      <div>
+                        <label className="block text-sm font-bold text-black mb-2">
+                          Hasardan Sorumlu Personel <span className="font-medium text-neutral-400">— seçilmezse tüm ekibe bölünür</span>
+                        </label>
+                        <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                          {isEkibi.map(pid => {
+                            const kisi = personnelList.find(p => String(p.id) === String(pid));
+                            const secili = secilenler.includes(pid);
+                            const pay = secili && tutar > 0 ? Math.round((tutar / secilenler.length) * 100) / 100 : 0;
+                            return (
+                              <button key={pid} type="button" onClick={() => sec(pid)}
+                                className={`w-full flex items-center gap-2.5 p-2.5 rounded-xl border-2 text-left transition ${secili ? 'border-red-400 bg-red-50' : 'border-neutral-200 bg-white hover:bg-neutral-50'}`}>
+                                <span className={`w-5 h-5 rounded border-2 shrink-0 flex items-center justify-center ${secili ? 'bg-red-600 border-red-600' : 'border-neutral-300'}`}>
+                                  {secili && <CheckCircle className="w-3.5 h-3.5 text-white" />}
+                                </span>
+                                <span className="flex-1 min-w-0">
+                                  <span className="block font-black text-sm text-neutral-800 truncate">{kisi?.fullName || 'Bilinmeyen personel'}</span>
+                                  <span className="block text-[10px] font-bold text-neutral-500 truncate">{kisi?.position || ''}</span>
+                                </span>
+                                {secili && pay > 0 && (
+                                  <span className="shrink-0 text-[11px] font-black text-red-700 whitespace-nowrap">₺{pay.toLocaleString('tr-TR')}</span>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        <div className="flex items-center justify-between mt-1.5">
+                          <p className="text-[11px] font-bold text-neutral-500">
+                            {secilenler.length === 0 ? 'Kimse seçilmedi — borç tüm ekibe eşit bölünecek.'
+                              : secilenler.length === 1 ? 'Tek sorumlu: tutarın tamamı bu kişiye yazılacak.'
+                              : `${secilenler.length} sorumlu: tutar eşit bölünecek.`}
+                          </p>
+                          {secilenler.length > 0 && (
+                            <button type="button" onClick={() => setResolveDamageModal(prev => ({ ...prev, sorumlular: [] }))}
+                              className="text-[11px] font-black text-neutral-500 hover:text-red-600 shrink-0">Seçimi temizle</button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {/* ==============================================================
                       YENİ: ÇÖZÜM BELGELERİ (isteğe bağlı, çoklu)
                       Fotoğraf, PDF, dekont, servis fişi vb. eklenebilir. Dosyalar
@@ -10180,7 +10276,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                         ? 'bg-red-600 hover:bg-red-700'
                         : 'bg-green-500 hover:bg-green-600'}`}>
                     <CheckCircle className="w-5 h-5" />
-                    {(parseFloat(resolveDamageModal.cost) || 0) > 0 ? 'Çözüldü Olarak Kaydet (Ekibe Borç Yazılacak)' : 'Çözüldü Olarak Kaydet'}
+                    {(parseFloat(resolveDamageModal.cost) || 0) > 0
+                      ? ((resolveDamageModal.sorumlular || []).length > 0
+                          ? `Çözüldü Olarak Kaydet (${resolveDamageModal.sorumlular.length} Kişiye Borç)`
+                          : 'Çözüldü Olarak Kaydet (Ekibe Borç Yazılacak)')
+                      : 'Çözüldü Olarak Kaydet'}
                   </button>
                 </div>
               </div>
