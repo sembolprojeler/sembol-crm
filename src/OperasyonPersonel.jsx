@@ -7543,6 +7543,10 @@ export const mesaiTakibeDahil = (p) => !!p && p.employmentStatus !== 'Pasif' && 
 // Sorun oluşturmaz, çünkü çağrı fonksiyon GÖVDESİNİN içindedir; modül
 // tamamen yüklendikten sonra çalışır. Dosyanın üstüne taşımayın.
 // ============================================================================
+// Beyaz yakada "izin/devamsız" kararının verileceği en erken saat (09:30).
+// Mesai 09:00'da başladığı için yarım saatlik tolerans bırakılır.
+export const BEYAZ_YAKA_KARAR_SAATI_DK = 9 * 60 + 30;
+
 export const beyazYakaOnerileriHesapla = (personeller, qrKayitlari, tarihStr, atananIsSeti = null) => {
   const sonuc = {};
   (personeller || []).forEach(person => {
@@ -7593,6 +7597,29 @@ export const beyazYakaOnerileriHesapla = (personeller, qrKayitlari, tarihStr, at
       };
       return;
     }
+    // ====================================================================
+    // YENİ (kullanıcı talebi): BEYAZ YAKADA SABAH KARAR BEKLEME PENCERESİ
+    // --------------------------------------------------------------------
+    // SORUN: Beyaz yaka mesaisi genelde 09:00'da başlıyor. Sabahın erken
+    // saatlerinde henüz QR okutmamış personele sistem hemen "Haftalık İzin"
+    // veya "Devamsız" öneriyor, bu öneri otomatik puantaja işleniyordu.
+    // Puantajda izin/devamsızlık görünen personel ise QR ekranından mesai
+    // GİRİŞİ YAPAMIYORDU — kilitleniyordu.
+    //
+    // KURAL: Bakılan gün BUGÜN ise ve saat henüz 09:30'u geçmemişse karar
+    // verilmez (öneri üretilmez). Böylece personel 09:30'a kadar rahatça
+    // giriş yapabilir. 09:30'dan sonra normal kural işler: izin günüyse Hİ,
+    // değilse D. GEÇMİŞ günler bu beklemeden etkilenmez — onlarda karar
+    // anında verilir.
+    //
+    // NOT: Bu yalnızca BEYAZ YAKA motorudur; mavi yakanın kendi kuralları
+    // (05:00 QR açılışı, ekip çıkışına göre fazla mesai) değişmedi.
+    // ====================================================================
+    if (tarihStr === mesaiBugunStr()) {
+      const su = new Date();
+      const suAnDk = su.getHours() * 60 + su.getMinutes();
+      if (suAnDk < BEYAZ_YAKA_KARAR_SAATI_DK) return;   // Henüz erken — öneri yok
+    }
     if (prog.izinli) {
       // Okutmamış ama çalışma programında o gün izinli -> Haftalık İzin
       sonuc[person.id] = {
@@ -7607,7 +7634,7 @@ export const beyazYakaOnerileriHesapla = (personeller, qrKayitlari, tarihStr, at
     sonuc[person.id] = {
       status: 'D', hours: '',
       girisSaati: null, cikisSaati: cikis?.timeStr || null,
-      aciklama: 'QR/kod ile giriş kaydı yok → Devamsızlık önerildi.',
+      aciklama: 'QR/kod ile giriş kaydı yok → Devamsızlık önerildi (saat 09:30 geçti).',
       kaynak: 'yok'
     };
   });
@@ -8603,6 +8630,27 @@ export const izinDurumuGetir = async (person, tarihStr) => {
       const hucre = (snap.data().records || {})[person?.id]?.[g];
       const kod = typeof hucre === 'object' && hucre !== null ? hucre.status : hucre;
       if (IZIN_KODLARI.includes(kod)) {
+        // ================================================================
+        // YENİ (kullanıcı talebi): BEYAZ YAKA SABAH KİLİDİ AÇILIR
+        // ----------------------------------------------------------------
+        // Beyaz yaka mesaisi 09:00'da başlıyor. Sistem daha önce (veya bu
+        // sürüm yayına alınmadan önce) sabah erken saatte otomatik "Hİ/D"
+        // yazdıysa, personel QR ekranından giriş YAPAMIYORDU.
+        //
+        // Bugün ve saat 09:30'dan ÖNCEYSE, puantajdaki bu OTOMATİK kayıt
+        // kilit sayılmaz; personel girişini yapabilir. Giriş basıldığı anda
+        // öneri motoru durumu 'G'ye çevirir.
+        //
+        // ELLE girilmiş (manual) izinler bu istisnadan MUAF — yönetici
+        // bilerek izin verdiyse kilit devam eder.
+        const elleGirilmis = typeof hucre === 'object' && hucre !== null && hucre.manual === true;
+        const beyazYaka = mesaiYakaTipi(person) === 'Beyaz Yaka';
+        if (beyazYaka && !elleGirilmis && tarihStr === mesaiBugunStr()) {
+          const su = new Date();
+          if ((su.getHours() * 60 + su.getMinutes()) < BEYAZ_YAKA_KARAR_SAATI_DK) {
+            return { izinli: false, kod: null, etiket: null, kaynak: 'beyaz-sabah-toleransi' };
+          }
+        }
         return { izinli: true, kod, etiket: MESAI_STATUS_OPTIONS.find(o => o.code === kod)?.label || kod, kaynak: 'puantaj' };
       }
     }
