@@ -3669,21 +3669,58 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
   // ANA AKIŞ (kullanıcı talebi): Görüşmeye gidildi → firma bilgileri hazır
   // doldurulmuş şekilde "Portföye Ekle" formu açılır; ikinci kez yazmaya
   // gerek kalmaz. Randevu 'gidildi' + portföye aktarıldı olarak işaretlenir.
-  const randevudanPortfoyeEkle = async (r) => {
-    try {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', r.id), {
-        durum: 'gidildi', gidilmeTarihi: new Date().toISOString(), portfoyeAktarildi: true,
-      });
-    } catch (e) { console.error(e); }
+  // ==========================================================================
+  // HATA DÜZELTMESİ + YENİ (kullanıcı bildirimi):
+  //  1) "GİDİLDİ • PORTFÖYDE" yazıyor ama portföy listesinde firma yok.
+  //     KÖK NEDEN: Düğmeye basıldığı anda portfoyeAktarildi:true yazılıyordu —
+  //     form henüz KAYDEDİLMEDEN. Form kapatılırsa rozet kalıyor, kayıt yoktu.
+  //     ÇÖZÜM: Bağ artık portföy GERÇEKTEN kaydedildiğinde kurulur
+  //     (handleKaydet içinde). Bekleyen bağ `bekleyenRandevuBagi` ile taşınır.
+  //  2) Randevuda girilen bilgiler (not, linkler) portföye tekrar yazılmak
+  //     zorunda kalınıyordu. Artık randevu notu portföyün NOTLAR alanına ve
+  //     ZİYARET GÜNLÜĞÜNE otomatik geçer; kayıt açılış tarihi randevu tarihidir.
+  // ==========================================================================
+  const [bekleyenRandevuBagi, setBekleyenRandevuBagi] = useState(null); // { r, gidildiIsaretle }
+
+  // Randevu bilgileriyle portföy formunu açar (tek ortak fonksiyon)
+  const randevuBilgisiylePortfoyFormuAc = (r, { gidildiIsaretle }) => {
     setForm({
       ...bosForm,
       firmaAdi: r.firmaAdi || '', tip: r.tip || 'Emlak Ofisi', yetkili: r.yetkili || '',
       telefon: r.telefon || '', bolge: r.bolge || '', adres: r.adres || '',
       portfoySahibi: r.atanan || currentUser?.fullName || '',
-      notlar: r.not ? `Randevu notu (${r.tarih} ${r.saat || ''}): ${r.not}` : '',
+      // Randevu notu (linkler dâhil) portföy notlarına aynen taşınır
+      notlar: r.not ? `Randevu notu (${(r.tarih || '').split('-').reverse().join('.')} ${r.saat || ''}): ${r.not}` : '',
+      // Görüşme yapıldıysa durum "Ziyaret Edildi", yalnızca kayıt açılıyorsa "Randevu Alındı"
+      durum: gidildiIsaretle ? 'Ziyaret Edildi' : (r.durum === 'gidildi' ? 'Ziyaret Edildi' : 'Randevu Alındı'),
+      // Randevu ileri tarihliyse karttaki "Sonraki randevu" alanına da yazılır
+      sonrakiRandevu: (!gidildiIsaretle && r.durum === 'bekliyor' && r.tarih) ? r.tarih : '',
     });
+    setBekleyenRandevuBagi({ r, gidildiIsaretle });
     setDuzenlenenId(null); setFormAcik(true);
+  };
+
+  const randevudanPortfoyeEkle = async (r) => {
+    // "Gidildi" işareti hemen konur (görüşme yapıldı); PORTFÖYDE rozeti ise kayıt oluşunca
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', r.id), {
+        durum: 'gidildi', gidilmeTarihi: new Date().toISOString(),
+      });
+    } catch (e) { console.error(e); }
+    randevuBilgisiylePortfoyFormuAc({ ...r, durum: 'gidildi' }, { gidildiIsaretle: true });
     addSystemLog?.('Saha Randevu', `${r.firmaAdi} görüşmesi yapıldı → Portföye Ekle formu açıldı.`);
+  };
+
+  // YENİ (kullanıcı talebi): Randevuyu Düzenle penceresinden "Portföye Ekle"
+  // Randevunun durumu DEĞİŞMEZ (bekliyor kalır); yalnızca aynı bilgilerle
+  // portföy formu açılır, kaydedilince randevu bu portföye bağlanır.
+  const duzenlenenRandevudanPortfoyeEkle = () => {
+    const r = randevular.find(x => x.id === randevuDuzenlenenId);
+    if (!r) return;
+    // Formda yapılmış ama kaydedilmemiş düzenlemeler de taşınsın
+    const guncel = { ...r, ...randevuForm, id: r.id, durum: r.durum };
+    setRandevuFormAcik(false);
+    randevuBilgisiylePortfoyFormuAc(guncel, { gidildiIsaretle: false });
   };
 
   // Takvim yardımcıları (Hatırlatmalar sayfasındaki desenle aynı)
@@ -3810,16 +3847,39 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
         addSystemLog?.('Saha Portföy', `${form.firmaAdi} kaydı güncellendi.`);
         await portfoyRandevusunuEsitle(duzenlenenId, form);          // YENİ: takvime yansıt
       } else {
+        // Randevudan geliyorsa: görüşme notu ziyaret günlüğüne, açılış hareket geçmişine
+        const rb = bekleyenRandevuBagi;
+        const ilkZiyaretler = (rb && rb.gidildiIsaretle) ? [{
+          tarih: rb.r.tarih || bugunStr(),
+          sonuc: `Randevu gerçekleştirildi${rb.r.not ? ` — ${rb.r.not}` : ''}`,
+          yapan: rb.r.atanan || currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(),
+        }] : [];
+        const ilkHareketler = [hareket('ekleme', `Portföye eklendi (${form.tip})`)];
+        if (rb) ilkHareketler.push(hareket('randevu', `${(rb.r.tarih || '').split('-').reverse().join('.')} ${rb.r.saat || ''} randevusundan aktarıldı`));
         const yeniRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy'), {
           ...form,
-          ziyaretler: [], cariHareketler: [],
-          hareketGecmisi: [hareket('ekleme', `Portföye eklendi (${form.tip})`)],
+          ziyaretler: ilkZiyaretler, cariHareketler: [],
+          hareketGecmisi: ilkHareketler,
           ekleyen: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(),
         });
         addSystemLog?.('Saha Portföy', `Yeni iş ortağı adayı eklendi: ${form.firmaAdi} (${form.tip}) — Portföy: ${form.portfoySahibi}`);
-        await portfoyRandevusunuEsitle(yeniRef.id, form);           // YENİ: takvime yansıt
+        // ================================================================
+        // HATA DÜZELTMESİ: Randevu ↔ portföy bağı ANCAK ŞİMDİ kurulur.
+        // Rozet ("PORTFÖYDE") ve portfoyId gerçek kayıt oluştuktan sonra yazılır;
+        // form kapatılıp vazgeçilirse randevuda yanlış rozet kalmaz.
+        // ================================================================
+        if (rb?.r?.id) {
+          try {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', rb.r.id), {
+              portfoyId: yeniRef.id, portfoyeAktarildi: true,
+            });
+          } catch (err) { console.warn('Randevu bağı yazılamadı:', err); }
+          setBekleyenRandevuBagi(null);
+        }
+        // Randevudan geldiyse takvimde zaten var; tekrar randevu üretme
+        if (!rb) await portfoyRandevusunuEsitle(yeniRef.id, form);      // takvime yansıt
       }
-      setFormAcik(false); setDuzenlenenId(null); setForm(bosForm);
+      setFormAcik(false); setDuzenlenenId(null); setForm(bosForm); setBekleyenRandevuBagi(null);
     } catch (e) { console.error('Partner kaydedilemedi:', e); alert('Kaydedilemedi, tekrar deneyin.'); }
     setKaydediliyor(false);
   };
@@ -4080,7 +4140,22 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
                         <div className="font-black text-sm text-neutral-800 break-words flex items-center gap-1.5 flex-wrap">
                           {r.firmaAdi}
                           <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-white border border-neutral-200 text-neutral-500">{r.tip}</span>
-                          {r.durum === 'gidildi' && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-600 text-white">GİDİLDİ{r.portfoyeAktarildi ? ' • PORTFÖYDE' : ''}</span>}
+                          {/* DEĞİŞTİ: "PORTFÖYDE" rozeti bayrağa değil GERÇEK kayda bakar */}
+                          {r.durum === 'gidildi' && (() => {
+                            const pfVar = !!randevununPortfoyu(r);
+                            return (
+                              <>
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-600 text-white">GİDİLDİ{pfVar ? ' • PORTFÖYDE' : ''}</span>
+                                {!pfVar && (
+                                  <button type="button" onClick={() => randevuBilgisiylePortfoyFormuAc(r, { gidildiIsaretle: true })}
+                                    title="Bu görüşme portföye eklenmemiş — aynı bilgilerle ekle"
+                                    className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 transition">
+                                    + Portföye Ekle
+                                  </button>
+                                )}
+                              </>
+                            );
+                          })()}
                           {r.durum === 'iptal' && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-neutral-400 text-white">İPTAL</span>}
                           {gecikmis && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-red-600 text-white">GECİKMİŞ</span>}
                         </div>
@@ -4226,6 +4301,15 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
               {randevuKaydediliyor ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
               {randevuDuzenlenenId ? 'Randevuyu Güncelle' : 'Randevuyu Kaydet'}
             </button>
+            {/* YENİ (kullanıcı talebi): Düzenleme penceresinden doğrudan portföye ekle.
+                Buradaki bilgiler (firma, yetkili, telefon, bölge, adres, not) aynen
+                portföy formuna geçer; randevu bekliyor kalır ve kayıt oluşunca bağlanır. */}
+            {randevuDuzenlenenId && !randevununPortfoyu(randevular.find(x => x.id === randevuDuzenlenenId)) && (
+              <button type="button" onClick={duzenlenenRandevudanPortfoyeEkle}
+                className="w-full py-2.5 bg-white border-2 border-red-500 text-red-700 hover:bg-red-50 font-black rounded-2xl transition flex items-center justify-center gap-2">
+                <PlusCircle className="w-4 h-4" /> Bu Bilgilerle Portföye Ekle
+              </button>
+            )}
           </div>
         </div>
       )}
