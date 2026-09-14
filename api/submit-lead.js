@@ -146,7 +146,11 @@ export default async function handler(req, res) {
       musteriAdi: String(body.fullName || '').trim(),
       iletisim: String(body.phone || '').trim(),
       hesapId: '',
-      hizmetTipi: HOME_LABEL[body.homeSize] || 'Belirsiz',
+      // CRM'de hizmetTipi SADECE 'Nakliye' | 'Depo' | 'Belirsiz' değerlerini kabul ediyor
+      // (başka bir değer CRM ekranında çökmeye yol açıyor) — bu wizard yalnızca evden eve
+      // nakliyat teklifleri aldığı için her zaman 'Nakliye'. Ev tipi ("1+1", "Villa" vb.)
+      // zaten sonMesaj özetinde ayrıca yer alıyor, kaybolmuyor.
+      hizmetTipi: 'Nakliye',
       sonMesaj: buildSonMesaj(body),
       kaynak: 'web-sihirbaz',
 
