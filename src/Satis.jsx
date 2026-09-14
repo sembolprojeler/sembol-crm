@@ -2922,7 +2922,7 @@ const KANAL_RENK = {
 // Tarihi kısa Türkçe biçimde göster
 const tarihSaat = (iso) => iso ? new Date(iso).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
 
-export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLog }) => {
+export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLog, setViewingImage }) => {
   // ---------------------------------------------------------------- STATE ---
   const [aktifKanal, setAktifKanal] = useState('telefon');
   const [kayitlar, setKayitlar] = useState([]);       // Tüm kanalların kayıtları (canlı)
@@ -3365,6 +3365,15 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
                   <p className="text-[10px] font-black text-neutral-400 uppercase mb-1">İlk Mesaj / Görüşme Özeti</p>
                   <p className="text-xs text-neutral-700">{detayKayit.sonMesaj}</p>
+                </div>
+              )}
+              {Array.isArray(detayKayit.fotograflar) && detayKayit.fotograflar.length > 0 && (
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+                  <p className="text-[10px] font-black text-neutral-400 uppercase mb-1">Müşterinin Yüklediği Fotoğraflar</p>
+                  <HasarCozumBelgeleri
+                    files={detayKayit.fotograflar.map((url, i) => ({ url, name: `Fotoğraf ${i + 1}` }))}
+                    setViewingImage={setViewingImage}
+                  />
                 </div>
               )}
               {/* Hızlı durum ve hizmet tipi değişimi */}

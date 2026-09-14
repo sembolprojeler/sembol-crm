@@ -8366,7 +8366,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             
             {/* YENİ: MÜŞTERİ HAVUZU EKRANI — kendi alt yetkisiyle görünür */}
             {activeTab === 'musteriHavuzu' && showSatisMusteriHavuzu &&
-              <MusteriHavuzuView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
+              <MusteriHavuzuView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
 
             {/* YENİ: SAHA PORTFÖY EKRANI — kendi alt yetkisiyle görünür */}
             {activeTab === 'sahaPortfoy' && showSatisSahaPortfoy &&
