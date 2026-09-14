@@ -112,6 +112,23 @@ export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+
+  // GEÇİCİ TEŞHİS: tarayıcıdan bu adrese düz girildiğinde (GET), sunucunun
+  // gerçekte hangi FIRESTORE_APP_ID / FIREBASE_PROJECT_ID değerlerini
+  // kullandığını gösterir. Şifre/anahtar İÇERMEZ, sadece yol/proje adı —
+  // sorun bulununca bu bloğu kaldıracağız.
+  if (req.method === 'GET') {
+    res.status(200).json({
+      debug: true,
+      firestoreAppId: FIRESTORE_APP_ID || null,
+      firebaseProjectId: process.env.FIREBASE_PROJECT_ID || null,
+      firebaseClientEmailSet: !!process.env.FIREBASE_CLIENT_EMAIL,
+      firebasePrivateKeySet: !!process.env.FIREBASE_PRIVATE_KEY,
+      allowedOrigin: ALLOWED_ORIGIN,
+    });
+    return;
+  }
+
   if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
 
   if (!FIRESTORE_APP_ID) {
