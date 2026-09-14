@@ -2932,6 +2932,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [hesapFiltre, setHesapFiltre] = useState('Tümü');
   const [arama, setArama] = useState('');
   const [detayKayit, setDetayKayit] = useState(null); // Detay/hareket penceresi
+  const [detayFotoGoster, setDetayFotoGoster] = useState(null); // Detay penceresinde açılan fotoğraf (yan panel)
   const [notMetni, setNotMetni] = useState('');
   const [yeniKayitAcik, setYeniKayitAcik] = useState(false);
   const [hesapYonetimAcik, setHesapYonetimAcik] = useState(false);
@@ -3303,8 +3304,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                       className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black mr-1.5 ${k.iletisim.includes('Bekleniyor') ? 'opacity-50 pointer-events-none bg-neutral-200 text-neutral-500' : renk.aktif}`}>
                       <kanal.Ikon className="w-3 h-3" /> {iletisimBtnMetin}
                     </a>
-                    <button type="button" onClick={() => { 
-                        setDetayKayit(k); 
+                    <button type="button" onClick={() => {
+                        setDetayKayit(k);
+                        setDetayFotoGoster(null);
                         setDuzenleIletisim(k.iletisim.includes('Bekleniyor') ? '' : k.iletisim);
                         setDuzenleMusteriAdi(k.musteriAdi.includes('Ziyaretçi') ? '' : k.musteriAdi);
                       }}
@@ -3322,12 +3324,12 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
 
       {/* DETAY / HAREKET PENCERESİ */}
       {detayKayit && (
-        <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setDetayKayit(null)}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[88vh] flex flex-col animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/70 z-[9998] flex flex-col sm:flex-row items-center justify-center p-4 gap-4 overflow-y-auto animate-in fade-in" onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[88vh] flex flex-col animate-in zoom-in-95 shrink-0" onClick={e => e.stopPropagation()}>
             <div className={`p-4 text-white rounded-t-2xl shrink-0 ${renk.aktif}`}>
               <div className="flex items-center justify-between">
                 <h3 className="font-black flex items-center gap-2 text-sm"><kanal.Ikon className="w-5 h-5" /> {detayKayit.musteriAdi || 'İsimsiz'} — {detayKayit.iletisim}</h3>
-                <button onClick={() => setDetayKayit(null)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+                <button onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); }} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
               </div>
               <p className="text-[11px] font-bold opacity-80 mt-1">{hesapAdi(detayKayit.hesapId)} • {tarihSaat(detayKayit.createdAt)} • Kaynak: {detayKayit.kaynak === 'api' ? 'API' : 'Manuel'}</p>
             </div>
@@ -3372,7 +3374,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   <p className="text-[10px] font-black text-neutral-400 uppercase mb-1">Müşterinin Yüklediği Fotoğraflar</p>
                   <HasarCozumBelgeleri
                     files={detayKayit.fotograflar.map((url, i) => ({ url, name: `Fotoğraf ${i + 1}` }))}
-                    setViewingImage={setViewingImage}
+                    setViewingImage={setDetayFotoGoster}
                   />
                 </div>
               )}
@@ -3431,9 +3433,32 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               </div>
             </div>
             <div className="p-3 border-t border-neutral-200 shrink-0">
-              <button onClick={() => setDetayKayit(null)} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm transition">Kapat</button>
+              <button onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); }} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm transition">Kapat</button>
             </div>
           </div>
+
+          {detayFotoGoster && (
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[88vh] flex flex-col animate-in zoom-in-95 slide-in-from-right-4 shrink-0" onClick={e => e.stopPropagation()}>
+              <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-purple-600 rounded-t-2xl shrink-0">
+                <h3 className="font-bold text-sm truncate pr-2">{detayFotoGoster.title}</h3>
+                <button onClick={() => setDetayFotoGoster(null)} className="text-neutral-400 hover:text-white transition shrink-0"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="p-4 flex-1 min-h-0 overflow-y-auto flex flex-col items-center">
+                <div className="w-full aspect-video bg-neutral-100 rounded-xl border border-neutral-300 flex items-center justify-center mb-3 overflow-hidden relative shadow-inner">
+                  {isVideoUrl(detayFotoGoster.name) ? (
+                    <video src={detayFotoGoster.name} controls autoPlay muted className="w-full h-full object-contain bg-black" />
+                  ) : (
+                    <img src={detayFotoGoster.name} alt="Görsel" className="w-full h-full object-contain" />
+                  )}
+                </div>
+                <a href={detayFotoGoster.name} target="_blank" rel="noreferrer"
+                  className="w-full py-2.5 bg-purple-50 text-purple-700 hover:bg-purple-100 font-bold rounded-xl transition flex justify-center items-center gap-2 border border-purple-200 text-xs mb-2">
+                  <ArrowUpRight className="w-4 h-4" /> Görseli / Dosyayı Aç
+                </a>
+                <button onClick={() => setDetayFotoGoster(null)} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-xs transition">Kapat</button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
