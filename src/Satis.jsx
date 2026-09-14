@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight } from 'lucide-react';
+import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
 import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul,
   // YENİ: Çok günlü iş (1. gün / 2. gün) — profilde tek iş gösterimi ve kapora koruması
@@ -2890,6 +2890,7 @@ const KANALLAR = [
   { id: 'whatsapp',  ad: 'WhatsApp Mesajları',  Ikon: MessageCircle, renk: 'green',   hesapEtiket: 'WhatsApp Numarası',  hesapOrnek: '0532 XXX XX XX',        iletisimEtiket: 'Telefon No' },
   { id: 'instagram', ad: 'Instagram Mesajları', Ikon: Camera,        renk: 'pink',    hesapEtiket: 'Instagram Hesabı',   hesapOrnek: '@sembolnakliyat',       iletisimEtiket: 'Kullanıcı Adı' },
   { id: 'gmail',     ad: 'Gmail / E-posta',     Ikon: Mail,          renk: 'red',     hesapEtiket: 'E-posta Adresi',     hesapOrnek: 'info@sembolevdeneve.com', iletisimEtiket: 'E-posta' },
+  { id: 'web',       ad: 'Web Sitesi Teklifleri', Ikon: Globe,       renk: 'purple',  hesapEtiket: 'Sayfa',              hesapOrnek: 'sembolevdeneve.com',      iletisimEtiket: 'Telefon No' },
 ];
 
 // Takip durumları — sıralama satış hunisine göredir
@@ -2915,6 +2916,7 @@ const KANAL_RENK = {
   green: { aktif: 'bg-green-600 text-white shadow-md', pasif: 'bg-green-50 text-green-700 border-green-200 hover:border-green-400', nokta: 'bg-green-600', koyu: 'text-green-700' },
   pink:  { aktif: 'bg-pink-600 text-white shadow-md',  pasif: 'bg-pink-50 text-pink-700 border-pink-200 hover:border-pink-400',   nokta: 'bg-pink-600',  koyu: 'text-pink-700' },
   red:   { aktif: 'bg-red-600 text-white shadow-md',   pasif: 'bg-red-50 text-red-700 border-red-200 hover:border-red-400',      nokta: 'bg-red-600',   koyu: 'text-red-700' },
+  purple: { aktif: 'bg-purple-600 text-white shadow-md', pasif: 'bg-purple-50 text-purple-700 border-purple-200 hover:border-purple-400', nokta: 'bg-purple-600', koyu: 'text-purple-700' },
 };
 
 // Tarihi kısa Türkçe biçimde göster
