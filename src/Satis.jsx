@@ -3104,7 +3104,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const iletisimLink = (k) => {
     const v = (k.iletisim || '').replace(/\s/g, '');
     if (aktifKanal === 'telefon') return `tel:${v}`;
-    if (aktifKanal === 'whatsapp') return `https://wa.me/${v.replace(/^0/, '90')}`;
+    // "web" sekmesindeki iletisim alanı da bir TELEFON numarasıdır (web
+    // sihirbazlarından gelen "phone" alanı) — buton zaten "Mesaj At" yazıyor,
+    // WhatsApp'a gitmesi lazım; mailto: yanlıştı.
+    if (aktifKanal === 'whatsapp' || aktifKanal === 'web') return `https://wa.me/${v.replace(/^0/, '90')}`;
     if (aktifKanal === 'instagram') return `https://instagram.com/${v.replace('@', '')}`;
     return `mailto:${v}`;
   };
