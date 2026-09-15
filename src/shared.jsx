@@ -159,6 +159,71 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
       { name: "Başakşehir Depoevim", province: "İstanbul (Avrupa)", district: "Başakşehir", address: "İkitelli OSB. Atatürk Blv. No:98", floor: "2. Kat", transportMethod: "Bina Asansörü" }
     ];
 
+    // ==========================================================================
+    // YENİ (kullanıcı talebi): SAHA DENETİMİNDE SADECE MAVİ YAKA PERSONEL
+    // ==========================================================================
+    // SORUN: Şef denetimi ekranında ve Saha Raporlaması listesinde, işe destek
+    // için çağrılan SİSTEM DIŞI yevmiyeciler (teamNames içine elle yazılan
+    // isimler) de puanlanabiliyor ve raporda personel rozeti olarak
+    // görünüyordu. Bu kişiler personel kartı olmayan, tek günlük çalışanlar
+    // olduğu için puan/yorum geçmişleri anlamsızdı ve raporu kalabalıklaştırıyordu.
+    //
+    // KURAL: Saha denetiminde yalnızca sistemde kayıtlı MAVİ YAKA personel
+    // puanlanır ve yorumlanır. Yevmiyeciler ile beyaz yaka kadro denetim
+    // puanlamasına hiç girmez.
+    //
+    // NOT: Buradaki fonksiyonlar TEK DOĞRU KAYNAK olsun diye shared.jsx'te
+    // tutuluyor; hem denetim formu (OperasyonIsler) hem de raporlama ekranları
+    // (İnsan Kaynakları, Satış, Personel Profili, App) aynı kuralı kullanır.
+    // ==========================================================================
+
+    // Mavi yaka sayılan pozisyonlar (projenin diğer ekranlarıyla birebir aynı liste)
+    export const MAVI_YAKA_POZISYONLARI = [
+      'Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi', 'Operatör'
+    ];
+
+    // Bir personel kaydı mavi yaka mı? (collarType yoksa pozisyondan çıkarılır —
+    // eski kayıtlar collarType alanı olmadan oluşturulmuştu, bozulmasınlar)
+    export const isMaviYakaPersonel = (p) => {
+      if (!p) return false;
+      if (p.collarType) return p.collarType === 'Mavi Yaka';
+      return MAVI_YAKA_POZISYONLARI.includes(p.position);
+    };
+
+    // KAYITLI bir denetim puan satırı raporda gösterilsin mi?
+    // (Firebase'de zaten duran ESKİ kayıtlar için geriye dönük temizlik)
+    // - 'manuel:' ön ekli id  -> sistem dışı yevmiyeci, gösterilmez
+    // - pozisyonu 'Sistem dışı' -> yevmiyeci, gösterilmez
+    // - pozisyonu dolu ama mavi yaka listesinde değil -> beyaz yaka, gösterilmez
+    // - pozisyonu boş eski kayıt -> dokunulmaz (veri kaybı olmasın diye gösterilir)
+    export const denetimPuanSatiriGecerliMi = (pp) => {
+      if (!pp) return false;
+      const id = String(pp.personelId || '');
+      if (id.startsWith('manuel:')) return false;
+      const poz = (pp.pozisyon || '').trim();
+      if (poz === 'Sistem dışı') return false;
+      if (poz && !MAVI_YAKA_POZISYONLARI.includes(poz)) return false;
+      return true;
+    };
+
+    // Firestore'dan okunan bir denetim kaydını temizler: yevmiyeci puan/yorumları
+    // ayıklanır, ortalama puan kalan mavi yakalara göre YENİDEN hesaplanır.
+    // Böylece tek bir yerde filtrelenince tüm istatistikler (ortalama, puanlanan
+    // personel sayısı, notlar) otomatik olarak doğru gelir.
+    export const denetimKaydiniTemizle = (d) => {
+      if (!d) return d;
+      const temiz = (d.personelPuanlari || []).filter(denetimPuanSatiriGecerliMi);
+      const puanlar = temiz.map(pp => parseInt(pp.puan) || 0).filter(n => n > 0);
+      return {
+        ...d,
+        personelPuanlari: temiz,
+        personelIdListesi: temiz.map(pp => String(pp.personelId)),
+        ortalamaPuan: puanlar.length
+          ? Math.round((puanlar.reduce((t, n) => t + n, 0) / puanlar.length) * 100) / 100
+          : 0,
+      };
+    };
+
     export const MESAI_STATUS_OPTIONS = [
       { code: 'G', label: 'Geldi', color: 'bg-green-100 text-green-700 focus:bg-green-200' },
       { code: 'FG', label: 'Fazla Gün', color: 'bg-teal-100 text-teal-700 focus:bg-teal-200' },
