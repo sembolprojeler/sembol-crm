@@ -10,7 +10,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   // Eskiden IBAN bu dosyada sabit yazılıydı ve panelden değiştirilemiyordu.
   aktifBankaBilgiMetni,
   // YENİ: IBAN Paylaş penceresi için varsayılan hesap nesnesi ve IBAN biçimleyici.
-  aktifBankaHesabi, ibanBicimle } from './shared.jsx';
+  aktifBankaHesabi, ibanBicimle,
+  // YENİ: Saha Raporlaması'nda sistem dışı yevmiyecilerin puan/yorumları gizlenir;
+  // yalnızca mavi yaka personel görünür (tek doğru kaynak: shared.jsx).
+  denetimKaydiniTemizle } from './shared.jsx';
 
 
   export const AddInfoView = ({ currentUser, personnelList, addSystemLog, onBack }) => {
@@ -2658,7 +2661,12 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
       // açık olduğu için (arka planda sürekli çalışan bir maliyet değil) bu risk
       // kabul edilebilir düzeyde.
       const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), snap => {
-        setDenetimler(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        // DEĞİŞTİ: Kayıtlar tek noktada süzülür. 'denetimKaydiniTemizle' sistem dışı
+        // yevmiyecilerin puan/yorum satırlarını atar ve ortalamayı kalan mavi yaka
+        // personele göre yeniden hesaplar. Bu sayede aşağıdaki TÜM istatistikler
+        // (ortalama puan, puanlanan personel sayısı, şef performansı, notlar)
+        // otomatik olarak doğru değerleri kullanır.
+        setDenetimler(snap.docs.map(d => denetimKaydiniTemizle({ id: d.id, ...d.data() })));
         setYukleniyor(false);
       }, e => { console.error(e); setYukleniyor(false); });
       return () => unsub();
