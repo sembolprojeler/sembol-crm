@@ -61,6 +61,12 @@ function applyCors(req, res) {
   res.setHeader('Access-Control-Allow-Origin', origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // Tarayıcı, "navigator.sendBeacon" ile gönderilen isteklere credentials'ı
+  // (cookie vb.) OTOMATİK dahil ediyor — JS tarafından kapatılamıyor. Bu
+  // yüzden sunucu bunu açıkça KABUL ETTİĞİNİ belirtmek zorunda, yoksa
+  // tarayıcı isteği CORS hatasıyla engelliyor (yukarıdaki Origin echo zaten
+  // '*' değil tam eşleşen origin olduğu için bu güvenli).
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
 }
 
 function getDb() {

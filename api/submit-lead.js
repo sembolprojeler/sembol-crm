@@ -82,6 +82,12 @@ function applyCors(req, res) {
   res.setHeader('Access-Control-Allow-Origin', origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // Wizard'lar sayfadan ayrılırken (flushOnLeave) "navigator.sendBeacon"
+  // kullanabiliyor — tarayıcı bu isteklere credentials'ı OTOMATİK dahil
+  // ediyor, JS'ten kapatılamıyor. Sunucu bunu kabul ettiğini belirtmezse
+  // tarayıcı isteği CORS hatasıyla engelliyor (Origin echo zaten '*' değil
+  // tam eşleşen origin olduğu için bu güvenli).
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
 }
 
 function getDb() {
