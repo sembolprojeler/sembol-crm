@@ -14,7 +14,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   // YENİ: Ekipler arası destek — puantajın da destek zincirini bilmesi için
   personelSonEkipIsi, isTamEkipIdleri, isMesaiEkipIdleri,
   // YENİ: Satış personelinin açtığı iş sayısında çok günlü/çok araçlı kopyaları elemek için
-  isYardimciKayitMi } from './shared.jsx';
+  isYardimciKayitMi,
+  // YENİ: Personel profilindeki saha puanı geçmişinde ve "yaptığı denetim"
+  // sayaçlarında sistem dışı yevmiyeciler sayılmaz; yalnızca mavi yaka personel.
+  denetimKaydiniTemizle } from './shared.jsx';
 
   export const AdminMaviYakaTakip = ({ jobs, personnelList, transactions }) => {
     const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
@@ -2940,7 +2943,10 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
           sonuc = birlestir([...sonuc, ...eskiler]);
         } catch (e) { console.warn('Saha denetimi yedek okuması yapılamadı:', e); }
 
-        if (!iptal) setSahaDenetimleri(sonuc);
+        // DEĞİŞTİ: Kayıtlar state'e yazılmadan önce yevmiyeci satırlarından arındırılır.
+        // Böylece hem kişinin aldığı saha puanları hem de şefse "denetlediği personel"
+        // sayacı yalnızca mavi yaka kadroyu kapsar.
+        if (!iptal) setSahaDenetimleri(sonuc.map(denetimKaydiniTemizle));
       })();
       return () => { iptal = true; }; // Cleanup
     }, [personId, db, appId]);
@@ -9378,6 +9384,26 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
           });
           if (!karar) return; // Kural karışmıyor (izin kodu veya tarih sınırı)
 
+          // ==================================================================
+          // DÜZELTME (kullanıcı bildirimi): SABAH ERKEN SAATTE "HAFTALIK İZİN"
+          // ------------------------------------------------------------------
+          // SORUN: Tek günlük beyaz yaka motorunda 09:30'a kadar karar
+          // verilmemesi için bir bekleme penceresi vardı (BEYAZ_YAKA_KARAR_SAATI_DK).
+          // Ancak HAFTALIK kural motoru bu pencereyi TANIMIYORDU; sabah 08:00'de
+          // henüz kimse okutmadan herkese "Hİ" kararı üretiyor, otomatik senkron
+          // da bunu puantaja yazıyordu. Personel 09:14'te giriş yapsa bile ekranda
+          // "Haftalık İzin" kalıyordu (bkz. aşağıdaki iki düzeltme).
+          //
+          // ÇÖZÜM: Bakılan gün BUGÜN ise ve saat henüz karar saatini (09:30)
+          // geçmemişse, GELMEME kararları (Hİ / D) üretilmez. "Geldi" ve "Fazla
+          // Gün" kararları etkilenmez — onlar zaten gerçek bir okutmaya dayanır.
+          // GEÇMİŞ günlerde hiçbir değişiklik yok; karar anında verilir.
+          // ==================================================================
+          if (tarih === mesaiBugunStr() && ['Hİ', 'D'].includes(karar.status)) {
+            const su = new Date();
+            if (su.getHours() * 60 + su.getMinutes() < BEYAZ_YAKA_KARAR_SAATI_DK) return;
+          }
+
           const oncekiOneri = sonuc[tarih]?.[p.id];
           // FM/EM (saatli) önerileri KORUNUR — kişi gelmiş demektir, saat hesabı
           // tek günlük motorun işidir. Haftalık kural yalnızca G kararını
@@ -9549,6 +9575,17 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   // ---------------------------------------------------------------------------
   // Bir kaydın muhasebedeki (puantaj) mevcut durumunu okur
   // Kaydın yakasını çöz: QR kaydında collarType varsa o, yoksa personel listesinden
+  // ==========================================================================
+  // YENİ: O gün personelin GERÇEK bir giriş kaydı var mı? (QR / seri kod /
+  // yöneticinin elle eklediği saat dahil). "Giriş yapmış ama haftalık izin
+  // yazıyor" hatasının düzeltilmesinde hem gösterim hem de puantaja yazma
+  // tarafında ortak ölçüt olarak kullanılır.
+  // DİKKAT: satirDurumKodu ve gunlukOzet bunu RENDER sırasında çağırdığı için
+  // tanımı onlardan ÖNCE olmak ZORUNDADIR; aşağı taşımayın (TDZ hatası verir).
+  // ==========================================================================
+  const oGunGirisVarMi = (personId, tarih) => (gunlukKayitlar || []).some(k =>
+    String(k.personnelId) === String(personId) && k.dateStr === tarih && k.type === 'giris');
+
   const kaydinYakasi = (k) => k?.collarType || mesaiYakaTipi(personnelList.find(p => String(p.id) === String(k?.personnelId)));
   const puantajDurumu = (k) => {
     const [y, a, g] = (k.dateStr || '').split('-').map(Number);
@@ -9616,6 +9653,30 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   // Mesai Durumu filtresi bu değere göre çalışır.
   const satirDurumKodu = (k) => {
     const pd = puantajDurumu(k);
+    // ========================================================================
+    // DÜZELTME (kullanıcı bildirimi): GİRİŞ VARSA "HAFTALIK İZİN" GÖSTERME
+    // ------------------------------------------------------------------------
+    // Puantajdaki kayıt her zaman önceliklidir; ANCAK personelin o gün gerçek
+    // bir GİRİŞ kaydı varsa "Haftalık İzin" (Hİ) veya "Devamsızlık" (D) kodu
+    // fiziksel gerçekle çelişir — kişi ofise gelmiş ve okutmuştur.
+    //
+    // Bu durumda puantajdaki eski kod YOK SAYILIR ve QR'a dayalı öneri (Geldi)
+    // gösterilir. Puantajdaki kayıt da otomatik senkronla zaten düzeltilir;
+    // bu satır o düzeltme yazılana kadar geçen sürede ekranın yanlış
+    // görünmesini engeller.
+    //
+    // İSTİSNA: Yöneticinin ELLE girdiği kayıtlara (manual === true) saygı
+    // duyulur — bilerek verilmiş bir karardır, ekranda aynen gösterilir.
+    // Onaylı izinler (Yİ/Bİ/Üİ/R/İB) de bu kuralın dışındadır.
+    // ========================================================================
+    if (pd?.status && ['Hİ', 'D'].includes(pd.status) && pd.manual !== true) {
+      const girisVar = k.giris || oGunGirisVarMi(k.personnelId, k.dateStr);
+      if (girisVar) {
+        const on = oneriDurumu(k);
+        // Öneri de gelmeme diyorsa (beklenmez) yine de "Geldi" gösterilir
+        return (on?.status && !['Hİ', 'D'].includes(on.status)) ? on.status : 'G';
+      }
+    }
     if (pd?.status) return pd.status;
     const on = oneriDurumu(k);
     return on?.status || null;
@@ -9702,7 +9763,29 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
   //   • Zaten aynı değer yazılıysa tekrar yazılmaz (gereksiz Firestore yazımı)
   // ==========================================================================
   const [topluIsleniyor, setTopluIsleniyor] = useState(false);
-  const KORUNAN_KODLAR = ['Yİ', 'Bİ', 'Üİ', 'R', 'İB', 'Hİ'];
+  // ==========================================================================
+  // DEĞİŞTİ (kullanıcı bildirimi): "GİRİŞ YAPTI AMA HÂLÂ HAFTALIK İZİN YAZIYOR"
+  // --------------------------------------------------------------------------
+  // SORUN: KORUNAN_KODLAR listesinde 'Hİ' de vardı ve KOŞULSUZ korunuyordu.
+  // Sabah erkenden sistemin KENDİSİ "Hİ" önerip puantaja yazdığında, personel
+  // saat 09:14'te QR okutsa bile bu kayıt bir daha GÜNCELLENEMİYORDU; öneri
+  // "Geldi"ye dönse de puantajdaki "Hİ" olduğu gibi kalıyor ve ekranda
+  // "Haftalık İzin" görünüyordu. (Örnek: Efe Can Güder, 14.09.2026)
+  //
+  // YENİ KURAL — iki liste:
+  //   • MAZERETLİ İZİN KODLARI (Yİ/Bİ/Üİ/R/İB): HER ZAMAN korunur. Onaylı
+  //     izinlerdir, sistem asla üzerine yazmaz.
+  //   • Hİ: yalnızca o gün personelin GERÇEK bir giriş kaydı YOKSA korunur.
+  //     Giriş kaydı varsa kişi işe gelmiştir; bu bir veri gerçeğidir ve
+  //     "Geldi" önerisinin yazılmasına izin verilir.
+  //
+  // NOT: Yöneticinin ELLE girdiği kayıtlar (manual === true) bu değişiklikten
+  // ETKİLENMEZ; onlar zaten bir üst satırda korunuyor. Yani bir yönetici bile
+  // bile "Hİ" yazdıysa sistem ona dokunmaz.
+  // ==========================================================================
+  const KORUNAN_IZIN_KODLARI = ['Yİ', 'Bİ', 'Üİ', 'R', 'İB'];
+  // Geriye dönük uyumluluk: eski adıyla da aynı listeye erişilebilsin
+  const KORUNAN_KODLAR = KORUNAN_IZIN_KODLARI;
 
   // ==========================================================================
   // DEĞİŞTİ (kullanıcı talebi): "PUANTAJA İŞLE" DÜĞMESİ KALDIRILDI — OTOMATİK
@@ -9752,7 +9835,10 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
       const mevcut = mevcutRecordsYaka[yaka][String(p.id)]?.[g];
       const mevcutKod = typeof mevcut === 'object' && mevcut !== null ? mevcut.status : mevcut;
       if (mevcut && mevcut.manual === true) return;              // Elle girilmiş: dokunma
-      if (KORUNAN_KODLAR.includes(mevcutKod)) return;            // İzin kodu: dokunma
+      if (KORUNAN_IZIN_KODLARI.includes(mevcutKod)) return;      // Onaylı izin kodu: dokunma
+      // DEĞİŞTİ: 'Hİ' artık koşullu korunuyor — personel o gün GİRİŞ yapmışsa
+      // sistemin yazdığı haftalık izin kaydının üzerine "Geldi" yazılabilir.
+      if (mevcutKod === 'Hİ' && !oGunGirisVarMi(p.id, tarih)) return;
       const yeniSaat = (oneri.status === 'FM' || oneri.status === 'EM' || oneri.status === 'FGM')
         ? String(oneri.hours || '') : '';
       const mevcutSaat = typeof mevcut === 'object' && mevcut !== null ? String(mevcut.hours || '') : '';
