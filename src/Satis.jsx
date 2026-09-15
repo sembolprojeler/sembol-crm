@@ -2864,7 +2864,7 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
 // VERİ YAPISI (Firestore):
 //  - havuzKayitlari : müşteri aday kayıtları. Alanlar:
 //      kanal ('telefon'|'whatsapp'|'instagram'|'gmail'), musteriAdi, iletisim,
-//      hesapId (hangi bağlı hesaptan geldi), hizmetTipi ('Nakliye'|'Depo'|'Belirsiz'),
+//      hesapId (hangi bağlı hesaptan geldi), hizmetTipi ('Nakliye'|'Depo'|'Asansör'),
 //      durum, atanan (satışçı adı), sonMesaj (özet/ilk mesaj), notlar[],
 //      hareketler[{tarih, kullanici, islem}], kaynak ('manuel'|'api'), createdAt
 //  - havuzHesaplari : kanallara bağlı hesaplar (birden fazla olabilir). Alanlar:
@@ -2906,7 +2906,7 @@ const DURUMLAR = [
 const HIZMET_TIPLERI = [
   { id: 'Nakliye',  Ikon: Truck,      renk: 'bg-red-600 text-white' },
   { id: 'Depo',     Ikon: Package,    renk: 'bg-blue-600 text-white' },
-  { id: 'Belirsiz', Ikon: HelpCircle, renk: 'bg-neutral-400 text-white' },
+  { id: 'Asansör',  Ikon: ArrowUpDown, renk: 'bg-green-600 text-white' },
 ];
 
 // Kanal rengine göre Tailwind sınıfları (dinamik sınıf üretimi Tailwind'de
@@ -2944,7 +2944,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [duzenleIletisim, setDuzenleIletisim] = useState('');
   const [duzenleMusteriAdi, setDuzenleMusteriAdi] = useState('');
 
-  const bosYeniKayit = { musteriAdi: '', iletisim: '', hesapId: '', hizmetTipi: 'Belirsiz', sonMesaj: '' };
+  const bosYeniKayit = { musteriAdi: '', iletisim: '', hesapId: '', hizmetTipi: 'Nakliye', sonMesaj: '' };
   const [yeniKayit, setYeniKayit] = useState(bosYeniKayit);
 
   const kanal = KANALLAR.find(k => k.id === aktifKanal);
@@ -3050,7 +3050,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         if (!anahtar || mevcutlar.has(anahtar)) continue;
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari'), {
           kanal: aktifKanal, musteriAdi: g.musteriAdi || '', iletisim: g.iletisim,
-          hesapId: g.hesapId || '', hizmetTipi: g.hizmetTipi || 'Belirsiz',
+          hesapId: g.hesapId || '', hizmetTipi: g.hizmetTipi || 'Nakliye',
           sonMesaj: g.sonMesaj || '', durum: 'Yeni', atanan: '', notlar: [], kaynak: 'api',
           hareketler: [{ tarih: new Date().toISOString(), kullanici: 'API', islem: 'Kayıt API senkronuyla alındı' }],
           createdAt: g.createdAt || new Date().toISOString(),
@@ -3069,7 +3069,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const kanalKayitlari = kayitlar.filter(k => k.kanal === aktifKanal);
   const filtreli = kanalKayitlari.filter(k => {
     if (durumFiltre !== 'Tümü' && (k.durum || 'Yeni') !== durumFiltre) return false;
-    if (hizmetFiltre !== 'Tümü' && (k.hizmetTipi || 'Belirsiz') !== hizmetFiltre) return false;
+    if (hizmetFiltre !== 'Tümü' && (k.hizmetTipi || 'Nakliye') !== hizmetFiltre) return false;
     if (hesapFiltre !== 'Tümü' && k.hesapId !== hesapFiltre) return false;
     if (arama.trim()) {
       const q = arama.toLowerCase();
@@ -3227,9 +3227,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           </button>
         ))}
         <span className="text-[10px] font-black text-neutral-400 uppercase ml-2">Hizmet:</span>
-        {['Tümü', 'Nakliye', 'Depo', 'Belirsiz'].map(t => (
+        {['Tümü', 'Nakliye', 'Depo', 'Asansör'].map(t => (
           <button key={t} type="button" onClick={() => setHizmetFiltre(t)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${hizmetFiltre === t ? (t === 'Nakliye' ? 'bg-red-600 text-white border-red-600' : t === 'Depo' ? 'bg-blue-600 text-white border-blue-600' : 'bg-neutral-900 text-white border-neutral-900') : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${hizmetFiltre === t ? (t === 'Nakliye' ? 'bg-red-600 text-white border-red-600' : t === 'Depo' ? 'bg-blue-600 text-white border-blue-600' : t === 'Asansör' ? 'bg-green-600 text-white border-green-600' : 'bg-neutral-900 text-white border-neutral-900') : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
             {t}
           </button>
         ))}
@@ -3258,7 +3258,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             )}
             {filtreli.map(k => {
               const sonHareket = (k.hareketler || [])[k.hareketler?.length - 1];
-              const tip = HIZMET_TIPLERI.find(t => t.id === (k.hizmetTipi || 'Belirsiz'));
+              const tip = HIZMET_TIPLERI.find(t => t.id === (k.hizmetTipi || 'Nakliye')) || HIZMET_TIPLERI[0];
               return (
                 <tr key={k.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition">
                   <td className="p-3 font-bold text-black">
@@ -3395,7 +3395,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 <div className="flex gap-1.5">
                   {HIZMET_TIPLERI.map(t => (
                     <button key={t.id} type="button" onClick={() => handleHizmetDegistir(detayKayit, t.id)}
-                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition flex items-center gap-1 ${(detayKayit.hizmetTipi || 'Belirsiz') === t.id ? t.renk : 'bg-white text-neutral-500 border border-neutral-200'}`}>
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition flex items-center gap-1 ${(detayKayit.hizmetTipi || 'Nakliye') === t.id ? t.renk : 'bg-white text-neutral-500 border border-neutral-200'}`}>
                       <t.Ikon className="w-3 h-3" /> {t.id}
                     </button>
                   ))}

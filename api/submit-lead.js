@@ -29,9 +29,11 @@
 //   4) Satış ekibinin CRM'de zaten değiştirmiş olabileceği durum/atanan/not
 //      alanlarının üzerine, müşteri formu doldurmaya devam ettikçe TEKRAR
 //      YAZILMAZ (sadece ilk oluşturmada set edilir).
-//   5) CRM'de hizmetTipi SADECE 'Nakliye' | 'Depo' | 'Belirsiz' değerlerini
+//   5) CRM'de hizmetTipi SADECE 'Nakliye' | 'Depo' | 'Asansör' değerlerini
 //      kabul ediyor (başka bir değer CRM ekranında çökmeye yol açıyor) —
-//      bu yüzden her form türü bu üç değerden birine sabitlenir. Formun tam
+//      bu yüzden her form türü bu üç değerden birine sabitlenir; hiçbir form
+//      "Belirsiz" olarak işaretlenmez, çünkü müşteri hangi formu doldurduysa
+//      hizmet zaten bellidir. Formun tam
 //      hizmet detayı (ev tipi, ofis büyüklüğü, depo hacmi vb.) zaten sonMesaj
 //      özetinde ayrıca yer alır, kaybolmaz.
 //
@@ -116,13 +118,13 @@ function resolveWizardType(source) {
   }
 }
 
-// CRM'de hizmetTipi SADECE bu üç değerden birini kabul ediyor.
+// CRM'de hizmetTipi SADECE bu dört değerden birini kabul ediyor.
 const HIZMET_TIPI_BY_WIZARD = {
   evdenEve: 'Nakliye',
   parcaEsya: 'Nakliye',
   ofis: 'Nakliye',
   depolama: 'Depo',
-  asansor: 'Belirsiz',
+  asansor: 'Asansör',
 };
 
 // Satış ekibinin Müşteri Havuzu listesinde formu ayırt edebilmesi için
