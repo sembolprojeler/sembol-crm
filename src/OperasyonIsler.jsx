@@ -14,7 +14,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   // YENİ: Çok günlü iş (1. gün / 2. gün) rozeti ve grup fiyatı gösterimi
   isGunEtiketi, isDevamGunuMu, isGrupFiyat, isGrupKapora, isAracEtiketi, isYardimciKayitMi,
   // YENİ: Fotoğraf eksik uyarısı ve ekipler arası destek
-  isFotografEksikleri, isDestekIdleri, isTamEkipIdleri, destekPersoneliMi, isAsilEkipIdleri } from './shared.jsx';
+  isFotografEksikleri, isDestekIdleri, isTamEkipIdleri, destekPersoneliMi, isAsilEkipIdleri,
+  // YENİ: Saha denetimi yalnızca MAVİ YAKA personel içindir. Sistem dışı
+  // yevmiyeciler denetim ekranında listelenmez, eski kayıtlarda da gizlenir.
+  isMaviYakaPersonel, denetimKaydiniTemizle } from './shared.jsx';
 import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from './OperasyonPersonel.jsx';
 
 
@@ -1811,7 +1814,10 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       if (!db) return;
       const unsub = onSnapshot(
         query(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), where('jobDate', '==', selectedDate)),
-        snap => setMevcutDenetimler(snap.docs.map(d => ({ id: d.id, ...d.data() }))),
+        // DEĞİŞTİ: Okunan her kayıt 'denetimKaydiniTemizle' süzgecinden geçirilir.
+        // Böylece geçmişte yevmiyecilere verilmiş puan/yorumlar forma geri
+        // yüklenmez ve ekranda görünmez.
+        snap => setMevcutDenetimler(snap.docs.map(d => denetimKaydiniTemizle({ id: d.id, ...d.data() }))),
         console.error
       );
       return () => unsub();
@@ -1856,17 +1862,28 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       setDenetimSifirlandi(true);
     };
 
-    // Denetim penceresindeki ekip listesi: sistemli personel + sistem dışı isimler
+    // ======================================================================
+    // DEĞİŞTİ (kullanıcı talebi): DENETİMDE SADECE MAVİ YAKA PERSONEL
+    // ----------------------------------------------------------------------
+    // ESKİ HALİ: Sistemde kayıtlı personellerin yanında, işe elle yazılan
+    // (teamNames) SİSTEM DIŞI YEVMİYECİLER de 'manuel:<ad>' kimliğiyle listeye
+    // ekleniyor ve şef tarafından puanlanabiliyordu.
+    //
+    // YENİ HALİ: Yevmiyeciler listeye HİÇ EKLENMEZ. Ayrıca sistemli personel
+    // içinden de yalnızca MAVİ YAKA olanlar gösterilir; beyaz yaka kadro
+    // (ofis/yönetim) saha denetiminde puanlanmaz.
+    //
+    // Sonuç: Puan ve yorum yalnızca mavi yaka personele verilir; her puan
+    // gerçek bir personel kartına işlendiği için profil geçmişi tutarlı kalır.
+    // ======================================================================
     const denetimEkibi = (job) => {
       if (!job) return [];
-      const sistemli = (job.assignedPersonnelIds || []).map(id => {
+      return (job.assignedPersonnelIds || []).map(id => {
         const p = personnelList.find(x => String(x.id) === String(id));
-        return p ? { id: String(p.id), ad: p.fullName, pozisyon: p.position || '', sistemli: true } : null;
+        // Sistemde bulunamayan veya mavi yaka olmayan kişi denetime alınmaz
+        if (!p || !isMaviYakaPersonel(p)) return null;
+        return { id: String(p.id), ad: p.fullName, pozisyon: p.position || '', sistemli: true };
       }).filter(Boolean);
-      const sistemliAdlar = sistemli.map(x => x.ad);
-      const elle = (job.teamNames || []).filter(n => !sistemliAdlar.includes(n))
-        .map(n => ({ id: 'manuel:' + n, ad: n, pozisyon: 'Sistem dışı', sistemli: false }));
-      return [...sistemli, ...elle];
     };
 
     const setPersonelPuan = (pid, puan) => setDenetimPuanlar(prev => ({ ...prev, [pid]: { ...(prev[pid] || {}), puan } }));
@@ -2367,12 +2384,17 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                 {/* 2) PERSONEL PUANLAMA — 1-5 puan + özel not */}
                 <div className="border border-neutral-200 rounded-xl overflow-hidden">
                   <div className="bg-purple-700 text-white px-3 py-2 text-[11px] font-black uppercase tracking-wide flex items-center justify-between">
-                    <span className="flex items-center gap-2"><Users className="w-3.5 h-3.5" /> İşe Giden Personel ({ekip.length})</span>
+                    {/* DEĞİŞTİ: Başlık artık kapsamı net söylüyor — yalnızca mavi yaka kadro */}
+                    <span className="flex items-center gap-2"><Users className="w-3.5 h-3.5" /> İşe Giden Mavi Yaka Personel ({ekip.length})</span>
                     <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full">Ortalama: {anlikOrtalama} ★</span>
                   </div>
                   <div className="p-3 space-y-3">
+                    {/* YENİ: Şefe kuralı hatırlatan bilgi notu — "yevmiyeciyi neden göremiyorum?" sorusunu baştan cevaplar */}
+                    <p className="text-[10px] font-bold text-neutral-500 bg-neutral-50 border border-neutral-200 rounded-lg p-2 leading-snug">
+                      Puanlama yalnızca <b>sistemde kayıtlı mavi yaka personel</b> içindir. Sistem dışı <b>yevmiyeciler</b> bu listede yer almaz; onlara puan ve yorum girilmez.
+                    </p>
                     {ekip.length === 0 && (
-                      <p className="text-xs font-bold text-neutral-400 py-4 text-center">Bu işe atanmış personel yok. Önce "Ekibi Düzenle" ile ekip ekleyin.</p>
+                      <p className="text-xs font-bold text-neutral-400 py-4 text-center">Bu işe atanmış mavi yaka personel yok. Önce "Ekibi Düzenle" ile kadrolu personel ekleyin.</p>
                     )}
                     {ekip.map(p => {
                       const secili = parseInt(denetimPuanlar[p.id]?.puan) || 0;
@@ -2381,7 +2403,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                           <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
                             <div className="min-w-0">
                               <span className="font-black text-sm text-black block truncate">{p.ad}</span>
-                              <span className="text-[10px] font-bold text-neutral-400">{p.pozisyon}{!p.sistemli && ' • puanı kaydedilir, profile işlenmez'}</span>
+                              {/* DEĞİŞTİ: Listede artık yalnızca sistemli mavi yaka personel var,
+                                  dolayısıyla eski "profile işlenmez" uyarısına gerek kalmadı. */}
+                              <span className="text-[10px] font-bold text-neutral-400">{p.pozisyon}</span>
                             </div>
                             {/* 1-5 puan seçimi */}
                             <div className="flex gap-1 shrink-0">
