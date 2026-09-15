@@ -62,7 +62,10 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
   // YENİ: Çok günlü iş (1. gün / 2. gün) yardımcıları — düzenleme koruması için
   isDevamGunuMu, isGunNo, isToplamGun, isYardimciKayitMi, isAracKopyasiMi, isAracNo, isToplamArac,
   // YENİ: Ekipler arası destek — mesai ekibi ve destek kimlikleri
-  isMesaiEkipIdleri, isDestekIdleri } from './shared.jsx';
+  isMesaiEkipIdleri, isDestekIdleri,
+  // YENİ: Saha denetim kayıtları uygulama genelinde yevmiyecilerden arındırılmış
+  // olarak dağıtılır; alt ekranlar ayrıca filtre uygulamak zorunda kalmaz.
+  denetimKaydiniTemizle } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
 import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJobsView, CancelledJobsView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, IsMerkeziView, IsKilavuzuView, HatirlatmalarView } from './OperasyonIsler.jsx';
 import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './OperasyonPersonel.jsx';
@@ -4826,7 +4829,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       // "kim denetledi" rozeti için kullanılıyor).
       // CANLI LİMİT 2000 -> 200: kişi bazlı geçmiş profil sayfasında getDocs ile okunur.
       unsubs.push(onSnapshot(query(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), orderBy('denetimTarihi', 'desc'), limit(200)), snap => {
-        setSahaDenetimleri(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        // DEĞİŞTİ: Sistem dışı yevmiyecilerin puan/yorum satırları burada ayıklanır.
+        setSahaDenetimleri(snap.docs.map(d => denetimKaydiniTemizle({ id: d.id, ...d.data() })));
       }, console.error));
 
       unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'company'), async docSnap => {
