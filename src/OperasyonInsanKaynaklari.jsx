@@ -1,906 +1,2272 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw } from 'lucide-react';
-import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, getDocs, where, orderBy, limit } from 'firebase/firestore';
-import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, normalizePozisyon, belgeListesiNormalize, HasarCozumBelgeleri, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar,
-  // YENİ: Deneme maaşı alanları — süre seçenekleri ve canlı özet metni.
-  // Ayrı dosya yerine shared.jsx içinde tutuluyor; Finans.jsx da aynı
-  // kaynaktan gecerliMaas'ı okur, böylece tek doğru kaynak vardır.
-  DENEME_SURE_SECENEKLERI, denemeOzetMetni,
-  // YENİ: Resmi Ayarları'ndaki GÜNCEL banka bilgisi (canlı önbellek).
-  // Eskiden IBAN bu dosyada sabit yazılıydı ve panelden değiştirilemiyordu.
-  aktifBankaBilgiMetni,
-  // YENİ: IBAN Paylaş penceresi için varsayılan hesap nesnesi ve IBAN biçimleyici.
-  aktifBankaHesabi, ibanBicimle,
-  // YENİ: Saha Raporlaması'nda sistem dışı yevmiyecilerin puan/yorumları gizlenir;
-  // yalnızca mavi yaka personel görünür (tek doğru kaynak: shared.jsx).
+import React, { useState, useEffect, useMemo } from 'react';
+import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe } from 'lucide-react';
+import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
+import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul,
+  // YENİ: Çok günlü iş (1. gün / 2. gün) — profilde tek iş gösterimi ve kapora koruması
+  anaIsleriFiltrele, isToplamGun, isToplamArac,
+  // YENİ: Saha denetim raporunda sistem dışı yevmiyecilerin puan/yorumu gösterilmez.
   denetimKaydiniTemizle } from './shared.jsx';
 
+  // ============================================================================
+  // YENİ: Ortak Bölüm Başlığı Bileşeni (SectionHeader)
+  // 4 ana başlık (Müşteri, Finans, Yükleme, Boşaltma) için tek tip, şık tasarım.
+  // Punto, eski başlıklara göre ~%5 küçültülmüştür (16px -> 15px, 18px -> 17px).
+  // ============================================================================
+  const SectionHeader = ({ icon: Icon, title, rightSlot }) => (
+    <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 -mx-3 md:-mx-4 -mt-3 md:-mt-4 mb-4 px-3 md:px-4 py-2.5 rounded-t-2xl bg-gradient-to-r from-red-600/10 via-neutral-100 to-transparent border-b-2 border-red-600/20">
+      <div className="flex items-center gap-2.5">
+        {/* İkon rozeti: kırmızı zemin üzerinde beyaz ikon (%10 küçültüldü) */}
+        <span className="w-7 h-7 shrink-0 rounded-lg bg-red-600 text-white flex items-center justify-center shadow-md shadow-red-600/30">
+          <Icon className="w-3.5 h-3.5" />
+        </span>
+        {/* Başlık yazısı: %10 küçültülmüş punto (15px→13.5px, 17px→15px) */}
+        <h3 className="font-black text-neutral-900 uppercase tracking-wide text-[13.5px] md:text-[15px] leading-tight">
+          {title}
+        </h3>
+      </div>
+      {/* Başlığın sağına eklenebilecek opsiyonel alan (örn. depo seçimi) */}
+      {rightSlot}
+    </div>
+  );
 
-  export const AddInfoView = ({ currentUser, personnelList, addSystemLog, onBack }) => {
-    const [infoType, setInfoType] = useState('Duyuru'); // Duyuru, Paylaşım, En İyiler
+  // ============================================================================
+  // YENİ (kullanıcı talebi): KAPORA — HANGİ İŞE GİRİLECEĞİ SORULUR
+  // ============================================================================
+  // SORUN: "Kapora Ekle" butonu, müşterinin bekleyen işleri arasından TARİHİ EN
+  // YENİ olanı sessizce seçiyordu (bekleyenler[0]). Bir müşterinin açıkta iki
+  // işi varsa kapora yanlış işe yazılabiliyordu. Ekran görüntüsündeki durum
+  // tam olarak buydu: 04.09 tarihli ₺0 tutarlı iş seçilmiş, oysa kapora
+  // 03.09 tarihli ₺64.000'lik işe ait.
+  //
+  // ÇÖZÜM: Bekleyen iş SAYISI 1'den fazlaysa pencerede iş seçimi sorulur;
+  // seçim yapılmadan kaydetmeye izin verilmez. Seçilen işin fiyatı, mevcut
+  // kaporası ve KALAN BAKİYESİ ekranda gösterilir; %20 önerisi de seçilen işe
+  // göre yeniden hesaplanır. Tek bekleyen iş varsa eski davranış korunur
+  // (otomatik seçilir, kullanıcıya fazladan soru sorulmaz).
+  // ============================================================================
+  // Bir işin kalan bakiyesi = fiyat - mevcut kapora (sistemin diğer yerleriyle aynı)
+  const kaporaIsKalanBakiye = (is) =>
+    Math.max(0, (parseFloat(is?.price) || 0) - (parseFloat(is?.deposit) || 0));
 
-    // Form States
-    const [announcement, setAnnouncement] = useState({ title: '', content: '' });
-    const [post, setPost] = useState({ title: '', imageUrl: '' });
-    const [bestEmp, setBestEmp] = useState({ title: 'Ayın En İyi Personeli', employeeName: '' });
+  // Seçim listesinde görünecek okunur etiket: tarih • tür • tutar • kalan
+  const kaporaIsEtiketi = (is) => {
+    const tarih = (is?.date || '').split('-').reverse().join('.');
+    const fiyat = (parseFloat(is?.price) || 0).toLocaleString('tr-TR');
+    const kalan = kaporaIsKalanBakiye(is).toLocaleString('tr-TR');
+    const kapora = parseFloat(is?.deposit) || 0;
+    return `${tarih} • ${is?.type || 'Nakliye'} • İş: ₺${fiyat}${kapora > 0 ? ` • Kapora: ₺${kapora.toLocaleString('tr-TR')}` : ''} • Kalan: ₺${kalan}`;
+  };
 
-    const [isSubmitting, setIsSubmitting] = useState(false);
-    const [successMsg, setSuccessMsg] = useState('');
+  // Bekleyen işler arasından seçim yaptıran açılır liste (ayrı bileşen)
+  const KaporaIsSecici = ({ isler, seciliId, onSec }) => (
+    <div>
+      <label className="text-xs font-bold text-neutral-600 block mb-1">
+        Kapora hangi işe girilsin? * <span className="text-amber-700">({isler.length} açık iş)</span>
+      </label>
+      <select value={seciliId} onChange={e => onSec(e.target.value)}
+        className="w-full p-3 border-2 border-amber-400 rounded-xl bg-white outline-none focus:ring-2 focus:ring-amber-500 text-sm font-bold">
+        {/* Seçim yapılmadan kaydedilmesin diye boş seçenek başta durur */}
+        <option value="">— İş seçin —</option>
+        {isler.map(j => <option key={j.id} value={j.id}>{kaporaIsEtiketi(j)}</option>)}
+      </select>
+      <p className="text-[10px] font-bold text-amber-700 mt-1">
+        Bu müşterinin açıkta birden fazla işi var; kapora yalnızca seçtiğiniz işin bakiyesinden düşer.
+      </p>
+    </div>
+  );
 
-    // YENİ: Yayınlanan bilgilendirmeleri yönetme (listele / sırala / yayından al / düzenle)
-    const [publishedItems, setPublishedItems] = useState([]);
-    const [editingInfoItem, setEditingInfoItem] = useState(null);
-    useEffect(() => {
-      const colName = infoType === 'Duyuru' ? 'announcements' : infoType === 'Paylaşım' ? 'posts' : 'bestEmployees';
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', colName), snap => {
-        const items = snap.docs.map(d => ({ ...d.data(), id: d.id }))
-          .filter(item => !item.hidden)
-          .sort((a, b) => (a.sortOrder ?? a.timestamp ?? 0) - (b.sortOrder ?? b.timestamp ?? 0));
-        setPublishedItems(items);
-      }, console.error);
-      return () => unsub();
-    }, [infoType]);
+  // ============================================================================
+  // YENİ: "Teslim Durumu" seçenekleri (eski adı Teslim Şekli / Duvar Montajı).
+  // NOT: Bu seçimler Sözleşme Detayı'na YAZI olarak EKLENMEZ. Bunun yerine
+  // sözleşme PDF'inde ve tüm iş kartlarında ayrı bir satır/etiket olarak gösterilir.
+  // ============================================================================
+  const WALL_MOUNT_OPTIONS = ['TV Montajı', 'Mobilya Sabitleme', 'Raf/Tablo', 'Avize', 'Kalıcı Ambalaj', 'Montaj Yapılmayacak', 'Depoya Teslim'];
 
-    const infoColName = infoType === 'Duyuru' ? 'announcements' : infoType === 'Paylaşım' ? 'posts' : 'bestEmployees';
+  // YENİ: "Eşya Durumu" seçenekleri — Teslim Durumu ile AYNI mantıkta çoklu seçim.
+  // Varsayılan (boş seçim) = "Toplu". Firma toplaması gereken seçenekler materyal hesabını tetikler.
+  const ESYA_OPTIONS = ['Kendisi Topladı', 'Toplama Yapılacaktır', 'Sadece Mutfak Toplama', 'Sadece Kıyafet Toplama', 'Sökülüm İşlemi Yoktur', 'Ambalaj İşlemi Yoktur', 'Özel Mobilya Sökülüm'];
+  // Bu seçeneklerden biri seçiliyse firma toplaması yapılacak demektir (materyal hesabı için)
+  const ESYA_COMPANY_PACKING = ['Toplama Yapılacaktır', 'Sadece Mutfak Toplama', 'Sadece Kıyafet Toplama'];
 
-    const toggleInfoHidden = async (item) => {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', infoColName, item.id), { hidden: !item.hidden });
-      if (addSystemLog) addSystemLog(item.hidden ? 'Bilgilendirme Yayına Alındı' : 'Bilgilendirme Yayından Alındı', `${infoType}: ${item.title || item.employeeName || ''}`);
+  export const AddJobView = ({
+    type, formData, setFormData, handleInputChange, handleProvinceChange,
+    handleDepoChange, toggleDepoDirection, handleAddJob, editingJobId, handleSwapAddresses
+  }) => {
+    // YENİ: İsim / telefon boş bırakılırsa gösterilecek uyarı penceresi state'i
+    const [showValidationModal, setShowValidationModal] = useState(false);
+    // YENİ: Teslim Durumu açılır penceresinin açık/kapalı durumu
+    const [wallMountOpen, setWallMountOpen] = useState(false);
+    // YENİ: Eşya Durumu açılır penceresinin açık/kapalı durumu
+    const [esyaOpen, setEsyaOpen] = useState(false);
+
+    // YENİ: Seçili teslim durumu işlemleri (dizi). Boş dizi = "Yok" seçili demektir.
+    const selectedWallMounts = formData.wallMounting || [];
+    // YENİ: Seçili eşya durumu işlemleri (dizi). Boş dizi = "Toplu" (varsayılan) demektir.
+    const selectedEsya = formData.esyaDurumu || [];
+
+    // YENİ: Teslim durumu seçimini değiştirir. Sözleşme detayına HİÇBİR yazı eklenmez;
+    // sadece wallMounting dizisi güncellenir (sözleşme PDF'i ve iş kartları bu diziyi okur).
+    const toggleWallMount = (opt) => {
+      setFormData(prev => {
+        const current = prev.wallMounting || [];
+        const next = opt === 'Yok'
+          ? [] // "Yok" seçilirse tüm seçimler temizlenir
+          : (current.includes(opt) ? current.filter(o => o !== opt) : [...current, opt]);
+        return { ...prev, wallMounting: next };
+      });
     };
 
-    const moveInfoItem = async (index, direction) => {
-      const targetIndex = index + direction;
-      if (targetIndex < 0 || targetIndex >= publishedItems.length) return;
-      const a = publishedItems[index];
-      const b = publishedItems[targetIndex];
-      const aOrder = a.sortOrder ?? a.timestamp ?? 0;
-      const bOrder = b.sortOrder ?? b.timestamp ?? 0;
-      await Promise.all([
-        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', infoColName, a.id), { sortOrder: bOrder }),
-        updateDoc(doc(db, 'artifacts', appId, 'public', 'data', infoColName, b.id), { sortOrder: aOrder })
-      ]);
+    // YENİ: Eşya durumu seçimini değiştirir (Teslim Durumu ile aynı çoklu-seçim mantığı).
+    // "Kendisi Topladı" dahil tüm seçenekler bağımsız açılıp kapanır (çoklu seçim).
+    // Geriye dönük uyumluluk için fromPacking (string) senkron tutulur:
+    // firma toplaması gerektiren bir seçim varsa 'Toplama Yapılacak', yoksa 'Kendisi Topladı'.
+    const toggleEsya = (opt) => {
+      setFormData(prev => {
+        const current = prev.esyaDurumu || [];
+        const next = current.includes(opt) ? current.filter(o => o !== opt) : [...current, opt];
+        // Materyal hesabı ve sözleşmedeki "Toplama Hizmeti" için fromPacking senkronu
+        const needsCompanyPacking = next.some(o => ESYA_COMPANY_PACKING.includes(o));
+        return { ...prev, esyaDurumu: next, fromPacking: needsCompanyPacking ? 'Toplama Yapılacak' : 'Kendisi Topladı' };
+      });
     };
 
-    const handleSaveEditInfo = async () => {
-      if (!editingInfoItem) return;
-      const { id, ...rest } = editingInfoItem;
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', infoColName, id), rest);
-      if (addSystemLog) addSystemLog('Bilgilendirme Düzenlendi', `${infoType}: ${rest.title || rest.employeeName || ''}`);
-      setEditingInfoItem(null);
+    // YENİ: Kayıt öncesi zorunlu alan kontrolü.
+    // İsim veya telefon boşsa kayıt YAPILMAZ, uyarı penceresi açılır.
+    const handleSaveClick = (e) => {
+      if (!formData.customerName?.trim() || !formData.customerPhone?.trim()) {
+        setShowValidationModal(true);
+        return;
+      }
+      handleAddJob(e); // Alanlar doluysa App.jsx içindeki asıl kayıt fonksiyonu çalışır
     };
 
-    const handleFileUpload = async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
-        
-        setIsSubmitting(true);
-        setPost(prev => ({ ...prev, imageUrl: 'Yükleniyor...' }));
-  
-        const formData = new FormData();
-        formData.append('file', file);
-  
-        try {
-          const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', {
-            method: 'POST',
-            body: formData,
-          });
-          const text = await res.text();
-          let uploadedUrl = file.name;
-          try {
-            const json = JSON.parse(text);
-            uploadedUrl = json.url || json.fileName || json.file || text;
-          } catch (err) {
-            uploadedUrl = text.trim();
-          }
-          setPost(prev => ({ ...prev, imageUrl: uploadedUrl }));
-        } catch (err) {
-          console.error("Yükleme hatası:", err);
-          alert("Görsel yüklenemedi.");
-          setPost(prev => ({ ...prev, imageUrl: '' }));
-        }
-        setIsSubmitting(false);
-      };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        setIsSubmitting(true);
-        try {
-            const colRef = collection(db, 'artifacts', appId, 'public', 'data', 
-                infoType === 'Duyuru' ? 'announcements' : 
-                infoType === 'Paylaşım' ? 'posts' : 'bestEmployees'
-            );
-
-            const commonData = {
-                timestamp: new Date().getTime(),
-                dateStr: new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }),
-                author: currentUser.fullName
-            };
-
-            if (infoType === 'Duyuru') {
-                await addDoc(colRef, { ...announcement, ...commonData });
-                setAnnouncement({ title: '', content: '' });
-                addSystemLog('Duyuru Eklendi', `Sisteme yeni bir duyuru eklendi: ${announcement.title}`);
-            } else if (infoType === 'Paylaşım') {
-                await addDoc(colRef, { ...post, ...commonData });
-                setPost({ title: '', imageUrl: '' });
-                addSystemLog('Paylaşım Eklendi', `Sisteme yeni bir saha paylaşımı eklendi.`);
-            } else if (infoType === 'En İyiler') {
-                await addDoc(colRef, { ...bestEmp, ...commonData });
-                setBestEmp({ title: 'Ayın En İyi Personeli', employeeName: '' });
-                addSystemLog('En İyiler Eklendi', `Sisteme ayın en iyi personeli eklendi: ${bestEmp.employeeName}`);
-            }
-
-            setSuccessMsg('Bilgilendirme başarıyla yayınlandı!');
-            setTimeout(() => setSuccessMsg(''), 3000);
-        } catch (error) {
-            console.error("Hata:", error);
-            alert("İşlem sırasında bir hata oluştu.");
-        }
-        setIsSubmitting(false);
-    };
+    // Ortak input stili (tekrarı azaltmak için değişkende tutuyoruz)
+    const inputCls = "w-full min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition";
+    const selectCls = "w-full min-w-0 p-2.5 md:p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition";
+    const labelCls = "block text-xs md:text-sm font-bold text-neutral-700 mb-1";
 
     return (
-      <>
-        {/* YENİ: Bu sayfa artık sol menüde değil, Bildirim Merkezi'nin sağ üstündeki
-            butondan açılıyor; bu yüzden geri dönüş bağlantısı eklendi. */}
-        {onBack && (
-          <div className="max-w-2xl mx-auto mb-3">
-            <button onClick={onBack} className="text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
-              <ChevronLeft className="w-4 h-4" /> Bildirim Merkezi'ne Dön
-            </button>
-          </div>
-        )}
-        <div className="max-w-2xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
-            <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
-                <Bell className="w-6 h-6 text-red-600" /> Bilgilendirme Ekle
-            </h2>
-
-            <div className="flex gap-2 p-1 bg-neutral-100 rounded-xl mb-6">
-                {['Duyuru', 'Paylaşım', 'En İyiler'].map(type => (
-                    <button
-                        key={type}
-                        type="button"
-                        onClick={() => setInfoType(type)}
-                        className={`flex-1 py-2 text-sm font-bold rounded-lg transition ${infoType === type ? 'bg-white text-black shadow-sm' : 'text-neutral-500 hover:text-black'}`}
-                    >
-                        {type}
-                    </button>
-                ))}
-            </div>
-
-            {successMsg && (
-                <div className="mb-6 p-3 bg-green-50 text-green-700 rounded-xl font-bold text-sm border border-green-200 flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5" /> {successMsg}
-                </div>
-            )}
-
-            <div  className="space-y-4">
-                {infoType === 'Duyuru' && (
-                    <>
-                        <div>
-                            <label className="block text-sm font-bold text-black mb-1">Duyuru Başlığı</label>
-                            <input required type="text" value={announcement.title} onChange={e => setAnnouncement({...announcement, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Yeni Araç Filomuz Hakkında" />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-black mb-1">Duyuru İçeriği</label>
-                            <textarea required value={announcement.content} onChange={e => setAnnouncement({...announcement, content: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-32 resize-none transition" placeholder="Tüm personelin göreceği detaylı duyuru metni..."></textarea>
-                        </div>
-                    </>
-                )}
-
-                {infoType === 'Paylaşım' && (
-                    <>
-                        <div>
-                            <label className="block text-sm font-bold text-black mb-1">Paylaşım Başlığı / Açıklaması</label>
-                            <input required type="text" value={post.title} onChange={e => setPost({...post, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Kadıköy operasyonundan kareler" />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-black mb-1">Görsel Ekle</label>
-                            {post.imageUrl && post.imageUrl !== 'Yükleniyor...' && (
-                                <div className="mb-2 w-full max-h-48 overflow-hidden rounded-xl border border-neutral-200">
-                                    {isVideoUrl(post.imageUrl) ? (
-                                      <video src={post.imageUrl} controls className="w-full h-full object-contain bg-black" />
-                                    ) : (
-                                      <img src={post.imageUrl} alt="Önizleme" className="w-full h-full object-contain bg-neutral-100" />
-                                    )}
-                                </div>
-                            )}
-                            {post.imageUrl === 'Yükleniyor...' && <div className="p-4 text-center font-bold text-neutral-500 animate-pulse bg-neutral-50 rounded-xl border border-neutral-200 mb-2">Görsel Yükleniyor...</div>}
-                            <MediaCaptureMenu onChange={handleFileUpload} disabled={isSubmitting} buttonLabel="Fotoğraf / Video Yükle" buttonClassName="cursor-pointer w-full py-4 bg-neutral-50 border border-neutral-300 border-dashed rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-100 transition" />
-                        </div>
-                    </>
-                )}
-
-                {infoType === 'En İyiler' && (
-                    <>
-                        <div>
-                            <label className="block text-sm font-bold text-black mb-1">Başlık</label>
-                            <input required type="text" value={bestEmp.title} onChange={e => setBestEmp({...bestEmp, title: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: Ayın En İyi Şoförü" />
-                        </div>
-                        <div>
-                            <label className="block text-sm font-bold text-black mb-1">Personel Seçimi</label>
-                            <select required value={bestEmp.employeeName} onChange={e => setBestEmp({...bestEmp, employeeName: e.target.value})} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-medium">
-                                <option value="">Lütfen personel seçin...</option>
-                                {personnelList.map(p => (
-                                    <option key={p.id} value={p.fullName}>{p.fullName} - {p.position}</option>
-                                ))}
-                            </select>
-                        </div>
-                    </>
-                )}
-
-                <button type="button" onClick={handleSubmit} disabled={isSubmitting || post.imageUrl === 'Yükleniyor...'} className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg disabled:opacity-50 mt-6">
-                    <Send className="w-5 h-5" /> Yayına Al
-                </button>
-            </div>
-
-            {/* YENİ: Yayınlanan {infoType} Listesi — sıralama, düzenleme, yayından alma */}
-            <div className="mt-8 pt-6 border-t border-neutral-200">
-              <h3 className="font-bold text-black mb-3">Yayınlanan {infoType} Listesi</h3>
-              {publishedItems.length === 0 ? (
-                <p className="text-sm text-neutral-500 italic">Henüz yayınlanmış bir {infoType.toLowerCase()} yok.</p>
-              ) : (
-                <div className="space-y-2">
-                  {publishedItems.map((item, index) => (
-                    <div key={item.id} className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-xl p-3">
-                      <div className="flex flex-col gap-0.5 shrink-0">
-                        <button type="button" disabled={index === 0} onClick={() => moveInfoItem(index, -1)} className="w-6 h-6 flex items-center justify-center rounded bg-white border border-neutral-200 hover:bg-neutral-100 disabled:opacity-30 transition"><ChevronUp className="w-3.5 h-3.5" /></button>
-                        <button type="button" disabled={index === publishedItems.length - 1} onClick={() => moveInfoItem(index, 1)} className="w-6 h-6 flex items-center justify-center rounded bg-white border border-neutral-200 hover:bg-neutral-100 disabled:opacity-30 transition"><ChevronDown className="w-3.5 h-3.5" /></button>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-black truncate">{item.title || item.employeeName || 'Başlıksız'}</p>
-                        {item.dateStr && <p className="text-[10px] text-neutral-400 font-medium">{item.dateStr}</p>}
-                      </div>
-                      <button type="button" onClick={() => setEditingInfoItem(item)} className="p-2 rounded-lg bg-white border border-neutral-200 hover:bg-neutral-100 transition shrink-0" title="Düzenle"><Edit className="w-4 h-4 text-neutral-600" /></button>
-                      <button type="button" onClick={() => toggleInfoHidden(item)} className="p-2 rounded-lg bg-white border border-neutral-200 hover:bg-neutral-100 transition shrink-0" title="Yayından Al"><EyeOff className="w-4 h-4 text-neutral-600" /></button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+      <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in">
+        <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
+          {/* Sayfa ana başlığı: "Detaylı" ibaresi kaldırıldı, tek satırda görünür (whitespace-nowrap) */}
+          <h2 className="text-[17px] md:text-[22px] font-black text-black flex items-center gap-2 whitespace-nowrap overflow-hidden">
+            <PlusCircle className="w-6 h-6 md:w-7 md:h-7 text-red-600 shrink-0" /> 
+            {editingJobId ? `${type} Kaydını Güncelle` : `${type} Kaydı Oluştur`}
+          </h2>
+          <button 
+            type="button" 
+            onClick={() => setFormData({...formData, isSpecial: !formData.isSpecial})}
+            className="flex flex-col items-center group transition"
+            title="Özel Müşteri Olarak İşaretle"
+          >
+            <Star className={`w-8 h-8 transition ${formData.isSpecial ? 'text-yellow-400 fill-yellow-400 drop-shadow-md scale-110' : 'text-neutral-300 group-hover:text-yellow-200'}`} />
+            <span className={`text-[10px] font-bold mt-1 ${formData.isSpecial ? 'text-yellow-600' : 'text-neutral-400'}`}>ÖZEL</span>
+          </button>
         </div>
 
-        {editingInfoItem && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setEditingInfoItem(null)}>
-            <div className="bg-white rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-              <h3 className="font-bold text-lg text-black mb-4">Bilgilendirmeyi Düzenle</h3>
-              <div className="space-y-3">
-                {infoType !== 'En İyiler' ? (
-                  <>
-                    <div>
-                      <label className="block text-sm font-bold text-neutral-700 mb-1">Başlık</label>
-                      <input type="text" value={editingInfoItem.title || ''} onChange={e => setEditingInfoItem({ ...editingInfoItem, title: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
-                    </div>
-                    {infoType === 'Duyuru' && (
-                      <div>
-                        <label className="block text-sm font-bold text-neutral-700 mb-1">İçerik</label>
-                        <textarea value={editingInfoItem.content || ''} onChange={e => setEditingInfoItem({ ...editingInfoItem, content: e.target.value })} rows={4} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <div>
-                      <label className="block text-sm font-bold text-neutral-700 mb-1">Başlık</label>
-                      <input type="text" value={editingInfoItem.title || ''} onChange={e => setEditingInfoItem({ ...editingInfoItem, title: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold text-neutral-700 mb-1">Personel</label>
-                      <select value={editingInfoItem.employeeName || ''} onChange={e => setEditingInfoItem({ ...editingInfoItem, employeeName: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600 bg-white">
-                        {personnelList.map(p => <option key={p.id} value={p.fullName}>{p.fullName}</option>)}
+        <div className="space-y-6">
+          {/* ==================== MÜŞTERİ VE RANDEVU BİLGİLERİ ==================== */}
+          <div className="bg-neutral-50 p-3 md:p-4 rounded-2xl border border-neutral-200 shadow-sm">
+            <SectionHeader icon={Users} title="Müşteri ve Randevu Bilgileri" />
+            
+            <div className="flex bg-neutral-200/60 p-1 rounded-xl mb-5 w-full md:w-fit border border-neutral-300">
+              <button 
+                type="button"
+                onClick={() => setFormData({...formData, customerType: 'Bireysel'})}
+                className={`flex-1 md:flex-none px-4 md:px-5 py-2 text-xs md:text-sm font-bold rounded-lg transition flex items-center justify-center gap-2 ${formData.customerType === 'Bireysel' ? 'bg-white text-red-600 shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+              >
+                <User className="w-4 h-4" /> Bireysel Müşteri
+              </button>
+              <button 
+                type="button"
+                onClick={() => setFormData({...formData, customerType: 'Kurumsal'})}
+                className={`flex-1 md:flex-none px-4 md:px-5 py-2 text-xs md:text-sm font-bold rounded-lg transition flex items-center justify-center gap-2 ${formData.customerType === 'Kurumsal' ? 'bg-white text-red-600 shadow-sm' : 'text-neutral-500 hover:text-black'}`}
+              >
+                <Briefcase className="w-4 h-4" /> Kurumsal Müşteri
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              {/* SATIR 1: Ad Soyad + TC Kimlik No (mobilde de yan yana) */}
+              <div className="grid grid-cols-2 gap-3 md:gap-4">
+                <div>
+                  <label className={labelCls}>
+                    {formData.customerType === 'Kurumsal' ? 'Şirket Ünvanı *' : 'Ad Soyad *'}
+                  </label>
+                  <input required type="text" name="customerName" value={formData.customerName} onChange={handleInputChange} className={inputCls} placeholder={formData.customerType === 'Kurumsal' ? 'Örn: Sembol Nakliyat A.Ş.' : 'Örn: Mehmet Şen'} />
+                </div>
+                <div>
+                  <label className={labelCls}>
+                    {formData.customerType === 'Kurumsal' ? 'Vergi No' : 'TC Kimlik Numarası'}
+                  </label>
+                  {formData.customerType === 'Kurumsal' ? (
+                    <input type="text" name="taxNo" value={formData.taxNo} onChange={handleInputChange} className={inputCls} placeholder="Vergi numarası" />
+                  ) : (
+                    // TC Kimlik No: inputMode=numeric ile mobilde sayı klavyesi açılır; onChange içinde harf/işaret temizlenir (yalnızca 0-9, en fazla 11 hane)
+                    <input 
+                      type="text" 
+                      inputMode="numeric" 
+                      name="tcNo" 
+                      value={formData.tcNo} 
+                      onChange={(e) => {
+                        const onlyDigits = e.target.value.replace(/\D/g, '').slice(0, 11); // Rakam dışı karakterleri sil
+                        handleInputChange({ target: { name: 'tcNo', value: onlyDigits } });
+                      }} 
+                      className={inputCls} 
+                      placeholder="İsteğe bağlı" 
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* SATIR 2: Telefon + Yedek Telefon (mobilde de yan yana) */}
+              <div className="grid grid-cols-2 gap-3 md:gap-4">
+                <div>
+                  <label className={labelCls}>Telefon Numarası *</label>
+                  <input required type="tel" name="customerPhone" value={formData.customerPhone} onChange={handleInputChange} className={inputCls} placeholder="Örn: 05551234567" />
+                </div>
+                <div>
+                  <label className={labelCls}>Yedek Telefon Numarası</label>
+                  <input type="tel" name="altPhone" value={formData.altPhone || ''} onChange={handleInputChange} className={inputCls} placeholder="İsteğe Bağlı" />
+                </div>
+              </div>
+
+              {/* SATIR 3: Tarih + Saat + İşlem Süresi + Araç Sayısı — 4 eşit sütun, hizalı, birbirine taşmaz */}
+              {/* DEĞİŞTİ (kullanıcı talebi): 3 sütun -> 4 sütun; "Araç Sayısı" eklendi (1-7, varsayılan 1). */}
+              {/* min-w-0 + w-full taşmayı engeller, ortak küçük punto (text-sm) ile hepsi aynı görünür */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div className="min-w-0">
+                  <label className={`${labelCls} text-center`}>Tarih *</label>
+                  <input required type="date" name="date" value={formData.date} onChange={handleInputChange} className="w-full min-w-0 h-11 box-border appearance-none px-1 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-[11px] md:text-sm text-center [text-align-last:center]" />
+                </div>
+                <div className="min-w-0">
+                  <label className={`${labelCls} text-center`}>Saat *</label>
+                  <input required type="time" name="time" value={formData.time} onChange={handleInputChange} className="w-full min-w-0 h-11 box-border appearance-none px-1 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition font-bold text-[11px] md:text-sm text-center [text-align-last:center]" />
+                </div>
+                <div className="min-w-0">
+                  <label className={`${labelCls} text-center`}>İşlem Süresi *</label>
+                  <select name="durationDays" value={formData.durationDays || '1'} onChange={handleInputChange} className="w-full min-w-0 h-11 box-border px-1 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-bold text-[11px] md:text-sm text-center [text-align-last:center]">
+                    {[1, 2, 3, 4, 5, 6, 7].map(d => <option key={d} value={d}>{d} Gün</option>)}
+                  </select>
+                </div>
+                {/* ==============================================================
+                    YENİ: ARAÇ SAYISI (kullanıcı talebi)
+                    Aynı gün işe kaç kamyon gidiyor? 2 seçilirse iş aynı güne
+                    "1. Araç" ve "2. Araç" olarak KOPYALANIR: bilgiler ve fiyat
+                    ekranda aynı görünür, her araca ayrı ekip atanır ve mesai
+                    ayrı kapatılır. Ciro, cari ve teslim kodu TEK'tir (kopyaların
+                    fiyatı veritabanında ₺0'dır, bkz. shared.jsx isAracKopyasiMi).
+                    ============================================================== */}
+                <div className="min-w-0">
+                  <label className={`${labelCls} text-center`}>Araç Sayısı *</label>
+                  <select name="aracSayisi" value={formData.aracSayisi || '1'} onChange={handleInputChange}
+                    title="Aynı gün işe giden kamyon sayısı. 2 ve üzeri seçilirse iş takvimde araç sayısı kadar görünür; ciro tek sayılır."
+                    className="w-full min-w-0 h-11 box-border px-1 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white transition font-bold text-[11px] md:text-sm text-center [text-align-last:center]">
+                    {[1, 2, 3, 4, 5, 6, 7].map(a => <option key={a} value={a}>{a} Araç</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ==================== FİNANS VE OPERASYON NOTLARI ==================== */}
+          {/* NOT: Bu bölüm, ekran görüntülerindeki akışa uygun şekilde müşteri bilgilerinin hemen altına taşındı */}
+          <div className="bg-neutral-50 p-3 md:p-4 rounded-2xl border border-neutral-200 shadow-sm">
+            <SectionHeader icon={Wallet} title="Finans ve Operasyon Notları" />
+            <div className="space-y-4">
+              {/* SATIR 1: Anlaşılan Fiyat + Alınan Kapora (mobilde de yan yana) */}
+              <div className="grid grid-cols-2 gap-3 md:gap-4">
+                <div>
+                  <label className={labelCls}>Anlaşılan Fiyat (TL)</label>
+                  <input type="number" name="price" value={formData.price} onChange={handleInputChange} className={`${inputCls} font-bold`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Alınan Kapora (TL)</label>
+                  <input type="number" name="deposit" value={formData.deposit} onChange={handleInputChange} className={`${inputCls} font-bold text-green-600`} />
+                </div>
+              </div>
+              {/* SATIR 2: Sözleşme Detayı + Operasyon Notları (mobilde de yan yana) */}
+              <div className="grid grid-cols-2 gap-3 md:gap-4">
+                <div>
+                  <label className={labelCls}>Sözleşme Detayı</label>
+                  <textarea name="contractDetails" value={formData.contractDetails || ''} onChange={handleInputChange} className={`${inputCls} h-20 resize-none`} />
+                </div>
+                <div>
+                  <label className={labelCls}>Operasyon Notları</label>
+                  <textarea name="notes" value={formData.notes || ''} onChange={handleInputChange} className={`${inputCls} h-20 resize-none`} />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* ==================== YÜKLEME BİLGİLERİ (1. ADRES) ==================== */}
+          <div className="bg-neutral-50 p-3 md:p-4 rounded-2xl border border-neutral-200 shadow-sm">
+            <SectionHeader 
+              icon={ArrowUpRight} 
+              title={type === 'Asansör' ? 'Kurulum Adresi' : 'Yükleme Bilgileri (1. Adres)'}
+              rightSlot={type === 'Depo' && formData.depoDirection === 'fromDepo' ? (
+                <div className="flex items-center gap-2 bg-red-50 p-2 rounded-xl border border-red-100">
+                  <Database className="w-4 h-4 text-red-600" />
+                  <label className="text-xs font-bold text-red-700 whitespace-nowrap">Kendi Depomuzdan Çıkacak:</label>
+                  <select 
+                    name="selectedDepo"
+                    value={formData.selectedDepo || ''} 
+                    onChange={handleDepoChange}
+                    className="p-1.5 border border-red-200 rounded-lg text-xs font-bold bg-white outline-none focus:ring-2 focus:ring-red-600 text-red-700 cursor-pointer"
+                  >
+                    <option value="">-- Özel Adres (Seçilmedi) --</option>
+                    {/* DEĞİŞTİ: Depolar artık tek tek yazılmıyor; shared.jsx'teki
+                        DEPO_LOCATIONS listesinden üretiliyor. Yeni bir tesis
+                        açıldığında yalnızca o listeye eklemek yeterli — bu ekranı
+                        ve boşaltma tarafındaki ikizini elle güncellemek gerekmiyor. */}
+                    {DEPO_LOCATIONS.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+                  </select>
+                </div>
+              ) : null}
+            />
+            <div className="space-y-4 mb-5">
+                {/* SATIR 1: Daire Tipi + Kat (mobilde de yan yana) */}
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div>
+                    <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Tipi' : 'Daire Tipi'}</label>
+                    <select name="fromRoomCount" value={formData.fromRoomCount} onChange={handleInputChange} className={selectCls}>
+                      {type === 'Asansör' ? (
+                        <>
+                          <option value="Yükleme Kurulum">Yükleme Kurulum</option>
+                          <option value="Boşaltma Kurulum">Boşaltma Kurulum</option>
+                          <option value="İnşaat Kurulum">İnşaat Kurulum</option>
+                          <option value="Parça Eşya Kurulum">Parça Eşya Kurulum</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="1+0">1+0</option>
+                          <option value="1+1">1+1</option>
+                          <option value="2+1">2+1</option>
+                          <option value="3+1">3+1</option>
+                          <option value="4+1">4+1</option>
+                          <option value="Ofis">Ofis</option>
+                          <option value="Villa">Villa</option>
+                          <option value="Parça Eşya">Parça Eşya</option>
+                          <option value="Depoevim Tesisleri">Depoevim Tesisleri</option>
+                        </>
+                      )}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Kat</label>
+                    <select name="fromFloor" value={formData.fromFloor} onChange={handleInputChange} className={selectCls}>
+                      {type === 'Asansör' 
+                        ? Array.from({ length: 20 }, (_, i) => `${i + 1}. Kat`).map(f => <option key={`from-${f}`} value={f}>{f}</option>)
+                        : FLOORS.map(f => <option key={`from-${f}`} value={f}>{f}</option>)
+                      }
+                    </select>
+                  </div>
+                </div>
+
+                {/* SATIR 2: Taşıma Şekli + Yükleme Mesafesi + Eşya Durumu — 3 eşit sütun, küçültülmüş ve hizalı, taşmasız */}
+                {/* items-end: farklı satır sayısındaki etiketlerde kutular alttan hizalanır. min-w-0: taşmayı engeller */}
+                <div className={`grid ${type === 'Asansör' ? 'grid-cols-2' : 'grid-cols-3'} gap-2 items-end`}>
+                  {type !== 'Asansör' && (
+                    <div className="min-w-0">
+                      <label className={labelCls}>Taşıma Şekli</label>
+                      <select name="fromTransportMethod" value={formData.fromTransportMethod || 'Merdiven'} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-red-600 text-xs md:text-sm">
+                        <option value="Bina Asansörü">Bina Asansörü</option>
+                        <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
+                        <option value="Merdiven">Merdiven</option>
                       </select>
                     </div>
-                  </>
-                )}
+                  )}
+                  <div className="min-w-0">
+                    <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Açısı' : 'Yükleme Mesafesi'}</label>
+                    <div className="flex gap-1">
+                      {/* Sayı kutusu: 3 hane tam gözükecek genişlikte (min-w) */}
+                      <input type="number" name="fromDistance" value={formData.fromDistance} onChange={handleInputChange} placeholder="20" className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" />
+                      {/* Birim kutusu: kapalıyken kısa (M / A), listede tam açıklama görünür */}
+                      <select name="fromDistanceUnit" value={formData.fromDistanceUnit} onChange={handleInputChange} className="w-11 shrink-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-xs md:text-sm text-center">
+                        <option value="Metre">M</option>
+                        <option value="Adım">A</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="min-w-0 relative">
+                    <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Eşya Durumu'}</label>
+                    {type === 'Asansör' ? (
+                      <select name="fromPacking" value={formData.fromPacking || 'Kendi İşimiz'} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-sm">
+                        <option value="Kendi İşimiz">Kendi İşimiz</option>
+                        <option value="Dışarıya Kiralama">Dışarıya Kiralama</option>
+                      </select>
+                    ) : (
+                      <>
+                        {/* YENİ: EŞYA DURUMU — Teslim Durumu ile aynı çoklu seçim açılır penceresi. Varsayılan: Kendisi Topladı */}
+                        <button
+                          type="button"
+                          onClick={() => setEsyaOpen(o => !o)}
+                          className={`w-full min-w-0 p-2 border rounded-xl outline-none bg-white text-xs md:text-sm text-left flex items-center justify-between gap-1 transition ${selectedEsya.length > 0 ? 'border-red-400 text-red-600 font-bold ring-1 ring-red-200' : 'border-neutral-300 text-neutral-700'}`}
+                        >
+                          {/* Kutuda: hiç seçim yoksa "Kendisi Topladı" (varsayılan), 1 seçimde adı, 2+ seçimde sayı */}
+                          <span className="truncate">{selectedEsya.length === 0 ? 'Kendisi Topladı' : (selectedEsya.length === 1 ? selectedEsya[0] : `${selectedEsya.length} işlem seçildi`)}</span>
+                          <span className="text-neutral-400 shrink-0">▾</span>
+                        </button>
+                        {esyaOpen && (
+                          <>
+                            <div className="fixed inset-0 z-20" onClick={() => setEsyaOpen(false)}></div>
+                            <div className="absolute z-30 mt-1 right-0 w-56 bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5 animate-in fade-in slide-in-from-top-1 max-h-64 overflow-y-auto custom-scrollbar">
+                              {ESYA_OPTIONS.map(opt => (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  onClick={() => toggleEsya(opt)}
+                                  className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition flex items-center justify-between gap-2 ${selectedEsya.includes(opt) ? 'bg-red-600 text-white' : 'text-neutral-700 hover:bg-neutral-100'}`}
+                                >
+                                  {opt}
+                                  {selectedEsya.includes(opt) && <span>✓</span>}
+                                </button>
+                              ))}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 md:gap-4 mb-4">
+                <div className="col-span-1">
+                  <label className={labelCls}>İl *</label>
+                  <select required name="fromProvince" value={formData.fromProvince} onChange={(e) => handleProvinceChange(e, 'from')} className={selectCls}>
+                    <option value="">İl Seçiniz</option>
+                    {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div className="col-span-1">
+                  <label className={labelCls}>İlçe *</label>
+                  <input required type="text" name="fromDistrict" value={formData.fromDistrict} onChange={handleInputChange} placeholder="İlçe giriniz" className={inputCls} />
+                </div>
+            </div>
+            <div>
+                <label className={labelCls}>Açık Adres Bilgileri</label>
+                <textarea name="fromAddress" value={formData.fromAddress} onChange={handleInputChange} className={`${inputCls} h-16 resize-none`} placeholder="Mahalle, sokak, bina no vb." />
+            </div>
+
+            {/* EKSTRA YÜKLEME ADRESLERİ */}
+            {formData.extraLoadingAddresses?.map((addr, index) => (
+              <div key={addr.id} className="mt-8 pt-6 border-t-2 border-neutral-200 border-dashed relative">
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.filter(a => a.id !== addr.id) }));
+                  }} 
+                  className="absolute -top-4 right-0 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition text-xs font-bold flex items-center gap-1 border border-red-100 shadow-sm"
+                >
+                  <X className="w-3.5 h-3.5"/> Adresi Kaldır
+                </button>
+                <h4 className="font-black text-neutral-700 mb-4 flex items-center gap-2 text-md uppercase tracking-wide">
+                  {index + 2}. {type === 'Asansör' ? 'Kurulum Adresi' : 'Yükleme Adresi'}
+                </h4>
+                <div className="space-y-4 mb-5">
+                  {/* SATIR 1: Daire Tipi + Kat */}
+                  <div className="grid grid-cols-2 gap-3 md:gap-4">
+                    <div>
+                      <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Tipi' : 'Daire Tipi'}</label>
+                      <select 
+                        value={addr.roomCount} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, roomCount: e.target.value } : a) }))} 
+                        className={selectCls}
+                      >
+                        {type === 'Asansör' ? (
+                          <>
+                            <option value="Yükleme Kurulum">Yükleme Kurulum</option>
+                            <option value="Boşaltma Kurulum">Boşaltma Kurulum</option>
+                            <option value="İnşaat Kurulum">İnşaat Kurulum</option>
+                            <option value="Parça Eşya Kurulum">Parça Eşya Kurulum</option>
+                          </>
+                        ) : (
+                          <>
+                            <option value="1+0">1+0</option>
+                            <option value="1+1">1+1</option>
+                            <option value="2+1">2+1</option>
+                            <option value="3+1">3+1</option>
+                            <option value="4+1">4+1</option>
+                            <option value="Ofis">Ofis</option>
+                            <option value="Villa">Villa</option>
+                            <option value="Parça Eşya">Parça Eşya</option>
+                            <option value="Depoevim Tesisleri">Depoevim Tesisleri</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Kat</label>
+                      <select 
+                        value={addr.floor} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, floor: e.target.value } : a) }))} 
+                        className={selectCls}
+                      >
+                        {type === 'Asansör' 
+                          ? Array.from({ length: 20 }, (_, i) => `${i + 1}. Kat`).map(f => <option key={`ext-from-${f}`} value={f}>{f}</option>)
+                          : FLOORS.map(f => <option key={`ext-from-${f}`} value={f}>{f}</option>)
+                        }
+                      </select>
+                    </div>
+                  </div>
+                  {/* SATIR 2: Taşıma Şekli + Mesafe + Eşya Durumu — 3 eşit sütun, hizalı, taşmasız */}
+                  <div className={`grid ${type === 'Asansör' ? 'grid-cols-2' : 'grid-cols-3'} gap-2 items-end`}>
+                    {type !== 'Asansör' && (
+                      <div className="min-w-0">
+                        <label className={labelCls}>Taşıma Şekli</label>
+                        <select 
+                          value={addr.transportMethod} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, transportMethod: e.target.value } : a) }))} 
+                          className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-red-600 text-xs md:text-sm"
+                        >
+                          <option value="Bina Asansörü">Bina Asansörü</option>
+                          <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
+                          <option value="Merdiven">Merdiven</option>
+                        </select>
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Açısı' : 'Yükleme Mesafesi'}</label>
+                      <div className="flex gap-1">
+                        <input 
+                          type="number" 
+                          value={addr.distance} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, distance: e.target.value } : a) }))} 
+                          placeholder="20" 
+                          className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" 
+                        />
+                        <select 
+                          value={addr.distanceUnit} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, distanceUnit: e.target.value } : a) }))} 
+                          className="w-11 shrink-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-xs md:text-sm text-center"
+                        >
+                          <option value="Metre">M</option>
+                          <option value="Adım">A</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="min-w-0">
+                      <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Eşya Durumu'}</label>
+                      <select 
+                        value={addr.packing} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, packing: e.target.value } : a) }))} 
+                        className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-sm"
+                      >
+                        {type === 'Asansör' ? (
+                          <>
+                            <option value="Kendi İşimiz">Kendi İşimiz</option>
+                            <option value="Dışarıya Kiralama">Dışarıya Kiralama</option>
+                          </>
+                        ) : (
+                          <>
+                            {ESYA_OPTIONS.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                          </>
+                        )}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 md:gap-4 mb-4">
+                  <div className="col-span-1">
+                    <label className={labelCls}>İl</label>
+                    <select 
+                      value={addr.province} 
+                      onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, province: e.target.value, district: '' } : a) }))} 
+                      className={selectCls}
+                    >
+                      <option value="">İl Seçiniz</option>
+                      {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div className="col-span-1">
+                    <label className={labelCls}>İlçe</label>
+                    <input 
+                      type="text"
+                      value={addr.district} 
+                      onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, district: e.target.value } : a) }))} 
+                      placeholder="İlçe giriniz"
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>Açık Adres Bilgileri</label>
+                  <textarea 
+                    value={addr.address} 
+                    onChange={(e) => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, address: e.target.value } : a) }))} 
+                    className={`${inputCls} h-16 resize-none`}
+                    placeholder="Mahalle, sokak, bina no vb." 
+                  />
+                </div>
               </div>
-              <div className="flex gap-2 pt-4">
-                <button type="button" onClick={() => setEditingInfoItem(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition">İptal</button>
-                <button type="button" onClick={handleSaveEditInfo} className="flex-1 py-2.5 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition">Kaydet</button>
+            ))}
+
+            <button 
+              type="button" 
+              onClick={() => {
+                setFormData(prev => ({
+                  ...prev,
+                  extraLoadingAddresses: [
+                    ...(prev.extraLoadingAddresses || []),
+                    { id: Date.now(), province: '', district: '', floor: '1. Kat', transportMethod: 'Merdiven', packing: type === 'Asansör' ? 'Kendi İşimiz' : 'Kendisi Topladı', roomCount: type === 'Asansör' ? 'Yükleme Kurulum' : '1+0 / Parça Eşya', distance: '', distanceUnit: 'Metre', address: '' }
+                  ]
+                }));
+              }} 
+              className="mt-4 w-full py-2 border border-dashed border-neutral-300 text-neutral-500 text-sm font-bold rounded-lg hover:bg-neutral-100 hover:border-neutral-400 transition flex justify-center items-center gap-1.5"
+            >
+              <PlusCircle className="w-4 h-4" /> Yeni {type === 'Asansör' ? 'Kurulum' : 'Yükleme'} Adresi Ekle
+            </button>
+          </div>
+
+          {type !== 'Asansör' && (
+            <>
+              {/* ORTADAKİ YER DEĞİŞTİRME BUTONU */}
+              {/* NOT: Bu buton, tam olarak YÜKLEME ve BOŞALTMA bölümlerinin ORTASINDA konumlanır */}
+              <div className="flex justify-center items-center h-0 relative z-10">
+                {/* Yönleri Değiştir: kullanıcı isteğiyle sadece simge olarak küçültüldü */}
+                <button 
+                  type="button" 
+                  onClick={handleSwapAddresses}
+                  className="bg-black text-white p-2.5 rounded-full shadow-xl border-[3px] border-white hover:bg-neutral-800 transition absolute"
+                  title="Yükleme ve Boşaltma Bilgilerini Yer Değiştir"
+                >
+                  <ArrowUpDown className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* ==================== BOŞALTMA BİLGİLERİ (1. ADRES) ==================== */}
+              <div className="bg-neutral-50 p-3 md:p-4 rounded-2xl border border-neutral-200 shadow-sm">
+                <SectionHeader 
+                  icon={MapPin} 
+                  title="Boşaltma Bilgileri (1. Adres)"
+                  rightSlot={type === 'Depo' && formData.depoDirection === 'toDepo' ? (
+                    <div className="flex items-center gap-2 bg-red-50 p-2 rounded-xl border border-red-100">
+                      <Database className="w-4 h-4 text-red-600" />
+                      <label className="text-xs font-bold text-red-700 whitespace-nowrap">Kendi Depomuza İndir:</label>
+                      <select 
+                        name="selectedDepo"
+                        value={formData.selectedDepo || ''} 
+                        onChange={handleDepoChange}
+                        className="p-1.5 border border-red-200 rounded-lg text-xs font-bold bg-white outline-none focus:ring-2 focus:ring-red-600 text-red-700 cursor-pointer"
+                      >
+                        <option value="">-- Özel Adres (Seçilmedi) --</option>
+                        {/* Aynı liste — DEPO_LOCATIONS tek kaynaktır */}
+                        {DEPO_LOCATIONS.map(d => <option key={d.name} value={d.name}>{d.name}</option>)}
+                      </select>
+                    </div>
+                  ) : null}
+                />
+            <div className="space-y-4 mb-5">
+                {/* SATIR 1: Daire Tipi + Kat (mobilde de yan yana) */}
+                <div className="grid grid-cols-2 gap-3 md:gap-4">
+                  <div>
+                    <label className={labelCls}>Daire Tipi</label>
+                    <select name="toRoomCount" value={formData.toRoomCount} onChange={handleInputChange} className={selectCls}>
+                      <option value="1+0">1+0</option>
+                      <option value="1+1">1+1</option>
+                      <option value="2+1">2+1</option>
+                      <option value="3+1">3+1</option>
+                      <option value="4+1">4+1</option>
+                      <option value="Ofis">Ofis</option>
+                      <option value="Villa">Villa</option>
+                      <option value="Parça Eşya">Parça Eşya</option>
+                      <option value="Depoevim Tesisleri">Depoevim Tesisleri</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>Kat</label>
+                    <select name="toFloor" value={formData.toFloor} onChange={handleInputChange} className={selectCls}>
+                      {FLOORS.map(f => <option key={`to-${f}`} value={f}>{f}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {/* SATIR 2: Taşıma Şekli + Boşaltma Mesafesi + Duvar Montajı — yükleme adresindeki düzenle birebir aynı (3 eşit sütun, hizalı, taşmasız) */}
+                <div className="grid grid-cols-3 gap-2 items-end">
+                  <div className="min-w-0">
+                    <label className={labelCls}>Taşıma Şekli</label>
+                    <select name="toTransportMethod" value={formData.toTransportMethod || 'Merdiven'} onChange={handleInputChange} className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-red-600 text-xs md:text-sm">
+                      <option value="Bina Asansörü">Bina Asansörü</option>
+                      <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
+                      <option value="Merdiven">Merdiven</option>
+                    </select>
+                  </div>
+                  <div className="min-w-0">
+                    <label className={labelCls}>Boşaltma Mesafesi</label>
+                    <div className="flex gap-1">
+                      <input type="number" name="toDistance" value={formData.toDistance} onChange={handleInputChange} placeholder="15" className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" />
+                      <select name="toDistanceUnit" value={formData.toDistanceUnit} onChange={handleInputChange} className="w-11 shrink-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-xs md:text-sm text-center">
+                        <option value="Metre">M</option>
+                        <option value="Adım">A</option>
+                      </select>
+                    </div>
+                  </div>
+                  {/* YENİ: TESLİM ŞEKLİ (eski adı Duvar Montajı) — çoklu seçim yapılabilen açılır pencere */}
+                  <div className="min-w-0 relative">
+                    <label className={labelCls}>Teslim Durumu</label>
+                    <button
+                      type="button"
+                      onClick={() => setWallMountOpen(o => !o)}
+                      className={`w-full min-w-0 p-2 border rounded-xl outline-none bg-white text-xs md:text-sm text-left flex items-center justify-between gap-1 transition ${selectedWallMounts.length > 0 ? 'border-red-400 text-red-600 font-bold ring-1 ring-red-200' : 'border-neutral-300 text-neutral-700'}`}
+                    >
+                      {/* Kutuda seçim sayısı gösterilir: hiç seçim yoksa "Yok" yazar */}
+                      <span className="truncate">{selectedWallMounts.length === 0 ? 'Yok' : `${selectedWallMounts.length} işlem seçildi`}</span>
+                      <span className="text-neutral-400 shrink-0">▾</span>
+                    </button>
+                    {wallMountOpen && (
+                      <>
+                        {/* Dışarıya tıklanınca pencereyi kapatan görünmez katman */}
+                        <div className="fixed inset-0 z-20" onClick={() => setWallMountOpen(false)}></div>
+                        <div className="absolute z-30 mt-1 right-0 w-56 bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5 animate-in fade-in slide-in-from-top-1 max-h-64 overflow-y-auto custom-scrollbar">
+                          {/* "Yok" seçeneği: tüm seçimleri temizler */}
+                          <button
+                            type="button"
+                            onClick={() => { toggleWallMount('Yok'); setWallMountOpen(false); }}
+                            className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition ${selectedWallMounts.length === 0 ? 'bg-red-50 text-red-600' : 'text-neutral-600 hover:bg-neutral-100'}`}
+                          >
+                            Yok
+                          </button>
+                          {WALL_MOUNT_OPTIONS.map(opt => (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() => toggleWallMount(opt)}
+                              className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold transition flex items-center justify-between gap-2 ${selectedWallMounts.includes(opt) ? 'bg-red-600 text-white' : 'text-neutral-700 hover:bg-neutral-100'}`}
+                            >
+                              {opt}
+                              {selectedWallMounts.includes(opt) && <span>✓</span>}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 md:gap-4 mb-4">
+                <div className="col-span-1">
+                  <label className={labelCls}>İl *</label>
+                  <select required name="toProvince" value={formData.toProvince} onChange={(e) => handleProvinceChange(e, 'to')} className={selectCls}>
+                    <option value="">İl Seçiniz</option>
+                    {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div className="col-span-1">
+                  <label className={labelCls}>İlçe *</label>
+                  <input required type="text" name="toDistrict" value={formData.toDistrict} onChange={handleInputChange} placeholder="İlçe giriniz" className={inputCls} />
+                </div>
+            </div>
+            <div>
+                <label className={labelCls}>Açık Adres Bilgileri</label>
+                <textarea name="toAddress" value={formData.toAddress} onChange={handleInputChange} className={`${inputCls} h-16 resize-none`} placeholder="Mahalle, sokak, bina no vb." />
+            </div>
+
+            {/* EKSTRA BOŞALTMA ADRESLERİ */}
+            {formData.extraUnloadingAddresses?.map((addr, index) => (
+              <div key={addr.id} className="mt-8 pt-6 border-t-2 border-neutral-200 border-dashed relative">
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.filter(a => a.id !== addr.id) }));
+                  }} 
+                  className="absolute -top-4 right-0 px-3 py-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition text-xs font-bold flex items-center gap-1 border border-red-100 shadow-sm"
+                >
+                  <X className="w-3.5 h-3.5"/> Adresi Kaldır
+                </button>
+                <h4 className="font-black text-neutral-700 mb-4 flex items-center gap-2 text-md uppercase tracking-wide">
+                  {index + 2}. Boşaltma Adresi
+                </h4>
+                <div className="space-y-4 mb-5">
+                  {/* SATIR 1: Daire Tipi + Kat */}
+                  <div className="grid grid-cols-2 gap-3 md:gap-4">
+                    <div>
+                      <label className={labelCls}>Daire Tipi</label>
+                      <select 
+                        value={addr.roomCount} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, roomCount: e.target.value } : a) }))} 
+                        className={selectCls}
+                      >
+                        <option value="1+0">1+0</option>
+                        <option value="1+1">1+1</option>
+                        <option value="2+1">2+1</option>
+                        <option value="3+1">3+1</option>
+                        <option value="4+1">4+1</option>
+                        <option value="Ofis">Ofis</option>
+                        <option value="Villa">Villa</option>
+                        <option value="Parça Eşya">Parça Eşya</option>
+                        <option value="Depoevim Tesisleri">Depoevim Tesisleri</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Kat</label>
+                      <select 
+                        value={addr.floor} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, floor: e.target.value } : a) }))} 
+                        className={selectCls}
+                      >
+                        {FLOORS.map(f => <option key={`ext-to-${f}`} value={f}>{f}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  {/* SATIR 2: Taşıma Şekli + Boşaltma Mesafesi */}
+                  <div className="grid grid-cols-2 gap-3 md:gap-4">
+                    <div>
+                      <label className={labelCls}>Taşıma Şekli</label>
+                      <select 
+                        value={addr.transportMethod} 
+                        onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, transportMethod: e.target.value } : a) }))} 
+                        className={`${selectCls} font-bold text-red-600`}
+                      >
+                        <option value="Bina Asansörü">Bina Asansörü</option>
+                        <option value="Dış Cephe Asansörü">Dış Cephe Asansörü</option>
+                        <option value="Merdiven">Merdiven</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Boşaltma Mesafesi</label>
+                      <div className="flex gap-1.5 md:gap-2">
+                        <input 
+                          type="number" 
+                          value={addr.distance} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distance: e.target.value } : a) }))} 
+                          placeholder="15" 
+                          className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" 
+                        />
+                        <select 
+                          value={addr.distanceUnit} 
+                          onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distanceUnit: e.target.value } : a) }))} 
+                          className="w-11 shrink-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-xs md:text-sm text-center"
+                        >
+                          <option value="Metre">M</option>
+                          <option value="Adım">A</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3 md:gap-4 mb-4">
+                  <div className="col-span-1">
+                    <label className={labelCls}>İl</label>
+                    <select 
+                      value={addr.province} 
+                      onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, province: e.target.value, district: '' } : a) }))} 
+                      className={selectCls}
+                    >
+                      <option value="">İl Seçiniz</option>
+                      {PROVINCES.map(p => <option key={p} value={p}>{p}</option>)}
+                    </select>
+                  </div>
+                  <div className="col-span-1">
+                    <label className={labelCls}>İlçe</label>
+                    <input 
+                      type="text"
+                      value={addr.district} 
+                      onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, district: e.target.value } : a) }))} 
+                      placeholder="İlçe giriniz"
+                      className={inputCls}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>Açık Adres Bilgileri</label>
+                  <textarea 
+                    value={addr.address} 
+                    onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, address: e.target.value } : a) }))} 
+                    className={`${inputCls} h-16 resize-none`}
+                    placeholder="Mahalle, sokak, bina no vb." 
+                  />
+                </div>
+              </div>
+            ))}
+
+            <button 
+              type="button" 
+              onClick={() => {
+                setFormData(prev => ({
+                  ...prev,
+                  extraUnloadingAddresses: [
+                    ...(prev.extraUnloadingAddresses || []),
+                    { id: Date.now(), province: '', district: '', floor: '1. Kat', transportMethod: 'Merdiven', packing: 'Kendisi Topladı', roomCount: '1+0 / Parça Eşya', distance: '', distanceUnit: 'Metre', address: '' }
+                  ]
+                }));
+              }} 
+              className="mt-4 w-full py-2 border border-dashed border-neutral-300 text-neutral-500 text-sm font-bold rounded-lg hover:bg-neutral-100 hover:border-neutral-400 transition flex justify-center items-center gap-1.5"
+            >
+              <PlusCircle className="w-4 h-4" /> Yeni Boşaltma Adresi Ekle
+            </button>
+          </div>
+            </>
+          )}
+
+          <button type="button" onClick={handleSaveClick} className="w-full bg-red-600 text-white font-black py-5 rounded-2xl hover:bg-red-700 transition flex justify-center items-center gap-2 text-xl shadow-xl shadow-red-600/30">
+            <PlusCircle className="w-6 h-6" /> 
+            {editingJobId ? 'Kaydı Güncelle' : 'Kaydı Oluştur'}
+          </button>
+        </div>
+
+        {/* ==================== YENİ: ZORUNLU ALAN UYARI PENCERESİ ==================== */}
+        {/* İsim veya telefon boş bırakılıp "Kaydı Oluştur"a basılırsa bu pencere açılır ve kayıt YAPILMAZ */}
+        {showValidationModal && (
+          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 animate-in zoom-in-95">
+              <div className="flex flex-col items-center text-center">
+                <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center mb-4">
+                  <AlertTriangle className="w-7 h-7 text-red-600" />
+                </div>
+                <h3 className="text-lg font-black text-black mb-2">Eksik Bilgi!</h3>
+                <p className="text-sm text-neutral-600 mb-5">
+                  Müşteri kaydı oluşturabilmek için <b>{formData.customerType === 'Kurumsal' ? 'Şirket Ünvanı' : 'Ad Soyad'}</b> ve <b>Telefon Numarası</b> alanları zorunludur. Lütfen bu alanları doldurun.
+                </p>
+                <button 
+                  type="button" 
+                  onClick={() => setShowValidationModal(false)}
+                  className="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition"
+                >
+                  Tamam, Anladım
+                </button>
               </div>
             </div>
           </div>
         )}
-    </>
-    );
-  };
-
-  export const ComplaintsView = ({ complaints, updateComplaintStatus, deleteComplaint }) => {
-    const [filter, setFilter] = useState('all');
-
-    const filtered = complaints.filter(c => filter === 'all' ? true : c.status === filter).sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-    return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-5xl mx-auto">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4">
-          <h2 className="text-xl font-bold text-black flex items-center gap-2">
-            <AlertTriangle className="w-6 h-6 text-red-600" /> Şikayet ve Bildirimler
-          </h2>
-          <div className="flex bg-neutral-100 p-1 rounded-xl">
-            <button onClick={() => setFilter('all')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${filter === 'all' ? 'bg-white text-black shadow-sm' : 'text-neutral-500'}`}>Tümü</button>
-            <button onClick={() => setFilter('Yeni')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${filter === 'Yeni' ? 'bg-red-500 text-white shadow-sm' : 'text-neutral-500'}`}>Yeni</button>
-            <button onClick={() => setFilter('İnceleniyor')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${filter === 'İnceleniyor' ? 'bg-blue-500 text-white shadow-sm' : 'text-neutral-500'}`}>İnceleniyor</button>
-            <button onClick={() => setFilter('Çözüldü')} className={`px-4 py-2 text-sm font-bold rounded-lg transition ${filter === 'Çözüldü' ? 'bg-green-500 text-white shadow-sm' : 'text-neutral-500'}`}>Çözüldü</button>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          {filtered.map(c => (
-            <div key={c.id} className={`p-4 rounded-xl border flex flex-col gap-3 transition ${!c.read ? 'bg-red-50/30 border-red-200' : 'bg-white border-neutral-200'}`}>
-              <div className="flex justify-between items-start">
-                <div>
-                  <h3 className="font-bold text-lg text-black flex items-center gap-2">
-                    {!c.read && <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse"></span>}
-                    {c.subject}
-                  </h3>
-                  <p className="text-xs text-neutral-500 mt-1 font-medium"><User className="w-3 h-3 inline mr-1" /> {c.senderName} ({c.senderPosition}) • <Clock className="w-3 h-3 inline ml-2 mr-1" /> {c.dateStr}</p>
-                </div>
-                <select 
-                  value={c.status} 
-                  onChange={e => updateComplaintStatus(c.id, e.target.value, true)}
-                  className={`text-xs font-bold px-3 py-1.5 rounded-lg border outline-none cursor-pointer ${c.status === 'Yeni' ? 'bg-red-100 text-red-800 border-red-200' : c.status === 'İnceleniyor' ? 'bg-blue-100 text-blue-800 border-blue-200' : 'bg-green-100 text-green-800 border-green-200'}`}
-                >
-                  <option value="Yeni">Yeni</option>
-                  <option value="İnceleniyor">İnceleniyor</option>
-                  <option value="Çözüldü">Çözüldü</option>
-                </select>
-              </div>
-              <div className="bg-neutral-50 p-3 rounded-lg border border-neutral-100 text-sm text-neutral-700 leading-relaxed whitespace-pre-wrap">
-                {c.content}
-              </div>
-              <div className="flex justify-end pt-2">
-                <button onClick={() => { if(window.confirm('Bildirimi silmek istediğinize emin misiniz?')) deleteComplaint(c.id); }} className="text-red-500 hover:text-red-700 text-xs font-bold flex items-center gap-1 bg-white px-2 py-1 rounded border border-red-100 hover:bg-red-50 transition"><Ban className="w-3.5 h-3.5" /> Sil</button>
-              </div>
-            </div>
-          ))}
-          {filtered.length === 0 && (
-            <p className="text-center text-neutral-500 py-8 bg-neutral-50 rounded-xl border border-neutral-200">Gösterilecek şikayet/bildirim bulunamadı.</p>
-          )}
-        </div>
       </div>
     );
   };
 
-  export const MyComplaintSubmitView = ({ currentUser, db, appId, addSystemLog }) => {
-    const [complaintSubject, setComplaintSubject] = useState('');
-    const [complaintContent, setComplaintContent] = useState('');
-    const [statusMessage, setStatusMessage] = useState({ text: '', type: '' });
 
-    const showMessage = (text, type = 'success') => {
-      setStatusMessage({ text, type });
-      setTimeout(() => setStatusMessage({ text: '', type: '' }), 3000);
-    };
-
-    const submitComplaint = async (e) => {
-       e.preventDefault();
-       try {
-          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'complaints'), {
-            senderId: currentUser.id,
-            senderName: currentUser.fullName,
-            senderPosition: currentUser.position,
-            subject: complaintSubject,
-            content: complaintContent,
-            status: 'Yeni',
-            read: false,
-            timestamp: new Date().toISOString(),
-            dateStr: new Date().toLocaleString('tr-TR')
-          });
-          setComplaintSubject(''); setComplaintContent('');
-          showMessage('Bildiriminiz yöneticilere başarıyla iletildi.', 'success');
-       } catch(err) { console.error(err); showMessage('Bir hata oluştu.', 'error'); }
-    };
-
-    return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-4xl mx-auto relative">
-         {statusMessage.text && (
-            <div className={`absolute top-4 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full font-bold text-sm shadow-xl z-50 animate-in slide-in-from-top-4 ${statusMessage.type === 'error' ? 'bg-red-600 text-white' : 'bg-green-600 text-white'}`}>
-              {statusMessage.text}
-            </div>
-         )}
-         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
-           <AlertTriangle className="w-6 h-6 text-red-600" /> Şikayet / Sorun Bildirimi
-         </h2>
-         <div  className="space-y-4">
-            <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 text-sm text-blue-800 font-medium mb-4">
-               Sistemdeki sorunları, personel şikayetlerini veya araç/ekipman eksikliklerini doğrudan yönetim kuruluna iletebilirsiniz.
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-black mb-1">Konu Başlığı</label>
-              <input required type="text" value={complaintSubject} onChange={e => setComplaintSubject(e.target.value)} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none transition" placeholder="Örn: 34 SBL 01 Aracında Arıza" />
-            </div>
-            <div>
-              <label className="block text-sm font-bold text-black mb-1">Detaylı Açıklama</label>
-              <textarea required value={complaintContent} onChange={e => setComplaintContent(e.target.value)} className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none h-32 resize-none transition" placeholder="Sorunu tüm detaylarıyla açıklayın..."></textarea>
-            </div>
-            <button type="button" onClick={submitComplaint} className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg shadow-red-600/20 mt-4">
-               <Send className="w-5 h-5" /> Bildirimi Yöneticilere Gönder
-            </button>
-         </div>
-      </div>
-    );
+  // Bir işin GERÇEK kayıt (oluşturulma) zamanı. Eski aktarımlarda taşıma tarihi
+  // 2029/2030/2032 gibi ileri tarihler olabildiği için sıralamada taşıma tarihi
+  // yerine bu değer kullanılır. Gelecek tarihli/eksik değerler güvenilmez sayılır.
+  const musteriKayitZamani = (job) => {
+    const ham = job?.createdAt || job?.createdDate || job?.kayitTarihi || job?.timestamp;
+    if (!ham) return null;
+    const t = (typeof ham === 'object' && ham.seconds) ? new Date(ham.seconds * 1000) : new Date(ham);
+    if (isNaN(t.getTime())) return null;
+    const ustSinir = new Date(); ustSinir.setDate(ustSinir.getDate() + 1);
+    if (t > ustSinir) return null;
+    return t.getTime();
   };
 
-  // --- PUANTAJ VIEW (Aylık Tablo) ---
-  // ============================================================================
-  // YENİ: PERSONEL BAŞVURU TAKİP MERKEZİ (Aday Takip Sistemi / ATS)
-  // Beyaz ve mavi yaka pozisyonlarına iş ilanından başvuran tüm adayların
-  // uçtan uca takibi: başvuru → görüşme → sınav → değerlendirme → kadroya alma.
-  // Sınav sonuçları aday kartına eklenir; onaylanan aday tek tıkla kadroya çekilir.
-  // ============================================================================
-  export const PersonelBasvuruView = ({ positions, currentUser, onHire, addSystemLog, setViewingImage }) => {
-    // YENİ 3 AŞAMALI SÜREÇ: Yeni Başvuru → (Değerlendirme / Yedek Havuz / Reddedildi) → Kadroya Alındı
-    // "Görüşme Planlandı" ve "Sınav Aşaması" aşamaları kaldırıldı.
-    const STAGES = [
-      { id: 'Yeni Başvuru',   color: 'bg-sky-100 text-sky-700 border-sky-200',        dot: 'bg-sky-500' },
-      { id: 'Değerlendirme',  color: 'bg-orange-100 text-orange-700 border-orange-200', dot: 'bg-orange-500' },
-      { id: 'Yedek Havuz',    color: 'bg-indigo-100 text-indigo-700 border-indigo-200', dot: 'bg-indigo-500' },
-      { id: 'Reddedildi',     color: 'bg-red-100 text-red-600 border-red-200',         dot: 'bg-red-500' },
-      { id: 'Kadroya Alındı', color: 'bg-green-100 text-green-700 border-green-200',   dot: 'bg-green-600' },
-    ];
-    const SOURCES = ['İş İlanı Sitesi', 'Sosyal Medya', 'Referans', 'Şubeye Başvuru', 'Diğer'];
-    // Sistemdeki pozisyonlar (App.jsx'ten gelir); boşsa varsayılan liste
-    const POSITION_LIST = (positions && positions.length > 0) ? positions : ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu'];
-
-    const [candidates, setCandidates] = useState([]);
+  export const CustomerListView = ({ jobs, title, handleEditJob, onViewCari }) => {
     const [searchQuery, setSearchQuery] = useState('');
-    const [stageFilter, setStageFilter] = useState('Tümü');
-    const [collarFilter, setCollarFilter] = useState('Tümü');
-    const [positionFilter, setPositionFilter] = useState('Tümü'); // YENİ: pozisyona göre filtre
-    const [showForm, setShowForm] = useState(false);
-    const [editingId, setEditingId] = useState(null);
-    const [expandedId, setExpandedId] = useState(null);
-    const [deleteId, setDeleteId] = useState(null);
-    const [hireCandidate, setHireCandidate] = useState(null);
-    const [belgeUploading, setBelgeUploading] = useState(false); // form içinde belge yükleniyor mu
-    const [belgeLabel, setBelgeLabel] = useState('');            // yeni belge adı
-    const [detayBelgeUploading, setDetayBelgeUploading] = useState(null); // detayda belge yükleyen aday id
+    // YENİ: Kategori sekmesi — "Özel Müşteriler" ve "Kara Liste" artık sol menüde değil,
+    // bu sayfanın en üstündeki butonlardan seçiliyor.
+    const [kategori, setKategori] = useState(title === 'Özel Müşteriler' ? 'ozel' : 'tum');
+    // YENİ: Sayfalama — liste 50'şerli sayfalara bölünür
+    const SAYFA_BOYUTU = 50;
+    const [sayfa, setSayfa] = useState(1);
 
-    const emptyForm = {
-      fullName: '', phone: '', collarType: 'Mavi Yaka', position: POSITION_LIST[0] || 'Şoför',
-      source: 'İş İlanı Sitesi', expectedSalary: '', address: '', notes: '', stage: 'Yeni Başvuru', belgeler: []
-    };
-    const [form, setForm] = useState(emptyForm);
-
-    // Adaylar Firestore'dan canlı dinlenir
+    // YENİ: Kara liste bilgisi cari profillerinde tutulur; canlı dinlenir
+    const [profilMap, setProfilMap] = useState({});
     useEffect(() => {
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'candidates'), snap => {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-        setCandidates(list);
-      });
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'customerProfiles'), snap => {
+        const m = {};
+        snap.docs.forEach(d => { m[d.id] = d.data(); });
+        setProfilMap(m);
+      }, console.error);
       return () => unsub();
     }, []);
+    // Bir işin müşterisi kara listede mi? (cari anahtarı üzerinden bakılır)
+    const isKaraListe = (job) => !!profilMap[normalizeCariPhone(job.customerPhone)]?.blacklisted;
 
-    // Dosyayı sunucuya yükleyip URL döndürür
-    const uploadFile = async (file) => {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
-      const text = await res.text();
-      try { const json = JSON.parse(text); return json.url || json.fileName || json.file || text; } catch (err) { return text.trim(); }
-    };
+    // Seçili kategoriye göre kaynak iş listesi
+    const relevantJobs =
+      kategori === 'ozel' ? jobs.filter(j => j.isSpecial) :
+      kategori === 'kara' ? jobs.filter(j => isKaraListe(j)) :
+      jobs;
 
-    // YENİ: Form içinde belge ekle (aday kaydından önce). Artık BİRDEN FAZLA dosya/fotoğraf aynı anda
-    // seçilebilir (Şimdi Çek / Galeriden Yükle / Dosyadan). Her dosya sırayla yüklenip form.belgeler
-    // dizisine ayrı bir kayıt olarak eklenir. "Belge adı" artık opsiyoneldir: yazılmazsa dosyanın kendi
-    // adı kullanılır; yazılıp birden fazla dosya seçilirse sonuna sıra numarası eklenir (CV (1), CV (2)...).
-    const handleFormBelgeUpload = async (e) => {
-      const files = Array.from(e.target.files || []);
-      if (files.length === 0) return;
-      setBelgeUploading(true);
-      try {
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const url = await uploadFile(file);
-          const label = belgeLabel.trim()
-            ? (files.length > 1 ? `${belgeLabel.trim()} (${i + 1})` : belgeLabel.trim())
-            : (file.name || `Belge ${i + 1}`);
-          setForm(prev => ({ ...prev, belgeler: [...(prev.belgeler || []), { id: Date.now().toString() + '_' + i, label, url }] }));
-        }
-        setBelgeLabel('');
-      } catch (err) { alert('Belge yüklenemedi.'); }
-      setBelgeUploading(false);
-    };
-    const handleFormBelgeRemove = (id) => setForm(prev => ({ ...prev, belgeler: (prev.belgeler || []).filter(b => b.id !== id) }));
+    // Müşterileri telefon numaralarına göre gruplayıp tekilleştiriyoruz
+    const customersMap = new Map();
+    relevantJobs.forEach(job => {
+      if (!job.customerPhone) return;
+      
+      // Telefon numarasını standartlaştırma (Boşlukları temizle vb. gerekirse)
+      const phoneKey = job.customerPhone.replace(/\s+/g, '');
+      // YENİ: Cari Profili sayfasına gidebilmek için normalize edilmiş telefon anahtarı
+      const cariKey = normalizeCariPhone(job.customerPhone);
 
-    // Aday kaydet (yeni veya düzenleme)
-    const handleSaveCandidate = async () => {
-      if (!form.fullName.trim() || !form.phone.trim()) return;
-      if (editingId) {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'candidates', editingId), { ...form });
-        addSystemLog?.('Aday Güncellendi', `${form.fullName} adlı adayın bilgileri güncellendi.`);
+      if (!customersMap.has(phoneKey)) {
+        customersMap.set(phoneKey, {
+            name: job.customerName,
+            phone: job.customerPhone,
+            cariKey,
+            type: job.customerType || 'Bireysel',
+            isSpecial: job.isSpecial,
+            jobCount: 1,
+            totalRevenue: Number(job.price) || 0,
+            lastJobDate: job.date,
+            latestJob: job,
+            // YENİ: sıralama için müşterinin EN SON KAYDEDİLEN işinin kayıt zamanı
+            sonKayitZamani: musteriKayitZamani(job)
+        });
       } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'candidates'), {
-          ...form, exams: [], history: [{ date: new Date().toISOString(), text: 'Başvuru alındı', by: currentUser?.fullName || 'Sistem' }],
-          createdBy: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
-        });
-        addSystemLog?.('Yeni Aday Başvurusu', `${form.fullName} adlı aday sisteme eklendi (${form.position}).`);
-      }
-      setForm(emptyForm); setEditingId(null); setShowForm(false); setBelgeLabel('');
-    };
+        const c = customersMap.get(phoneKey);
+        
+        // Eğer aynı numaraya farklı bir isim kaydedilmişse (örn: Ahmet Yılmaz, Ahmet Y.)
+        // İsimleri birleştirebilir veya en son kaydedileni kullanabilirsiniz. 
+        // Şimdilik ilk kaydedilen ismi tutuyoruz, dilersek güncelleyebiliriz.
+        // c.name = job.customerName; 
 
-    // Aşama değiştir (süreç geçmişine işlenir)
-    const handleStageChange = async (cand, newStage) => {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'candidates', cand.id), {
-        stage: newStage,
-        history: [...(cand.history || []), { date: new Date().toISOString(), text: `Aşama: ${newStage}`, by: currentUser?.fullName || 'Sistem' }]
-      });
-    };
-
-    // Adayı YEDEK HAVUZ'a al
-    const handleMoveToPool = async (cand) => {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'candidates', cand.id), {
-        stage: 'Yedek Havuz', pooledAt: new Date().toISOString(),
-        history: [...(cand.history || []), { date: new Date().toISOString(), text: 'Yedek havuza alındı (ileride değerlendirilmek üzere)', by: currentUser?.fullName || 'Sistem' }]
-      });
-    };
-
-    // Havuzdaki adayı tekrar sürece dahil et → artık "Değerlendirme" aşamasına döner
-    const handleRecallFromPool = async (cand) => {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'candidates', cand.id), {
-        stage: 'Değerlendirme', recalledAt: new Date().toISOString(),
-        history: [...(cand.history || []), { date: new Date().toISOString(), text: 'Havuzdan tekrar değerlendirmeye alındı 📞', by: currentUser?.fullName || 'Sistem' }]
-      });
-    };
-
-    // YENİ: Detay panelinde belge ekle (kayıtlı adaya). Artık BİRDEN FAZLA dosya/fotoğraf
-    // aynı anda seçilebilir (Şimdi Çek / Galeriden / Dosyadan). Belge adı olarak dosyanın
-    // kendi adı kullanılır; sonradan kalem simgesiyle yeniden adlandırılabilir.
-    const handleDetayBelgeUpload = async (cand, e) => {
-      const files = Array.from(e.target.files || []);
-      if (files.length === 0) return;
-      setDetayBelgeUploading(cand.id);
-      try {
-        const yeniler = [];
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const url = await uploadFile(file);
-          yeniler.push({ id: Date.now().toString() + '_' + i, label: (file.name || `Belge ${i + 1}`), url });
+        c.jobCount += 1;
+        c.totalRevenue += (Number(job.price) || 0);
+        if (new Date(job.date) > new Date(c.lastJobDate)) {
+            c.lastJobDate = job.date;
+            c.latestJob = job;
         }
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'candidates', cand.id), {
-          belgeler: [...(cand.belgeler || []), ...yeniler],
-          history: [...(cand.history || []), { date: new Date().toISOString(), text: `${yeniler.length} belge eklendi`, by: currentUser?.fullName || 'Sistem' }]
-        });
-      } catch (err) { alert('Belge yüklenemedi.'); }
-      setDetayBelgeUploading(null);
-    };
-    // Detayda belge sil / adını değiştir
-    const handleDetayBelgeRemove = async (cand, id) => {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'candidates', cand.id), { belgeler: (cand.belgeler || []).filter(b => b.id !== id) });
-    };
-    const handleDetayBelgeRename = async (cand, id) => {
-      const cur = (cand.belgeler || []).find(b => b.id === id);
-      const yeni = window.prompt('Belge adını düzenleyin:', cur?.label || '');
-      if (yeni === null || !yeni.trim()) return;
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'candidates', cand.id), { belgeler: (cand.belgeler || []).map(b => b.id === id ? { ...b, label: yeni.trim() } : b) });
-    };
-
-    // Filtrelenmiş liste (isim/telefon/pozisyon arama + aşama + yaka + pozisyon)
-    const filtered = candidates.filter(cnd => {
-      const q = searchQuery.toLowerCase();
-      const matchQ = !q || (cnd.fullName || '').toLowerCase().includes(q) || (cnd.phone || '').includes(q) || (cnd.position || '').toLowerCase().includes(q);
-      const matchStage = stageFilter === 'Tümü' || cnd.stage === stageFilter;
-      const matchCollar = collarFilter === 'Tümü' || cnd.collarType === collarFilter;
-      const matchPos = positionFilter === 'Tümü' || cnd.position === positionFilter;
-      return matchQ && matchStage && matchCollar && matchPos;
+        // Sıralama ölçütü ayrı tutulur: en YENİ KAYIT zamanı
+        const kz = musteriKayitZamani(job);
+        if (kz !== null && (c.sonKayitZamani === null || kz > c.sonKayitZamani)) {
+            c.sonKayitZamani = kz;
+        }
+        if (job.isSpecial) c.isSpecial = true;
+      }
     });
 
-    const stageOf = (id) => STAGES.find(s => s.id === id) || STAGES[0];
-    // Adaylarda geçen benzersiz pozisyonlar (filtre için)
-    const usedPositions = Array.from(new Set(candidates.map(c => c.position).filter(Boolean))).sort((a, b) => a.localeCompare(b, 'tr'));
+    const customers = Array.from(customersMap.values())
+      .filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.phone.includes(searchQuery))
+      // SIRALAMA: en yeni KAYITTAN en eskiye. Kayıt zamanı bilinmeyenler en sonda.
+      .sort((a, b) => {
+        const ka = a.sonKayitZamani, kb = b.sonKayitZamani;
+        if (ka === null && kb === null) return new Date(b.lastJobDate) - new Date(a.lastJobDate);
+        if (ka === null) return 1;
+        if (kb === null) return -1;
+        return kb - ka;
+      });
+
+    // Arama veya kategori değişince ilk sayfaya dön; yalnızca aktif sayfa render edilir
+    useEffect(() => { setSayfa(1); }, [searchQuery, kategori]);
+    const pagedCustomers = customers.slice((sayfa - 1) * SAYFA_BOYUTU, sayfa * SAYFA_BOYUTU);
+
+    // Üst kategori butonları için canlı sayaçlar (tekil müşteri sayısı)
+    const tekilSayisi = (list) => new Set(list.filter(j => j.customerPhone).map(j => j.customerPhone.replace(/\s+/g, ''))).size;
+    const SEKMELER = [
+      { id: 'tum',  label: 'Tüm Müşteriler',  icon: Users, renk: 'bg-red-600',    sayac: tekilSayisi(jobs) },
+      { id: 'ozel', label: 'Özel Müşteriler', icon: Star,  renk: 'bg-yellow-500', sayac: tekilSayisi(jobs.filter(j => j.isSpecial)) },
+      { id: 'kara', label: 'Kara Liste',      icon: Ban,   renk: 'bg-black',      sayac: tekilSayisi(jobs.filter(j => isKaraListe(j))) },
+    ];
+    const aktifBaslik = SEKMELER.find(s => s.id === kategori)?.label || title;
 
     return (
-      <div className="max-w-5xl mx-auto animate-in fade-in space-y-5">
-        {/* BAŞLIK + ÖZET */}
-        <div className="bg-gradient-to-r from-green-600 via-emerald-700 to-emerald-900 rounded-2xl p-5 md:p-6 text-white shadow-lg">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><UserPlus className="w-6 h-6" /> Personel Başvuru Merkezi</h2>
-              <p className="text-green-100 text-xs md:text-sm mt-1">Tüm beyaz/mavi yaka aday başvurularını buradan takip edin. Süreç: Başvuru → Değerlendirme → Kadro.</p>
-            </div>
-            <button onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(true); setBelgeLabel(''); }}
-              className="shrink-0 px-4 py-2.5 bg-white text-emerald-800 font-black rounded-xl shadow hover:scale-[1.03] transition flex items-center gap-2 text-sm">
-              <PlusCircle className="w-4 h-4" /> Yeni Aday Ekle
-            </button>
-          </div>
-          {/* Aşama sayaçları (5 aşama) */}
-          <div className="grid grid-cols-3 md:grid-cols-5 gap-2 mt-4">
-            {STAGES.map(s => {
-              const cnt = candidates.filter(cd => cd.stage === s.id).length;
+      <div className="space-y-4 animate-in fade-in">
+        {/* YENİ: ÜST KATEGORİ BUTONLARI — Tüm / Özel / Kara Liste */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {SEKMELER.map(s => {
+              const Icon = s.icon;
+              const aktif = kategori === s.id;
               return (
-                <button key={s.id} onClick={() => setStageFilter(stageFilter === s.id ? 'Tümü' : s.id)}
-                  className={`rounded-xl px-2 py-2 text-center transition border ${stageFilter === s.id ? 'bg-white text-emerald-900 border-white shadow' : 'bg-white/10 border-white/20 hover:bg-white/20'}`}>
-                  <div className="text-lg font-black leading-none">{cnt}</div>
-                  <div className="text-[9px] font-bold mt-1 leading-tight opacity-90">{s.id}</div>
+                <button key={s.id} onClick={() => setKategori(s.id)}
+                  className={`flex items-center justify-center gap-2 py-3 px-3 rounded-xl text-sm font-black border transition hover:scale-[1.02] ${aktif ? `${s.renk} text-white border-transparent shadow-md` : 'bg-white text-neutral-500 border-neutral-200 hover:border-red-400 hover:text-red-600'}`}>
+                  <Icon className="w-4 h-4 shrink-0" />
+                  <span className="whitespace-nowrap">{s.label}</span>
+                  <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${aktif ? 'bg-white/25 text-white' : 'bg-neutral-100 text-neutral-500'}`}>{s.sayac}</span>
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* FİLTRELER */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 space-y-2">
-          <div className="flex flex-col md:flex-row gap-2 items-stretch md:items-center">
-            <div className="relative flex-1">
-              <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="İsim, telefon veya pozisyon ara..."
-                className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none text-sm" />
-            </div>
-            <div className="flex gap-2">
-              {['Tümü', 'Mavi Yaka', 'Beyaz Yaka'].map(cType => (
-                <button key={cType} onClick={() => setCollarFilter(cType)}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition ${collarFilter === cType ? 'bg-emerald-700 text-white border-emerald-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-emerald-400'}`}>
-                  {cType}
-                </button>
-              ))}
-            </div>
-          </div>
-          {/* YENİ: Pozisyona göre filtre */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] font-black text-neutral-400 uppercase">Pozisyon:</span>
-            <button onClick={() => setPositionFilter('Tümü')} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${positionFilter === 'Tümü' ? 'bg-emerald-700 text-white border-emerald-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-emerald-400'}`}>Tümü</button>
-            {usedPositions.map(p => (
-              <button key={p} onClick={() => setPositionFilter(positionFilter === p ? 'Tümü' : p)} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${positionFilter === p ? 'bg-emerald-700 text-white border-emerald-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-emerald-400'}`}>{p}</button>
-            ))}
-            {(stageFilter !== 'Tümü' || positionFilter !== 'Tümü') && (
-              <button onClick={() => { setStageFilter('Tümü'); setPositionFilter('Tümü'); }} className="px-2.5 py-1 rounded-lg text-[11px] font-bold bg-neutral-100 text-neutral-600 border border-neutral-200 flex items-center gap-1">Filtreyi Temizle <X className="w-3 h-3" /></button>
-            )}
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 border-b border-neutral-200 pb-4 gap-4">
+          <h2 className="text-xl font-bold text-black flex items-center gap-2 shrink-0">
+            <Users className="w-6 h-6 text-red-600" /> {aktifBaslik}
+          </h2>
+          <div className="relative w-full md:w-64">
+            <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+            <input
+              type="text"
+              placeholder="Müşteri Adı veya Telefon..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-red-600 transition"
+            />
           </div>
         </div>
-
-        {/* ADAY LİSTESİ */}
-        <div className="space-y-3">
-          {filtered.length === 0 && (
-            <div className="bg-white rounded-2xl border border-dashed border-neutral-300 p-10 text-center text-neutral-400 font-bold text-sm">
-              {candidates.length === 0 ? 'Henüz aday başvurusu yok. "Yeni Aday Ekle" ile ilk adayı ekleyin.' : 'Filtreye uyan aday bulunamadı.'}
-            </div>
-          )}
-          {filtered.map(cand => {
-            const st = stageOf(cand.stage);
-            const isOpen = expandedId === cand.id;
-            const isFinal = cand.stage === 'Kadroya Alındı' || cand.stage === 'Reddedildi';
-            return (
-              <div key={cand.id} className={`bg-white rounded-2xl shadow-sm border transition overflow-hidden ${cand.stage === 'Kadroya Alındı' ? 'border-green-300' : cand.stage === 'Reddedildi' ? 'border-red-200 opacity-75' : cand.stage === 'Yedek Havuz' ? 'border-indigo-300' : 'border-neutral-200'}`}>
-                {/* KART ÜSTÜ */}
-                <div className="p-4 flex flex-col md:flex-row md:items-center gap-3 cursor-pointer" onClick={() => setExpandedId(isOpen ? null : cand.id)}>
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    <div className={`w-11 h-11 shrink-0 rounded-full flex items-center justify-center font-black text-white text-sm ${cand.collarType === 'Beyaz Yaka' ? 'bg-sky-600' : 'bg-emerald-700'}`}>
-                      {(cand.fullName || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="font-black text-black truncate flex items-center gap-2">
-                        {cand.fullName}
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${cand.collarType === 'Beyaz Yaka' ? 'bg-sky-50 text-sky-700 border-sky-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>{cand.collarType}</span>
-                      </div>
-                      <div className="text-xs text-neutral-500 font-medium truncate flex items-center gap-2 mt-0.5">
-                        <span className="flex items-center gap-1"><Briefcase className="w-3 h-3" /> {cand.position}</span>
-                        <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {cand.phone}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {(cand.belgeler || []).length > 0 && (
-                      <span className="text-[10px] font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-lg flex items-center gap-1">
-                        <FolderOpen className="w-3 h-3" /> {(cand.belgeler || []).length} Belge
-                      </span>
-                    )}
-                    <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg border flex items-center gap-1.5 ${st.color}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`}></span> {cand.stage}
-                    </span>
-                    {isOpen ? <ChevronUp className="w-4 h-4 text-neutral-400" /> : <ChevronDown className="w-4 h-4 text-neutral-400" />}
-                  </div>
-                </div>
-
-                {/* DETAY PANELİ */}
-                {isOpen && (
-                  <div className="border-t border-neutral-100 bg-neutral-50/60 p-4 space-y-4 animate-in slide-in-from-top-1">
-                    {/* Bilgi satırı */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><span className="text-neutral-400 font-bold block text-[9px] uppercase">Başvuru Kaynağı</span><span className="font-bold text-neutral-700">{cand.source || '-'}</span></div>
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><span className="text-neutral-400 font-bold block text-[9px] uppercase">Maaş Beklentisi</span><span className="font-bold text-neutral-700">{cand.expectedSalary ? `${parseInt(cand.expectedSalary).toLocaleString('tr-TR')} TL` : '-'}</span></div>
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5 col-span-2"><span className="text-neutral-400 font-bold block text-[9px] uppercase">Adres</span><span className="font-bold text-neutral-700">{cand.address || '-'}</span></div>
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5 col-span-2 md:col-span-4"><span className="text-neutral-400 font-bold block text-[9px] uppercase">Başvuru Tarihi</span><span className="font-bold text-neutral-700">{cand.createdAt ? cand.createdAt.split('T')[0].split('-').reverse().join('.') : '-'}</span></div>
-                    </div>
-                    {cand.notes && <div className="bg-yellow-50 border border-yellow-200 rounded-xl p-3 text-xs text-yellow-800 font-medium"><b>Not:</b> {cand.notes}</div>}
-
-                    {/* YENİ: ADAY BELGELERİ — görüntüle / adını değiştir / kaldır + yeni belge ekle */}
-                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="text-xs font-black text-neutral-700 flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-blue-600" /> Aday Belgeleri</h4>
-                        {!isFinal && (
-                          /* YENİ: Şimdi Çek / Galeriden Yükle / Dosyadan seçenekleri + birden fazla belge/fotoğraf seçimi */
-                          <MediaCaptureMenu
-                            compact
-                            multiple
-                            disabled={detayBelgeUploading === cand.id}
-                            buttonLabel={detayBelgeUploading === cand.id ? 'Yükleniyor...' : 'Belge Ekle'}
-                            buttonClassName="text-[11px] font-bold text-blue-600 hover:text-blue-800 cursor-pointer flex items-center gap-1"
-                            onChange={(e) => handleDetayBelgeUpload(cand, e)}
-                          />
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-black text-white border-b border-neutral-200">
+              <tr>
+                <th className="p-4 font-bold rounded-tl-xl">Müşteri Bilgisi</th>
+                <th className="p-4 font-bold">İletişim</th>
+                <th className="p-4 font-bold text-center">Toplam İşlem</th>
+                <th className="p-4 font-bold text-right">Toplam Hacim</th>
+                <th className="p-4 font-bold">Son İşlem Tarihi</th>
+                <th className="p-4 font-bold">Cari Profili</th>
+                <th className="p-4 font-bold rounded-tr-xl">İşlemler</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {pagedCustomers.map((c, index) => {
+                // YENİ: Bu müşteri kara listede mi? Sebebi de tooltip olarak gösterilir.
+                const karaProfil = profilMap[c.cariKey];
+                const kara = !!karaProfil?.blacklisted;
+                return (
+                <tr key={index} className={`transition ${kara ? 'bg-red-50/50 hover:bg-red-50' : 'hover:bg-neutral-50'}`}>
+                  <td className="p-4 font-bold text-black">
+                    <div className="flex items-center gap-2">
+                      {kara
+                        ? <Ban className="w-4 h-4 text-red-600 shrink-0" />
+                        : (c.isSpecial && <Star className="w-4 h-4 text-yellow-500 fill-yellow-500 drop-shadow-sm shrink-0" />)}
+                      <div>
+                        {/* Kara listedeki müşterinin adı üstü çizili gösterilir */}
+                        <span className={kara ? 'line-through decoration-red-500 decoration-2 text-neutral-500' : ''}>{c.name}</span>
+                        {kara && <span className="ml-2 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full align-middle tracking-wider">KARA LİSTE</span>}
+                        <span className="block text-[10px] text-neutral-500 font-medium">{c.type} Müşteri</span>
+                        {kara && karaProfil?.blacklistReason && (
+                          <span className="block text-[10px] text-red-600 font-bold mt-0.5 max-w-[240px] truncate" title={karaProfil.blacklistReason}>
+                            Sebep: {karaProfil.blacklistReason}
+                          </span>
                         )}
                       </div>
-                      {(cand.belgeler || []).length === 0 ? (
-                        <p className="text-[11px] text-neutral-400 font-medium">Henüz belge eklenmedi.</p>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {(cand.belgeler || []).map(b => (
-                            <div key={b.id} className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-2">
-                              <FileText className="w-4 h-4 text-blue-500 shrink-0" />
-                              <span className="font-bold text-neutral-700 text-xs flex-1 truncate" title={b.label}>{b.label}</span>
-                              <button onClick={() => setViewingImage?.({ title: b.label, name: b.url })} className="text-[10px] font-bold text-neutral-600 bg-white border border-neutral-200 rounded px-1.5 py-0.5 hover:bg-neutral-100 flex items-center gap-0.5"><Eye className="w-3 h-3" /> Gör</button>
-                              {!isFinal && <button onClick={() => handleDetayBelgeRename(cand, b.id)} className="text-[10px] font-bold text-blue-600 bg-blue-50 border border-blue-100 rounded px-1.5 py-0.5 hover:bg-blue-100 flex items-center gap-0.5"><Edit className="w-3 h-3" /></button>}
-                              {!isFinal && <button onClick={() => handleDetayBelgeRemove(cand, b.id)} className="text-[10px] font-bold text-red-500 bg-red-50 border border-red-100 rounded px-1.5 py-0.5 hover:bg-red-100 flex items-center gap-0.5"><X className="w-3 h-3" /></button>}
-                            </div>
-                          ))}
-                        </div>
+                    </div>
+                  </td>
+                  <td className="p-4 text-neutral-600 font-medium">
+                    <a href={"tel:" + c.phone} className="flex items-center gap-1.5 hover:text-red-600 transition">
+                      <Phone className="w-3.5 h-3.5" /> {c.phone}
+                    </a>
+                  </td>
+                  <td className="p-4 text-center font-bold text-neutral-700">
+                    <span className="bg-neutral-100 px-2.5 py-1 rounded-lg border border-neutral-200">{c.jobCount} İşlem</span>
+                  </td>
+                  <td className="p-4 text-right font-black text-green-600">
+                    ₺{c.totalRevenue.toLocaleString('tr-TR')}
+                  </td>
+                  <td className="p-4 text-neutral-600">
+                    <span className="flex items-center gap-1.5"><CalendarDays className="w-3.5 h-3.5 text-neutral-400" /> {c.lastJobDate}</span>
+                  </td>
+                  <td className="p-4">
+                    <button onClick={() => onViewCari && onViewCari(c.cariKey)} className="px-3 py-1.5 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5 w-max">
+                      <FolderOpen className="w-3.5 h-3.5" /> Cari Profiline Git
+                    </button>
+                  </td>
+                  <td className="p-4">
+                    <button onClick={() => handleEditJob(c.latestJob)} className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5 w-max">
+                      <Edit className="w-3.5 h-3.5" /> Son İşe Git
+                    </button>
+                  </td>
+                </tr>
+                );
+              })}
+              {customers.length === 0 && (
+                <tr>
+                  <td colSpan="7" className="p-6 text-center text-neutral-500">
+                    {kategori === 'kara'
+                      ? 'Kara listeye alınmış müşteri bulunmuyor.'
+                      : kategori === 'ozel'
+                        ? 'Özel müşteri kaydı bulunamadı.'
+                        : 'Müşteri kaydı bulunamadı.'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* YENİ: Sayfalama çubuğu — 50'şerli sayfa geçişi */}
+        <SayfalamaBar toplam={customers.length} sayfa={sayfa} sayfaBoyutu={SAYFA_BOYUTU} onSayfaChange={setSayfa} birim="müşteri" />
+      </div>
+      </div>
+    );
+  };
+
+  // --- YENİ: CARİ PROFİLİ SAYFASI ---
+  // Bu bileşen TAMAMEN YENİ ve EKLENTİ niteliğindedir. Ayrı bir "customers"
+  // koleksiyonu oluşturulmadı; profil, aynı isim+telefon numarasına sahip
+  // TÜM iş kayıtlarından (jobs) CANLI olarak türetiliyor. Bu sayede her yeni
+  // iş kaydı otomatik olarak ilgili müşterinin cari profiline işliyor;
+  // ayrıca büyük/küçük harf ve telefon formatı farkı gözetmeksizin aynı
+  // müşteri tek bir cari profilde birleşmiş oluyor.
+  export const CustomerProfileView = ({ jobs, cariKey, onBack, handleEditJob, db, appId, addSystemLog, personnelList = [], vehicles = [], currentUser, setViewingImage, setMarkDamageJobId }) => {
+    const customerJobs = jobs
+      .filter(j => normalizeCariPhone(j.customerPhone) === cariKey)
+      .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    // ======================================================================
+    // YENİ (kullanıcı talebi): ÇOK GÜNLÜ İŞ PROFİLDE TEK KAYIT
+    // ----------------------------------------------------------------------
+    // 2 günlük bir nakliye takvimde 2 kart (1. Gün / 2. Gün) olarak durur ama
+    // müşteri açısından TEK iştir. Bu yüzden profildeki "Yaptığı İşler" ve
+    // kapora penceresi devam günlerini (2. gün, 3. gün ...) listelemez; ana
+    // işi "2 günlük" rozetiyle gösterir. Cari/ekstre hesapları zaten price
+    // alanından beslendiği ve devam gününde price ₺0 olduğu için değişmez.
+    // ======================================================================
+    const customerAnaIsler = anaIsleriFiltrele(customerJobs);
+
+    // ======================================================================
+    // YENİ: SAHA DENETİMLERİ — Bu müşterinin işlerine şeflerin yaptığı denetimler.
+    // İş kartında "Saha Denetim Raporunu Gör" butonuyla tüm detay (fotoğraf/video,
+    // personel puanları, şef notları, kayıt doğruluğu) pencerede açılır.
+    // ======================================================================
+    const [sahaDenetimleri, setSahaDenetimleri] = useState([]);
+    const [acikDenetim, setAcikDenetim] = useState(null); // Rapor penceresi
+    useEffect(() => {
+      if (!db) return;
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), snap => {
+        // DEĞİŞTİ: Yevmiyeci satırları okunur okunmaz ayıklanır — rapor penceresinde
+        // yalnızca mavi yaka personelin puanı ve şef notu listelenir.
+        setSahaDenetimleri(snap.docs.map(d => denetimKaydiniTemizle({ id: d.id, ...d.data() })));
+      }, console.error);
+      return () => unsub();
+    }, [db, appId]);
+    // Bir işin denetim kaydını döndürür (yoksa null)
+    const jobSahaDenetimi = (jobId) => sahaDenetimleri.find(d => String(d.jobId) === String(jobId)) || null;
+    const denetimPuanRenk = (p) => p >= 4.5 ? 'text-green-600' : p >= 3.5 ? 'text-lime-600' : p >= 2.5 ? 'text-orange-500' : 'text-red-600';
+
+    // YENİ: Bu tarihten önceki işleri geriye dönük tamamlayamayacağımız için
+    // cari hesapta otomatik olarak "tamamlandı + tahsil edildi" kabul ediyoruz.
+    const CARI_AUTO_COMPLETE_CUTOFF = '2026-07-05';
+    const isBeforeCariCutoff = (dateStr) => !!dateStr && dateStr < CARI_AUTO_COMPLETE_CUTOFF;
+
+    // YENİ: Manuel cari hareketleri (Borç Ekle / Tahsilat Ekle) ve kişisel bilgi düzenlemesi
+    const [cariTransactions, setCariTransactions] = useState([]);
+    const [profileOverride, setProfileOverride] = useState(null);
+    const [showEditProfileModal, setShowEditProfileModal] = useState(false);
+    const [editProfileForm, setEditProfileForm] = useState({ name: '', phone: '', altPhone: '', customerType: 'Bireysel', idNo: '' });
+    const [showAddDebtModal, setShowAddDebtModal] = useState(false);
+    // ========================================================================
+    // YENİ: KAPORA EKLE
+    // ========================================================================
+    // Müşterinin SON BEKLEYEN (sonlandırılmamış) işine profilden kapora girme.
+    // form: { tutar, defterId, jobId } — defterler modal açılınca okunur.
+    const [showKaporaModal, setShowKaporaModal] = useState(false);
+    const [kaporaForm, setKaporaForm] = useState({ tutar: '', defterId: '', jobId: '' });
+    const [kaporaDefterler, setKaporaDefterler] = useState([]);
+    // YENİ: Kapora penceresinde seçilebilecek bekleyen işler (birden fazlaysa sorulur)
+    const [kaporaIsler, setKaporaIsler] = useState([]);
+    const [kaporaKaydediliyor, setKaporaKaydediliyor] = useState(false);
+    const [showAddPaymentModal, setShowAddPaymentModal] = useState(false);
+    const [manualEntryForm, setManualEntryForm] = useState({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
+    // YENİ: KARA LİSTE — müşteriyi sebebiyle birlikte kara listeye alma / düzenleme / çıkarma
+    const [showBlacklistModal, setShowBlacklistModal] = useState(false);
+    const [blacklistReasonInput, setBlacklistReasonInput] = useState('');
+    const [showBlacklistRemoveConfirm, setShowBlacklistRemoveConfirm] = useState(false);
+
+    useEffect(() => {
+      if (!cariKey || !db) return;
+      const unsub1 = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'customerProfiles', cariKey), snap => {
+        setProfileOverride(snap.exists() ? snap.data() : null);
+      }, console.error);
+      const qTrans = query(collection(db, 'artifacts', appId, 'public', 'data', 'cariTransactions'), where('cariKey', '==', cariKey));
+      const unsub2 = onSnapshot(qTrans, snap => {
+        setCariTransactions(snap.docs.map(d => ({ ...d.data(), id: d.id })));
+      }, console.error);
+      return () => { unsub1(); unsub2(); };
+    }, [cariKey, db, appId]);
+
+    if (!cariKey || customerJobs.length === 0) {
+      return (
+        <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-8 text-center animate-in fade-in">
+          <button onClick={onBack} className="mb-4 text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
+            <ChevronLeft className="w-4 h-4" /> Listeye Geri Dön
+          </button>
+          <AlertTriangle className="w-12 h-12 text-neutral-300 mx-auto mb-3" />
+          <p className="text-neutral-500 font-medium">Bu müşteriye ait cari profili bulunamadı.</p>
+        </div>
+      );
+    }
+
+    const oldestFirst = [...customerJobs].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const firstJob = oldestFirst[0];
+    const latestJob = customerJobs[0];
+
+    // Kişisel bilgiler: eğer manuel düzenleme yapılmışsa (profileOverride) onu, yoksa iş kayıtlarından türeteni kullan
+    const customerName = profileOverride?.name || latestJob.customerName;
+    const customerPhone = profileOverride?.phone || latestJob.customerPhone;
+    const altPhone = profileOverride?.altPhone ?? (customerJobs.find(j => j.altPhone)?.altPhone || '');
+    const customerType = profileOverride?.customerType || latestJob.customerType || 'Bireysel';
+    const idNo = profileOverride?.idNo ?? ((customerJobs.find(j => j.tcNo)?.tcNo) || (customerJobs.find(j => j.taxNo)?.taxNo) || '');
+
+    // YENİ: Kendi oluşturduğumuz (otomatik) 0 TL'lik Asansör kurulum kayıtları cari hesaba dahil edilmez.
+    // Sadece Nakliye, Depo ve ücretli (0 TL olmayan) Asansör işleri cari hesaba işlenir.
+    const isCariExcluded = (j) => j.type === 'Asansör' && (!j.price || parseFloat(j.price) === 0);
+    const cariEligibleJobs = oldestFirst.filter(j => !isCariExcluded(j));
+
+    const isJobFullyPaid = (j) => {
+      const method = j.endJobDetails?.paymentMethod;
+      return j.status === 'completed' && method && !['Ödeme Yapmadı', 'Ödeme Alınmadı'].includes(method);
+    };
+
+    // --- Ödeme / Cari Hesap Özeti (Depoevim tarzı) ---
+    const rawEntries = [];
+    cariEligibleJobs.forEach(j => {
+      const price = parseFloat(j.price) || 0;
+      const deposit = parseFloat(j.deposit) || 0;
+      // YENİ: Cutoff tarihinden önceki işler otomatik olarak tamamlanmış + tahsil edilmiş kabul edilir
+      const forcedComplete = isBeforeCariCutoff(j.date);
+      const fullyPaid = forcedComplete || isJobFullyPaid(j);
+      const paidAmount = fullyPaid ? price : deposit;
+
+      if (price > 0) rawEntries.push({ date: j.date, desc: `${j.type || 'Nakliye'} İşlemi - ${j.customerName}`, debt: price, credit: 0 });
+      if (paidAmount > 0) rawEntries.push({ date: j.date, desc: fullyPaid ? 'Tahsilat (İş Tamamlandı)' : 'Kapora Tahsilatı', debt: 0, credit: paidAmount });
+    });
+    // YENİ: Manuel eklenen borç/tahsilat kayıtlarını da hesap dökümüne dahil et
+    cariTransactions.forEach(t => {
+      rawEntries.push({
+        date: t.date,
+        desc: t.description || (t.type === 'debt' ? 'Manuel Borç Kaydı' : 'Manuel Tahsilat'),
+        debt: t.type === 'debt' ? (parseFloat(t.amount) || 0) : 0,
+        credit: t.type === 'payment' ? (parseFloat(t.amount) || 0) : 0
+      });
+    });
+    rawEntries.sort((a, b) => new Date(a.date) - new Date(b.date));
+    let runningBalance = 0;
+    const ledgerRows = rawEntries.map((e, idx) => {
+      runningBalance += e.debt - e.credit;
+      return { id: idx, ...e, balance: runningBalance };
+    });
+    const totalAmount = rawEntries.reduce((s, e) => s + e.debt, 0);
+    const totalPaid = rawEntries.reduce((s, e) => s + e.credit, 0);
+    const remainingBalance = totalAmount - totalPaid;
+
+    const handleSaveProfileEdit = async (e) => {
+      e.preventDefault();
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customerProfiles', cariKey), {
+        ...editProfileForm,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      if (addSystemLog) addSystemLog('Cari Profil Düzenlendi', `${editProfileForm.name} müşterisinin cari profil bilgileri güncellendi.`);
+      setShowEditProfileModal(false);
+    };
+
+    // YENİ: KARA LİSTE DURUMU — customerProfiles dokümanında saklanır
+    const isBlacklisted = !!profileOverride?.blacklisted;
+    const blacklistReason = profileOverride?.blacklistReason || '';
+    const blacklistedBy = profileOverride?.blacklistedBy || '';
+    const blacklistedAt = profileOverride?.blacklistedAt || '';
+
+    // Müşteriyi kara listeye al veya mevcut sebebi güncelle
+    const handleSaveBlacklist = async (e) => {
+      e.preventDefault();
+      if (!blacklistReasonInput.trim()) return;
+      const yeniKayit = !isBlacklisted; // ilk kez mi ekleniyor
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customerProfiles', cariKey), {
+        blacklisted: true,
+        blacklistReason: blacklistReasonInput.trim(),
+        blacklistedBy: yeniKayit ? (currentUser?.fullName || 'Sistem') : (blacklistedBy || currentUser?.fullName || 'Sistem'),
+        blacklistedAt: yeniKayit ? new Date().toISOString() : (blacklistedAt || new Date().toISOString()),
+        blacklistUpdatedBy: currentUser?.fullName || 'Sistem',
+        blacklistUpdatedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      if (addSystemLog) addSystemLog(yeniKayit ? 'Müşteri Kara Listeye Alındı' : 'Kara Liste Sebebi Güncellendi', `${customerName} (${customerPhone}) — Sebep: ${blacklistReasonInput.trim()}`);
+      setShowBlacklistModal(false);
+    };
+
+    // Müşteriyi kara listeden çıkar (sebep kaydı geçmiş için saklanır)
+    const handleRemoveBlacklist = async () => {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'customerProfiles', cariKey), {
+        blacklisted: false,
+        blacklistRemovedBy: currentUser?.fullName || 'Sistem',
+        blacklistRemovedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      if (addSystemLog) addSystemLog('Müşteri Kara Listeden Çıkarıldı', `${customerName} (${customerPhone}) kara listeden çıkarıldı.`);
+      setShowBlacklistRemoveConfirm(false);
+    };
+
+    const handleAddManualEntry = async (e, type) => {
+      e.preventDefault();
+      if (!manualEntryForm.amount) return;
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'cariTransactions'), {
+        cariKey,
+        type,
+        amount: parseFloat(manualEntryForm.amount) || 0,
+        description: manualEntryForm.description,
+        date: manualEntryForm.date,
+        createdAt: new Date().toISOString()
+      });
+      if (addSystemLog) addSystemLog(type === 'debt' ? 'Cari Borç Eklendi' : 'Cari Tahsilat Eklendi', `${customerName} carisine ${manualEntryForm.amount} TL ${type === 'debt' ? 'borç' : 'tahsilat'} kaydı eklendi.`);
+      setManualEntryForm({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
+      setShowAddDebtModal(false);
+      setShowAddPaymentModal(false);
+    };
+
+    return (
+      <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in pb-8">
+        <button onClick={onBack} className="text-sm font-bold text-neutral-500 hover:text-black transition flex items-center gap-1.5">
+          <ChevronLeft className="w-4 h-4" /> Listeye Geri Dön
+        </button>
+
+        {/* Kişisel Bilgiler */}
+        <div className={`bg-white rounded-2xl shadow-sm border p-6 ${isBlacklisted ? 'border-red-300 ring-1 ring-red-100' : 'border-neutral-200'}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-4 border-b border-neutral-200 pb-4">
+            <h2 className="text-xl font-bold text-black flex items-center gap-2">
+              <Users className="w-6 h-6 text-red-600" /> Cari Hesap Profili
+            </h2>
+            {/* YENİ: SAĞ ÜST BUTON GRUBU — Profili Düzenle + Kara Liste butonları yan yana */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* YENİ: Belirgin, yazılı "Profili Düzenle" butonu (eskiden isim yanındaki küçük kalem ikonuydu) */}
+              <button
+                type="button"
+                onClick={() => { setEditProfileForm({ name: customerName, phone: customerPhone, altPhone: altPhone, customerType: customerType, idNo: idNo }); setShowEditProfileModal(true); }}
+                className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-black rounded-xl transition flex items-center gap-2 border border-blue-200 shadow-sm"
+                title="Cari Profilini Düzenle"
+              >
+                <Edit className="w-4 h-4" /> Profili Düzenle
+              </button>
+              {isBlacklisted ? (
+                <div className="flex items-center gap-2">
+                  <button type="button" onClick={() => { setBlacklistReasonInput(blacklistReason); setShowBlacklistModal(true); }}
+                    className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-black rounded-xl transition flex items-center gap-1.5 border border-red-200">
+                    <Edit className="w-3.5 h-3.5" /> Sebebi Düzenle
+                  </button>
+                  <button type="button" onClick={() => setShowBlacklistRemoveConfirm(true)}
+                    className="px-3 py-2 bg-green-50 hover:bg-green-100 text-green-700 text-xs font-black rounded-xl transition flex items-center gap-1.5 border border-green-200">
+                    <CheckCircle className="w-3.5 h-3.5" /> Kara Listeden Çıkar
+                  </button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => { setBlacklistReasonInput(''); setShowBlacklistModal(true); }}
+                  className="px-4 py-2 bg-black hover:bg-red-700 text-white text-xs font-black rounded-xl transition flex items-center gap-2 shadow-sm">
+                  <Ban className="w-4 h-4" /> Kara Listeye Al
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* YENİ: KARA LİSTE BİLDİRİM BANDI — sebep, ekleyen ve tarih görünür */}
+          {isBlacklisted && (
+            <div className="mb-5 rounded-xl border-2 border-red-300 bg-red-50 p-4 animate-in fade-in">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-xl bg-red-600 flex items-center justify-center shrink-0">
+                  <Ban className="w-5 h-5 text-white" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-black text-red-700 flex items-center gap-2">
+                    BU MÜŞTERİ KARA LİSTEDE
+                    <span className="text-[10px] font-black bg-red-600 text-white px-2 py-0.5 rounded-full">DİKKAT</span>
+                  </p>
+                  <p className="text-sm font-bold text-red-900 mt-1.5 whitespace-pre-wrap">{blacklistReason || 'Sebep belirtilmemiş.'}</p>
+                  <p className="text-[11px] font-bold text-red-500 mt-2">
+                    {blacklistedBy ? `Ekleyen: ${blacklistedBy}` : ''}
+                    {blacklistedAt ? ` • ${new Date(blacklistedAt).toLocaleString('tr-TR')}` : ''}
+                    {profileOverride?.blacklistUpdatedAt && profileOverride.blacklistUpdatedAt !== blacklistedAt
+                      ? ` • Son güncelleme: ${profileOverride.blacklistUpdatedBy || '—'} (${new Date(profileOverride.blacklistUpdatedAt).toLocaleString('tr-TR')})`
+                      : ''}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-4 mb-5">
+            <div className={`w-16 h-16 rounded-full flex items-center justify-center text-2xl font-black shrink-0 ${isBlacklisted ? 'bg-red-100 text-red-600' : 'bg-orange-100 text-orange-600'}`}>
+              {customerName.charAt(0).toUpperCase()}
+            </div>
+            <div className="flex-1">
+              <h3 className="text-2xl font-black text-black flex items-center gap-2 flex-wrap">
+                {/* Kara listedeki müşterinin adı üstü çizili gösterilir */}
+                <span className={isBlacklisted ? 'line-through decoration-red-500 decoration-2 text-neutral-500' : ''}>{customerName}</span>
+                {isBlacklisted && <span className="text-[10px] font-black bg-red-600 text-white px-2 py-1 rounded-full tracking-wider">KARA LİSTE</span>}
+                {latestJob.isSpecial && <Star className="w-5 h-5 text-yellow-500 fill-yellow-500" />}
+              </h3>
+              <p className="text-neutral-500 text-sm font-medium">İlk Kayıt: {firstJob.date}</p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 mb-5">
+            <a href={`tel:${(customerPhone || '').replace(/\D/g, '')}`} className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-black text-sm font-bold rounded-xl transition flex items-center gap-2">
+              <Phone className="w-4 h-4" /> Ara
+            </a>
+            <a
+              href={`https://wa.me/${(() => { let p = (customerPhone || '').replace(/\D/g, ''); if (p.startsWith('0')) p = '90' + p.substring(1); else if (!p.startsWith('90')) p = '90' + p; return p; })()}`}
+              target="_blank" rel="noreferrer"
+              className="px-4 py-2 bg-[#25D366] hover:bg-[#128C7E] text-white text-sm font-bold rounded-xl transition flex items-center gap-2"
+            >
+              <MessageCircle className="w-4 h-4" /> WhatsApp
+            </a>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-neutral-50 p-4 rounded-xl border border-neutral-100">
+            <div>
+              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">Telefon</span>
+              <p className="font-bold text-black text-sm">{customerPhone}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">Yedek Telefon</span>
+              <p className="font-bold text-black text-sm">{altPhone || '-'}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">Müşteri Tipi</span>
+              <p className="font-bold text-black text-sm">{customerType}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-neutral-400 uppercase tracking-wider block mb-1">{customerType === 'Kurumsal' ? 'Vergi No' : 'TC Kimlik No'}</span>
+              <p className="font-bold text-black text-sm">{idNo || '-'}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Ödeme Bilgileri (Depoevim tarzı Cari Hesap Dökümü) */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-4">
+            <h3 className="font-bold text-lg text-black flex items-center gap-2">
+              <Wallet className="w-6 h-6 text-green-600" /> Cari Hesap / Ödeme Bilgileri
+            </h3>
+            {/* YENİ: Manuel Borç Ekle / Tahsilat Ekle butonları */}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => { setManualEntryForm({ amount: '', description: '', date: new Date().toISOString().split('T')[0] }); setShowAddDebtModal(true); }} className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                <PlusCircle className="w-3.5 h-3.5" /> Borç Ekle
+              </button>
+              <button type="button" onClick={() => { setManualEntryForm({ amount: '', description: '', date: new Date().toISOString().split('T')[0] }); setShowAddPaymentModal(true); }} className="px-3 py-2 bg-green-50 hover:bg-green-100 text-green-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                <PlusCircle className="w-3.5 h-3.5" /> Tahsilat Ekle
+              </button>
+              {/* ==========================================================
+                  KAPORA EKLE (kullanıcı talebi)
+                  DEĞİŞTİ: Eskiden müşterinin SON bekleyen işi sessizce
+                  seçiliyordu; açıkta iki iş varsa kapora yanlış işe
+                  yazılabiliyordu. Artık bekleyen işlerin TAMAMI pencereye
+                  taşınır: tek iş varsa otomatik seçilir (eski davranış),
+                  birden fazlaysa kullanıcıya hangi işe girileceği sorulur.
+                  ========================================================== */}
+              <button type="button" onClick={async () => {
+                // Bekleyen işler: sonlandırılmamış + iptal edilmemiş, tarihi en yeni önce
+                // YENİ: Çok günlü işin DEVAM günleri (₺0 tutarlı 2. gün vb.) listelenmez;
+                // kapora her zaman ANA işe (1. gün) yazılır ve onun bakiyesinden düşer.
+                const bekleyenler = anaIsleriFiltrele(customerJobs)
+                  .filter(j => j.status !== 'completed' && j.status !== 'cancelled' && !j.endJobDetails)
+                  .sort((a, b) => new Date(b.date) - new Date(a.date));
+                if (bekleyenler.length === 0) { alert('Bu müşterinin bekleyen (sonlandırılmamış) işi yok. Kapora, bekleyen bir işe bağlanır.'); return; }
+                // Defterleri oku ve Banka hesabını önseç (NAKLİYE öncelikli)
+                let defterListesi = [];
+                try {
+                  const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'defterler'));
+                  defterListesi = snap.docs.map(d => ({ ...d.data(), id: d.id }))
+                    .filter(d => d.tur !== 'Kredi' && d.tur !== 'Ödemeler') // plan defterlerine para girişi yazılmaz
+                    .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
+                } catch (e) { console.error('Defterler okunamadı:', e); }
+                setKaporaDefterler(defterListesi);
+                const bankaDefteri = odemeIcinDefterBul(defterListesi, 'Banka');
+                // Seçilebilecek işler pencereye taşınır
+                setKaporaIsler(bekleyenler);
+                // TEK iş varsa otomatik seç; BİRDEN FAZLAYSA seçim kullanıcıya bırakılır
+                const tekIs = bekleyenler.length === 1 ? bekleyenler[0] : null;
+                // %20 öneri: yalnızca iş belliyse hesaplanır (tam sayıya yuvarlanır)
+                const oneri = tekIs ? Math.round((parseFloat(tekIs.price) || 0) * 0.20) : 0;
+                setKaporaForm({ tutar: oneri ? String(oneri) : '', defterId: bankaDefteri?.id || defterListesi[0]?.id || '', jobId: tekIs?.id || '' });
+                setShowKaporaModal(true);
+              }} className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
+                <Wallet className="w-3.5 h-3.5" /> Kapora Ekle
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div className="bg-neutral-50 p-4 rounded-xl border border-neutral-200">
+              <span className="text-xs font-bold text-neutral-500 block mb-1">Toplam Anlaşma Tutarı</span>
+              <span className="text-xl font-black text-black">₺{totalAmount.toLocaleString('tr-TR')}</span>
+            </div>
+            <div className="bg-green-50 p-4 rounded-xl border border-green-200">
+              <span className="text-xs font-bold text-green-700 block mb-1">Toplam Tahsilat</span>
+              <span className="text-xl font-black text-green-700">₺{totalPaid.toLocaleString('tr-TR')}</span>
+            </div>
+            <div className={`p-4 rounded-xl border ${remainingBalance > 0 ? 'bg-red-50 border-red-200' : 'bg-neutral-50 border-neutral-200'}`}>
+              <span className={`text-xs font-bold block mb-1 ${remainingBalance > 0 ? 'text-red-700' : 'text-neutral-500'}`}>Kalan Bakiye</span>
+              <span className={`text-xl font-black ${remainingBalance > 0 ? 'text-red-700' : 'text-black'}`}>₺{remainingBalance.toLocaleString('tr-TR')}</span>
+            </div>
+          </div>
+
+          <h4 className="font-bold text-sm text-neutral-600 mb-2 flex items-center gap-1.5"><History className="w-4 h-4" /> Detaylı Hesap Dökümü (Ekstre)</h4>
+          <div className="overflow-x-auto border border-neutral-200 rounded-xl">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-neutral-50 border-b border-neutral-200 text-neutral-600">
+                <tr>
+                  <th className="p-3 font-bold">Tarih</th>
+                  <th className="p-3 font-bold">İşlem Açıklaması</th>
+                  <th className="p-3 font-bold text-right">Borç</th>
+                  <th className="p-3 font-bold text-right">Tahsilat</th>
+                  <th className="p-3 font-bold text-right">Bakiye</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {ledgerRows.map(row => (
+                  <tr key={row.id} className="hover:bg-neutral-50 transition">
+                    <td className="p-3 font-medium text-black whitespace-nowrap">{row.date}</td>
+                    <td className="p-3 text-neutral-600">{row.desc}</td>
+                    <td className="p-3 text-right font-bold text-red-600">{row.debt > 0 ? `₺${row.debt.toLocaleString('tr-TR')}` : '-'}</td>
+                    <td className="p-3 text-right font-bold text-green-600">{row.credit > 0 ? `₺${row.credit.toLocaleString('tr-TR')}` : '-'}</td>
+                    <td className="p-3 text-right font-black text-black">₺{row.balance.toLocaleString('tr-TR')}</td>
+                  </tr>
+                ))}
+                {ledgerRows.length === 0 && (
+                  <tr><td colSpan="5" className="p-4 text-center text-neutral-400">Herhangi bir mali hareket bulunmuyor.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Müşterinin Yaptığı İşler */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="font-bold text-lg text-black mb-4 flex items-center gap-2 justify-between">
+            <span className="flex items-center gap-2"><ClipboardList className="w-6 h-6 text-blue-500" /> Yaptığı İşler</span>
+            {/* DEĞİŞTİ: Sayı, devam günleri hariç ANA iş sayısıdır (2 günlük iş = 1 kayıt) */}
+            <span className="text-xs bg-neutral-100 px-3 py-1 rounded-lg border border-neutral-200 font-bold text-neutral-500">{customerAnaIsler.length} kayıt</span>
+          </h3>
+          <div className="space-y-3">
+            {customerAnaIsler.map(job => {
+              // YENİ: Çok günlü işte kaç gün sürdüğü / kaç araç gittiği rozet olarak gösterilir
+              const toplamGun = isToplamGun(job, customerJobs);
+              const toplamArac = isToplamArac(job);
+              // YENİ: Cutoff tarihinden önceki işler cari amaçlı "Tamamlandı" olarak gösterilir
+              const forcedComplete = isBeforeCariCutoff(job.date);
+              const statusLabel = forcedComplete
+                ? 'Tamamlandı (Otomatik)'
+                : (job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : job.status === 'cancelled' ? 'İptal Edildi' : 'Bekliyor');
+
+              // YENİ: İşin detay bilgilerini derle (araç, ekip, kaydı açan)
+              const teamNames = (job.teamNames && job.teamNames.length > 0)
+                ? job.teamNames
+                : (job.assignedPersonnelIds || []).map(id => personnelList.find(p => String(p.id) === String(id))?.fullName).filter(Boolean);
+              const vehiclePlate = job.assignedVehiclePlate || '';
+              const vehicleInfo = vehiclePlate ? vehicles.find(v => v.plate === vehiclePlate) : null;
+              const creator = job.createdBy || job.creatorName || job.salesPerson || '';
+
+              return (
+                <div key={job.id} className="bg-neutral-50 border border-neutral-200 p-4 rounded-xl shadow-sm transition hover:border-blue-200">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold text-white uppercase tracking-wider shrink-0 ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
+                        {job.type || 'Nakliye'}
+                      </span>
+                      {/* YENİ: Çok günlü iş rozeti — takvimde her gün ayrı kart olsa da burada tek iş */}
+                      {toplamGun > 1 && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-black text-white uppercase tracking-wider shrink-0 bg-purple-600" title={`Bu iş ${toplamGun} gün sürüyor. Takvimde her gün ayrı kart olarak görünür; ciro ve kapora tek iş üzerinden sayılır.`}>
+                          {toplamGun} Günlük
+                        </span>
+                      )}
+                      {/* YENİ: Aynı güne birden fazla araç gidiyorsa rozet */}
+                      {toplamArac > 1 && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-black text-white uppercase tracking-wider shrink-0 bg-sky-600" title={`Bu işe ${toplamArac} araç gidiyor. Takvimde araç sayısı kadar kart görünür; ciro ve teslim kodu tektir.`}>
+                          {toplamArac} Araç
+                        </span>
+                      )}
+                      <div>
+                        <span className="font-bold text-black text-sm block">{job.date} {job.time ? `- ${job.time}` : ''}</span>
+                        <span className={`text-[10px] font-bold uppercase ${forcedComplete || job.status === 'completed' ? 'text-black' : job.status === 'in-progress' ? 'text-red-600' : job.status === 'cancelled' ? 'text-neutral-400' : 'text-neutral-500'}`}>
+                          {statusLabel}
+                          {isCariExcluded(job) && <span className="ml-1.5 text-neutral-400 normal-case font-medium">(Cari hesaba dahil değil)</span>}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      {job.price ? <span className="font-black text-green-600 text-sm">₺{parseInt(job.price).toLocaleString('tr-TR')}</span> : null}
+                      <button onClick={() => generateContractPDF(job)} className="px-3 py-2 bg-green-50 border border-green-200 text-green-700 text-xs font-bold rounded-lg hover:bg-green-100 transition flex items-center gap-1.5 whitespace-nowrap">
+                        <FileText className="w-3.5 h-3.5" /> Sözleşmeyi İndir
+                      </button>
+                      <button onClick={() => handleEditJob(job)} className="px-3 py-2 bg-white border border-neutral-200 text-neutral-600 text-xs font-bold rounded-lg hover:bg-neutral-100 transition flex items-center gap-1.5 whitespace-nowrap">
+                        İşe Git <ArrowUpRight className="w-3.5 h-3.5" />
+                      </button>
+                      {/* ==========================================================
+                          YENİ: HASAR OLUŞTU BUTONU (müşteri profili iş kartı)
+                          Operasyon > Biten İşler ekranındaki buton ile AYNI akışı
+                          kullanır: setMarkDamageJobId ile onay penceresi açılır,
+                          onaylanınca iş "Hasar var" olarak işaretlenir ve Hasar
+                          Tahtası'nda "Çözüm Bekliyor" listesine düşer.
+                          GÖRÜNME KOŞULU: yalnızca TAMAMLANMIŞ işlerde ve henüz
+                          hasar işaretlenmemişse çıkar. Zaten hasarlıysa buton
+                          yerine durum rozeti gösterilir (çözüldü / çözüm bekliyor).
+                          NOT: setMarkDamageJobId verilmemişse hiçbir şey çizilmez,
+                          böylece bu bileşeni başka yerden çağıran kod bozulmaz.
+                          ========================================================== */}
+                      {setMarkDamageJobId && (forcedComplete || job.status === 'completed') && (
+                        job.endJobDetails?.damageStatus === 'Hasar var' ? (
+                          <span className={`px-3 py-2 text-xs font-bold rounded-lg flex items-center gap-1.5 whitespace-nowrap border ${job.endJobDetails?.damageResolved
+                            ? 'bg-green-50 border-green-200 text-green-700'
+                            : 'bg-red-50 border-red-200 text-red-700'}`}>
+                            <AlertTriangle className="w-3.5 h-3.5" />
+                            {job.endJobDetails?.damageResolved ? 'Hasar Çözüldü' : 'Hasar Çözüm Bekliyor'}
+                          </span>
+                        ) : (
+                          <button onClick={() => setMarkDamageJobId(job.id)} className="px-3 py-2 bg-orange-50 border border-orange-200 text-orange-700 text-xs font-bold rounded-lg hover:bg-orange-100 transition flex items-center gap-1.5 whitespace-nowrap">
+                            <AlertTriangle className="w-3.5 h-3.5" /> Hasar Oluştu
+                          </button>
+                        )
                       )}
                     </div>
+                  </div>
 
-                    {/* SÜREÇ GEÇMİŞİ */}
-                    {(cand.history || []).length > 0 && (
-                      <div className="bg-white rounded-xl border border-neutral-200 p-3">
-                        <h4 className="text-xs font-black text-neutral-700 mb-2 flex items-center gap-1.5"><History className="w-3.5 h-3.5 text-neutral-500" /> Süreç Geçmişi</h4>
-                        <div className="space-y-1 max-h-28 overflow-y-auto">
-                          {[...(cand.history || [])].reverse().map((h, i) => (
-                            <div key={i} className="text-[10px] text-neutral-500 font-medium flex gap-2">
-                              <span className="text-neutral-400 shrink-0">{new Date(h.date).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-                              <span className="flex-1">{h.text}</span>
-                              <span className="text-neutral-400 shrink-0">{h.by}</span>
-                            </div>
-                          ))}
+                  {/* YENİ: İşin detay kart bilgileri (araç, ekip, kaydı açan, güzergah) */}
+                  <div className="mt-3 pt-3 border-t border-neutral-200 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-xs">
+                    <div className="flex items-start gap-2">
+                      <Truck className="w-3.5 h-3.5 text-purple-500 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-neutral-400 font-bold uppercase text-[9px] block">Giden Araç</span>
+                        <span className="font-bold text-black">{vehiclePlate ? `${vehiclePlate}${vehicleInfo ? ` (${vehicleInfo.type})` : ''}` : 'Atanmadı'}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <Users className="w-3.5 h-3.5 text-orange-500 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="text-neutral-400 font-bold uppercase text-[9px] block">Giden Ekip</span>
+                        <span className="font-bold text-black">{teamNames.length > 0 ? teamNames.join(', ') : 'Atanmadı'}</span>
+                      </div>
+                    </div>
+                    {creator && (
+                      <div className="flex items-start gap-2">
+                        <UserPlus className="w-3.5 h-3.5 text-blue-500 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-neutral-400 font-bold uppercase text-[9px] block">Kaydı Açan</span>
+                          <span className="font-bold text-black">{creator}</span>
                         </div>
                       </div>
                     )}
+                    {(job.fromDistrict || job.toDistrict) && (
+                      <div className="flex items-start gap-2">
+                        <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-neutral-400 font-bold uppercase text-[9px] block">Güzergah</span>
+                          <span className="font-bold text-black">{job.fromDistrict || '?'} → {job.toDistrict || '?'}</span>
+                        </div>
+                      </div>
+                    )}
+                    {job.endJobDetails?.paymentMethod && (
+                      <div className="flex items-start gap-2">
+                        <Wallet className="w-3.5 h-3.5 text-green-500 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-neutral-400 font-bold uppercase text-[9px] block">Ödeme Yöntemi</span>
+                          <span className="font-bold text-black">{job.endJobDetails.paymentMethod}</span>
+                        </div>
+                      </div>
+                    )}
+                    {job.notes && (
+                      <div className="flex items-start gap-2 sm:col-span-2">
+                        <ClipboardList className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-neutral-400 font-bold uppercase text-[9px] block">Notlar</span>
+                          <span className="font-bold text-black break-words">{job.notes}</span>
+                        </div>
+                      </div>
+                    )}
+                    {job.roomCount && (
+                      <div className="flex items-start gap-2">
+                        <Package className="w-3.5 h-3.5 text-neutral-500 shrink-0 mt-0.5" />
+                        <div>
+                          <span className="text-neutral-400 font-bold uppercase text-[9px] block">Ev / Hacim</span>
+                          <span className="font-bold text-black">{job.roomCount}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
 
-                    {/* AKSİYONLAR */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      {/* YENİ: Hızlı aşama butonları — Değerlendirmeye Al / Havuza Al / Reddedildi */}
-                      {!isFinal && cand.stage !== 'Değerlendirme' && (
-                        <button onClick={() => handleStageChange(cand, 'Değerlendirme')} className="px-3 py-2 bg-orange-50 text-orange-700 rounded-xl text-xs font-bold hover:bg-orange-100 transition flex items-center gap-1 border border-orange-200"><Star className="w-3.5 h-3.5" /> Değerlendirmeye Al</button>
-                      )}
-                      {cand.stage !== 'Yedek Havuz' && !isFinal && (
-                        <button onClick={() => handleMoveToPool(cand)} className="px-3 py-2 bg-indigo-50 text-indigo-700 rounded-xl text-xs font-bold hover:bg-indigo-100 transition flex items-center gap-1 border border-indigo-200"><History className="w-3.5 h-3.5" /> Havuza Al</button>
-                      )}
-                      {cand.stage === 'Yedek Havuz' && (
-                        <button onClick={() => handleRecallFromPool(cand)} className="px-3 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 transition flex items-center gap-1 shadow-md shadow-indigo-600/30"><Phone className="w-3.5 h-3.5" /> Tekrar Değerlendir</button>
-                      )}
-                      {cand.stage !== 'Reddedildi' && cand.stage !== 'Kadroya Alındı' && (
-                        <button onClick={() => handleStageChange(cand, 'Reddedildi')} className="px-3 py-2 bg-red-50 text-red-600 rounded-xl text-xs font-bold hover:bg-red-100 transition flex items-center gap-1 border border-red-200"><X className="w-3.5 h-3.5" /> Reddet</button>
-                      )}
-                      {/* WhatsApp */}
-                      <button onClick={() => {
-                        let phone = (cand.phone || '').replace(/\D/g, '');
-                        if (phone.startsWith('0')) phone = '90' + phone.substring(1); else if (!phone.startsWith('90')) phone = '90' + phone;
-                        window.open(`https://wa.me/${phone}`, '_blank');
-                      }} className="px-3 py-2 bg-[#25D366] text-white rounded-xl text-xs font-bold hover:bg-[#128C7E] transition flex items-center gap-1"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</button>
-                      {/* Düzenle */}
-                      <button onClick={() => { setForm({ fullName: cand.fullName || '', phone: cand.phone || '', collarType: cand.collarType || 'Mavi Yaka', position: cand.position || POSITION_LIST[0], source: cand.source || 'İş İlanı Sitesi', expectedSalary: cand.expectedSalary || '', address: cand.address || '', notes: cand.notes || '', stage: cand.stage || 'Yeni Başvuru', belgeler: cand.belgeler || [] }); setEditingId(cand.id); setShowForm(true); setBelgeLabel(''); }}
-                        className="px-3 py-2 bg-neutral-100 text-neutral-700 rounded-xl text-xs font-bold hover:bg-neutral-200 transition flex items-center gap-1 border border-neutral-200"><Edit className="w-3.5 h-3.5" /> Düzenle</button>
-                      {/* Sil */}
-                      <button onClick={() => setDeleteId(cand.id)} className="px-3 py-2 bg-red-50 text-red-600 rounded-xl text-xs font-bold hover:bg-red-100 transition flex items-center gap-1 border border-red-200"><X className="w-3.5 h-3.5" /> Sil</button>
-                      {/* KADROYA AL — pozisyon otomatik eşleştirilir */}
-                      {cand.stage !== 'Kadroya Alındı' && cand.stage !== 'Reddedildi' && (
-                        <button onClick={() => setHireCandidate(cand)} className="ml-auto px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-700 text-white rounded-xl text-xs font-black hover:scale-[1.03] transition flex items-center gap-1.5 shadow-md shadow-green-600/30">
-                          <CheckCircle className="w-4 h-4" /> Kadroya Al
-                        </button>
-                      )}
-                      {cand.stage === 'Kadroya Alındı' && (
-                        <span className="ml-auto text-xs font-black text-green-700 flex items-center gap-1"><CheckCircle className="w-4 h-4" /> Kadroda</span>
+                  {/* YENİ: İŞ SONLANDIRMA BİLGİLERİ + TESLİM GÖRSELLERİ
+                      Operasyon ekranında girilen sonlandırma detayları burada da görünür. */}
+                  {(() => {
+                    const d = job.endJobDetails;
+                    const temiz = (arr) => (arr || []).filter(x => x && x !== 'Yükleniyor...');
+                    const kasa = temiz(d?.truckImages || (d?.truckImage ? [d.truckImage] : []));
+                    const teslim = temiz(d?.deliveryImages);
+                    const hasar = temiz(d?.damageImages);
+                    const asansor = temiz(d?.elevatorImages);
+                    const gorselVar = kasa.length + teslim.length + hasar.length + asansor.length > 0;
+                    if (!d && !gorselVar) return null;
+
+                    // Sonlandırma sırasında girilen metin bilgileri (boş olanlar gösterilmez)
+                    const satirlar = [
+                      { etiket: 'Müşteri Memnuniyeti', deger: d?.customerSatisfaction },
+                      { etiket: 'Hasar Durumu', deger: d?.damageStatus, detay: d?.damageDetails },
+                      // YENİ: Hasar çözüldüyse çözüm notu da müşteri profilinde görünür
+                      { etiket: 'Hasar Çözümü', deger: d?.damageResolved ? 'Çözüldü' : null, detay: d?.damageResolutionNote },
+                      { etiket: 'Kamyon Durumu', deger: d?.truckStatus, detay: d?.truckIssueDetails },
+                      { etiket: 'Asansör Kurulumu', deger: d?.elevatorSetup, detay: d?.elevatorSetupReason },
+                      { etiket: 'Asansörde Sorun', deger: d?.elevatorIssue === 'Evet' ? 'Evet' : null, detay: d?.elevatorIssueReason },
+                      { etiket: 'Araçta Sorun', deger: d?.vehicleIssue === 'Evet' ? 'Evet' : null, detay: d?.vehicleIssueReason },
+                    ].filter(s => s.deger);
+
+                    // Görsel etiketi: tıklayınca mevcut görsel görüntüleyicide açılır
+                    const GorselRozet = ({ liste, baslik, renk }) => liste.map((img, i) => (
+                      <button key={baslik + i} type="button"
+                        onClick={() => setViewingImage ? setViewingImage({ title: baslik, name: img }) : window.open(img, '_blank')}
+                        className={`text-[10px] font-black px-2 py-1 rounded-lg border transition flex items-center gap-1 ${renk}`}>
+                        <Camera className="w-3 h-3" /> {baslik}{liste.length > 1 ? ` ${i + 1}` : ''}
+                      </button>
+                    ));
+
+                    return (
+                      <div className="mt-3 pt-3 border-t border-neutral-200">
+                        <p className="text-[9px] font-black text-neutral-400 uppercase tracking-wider mb-2">İş Sonlandırma Bilgileri</p>
+
+                        {satirlar.length > 0 && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-xs mb-2.5">
+                            {satirlar.map((s, i) => (
+                              <div key={i} className="min-w-0">
+                                <span className="text-neutral-400 font-bold uppercase text-[9px] block">{s.etiket}</span>
+                                <span className="font-bold text-black break-words">{s.deger}</span>
+                                {s.detay && <span className="block text-[10px] text-neutral-500 font-medium break-words">{s.detay}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {gorselVar ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            <GorselRozet liste={kasa} baslik="Kasa Fotoğrafı" renk="bg-neutral-100 text-neutral-600 border-neutral-200 hover:bg-neutral-200" />
+                            <GorselRozet liste={teslim} baslik="Teslim Yeri" renk="bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100" />
+                            <GorselRozet liste={hasar} baslik="Hasar" renk="bg-red-50 text-red-700 border-red-200 hover:bg-red-100" />
+                            <GorselRozet liste={asansor} baslik="Asansör" renk="bg-green-50 text-green-700 border-green-200 hover:bg-green-100" />
+                          </div>
+                        ) : (
+                          <p className="text-[10px] font-bold text-neutral-400">Bu işe ait fotoğraf / video eklenmemiş.</p>
+                        )}
+
+                        {/* YENİ: HASAR ÇÖZÜM BELGELERİ — hasar kapatılırken eklenen
+                            fotoğraf/PDF/dekont dosyaları müşteri profilinde de görünür.
+                            Ortak bileşen (shared.jsx): görseller görüntüleyicide,
+                            PDF/belgeler yeni sekmede açılır. */}
+                        {(d?.damageResolutionFiles || []).length > 0 && (
+                          <div className="mt-2">
+                            <span className="text-neutral-400 font-bold uppercase text-[9px] block">Hasar Çözüm Belgeleri</span>
+                            <HasarCozumBelgeleri files={d.damageResolutionFiles} setViewingImage={setViewingImage} />
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                  {/* YENİ: SAHA DENETİMİ — bu işe şef denetimi yapılmışsa kim yaptığı,
+                      ortalama puanı görünür ve tek dokunuşla tüm rapor açılır. */}
+                  {(() => {
+                    const dnt = jobSahaDenetimi(job.id);
+                    if (!dnt) return null;
+                    const medyaSayisi = (dnt.medya || []).filter(Boolean).length;
+                    return (
+                      <div className="mt-3 pt-3 border-t border-neutral-200">
+                        <div className="bg-purple-50 border border-purple-200 rounded-xl p-3">
+                          <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <ClipboardCheck className="w-4 h-4 text-purple-600 shrink-0" />
+                              <span className="text-[10px] font-black text-purple-700 uppercase tracking-wider">Saha Denetimi Yapıldı</span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <span className={`text-base font-black ${denetimPuanRenk(dnt.ortalamaPuan)}`}>{String(dnt.ortalamaPuan ?? 0).replace('.', ',')}</span>
+                              <Star className="w-3.5 h-3.5 text-yellow-500" />
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs mb-2">
+                            <div>
+                              <span className="text-neutral-400 font-bold uppercase text-[9px] block">Denetimi Yapan Şef</span>
+                              <span className="font-bold text-black">{dnt.sefAdi || '—'}</span>
+                            </div>
+                            <div>
+                              <span className="text-neutral-400 font-bold uppercase text-[9px] block">Denetim Tarihi</span>
+                              <span className="font-bold text-black">{dnt.denetimTarihi ? new Date(dnt.denetimTarihi).toLocaleString('tr-TR') : '—'}</span>
+                            </div>
+                          </div>
+                          {dnt.genelRapor && (
+                            <p className="text-[11px] font-medium text-neutral-600 line-clamp-2 break-words mb-2">{dnt.genelRapor}</p>
+                          )}
+                          <button type="button" onClick={() => setAcikDenetim(dnt)}
+                            className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-black rounded-lg transition flex justify-center items-center gap-1.5">
+                            <Eye className="w-3.5 h-3.5" /> Saha Denetim Raporunu Gör
+                            {medyaSayisi > 0 && <span className="bg-white/25 px-1.5 py-0.5 rounded-full text-[9px]">{medyaSayisi} görsel</span>}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ============ YENİ: SAHA DENETİM RAPORU PENCERESİ ============
+            Şefin o iş için yaptığı denetimin tamamı: sahada çekilen fotoğraf/videolar,
+            personel puanları ve şefin özel notları, kayıt doğruluğu değerlendirmesi
+            ve saha raporu. Görsellere tıklayınca büyük boyutta açılır. */}
+        {acikDenetim && (() => {
+          const d = acikDenetim;
+          const medya = (d.medya || []).filter(Boolean);
+          const DOGRULUK_RENK = {
+            'Hepsi doğru': 'bg-green-50 text-green-700 border-green-200',
+            'Hemen hemen doğru': 'bg-lime-50 text-lime-700 border-lime-200',
+            'Çok yanlış bilgiler var': 'bg-orange-50 text-orange-700 border-orange-200',
+            'Tamamen yanlış': 'bg-red-50 text-red-700 border-red-200',
+          };
+          return (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[60] flex justify-center items-center p-3 md:p-6">
+              <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col h-[88vh]">
+                {/* Başlık */}
+                <div className="bg-gradient-to-r from-purple-700 to-purple-900 text-white px-4 py-3 flex justify-between items-center shrink-0">
+                  <div className="min-w-0">
+                    <h3 className="font-black text-base flex items-center gap-2"><ClipboardCheck className="w-5 h-5" /> Saha Denetim Raporu</h3>
+                    <p className="text-[11px] font-bold text-purple-200 truncate">{d.jobCustomerName} • {d.jobType} • {d.jobDate} {d.jobTime}</p>
+                  </div>
+                  <button onClick={() => setAcikDenetim(null)} className="text-purple-200 hover:text-white transition shrink-0"><X className="w-6 h-6" /></button>
+                </div>
+
+                {/* İçerik */}
+                <div className="p-4 space-y-4 overflow-y-auto" style={{ height: 'calc(88vh - 60px)' }}>
+                  {/* Kim denetledi / kaydı kim açtı / ortalama puan */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+                    <div className="bg-purple-50 rounded-xl p-3 border border-purple-200">
+                      <span className="text-[9px] font-black text-purple-500 uppercase block">Denetimi Yapan Şef</span>
+                      <span className="font-black text-black">{d.sefAdi || '—'}</span>
+                    </div>
+                    <div className="bg-neutral-50 rounded-xl p-3 border border-neutral-200">
+                      <span className="text-[9px] font-black text-neutral-400 uppercase block">Kaydı Açan</span>
+                      <span className="font-black text-black">{d.kayitAcan || '—'}</span>
+                    </div>
+                    <div className="bg-yellow-50 rounded-xl p-3 border border-yellow-200">
+                      <span className="text-[9px] font-black text-yellow-600 uppercase block">Ortalama Puan</span>
+                      <span className="font-black text-black flex items-center gap-1">
+                        {String(d.ortalamaPuan ?? 0).replace('.', ',')} <Star className="w-3.5 h-3.5 text-yellow-500" /> <span className="text-[10px] text-neutral-400">/ 5</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Kayıt doğruluğu */}
+                  <div>
+                    <span className="text-[9px] font-black text-neutral-400 uppercase block mb-1">İş Bilgileri Doğru Açıldı mı?</span>
+                    <span className={`inline-block text-xs font-black px-2.5 py-1.5 rounded-lg border ${DOGRULUK_RENK[d.kayitDogrulugu] || 'bg-neutral-50 text-neutral-600 border-neutral-200'}`}>
+                      {d.kayitDogrulugu || '—'}
+                    </span>
+                  </div>
+
+                  {/* Sahada çekilen fotoğraf / video */}
+                  <div className="border border-orange-200 rounded-xl overflow-hidden">
+                    <div className="bg-orange-600 text-white px-3 py-2 text-[10px] font-black uppercase tracking-wide flex items-center gap-2">
+                      <Camera className="w-3.5 h-3.5" /> Sahada Çekilen Fotoğraf / Video ({medya.length})
+                    </div>
+                    <div className="p-3">
+                      {medya.length === 0 ? (
+                        <p className="text-xs font-bold text-neutral-400">Bu denetime ait görsel bulunmuyor.</p>
+                      ) : (
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                          {medya.map((url, i) => (
+                            <button key={url + i} type="button" onClick={() => setViewingImage?.({ title: `Saha Denetimi — Görsel ${i + 1}`, name: url })}
+                              className="aspect-square rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 hover:ring-2 hover:ring-orange-500 transition flex items-center justify-center relative">
+                              {isVideoUrl(url)
+                                ? <><Camera className="w-6 h-6 text-neutral-500" /><span className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-[8px] font-black py-0.5">VİDEO</span></>
+                                : <img src={url} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
+                            </button>
+                          ))}
+                        </div>
                       )}
                     </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
 
-        {/* ADAY EKLE / DÜZENLE MODALI */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setShowForm(false)}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-              <h3 className="font-black text-black mb-4 flex items-center gap-2"><UserPlus className="w-5 h-5 text-emerald-700" /> {editingId ? 'Adayı Düzenle' : 'Yeni Aday Başvurusu'}</h3>
-              <div className="space-y-3 text-sm">
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Ad Soyad *</label>
-                    <input value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" placeholder="Örn: Ali Yılmaz" /></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Telefon *</label>
-                    <input value={form.phone} inputMode="numeric" onChange={e => setForm({ ...form, phone: e.target.value.replace(/[^0-9]/g, '').slice(0, 11) })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" placeholder="05xxxxxxxxx" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Yaka Tipi</label>
-                    <select value={form.collarType} onChange={e => setForm({ ...form, collarType: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
-                      <option>Mavi Yaka</option><option>Beyaz Yaka</option>
-                    </select></div>
-                  {/* YENİ: Pozisyon artık sistemdeki pozisyonlardan SEÇİLİR (kadroya alınca bu pozisyona eşleştirilir) */}
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Başvurulan Pozisyon</label>
-                    <select value={form.position} onChange={e => setForm({ ...form, position: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
-                      {POSITION_LIST.map(p => <option key={p} value={p}>{p}</option>)}
-                    </select></div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Başvuru Kaynağı</label>
-                    <select value={form.source} onChange={e => setForm({ ...form, source: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
-                      {SOURCES.map(s => <option key={s}>{s}</option>)}
-                    </select></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Maaş Beklentisi (TL)</label>
-                    <input type="number" value={form.expectedSalary} onChange={e => setForm({ ...form, expectedSalary: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" /></div>
-                </div>
-                {/* YENİ: Adres alanı */}
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Adres</label>
-                  <textarea value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm h-14 resize-none" placeholder="İkametgah / ev adresi" /></div>
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Notlar</label>
-                  <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm h-16 resize-none" placeholder="Deneyim, referans, izlenim vb." /></div>
-
-                {/* YENİ: BELGE EKLE — adaya ait belgeler (CV, kimlik, ehliyet vb.) */}
-                <div className="border border-neutral-200 rounded-xl p-3 bg-neutral-50">
-                  <label className="text-xs font-black text-neutral-700 mb-2 flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-blue-600" /> Belgeler</label>
-                  <div className="flex gap-1.5 mb-2">
-                    <input value={belgeLabel} onChange={e => setBelgeLabel(e.target.value)} placeholder="Belge adı (opsiyonel, örn: CV)" className="flex-1 min-w-0 p-2 border border-neutral-300 rounded-lg text-xs outline-none focus:ring-1 focus:ring-emerald-600" />
-                    {/* YENİ: Şimdi Çek / Galeriden Yükle / Dosyadan seçenekleri + birden fazla belge/fotoğraf seçimi (multiple) */}
-                    <MediaCaptureMenu
-                      compact
-                      multiple
-                      disabled={belgeUploading}
-                      buttonLabel={belgeUploading ? 'Yükleniyor...' : 'Yükle'}
-                      onChange={handleFormBelgeUpload}
-                    />
+                  {/* Şefin saha raporu */}
+                  <div className="border border-blue-200 rounded-xl overflow-hidden">
+                    <div className="bg-blue-700 text-white px-3 py-2 text-[10px] font-black uppercase tracking-wide flex items-center gap-2">
+                      <ClipboardList className="w-3.5 h-3.5" /> Şefin Saha Raporu
+                    </div>
+                    <div className="p-3">
+                      <p className="text-xs font-medium text-neutral-700 whitespace-pre-wrap break-words">{d.genelRapor || '—'}</p>
+                    </div>
                   </div>
-                  {(form.belgeler || []).length > 0 && (
-                    <div className="space-y-1">
-                      {(form.belgeler || []).map(b => (
-                        <div key={b.id} className="flex items-center gap-2 bg-white border border-neutral-200 rounded-lg px-2 py-1.5 text-xs">
-                          <FileText className="w-3.5 h-3.5 text-blue-500" />
-                          <span className="font-bold text-neutral-700 flex-1 truncate">{b.label}</span>
-                          <button onClick={() => setViewingImage?.({ title: b.label, name: b.url })} className="text-neutral-500 hover:text-black"><Eye className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => handleFormBelgeRemove(b.id)} className="text-red-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
+
+                  {/* Personel puanları ve özel notlar */}
+                  <div className="border border-neutral-200 rounded-xl overflow-hidden">
+                    <div className="bg-neutral-900 text-white px-3 py-2 text-[10px] font-black uppercase tracking-wide flex items-center gap-2">
+                      <Users className="w-3.5 h-3.5" /> Personel Puanları ve Şef Notları ({(d.personelPuanlari || []).length})
+                    </div>
+                    <div className="p-3 space-y-2">
+                      {(d.personelPuanlari || []).map((p, i) => (
+                        <div key={p.personelId + i} className="bg-neutral-50 rounded-lg p-2.5 border border-neutral-200 flex items-start gap-3">
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className={`text-lg font-black ${denetimPuanRenk(p.puan)}`}>{p.puan}</span>
+                            <Star className="w-3.5 h-3.5 text-yellow-500" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="font-black text-xs text-black block">{p.personelAdi}</span>
+                            {p.pozisyon && <span className="text-[10px] font-bold text-neutral-400 block">{p.pozisyon}</span>}
+                            {p.ozelNot
+                              ? <span className="text-[11px] text-neutral-600 font-medium block break-words mt-0.5">{p.ozelNot}</span>
+                              : <span className="text-[10px] text-neutral-300 font-bold">Not girilmemiş</span>}
+                          </div>
                         </div>
                       ))}
                     </div>
-                  )}
+                  </div>
+
+                  <div className="text-[10px] font-bold text-neutral-400 text-center pb-2">
+                    Denetim zamanı: {d.denetimTarihi ? new Date(d.denetimTarihi).toLocaleString('tr-TR') : '—'}
+                  </div>
                 </div>
               </div>
-              <div className="flex gap-2 mt-5">
-                <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
-                <button onClick={handleSaveCandidate} disabled={!form.fullName.trim() || !form.phone.trim()} className="flex-1 py-2.5 bg-emerald-700 text-white font-black rounded-xl hover:bg-emerald-800 transition text-sm disabled:opacity-40 disabled:cursor-not-allowed">
-                  {editingId ? 'Güncelle' : 'Adayı Kaydet'}
+            </div>
+          );
+        })()}
+
+        {/* YENİ: KARA LİSTEYE ALMA / SEBEP DÜZENLEME MODALI */}
+        {showBlacklistModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-red-700 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><Ban className="w-5 h-5" /> {isBlacklisted ? 'Kara Liste Sebebini Düzenle' : 'Müşteriyi Kara Listeye Al'}</h3>
+                <button onClick={() => setShowBlacklistModal(false)} className="text-red-200 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleSaveBlacklist} className="p-6 space-y-4">
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+                  <p className="text-xs font-bold text-neutral-400 uppercase">Müşteri</p>
+                  <p className="text-sm font-black text-black">{customerName}</p>
+                  <p className="text-xs font-bold text-neutral-500">{customerPhone}</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Kara Liste Sebebi *</label>
+                  <textarea required value={blacklistReasonInput} onChange={e => setBlacklistReasonInput(e.target.value)}
+                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600 h-28 resize-none text-sm"
+                    placeholder="Örn: Ödemesini yapmadı ve iletişimi kesti / Ekibimize hakaret etti / Sürekli asılsız hasar iddiası..." />
+                  <p className="text-[11px] text-neutral-400 font-bold mt-1.5">Bu sebep cari profilinde ve kara liste ekranında görünecektir.</p>
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => setShowBlacklistModal(false)} className="flex-1 py-3 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
+                  <button type="submit" disabled={!blacklistReasonInput.trim()} className="flex-1 py-3 bg-red-700 text-white font-black rounded-xl hover:bg-red-800 transition text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                    {isBlacklisted ? 'Sebebi Güncelle' : 'Onayla ve Kara Listeye Al'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: KARA LİSTEDEN ÇIKARMA ONAY MODALI */}
+        {showBlacklistRemoveConfirm && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-xs rounded-2xl shadow-2xl p-6 text-center animate-in zoom-in-95">
+              <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-3" />
+              <p className="text-sm font-bold text-neutral-700 mb-1"><b>{customerName}</b> kara listeden çıkarılacak.</p>
+              <p className="text-xs text-neutral-400 font-bold mb-4">Müşteri tekrar normal listede görünecek.</p>
+              <div className="flex gap-2">
+                <button onClick={() => setShowBlacklistRemoveConfirm(false)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
+                <button onClick={handleRemoveBlacklist} className="flex-1 py-2.5 bg-green-600 text-white font-black rounded-xl text-sm hover:bg-green-700">Evet, Çıkar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* YENİ: Cari Profil Düzenleme Modalı */}
+        {showEditProfileModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-black text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg flex items-center gap-2"><Edit className="w-5 h-5" /> Cari Profilini Düzenle</h3>
+                <button onClick={() => setShowEditProfileModal(false)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={handleSaveProfileEdit} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Ad Soyad</label>
+                  <input required type="text" value={editProfileForm.name} onChange={e => setEditProfileForm({ ...editProfileForm, name: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Telefon</label>
+                  <input required type="text" value={editProfileForm.phone} onChange={e => setEditProfileForm({ ...editProfileForm, phone: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Yedek Telefon</label>
+                  <input type="text" value={editProfileForm.altPhone} onChange={e => setEditProfileForm({ ...editProfileForm, altPhone: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Müşteri Tipi</label>
+                  <select value={editProfileForm.customerType} onChange={e => setEditProfileForm({ ...editProfileForm, customerType: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none bg-white focus:ring-2 focus:ring-red-600">
+                    <option value="Bireysel">Bireysel</option>
+                    <option value="Kurumsal">Kurumsal</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">{editProfileForm.customerType === 'Kurumsal' ? 'Vergi No' : 'TC Kimlik No'}</label>
+                  <input type="text" value={editProfileForm.idNo} onChange={e => setEditProfileForm({ ...editProfileForm, idNo: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-black text-white font-bold rounded-xl hover:bg-neutral-800 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <Save className="w-5 h-5" /> Kaydet
                 </button>
-              </div>
+              </form>
             </div>
           </div>
         )}
 
-        {/* SİLME ONAY MODALI */}
-        {deleteId && (
-          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center animate-in zoom-in-95">
-              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
-              <p className="text-sm font-bold text-neutral-700 mb-4">Bu aday kaydı kalıcı olarak silinecek. Emin misiniz?</p>
-              <div className="flex gap-2">
-                <button onClick={() => setDeleteId(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
-                <button onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'candidates', deleteId)); setDeleteId(null); }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
+        {/* YENİ: Manuel Borç Ekle Modalı */}
+        {/* ==================================================================
+            YENİ: KAPORA EKLE PENCERESİ
+            İş fiyatının %20'si önerilir; tutar elle değiştirilebilir.
+            Kaydedilince İKİ şey olur:
+              1) İşin deposit alanına eklenir -> iş kartında ve sonlandırma
+                 hesabında kapora olarak düşer (kayıt ekranındaki kaporayla
+                 birebir aynı mantık).
+              2) Seçilen deftere BUGÜNÜN tarihiyle GİRİŞ yazılır (kaynak:
+                 'Kapora (Manuel)'). Otomatik kapora fonksiyonu bu kaydı
+                 tanır ve asla üzerine yazmaz (shared.tsx koruması).
+            ================================================================== */}
+        {showKaporaModal && (() => {
+          // DEĞİŞTİ: Artık iş seçilmemiş de olabilir (birden fazla açık iş varsa
+          // kullanıcı seçene kadar boş kalır). Bu yüzden 'return null' KALDIRILDI;
+          // aksi halde pencere hiç açılmazdı.
+          const kaporaIsi = customerJobs.find(j => j.id === kaporaForm.jobId) || null;
+          const cokIsVar = kaporaIsler.length > 1;
+          const fiyat = parseFloat(kaporaIsi?.price) || 0;
+          const mevcutKapora = parseFloat(kaporaIsi?.deposit) || 0;
+          const girilen = parseFloat(kaporaForm.tutar) || 0;
+          const seciliDefter = kaporaDefterler.find(d => d.id === kaporaForm.defterId);
+          // Seçilen işin kalan bakiyesi — kapora bu tutardan düşer
+          const kalanBakiye = Math.max(0, fiyat - mevcutKapora);
+          // İş seçilince %20 önerisi o işe göre yeniden hesaplanır
+          const isSec = (jobId) => {
+            const secilen = kaporaIsler.find(j => j.id === jobId);
+            const oneri = secilen ? Math.round((parseFloat(secilen.price) || 0) * 0.20) : 0;
+            setKaporaForm(f => ({ ...f, jobId, tutar: oneri ? String(oneri) : '' }));
+          };
+          const kaydet = async () => {
+            // YENİ: İş seçilmeden kapora kaydedilemez
+            if (!kaporaIsi) { alert('Kaporanın hangi işe girileceğini seçin.'); return; }
+            if (!(girilen > 0)) { alert('Geçerli bir kapora tutarı girin.'); return; }
+            if (!kaporaForm.defterId) { alert('Kaporanın yazılacağı hesabı seçin.'); return; }
+            // YENİ: Kapora, seçilen işin kalan bakiyesini aşamaz (yanlış iş
+            // seçimini de erken yakalar). Fiyatı 0 olan işlerde kontrol atlanır.
+            if (fiyat > 0 && girilen > kalanBakiye + 0.01) {
+              alert(`Girilen kapora, seçilen işin kalan bakiyesinden fazla.\n\nİş tutarı: ₺${fiyat.toLocaleString('tr-TR')}\nMevcut kapora: ₺${mevcutKapora.toLocaleString('tr-TR')}\nKalan bakiye: ₺${kalanBakiye.toLocaleString('tr-TR')}\n\nDoğru işi seçtiğinizden emin olun.`);
+              return;
+            }
+            setKaporaKaydediliyor(true);
+            try {
+              const bugun = new Date().toISOString().split('T')[0];
+              // 1) İşin kapora alanına EKLE (mevcut kaporanın üzerine)
+              await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', kaporaIsi.id), {
+                deposit: String(mevcutKapora + girilen)
+              });
+              // 2) Seçilen deftere bugünün tarihiyle GİRİŞ yaz
+              await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+                tip: 'giris',
+                tutar: girilen,
+                aciklama: kaporaIsi.deliveryCode ? `Teslim kodu: ${kaporaIsi.deliveryCode}` : 'Profilden kapora',
+                kategori: 'Kapora',
+                etiketler: ['Kapora', kaporaIsi.type].filter(Boolean),
+                odemeYontemi: seciliDefter?.tur === 'Banka' ? 'Banka / Havale' : seciliDefter?.tur === 'Kredi Kartı' ? 'Kredi Kartı' : 'Nakit',
+                tarih: bugun, // Kaporanın GİRİLDİĞİ gün — kullanıcı talebi
+                defterId: kaporaForm.defterId,
+                kaynak: 'Kapora (Manuel)',
+                kayitTipi: 'kapora',
+                kaporaKaynakId: kaporaIsi.id, // Oto fonksiyon ikinci satır açmasın diye
+                isId: kaporaIsi.id,
+                musteriAdi: kaporaIsi.customerName || '',
+                musteriTel: kaporaIsi.customerPhone || '',
+                teslimKodu: kaporaIsi.deliveryCode || '',
+                by: currentUser?.fullName || 'Sistem',
+                createdAt: new Date().toISOString()
+              });
+              if (addSystemLog) addSystemLog('Kapora Eklendi (Profil)',
+                `${kaporaIsi.customerName}: ₺${girilen.toLocaleString('tr-TR')} kapora ${seciliDefter?.ad || 'deftere'} yazıldı ve işin kaporasına eklendi.`);
+              setShowKaporaModal(false);
+            } catch (e) {
+              console.error('Kapora kaydedilemedi:', e);
+              alert('Kapora kaydedilemedi. Lütfen tekrar deneyin.');
+            }
+            setKaporaKaydediliyor(false);
+          };
+          return (
+            <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="font-black text-black flex items-center gap-2"><Wallet className="w-5 h-5 text-amber-600" /> Kapora Ekle</h3>
+                  <button onClick={() => setShowKaporaModal(false)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="space-y-3">
+                  {/* YENİ: Açıkta birden fazla iş varsa hangi işe girileceği sorulur */}
+                  {cokIsVar && (
+                    <KaporaIsSecici isler={kaporaIsler} seciliId={kaporaForm.jobId} onSec={isSec} />
+                  )}
+
+                  {/* Bağlanan iş özeti — yalnızca iş seçiliyse gösterilir */}
+                  {kaporaIsi ? (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-800">
+                      <div className="font-black text-sm">{kaporaIsi.customerName}</div>
+                      <div>{kaporaIsi.date?.split('-').reverse().join('.')} • {kaporaIsi.type || 'Nakliye'} • İş tutarı: ₺{fiyat.toLocaleString('tr-TR')}</div>
+                      {mevcutKapora > 0 && <div>Mevcut kapora: ₺{mevcutKapora.toLocaleString('tr-TR')}</div>}
+                      {/* YENİ: Kaporanın düşeceği bakiye net görünsün */}
+                      <div>Bu işin kalan bakiyesi: <b>₺{kalanBakiye.toLocaleString('tr-TR')}</b></div>
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-xl text-xs font-bold text-neutral-500 text-center">
+                      Devam etmek için yukarıdan bir iş seçin.
+                    </div>
+                  )}
+
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Kapora Tutarı (₺) *</label>
+                    <input type="number" inputMode="decimal" value={kaporaForm.tutar}
+                      onChange={e => setKaporaForm({ ...kaporaForm, tutar: e.target.value })}
+                      className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-lg font-black" />
+                    <p className="text-[10px] font-bold text-neutral-400 mt-1">İş tutarının %20'si önerildi; gerekirse değiştirin.</p>
+                  </div>
+
+                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaba yazılsın? *</label>
+                    <select value={kaporaForm.defterId} onChange={e => setKaporaForm({ ...kaporaForm, defterId: e.target.value })}
+                      className="w-full p-3 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-amber-500 text-sm">
+                      {kaporaDefterler.map(d => <option key={d.id} value={d.id}>{d.ad} — {d.tur}</option>)}
+                    </select>
+                    <p className="text-[10px] font-bold text-neutral-400 mt-1">Banka hesabı önseçili gelir; nakit veya kredi kartı alındıysa değiştirin.</p>
+                  </div>
+
+                  {girilen > 0 && kaporaIsi && (
+                    <div className="text-[11px] font-bold text-neutral-600 bg-neutral-50 rounded-lg p-2.5 border border-neutral-200 space-y-0.5">
+                      <div>Deftere yazılacak: <b className="text-emerald-700">+₺{girilen.toLocaleString('tr-TR')}</b> (bugün, {seciliDefter?.ad || '-'})</div>
+                      {/* Hangi işe işlendiği burada da tekrar yazılır — yanlış iş seçimi göze çarpsın */}
+                      <div>İşlenecek iş: <b>{kaporaIsi.date?.split('-').reverse().join('.')} • ₺{fiyat.toLocaleString('tr-TR')}</b></div>
+                      <div>İşin yeni kaporası: <b>₺{(mevcutKapora + girilen).toLocaleString('tr-TR')}</b> • Kalan bakiye: <b>₺{Math.max(0, fiyat - mevcutKapora - girilen).toLocaleString('tr-TR')}</b></div>
+                    </div>
+                  )}
+
+                  {/* Buton, iş seçilmeden ve tutar girilmeden pasif kalır */}
+                  <button onClick={kaydet} disabled={kaporaKaydediliyor || !kaporaIsi || !(girilen > 0)}
+                    className="w-full py-3 bg-amber-600 hover:bg-amber-700 disabled:bg-neutral-300 text-white font-black rounded-xl transition">
+                    {kaporaKaydediliyor ? 'Kaydediliyor...' : !kaporaIsi ? 'Önce iş seçin' : 'Kaporayı Kaydet'}
+                  </button>
+                </div>
               </div>
+            </div>
+          );
+        })()}
+
+        {showAddDebtModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-red-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg">Manuel Borç Ekle</h3>
+                <button onClick={() => setShowAddDebtModal(false)} className="text-red-100 hover:text-white transition"><X className="w-6 h-6" /></button>
+              </div>
+              <form onSubmit={(e) => handleAddManualEntry(e, 'debt')} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tutar (TL)</label>
+                  <input required type="number" value={manualEntryForm.amount} onChange={e => setManualEntryForm({ ...manualEntryForm, amount: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Açıklama</label>
+                  <input type="text" value={manualEntryForm.description} onChange={e => setManualEntryForm({ ...manualEntryForm, description: e.target.value })} placeholder="Örn: Ek hizmet bedeli" className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tarih</label>
+                  <input required type="date" value={manualEntryForm.date} onChange={e => setManualEntryForm({ ...manualEntryForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <PlusCircle className="w-5 h-5" /> Borcu Ekle
+                </button>
+              </form>
             </div>
           </div>
         )}
 
-        {/* KADROYA ALMA ONAY MODALI */}
-        {hireCandidate && (
-          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 text-center animate-in zoom-in-95">
-              <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-3"><CheckCircle className="w-8 h-8 text-green-600" /></div>
-              <h3 className="font-black text-black mb-1">Kadroya Alınsın mı?</h3>
-              <p className="text-xs text-neutral-500 mb-4"><b>{hireCandidate.fullName}</b> — <b>{hireCandidate.position}</b> ({hireCandidate.collarType}) pozisyonuyla personel listesine eklenecek. Aday durumu "Kadroya Alındı" olacak ve belgeleri özlük dosyasına aktarılacak.</p>
-              <div className="flex gap-2">
-                <button onClick={() => setHireCandidate(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
-                <button onClick={async () => {
-                  await onHire?.(hireCandidate);
-                  await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'candidates', hireCandidate.id), {
-                    stage: 'Kadroya Alındı', hiredAt: new Date().toISOString(),
-                    history: [...(hireCandidate.history || []), { date: new Date().toISOString(), text: 'Kadroya alındı 🎉', by: currentUser?.fullName || 'Sistem' }]
-                  });
-                  setHireCandidate(null);
-                }} className="flex-1 py-2.5 bg-green-600 text-white font-black rounded-xl text-sm hover:bg-green-700">Evet, Kadroya Al</button>
+        {/* YENİ: Manuel Tahsilat Ekle Modalı */}
+        {showAddPaymentModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95">
+              <div className="bg-green-600 text-white p-4 flex justify-between items-center">
+                <h3 className="font-bold text-lg">Manuel Tahsilat Ekle</h3>
+                <button onClick={() => setShowAddPaymentModal(false)} className="text-green-100 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
+              <form onSubmit={(e) => handleAddManualEntry(e, 'payment')} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tutar (TL)</label>
+                  <input required type="number" value={manualEntryForm.amount} onChange={e => setManualEntryForm({ ...manualEntryForm, amount: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-green-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Açıklama</label>
+                  <input type="text" value={manualEntryForm.description} onChange={e => setManualEntryForm({ ...manualEntryForm, description: e.target.value })} placeholder="Örn: Nakit tahsilat" className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-green-600" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-black mb-1">Tarih</label>
+                  <input required type="date" value={manualEntryForm.date} onChange={e => setManualEntryForm({ ...manualEntryForm, date: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-green-600" />
+                </div>
+                <button type="submit" className="w-full py-4 bg-green-600 text-white font-bold rounded-xl hover:bg-green-700 transition flex justify-center items-center gap-2 shadow-lg mt-2">
+                  <PlusCircle className="w-5 h-5" /> Tahsilatı Ekle
+                </button>
+              </form>
             </div>
           </div>
         )}
@@ -909,2248 +2275,2459 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   };
 
   // ============================================================================
-  // YENİ: ŞİRKET EVRAKLARI — şirkete ait genel belgelerin yüklendiği/yönetildiği bölüm.
-  // (Vergi levhası, imza sirküleri, ruhsatlar, sözleşmeler, sigorta poliçeleri vb.)
-  // Belgeler 'sirketEvraklari' Firestore koleksiyonunda tutulur; yükle / görüntüle / düzenle / sil.
+  // YENİ: ESKİ SİSTEMDEN VERİ AKTARIMI (semboln_db.sql → CRM)
+  // Eski uygulamanın phpMyAdmin SQL yedeğini okuyup iş + müşteri kayıtlarını
+  // yeni sisteme aktarır. Kurallar:
+  //  - 'orders' (işler) ve 'transfers' (yükleme/boşaltma detayları) tabloları okunur.
+  //    Depo KİRALAMA tabloları (rents/users/stores) HİÇ okunmaz → o 346 kayıt yok sayılır.
+  //  - Ad Soyad → customerName, Telefon → customerPhone, TC → tcNo,
+  //    Tarih+Saat → date+time, Toplam Tutar → price, Kapora → deposit,
+  //    Ek Açıklama → notes (Operasyon Notları).
+  //  - Adres → açık adres alanına yazılır; metinde il/ilçe tespit edilirse seçilir,
+  //    edilemezse il/ilçe BOŞ bırakılır.
+  //  - Kat → 'n. Kat' (0=Giriş Kat); Taşıma Şekli: dış asansör varsa 'Dış Cephe
+  //    Asansörü', bina asansörü varsa 'Bina Asansörü', yoksa 'Merdiven'.
+  //  - Toplanacak eşya varsa 'Toplama Yapılacak', yoksa 'Kendisi Topladı'.
+  //  - Adreste 'Depoevim' geçiyorsa kayıt DEPO formatında açılır; şube adı
+  //    (Çekmeköy/Kartal/Ümraniye) geçiyorsa o şube, geçmiyorsa Pendik seçilir.
+  //  - complate/wait/work → tamamlanmış; canceled → iptal olarak aktarılır.
+  //    Ekip/personel BOŞ bırakılır; puan ve mesai otomatik ONAYLI işaretlenir,
+  //    stok düşümü yapılmaz (materialsDeducted: true).
+  //  - 'deneme/test/asdf' gibi çöp kayıtlar atlanır. Aynı kayıt (legacyId)
+  //    ikinci kez aktarılmaz. Aynı isim+telefon zaten aynı cari profilde birleşir.
+  //  - Her aktarım bir parti (batch) olarak kaydedilir; SON AKTARIM tek tuşla
+  //    GERİ ALINABİLİR (eklenen tüm kayıtlar silinir, hiç yüklenmemiş gibi olur).
   // ============================================================================
-  export const SirketEvraklariView = ({ db, appId, addSystemLog, setViewingImage, currentUser }) => {
-    const [docs, setDocs] = useState([]);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [showForm, setShowForm] = useState(false);
-    const [label, setLabel] = useState('');
-    const [category, setCategory] = useState('Genel');
-    const [isUploading, setIsUploading] = useState(false);
-    const [deleteId, setDeleteId] = useState(null);
+  export const EskiVeriIceAktar = ({ jobs = [], currentUser, addSystemLog, onClose }) => {
+    const [asama, setAsama] = useState('dosya'); // dosya | onizleme | aktariliyor | bitti
+    const [hata, setHata] = useState('');
+    const [ozet, setOzet] = useState(null);        // önizleme özeti
+    const [hazirKayitlar, setHazirKayitlar] = useState([]); // aktarılacak yeni iş dokümanları
+    const [ilerleme, setIlerleme] = useState({ yazilan: 0, toplam: 0 });
+    const [sonPartiler, setSonPartiler] = useState([]);     // geçmiş aktarımlar (geri alma için)
+    const [geriAliniyor, setGeriAliniyor] = useState(false);
 
-    // Hazır kategori önerileri
-    const CATEGORIES = ['Genel', 'Vergi & Mali', 'Resmi Belgeler', 'Ruhsat & İzin', 'Sigorta', 'Sözleşmeler', 'Araç Belgeleri', 'Diğer'];
-    const CATEGORY_COLORS = {
-      'Genel': 'bg-neutral-100 text-neutral-700 border-neutral-200',
-      'Vergi & Mali': 'bg-green-50 text-green-700 border-green-200',
-      'Resmi Belgeler': 'bg-blue-50 text-blue-700 border-blue-200',
-      'Ruhsat & İzin': 'bg-amber-50 text-amber-700 border-amber-200',
-      'Sigorta': 'bg-purple-50 text-purple-700 border-purple-200',
-      'Sözleşmeler': 'bg-indigo-50 text-indigo-700 border-indigo-200',
-      'Araç Belgeleri': 'bg-teal-50 text-teal-700 border-teal-200',
-      'Diğer': 'bg-neutral-100 text-neutral-600 border-neutral-200',
-    };
-
-    // Belgeler canlı dinlenir
+    // Geçmiş aktarım partilerini canlı dinle (geri alma butonu için)
     useEffect(() => {
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sirketEvraklari'), snap => {
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'legacyImports'), snap => {
         const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
         list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-        setDocs(list);
+        setSonPartiler(list);
       });
       return () => unsub();
     }, []);
 
-    // Belge yükle
-    const handleUpload = async (e) => {
-      const file = e.target.files[0];
-      if (!file || !label.trim()) return;
-      setIsUploading(true);
+    // ---------------- SQL AYRIŞTIRICI ----------------
+    // Belirtilen tablonun tüm INSERT ifadelerindeki satır demetlerini döndürür.
+    // Tek tırnaklı stringleri, \' ve '' kaçışlarını, NULL ve sayıları doğru çözer.
+    const parseInsertRows = (sql, tablo) => {
+      const rows = [];
+      const marker = 'INSERT INTO `' + tablo + '`';
+      let from = 0;
+      while (true) {
+        const idx = sql.indexOf(marker, from);
+        if (idx === -1) break;
+        const valIdx = sql.indexOf('VALUES', idx);
+        if (valIdx === -1) break;
+        let i = valIdx + 6;
+        let depth = 0, inStr = false, cur = '', tuple = [], done = false;
+        const pushVal = () => {
+          const t = cur;
+          cur = '';
+          if (t === '\u0000NULL\u0000') tuple.push(null);
+          else tuple.push(t);
+        };
+        while (i < sql.length && !done) {
+          const ch = sql[i];
+          if (inStr) {
+            if (ch === '\\') { // backslash kaçışı: \' \\ \n vb.
+              const nx = sql[i + 1];
+              cur += nx === 'n' ? '\n' : nx === 'r' ? '\r' : nx === 't' ? '\t' : (nx ?? '');
+              i += 2; continue;
+            }
+            if (ch === "'") {
+              if (sql[i + 1] === "'") { cur += "'"; i += 2; continue; } // '' kaçışı
+              inStr = false; i++; continue;
+            }
+            cur += ch; i++; continue;
+          }
+          if (ch === "'") { inStr = true; i++; continue; }
+          if (ch === '(') { depth++; if (depth === 1) { tuple = []; cur = ''; } else cur += ch; i++; continue; }
+          if (ch === ')') {
+            depth--;
+            if (depth === 0) { pushVal(); rows.push(tuple); } else cur += ch;
+            i++; continue;
+          }
+          if (depth >= 1) {
+            if (ch === ',' && depth === 1) { pushVal(); i++; continue; }
+            cur += ch; i++; continue;
+          }
+          if (ch === ';') { done = true; break; }
+          i++;
+        }
+        // NULL değerlerini işaretle: tırnaksız NULL token'ları trim edilmiş 'NULL' olarak gelir
+        for (const r of rows) for (let k = 0; k < r.length; k++) {
+          if (typeof r[k] === 'string' && r[k].trim() === 'NULL') r[k] = null;
+          else if (typeof r[k] === 'string') r[k] = r[k].trim() === r[k] ? r[k] : r[k].trim();
+        }
+        from = valIdx + 6;
+      }
+      return rows;
+    };
+
+    // ---------------- YARDIMCI EŞLEYİCİLER ----------------
+    const trLower = (s) => (s || '').toLocaleLowerCase('tr-TR');
+
+    // Çöp/deneme kayıt tespiti
+    const copKayitMi = (ad) => {
+      const t = trLower(ad).trim();
+      if (!t) return true;
+      if (/(deneme|test\b|asdf|sdfs|dsad|qwe|zxc|xxxx|aaaa)/.test(t)) return true;
+      // tek kelime + 4+ harf + hiç sesli harf yok → rastgele tuş basımı
+      if (/^[bcçdfgğhjklmnprsştvzqwx]{4,}$/.test(t)) return true;
+      return false;
+    };
+
+    // YENİ KURAL: İsim en az İKİ kelimeli olmalı (ad + soyad). Tek kelimelik kayıtlar atlanır.
+    const isimGecerliMi = (ad) => {
+      const kelimeler = String(ad || '').trim().split(/\s+/).filter(k => k.length >= 2);
+      return kelimeler.length >= 2;
+    };
+
+    // YENİ KURAL: Telefon 11 haneli geçerli bir Türk cep numarası olmalı (05XXXXXXXXX).
+    // 11111111111, 33333333333 gibi tek rakamdan oluşan/uydurma numaralar elenir.
+    const telefonGecerliMi = (tel) => {
+      let t = String(tel || '').replace(/\D/g, '');
+      if (t.startsWith('90') && t.length === 12) t = '0' + t.slice(2); // +90... formatı
+      if (t.length === 10 && t.startsWith('5')) t = '0' + t;           // baştaki 0 eksikse tamamla
+      if (t.length !== 11) return false;            // 11 hane değilse aktarma
+      if (!t.startsWith('05')) return false;        // cep numarası değilse aktarma
+      if (/^(\d)\1{10}$/.test(t)) return false;     // 11111111111 gibi hepsi aynı rakam
+      if (/^0(\d)\1{9}$/.test(t)) return false;     // 05555555555 gibi kalıp numara
+      const govde = t.slice(1);                     // 5XXXXXXXXX
+      if (new Set(govde).size <= 2) return false;   // 2 farklı rakamdan az → uydurma
+      if (/^0501234567|^05123456789|^05000000/.test(t)) return false; // ardışık/sıfır kalıpları
+      return true;
+    };
+
+    // Telefonu standart 11 haneli biçime çevir (05XXXXXXXXX)
+    const telefonNormalize = (tel) => {
+      let t = String(tel || '').replace(/\D/g, '');
+      if (t.startsWith('90') && t.length === 12) t = '0' + t.slice(2);
+      if (t.length === 10 && t.startsWith('5')) t = '0' + t;
+      return t;
+    };
+
+    // Metni sadeleştir: küçük harf, noktalama → boşluk (kelime bazlı eşleşme için)
+    const adresNorm = (s) => (s || '').toLocaleLowerCase('tr-TR')
+      .replace(/i̇/g, 'i').replace(/[^a-zçğıöşü0-9]+/g, ' ').trim();
+
+    // Tek başına il belirtmeyen, çok sayıda ilde bulunan genel adlar
+    const GENEL_ILCE_ADLARI = new Set(['merkez', 'cumhuriyet', 'carsi', 'çarşı', 'sahil']);
+
+    // İl/ilçe arama indeksi — bir kez kurulur, her adreste yeniden taranmaz.
+    // (Eski sürüm her adres için 972 ilçeyi tek tek tarıyordu; 4.600 kayıtta tarayıcı donuyordu.)
+    const KONUM_INDEKS = useMemo(() => {
+      const ilce = new Map(), il = new Map();
+      for (const [ilAdi, ilceler] of Object.entries(TURKEY_LOCATIONS)) {
+        il.set(adresNorm(ilAdi.replace(/\s*\(.*\)/, '')), ilAdi);
+        for (const d of ilceler) {
+          for (const k of new Set([adresNorm(d), adresNorm(d).replace(/ /g, '')])) {
+            if (!ilce.has(k)) ilce.set(k, []);
+            if (!ilce.get(k).some(x => x.district === d && x.province === ilAdi)) ilce.get(k).push({ province: ilAdi, district: d });
+          }
+        }
+      }
+      return { ilce, il };
+    }, []);
+
+    // Adres metninden il/ilçe tespiti.
+    // Türkçe adreslerde ilçe/il SONDA yazıldığı için tarama sondan başa yapılır;
+    // böylece "Yenişehir mah. ... / Pendik" adresi Bursa değil, Pendik olarak eşleşir.
+    // Kesin sonuç yoksa il/ilçe BOŞ bırakılır (kullanıcı kuralı).
+    const ilIlceBul = (adres) => {
+      const bos = { province: '', district: '' };
+      if (!adres) return bos;
+      const kelimeler = adresNorm(adres).split(' ').filter(Boolean);
+      if (kelimeler.length === 0) return bos;
+
+      // Adreste açıkça il adı geçiyor mu? (belirsiz ilçelerde ipucu olarak kullanılır)
+      let ipucuIl = '';
+      for (const k of kelimeler) { const v = KONUM_INDEKS.il.get(k); if (v) ipucuIl = v; }
+      const istanbulMu = kelimeler.includes('istanbul');
+
+      // Sondan başa, 1-3 kelimelik birleşimlerle aday ara (Küçük Çekmece, Gazi Osman Paşa gibi)
+      const adaylar = [];
+      for (let i = kelimeler.length - 1; i >= 0; i--) {
+        for (let n = 3; n >= 1; n--) {
+          if (i - n + 1 < 0) continue;
+          const parca = kelimeler.slice(i - n + 1, i + 1).join(' ');
+          for (const key of new Set([parca, parca.replace(/ /g, '')])) {
+            const bulunan = KONUM_INDEKS.ilce.get(key);
+            if (bulunan) adaylar.push({ key, secenekler: bulunan });
+          }
+        }
+      }
+      if (adaylar.length === 0) {
+        if (ipucuIl && !ipucuIl.startsWith('İstanbul')) return { province: ipucuIl, district: '' };
+        return bos;
+      }
+
+      for (const aday of adaylar) {
+        let sec = aday.secenekler;
+        if (sec.length > 1) {
+          const ipucuyla = ipucuIl ? sec.filter(s => s.province === ipucuIl) : [];
+          if (ipucuyla.length) sec = ipucuyla;
+          else if (istanbulMu) { const ist = sec.filter(s => s.province.startsWith('İstanbul')); if (ist.length === 1) sec = ist; }
+        }
+        if (sec.length === 1) {
+          // Genel ad (Merkez vb.) + il ipucu yoksa güvenilmez → boş bırak
+          if (GENEL_ILCE_ADLARI.has(aday.key) && !ipucuIl && !istanbulMu) continue;
+          return { province: sec[0].province, district: sec[0].district };
+        }
+        const anadolu = sec.find(s => s.province === 'İstanbul (Anadolu)');
+        if (anadolu && istanbulMu) return { province: anadolu.province, district: anadolu.district };
+      }
+      if (ipucuIl && !ipucuIl.startsWith('İstanbul')) return { province: ipucuIl, district: '' };
+      return bos;
+    };
+
+    // Kat eşlemesi: 0 → Giriş Kat, n → 'n. Kat' (1-30 arası FLOORS ile birebir)
+    const katEsle = (n) => {
+      const f = parseInt(n);
+      if (isNaN(f)) return '';
+      if (f <= 0) return 'Giriş Kat';
+      return `${Math.min(f, 30)}. Kat`;
+    };
+
+    // Taşıma şekli eşlemesi (eski sistemdeki iki ayrı alan birleştirilir):
+    //   nelevator = "Nakliye Asansörü" (dış cephe)  → 1: Var, 0: Yok
+    //   elevator  = "Asansör" (bina asansörü)       → 2: Var, 1/0: Yok
+    // Kural: Dış cephe asansörü varsa (bina asansörü olsun olmasın) 'Dış Cephe Asansörü';
+    //        yoksa bina asansörü varsa 'Bina Asansörü'; ikisi de yoksa 'Merdiven'.
+    const tasimaEsle = (t) => {
+      if (!t) return 'Merdiven';
+      if (parseInt(t.nelevator) === 1) return 'Dış Cephe Asansörü';
+      if (parseInt(t.elevator) === 2) return 'Bina Asansörü';
+      return 'Merdiven';
+    };
+
+    // Daire tipi eşlemesi: eski sistemde sayı (3 → "3+1"). Yeni sistemdeki
+    // seçenek listesinde karşılığı yoksa BOŞ bırakılır.
+    const DAIRE_TIPLERI = { 1: '1+1', 2: '2+1', 3: '3+1', 4: '4+1', 5: '5+1', 6: '6+1' };
+    const daireTipiEsle = (n) => DAIRE_TIPLERI[parseInt(n)] || '';
+
+    // Depoevim şube tespiti
+    const depoSubeBul = (adres) => {
+      const t = trLower(adres);
+      if (t.includes('çekmeköy') || t.includes('cekmekoy')) return 'Çekmeköy Depoevim';
+      if (t.includes('kartal')) return 'Kartal Depoevim';
+      if (t.includes('ümraniye') || t.includes('umraniye')) return 'Ümraniye Depoevim';
+      return 'Pendik Depoevim'; // sadece "depoevim" yazıyorsa varsayılan şube
+    };
+
+    // ---------------- DOSYA OKUMA + ÖNİZLEME ----------------
+    const handleDosyaSec = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      setHata('');
+      const reader = new FileReader();
+      reader.onerror = () => setHata('Dosya okunamadı.');
+      reader.onload = () => {
+        try { analizEt(String(reader.result)); }
+        catch (err) { console.error(err); setHata('SQL dosyası ayrıştırılamadı: ' + err.message); }
+      };
+      reader.readAsText(file, 'utf-8');
+    };
+
+    const analizEt = (sql) => {
+      // orders sütun sırası: id, name_surname, mobile, TC_kimlik, date, km, amount, final_amount,
+      // status, new_control, sef_control, kasko, kapora, ekInfo, canceledNote, load_info, unload_info, ...
+      const orderRows = parseInsertRows(sql, 'orders');
+      // transfers sütun sırası: id, type, elevator, carry_stuff, apartment_type, floor, address, ...
+      const transferRows = parseInsertRows(sql, 'transfers');
+      if (orderRows.length === 0) { setHata("Dosyada 'orders' tablosu bulunamadı. Doğru yedek dosyasını seçtiğinizden emin olun."); return; }
+
+      const transferMap = new Map();
+      // transfers sütun sırası (0'dan): id, type, elevator, carry_stuff, apartment_type,
+      // floor, address, kmbosaltma, kmyukleme, nelevator, createDate, created_at, updated_at
+      // NOT: nelevator 9. indekstedir (10 = createDate). Bu eşleşme, eski uygulamanın
+      // "Nakliye Asansörü / Asansör / Kat / Daire Tipi" ekranıyla birebir doğrulanmıştır.
+      transferRows.forEach(r => transferMap.set(String(r[0]), {
+        elevator: r[2], carry_stuff: r[3], apartment_type: r[4], floor: r[5], address: r[6] || '', nelevator: r[9]
+      }));
+
+      // Daha önce aktarılmış kayıtları atla (legacyId üzerinden)
+      const mevcutLegacy = new Set(jobs.map(j => j.legacyId).filter(Boolean));
+
+      const kayitlar = [];
+      let atlananCop = 0, atlananMukerrer = 0, atlananBos = 0, atlananIsim = 0, atlananTelefon = 0;
+      let sayacIptal = 0, sayacDepo = 0;
+
+      for (const r of orderRows) {
+        const [id, ad, tel, tc, tarihSaat, , , toplam, status, , , , kapora, ekInfo, canceledNote, loadId, unloadId] = r;
+        const legacyId = 'order_' + id;
+        if (mevcutLegacy.has(legacyId)) { atlananMukerrer++; continue; }
+        if (!ad || !String(ad).trim()) { atlananBos++; continue; }
+        if (copKayitMi(ad)) { atlananCop++; continue; }
+        // YENİ: Ad + soyad yoksa (tek kelimelik isim) aktarma
+        if (!isimGecerliMi(ad)) { atlananIsim++; continue; }
+        // YENİ: 11 haneli geçerli cep numarası yoksa aktarma
+        if (!telefonGecerliMi(tel)) { atlananTelefon++; continue; }
+
+        const yuk = transferMap.get(String(loadId)) || null;
+        const bos = transferMap.get(String(unloadId)) || null;
+
+        // Tarih/saat: '2021-06-01 03:30:00' → '2021-06-01' + '03:30'
+        let date = '', time = '';
+        if (tarihSaat) {
+          const [d, t] = String(tarihSaat).split(' ');
+          date = d || '';
+          time = (t || '').slice(0, 5);
+        }
+
+        const yukAdres = (yuk?.address || '').trim();
+        const bosAdres = (bos?.address || '').trim();
+
+        // Depoevim tespiti: yükleme veya boşaltma adresinde geçiyorsa DEPO kaydı olur
+        const yukDepo = trLower(yukAdres).includes('depoevim') || trLower(yukAdres).includes('depo evim');
+        const bosDepo = trLower(bosAdres).includes('depoevim') || trLower(bosAdres).includes('depo evim');
+        const depoMu = yukDepo || bosDepo;
+
+        // İptal durumu
+        const iptalMi = trLower(status) === 'canceled';
+        if (iptalMi) sayacIptal++;
+        if (depoMu) sayacDepo++;
+
+        const simdi = new Date().toISOString();
+        const jobDoc = {
+          legacyId,
+          type: depoMu ? 'Depo' : 'Nakliye',
+          customerType: 'Bireysel',
+          customerName: String(ad).trim(),
+          customerPhone: telefonNormalize(tel),
+          altPhone: '',
+          tcNo: tc ? String(tc).trim() : '',
+          taxNo: '',
+          date, time,
+          price: toplam ? String(parseFloat(String(toplam).replace(',', '.')) || '') : '',
+          deposit: kapora ? String(parseFloat(String(kapora).replace(',', '.')) || '') : '',
+          notes: [ekInfo, canceledNote].filter(Boolean).join(' | ').trim(),
+          durationDays: '1',
+          aracSayisi: '1', // YENİ: havuzdan aktarımda varsayılan tek araç
+          isSpecial: false,
+          deliveryCode: Math.random().toString(36).substring(2, 8).toUpperCase(),
+          // Ekip bilgisi BOŞ bırakılır
+          team: 'Atanmadı', assignedPersonnelId: null, assignedPersonnelIds: [], teamNames: [],
+          extraLoadingAddresses: [], extraUnloadingAddresses: [],
+          // Durum: iptal → cancelled; diğer her şey → tamamlanmış + onaylı
+          status: iptalMi ? 'cancelled' : 'completed',
+          endJobDetails: null,
+          materialsDeducted: true,   // eski işler için stok DÜŞÜLMEZ
+          pointsApproved: !iptalMi,  // puan otomatik onaylı
+          mesaiApproved: !iptalMi,   // mesai otomatik onaylı
+          completedAt: !iptalMi && date ? `${date}T${time || '09:00'}:00` : null,
+          cancelledAt: iptalMi && date ? `${date}T${time || '09:00'}:00` : null,
+          createdBy: 'Eski Sistem Aktarımı',
+          createdAt: date ? `${date}T${time || '09:00'}:00` : simdi,
+          importedLegacy: true,
+        };
+
+        // ---- YÜKLEME TARAFI ----
+        if (yukDepo) {
+          const sube = DEPO_LOCATIONS.find(d => d.name === depoSubeBul(yukAdres)) || DEPO_LOCATIONS[0];
+          Object.assign(jobDoc, {
+            depoDirection: 'fromDepo', selectedDepo: sube.name,
+            fromProvince: sube.province, fromDistrict: sube.district, fromAddress: sube.address,
+            fromFloor: 'Giriş Kat', fromTransportMethod: 'Merdiven', fromPacking: 'Kendisi Topladı',
+            fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre',
+          });
+        } else {
+          const konum = yukAdres ? ilIlceBul(yukAdres) : { province: '', district: '' };
+          Object.assign(jobDoc, {
+            fromProvince: konum.province, fromDistrict: konum.district, fromAddress: yukAdres,
+            fromFloor: katEsle(yuk?.floor), fromTransportMethod: tasimaEsle(yuk),
+            fromPacking: parseInt(yuk?.carry_stuff) === 2 ? 'Toplama Yapılacak' : 'Kendisi Topladı',
+            fromRoomCount: daireTipiEsle(yuk?.apartment_type), fromDistance: '', fromDistanceUnit: 'Metre',
+          });
+        }
+
+        // ---- BOŞALTMA TARAFI ----
+        if (bosDepo && !yukDepo) {
+          const sube = DEPO_LOCATIONS.find(d => d.name === depoSubeBul(bosAdres)) || DEPO_LOCATIONS[0];
+          Object.assign(jobDoc, {
+            depoDirection: 'toDepo', selectedDepo: sube.name,
+            toProvince: sube.province, toDistrict: sube.district, toAddress: sube.address,
+            toFloor: 'Giriş Kat', toTransportMethod: 'Merdiven', toPacking: 'Kendisi Topladı',
+            toRoomCount: 'Depoevim Tesisleri', toDistance: '0', toDistanceUnit: 'Metre',
+          });
+        } else {
+          const konum = bosAdres ? ilIlceBul(bosAdres) : { province: '', district: '' };
+          Object.assign(jobDoc, {
+            toProvince: konum.province, toDistrict: konum.district, toAddress: bosAdres,
+            toFloor: katEsle(bos?.floor), toTransportMethod: tasimaEsle(bos),
+            toPacking: 'Kendisi Topladı',
+            toRoomCount: daireTipiEsle(bos?.apartment_type), toDistance: '', toDistanceUnit: 'Metre',
+          });
+        }
+
+        // Teslim durumu eski sistemde yok → boş bırakılır (görünümde 'Yok' yazar)
+        jobDoc.wallMounting = [];
+
+        kayitlar.push(jobDoc);
+      }
+
+      // Aktarım tarihine göre eskiden yeniye yaz (cari 'ilk kayıt' tarihleri doğru otursun)
+      kayitlar.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+
+      setHazirKayitlar(kayitlar);
+      setOzet({
+        okunanIs: orderRows.length,
+        okunanAdres: transferRows.length,
+        aktarilacak: kayitlar.length,
+        tamamlanan: kayitlar.length - sayacIptal,
+        iptal: sayacIptal,
+        depo: sayacDepo,
+        nakliye: kayitlar.length - sayacDepo,
+        tekilMusteri: new Set(kayitlar.map(k => (k.customerPhone || '').replace(/\D/g, ''))).size,
+        atlananCop, atlananMukerrer, atlananBos, atlananIsim, atlananTelefon,
+      });
+      setAsama('onizleme');
+    };
+
+    // ---------------- AKTARIM (Firestore'a yazma) ----------------
+    const aktarimiBaslat = async () => {
+      if (hazirKayitlar.length === 0) return;
+      setAsama('aktariliyor');
+      setIlerleme({ yazilan: 0, toplam: hazirKayitlar.length });
+      const partiId = 'imp_' + Date.now();
+      const yazilanIdler = [];
+      try {
+        const PARCA = 350; // Firestore batch limiti 500; güvenli pay bırakıyoruz
+        for (let i = 0; i < hazirKayitlar.length; i += PARCA) {
+          const dilim = hazirKayitlar.slice(i, i + PARCA);
+          const batch = writeBatch(db);
+          for (const kayit of dilim) {
+            const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', 'jobs'));
+            batch.set(ref, { ...kayit, importBatchId: partiId });
+            yazilanIdler.push(ref.id);
+          }
+          await batch.commit();
+          setIlerleme({ yazilan: Math.min(i + PARCA, hazirKayitlar.length), toplam: hazirKayitlar.length });
+        }
+        // Geri alma için parti kaydı oluştur
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'legacyImports', partiId), {
+          jobIds: yazilanIdler, count: yazilanIdler.length,
+          by: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+        });
+        addSystemLog?.('Eski Sistem Aktarımı', `${yazilanIdler.length} iş kaydı eski sistemden içe aktarıldı.`);
+        setAsama('bitti');
+      } catch (err) {
+        console.error(err);
+        setHata('Aktarım sırasında hata oluştu: ' + err.message + ' — "Son Yüklemeyi Geri Al" ile yarım aktarımı temizleyebilirsiniz.');
+        // Yarım kalan parti de geri alınabilsin diye kaydı yine oluştur
+        if (yazilanIdler.length > 0) {
+          await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'legacyImports', partiId), {
+            jobIds: yazilanIdler, count: yazilanIdler.length, incomplete: true,
+            by: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+          });
+        }
+        setAsama('onizleme');
+      }
+    };
+
+    // ---------------- SON YÜKLEMEYİ GERİ AL ----------------
+    const sonYuklemeyiGeriAl = async () => {
+      const parti = sonPartiler[0];
+      if (!parti || geriAliniyor) return;
+      setGeriAliniyor(true);
+      try {
+        const ids = parti.jobIds || [];
+        const PARCA = 350;
+        for (let i = 0; i < ids.length; i += PARCA) {
+          const batch = writeBatch(db);
+          ids.slice(i, i + PARCA).forEach(id => batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id)));
+          await batch.commit();
+        }
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'legacyImports', parti.id));
+        addSystemLog?.('Eski Sistem Aktarımı Geri Alındı', `${ids.length} içe aktarılmış kayıt silindi; sistem aktarım öncesine döndü.`);
+      } catch (err) { setHata('Geri alma sırasında hata: ' + err.message); }
+      setGeriAliniyor(false);
+    };
+
+    return (
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[70] flex justify-center items-center p-4">
+        <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+          <div className="bg-black text-white p-4 flex justify-between items-center shrink-0">
+            <h3 className="font-bold text-lg flex items-center gap-2"><Database className="w-5 h-5 text-yellow-400" /> Eski Sistemden İçe Aktar</h3>
+            <button onClick={onClose} disabled={asama === 'aktariliyor'} className="text-neutral-400 hover:text-white transition disabled:opacity-40"><X className="w-6 h-6" /></button>
+          </div>
+
+          <div className="p-5 overflow-y-auto space-y-4">
+            {hata && <div className="bg-red-50 border border-red-200 text-red-700 text-sm font-bold rounded-xl p-3">{hata}</div>}
+
+            {/* AŞAMA 1: DOSYA SEÇİMİ */}
+            {asama === 'dosya' && (
+              <>
+                <p className="text-sm text-neutral-600 font-medium">
+                  Eski uygulamanın SQL yedeğini (<b>semboln_db.sql</b>) seçin. İş kayıtları ve müşteriler
+                  otomatik eşleştirilerek sisteme aktarılır. <b>Depo kiralama kayıtları aktarılmaz.</b>
+                </p>
+                <label className="cursor-pointer w-full py-8 bg-neutral-50 border-2 border-neutral-300 border-dashed rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-neutral-100 hover:border-red-400 transition">
+                  <Database className="w-8 h-8 text-neutral-400" />
+                  <span className="text-sm font-black text-neutral-600">SQL Dosyası Seç (.sql)</span>
+                  <span className="text-[11px] font-bold text-neutral-400">Dosya sadece tarayıcınızda okunur, önce önizleme gösterilir</span>
+                  <input type="file" accept=".sql,text/plain" className="hidden" onChange={handleDosyaSec} />
+                </label>
+              </>
+            )}
+
+            {/* AŞAMA 2: ÖNİZLEME */}
+            {asama === 'onizleme' && ozet && (
+              <>
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 text-xs font-bold text-neutral-500">
+                  Dosyada {ozet.okunanIs.toLocaleString('tr-TR')} iş ve {ozet.okunanAdres.toLocaleString('tr-TR')} adres kaydı okundu.
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-black">{ozet.aktarilacak.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">Aktarılacak İş</div></div>
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-purple-700">{ozet.tekilMusteri.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">Tekil Müşteri (Cari)</div></div>
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-green-600">{ozet.tamamlanan.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">Tamamlanmış + Onaylı</div></div>
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-red-600">{ozet.iptal.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">İptal Edilmiş</div></div>
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-red-500">{ozet.nakliye.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">Nakliye Kaydı</div></div>
+                  <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-xl font-black text-blue-600">{ozet.depo.toLocaleString('tr-TR')}</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-0.5">Depo Kaydı</div></div>
+                </div>
+                <div className="text-[11px] font-bold text-neutral-400 bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+                  <b className="text-neutral-500">Atlanan kayıtlar:</b> {ozet.atlananCop} deneme/çöp • {ozet.atlananTelefon} geçersiz telefon (11 hane değil veya uydurma)
+                  • {ozet.atlananIsim} tek kelimelik isim (soyadı yok) • {ozet.atlananBos} isimsiz • {ozet.atlananMukerrer} daha önce aktarılmış.
+                  Depo kiralama müşterileri hiç okunmadı.
+                </div>
+                <button onClick={aktarimiBaslat} className="w-full py-3.5 bg-red-600 text-white font-black rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2 shadow-lg">
+                  <Database className="w-5 h-5" /> {ozet.aktarilacak.toLocaleString('tr-TR')} Kaydı İçe Aktar
+                </button>
+              </>
+            )}
+
+            {/* AŞAMA 3: AKTARILIYOR */}
+            {asama === 'aktariliyor' && (
+              <div className="py-6 text-center space-y-3">
+                <div className="text-sm font-black text-black">Kayıtlar aktarılıyor, lütfen pencereyi kapatmayın...</div>
+                <div className="w-full bg-neutral-100 rounded-full h-3 overflow-hidden border border-neutral-200">
+                  <div className="bg-red-600 h-full transition-all" style={{ width: `${ilerleme.toplam ? Math.round((ilerleme.yazilan / ilerleme.toplam) * 100) : 0}%` }}></div>
+                </div>
+                <div className="text-xs font-bold text-neutral-500">{ilerleme.yazilan.toLocaleString('tr-TR')} / {ilerleme.toplam.toLocaleString('tr-TR')}</div>
+              </div>
+            )}
+
+            {/* AŞAMA 4: BİTTİ */}
+            {asama === 'bitti' && (
+              <div className="py-4 text-center space-y-3">
+                <CheckCircle className="w-14 h-14 text-green-600 mx-auto" />
+                <div className="text-base font-black text-black">Aktarım tamamlandı!</div>
+                <p className="text-xs font-bold text-neutral-500">
+                  {ilerleme.toplam.toLocaleString('tr-TR')} iş kaydı eklendi. Müşteriler cari profillerinde otomatik birleşti.
+                  Tamamlanan İşler, İptal Edilen İşler ve Tüm Müşteriler bölümlerinden kontrol edebilirsiniz.
+                </p>
+                <button onClick={onClose} className="w-full py-3 bg-neutral-900 text-white font-black rounded-xl hover:bg-black transition">Kapat</button>
+              </div>
+            )}
+
+            {/* SON YÜKLEMEYİ GERİ AL — her aşamada altta görünür (aktarım sırasında hariç) */}
+            {asama !== 'aktariliyor' && sonPartiler.length > 0 && (
+              <div className="border-t border-neutral-200 pt-4">
+                <div className="flex items-center justify-between gap-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-amber-800">Son yükleme: {sonPartiler[0].count?.toLocaleString('tr-TR')} kayıt{sonPartiler[0].incomplete ? ' (yarım kaldı)' : ''}</p>
+                    <p className="text-[10px] font-bold text-amber-600">{sonPartiler[0].by} • {sonPartiler[0].createdAt ? new Date(sonPartiler[0].createdAt).toLocaleString('tr-TR') : ''}</p>
+                  </div>
+                  <button onClick={sonYuklemeyiGeriAl} disabled={geriAliniyor}
+                    className="shrink-0 px-3 py-2 bg-amber-600 text-white text-xs font-black rounded-lg hover:bg-amber-700 transition disabled:opacity-50 flex items-center gap-1.5">
+                    {geriAliniyor ? 'Geri Alınıyor...' : 'Son Yüklemeyi Geri Al'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ============================================================================
+  // YENİ: MÜŞTERİ HAVUZU MODÜLÜ — Satış Bölümü'nün bir parçası olarak buraya taşındı
+  // (önceden ayrı MusteriHavuzu.jsx dosyasındaydı; içerik AYNEN korunmuştur,
+  // sadece import satırları yukarıdaki ortak import bloğuyla birleştirildi)
+  // ============================================================================
+
+// ============================================================================
+// MÜŞTERİ HAVUZU MODÜLÜ
+// Şirketi arayan / mesaj atan tüm müşteri adayları 4 kanalda tek havuzda
+// toplanır: Telefon Çağrıları, WhatsApp, Instagram DM, Gmail/E-posta.
+// Satış personeli buradan müşteriye döner, durum ve not işler; her hareket
+// kim tarafından yapıldıysa kayıt geçmişine (hareketler) yazılır.
+//
+// VERİ YAPISI (Firestore):
+//  - havuzKayitlari : müşteri aday kayıtları. Alanlar:
+//      kanal ('telefon'|'whatsapp'|'instagram'|'gmail'), musteriAdi, iletisim,
+//      hesapId (hangi bağlı hesaptan geldi), hizmetTipi ('Nakliye'|'Depo'|'Asansör'),
+//      durum, atanan (satışçı adı), sonMesaj (özet/ilk mesaj), notlar[],
+//      hareketler[{tarih, kullanici, islem}], kaynak ('manuel'|'api'), createdAt
+//  - havuzHesaplari : kanallara bağlı hesaplar (birden fazla olabilir). Alanlar:
+//      kanal, etiket (örn "Santral 1 - 0850..."), deger (numara/kullanıcı/mail), createdAt
+//
+// API ENTEGRASYONU:
+//  Kayıtlar manuel girilebildiği gibi, aşağıdaki uç noktalardan "Senkronize Et"
+//  butonuyla da çekilir. Uç nokta dosyaları projenin api/ klasöründedir
+//  (Vercel serverless). Her uç nokta normalize edilmiş kayıt listesi döndürür.
+// ============================================================================
+
+// Kanal başına API uç noktası (api/ klasöründeki dosyalarla birebir eşleşir)
+const HAVUZ_API_UCLARI = {
+  telefon:   '/api/santral/vapi',      // Sanal santral (Vapi) çağrı kayıtları
+  whatsapp:  '/api/openai/whatsapp',   // WhatsApp Business mesajları
+  instagram: '/api/openai/instagram',  // Instagram DM kutusu
+  gmail:     '/api/openai/chat',       // Gmail / şirket e-postaları (AI özetli)
+};
+
+// Kanal tanımları: sekme rengi, ikonu, hesap alanı etiketleri
+const KANALLAR = [
+  { id: 'telefon',   ad: 'Telefon Çağrıları',   Ikon: Phone,         renk: 'blue',    hesapEtiket: 'Santral Numarası',   hesapOrnek: '0850 XXX XX XX',        iletisimEtiket: 'Telefon No' },
+  { id: 'whatsapp',  ad: 'WhatsApp Mesajları',  Ikon: MessageCircle, renk: 'green',   hesapEtiket: 'WhatsApp Numarası',  hesapOrnek: '0532 XXX XX XX',        iletisimEtiket: 'Telefon No' },
+  { id: 'instagram', ad: 'Instagram Mesajları', Ikon: Camera,        renk: 'pink',    hesapEtiket: 'Instagram Hesabı',   hesapOrnek: '@sembolnakliyat',       iletisimEtiket: 'Kullanıcı Adı' },
+  { id: 'gmail',     ad: 'Gmail / E-posta',     Ikon: Mail,          renk: 'red',     hesapEtiket: 'E-posta Adresi',     hesapOrnek: 'info@sembolevdeneve.com', iletisimEtiket: 'E-posta' },
+  { id: 'web',       ad: 'Web Sitesi Teklifleri', Ikon: Globe,       renk: 'purple',  hesapEtiket: 'Sayfa',              hesapOrnek: 'sembolevdeneve.com',      iletisimEtiket: 'Telefon No' },
+];
+
+// Takip durumları — sıralama satış hunisine göredir
+const DURUMLAR = [
+  { id: 'Yeni',              renk: 'bg-neutral-100 text-neutral-700 border-neutral-300' },
+  { id: 'Görüşme Sağlandı',  renk: 'bg-blue-50 text-blue-700 border-blue-200' },
+  { id: 'Dönüş Bekliyor',    renk: 'bg-amber-50 text-amber-700 border-amber-200' },
+  { id: 'Reddedildi',        renk: 'bg-red-50 text-red-700 border-red-200' },
+  { id: 'İşi Aldık',         renk: 'bg-green-50 text-green-700 border-green-200' },
+];
+
+// Hizmet tipi rozet renkleri (sistemin geneliyle uyumlu: Nakliye kırmızı, Depo mavi)
+const HIZMET_TIPLERI = [
+  { id: 'Nakliye',  Ikon: Truck,      renk: 'bg-red-600 text-white' },
+  { id: 'Depo',     Ikon: Package,    renk: 'bg-blue-600 text-white' },
+  { id: 'Asansör',  Ikon: ArrowUpDown, renk: 'bg-green-600 text-white' },
+];
+
+// Kanal rengine göre Tailwind sınıfları (dinamik sınıf üretimi Tailwind'de
+// çalışmadığı için tüm varyantlar açıkça yazılır)
+const KANAL_RENK = {
+  blue:  { aktif: 'bg-blue-600 text-white shadow-md',  pasif: 'bg-blue-50 text-blue-700 border-blue-200 hover:border-blue-400',   nokta: 'bg-blue-600',  koyu: 'text-blue-700' },
+  green: { aktif: 'bg-green-600 text-white shadow-md', pasif: 'bg-green-50 text-green-700 border-green-200 hover:border-green-400', nokta: 'bg-green-600', koyu: 'text-green-700' },
+  pink:  { aktif: 'bg-pink-600 text-white shadow-md',  pasif: 'bg-pink-50 text-pink-700 border-pink-200 hover:border-pink-400',   nokta: 'bg-pink-600',  koyu: 'text-pink-700' },
+  red:   { aktif: 'bg-red-600 text-white shadow-md',   pasif: 'bg-red-50 text-red-700 border-red-200 hover:border-red-400',      nokta: 'bg-red-600',   koyu: 'text-red-700' },
+  purple: { aktif: 'bg-purple-600 text-white shadow-md', pasif: 'bg-purple-50 text-purple-700 border-purple-200 hover:border-purple-400', nokta: 'bg-purple-600', koyu: 'text-purple-700' },
+};
+
+// Tarihi kısa Türkçe biçimde göster
+const tarihSaat = (iso) => iso ? new Date(iso).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
+
+export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLog, setViewingImage }) => {
+  // ---------------------------------------------------------------- STATE ---
+  const [aktifKanal, setAktifKanal] = useState('telefon');
+  const [kayitlar, setKayitlar] = useState([]);       // Tüm kanalların kayıtları (canlı)
+  const [hesaplar, setHesaplar] = useState([]);       // Bağlı hesaplar (canlı)
+  const [durumFiltre, setDurumFiltre] = useState('Tümü');
+  const [hizmetFiltre, setHizmetFiltre] = useState('Tümü');
+  const [hesapFiltre, setHesapFiltre] = useState('Tümü');
+  const [arama, setArama] = useState('');
+  const [detayKayit, setDetayKayit] = useState(null); // Detay/hareket penceresi
+  const [detayFotoGoster, setDetayFotoGoster] = useState(null); // Detay penceresinde açılan fotoğraf (yan panel)
+  const [notMetni, setNotMetni] = useState('');
+  const [yeniKayitAcik, setYeniKayitAcik] = useState(false);
+  const [hesapYonetimAcik, setHesapYonetimAcik] = useState(false);
+  const [yeniHesap, setYeniHesap] = useState({ etiket: '', deger: '', apiAnahtari: '' });
+  const [senkronDurum, setSenkronDurum] = useState(''); // '', 'yukleniyor', mesaj
+  const [silinecekId, setSilinecekId] = useState(null);
+  
+  // YENİ: Müşteri eşleştirme için state'ler
+  const [duzenleIletisim, setDuzenleIletisim] = useState('');
+  const [duzenleMusteriAdi, setDuzenleMusteriAdi] = useState('');
+
+  const bosYeniKayit = { musteriAdi: '', iletisim: '', hesapId: '', hizmetTipi: 'Nakliye', sonMesaj: '' };
+  const [yeniKayit, setYeniKayit] = useState(bosYeniKayit);
+
+  const kanal = KANALLAR.find(k => k.id === aktifKanal);
+  const renk = KANAL_RENK[kanal.renk];
+  const kullaniciAdi = currentUser?.fullName || 'Sistem';
+
+  // ------------------------------------------------------- CANLI VERİLER ---
+  useEffect(() => {
+    const unsub1 = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari'), snap => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      setKayitlar(list);
+    });
+    const unsub2 = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'havuzHesaplari'), snap => {
+      setHesaplar(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+    return () => { unsub1(); unsub2(); };
+  }, []);
+
+  // ------------------------------------------------------- YARDIMCILAR ---
+  const hareketliGuncelle = async (kayit, degisiklik, islemMetni) => {
+    const hareket = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, islem: islemMetni };
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari', kayit.id), {
+      ...degisiklik,
+      hareketler: [...(kayit.hareketler || []), hareket],
+    });
+    setDetayKayit(prev => prev && prev.id === kayit.id ? { ...prev, ...degisiklik, hareketler: [...(prev.hareketler || []), hareket] } : prev);
+  };
+
+  const handleDurumDegistir = async (kayit, yeniDurum) => {
+    if (kayit.durum === yeniDurum) return;
+    await hareketliGuncelle(kayit, { durum: yeniDurum }, `Durum "${kayit.durum || 'Yeni'}" → "${yeniDurum}" olarak değiştirildi`);
+    addSystemLog?.('Müşteri Havuzu', `${kayit.musteriAdi || kayit.iletisim}: durum "${yeniDurum}" yapıldı.`);
+  };
+
+  const handleAta = async (kayit, isim) => {
+    await hareketliGuncelle(kayit, { atanan: isim }, isim ? `Kayıt ${isim} adlı satışçıya atandı` : 'Atama kaldırıldı');
+  };
+
+  const handleNotEkle = async (kayit) => {
+    if (!notMetni.trim()) return;
+    const not = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, metin: notMetni.trim() };
+    await hareketliGuncelle(kayit, { notlar: [...(kayit.notlar || []), not] }, `Not eklendi: "${notMetni.trim().slice(0, 60)}"`);
+    setNotMetni('');
+  };
+
+  const handleHizmetDegistir = async (kayit, tip) => {
+    if (kayit.hizmetTipi === tip) return;
+    await hareketliGuncelle(kayit, { hizmetTipi: tip }, `Hizmet tipi "${tip}" olarak işaretlendi`);
+  };
+
+  const handleMusteriGuncelle = async (kayit) => {
+    const yeniAd = duzenleMusteriAdi.trim() || kayit.musteriAdi;
+    const yeniNo = duzenleIletisim.trim() || kayit.iletisim;
+
+    if (yeniAd === kayit.musteriAdi && yeniNo === kayit.iletisim) return;
+
+    await hareketliGuncelle(kayit, { musteriAdi: yeniAd, iletisim: yeniNo }, `Müşteri bilgileri eşleştirildi: ${yeniAd} - ${yeniNo}`);
+    addSystemLog?.('Müşteri Havuzu', `Web tıklaması gerçek müşteriyle eşleştirildi: ${yeniAd}`);
+  };
+
+  const handleYeniKayit = async () => {
+    if (!yeniKayit.iletisim.trim()) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari'), {
+      kanal: aktifKanal,
+      musteriAdi: yeniKayit.musteriAdi.trim(),
+      iletisim: yeniKayit.iletisim.trim(),
+      hesapId: yeniKayit.hesapId,
+      hizmetTipi: yeniKayit.hizmetTipi,
+      sonMesaj: yeniKayit.sonMesaj.trim(),
+      durum: 'Yeni', atanan: '', notlar: [], kaynak: 'manuel',
+      hareketler: [{ tarih: new Date().toISOString(), kullanici: kullaniciAdi, islem: 'Kayıt manuel olarak oluşturuldu' }],
+      createdAt: new Date().toISOString(),
+    });
+    addSystemLog?.('Müşteri Havuzu', `${kanal.ad} havuzuna yeni kayıt eklendi: ${yeniKayit.musteriAdi || yeniKayit.iletisim}`);
+    setYeniKayit(bosYeniKayit); setYeniKayitAcik(false);
+  };
+
+  const handleHesapEkle = async () => {
+    if (!yeniHesap.deger.trim()) return;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'havuzHesaplari'), {
+      kanal: aktifKanal, etiket: yeniHesap.etiket.trim() || yeniHesap.deger.trim(),
+      deger: yeniHesap.deger.trim(),
+      apiYolu: HAVUZ_API_UCLARI[aktifKanal] || '',
+      apiAnahtari: yeniHesap.apiAnahtari.trim(),
+      createdAt: new Date().toISOString(),
+    });
+    addSystemLog?.('Müşteri Havuzu', `${kanal.ad} için hesap bağlandı: ${yeniHesap.deger.trim()}`);
+    setYeniHesap({ etiket: '', deger: '', apiAnahtari: '' });
+  };
+
+  const handleSenkron = async () => {
+    setSenkronDurum('yukleniyor');
+    try {
+      const res = await fetch(HAVUZ_API_UCLARI[aktifKanal]);
+      if (!res.ok) throw new Error('endpoint');
+      const data = await res.json();
+      const gelenler = Array.isArray(data?.kayitlar) ? data.kayitlar : [];
+      const mevcutlar = new Set(kayitlar.filter(k => k.kanal === aktifKanal).map(k => (k.iletisim || '').toLowerCase()));
+      let eklenen = 0;
+      for (const g of gelenler) {
+        const anahtar = (g.iletisim || '').toLowerCase();
+        if (!anahtar || mevcutlar.has(anahtar)) continue;
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari'), {
+          kanal: aktifKanal, musteriAdi: g.musteriAdi || '', iletisim: g.iletisim,
+          hesapId: g.hesapId || '', hizmetTipi: g.hizmetTipi || 'Nakliye',
+          sonMesaj: g.sonMesaj || '', durum: 'Yeni', atanan: '', notlar: [], kaynak: 'api',
+          hareketler: [{ tarih: new Date().toISOString(), kullanici: 'API', islem: 'Kayıt API senkronuyla alındı' }],
+          createdAt: g.createdAt || new Date().toISOString(),
+        });
+        mevcutlar.add(anahtar); eklenen++;
+      }
+      setSenkronDurum(`${eklenen} yeni kayıt alındı`);
+      if (eklenen > 0) addSystemLog?.('Müşteri Havuzu', `${kanal.ad}: API senkronuyla ${eklenen} yeni kayıt alındı.`);
+    } catch (e) {
+      setSenkronDurum('API bağlantısı henüz hazır değil — kayıtları manuel ekleyebilirsiniz');
+    }
+    setTimeout(() => setSenkronDurum(''), 5000);
+  };
+
+  const kanalHesaplari = hesaplar.filter(h => h.kanal === aktifKanal);
+  const kanalKayitlari = kayitlar.filter(k => k.kanal === aktifKanal);
+  const filtreli = kanalKayitlari.filter(k => {
+    if (durumFiltre !== 'Tümü' && (k.durum || 'Yeni') !== durumFiltre) return false;
+    if (hizmetFiltre !== 'Tümü' && (k.hizmetTipi || 'Nakliye') !== hizmetFiltre) return false;
+    if (hesapFiltre !== 'Tümü' && k.hesapId !== hesapFiltre) return false;
+    if (arama.trim()) {
+      const q = arama.toLowerCase();
+      return (k.musteriAdi || '').toLowerCase().includes(q) || (k.iletisim || '').toLowerCase().includes(q) || (k.atanan || '').toLowerCase().includes(q);
+    }
+    return true;
+  });
+
+  const durumSayaclari = { 'Tümü': kanalKayitlari.length };
+  DURUMLAR.forEach(d => { durumSayaclari[d.id] = kanalKayitlari.filter(k => (k.durum || 'Yeni') === d.id).length; });
+
+  const satiscilar = personnelList.filter(p => p.position !== 'Firma Sahibi');
+  const hesapAdi = (id) => kanalHesaplari.find(h => h.id === id)?.etiket || '—';
+  const durumRenk = (d) => DURUMLAR.find(x => x.id === (d || 'Yeni'))?.renk || DURUMLAR[0].renk;
+
+  const iletisimLink = (k) => {
+    const v = (k.iletisim || '').replace(/\s/g, '');
+    if (aktifKanal === 'telefon') return `tel:${v}`;
+    if (aktifKanal === 'whatsapp') return `https://wa.me/${v.replace(/^0/, '90')}`;
+    if (aktifKanal === 'instagram') return `https://instagram.com/${v.replace('@', '')}`;
+    return `mailto:${v}`;
+  };
+  const iletisimBtnMetin = aktifKanal === 'telefon' ? 'Ara' : aktifKanal === 'gmail' ? 'Mail At' : 'Mesaj At';
+
+  // YENİ: AKTİF SEÇİLİ KANALA GÖRE GÜNLÜK PERFORMANS İSTATİSTİKLERİ
+  const bugunStr = new Date().toISOString().split('T')[0];
+  const aktifKanalBugun = kayitlar.filter(k => k.kanal === aktifKanal && k.createdAt && k.createdAt.startsWith(bugunStr));
+  const bugunAdsSayisi = aktifKanalBugun.filter(k => k.sonMesaj?.includes('Google reklam') || k.musteriAdi?.includes('Google Ads')).length;
+  const bugunOrganikSayisi = aktifKanalBugun.filter(k => !k.sonMesaj?.includes('Google reklam') && !k.musteriAdi?.includes('Google Ads')).length;
+
+  // ================================================================ RENDER ===
+  return (
+    <div className="max-w-7xl mx-auto animate-in fade-in space-y-4">
+
+      {/* BAŞLIK */}
+      <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 rounded-2xl p-5 text-white shadow-lg flex flex-col md:flex-row justify-between md:items-center gap-4">
+        <div>
+          <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><Users className="w-6 h-6 text-yellow-400" /> Müşteri Havuzu</h2>
+          <p className="text-neutral-300 text-xs md:text-sm mt-1">Şirketi arayan ve mesaj atan tüm müşteri adayları tek havuzda.</p>
+        </div>
+        
+        {/* YENİ: SEÇİLİ KANALA GÖRE GÜNLÜK ÖZET KUTULARI */}
+        <div className="flex gap-2">
+          <div className="bg-white/10 border border-white/20 px-4 py-2 rounded-xl backdrop-blur-sm">
+            <p className="text-[10px] font-black text-green-400 uppercase">🟢 Bugün {kanal.ad} (Ads)</p>
+            <p className="text-lg font-black text-white">{bugunAdsSayisi} Tıklama</p>
+          </div>
+          <div className="bg-white/10 border border-white/20 px-4 py-2 rounded-xl backdrop-blur-sm">
+            <p className="text-[10px] font-black text-blue-400 uppercase">🔵 Bugün {kanal.ad} (Organik)</p>
+            <p className="text-lg font-black text-white">{bugunOrganikSayisi} Tıklama</p>
+          </div>
+        </div>
+      </div>
+
+      {/* KANAL SEKMELERİ — 4 bölüm */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+        {KANALLAR.map(k => {
+          const r = KANAL_RENK[k.renk];
+          const sayi = kayitlar.filter(x => x.kanal === k.id).length;
+          const aktif = aktifKanal === k.id;
+          return (
+            <button key={k.id} type="button"
+              onClick={() => { setAktifKanal(k.id); setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setHesapFiltre('Tümü'); setArama(''); setYeniKayitAcik(false); setHesapYonetimAcik(false); }}
+              className={`p-3 rounded-2xl border-2 transition flex items-center gap-2.5 ${aktif ? `${r.aktif} border-transparent` : `bg-white ${r.pasif}`}`}>
+              <k.Ikon className="w-5 h-5 shrink-0" />
+              <span className="text-xs font-black text-left leading-tight flex-1">{k.ad}</span>
+              <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${aktif ? 'bg-white/25' : 'bg-white'}`}>{sayi}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ARAÇ ÇUBUĞU: hesap filtresi + arama + aksiyonlar */}
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex flex-col lg:flex-row gap-2 lg:items-center">
+        <select value={hesapFiltre} onChange={e => setHesapFiltre(e.target.value)} className="px-3 py-2 text-xs font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none">
+          <option value="Tümü">Tüm Hesaplar ({kanalHesaplari.length})</option>
+          {kanalHesaplari.map(h => <option key={h.id} value={h.id}>{h.etiket}</option>)}
+        </select>
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Müşteri adı, numara veya satışçı ara..." className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-neutral-400" />
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button type="button" onClick={handleSenkron} disabled={senkronDurum === 'yukleniyor'}
+            className="px-3 py-2 bg-neutral-900 hover:bg-neutral-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 transition disabled:opacity-60">
+            {senkronDurum === 'yukleniyor' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Zap className="w-3.5 h-3.5" />} Senkronize Et
+          </button>
+          <button type="button" onClick={() => { setHesapYonetimAcik(v => !v); setYeniKayitAcik(false); }}
+            className="px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-xl text-xs font-black flex items-center gap-1.5 transition">
+            <Settings className="w-3.5 h-3.5" /> Hesaplar
+          </button>
+          <button type="button" onClick={() => { setYeniKayitAcik(v => !v); setHesapYonetimAcik(false); }}
+            className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 transition ${renk.aktif}`}>
+            <PlusCircle className="w-3.5 h-3.5" /> Yeni Kayıt
+          </button>
+        </div>
+      </div>
+      {senkronDurum && senkronDurum !== 'yukleniyor' && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold rounded-xl px-3 py-2">{senkronDurum}</div>
+      )}
+
+      {/* HESAP YÖNETİMİ */}
+      {hesapYonetimAcik && (
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 space-y-3 animate-in slide-in-from-top-1">
+          <div className="text-xs font-black text-neutral-700 flex items-center gap-1.5"><Settings className="w-4 h-4" /> Bağlı {kanal.hesapEtiket} Listesi</div>
+          <div className="flex flex-wrap gap-2">
+            {kanalHesaplari.length === 0 && <span className="text-xs text-neutral-400 font-bold">Henüz hesap bağlanmadı. Aşağıdan ekleyin.</span>}
+            {kanalHesaplari.map(h => (
+              <span key={h.id} className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-1.5 text-xs font-bold">
+                <span className={`w-2 h-2 rounded-full ${renk.nokta}`}></span>
+                {h.etiket} <span className="text-neutral-400 font-medium">({h.deger})</span>
+                <button type="button" onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'havuzHesaplari', h.id)); }} className="text-neutral-300 hover:text-red-600"><X className="w-3 h-3" /></button>
+              </span>
+            ))}
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2">
+            <input value={yeniHesap.etiket} onChange={e => setYeniHesap({ ...yeniHesap, etiket: e.target.value })} placeholder="Etiket (örn: Santral 1)" className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none" />
+            <input value={yeniHesap.deger} onChange={e => setYeniHesap({ ...yeniHesap, deger: e.target.value })} placeholder={kanal.hesapOrnek} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none" />
+            <input type="password" value={yeniHesap.apiAnahtari} onChange={e => setYeniHesap({ ...yeniHesap, apiAnahtari: e.target.value })} placeholder="API Anahtarı (opsiyonel)" className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none" autoComplete="off" />
+            <button type="button" onClick={handleHesapEkle} disabled={!yeniHesap.deger.trim()} className="p-2.5 bg-neutral-900 text-white rounded-xl text-xs font-black disabled:opacity-40">Hesap Bağla</button>
+          </div>
+          <div className="text-[10px] font-bold text-neutral-400 flex items-center gap-1.5 pt-1 border-t border-neutral-100">
+            <Zap className="w-3 h-3" /> Bu kanalın API uç noktası: <code className="bg-neutral-100 text-neutral-600 px-1.5 py-0.5 rounded">{HAVUZ_API_UCLARI[aktifKanal]}</code>
+          </div>
+        </div>
+      )}
+
+      {/* YENİ KAYIT FORMU */}
+      {yeniKayitAcik && (
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 space-y-2 animate-in slide-in-from-top-1">
+          <div className="text-xs font-black text-neutral-700 flex items-center gap-1.5"><PlusCircle className="w-4 h-4" /> {kanal.ad} — Yeni Kayıt</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2">
+            <input value={yeniKayit.musteriAdi} onChange={e => setYeniKayit({ ...yeniKayit, musteriAdi: e.target.value })} placeholder="Müşteri Adı" className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none" />
+            <input value={yeniKayit.iletisim} onChange={e => setYeniKayit({ ...yeniKayit, iletisim: e.target.value })} placeholder={kanal.iletisimEtiket + ' *'} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none" />
+            <select value={yeniKayit.hesapId} onChange={e => setYeniKayit({ ...yeniKayit, hesapId: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl bg-white text-xs font-bold outline-none">
+              <option value="">Hangi hesaba geldi?</option>
+              {kanalHesaplari.map(h => <option key={h.id} value={h.id}>{h.etiket}</option>)}
+            </select>
+            <select value={yeniKayit.hizmetTipi} onChange={e => setYeniKayit({ ...yeniKayit, hizmetTipi: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl bg-white text-xs font-bold outline-none">
+              {HIZMET_TIPLERI.map(t => <option key={t.id}>{t.id}</option>)}
+            </select>
+            <button type="button" onClick={handleYeniKayit} disabled={!yeniKayit.iletisim.trim()} className={`p-2.5 rounded-xl text-xs font-black transition disabled:opacity-40 ${renk.aktif}`}>Havuza Ekle</button>
+          </div>
+          <input value={yeniKayit.sonMesaj} onChange={e => setYeniKayit({ ...yeniKayit, sonMesaj: e.target.value })} placeholder="İlk mesaj / görüşme özeti (opsiyonel)" className="w-full p-2.5 border border-neutral-300 rounded-xl text-xs outline-none" />
+        </div>
+      )}
+
+      {/* DURUM + HİZMET FİLTRELERİ */}
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex flex-wrap items-center gap-2">
+        <span className="text-[10px] font-black text-neutral-400 uppercase">Durum:</span>
+        {['Tümü', ...DURUMLAR.map(d => d.id)].map(d => (
+          <button key={d} type="button" onClick={() => setDurumFiltre(d)}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${durumFiltre === d ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+            {d} <span className="opacity-60">({durumSayaclari[d]})</span>
+          </button>
+        ))}
+        <span className="text-[10px] font-black text-neutral-400 uppercase ml-2">Hizmet:</span>
+        {['Tümü', 'Nakliye', 'Depo', 'Asansör'].map(t => (
+          <button key={t} type="button" onClick={() => setHizmetFiltre(t)}
+            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${hizmetFiltre === t ? (t === 'Nakliye' ? 'bg-red-600 text-white border-red-600' : t === 'Depo' ? 'bg-blue-600 text-white border-blue-600' : t === 'Asansör' ? 'bg-green-600 text-white border-green-600' : 'bg-neutral-900 text-white border-neutral-900') : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* HAVUZ TABLOSU */}
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-x-auto">
+        <table className="w-full text-left text-xs min-w-[900px]">
+          <thead className="bg-neutral-900 text-white">
+            <tr>
+              <th className="p-3 font-bold rounded-tl-2xl">Müşteri</th>
+              <th className="p-3 font-bold">{kanal.iletisimEtiket}</th>
+              <th className="p-3 font-bold">Hesap</th>
+              <th className="p-3 font-bold text-center">Hizmet</th>
+              <th className="p-3 font-bold text-center">Durum</th>
+              <th className="p-3 font-bold">Atanan Satışçı</th>
+              <th className="p-3 font-bold">Son Hareket</th>
+              <th className="p-3 font-bold text-right rounded-tr-2xl">İşlem</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtreli.length === 0 && (
+              <tr><td colSpan={8} className="p-8 text-center text-neutral-400 font-bold">
+                Bu filtrelerde kayıt yok. "Yeni Kayıt" ile ekleyin veya "Senkronize Et" ile API'den çekin.
+              </td></tr>
+            )}
+            {filtreli.map(k => {
+              const sonHareket = (k.hareketler || [])[k.hareketler?.length - 1];
+              const tip = HIZMET_TIPLERI.find(t => t.id === (k.hizmetTipi || 'Nakliye')) || HIZMET_TIPLERI[0];
+              return (
+                <tr key={k.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition">
+                  <td className="p-3 font-bold text-black">
+                    <div className="flex items-center gap-2">
+                      <span className={`w-7 h-7 rounded-full ${renk.nokta} text-white flex items-center justify-center text-[10px] font-black shrink-0`}>
+                        {(k.musteriAdi || k.iletisim || '?').charAt(0).toUpperCase()}
+                      </span>
+                      <div className="min-w-0">
+                        <span className="block truncate">{k.musteriAdi || 'İsimsiz'}</span>
+                        {k.kaynak === 'api' && <span className="text-[9px] font-black text-neutral-400">API</span>}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="p-3 font-bold text-neutral-600">{k.iletisim}</td>
+                  <td className="p-3 text-neutral-500 font-bold">{hesapAdi(k.hesapId)}</td>
+                  <td className="p-3 text-center">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black ${tip.renk}`}>
+                      <tip.Ikon className="w-3 h-3" /> {tip.id.toUpperCase()}
+                    </span>
+                  </td>
+                  <td className="p-3 text-center">
+                    <select value={k.durum || 'Yeni'} onChange={e => handleDurumDegistir(k, e.target.value)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-black border outline-none cursor-pointer ${durumRenk(k.durum)}`}>
+                      {DURUMLAR.map(d => <option key={d.id}>{d.id}</option>)}
+                    </select>
+                  </td>
+                  <td className="p-3">
+                    <select value={k.atanan || ''} onChange={e => handleAta(k, e.target.value)}
+                      className="px-2 py-1 rounded-lg text-[10px] font-bold border border-neutral-200 bg-white outline-none cursor-pointer max-w-[130px]">
+                      <option value="">— Atanmadı —</option>
+                      {satiscilar.map(p => <option key={p.id} value={p.fullName}>{p.fullName}</option>)}
+                    </select>
+                  </td>
+                  <td className="p-3 text-neutral-500 max-w-[190px]">
+                    {sonHareket ? (
+                      <span className="block truncate" title={sonHareket.islem}>
+                        <b className="text-neutral-700">{sonHareket.kullanici}</b> • {tarihSaat(sonHareket.tarih)}
+                      </span>
+                    ) : '—'}
+                  </td>
+                  <td className="p-3 text-right whitespace-nowrap">
+                    <a href={iletisimLink(k)} target={aktifKanal === 'telefon' ? '_self' : '_blank'} rel="noopener noreferrer"
+                      className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black mr-1.5 ${k.iletisim.includes('Bekleniyor') ? 'opacity-50 pointer-events-none bg-neutral-200 text-neutral-500' : renk.aktif}`}>
+                      <kanal.Ikon className="w-3 h-3" /> {iletisimBtnMetin}
+                    </a>
+                    <button type="button" onClick={() => {
+                        setDetayKayit(k);
+                        setDetayFotoGoster(null);
+                        setDuzenleIletisim(k.iletisim.includes('Bekleniyor') ? '' : k.iletisim);
+                        setDuzenleMusteriAdi(k.musteriAdi.includes('Ziyaretçi') ? '' : k.musteriAdi);
+                      }}
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg text-[10px] font-black mr-1.5">
+                      <StickyNote className="w-3 h-3" /> Detay
+                    </button>
+                    <button type="button" onClick={() => setSilinecekId(k.id)} className="text-red-300 hover:text-red-600 align-middle"><Trash2 className="w-3.5 h-3.5" /></button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {/* DETAY / HAREKET PENCERESİ */}
+      {detayKayit && (
+        <div className="fixed inset-0 bg-black/70 z-[9998] flex flex-col sm:flex-row items-center justify-center p-4 gap-4 overflow-y-auto animate-in fade-in" onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[88vh] flex flex-col animate-in zoom-in-95 shrink-0" onClick={e => e.stopPropagation()}>
+            <div className={`p-4 text-white rounded-t-2xl shrink-0 ${renk.aktif}`}>
+              <div className="flex items-center justify-between">
+                <h3 className="font-black flex items-center gap-2 text-sm"><kanal.Ikon className="w-5 h-5" /> {detayKayit.musteriAdi || 'İsimsiz'} — {detayKayit.iletisim}</h3>
+                <button onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); }} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+              </div>
+              <p className="text-[11px] font-bold opacity-80 mt-1">{hesapAdi(detayKayit.hesapId)} • {tarihSaat(detayKayit.createdAt)} • Kaynak: {detayKayit.kaynak === 'api' ? 'API' : 'Manuel'}</p>
+            </div>
+            
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+              
+              {/* Müşteri Eşleştirme / Bilgi Güncelleme Alanı */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+                <p className="text-[10px] font-black text-blue-700 uppercase mb-2">Müşteri Bilgilerini Eşleştir</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                  <input
+                    value={duzenleMusteriAdi}
+                    onChange={e => setDuzenleMusteriAdi(e.target.value)}
+                    placeholder="Gerçek Ad Soyad"
+                    className="p-2.5 border border-blue-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                  <input
+                    value={duzenleIletisim}
+                    onChange={e => setDuzenleIletisim(e.target.value)}
+                    placeholder="Gerçek Telefon No"
+                    className="p-2.5 border border-blue-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-600"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleMusteriGuncelle(detayKayit)}
+                  disabled={(!duzenleIletisim.trim() && !duzenleMusteriAdi.trim()) || (duzenleIletisim === detayKayit.iletisim && duzenleMusteriAdi === detayKayit.musteriAdi)}
+                  className="w-full py-2 bg-blue-600 text-white rounded-xl text-xs font-black disabled:opacity-40 transition"
+                >
+                  Bilgileri Güncelle ve Eşleştir
+                </button>
+              </div>
+
+              {detayKayit.sonMesaj && (
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+                  <p className="text-[10px] font-black text-neutral-400 uppercase mb-1">İlk Mesaj / Görüşme Özeti</p>
+                  <p className="text-xs text-neutral-700">{detayKayit.sonMesaj}</p>
+                </div>
+              )}
+              {Array.isArray(detayKayit.fotograflar) && detayKayit.fotograflar.length > 0 && (
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+                  <p className="text-[10px] font-black text-neutral-400 uppercase mb-1">Müşterinin Yüklediği Fotoğraflar</p>
+                  <HasarCozumBelgeleri
+                    files={detayKayit.fotograflar.map((url, i) => ({ url, name: `Fotoğraf ${i + 1}` }))}
+                    setViewingImage={setDetayFotoGoster}
+                  />
+                </div>
+              )}
+              {/* Hızlı durum ve hizmet tipi değişimi */}
+              <div>
+                <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Durum</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {DURUMLAR.map(d => (
+                    <button key={d.id} type="button" onClick={() => handleDurumDegistir(detayKayit, d.id)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border transition ${(detayKayit.durum || 'Yeni') === d.id ? 'bg-neutral-900 text-white border-neutral-900' : d.renk}`}>
+                      {d.id}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Hizmet Tipi</p>
+                <div className="flex gap-1.5">
+                  {HIZMET_TIPLERI.map(t => (
+                    <button key={t.id} type="button" onClick={() => handleHizmetDegistir(detayKayit, t.id)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition flex items-center gap-1 ${(detayKayit.hizmetTipi || 'Nakliye') === t.id ? t.renk : 'bg-white text-neutral-500 border border-neutral-200'}`}>
+                      <t.Ikon className="w-3 h-3" /> {t.id}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* Not ekleme */}
+              <div>
+                <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Not Ekle</p>
+                <div className="flex gap-2">
+                  <input value={notMetni} onChange={e => setNotMetni(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleNotEkle(detayKayit); }}
+                    placeholder="Örn: Fiyat verildi, perşembe dönecek..." className="flex-1 p-2.5 border border-neutral-300 rounded-xl text-xs outline-none" />
+                  <button type="button" onClick={() => handleNotEkle(detayKayit)} disabled={!notMetni.trim()} className="px-3 py-2 bg-neutral-900 text-white rounded-xl text-xs font-black disabled:opacity-40 flex items-center gap-1"><Send className="w-3 h-3" /> Ekle</button>
+                </div>
+                {(detayKayit.notlar || []).slice().reverse().map((n, i) => (
+                  <div key={i} className="mt-2 bg-yellow-50 border border-yellow-200 rounded-xl p-2.5">
+                    <p className="text-xs text-neutral-800">{n.metin}</p>
+                    <p className="text-[9px] font-bold text-neutral-400 mt-1">{n.kullanici} • {tarihSaat(n.tarih)}</p>
+                  </div>
+                ))}
+              </div>
+              {/* Hareket geçmişi */}
+              <div>
+                <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5 flex items-center gap-1"><History className="w-3 h-3" /> Hareket Geçmişi</p>
+                <div className="space-y-1.5">
+                  {(detayKayit.hareketler || []).slice().reverse().map((h, i) => (
+                    <div key={i} className="flex items-start gap-2 text-xs">
+                      <span className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${renk.nokta}`}></span>
+                      <div>
+                        <span className="text-neutral-700">{h.islem}</span>
+                        <span className="block text-[9px] font-bold text-neutral-400">{h.kullanici} • {tarihSaat(h.tarih)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="p-3 border-t border-neutral-200 shrink-0">
+              <button onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); }} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm transition">Kapat</button>
+            </div>
+          </div>
+
+          {detayFotoGoster && (
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm max-h-[88vh] flex flex-col animate-in zoom-in-95 slide-in-from-right-4 shrink-0" onClick={e => e.stopPropagation()}>
+              <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-purple-600 rounded-t-2xl shrink-0">
+                <h3 className="font-bold text-sm truncate pr-2">{detayFotoGoster.title}</h3>
+                <button onClick={() => setDetayFotoGoster(null)} className="text-neutral-400 hover:text-white transition shrink-0"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="p-4 flex-1 min-h-0 overflow-y-auto flex flex-col items-center">
+                <div className="w-full aspect-video bg-neutral-100 rounded-xl border border-neutral-300 flex items-center justify-center mb-3 overflow-hidden relative shadow-inner">
+                  {isVideoUrl(detayFotoGoster.name) ? (
+                    <video src={detayFotoGoster.name} controls autoPlay muted className="w-full h-full object-contain bg-black" />
+                  ) : (
+                    <img src={detayFotoGoster.name} alt="Görsel" className="w-full h-full object-contain" />
+                  )}
+                </div>
+                <a href={detayFotoGoster.name} target="_blank" rel="noreferrer"
+                  className="w-full py-2.5 bg-purple-50 text-purple-700 hover:bg-purple-100 font-bold rounded-xl transition flex justify-center items-center gap-2 border border-purple-200 text-xs mb-2">
+                  <ArrowUpRight className="w-4 h-4" /> Görseli / Dosyayı Aç
+                </a>
+                <button onClick={() => setDetayFotoGoster(null)} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-xs transition">Kapat</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* SİLME ONAYI */}
+      {silinecekId && (
+        <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-in zoom-in-95">
+            <h3 className="font-black text-black mb-2">Kayıt silinsin mi?</h3>
+            <p className="text-xs text-neutral-500 mb-4">Bu müşteri kaydı ve tüm hareket geçmişi kalıcı olarak silinecek.</p>
+            <div className="flex gap-2">
+              <button onClick={() => setSilinecekId(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-black rounded-xl text-sm">Vazgeç</button>
+              <button onClick={async () => {
+                await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari', silinecekId));
+                addSystemLog?.('Müşteri Havuzu', 'Bir havuz kaydı silindi.');
+                setSilinecekId(null);
+              }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+  // ============================================================================
+  // YENİ: SAHA PORTFÖY MODÜLÜ — Satış Bölümü'nün bir parçası olarak buraya taşındı
+  // (önceden ayrı SahaPortfoy.jsx dosyasındaydı; içerik AYNEN korunmuştur,
+  // sadece import satırları yukarıdaki ortak import bloğuyla birleştirildi)
+  // ============================================================================
+// ============================================================================
+// SAHA PORTFÖY MODÜLÜ — Saha satış/pazarlama ekibinin çalışma alanı
+// Amaç: Emlak ofisleri, site yönetimleri, inşaat firmaları gibi İŞ ORTAKLARINI
+// portföye kazandırmak; ziyaret → görüşme → anlaşma sürecini takip etmek;
+// anlaşılan ortaklara komisyon/teminat carisi tutmak; yönlendirdikleri işleri
+// saymak. Kartvizitler fotoğraflanıp doğrudan partnera arşivlenir.
+//
+// - PORTFÖY SAHİBİ: her partner bir satış personeline aittir; herkes kimin
+//   portföyü olduğunu ve kimin görüştüğünü/bağladığını görür.
+// - SÜREÇ DURUMLARI: Aday → Randevu Alındı → Ziyaret Edildi → Görüşülüyor
+//   → Anlaşıldı (Bağlandı) → Pasif/Reddetti.
+// - ZİYARET GÜNLÜĞÜ: her ziyaret tarih + görüşen personel + sonuç notuyla
+//   partnera işlenir; tüm hareketler kayıt altındadır.
+// - CARİ: komisyon ödemeleri ve verilen teminatlar partner detayında tutulur;
+//   toplamlar kartta görünür.
+// - KARTVİZİT ARŞİVİ: kamera/galeri ile çoklu kartvizit fotoğrafı yüklenir
+//   (upload.php altyapısı, MediaCaptureMenu bileşeni).
+// Firebase koleksiyonu: 'sahaPortfoy' (partner dokümanları; ziyaretler,
+// cariHareketler, kartvizitler ve hareketGecmisi alt dizileri).
+// ============================================================================
+
+// Partner tipleri — ikon ve renkleriyle
+const PARTNER_TIPLERI = [
+  { id: 'Emlak Ofisi',    ikon: Home,      renk: 'bg-red-50 text-red-700 border-red-200' },
+  { id: 'Site Yönetimi',  ikon: Building2, renk: 'bg-blue-50 text-blue-700 border-blue-200' },
+  { id: 'İnşaat Firması', ikon: HardHat,   renk: 'bg-orange-50 text-orange-700 border-orange-200' },
+  { id: 'Kurumsal Firma', ikon: Briefcase, renk: 'bg-purple-50 text-purple-700 border-purple-200' },
+  { id: 'Diğer',          ikon: Handshake, renk: 'bg-neutral-100 text-neutral-700 border-neutral-300' },
+];
+
+// Süreç durumları — sıralı akış
+const PORTFOY_DURUMLARI = [
+  { id: 'Aday',           renk: 'bg-neutral-100 text-neutral-700 border-neutral-300' },
+  { id: 'Randevu Alındı', renk: 'bg-yellow-50 text-yellow-700 border-yellow-300' },
+  { id: 'Ziyaret Edildi', renk: 'bg-blue-50 text-blue-700 border-blue-300' },
+  { id: 'Görüşülüyor',    renk: 'bg-purple-50 text-purple-700 border-purple-300' },
+  { id: 'Anlaşıldı',      renk: 'bg-green-50 text-green-700 border-green-300' },
+  { id: 'Pasif',          renk: 'bg-red-50 text-red-600 border-red-200' },
+];
+
+const bugunStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const tl = (n) => `₺${(Number(n) || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
+
+export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog, setViewingImage }) => {
+  const [partnerlar, setPartnerlar] = useState([]);
+  const [arama, setArama] = useState('');
+  const [tipFiltre, setTipFiltre] = useState('Tümü');
+  const [durumFiltre, setDurumFiltre] = useState('Tümü');
+  const [sahipFiltre, setSahipFiltre] = useState('Tümü'); // Portföy sahibi (satış personeli) filtresi
+  const [detayId, setDetayId] = useState(null);           // Detay paneli açık partner
+  const [formAcik, setFormAcik] = useState(false);
+  const [duzenlenenId, setDuzenlenenId] = useState(null);
+  const [kaydediliyor, setKaydediliyor] = useState(false);
+  const [kartvizitYukleniyor, setKartvizitYukleniyor] = useState(false);
+  const [silinecekId, setSilinecekId] = useState(null);
+  // Detay panelindeki hızlı işlemler için küçük formlar
+  const [ziyaretForm, setZiyaretForm] = useState({ tarih: bugunStr(), not: '' });
+  const [cariForm, setCariForm] = useState({ tip: 'komisyon', tutar: '', aciklama: '' });
+
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): SAHA RANDEVU SİSTEMİ
+  // --------------------------------------------------------------------------
+  // İş akışı: Saha pazarlamacı, bir firmayı portföye eklemeden ÖNCE randevu
+  // alır → takvimden takip eder → görüşmeye gider → "Gidildi → Portföye Ekle"
+  // ile görüşme bilgileri HAZIR DOLDURULMUŞ portföy formuna aktarılır.
+  // Randevular 'sahaRandevular' koleksiyonunda tutulur; takvim, Hatırlatmalar
+  // sayfasındaki takvimle aynı tasarım dilindedir (ay ızgarası + gün simgeleri
+  // + seçili günün listesi).
+  // Durumlar: bekliyor → gidildi | iptal. Tarihi geçmiş "bekliyor" randevular
+  // takvimde ve listede KIRMIZI uyarıyla öne çıkar (unutulan görüşme kalmasın).
+  // ==========================================================================
+  const [randevular, setRandevular] = useState([]);
+  const [randevuFormAcik, setRandevuFormAcik] = useState(false);
+  const [randevuDuzenlenenId, setRandevuDuzenlenenId] = useState(null);
+  const [randevuKaydediliyor, setRandevuKaydediliyor] = useState(false);
+  const [randevuSilinecekId, setRandevuSilinecekId] = useState(null);
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): RANDEVU TARİHİNİ DEĞİŞTİR (ERTELE)
+  // --------------------------------------------------------------------------
+  // Takvimdeki bekleyen randevu satırında "Tarihi Değiştir" düğmesi: küçük bir
+  // pencerede yeni tarih/saat seçilir. Eski tarih kaydın erteleme geçmişine
+  // yazılır (kaç kez ertelendiği görünsün). Randevu portföye bağlıysa karttaki
+  // "Sonraki randevu" alanı da aynı tarihe güncellenir; takvim yeni güne odaklanır.
+  // ==========================================================================
+  const [tarihDegistir, setTarihDegistir] = useState(null); // { randevu, tarih, saat }
+  const randevuTarihiniDegistir = async () => {
+    if (!tarihDegistir?.randevu) return;
+    const r = tarihDegistir.randevu;
+    const yeniTarih = tarihDegistir.tarih, yeniSaat = tarihDegistir.saat || r.saat || '10:00';
+    if (!yeniTarih) { alert('Yeni tarih seçin.'); return; }
+    if (yeniTarih === r.tarih && yeniSaat === (r.saat || '')) { setTarihDegistir(null); return; } // değişiklik yok
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', r.id), {
+        tarih: yeniTarih, saat: yeniSaat,
+        ertelemeGecmisi: [...(r.ertelemeGecmisi || []), { eskiTarih: r.tarih, eskiSaat: r.saat || '', yeniTarih, yeniSaat, yapan: currentUser?.fullName || 'Sistem', zaman: new Date().toISOString() }],
+      });
+      // Portföye bağlıysa karttaki "Sonraki randevu" da aynı tarihe çekilir
+      const pf = r.portfoyId ? partnerlar.find(x => x.id === r.portfoyId) : null;
+      if (pf) {
+        try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy', pf.id), { sonrakiRandevu: yeniTarih }); } catch (err) { console.warn(err); }
+      }
+      addSystemLog?.('Saha Randevu', `${r.firmaAdi} randevusu ${r.tarih.split('-').reverse().join('.')} → ${yeniTarih.split('-').reverse().join('.')} ${yeniSaat} tarihine alındı.`);
+      setRSecilenGun(yeniTarih);       // Takvim yeni güne odaklansın
+      setTarihDegistir(null);
+    } catch (e) { console.error(e); alert('Tarih değiştirilemedi.'); }
+  };
+  const bosRandevuForm = {
+    firmaAdi: '', tip: 'Emlak Ofisi', yetkili: '', telefon: '', bolge: '', adres: '',
+    tarih: bugunStr(), saat: '10:00', atanan: currentUser?.fullName || '', not: '',
+    portfoyId: null,   // YENİ: randevu mevcut bir portföy kaydına bağlıysa kimliği
+  };
+  const [randevuForm, setRandevuForm] = useState(bosRandevuForm);
+  // YENİ (kullanıcı talebi): Yeni Randevu penceresinde portföyden arama metni
+  const [randevuPortfoyArama, setRandevuPortfoyArama] = useState('');
+
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): MEVCUT PORTFÖYDEN RANDEVU
+  // --------------------------------------------------------------------------
+  // (a) Yeni Randevu penceresinde arama kutusuna firma adı yazılınca portföy
+  //     listesi süzülür; seçilen firmanın bilgileri forma dolar ve randevu o
+  //     kayda BAĞLANIR (portfoyId). Böylece "Gidildi" dendiğinde ziyaret
+  //     günlüğüne işlenir, "Portföye Ekle" seçeneği gereksiz yere çıkmaz.
+  // (b) Portföy detay penceresindeki "Randevu Ekle" düğmesi aynı formu firma
+  //     bilgileri hazır dolu ve bağlı şekilde açar.
+  // ==========================================================================
+  const portfoydenRandevuFormunuDoldur = (pf) => {
+    setRandevuForm(f => ({
+      ...f,
+      firmaAdi: pf.firmaAdi || '', tip: pf.tip || 'Emlak Ofisi', yetkili: pf.yetkili || '',
+      telefon: pf.telefon || '', bolge: pf.bolge || '', adres: pf.adres || '',
+      atanan: pf.portfoySahibi || f.atanan || currentUser?.fullName || '',
+      portfoyId: pf.id,
+    }));
+    setRandevuPortfoyArama('');
+  };
+  // Portföy detayından doğrudan randevu penceresi aç
+  const portfoydenRandevuAc = (pf) => {
+    setRandevuForm({ ...bosRandevuForm, tarih: pf.sonrakiRandevu && pf.sonrakiRandevu >= bugunStr() ? pf.sonrakiRandevu : bugunStr() });
+    portfoydenRandevuFormunuDoldur(pf);
+    setRandevuDuzenlenenId(null);
+    setRandevuFormAcik(true);
+  };
+  // Arama sonuçları (en fazla 8; ad, yetkili veya bölgeye göre)
+  const randevuPortfoySonuclari = useMemo(() => {
+    const q = randevuPortfoyArama.trim().toLocaleLowerCase('tr-TR');
+    if (q.length < 2) return [];
+    return partnerlar
+      .filter(pf => [pf.firmaAdi, pf.yetkili, pf.bolge].some(x => String(x || '').toLocaleLowerCase('tr-TR').includes(q)))
+      .slice(0, 8);
+  }, [randevuPortfoyArama, partnerlar]);
+  // Takvim: görüntülenen ay + seçili gün
+  const [rTakvim, setRTakvim] = useState(() => { const d = new Date(); return { yil: d.getFullYear(), ay: d.getMonth() }; });
+  const [rSecilenGun, setRSecilenGun] = useState(bugunStr());
+
+  // Randevuları canlı dinle
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular'), (snap) => {
+      setRandevular(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error('Saha randevuları yüklenemedi:', err));
+    return () => unsub();
+  }, []);
+
+  // Randevu kaydet (yeni / düzenle)
+  const randevuKaydet = async () => {
+    if (!randevuForm.firmaAdi.trim()) { alert('Firma adı girin.'); return; }
+    if (!randevuForm.tarih) { alert('Randevu tarihi seçin.'); return; }
+    setRandevuKaydediliyor(true);
+    try {
+      if (randevuDuzenlenenId) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', randevuDuzenlenenId), { ...randevuForm });
+        addSystemLog?.('Saha Randevu', `${randevuForm.firmaAdi} randevusu güncellendi (${randevuForm.tarih} ${randevuForm.saat}).`);
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular'), {
+          ...randevuForm, portfoyId: randevuForm.portfoyId || null, durum: 'bekliyor',
+          kaynak: randevuForm.portfoyId ? 'portfoy' : 'manuel',
+          olusturan: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(),
+        });
+        addSystemLog?.('Saha Randevu', `Yeni randevu: ${randevuForm.firmaAdi} — ${randevuForm.tarih} ${randevuForm.saat} (${randevuForm.atanan}).`);
+        // YENİ: Portföye bağlı randevuysa karttaki "Sonraki randevu" tarihi de güncellenir
+        if (randevuForm.portfoyId) {
+          try {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy', randevuForm.portfoyId), { sonrakiRandevu: randevuForm.tarih });
+          } catch (err) { console.warn('Portföy sonraki randevu güncellenemedi:', err); }
+        }
+      }
+      setRSecilenGun(randevuForm.tarih); // kaydedince takvim o güne odaklansın
+      setRandevuFormAcik(false); setRandevuDuzenlenenId(null); setRandevuForm(bosRandevuForm); setRandevuPortfoyArama('');
+    } catch (e) { console.error(e); alert('Randevu kaydedilemedi.'); }
+    finally { setRandevuKaydediliyor(false); }
+  };
+
+  // Durum değiştir: iptal / tekrar bekliyor
+  const randevuDurum = async (r, durum) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', r.id), {
+        durum, ...(durum === 'gidildi' ? { gidilmeTarihi: new Date().toISOString() } : {}),
+      });
+      addSystemLog?.('Saha Randevu', `${r.firmaAdi} randevusu: ${durum === 'gidildi' ? 'GİDİLDİ' : durum === 'iptal' ? 'İPTAL edildi' : 'tekrar beklemeye alındı'}.`);
+    } catch (e) { console.error(e); alert('Güncellenemedi.'); }
+  };
+
+  const randevuSil = async () => {
+    if (!randevuSilinecekId) return;
+    try {
+      const r = randevular.find(x => x.id === randevuSilinecekId);
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', randevuSilinecekId));
+      addSystemLog?.('Saha Randevu', `${r?.firmaAdi || ''} randevusu silindi.`);
+    } catch (e) { console.error(e); }
+    setRandevuSilinecekId(null);
+  };
+
+  // ANA AKIŞ (kullanıcı talebi): Görüşmeye gidildi → firma bilgileri hazır
+  // doldurulmuş şekilde "Portföye Ekle" formu açılır; ikinci kez yazmaya
+  // gerek kalmaz. Randevu 'gidildi' + portföye aktarıldı olarak işaretlenir.
+  // ==========================================================================
+  // HATA DÜZELTMESİ + YENİ (kullanıcı bildirimi):
+  //  1) "GİDİLDİ • PORTFÖYDE" yazıyor ama portföy listesinde firma yok.
+  //     KÖK NEDEN: Düğmeye basıldığı anda portfoyeAktarildi:true yazılıyordu —
+  //     form henüz KAYDEDİLMEDEN. Form kapatılırsa rozet kalıyor, kayıt yoktu.
+  //     ÇÖZÜM: Bağ artık portföy GERÇEKTEN kaydedildiğinde kurulur
+  //     (handleKaydet içinde). Bekleyen bağ `bekleyenRandevuBagi` ile taşınır.
+  //  2) Randevuda girilen bilgiler (not, linkler) portföye tekrar yazılmak
+  //     zorunda kalınıyordu. Artık randevu notu portföyün NOTLAR alanına ve
+  //     ZİYARET GÜNLÜĞÜNE otomatik geçer; kayıt açılış tarihi randevu tarihidir.
+  // ==========================================================================
+  const [bekleyenRandevuBagi, setBekleyenRandevuBagi] = useState(null); // { r, gidildiIsaretle }
+
+  // Randevu bilgileriyle portföy formunu açar (tek ortak fonksiyon)
+  const randevuBilgisiylePortfoyFormuAc = (r, { gidildiIsaretle }) => {
+    setForm({
+      ...bosForm,
+      firmaAdi: r.firmaAdi || '', tip: r.tip || 'Emlak Ofisi', yetkili: r.yetkili || '',
+      telefon: r.telefon || '', bolge: r.bolge || '', adres: r.adres || '',
+      portfoySahibi: r.atanan || currentUser?.fullName || '',
+      // Randevu notu (linkler dâhil) portföy notlarına aynen taşınır
+      notlar: r.not ? `Randevu notu (${(r.tarih || '').split('-').reverse().join('.')} ${r.saat || ''}): ${r.not}` : '',
+      // Görüşme yapıldıysa durum "Ziyaret Edildi", yalnızca kayıt açılıyorsa "Randevu Alındı"
+      durum: gidildiIsaretle ? 'Ziyaret Edildi' : (r.durum === 'gidildi' ? 'Ziyaret Edildi' : 'Randevu Alındı'),
+      // Randevu ileri tarihliyse karttaki "Sonraki randevu" alanına da yazılır
+      sonrakiRandevu: (!gidildiIsaretle && r.durum === 'bekliyor' && r.tarih) ? r.tarih : '',
+    });
+    setBekleyenRandevuBagi({ r, gidildiIsaretle });
+    setDuzenlenenId(null); setFormAcik(true);
+  };
+
+  const randevudanPortfoyeEkle = async (r) => {
+    // "Gidildi" işareti hemen konur (görüşme yapıldı); PORTFÖYDE rozeti ise kayıt oluşunca
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', r.id), {
+        durum: 'gidildi', gidilmeTarihi: new Date().toISOString(),
+      });
+    } catch (e) { console.error(e); }
+    randevuBilgisiylePortfoyFormuAc({ ...r, durum: 'gidildi' }, { gidildiIsaretle: true });
+    addSystemLog?.('Saha Randevu', `${r.firmaAdi} görüşmesi yapıldı → Portföye Ekle formu açıldı.`);
+  };
+
+  // YENİ (kullanıcı talebi): Randevuyu Düzenle penceresinden "Portföye Ekle"
+  // Randevunun durumu DEĞİŞMEZ (bekliyor kalır); yalnızca aynı bilgilerle
+  // portföy formu açılır, kaydedilince randevu bu portföye bağlanır.
+  const duzenlenenRandevudanPortfoyeEkle = () => {
+    const r = randevular.find(x => x.id === randevuDuzenlenenId);
+    if (!r) return;
+    // Formda yapılmış ama kaydedilmemiş düzenlemeler de taşınsın
+    const guncel = { ...r, ...randevuForm, id: r.id, durum: r.durum };
+    setRandevuFormAcik(false);
+    randevuBilgisiylePortfoyFormuAc(guncel, { gidildiIsaretle: false });
+  };
+
+  // Takvim yardımcıları (Hatırlatmalar sayfasındaki desenle aynı)
+  const R_AYLAR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+  const R_GUNLER = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
+  const rHucreler = useMemo(() => {
+    const ilkIndex = (new Date(rTakvim.yil, rTakvim.ay, 1).getDay() + 6) % 7; // Pazartesi başlangıç
+    const gunSayisi = new Date(rTakvim.yil, rTakvim.ay + 1, 0).getDate();
+    return [...Array(ilkIndex).fill(null), ...Array.from({ length: gunSayisi }, (_, i) => i + 1)];
+  }, [rTakvim]);
+  const rGunRandevulari = (tarihStr) => randevular
+    .filter(r => r.tarih === tarihStr)
+    .sort((a, b) => (a.saat || '').localeCompare(b.saat || ''));
+  const rSecilenGunListesi = rGunRandevulari(rSecilenGun);
+  // Gecikmiş = tarihi geçmiş ama hâlâ "bekliyor" (görüşmeye gidilmemiş)
+  const rGecikmisler = randevular.filter(r => r.durum === 'bekliyor' && r.tarih < bugunStr());
+  const rBugunkuler = randevular.filter(r => r.durum === 'bekliyor' && r.tarih === bugunStr());
+
+  const bosForm = {
+    firmaAdi: '', tip: 'Emlak Ofisi', yetkili: '', telefon: '', bolge: '', adres: '',
+    portfoySahibi: currentUser?.fullName || '', durum: 'Aday',
+    komisyonNotu: '', sonrakiRandevu: '', notlar: '',
+    kartvizitler: [],
+  };
+  const [form, setForm] = useState(bosForm);
+
+  // Satış personeli listesi (portföy sahibi seçimi için) — beyaz yaka satış öncelikli,
+  // ama esneklik için tüm personel seçilebilir
+  const satisPersonelleri = personnelList.filter(p => p.position !== 'Firma Sahibi').map(p => p.fullName).sort();
+
+  // ---------------------------------------------------- VERİ DİNLEME ---
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy'), (snap) => {
+      setPartnerlar(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, (err) => console.error('Saha portföyü yüklenemedi:', err));
+    return () => unsub();
+  }, []);
+
+  // ---------------------------------------------------- HAREKET KAYDI ---
+  // Her önemli işlem (ekleme, durum değişikliği, ziyaret, cari, kartvizit)
+  // partnerın hareketGecmisi dizisine kim-ne zaman bilgisiyle yazılır.
+  const hareket = (tip, detay) => ({ tip, detay, yapan: currentUser?.fullName || 'Sistem', tarih: new Date().toISOString() });
+
+  // ---------------------------------------------------- KARTVİZİT ---
+  const handleKartvizitYukle = async (e, hedefPartner = null) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setKartvizitYukleniyor(true);
+    const yeniler = [];
+    for (const file of files) {
       const fd = new FormData();
       fd.append('file', file);
       try {
         const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
         const text = await res.text();
-        let uploadedUrl = file.name;
-        try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sirketEvraklari'), {
-          label: label.trim(), category, url: uploadedUrl,
-          uploadedBy: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+        let url = file.name;
+        try { const json = JSON.parse(text); url = json.url || json.fileName || json.file || text; } catch (err) { url = text.trim(); }
+        yeniler.push({ url, name: file.name, date: new Date().toISOString(), yukleyen: currentUser?.fullName || 'Sistem' });
+      } catch (err) { console.error('Kartvizit yüklenemedi:', err); alert(`"${file.name}" yüklenemedi.`); }
+    }
+    if (yeniler.length > 0) {
+      if (hedefPartner) {
+        // Mevcut partnera doğrudan ekle (detay panelinden)
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy', hedefPartner.id), {
+          kartvizitler: [...(hedefPartner.kartvizitler || []), ...yeniler],
+          hareketGecmisi: [...(hedefPartner.hareketGecmisi || []), hareket('kartvizit', `${yeniler.length} kartvizit eklendi`)],
         });
-        addSystemLog?.('Şirket Evrakı Eklendi', `"${label.trim()}" (${category}) şirket evrakı yüklendi.`);
-        setLabel(''); setCategory('Genel'); setShowForm(false);
-      } catch (err) {
-        console.error('Yükleme hatası:', err);
-        alert('Belge yüklenemedi.');
-      }
-      setIsUploading(false);
-    };
-
-    // Belge adını / kategorisini düzenle
-    const handleRename = async (d) => {
-      const yeni = window.prompt('Belge adını düzenleyin:', d.label || '');
-      if (yeni === null || !yeni.trim()) return;
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketEvraklari', d.id), { label: yeni.trim() });
-    };
-
-    const filtered = docs.filter(d => {
-      const q = searchQuery.toLowerCase();
-      return !q || (d.label || '').toLowerCase().includes(q) || (d.category || '').toLowerCase().includes(q);
-    });
-
-    return (
-      <div className="max-w-5xl mx-auto animate-in fade-in space-y-5">
-        {/* BAŞLIK */}
-        <div className="bg-gradient-to-r from-green-600 via-emerald-700 to-emerald-900 rounded-2xl p-5 md:p-6 text-white shadow-lg">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><FolderOpen className="w-6 h-6" /> Şirket Evrakları</h2>
-              <p className="text-green-100 text-xs md:text-sm mt-1">Şirkete ait resmi belgeleri (vergi levhası, imza sirküleri, ruhsatlar, sigorta, sözleşmeler vb.) buradan yükleyin ve yönetin.</p>
-            </div>
-            <button onClick={() => { setShowForm(v => !v); setLabel(''); setCategory('Genel'); }} className="shrink-0 px-4 py-2.5 bg-white text-emerald-800 font-black rounded-xl shadow hover:scale-[1.03] transition flex items-center gap-2 text-sm">
-              <PlusCircle className="w-4 h-4" /> Evrak Yükle
-            </button>
-          </div>
-        </div>
-
-        {/* YÜKLEME FORMU */}
-        {showForm && (
-          <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 animate-in slide-in-from-top-1">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
-              <div>
-                <label className="text-xs font-bold text-neutral-600 block mb-1">Belge Adı *</label>
-                <input value={label} onChange={e => setLabel(e.target.value)} placeholder="Örn: 2026 Vergi Levhası" className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-emerald-600 text-sm" />
-              </div>
-              <div>
-                <label className="text-xs font-bold text-neutral-600 block mb-1">Kategori</label>
-                <select value={category} onChange={e => setCategory(e.target.value)} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
-                  {CATEGORIES.map(c => <option key={c}>{c}</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <label className={`flex-1 py-2.5 rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition cursor-pointer ${label.trim() ? 'bg-emerald-700 text-white hover:bg-emerald-800' : 'bg-neutral-200 text-neutral-400 pointer-events-none'}`}>
-                {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                {isUploading ? 'Yükleniyor...' : (label.trim() ? 'Dosya Seç & Yükle' : 'Önce belge adı girin')}
-                <input type="file" className="hidden" onChange={handleUpload} disabled={isUploading || !label.trim()} />
-              </label>
-              <button onClick={() => { setShowForm(false); setLabel(''); }} className="px-4 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
-            </div>
-          </div>
-        )}
-
-        {/* ARAMA */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3">
-          <div className="relative">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Belge adı veya kategoriye göre ara..." className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-emerald-600 outline-none text-sm" />
-          </div>
-        </div>
-
-        {/* BELGE LİSTESİ */}
-        {filtered.length === 0 ? (
-          <div className="bg-white rounded-2xl border border-dashed border-neutral-300 p-10 text-center text-neutral-400 font-bold text-sm">
-            {docs.length === 0 ? 'Henüz şirket evrakı yüklenmemiş. "Evrak Yükle" ile ilk belgeyi ekleyin.' : 'Aramanıza uyan belge bulunamadı.'}
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map(d => (
-              <div key={d.id} className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 flex flex-col gap-3 hover:shadow-md hover:border-emerald-200 transition">
-                <div className="flex items-start gap-2">
-                  <span className="w-9 h-9 shrink-0 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center"><FileText className="w-5 h-5" /></span>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-sm text-neutral-800 leading-tight truncate" title={d.label}>{d.label}</h3>
-                    <span className={`inline-block mt-1 text-[9px] font-bold px-1.5 py-0.5 rounded border ${CATEGORY_COLORS[d.category] || CATEGORY_COLORS['Genel']}`}>{d.category || 'Genel'}</span>
-                  </div>
-                </div>
-                <div className="text-[10px] text-neutral-400 font-medium flex items-center justify-between">
-                  <span>{d.createdAt ? d.createdAt.split('T')[0].split('-').reverse().join('.') : '-'}</span>
-                  <span className="truncate ml-2">{d.uploadedBy || ''}</span>
-                </div>
-                <div className="flex flex-col gap-1.5 mt-auto">
-                  <button onClick={() => setViewingImage({ title: d.label, name: d.url })} className="w-full py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-bold text-xs rounded-lg transition flex items-center justify-center gap-2 border border-neutral-200">
-                    <Eye className="w-4 h-4" /> Görüntüle
-                  </button>
-                  <div className="flex gap-1.5">
-                    <button onClick={() => handleRename(d)} className="flex-1 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold text-xs rounded-lg transition flex items-center justify-center gap-1 border border-blue-100">
-                      <Edit className="w-3.5 h-3.5" /> Düzenle
-                    </button>
-                    <button onClick={() => setDeleteId(d.id)} className="flex-1 py-2 bg-red-50 hover:bg-red-100 text-red-600 font-bold text-xs rounded-lg transition flex items-center justify-center gap-1 border border-red-100">
-                      <X className="w-3.5 h-3.5" /> Kaldır
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* SİLME ONAY MODALI */}
-        {deleteId && (
-          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center animate-in zoom-in-95">
-              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
-              <p className="text-sm font-bold text-neutral-700 mb-4">Bu şirket evrakı kalıcı olarak silinecek. Emin misiniz?</p>
-              <div className="flex gap-2">
-                <button onClick={() => setDeleteId(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
-                <button onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketEvraklari', deleteId)); addSystemLog?.('Şirket Evrakı Silindi', 'Bir şirket evrakı silindi.'); setDeleteId(null); }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-  // ============================================================================
-  // YENİ: DAVA DOSYALARI (ŞİRKET DOSYALARI > HUKUK TAKİP MERKEZİ)
-  // Şirkete gelen/açılan tüm hukuki süreçlerin tek merkezden yönetildiği bölüm:
-  // Davalar, İcra Takipleri, İhtarnameler, İhbarnameler, Arabuluculuk, UETS
-  // Tebligatları, Vergi/İdari süreçler vb.
-  // Özellikler:
-  //  - Dosya bazlı takip: dosya no, mahkeme/kurum, karşı taraf, konum (davacı/davalı...),
-  //    dava tutarı, kritik tarihler (duruşma / itiraz-cevap son günü), avukat, notlar.
-  //  - Belge yönetimi: fotoğraf + PDF + her tür dosya, ÇOKLU yükleme (Şimdi Çek /
-  //    Galeriden / Dosyadan). Her belgede KİMİN ve NE ZAMAN yüklediği görünür.
-  //  - Süreç geçmişi: durum değişiklikleri ve önemli olaylar otomatik loglanır.
-  //  - Filtreleme: durum, dosya türü ve serbest arama.
-  //  - AVUKAT MUHASEBESİ: dosya masrafı, harç, bilirkişi, vekalet ücreti, aylık
-  //    sabit ücret vb. giderler ile yapılan ödemeler ayrı ayrı kaydedilir.
-  //    Toplam Masraf / Ödenen / Kalan Bakiye anlık hesaplanır. Kaydı kimin
-  //    girdiği (ör. şirket avukatı kendi kullanıcısıyla) her satırda görünür.
-  // Veriler Firestore'da 'davaDosyalari' ve 'avukatMuhasebe' koleksiyonlarında tutulur.
-  // ============================================================================
-  export const DavaDosyalariView = ({ currentUser, addSystemLog, setViewingImage }) => {
-    // Dosya türleri (hukuki süreç çeşitleri)
-    const DOSYA_TURLERI = ['İş Davası', 'Ticari Dava', 'Hukuk Davası', 'Ceza Davası', 'İcra Takibi', 'İhtarname', 'İhbarname', 'Arabuluculuk', 'UETS Tebligatı', 'Vergi / İdari', 'Sigorta / Hasar', 'Diğer'];
-    // Dosya durumları ve renk kodları (rozet + kart kenarı için)
-    const DURUMLAR = [
-      { id: 'Yeni',               color: 'bg-sky-100 text-sky-700 border-sky-200',           dot: 'bg-sky-500' },
-      { id: 'İnceleniyor',        color: 'bg-amber-100 text-amber-700 border-amber-200',     dot: 'bg-amber-500' },
-      { id: 'Devam Ediyor',       color: 'bg-orange-100 text-orange-700 border-orange-200',  dot: 'bg-orange-500' },
-      { id: 'Duruşma Bekleniyor', color: 'bg-purple-100 text-purple-700 border-purple-200',  dot: 'bg-purple-500' },
-      { id: 'İtiraz Süreci',      color: 'bg-rose-100 text-rose-700 border-rose-200',        dot: 'bg-rose-500' },
-      { id: 'Uzlaşıldı',          color: 'bg-teal-100 text-teal-700 border-teal-200',        dot: 'bg-teal-500' },
-      { id: 'Kazanıldı',          color: 'bg-green-100 text-green-700 border-green-200',     dot: 'bg-green-600' },
-      { id: 'Kaybedildi',         color: 'bg-red-100 text-red-600 border-red-200',           dot: 'bg-red-500' },
-      { id: 'Arşiv',              color: 'bg-neutral-100 text-neutral-500 border-neutral-200', dot: 'bg-neutral-400' },
-    ];
-    // Şirketin dosyadaki konumu
-    const TARAFLAR = ['Davacı', 'Davalı', 'Alacaklı', 'Borçlu', 'Müşteki', 'İhtar Eden', 'İhtar Edilen', 'Tebliğ Alan'];
-    // Muhasebe kayıt türleri: 'masraf' = borçlandıran gider, 'odeme' = avukata/kuruma yapılan ödeme
-    const MASRAF_TURLERI = ['Dava Masrafı', 'Harç', 'Bilirkişi Ücreti', 'Tebligat / Posta', 'İcra Masrafı', 'Vekalet Ücreti', 'Aylık Sabit Ücret', 'Diğer Masraf'];
-
-    const [dosyalar, setDosyalar] = useState([]);
-    const [muhasebe, setMuhasebe] = useState([]);
-    const [altSekme, setAltSekme] = useState('dosyalar'); // 'dosyalar' | 'muhasebe'
-    const [searchQuery, setSearchQuery] = useState('');
-    const [durumFilter, setDurumFilter] = useState('Tümü');
-    const [turFilter, setTurFilter] = useState('Tümü');
-    const [showForm, setShowForm] = useState(false);
-    const [editingId, setEditingId] = useState(null);
-    const [expandedId, setExpandedId] = useState(null);
-    const [deleteId, setDeleteId] = useState(null);
-    const [belgeUploading, setBelgeUploading] = useState(false);     // form içi belge yükleme durumu
-    const [belgeLabel, setBelgeLabel] = useState('');                // form içi yeni belge adı (opsiyonel)
-    const [detayBelgeUploading, setDetayBelgeUploading] = useState(null); // detayda yükleme yapılan dosya id
-
-    // Boş dosya formu
-    const emptyForm = {
-      baslik: '', dosyaTuru: 'İş Davası', durum: 'Yeni', taraf: 'Davalı',
-      dosyaNo: '', mahkeme: '', karsiTaraf: '', avukat: '', tutar: '',
-      acilisTarihi: new Date().toISOString().split('T')[0], durusmaTarihi: '', sonTarih: '',
-      notlar: '', belgeler: []
-    };
-    const [form, setForm] = useState(emptyForm);
-
-    // Muhasebe kayıt formu (yon: masraf/odeme)
-    const emptyMuhForm = { yon: 'masraf', tur: 'Dava Masrafı', tutar: '', tarih: new Date().toISOString().split('T')[0], dosyaId: '', aciklama: '' };
-    const [muhForm, setMuhForm] = useState(emptyMuhForm);
-    const [muhDosyaFilter, setMuhDosyaFilter] = useState('Tümü');
-    const [muhDeleteId, setMuhDeleteId] = useState(null);
-    // YENİ: Muhasebe kaydına eklenecek dekont/belge listesi (birden fazla olabilir).
-    // Her öğe: { url, name, type } — type 'image' veya 'pdf'/'file'
-    const [muhBelgeler, setMuhBelgeler] = useState([]);
-    const [muhBelgeYukleniyor, setMuhBelgeYukleniyor] = useState(false);
-    // YENİ: "Dekontu Gör" penceresinde gösterilecek kayıt
-    const [muhBelgeGoster, setMuhBelgeGoster] = useState(null);
-
-    // Dava dosyaları Firestore'dan canlı dinlenir
-    useEffect(() => {
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari'), snap => {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-        setDosyalar(list);
-      });
-      return () => unsub();
-    }, []);
-
-    // Avukat muhasebe kayıtları Firestore'dan canlı dinlenir
-    useEffect(() => {
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe'), snap => {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        list.sort((a, b) => (b.tarih || '').localeCompare(a.tarih || ''));
-        setMuhasebe(list);
-      });
-      return () => unsub();
-    }, []);
-
-    // Dosyayı sunucuya yükleyip URL döndürür (mevcut upload altyapısıyla aynı)
-    const uploadFile = async (file) => {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
-      const text = await res.text();
-      try { const json = JSON.parse(text); return json.url || json.fileName || json.file || text; } catch (err) { return text.trim(); }
-    };
-
-    // ÇOKLU belge yükleme (form içinde, dosya kaydından önce). Fotoğraf/PDF/her tür dosya desteklenir.
-    // Her belgeye yükleyen kişi ve tarih otomatik işlenir.
-    const handleFormBelgeUpload = async (e) => {
-      const files = Array.from(e.target.files || []);
-      if (files.length === 0) return;
-      setBelgeUploading(true);
-      try {
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const url = await uploadFile(file);
-          const label = belgeLabel.trim()
-            ? (files.length > 1 ? `${belgeLabel.trim()} (${i + 1})` : belgeLabel.trim())
-            : (file.name || `Belge ${i + 1}`);
-          setForm(prev => ({ ...prev, belgeler: [...(prev.belgeler || []), { id: Date.now().toString() + '_' + i, label, url, uploadedBy: currentUser?.fullName || 'Sistem', date: new Date().toISOString() }] }));
-        }
-        setBelgeLabel('');
-      } catch (err) { alert('Belge yüklenemedi.'); }
-      setBelgeUploading(false);
-    };
-    const handleFormBelgeRemove = (id) => setForm(prev => ({ ...prev, belgeler: (prev.belgeler || []).filter(b => b.id !== id) }));
-
-    // Kayıtlı dosyaya detay panelinden ÇOKLU belge ekleme
-    const handleDetayBelgeUpload = async (dosya, e) => {
-      const files = Array.from(e.target.files || []);
-      if (files.length === 0) return;
-      setDetayBelgeUploading(dosya.id);
-      try {
-        const yeniler = [];
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const url = await uploadFile(file);
-          yeniler.push({ id: Date.now().toString() + '_' + i, label: file.name || `Belge ${i + 1}`, url, uploadedBy: currentUser?.fullName || 'Sistem', date: new Date().toISOString() });
-        }
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), {
-          belgeler: [...(dosya.belgeler || []), ...yeniler],
-          history: [...(dosya.history || []), { date: new Date().toISOString(), text: `${yeniler.length} belge eklendi`, by: currentUser?.fullName || 'Sistem' }]
-        });
-        addSystemLog?.('Dava Dosyası Belge', `${dosya.baslik} dosyasına ${yeniler.length} belge eklendi.`);
-      } catch (err) { alert('Belge yüklenemedi.'); }
-      setDetayBelgeUploading(null);
-    };
-    const handleDetayBelgeRemove = async (dosya, id) => {
-      const b = (dosya.belgeler || []).find(x => x.id === id);
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), {
-        belgeler: (dosya.belgeler || []).filter(x => x.id !== id),
-        history: [...(dosya.history || []), { date: new Date().toISOString(), text: `Belge silindi: ${b?.label || ''}`, by: currentUser?.fullName || 'Sistem' }]
-      });
-    };
-    const handleDetayBelgeRename = async (dosya, id) => {
-      const cur = (dosya.belgeler || []).find(b => b.id === id);
-      const yeni = window.prompt('Belge adını düzenleyin:', cur?.label || '');
-      if (yeni === null || !yeni.trim()) return;
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), { belgeler: (dosya.belgeler || []).map(b => b.id === id ? { ...b, label: yeni.trim() } : b) });
-    };
-
-    // Dosya kaydet (yeni veya düzenleme)
-    const handleSaveDosya = async () => {
-      if (!form.baslik.trim()) return;
-      if (editingId) {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', editingId), { ...form });
-        addSystemLog?.('Dava Dosyası Güncellendi', `${form.baslik} dosyası güncellendi.`);
       } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari'), {
+        // Yeni kayıt formuna ekle (henüz kaydedilmedi)
+        setForm(f => ({ ...f, kartvizitler: [...f.kartvizitler, ...yeniler] }));
+      }
+    }
+    setKartvizitYukleniyor(false);
+    if (e.target) e.target.value = '';
+  };
+
+  // ---------------------------------------------------- KAYDET / SİL ---
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): PORTFÖY "SONRAKİ RANDEVU" ↔ RANDEVU TAKVİMİ BAĞI
+  // --------------------------------------------------------------------------
+  // SORUN: Mevcut portföy kaydında "Sonraki randevu" tarihi girildiğinde bu
+  // yalnızca kartın üstünde bir tarih olarak duruyordu; Randevu Takvimi ise
+  // sadece 'sahaRandevular' koleksiyonunu okuduğu için orada görünmüyordu.
+  // ÇÖZÜM: Portföy kaydedilirken sonrakiRandevu doluysa 'sahaRandevular'da o
+  // portföye BAĞLI (portfoyId) bir randevu oluşturulur; tarih değişirse aynı
+  // randevu güncellenir (kopya oluşmaz). Böylece takvimde görünür ve oradan
+  // "Gidildi" işlenebilir.
+  // ==========================================================================
+  const portfoyRandevusunuEsitle = async (portfoyId, formVerisi) => {
+    if (!portfoyId) return;
+    const bagli = randevular.find(r => r.portfoyId === portfoyId && r.durum === 'bekliyor');
+    const tarih = (formVerisi.sonrakiRandevu || '').trim();
+    if (!tarih) return;                                   // Randevu tarihi yoksa dokunma
+    const ortak = {
+      firmaAdi: formVerisi.firmaAdi || '', tip: formVerisi.tip || 'Emlak Ofisi', yetkili: formVerisi.yetkili || '',
+      telefon: formVerisi.telefon || '', bolge: formVerisi.bolge || '', adres: formVerisi.adres || '',
+      tarih, atanan: formVerisi.portfoySahibi || currentUser?.fullName || '', portfoyId,
+    };
+    if (bagli) {
+      // Tarih veya bilgiler değişmişse bağlı randevuyu güncelle (kopya oluşturma)
+      if (bagli.tarih !== tarih || bagli.firmaAdi !== ortak.firmaAdi || bagli.telefon !== ortak.telefon) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', bagli.id), ortak);
+      }
+    } else {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular'), {
+        ...ortak, saat: '10:00', not: 'Portföy kaydındaki "Sonraki randevu" alanından otomatik oluşturuldu.',
+        durum: 'bekliyor', kaynak: 'portfoy',
+        olusturan: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(),
+      });
+      addSystemLog?.('Saha Randevu', `${ortak.firmaAdi} için portföyden randevu takvime eklendi (${tarih}).`);
+    }
+  };
+
+  const handleKaydet = async () => {
+    if (!form.firmaAdi.trim()) return;
+    setKaydediliyor(true);
+    try {
+      if (duzenlenenId) {
+        const p = partnerlar.find(x => x.id === duzenlenenId);
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy', duzenlenenId), {
           ...form,
-          history: [{ date: new Date().toISOString(), text: 'Dosya açıldı', by: currentUser?.fullName || 'Sistem' }],
-          createdBy: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+          hareketGecmisi: [...(p?.hareketGecmisi || []), hareket('guncelleme', 'Kayıt bilgileri güncellendi')],
         });
-        addSystemLog?.('Yeni Dava Dosyası', `${form.baslik} (${form.dosyaTuru}) dosyası açıldı.`);
-      }
-      setForm(emptyForm); setEditingId(null); setShowForm(false); setBelgeLabel('');
-    };
-
-    // Durum değiştir (süreç geçmişine otomatik işlenir)
-    const handleDurumChange = async (dosya, yeniDurum) => {
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), {
-        durum: yeniDurum,
-        history: [...(dosya.history || []), { date: new Date().toISOString(), text: `Durum: ${yeniDurum}`, by: currentUser?.fullName || 'Sistem' }]
-      });
-    };
-
-    // ========================================================================
-    // YENİ: SÜREÇ İŞLEMLERİ — dosya TÜRÜNE göre mantıklı takip adımları.
-    // Her buton tek dokunuşla Süreç Geçmişi'ne tarih + kullanıcı adıyla işlenir;
-    // istenirse işleme kısa bir not da eklenebilir. "Özel İşlem" ile listede
-    // olmayan herhangi bir adım serbest metin olarak kaydedilebilir.
-    // ========================================================================
-    const SUREC_ISLEMLERI = {
-      'İcra Takibi':    ['Takip Açıldı', 'Ödeme Emri Gönderildi', 'Tebliğ Edildi', 'İtiraz Edildi', 'İtirazın Kaldırılması İstendi', 'Haciz Talep Edildi', 'Haciz Yapıldı', 'Tahsilat Yapıldı', 'Dosya Kapandı'],
-      'İş Davası':      ['Dava Açıldı', 'Dilekçe Sunuldu', 'Cevap Dilekçesi Geldi', 'Duruşma Yapıldı', 'Bilirkişi Raporu Geldi', 'Karar Çıktı', 'İstinaf / Temyiz Edildi'],
-      'Ticari Dava':    ['Dava Açıldı', 'Dilekçe Sunuldu', 'Cevap Dilekçesi Geldi', 'Duruşma Yapıldı', 'Bilirkişi Raporu Geldi', 'Karar Çıktı', 'İstinaf / Temyiz Edildi'],
-      'Hukuk Davası':   ['Dava Açıldı', 'Dilekçe Sunuldu', 'Cevap Dilekçesi Geldi', 'Duruşma Yapıldı', 'Bilirkişi Raporu Geldi', 'Karar Çıktı', 'İstinaf / Temyiz Edildi'],
-      'Ceza Davası':    ['Şikayet / İhbar Yapıldı', 'İfade Verildi', 'İddianame Kabul Edildi', 'Duruşma Yapıldı', 'Karar Çıktı', 'İstinaf / Temyiz Edildi'],
-      'İhtarname':      ['İhtar Gönderildi', 'Tebliğ Edildi', 'Cevap Geldi', 'Süre Doldu (Cevapsız)'],
-      'İhbarname':      ['İhbar Gönderildi', 'Tebliğ Edildi', 'Cevap Geldi', 'Süre Doldu (Cevapsız)'],
-      'Arabuluculuk':   ['Başvuru Yapıldı', 'Toplantı Tarihi Belirlendi', 'Toplantı Yapıldı', 'Anlaşma Sağlandı', 'Anlaşma Sağlanamadı (Son Tutanak)'],
-      'UETS Tebligatı': ['Tebligat Alındı', 'İncelendi', 'Cevap / İtiraz Verildi', 'Gereği Yapıldı'],
-      'Vergi / İdari':  ['Başvuru / Beyan Yapıldı', 'Tebligat Alındı', 'İtiraz / Uzlaşma Talep Edildi', 'Ödeme Yapıldı', 'Sonuçlandı'],
-      'Sigorta / Hasar':['Hasar Bildirimi Yapıldı', 'Eksper İncelemesi Yapıldı', 'Teklif Geldi', 'Ödeme Alındı', 'Dosya Kapandı'],
-      'Diğer':          ['Başvuru Yapıldı', 'Cevap Geldi', 'İşlem Yapıldı', 'Sonuçlandı'],
-    };
-
-    const handleSurecIslem = async (dosya, islemAdi) => {
-      // İşleme isteğe bağlı kısa bir açıklama eklenebilir (boş bırakılabilir)
-      const not = window.prompt(`"${islemAdi}" işlemi kaydedilecek.\n\nİsterseniz kısa bir not ekleyin (boş bırakılabilir):`, '');
-      if (not === null) return; // Vazgeçildi
-      const metin = not.trim() ? `${islemAdi} — ${not.trim()}` : islemAdi;
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), {
-        history: [...(dosya.history || []), { date: new Date().toISOString(), text: metin, by: currentUser?.fullName || 'Sistem' }]
-      });
-      addSystemLog?.('Dava Dosyası İşlemi', `${dosya.baslik}: ${metin}`);
-    };
-
-    const handleOzelIslem = async (dosya) => {
-      const metin = window.prompt('Yapılan işlemi yazın (örn: "Karşı tarafla görüşüldü, ek süre istendi"):', '');
-      if (metin === null || !metin.trim()) return;
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', dosya.id), {
-        history: [...(dosya.history || []), { date: new Date().toISOString(), text: metin.trim(), by: currentUser?.fullName || 'Sistem' }]
-      });
-      addSystemLog?.('Dava Dosyası İşlemi', `${dosya.baslik}: ${metin.trim()}`);
-    };
-
-    // ======================================================================
-    // YENİ: DEKONT / BELGE YÜKLEME (çoklu seçim destekli)
-    // Şirket Evrakları ekranındaki ile AYNI yükleme altyapısını kullanır
-    // (upload.php). Seçilen dosyalar tek tek yüklenir, dönen adresler
-    // muhBelgeler listesinde birikir ve "Kaydet"e basıldığında muhasebe
-    // kaydının içine 'belgeler' alanı olarak yazılır.
-    // PDF ve fotoğraf (jpg/png/heic vb.) birlikte seçilebilir.
-    // ======================================================================
-    const handleMuhBelgeUpload = async (e) => {
-      const files = Array.from(e.target.files || []);
-      if (files.length === 0) return;
-      setMuhBelgeYukleniyor(true);
-      const yeniler = [];
-      for (const file of files) {
-        const fd = new FormData();
-        fd.append('file', file);
-        try {
-          const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
-          const text = await res.text();
-          let uploadedUrl = file.name;
-          try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (err) { uploadedUrl = text.trim(); }
-          // Dosya tipini uzantıdan belirle (önizlemede resim mi bağlantı mı gösterileceğini seçer)
-          const uzanti = (file.name.split('.').pop() || '').toLowerCase();
-          const tip = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'].includes(uzanti) ? 'image' : (uzanti === 'pdf' ? 'pdf' : 'file');
-          yeniler.push({ url: uploadedUrl, name: file.name, type: tip });
-        } catch (err) {
-          console.error('Dekont yüklenemedi:', file.name, err);
-          alert(`"${file.name}" yüklenemedi.`);
+        addSystemLog?.('Saha Portföy', `${form.firmaAdi} kaydı güncellendi.`);
+        await portfoyRandevusunuEsitle(duzenlenenId, form);          // YENİ: takvime yansıt
+      } else {
+        // Randevudan geliyorsa: görüşme notu ziyaret günlüğüne, açılış hareket geçmişine
+        const rb = bekleyenRandevuBagi;
+        const ilkZiyaretler = (rb && rb.gidildiIsaretle) ? [{
+          tarih: rb.r.tarih || bugunStr(),
+          sonuc: `Randevu gerçekleştirildi${rb.r.not ? ` — ${rb.r.not}` : ''}`,
+          yapan: rb.r.atanan || currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(),
+        }] : [];
+        const ilkHareketler = [hareket('ekleme', `Portföye eklendi (${form.tip})`)];
+        if (rb) ilkHareketler.push(hareket('randevu', `${(rb.r.tarih || '').split('-').reverse().join('.')} ${rb.r.saat || ''} randevusundan aktarıldı`));
+        const yeniRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy'), {
+          ...form,
+          ziyaretler: ilkZiyaretler, cariHareketler: [],
+          hareketGecmisi: ilkHareketler,
+          ekleyen: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(),
+        });
+        addSystemLog?.('Saha Portföy', `Yeni iş ortağı adayı eklendi: ${form.firmaAdi} (${form.tip}) — Portföy: ${form.portfoySahibi}`);
+        // ================================================================
+        // HATA DÜZELTMESİ: Randevu ↔ portföy bağı ANCAK ŞİMDİ kurulur.
+        // Rozet ("PORTFÖYDE") ve portfoyId gerçek kayıt oluştuktan sonra yazılır;
+        // form kapatılıp vazgeçilirse randevuda yanlış rozet kalmaz.
+        // ================================================================
+        if (rb?.r?.id) {
+          try {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', rb.r.id), {
+              portfoyId: yeniRef.id, portfoyeAktarildi: true,
+            });
+          } catch (err) { console.warn('Randevu bağı yazılamadı:', err); }
+          setBekleyenRandevuBagi(null);
         }
+        // Randevudan geldiyse takvimde zaten var; tekrar randevu üretme
+        if (!rb) await portfoyRandevusunuEsitle(yeniRef.id, form);      // takvime yansıt
       }
-      setMuhBelgeler(prev => [...prev, ...yeniler]);
-      setMuhBelgeYukleniyor(false);
-      e.target.value = ''; // Aynı dosya tekrar seçilebilsin diye giriş sıfırlanır
-    };
+      setFormAcik(false); setDuzenlenenId(null); setForm(bosForm); setBekleyenRandevuBagi(null);
+    } catch (e) { console.error('Partner kaydedilemedi:', e); alert('Kaydedilemedi, tekrar deneyin.'); }
+    setKaydediliyor(false);
+  };
 
-    // Muhasebe kaydı ekle (masraf veya ödeme). Kim girdiyse ismi kayda işlenir (avukat dahil).
-    const handleSaveMuhasebe = async () => {
-      if (!muhForm.tutar || isNaN(parseFloat(muhForm.tutar))) return;
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe'), {
-        ...muhForm, tutar: parseFloat(muhForm.tutar),
-        belgeler: muhBelgeler, // YENİ: Yüklenen dekont/belge listesi kayda eklenir
-        ekleyen: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): RANDEVU FİRMASI PORTFÖYDE Mİ?
+  // Bağlı kimlikle (portfoyId) veya firma adıyla (eski randevular için) bulur.
+  // Portföyde OLAN firmaya "Portföye Ekle" seçeneği sunulmaz — sadece "Gidildi".
+  // ==========================================================================
+  const randevununPortfoyu = (r) => {
+    if (!r) return null;
+    if (r.portfoyId) { const p = partnerlar.find(x => x.id === r.portfoyId); if (p) return p; }
+    const ad = String(r.firmaAdi || '').trim().toLocaleLowerCase('tr-TR');
+    return ad ? (partnerlar.find(x => String(x.firmaAdi || '').trim().toLocaleLowerCase('tr-TR') === ad) || null) : null;
+  };
+
+  // Portföydeki firmanın randevusu yapıldı: randevu 'gidildi' olur, portföye
+  // ziyaret günlüğü satırı düşer ve karttaki "Sonraki randevu" temizlenir.
+  const portfoyRandevusuGidildi = async (r, portfoy) => {
+    try {
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaRandevular', r.id), {
+        durum: 'gidildi', gidilmeTarihi: new Date().toISOString(), portfoyId: portfoy.id,
       });
-      addSystemLog?.('Avukat Muhasebe', `${muhForm.yon === 'masraf' ? 'Masraf' : 'Ödeme'} kaydı eklendi: ${parseFloat(muhForm.tutar).toLocaleString('tr-TR')} TL (${muhForm.tur})${muhBelgeler.length ? ` — ${muhBelgeler.length} belge eklendi` : ''}.`);
-      setMuhForm(emptyMuhForm);
-      setMuhBelgeler([]); // YENİ: Belge listesi de temizlenir
-    };
+      const ziyaret = { tarih: r.tarih || bugunStr(), sonuc: `Randevu gerçekleştirildi${r.not ? ` — ${r.not}` : ''}`, yapan: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString() };
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy', portfoy.id), {
+        ziyaretler: [...(portfoy.ziyaretler || []), ziyaret],
+        // Karttaki tarih bu randevuya aitse temizle (bir sonraki randevu için boş kalsın)
+        ...(portfoy.sonrakiRandevu === r.tarih ? { sonrakiRandevu: '' } : {}),
+        hareketGecmisi: [...(portfoy.hareketGecmisi || []), hareket('ziyaret', `Randevu gerçekleştirildi (${r.tarih}${r.saat ? ' ' + r.saat : ''})`)],
+      });
+      addSystemLog?.('Saha Randevu', `${r.firmaAdi} randevusu GİDİLDİ → portföy ziyaret günlüğüne işlendi.`);
+    } catch (e) { console.error(e); alert('Güncellenemedi.'); }
+  };
 
-    // --- HESAPLAMALAR ---
-    const paraFormat = (n) => (Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-    const toplamMasraf = muhasebe.filter(m => m.yon === 'masraf').reduce((s, m) => s + (Number(m.tutar) || 0), 0);
-    const toplamOdenen = muhasebe.filter(m => m.yon === 'odeme').reduce((s, m) => s + (Number(m.tutar) || 0), 0);
-    const kalanBakiye = toplamMasraf - toplamOdenen; // pozitifse avukata/kurumlara borç var demektir
-    const aktifDosyaSayisi = dosyalar.filter(d => !['Arşiv', 'Kazanıldı', 'Kaybedildi', 'Uzlaşıldı'].includes(d.durum)).length;
-
-    // Önümüzdeki 30 gün içinde duruşması / son tarihi olan dosyalar (yaklaşan kritik tarihler)
-    const bugun = new Date(); bugun.setHours(0, 0, 0, 0);
-    const gunFarki = (tarihStr) => tarihStr ? Math.ceil((new Date(tarihStr) - bugun) / (1000 * 60 * 60 * 24)) : null;
-    const yaklasanlar = dosyalar
-      .map(d => {
-        const f1 = gunFarki(d.durusmaTarihi); const f2 = gunFarki(d.sonTarih);
-        const enYakin = [f1, f2].filter(x => x !== null && x >= 0).sort((a, b) => a - b)[0];
-        return { ...d, kalanGun: enYakin === undefined ? null : enYakin };
-      })
-      .filter(d => d.kalanGun !== null && d.kalanGun <= 30 && !['Arşiv'].includes(d.durum))
-      .sort((a, b) => a.kalanGun - b.kalanGun);
-
-    // Dosya bazlı masraf toplamı (kart üstünde gösterilir)
-    const dosyaMasrafi = (dosyaId) => muhasebe.filter(m => m.dosyaId === dosyaId && m.yon === 'masraf').reduce((s, m) => s + (Number(m.tutar) || 0), 0);
-
-    // Filtrelenmiş dosya listesi
-    const filtered = dosyalar.filter(d => {
-      const q = searchQuery.toLowerCase();
-      const matchQ = !q || (d.baslik || '').toLowerCase().includes(q) || (d.dosyaNo || '').toLowerCase().includes(q) || (d.karsiTaraf || '').toLowerCase().includes(q) || (d.mahkeme || '').toLowerCase().includes(q) || (d.avukat || '').toLowerCase().includes(q);
-      const matchDurum = durumFilter === 'Tümü' || d.durum === durumFilter;
-      const matchTur = turFilter === 'Tümü' || d.dosyaTuru === turFilter;
-      return matchQ && matchDurum && matchTur;
+  // Durum değiştirme — "Anlaşıldı" seçilirse "bağlayan" olarak işlemi yapan yazılır
+  const handleDurumDegistir = async (p, yeniDurum) => {
+    const ek = {};
+    if (yeniDurum === 'Anlaşıldı' && !p.baglayan) {
+      ek.baglayan = currentUser?.fullName || 'Sistem';
+      ek.baglanmaTarihi = new Date().toISOString();
+    }
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy', p.id), {
+      durum: yeniDurum, ...ek,
+      hareketGecmisi: [...(p.hareketGecmisi || []), hareket('durum', `Durum "${yeniDurum}" yapıldı${ek.baglayan ? ` — Bağlayan: ${ek.baglayan}` : ''}`)],
     });
+    if (yeniDurum === 'Anlaşıldı') addSystemLog?.('Saha Portföy', `${p.firmaAdi} PORTFÖYE BAĞLANDI! (${currentUser?.fullName || 'Sistem'})`);
+  };
 
-    // Muhasebe listesi filtreli
-    const muhFiltered = muhasebe.filter(m => muhDosyaFilter === 'Tümü' || (muhDosyaFilter === 'Genel' ? !m.dosyaId : m.dosyaId === muhDosyaFilter));
+  // Ziyaret günlüğüne kayıt
+  const handleZiyaretEkle = async (p) => {
+    if (!ziyaretForm.not.trim()) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy', p.id), {
+      ziyaretler: [...(p.ziyaretler || []), { ...ziyaretForm, yapan: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString() }],
+      hareketGecmisi: [...(p.hareketGecmisi || []), hareket('ziyaret', `Ziyaret yapıldı (${ziyaretForm.tarih}): ${ziyaretForm.not.slice(0, 50)}`)],
+    });
+    setZiyaretForm({ tarih: bugunStr(), not: '' });
+  };
 
-    const durumOf = (id) => DURUMLAR.find(s => s.id === id) || DURUMLAR[0];
-    const dosyaAdi = (id) => dosyalar.find(d => d.id === id)?.baslik || 'Genel (dosyasız)';
-    const tarihGoster = (t) => t ? new Date(t).toLocaleDateString('tr-TR') : '—';
+  // Cari hareket: komisyon ödemesi veya teminat verilmesi
+  const handleCariEkle = async (p) => {
+    const tutar = parseFloat(cariForm.tutar);
+    if (!tutar || isNaN(tutar)) return;
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy', p.id), {
+      cariHareketler: [...(p.cariHareketler || []), { tip: cariForm.tip, tutar, aciklama: cariForm.aciklama.trim(), yapan: currentUser?.fullName || 'Sistem', tarih: new Date().toISOString() }],
+      hareketGecmisi: [...(p.hareketGecmisi || []), hareket('cari', `${cariForm.tip === 'komisyon' ? 'Komisyon ödendi' : cariForm.tip === 'teminat' ? 'Teminat verildi' : 'Teminat iade alındı'}: ${tl(tutar)}`)],
+    });
+    addSystemLog?.('Saha Portföy Cari', `${p.firmaAdi} — ${cariForm.tip === 'komisyon' ? 'Komisyon' : 'Teminat'}: ${tl(tutar)}`);
+    setCariForm({ tip: 'komisyon', tutar: '', aciklama: '' });
+  };
 
-    return (
-      <div className="max-w-6xl mx-auto animate-in fade-in space-y-5">
-        {/* BAŞLIK + ÖZET — mor geçişli hukuk paneli */}
-        <div className="bg-gradient-to-r from-purple-600 via-purple-800 to-fuchsia-950 rounded-2xl p-5 md:p-6 text-white shadow-lg">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><Scale className="w-6 h-6" /> Dava Dosyaları — Hukuk Takip Merkezi</h2>
-              <p className="text-purple-200 text-xs md:text-sm mt-1">Dava, icra, ihtar/ihbar, arabuluculuk ve tüm hukuki süreçler ile avukat muhasebesi tek merkezden yönetilir.</p>
-            </div>
-            <button onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(true); setBelgeLabel(''); }}
-              className="shrink-0 px-4 py-2.5 bg-white text-purple-900 font-black rounded-xl shadow hover:scale-[1.03] transition flex items-center gap-2 text-sm">
-              <PlusCircle className="w-4 h-4" /> Yeni Dosya Aç
-            </button>
-          </div>
-          {/* Özet kartları: dosya + muhasebe durumu bir arada */}
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-4">
-            <div className="rounded-xl px-3 py-2.5 bg-white/10 border border-white/20"><div className="text-lg font-black leading-none">{aktifDosyaSayisi}</div><div className="text-[9px] font-bold mt-1 opacity-90">AKTİF DOSYA</div></div>
-            <div className={`rounded-xl px-3 py-2.5 border ${yaklasanlar.length > 0 ? 'bg-red-500/30 border-red-300/40' : 'bg-white/10 border-white/20'}`}><div className="text-lg font-black leading-none">{yaklasanlar.length}</div><div className="text-[9px] font-bold mt-1 opacity-90">YAKLAŞAN TARİH (30 GÜN)</div></div>
-            <div className="rounded-xl px-3 py-2.5 bg-white/10 border border-white/20"><div className="text-lg font-black leading-none">{paraFormat(toplamMasraf)} ₺</div><div className="text-[9px] font-bold mt-1 opacity-90">TOPLAM MASRAF</div></div>
-            <div className="rounded-xl px-3 py-2.5 bg-white/10 border border-white/20"><div className="text-lg font-black leading-none">{paraFormat(toplamOdenen)} ₺</div><div className="text-[9px] font-bold mt-1 opacity-90">ÖDENEN TUTAR</div></div>
-            <div className={`rounded-xl px-3 py-2.5 border ${kalanBakiye > 0 ? 'bg-amber-500/30 border-amber-300/40' : 'bg-emerald-500/30 border-emerald-300/40'}`}><div className="text-lg font-black leading-none">{paraFormat(kalanBakiye)} ₺</div><div className="text-[9px] font-bold mt-1 opacity-90">KALAN BAKİYE</div></div>
-          </div>
+  // Yönlendirilen iş sayacı (partner bize iş gönderdiğinde +1)
+  const handleYonlendirmeEkle = async (p) => {
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy', p.id), {
+      yonlendirmeSayisi: (p.yonlendirmeSayisi || 0) + 1,
+      hareketGecmisi: [...(p.hareketGecmisi || []), hareket('yonlendirme', 'Yönlendirilen iş kaydedildi (+1)')],
+    });
+  };
+
+  const handleSil = async () => {
+    if (!silinecekId) return;
+    const p = partnerlar.find(x => x.id === silinecekId);
+    await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sahaPortfoy', silinecekId));
+    addSystemLog?.('Saha Portföy', `${p?.firmaAdi || ''} portföyden silindi.`);
+    setSilinecekId(null); setDetayId(null);
+  };
+
+  // ---------------------------------------------------- TÜREVLER ---
+  const filtreli = partnerlar.filter(p => {
+    if (tipFiltre !== 'Tümü' && p.tip !== tipFiltre) return false;
+    if (durumFiltre !== 'Tümü' && p.durum !== durumFiltre) return false;
+    if (sahipFiltre !== 'Tümü' && p.portfoySahibi !== sahipFiltre) return false;
+    if (arama.trim()) {
+      const q = arama.toLowerCase();
+      return (p.firmaAdi || '').toLowerCase().includes(q) || (p.yetkili || '').toLowerCase().includes(q) || (p.telefon || '').includes(arama) || (p.bolge || '').toLowerCase().includes(q);
+    }
+    return true;
+  }).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+
+  const detay = partnerlar.find(p => p.id === detayId);
+  const cariOzet = (p) => {
+    const h = p.cariHareketler || [];
+    const komisyon = h.filter(x => x.tip === 'komisyon').reduce((s, x) => s + (x.tutar || 0), 0);
+    const teminat = h.filter(x => x.tip === 'teminat').reduce((s, x) => s + (x.tutar || 0), 0)
+                  - h.filter(x => x.tip === 'teminatIade').reduce((s, x) => s + (x.tutar || 0), 0);
+    return { komisyon, teminat };
+  };
+
+  // Özet kartları
+  const anlasilanlar = partnerlar.filter(p => p.durum === 'Anlaşıldı');
+  const buHaftaZiyaret = (() => {
+    const yediGunOnce = new Date(); yediGunOnce.setDate(yediGunOnce.getDate() - 7);
+    return partnerlar.reduce((s, p) => s + (p.ziyaretler || []).filter(z => new Date(z.tarih) >= yediGunOnce).length, 0);
+  })();
+  // DEĞİŞTİ (kullanıcı talebi): "Bekleyen Randevu" artık YENİ randevu
+  // sisteminden sayılır (bekliyor + günü gelmemiş/bugün) ve partner kartına
+  // elle girilmiş eski "sonraki randevu" tarihleri de eklenir (geriye uyum).
+  const bekleyenRandevu = randevular.filter(r => r.durum === 'bekliyor' && r.tarih >= bugunStr()).length
+    + partnerlar.filter(p => p.sonrakiRandevu && p.sonrakiRandevu >= bugunStr() && p.durum !== 'Anlaşıldı' && p.durum !== 'Pasif').length;
+  const toplamKomisyon = partnerlar.reduce((s, p) => s + cariOzet(p).komisyon, 0);
+  const acikTeminat = partnerlar.reduce((s, p) => s + cariOzet(p).teminat, 0);
+
+  const tipBul = (id) => PARTNER_TIPLERI.find(t => t.id === id) || PARTNER_TIPLERI[4];
+  const durumBul = (id) => PORTFOY_DURUMLARI.find(d => d.id === id) || PORTFOY_DURUMLARI[0];
+
+  return (
+    <div className="space-y-4 animate-in fade-in max-w-6xl mx-auto">
+      {/* BAŞLIK */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div>
+          <p className="text-[11px] font-black text-neutral-400 uppercase tracking-widest">Saha Pazarlama Ekibi</p>
+          <h2 className="text-2xl font-black text-black flex items-center gap-2"><Handshake className="w-7 h-7 text-red-600" /> Saha Portföy</h2>
+          <p className="text-sm text-neutral-500 font-medium mt-1">Emlak ofisleri, site yönetimleri ve iş ortakları — ziyaret, anlaşma, komisyon ve teminat takibi tek yerde.</p>
         </div>
-
-        {/* YAKLAŞAN KRİTİK TARİH UYARILARI */}
-        {yaklasanlar.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-3">
-            <div className="text-[10px] font-black text-red-500 uppercase mb-2 flex items-center gap-1.5"><AlertTriangle className="w-3.5 h-3.5" /> Yaklaşan Duruşma / Son Tarihler</div>
-            <div className="flex flex-wrap gap-2">
-              {yaklasanlar.map(d => (
-                <button key={d.id} onClick={() => { setAltSekme('dosyalar'); setExpandedId(d.id); }}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition ${d.kalanGun <= 7 ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
-                  {d.baslik} — {d.kalanGun === 0 ? 'BUGÜN' : `${d.kalanGun} gün kaldı`}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ALT SEKME GEÇİŞİ: Dosyalar / Avukat Muhasebesi */}
-        <div className="flex gap-2">
-          <button onClick={() => setAltSekme('dosyalar')} className={`flex-1 py-2.5 rounded-xl text-sm font-black transition border ${altSekme === 'dosyalar' ? 'bg-purple-700 text-white border-purple-700 shadow' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}><span className="flex items-center justify-center gap-2"><FolderOpen className="w-4 h-4" /> Dosyalar ({dosyalar.length})</span></button>
-          <button onClick={() => setAltSekme('muhasebe')} className={`flex-1 py-2.5 rounded-xl text-sm font-black transition border ${altSekme === 'muhasebe' ? 'bg-purple-700 text-white border-purple-700 shadow' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}><span className="flex items-center justify-center gap-2"><Wallet className="w-4 h-4" /> Avukat Muhasebesi ({muhasebe.length})</span></button>
+        <div className="flex items-center gap-2 shrink-0">
+          {/* YENİ (kullanıcı talebi): Randevu Ekle — Portföye Ekle'nin SOLUNDA.
+              Akış: önce randevu alınır, görüşmeye gidilir, sonra portföye eklenir. */}
+          <button type="button" onClick={() => { setRandevuForm({ ...bosRandevuForm, tarih: rSecilenGun || bugunStr(), atanan: currentUser?.fullName || '' }); setRandevuDuzenlenenId(null); setRandevuFormAcik(true); }}
+            className="px-5 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl shadow-lg shadow-indigo-600/25 transition flex items-center gap-2">
+            <CalendarDays className="w-5 h-5" /> Randevu Ekle
+          </button>
+          <button type="button" onClick={() => { setForm({ ...bosForm, portfoySahibi: currentUser?.fullName || '' }); setDuzenlenenId(null); setFormAcik(true); }}
+            className="px-5 py-3 bg-red-600 hover:bg-red-700 text-white font-black rounded-2xl shadow-lg shadow-red-600/25 transition flex items-center gap-2">
+            <PlusCircle className="w-5 h-5" /> Portföye Ekle
+          </button>
         </div>
+      </div>
 
-        {/* ================= DOSYALAR SEKMESİ ================= */}
-        {altSekme === 'dosyalar' && (<>
-        {/* FİLTRELER */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 space-y-2">
-          <div className="relative">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Dosya adı, dosya no, karşı taraf, mahkeme veya avukat ara..."
-              className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-purple-600 outline-none text-sm" />
-          </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[10px] font-black text-neutral-400 uppercase">Durum:</span>
-            {['Tümü', ...DURUMLAR.map(s => s.id)].map(s => (
-              <button key={s} onClick={() => setDurumFilter(s)} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${durumFilter === s ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}>{s}</button>
-            ))}
-          </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="text-[10px] font-black text-neutral-400 uppercase">Tür:</span>
-            {['Tümü', ...DOSYA_TURLERI].map(t => (
-              <button key={t} onClick={() => setTurFilter(t)} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${turFilter === t ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}>{t}</button>
-            ))}
-          </div>
-        </div>
+      {/* ÖZET ŞERİT */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
+        <div className="p-3 rounded-2xl border-2 bg-white border-neutral-200"><p className="text-[9px] font-black uppercase text-neutral-400 flex items-center gap-1"><Users className="w-3 h-3" /> Toplam Portföy</p><p className="text-xl font-black">{partnerlar.length}</p></div>
+        <div className="p-3 rounded-2xl border-2 bg-green-50 border-green-200"><p className="text-[9px] font-black uppercase text-green-700 flex items-center gap-1"><CheckCircle className="w-3 h-3" /> Anlaşılan</p><p className="text-xl font-black text-green-700">{anlasilanlar.length}</p></div>
+        <div className="p-3 rounded-2xl border-2 bg-white border-neutral-200"><p className="text-[9px] font-black uppercase text-blue-600 flex items-center gap-1"><MapPin className="w-3 h-3" /> Bu Hafta Ziyaret</p><p className="text-xl font-black text-blue-700">{buHaftaZiyaret}</p></div>
+        <div className="p-3 rounded-2xl border-2 bg-white border-neutral-200"><p className="text-[9px] font-black uppercase text-yellow-600 flex items-center gap-1"><CalendarDays className="w-3 h-3" /> Bekleyen Randevu</p><p className="text-xl font-black text-yellow-700">{bekleyenRandevu}</p></div>
+        <div className="p-3 rounded-2xl border-2 bg-white border-neutral-200 col-span-2 md:col-span-1"><p className="text-[9px] font-black uppercase text-neutral-400 flex items-center gap-1"><Wallet className="w-3 h-3" /> Komisyon / Teminat</p><p className="text-sm font-black text-green-700">{tl(toplamKomisyon)} <span className="text-neutral-300">/</span> <span className="text-orange-600">{tl(acikTeminat)}</span></p></div>
+      </div>
 
-        {/* DOSYA KARTLARI */}
-        <div className="space-y-3">
-          {filtered.length === 0 && (
-            <div className="bg-white rounded-2xl border border-dashed border-neutral-300 p-10 text-center text-sm font-bold text-neutral-400">Kayıtlı dosya bulunamadı. "Yeni Dosya Aç" ile ilk hukuki süreci ekleyin.</div>
-          )}
-          {filtered.map(d => {
-            const st = durumOf(d.durum);
-            const masraf = dosyaMasrafi(d.id);
-            const kalanG = [gunFarki(d.durusmaTarihi), gunFarki(d.sonTarih)].filter(x => x !== null && x >= 0).sort((a, b) => a - b)[0];
-            return (
-              <div key={d.id} className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
-                {/* KART BAŞLIĞI */}
-                <button onClick={() => setExpandedId(expandedId === d.id ? null : d.id)} className="w-full text-left p-4 hover:bg-neutral-50 transition">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0">
-                      <div className="w-10 h-10 rounded-xl bg-purple-100 flex items-center justify-center shrink-0"><Scale className="w-5 h-5 text-purple-700" /></div>
-                      <div className="min-w-0">
-                        <div className="font-black text-black text-sm truncate">{d.baslik}</div>
-                        <div className="text-[11px] text-neutral-500 font-bold mt-0.5 flex flex-wrap gap-x-2">
-                          <span>{d.dosyaTuru}</span>
-                          {d.dosyaNo && <span>• No: {d.dosyaNo}</span>}
-                          {d.karsiTaraf && <span>• Karşı Taraf: {d.karsiTaraf}</span>}
-                          {d.taraf && <span>• Konum: {d.taraf}</span>}
-                        </div>
-                        <div className="text-[11px] text-neutral-400 font-bold mt-0.5 flex flex-wrap gap-x-2">
-                          {d.mahkeme && <span>{d.mahkeme}</span>}
-                          {d.avukat && <span>• Av. {d.avukat}</span>}
-                          {masraf > 0 && <span className="text-amber-600">• Masraf: {paraFormat(masraf)} ₺</span>}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      <span className={`px-2.5 py-1 rounded-full text-[10px] font-black border ${st.color}`}>{d.durum}</span>
-                      {kalanG !== undefined && kalanG !== null && <span className={`text-[10px] font-black ${kalanG <= 7 ? 'text-red-600' : 'text-amber-600'}`}>⏳ {kalanG === 0 ? 'BUGÜN' : `${kalanG} gün`}</span>}
-                      {(d.belgeler || []).length > 0 && <span className="text-[10px] font-bold text-neutral-400">{(d.belgeler || []).length} belge</span>}
-                    </div>
-                  </div>
-                </button>
-
-                {/* DETAY PANELİ */}
-                {expandedId === d.id && (
-                  <div className="border-t border-neutral-100 p-4 space-y-4 animate-in slide-in-from-top-2 bg-neutral-50/50">
-                    {/* Bilgi ızgarası */}
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Açılış Tarihi</div><div className="font-black text-black">{tarihGoster(d.acilisTarihi)}</div></div>
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Duruşma / Kritik Tarih</div><div className="font-black text-black">{tarihGoster(d.durusmaTarihi)}</div></div>
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">İtiraz / Cevap Son Günü</div><div className="font-black text-black">{tarihGoster(d.sonTarih)}</div></div>
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Dava / Takip Tutarı</div><div className="font-black text-black">{d.tutar ? `${paraFormat(d.tutar)} ₺` : '—'}</div></div>
-                    </div>
-                    {d.notlar && <div className="bg-white rounded-xl border border-neutral-200 p-3 text-xs text-neutral-600"><span className="font-black text-neutral-400 text-[10px] uppercase block mb-1">Notlar</span>{d.notlar}</div>}
-
-                    {/* Durum değiştir + işlem butonları */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <select value={d.durum} onChange={e => handleDurumChange(d, e.target.value)} className="p-2 border border-neutral-300 rounded-lg bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600">
-                        {DURUMLAR.map(s => <option key={s.id} value={s.id}>{s.id}</option>)}
-                      </select>
-                      <button onClick={() => { setForm({ ...emptyForm, ...d }); setEditingId(d.id); setShowForm(true); }} className="px-3 py-2 bg-neutral-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-black transition"><Edit className="w-3.5 h-3.5" /> Düzenle</button>
-                      <button onClick={() => { setAltSekme('muhasebe'); setMuhDosyaFilter(d.id); setMuhForm({ ...emptyMuhForm, dosyaId: d.id }); }} className="px-3 py-2 bg-purple-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-purple-800 transition"><Wallet className="w-3.5 h-3.5" /> Dosya Muhasebesi</button>
-                      <button onClick={() => setDeleteId(d.id)} className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-red-100 transition"><X className="w-3.5 h-3.5" /> Sil</button>
-                    </div>
-
-                    {/* YENİ: SÜREÇ İŞLEMLERİ — dosyanın türüne göre takip adımları.
-                        Tek dokunuşla Süreç Geçmişi'ne işlenir; her işleme not eklenebilir. */}
-                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
-                      <span className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5 mb-2"><CheckSquare className="w-3.5 h-3.5 text-purple-600" /> Süreç İşlemleri <span className="normal-case font-bold text-neutral-400">({d.dosyaTuru})</span></span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {(SUREC_ISLEMLERI[d.dosyaTuru] || SUREC_ISLEMLERI['Diğer']).map(islem => (
-                          <button key={islem} onClick={() => handleSurecIslem(d, islem)}
-                            className="px-2.5 py-1.5 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg text-[11px] font-bold hover:bg-purple-100 hover:border-purple-300 transition">
-                            {islem}
-                          </button>
-                        ))}
-                        <button onClick={() => handleOzelIslem(d)}
-                          className="px-2.5 py-1.5 bg-neutral-800 text-white rounded-lg text-[11px] font-bold hover:bg-black transition flex items-center gap-1">
-                          <PlusCircle className="w-3 h-3" /> Özel İşlem
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* BELGELER — çoklu yükleme (fotoğraf/PDF/dosya), yükleyen kişi + tarih görünür */}
-                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-purple-600" /> Dosya Belgeleri</span>
-                        <MediaCaptureMenu compact multiple disabled={detayBelgeUploading === d.id}
-                          buttonLabel={detayBelgeUploading === d.id ? 'Yükleniyor...' : 'Belge Ekle'}
-                          onChange={(e) => handleDetayBelgeUpload(d, e)} />
-                      </div>
-                      {(d.belgeler || []).length === 0 && <div className="text-[11px] text-neutral-400 font-bold py-2">Henüz belge yüklenmemiş.</div>}
-                      <div className="space-y-1">
-                        {(d.belgeler || []).map(b => (
-                          <div key={b.id} className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1.5 text-xs">
-                            <FileText className="w-3.5 h-3.5 text-purple-500 shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-bold text-neutral-700 truncate">{b.label}</div>
-                              <div className="text-[10px] text-neutral-400 font-bold">{b.uploadedBy || '—'} • {b.date ? new Date(b.date).toLocaleString('tr-TR') : ''}</div>
-                            </div>
-                            <button onClick={() => setViewingImage?.({ title: b.label, name: b.url })} className="text-neutral-500 hover:text-black" title="Görüntüle"><Eye className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => handleDetayBelgeRename(d, b.id)} className="text-neutral-500 hover:text-black" title="Adını değiştir"><Edit className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => handleDetayBelgeRemove(d, b.id)} className="text-red-400 hover:text-red-600" title="Sil"><X className="w-3.5 h-3.5" /></button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* SÜREÇ GEÇMİŞİ */}
-                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
-                      <span className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5 mb-2"><History className="w-3.5 h-3.5 text-purple-600" /> Süreç Geçmişi</span>
-                      <div className="space-y-1 max-h-40 overflow-y-auto">
-                        {[...(d.history || [])].reverse().map((h, i) => (
-                          <div key={i} className="text-[11px] text-neutral-500 font-bold flex gap-2">
-                            <span className="text-neutral-400 shrink-0">{new Date(h.date).toLocaleString('tr-TR')}</span>
-                            <span className="text-neutral-700">{h.text}</span>
-                            <span className="text-purple-600 ml-auto shrink-0">{h.by}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-        </>)}
-
-        {/* ================= AVUKAT MUHASEBESİ SEKMESİ ================= */}
-        {altSekme === 'muhasebe' && (<>
-        {/* Muhasebe özet şeridi */}
-        <div className="grid grid-cols-3 gap-2">
-          <div className="bg-white rounded-2xl border border-neutral-200 p-4 text-center"><div className="text-lg font-black text-amber-600">{paraFormat(toplamMasraf)} ₺</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-1">Toplam Masraf / Ücret</div></div>
-          <div className="bg-white rounded-2xl border border-neutral-200 p-4 text-center"><div className="text-lg font-black text-emerald-600">{paraFormat(toplamOdenen)} ₺</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-1">Toplam Ödenen</div></div>
-          <div className="bg-white rounded-2xl border border-neutral-200 p-4 text-center"><div className={`text-lg font-black ${kalanBakiye > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{paraFormat(kalanBakiye)} ₺</div><div className="text-[10px] font-black text-neutral-400 uppercase mt-1">Kalan Bakiye</div></div>
-        </div>
-
-        {/* YENİ KAYIT FORMU — masraf (avukat da girebilir) veya ödeme */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 space-y-3">
-          <div className="text-xs font-black text-neutral-700 flex items-center gap-1.5"><PlusCircle className="w-4 h-4 text-purple-600" /> Yeni Muhasebe Kaydı</div>
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-            {/* Kayıt yönü: masraf mı ödeme mi */}
-            <select value={muhForm.yon} onChange={e => setMuhForm({ ...muhForm, yon: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600">
-              <option value="masraf">Masraf / Ücret (Gider)</option>
-              <option value="odeme">Ödeme (Ödenen Tutar)</option>
-            </select>
-            <select value={muhForm.tur} onChange={e => setMuhForm({ ...muhForm, tur: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600">
-              {(muhForm.yon === 'masraf' ? MASRAF_TURLERI : ['Avukata Ödeme', 'Harç Ödemesi', 'Kurum Ödemesi', 'Diğer Ödeme']).map(t => <option key={t}>{t}</option>)}
-            </select>
-            <input type="number" value={muhForm.tutar} onChange={e => setMuhForm({ ...muhForm, tutar: e.target.value })} placeholder="Tutar (TL)" className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600" />
-            <input type="date" value={muhForm.tarih} onChange={e => setMuhForm({ ...muhForm, tarih: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600" />
-            {/* Kayıt bir dosyaya bağlanabilir ya da genel (ör. aylık sabit ücret) olabilir */}
-            <select value={muhForm.dosyaId} onChange={e => setMuhForm({ ...muhForm, dosyaId: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600">
-              <option value="">Genel (dosyasız)</option>
-              {dosyalar.map(d => <option key={d.id} value={d.id}>{d.baslik}</option>)}
-            </select>
-            <button onClick={handleSaveMuhasebe} disabled={!muhForm.tutar} className="p-2.5 bg-purple-700 text-white rounded-xl text-xs font-black hover:bg-purple-800 transition disabled:opacity-40">Kaydet</button>
-          </div>
-          <input value={muhForm.aciklama} onChange={e => setMuhForm({ ...muhForm, aciklama: e.target.value })} placeholder="Açıklama (opsiyonel — örn: Nisan ayı sabit ücret, X dosyası bilirkişi ücreti)" className="w-full p-2.5 border border-neutral-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-purple-600" />
-
-          {/* YENİ: DEKONT / BELGE YÜKLEME — birden fazla PDF ve fotoğraf seçilebilir */}
-          <div className="border-2 border-dashed border-purple-200 rounded-xl p-3 bg-purple-50/40 space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <label className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer ${muhBelgeYukleniyor ? 'bg-neutral-200 text-neutral-400 pointer-events-none' : 'bg-purple-700 text-white hover:bg-purple-800'}`}>
-                {muhBelgeYukleniyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlusCircle className="w-4 h-4" />}
-                {muhBelgeYukleniyor ? 'Yükleniyor...' : 'Dekont / Belge Yükle'}
-                {/* multiple: birden fazla dosya birlikte seçilebilir. accept: fotoğraf + PDF */}
-                <input type="file" multiple accept="image/*,application/pdf,.pdf" className="hidden" onChange={handleMuhBelgeUpload} disabled={muhBelgeYukleniyor} />
-              </label>
-              <span className="text-[10px] font-bold text-neutral-500">
-                {muhBelgeler.length > 0 ? `${muhBelgeler.length} belge eklendi — kaydettiğinizde kayda bağlanacak` : 'PDF ve fotoğraf seçebilirsiniz (birden fazla)'}
+      {/* ==================================================================
+          YENİ (kullanıcı talebi): RANDEVU TAKVİMİ
+          ------------------------------------------------------------------
+          Hatırlatmalar sayfasındaki takvimle aynı tasarım dili: ay ızgarası,
+          gün hücrelerinde durum simgeleri, altında seçili günün listesi.
+          Simgeler: bekleyen randevu = mavi saat, gidilen = yeşil tik,
+          iptal = gri çarpı, tarihi geçmiş bekleyen = kırmızı ünlem.
+          ================================================================== */}
+      <div className="bg-white rounded-3xl shadow-sm border border-neutral-200 p-4 md:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <h3 className="text-lg font-black flex items-center gap-2"><CalendarDays className="w-5 h-5 text-indigo-600" /> Randevu Takvimi</h3>
+          {/* Saha pazarlamacının güne başlarken göreceği hızlı durum bantları */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {rBugunkuler.length > 0 && (
+              <span className="text-[10px] font-black px-2.5 py-1 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-300">
+                Bugün {rBugunkuler.length} randevunuz var
               </span>
-            </div>
-            {/* Yüklenen belgelerin küçük önizlemeleri — kaydetmeden önce çıkarılabilir */}
-            {muhBelgeler.length > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {muhBelgeler.map((b, i) => (
-                  <div key={i} className="relative group flex items-center gap-1.5 bg-white border border-purple-200 rounded-lg pl-1.5 pr-6 py-1.5 shadow-sm">
-                    {b.type === 'image'
-                      ? <img src={b.url} alt={b.name} className="w-8 h-8 object-cover rounded" />
-                      : <span className="w-8 h-8 rounded bg-red-50 text-red-600 flex items-center justify-center"><FileText className="w-4 h-4" /></span>}
-                    <span className="text-[10px] font-bold text-neutral-700 max-w-[110px] truncate">{b.name}</span>
-                    {/* Yanlış yüklenen belgeyi listeden çıkar */}
-                    <button type="button" onClick={() => setMuhBelgeler(prev => prev.filter((_, x) => x !== i))}
-                      className="absolute right-1 top-1/2 -translate-y-1/2 text-neutral-300 hover:text-red-600 transition" title="Bu belgeyi çıkar">
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))}
-              </div>
+            )}
+            {rGecikmisler.length > 0 && (
+              <button type="button" onClick={() => setRSecilenGun(rGecikmisler[0].tarih)}
+                className="text-[10px] font-black px-2.5 py-1 rounded-full bg-red-100 text-red-700 border border-red-300 hover:bg-red-200 transition">
+                ⚠ {rGecikmisler.length} gecikmiş randevu — gidilmedi mi?
+              </button>
             )}
           </div>
         </div>
 
-        {/* DOSYAYA GÖRE FİLTRE */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-black text-neutral-400 uppercase">Dosya:</span>
-          <button onClick={() => setMuhDosyaFilter('Tümü')} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${muhDosyaFilter === 'Tümü' ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200'}`}>Tümü</button>
-          <button onClick={() => setMuhDosyaFilter('Genel')} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${muhDosyaFilter === 'Genel' ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200'}`}>Genel</button>
-          {dosyalar.map(d => (
-            <button key={d.id} onClick={() => setMuhDosyaFilter(d.id)} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${muhDosyaFilter === d.id ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200'}`}>{d.baslik}</button>
-          ))}
+        {/* AY GEZGİNİ */}
+        <div className="flex items-center justify-between mb-3">
+          <button type="button" onClick={() => setRTakvim(t => { const d = new Date(t.yil, t.ay - 1, 1); return { yil: d.getFullYear(), ay: d.getMonth() }; })} className="p-2 hover:bg-neutral-100 rounded-xl transition"><ChevronLeft className="w-5 h-5" /></button>
+          <h4 className="text-base font-black">{R_AYLAR[rTakvim.ay]} {rTakvim.yil}</h4>
+          <button type="button" onClick={() => setRTakvim(t => { const d = new Date(t.yil, t.ay + 1, 1); return { yil: d.getFullYear(), ay: d.getMonth() }; })} className="p-2 hover:bg-neutral-100 rounded-xl transition"><ChevronRight className="w-5 h-5" /></button>
         </div>
-
-        {/* MUHASEBE TABLOSU — kaydı kimin girdiği (avukat dahil) her satırda görünür */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-neutral-900 text-white">
-              <tr>
-                <th className="p-3 font-bold rounded-tl-2xl">Tarih</th>
-                <th className="p-3 font-bold">Yön</th>
-                <th className="p-3 font-bold">Tür</th>
-                <th className="p-3 font-bold">Dosya</th>
-                <th className="p-3 font-bold">Açıklama</th>
-                <th className="p-3 font-bold">Ekleyen</th>
-                {/* YENİ: Kayda bağlı dekont/belge varsa buradan görüntülenir */}
-                <th className="p-3 font-bold text-center">Dekont</th>
-                <th className="p-3 font-bold text-right">Tutar</th>
-                <th className="p-3 font-bold rounded-tr-2xl"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {muhFiltered.length === 0 && <tr><td colSpan={9} className="p-6 text-center text-neutral-400 font-bold">Kayıt bulunamadı.</td></tr>}
-              {muhFiltered.map(m => (
-                <tr key={m.id} className="border-b border-neutral-100 hover:bg-neutral-50">
-                  <td className="p-3 font-bold text-neutral-600">{tarihGoster(m.tarih)}</td>
-                  <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${m.yon === 'masraf' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{m.yon === 'masraf' ? 'MASRAF' : 'ÖDEME'}</span></td>
-                  <td className="p-3 font-bold text-neutral-700">{m.tur}</td>
-                  <td className="p-3 text-neutral-500 font-bold">{dosyaAdi(m.dosyaId)}</td>
-                  <td className="p-3 text-neutral-500 max-w-[200px] truncate">{m.aciklama || '—'}</td>
-                  <td className="p-3 font-bold text-purple-700">{m.ekleyen || '—'}</td>
-                  {/* YENİ: DEKONTU GÖR — kayda belge eklenmişse buton, yoksa tire görünür */}
-                  <td className="p-3 text-center">
-                    {m.belgeler?.length > 0 ? (
-                      <button onClick={() => setMuhBelgeGoster(m)}
-                        className="px-2.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 rounded-lg text-[10px] font-black inline-flex items-center gap-1 transition"
-                        title="Bu kayda ait dekont/belgeleri görüntüle">
-                        <Eye className="w-3 h-3" /> Dekontu Gör ({m.belgeler.length})
-                      </button>
-                    ) : <span className="text-neutral-300 font-bold">—</span>}
-                  </td>
-                  <td className={`p-3 text-right font-black ${m.yon === 'masraf' ? 'text-amber-600' : 'text-emerald-600'}`}>{m.yon === 'masraf' ? '+' : '−'}{paraFormat(m.tutar)} ₺</td>
-                  <td className="p-3 text-right"><button onClick={() => setMuhDeleteId(m.id)} className="text-red-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="grid grid-cols-7 gap-1.5 mb-1.5">
+          {R_GUNLER.map(g => <div key={g} className="text-center text-[11px] font-black text-neutral-400 py-1">{g}</div>)}
         </div>
-        </>)}
-
-        {/* YENİ: DEKONT GÖRÜNTÜLEME PENCERESİ
-            Kayda bağlı tüm belgeleri listeler. Fotoğraflar doğrudan gösterilir
-            (tıklayınca yeni sekmede tam boyut açılır), PDF'ler görüntüleme
-            bağlantısı olarak sunulur. */}
-        {muhBelgeGoster && (
-          <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setMuhBelgeGoster(null)}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
-              <div className="p-4 border-b border-neutral-200 flex items-center justify-between shrink-0">
-                <div className="min-w-0">
-                  <h3 className="font-black text-black flex items-center gap-2 text-sm"><Wallet className="w-5 h-5 text-purple-700" /> Ödeme Dekontu / Belgeler</h3>
-                  <p className="text-[11px] font-bold text-neutral-500 mt-1 truncate">
-                    {tarihGoster(muhBelgeGoster.tarih)} • {muhBelgeGoster.tur} • {muhBelgeGoster.yon === 'masraf' ? '+' : '−'}{paraFormat(muhBelgeGoster.tutar)} ₺
-                  </p>
-                </div>
-                <button onClick={() => setMuhBelgeGoster(null)} className="text-neutral-400 hover:text-black shrink-0"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="flex-1 min-h-0 overflow-y-auto p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {(muhBelgeGoster.belgeler || []).map((b, i) => (
-                  <a key={i} href={b.url} target="_blank" rel="noopener noreferrer"
-                    className="border border-neutral-200 rounded-xl overflow-hidden hover:border-purple-400 hover:shadow-md transition group">
-                    {b.type === 'image' ? (
-                      <img src={b.url} alt={b.name} className="w-full h-40 object-cover bg-neutral-100" />
-                    ) : (
-                      <div className="w-full h-40 bg-red-50 flex flex-col items-center justify-center gap-2 text-red-600">
-                        <FileText className="w-10 h-10" />
-                        <span className="text-[10px] font-black uppercase">{b.type === 'pdf' ? 'PDF Belge' : 'Dosya'}</span>
-                      </div>
-                    )}
-                    <div className="p-2 flex items-center gap-1.5 bg-white">
-                      <Eye className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                      <span className="text-[11px] font-bold text-neutral-700 truncate group-hover:text-purple-700">{b.name || 'Belge'}</span>
-                    </div>
-                  </a>
-                ))}
-              </div>
-              <div className="p-3 border-t border-neutral-200 shrink-0">
-                <button onClick={() => setMuhBelgeGoster(null)} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm transition">Kapat</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* YENİ / DÜZENLE DOSYA MODALI */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in overflow-y-auto">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 animate-in zoom-in-95 my-8 max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-black text-black flex items-center gap-2"><Scale className="w-5 h-5 text-purple-700" /> {editingId ? 'Dosyayı Düzenle' : 'Yeni Dava Dosyası'}</h3>
-                <button onClick={() => setShowForm(false)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-3">
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Dosya Başlığı *</label>
-                  <input value={form.baslik} onChange={e => setForm({ ...form, baslik: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="Örn: X Ltd. Şti. alacak davası" /></div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Dosya Türü</label>
-                    <select value={form.dosyaTuru} onChange={e => setForm({ ...form, dosyaTuru: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-purple-600 text-sm">
-                      {DOSYA_TURLERI.map(t => <option key={t}>{t}</option>)}
-                    </select></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Şirketin Konumu</label>
-                    <select value={form.taraf} onChange={e => setForm({ ...form, taraf: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-purple-600 text-sm">
-                      {TARAFLAR.map(t => <option key={t}>{t}</option>)}
-                    </select></div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Dosya / Esas No</label>
-                    <input value={form.dosyaNo} onChange={e => setForm({ ...form, dosyaNo: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="2026/1234 E." /></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Mahkeme / İcra Dairesi / Kurum</label>
-                    <input value={form.mahkeme} onChange={e => setForm({ ...form, mahkeme: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="İst. 5. İş Mahkemesi" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Karşı Taraf</label>
-                    <input value={form.karsiTaraf} onChange={e => setForm({ ...form, karsiTaraf: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">İlgili Avukat</label>
-                    <input value={form.avukat} onChange={e => setForm({ ...form, avukat: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="Şirket avukatı adı" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Dava / Takip Tutarı (TL)</label>
-                    <input type="number" value={form.tutar} onChange={e => setForm({ ...form, tutar: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Açılış Tarihi</label>
-                    <input type="date" value={form.acilisTarihi} onChange={e => setForm({ ...form, acilisTarihi: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
-                </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Duruşma / Kritik Tarih</label>
-                    <input type="date" value={form.durusmaTarihi} onChange={e => setForm({ ...form, durusmaTarihi: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">İtiraz / Cevap Son Günü</label>
-                    <input type="date" value={form.sonTarih} onChange={e => setForm({ ...form, sonTarih: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" /></div>
-                </div>
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Notlar</label>
-                  <textarea value={form.notlar} onChange={e => setForm({ ...form, notlar: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm h-16 resize-none" placeholder="Sürece dair önemli notlar..." /></div>
-
-                {/* BELGELER — form aşamasında da çoklu yükleme yapılabilir */}
-                <div className="border border-neutral-200 rounded-xl p-3 bg-neutral-50">
-                  <label className="text-xs font-black text-neutral-700 mb-2 flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-purple-600" /> Belgeler</label>
-                  <div className="flex gap-1.5 mb-2">
-                    <input value={belgeLabel} onChange={e => setBelgeLabel(e.target.value)} placeholder="Belge adı (opsiyonel, örn: Tebligat)" className="flex-1 min-w-0 p-2 border border-neutral-300 rounded-lg text-xs outline-none focus:ring-1 focus:ring-purple-600" />
-                    <MediaCaptureMenu compact multiple disabled={belgeUploading}
-                      buttonLabel={belgeUploading ? 'Yükleniyor...' : 'Yükle'}
-                      onChange={handleFormBelgeUpload} />
-                  </div>
-                  {(form.belgeler || []).length > 0 && (
-                    <div className="space-y-1">
-                      {(form.belgeler || []).map(b => (
-                        <div key={b.id} className="flex items-center gap-2 bg-white border border-neutral-200 rounded-lg px-2 py-1.5 text-xs">
-                          <FileText className="w-3.5 h-3.5 text-purple-500" />
-                          <span className="font-bold text-neutral-700 flex-1 truncate">{b.label} <span className="text-neutral-400 font-normal">({b.uploadedBy})</span></span>
-                          <button onClick={() => setViewingImage?.({ title: b.label, name: b.url })} className="text-neutral-500 hover:text-black"><Eye className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => handleFormBelgeRemove(b.id)} className="text-red-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-2 mt-5">
-                <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
-                <button onClick={handleSaveDosya} disabled={!form.baslik.trim()} className="flex-1 py-2.5 bg-purple-700 text-white font-black rounded-xl hover:bg-purple-800 transition text-sm disabled:opacity-40 disabled:cursor-not-allowed">
-                  {editingId ? 'Güncelle' : 'Dosyayı Kaydet'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* DOSYA SİLME ONAYI */}
-        {deleteId && (
-          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center animate-in zoom-in-95">
-              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
-              <p className="text-sm font-bold text-neutral-700 mb-4">Bu dava dosyası kalıcı olarak silinecek. Emin misiniz?</p>
-              <div className="flex gap-2">
-                <button onClick={() => setDeleteId(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
-                <button onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari', deleteId)); addSystemLog?.('Dava Dosyası Silindi', 'Bir dava dosyası silindi.'); setDeleteId(null); }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* MUHASEBE KAYDI SİLME ONAYI */}
-        {muhDeleteId && (
-          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center animate-in zoom-in-95">
-              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
-              <p className="text-sm font-bold text-neutral-700 mb-4">Bu muhasebe kaydı silinecek. Emin misiniz?</p>
-              <div className="flex gap-2">
-                <button onClick={() => setMuhDeleteId(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
-                <button onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe', muhDeleteId)); addSystemLog?.('Avukat Muhasebe', 'Bir muhasebe kaydı silindi.'); setMuhDeleteId(null); }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ============================================================================
-  // YENİ: ŞİRKET BELGELERİ (ŞİRKET DOSYALARI > BELGE ARŞİV MERKEZİ)
-  // Şirkete ait TÜM resmi evrakların kategorili arşiv mantığıyla saklandığı,
-  // arandığı ve yönetildiği bölüm: İmza Sirküleri, Kira Kontratı, Vergi Levhası,
-  // Ticaret Sicil, Faaliyet Belgesi, Sigorta Poliçeleri, Ruhsat/İzinler vb.
-  // Özellikler:
-  //  - KATEGORİ (BÖLÜM) MANTIĞI: Her belge bir bölüme eklenir; bölümlere göre
-  //    tek tıkla filtrelenir, her bölümün belge sayısı görünür.
-  //  - ARŞİV ARAMA: Belge adı, açıklama, etiket ve ekli dosya adlarında arama.
-  //  - GEÇERLİLİK TAKİBİ: Son geçerlilik tarihi olan belgelerde (kontrat,
-  //    poliçe, ruhsat vb.) süresi geçen KIRMIZI, 30 gün içinde dolacak olan
-  //    SARI uyarıyla üstte listelenir.
-  //  - ÇOKLU DOSYA: Her belge kaydına birden fazla fotoğraf/PDF/dosya eklenir
-  //    (Şimdi Çek / Galeriden / Dosyadan). Kimin ne zaman yüklediği görünür.
-  //  - Tam yönetim: ekle / görüntüle / düzenle / dosya ekle-çıkar / sil,
-  //    tüm hareketler kayıt geçmişine (kim, ne zaman) işlenir.
-  // Veriler Firestore'da 'sirketBelgeleri' koleksiyonunda tutulur.
-  // ============================================================================
-  export const SirketBelgeleriView = ({ currentUser, addSystemLog, setViewingImage }) => {
-    // Arşiv bölümleri (kategoriler): ikon + renk ile birlikte tanımlanır
-    const KATEGORILER = [
-      { id: 'Resmi Evraklar',        icon: Landmark,   color: 'text-indigo-600',  bg: 'bg-indigo-100',  desc: 'İmza sirküleri, ticaret sicil, faaliyet belgesi...' },
-      { id: 'Sözleşme & Kontratlar', icon: FileText,   color: 'text-purple-600',  bg: 'bg-purple-100',  desc: 'Kira kontratı, tedarikçi ve iş sözleşmeleri...' },
-      { id: 'Vergi & Mali Evraklar', icon: Wallet,     color: 'text-emerald-600', bg: 'bg-emerald-100', desc: 'Vergi levhası, beyannameler, mali tablolar...' },
-      { id: 'Sigorta Poliçeleri',    icon: CheckSquare,color: 'text-sky-600',     bg: 'bg-sky-100',     desc: 'İşyeri, nakliyat, araç ve sorumluluk poliçeleri...' },
-      { id: 'Ruhsat & İzinler',      icon: Key,        color: 'text-amber-600',   bg: 'bg-amber-100',   desc: 'İşyeri ruhsatı, taşıma yetki belgeleri (K1 vb.)...' },
-      { id: 'Araç Belgeleri',        icon: Car,        color: 'text-red-600',     bg: 'bg-red-100',     desc: 'Şirket araçlarına ait genel evraklar...' },
-      { id: 'Banka & Finans',        icon: CreditCard, color: 'text-teal-600',    bg: 'bg-teal-100',    desc: 'Banka sözleşmeleri, kredi ve teminat evrakları...' },
-      { id: 'Diğer',                 icon: Package,    color: 'text-neutral-600', bg: 'bg-neutral-100', desc: 'Diğer tüm şirket belgeleri...' },
-    ];
-
-    const [belgeler, setBelgeler] = useState([]);
-    const [searchQuery, setSearchQuery] = useState('');
-    const [kategoriFilter, setKategoriFilter] = useState('Tümü');
-    const [siralama, setSiralama] = useState('yeni'); // 'yeni' | 'gecerlilik' | 'az'
-    const [showForm, setShowForm] = useState(false);
-    const [editingId, setEditingId] = useState(null);
-    const [expandedId, setExpandedId] = useState(null);
-    const [deleteId, setDeleteId] = useState(null);
-    const [dosyaUploading, setDosyaUploading] = useState(false);      // form içi yükleme
-    const [detayUploading, setDetayUploading] = useState(null);       // detayda yükleme yapılan belge id
-    const [dosyaLabel, setDosyaLabel] = useState('');                 // form içi dosya adı (opsiyonel)
-    // YENİ: Kritik evrak uyarı şeridinde varsayılan olarak yalnızca ilk 5 kayıt
-    // gösterilir; "Tümünü Göster" ile tamamı açılır. Uzun listenin ekranı
-    // kaplamasını ve asıl arşiv bölümünü aşağı itmesini önler.
-    const [tumKritikleriGoster, setTumKritikleriGoster] = useState(false);
-
-    // Boş belge kayıt formu
-    const emptyForm = {
-      baslik: '', kategori: 'Resmi Evraklar', aciklama: '', etiketler: '',
-      gecerlilikTarihi: '', dosyalar: []
-    };
-    const [form, setForm] = useState(emptyForm);
-
-    // Şirket belgeleri Firestore'dan canlı dinlenir
-    useEffect(() => {
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri'), snap => {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        setBelgeler(list);
-      });
-      return () => unsub();
-    }, []);
-
-    // Dosyayı sunucuya yükleyip URL döndürür (mevcut upload altyapısıyla aynı)
-    const uploadFile = async (file) => {
-      const fd = new FormData();
-      fd.append('file', file);
-      const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
-      const text = await res.text();
-      try { const json = JSON.parse(text); return json.url || json.fileName || json.file || text; } catch (err) { return text.trim(); }
-    };
-
-    // ÇOKLU dosya yükleme (form içinde, kayıttan önce). Yükleyen + tarih otomatik işlenir.
-    const handleFormDosyaUpload = async (e) => {
-      const files = Array.from(e.target.files || []);
-      if (files.length === 0) return;
-      setDosyaUploading(true);
-      try {
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const url = await uploadFile(file);
-          const label = dosyaLabel.trim()
-            ? (files.length > 1 ? `${dosyaLabel.trim()} (${i + 1})` : dosyaLabel.trim())
-            : (file.name || `Dosya ${i + 1}`);
-          setForm(prev => ({ ...prev, dosyalar: [...(prev.dosyalar || []), { id: Date.now().toString() + '_' + i, label, url, uploadedBy: currentUser?.fullName || 'Sistem', date: new Date().toISOString() }] }));
-        }
-        setDosyaLabel('');
-      } catch (err) { alert('Dosya yüklenemedi.'); }
-      setDosyaUploading(false);
-    };
-    const handleFormDosyaRemove = (id) => setForm(prev => ({ ...prev, dosyalar: (prev.dosyalar || []).filter(d => d.id !== id) }));
-
-    // Kayıtlı belgeye detay panelinden ÇOKLU dosya ekleme
-    const handleDetayDosyaUpload = async (belge, e) => {
-      const files = Array.from(e.target.files || []);
-      if (files.length === 0) return;
-      setDetayUploading(belge.id);
-      try {
-        const yeniler = [];
-        for (let i = 0; i < files.length; i++) {
-          const file = files[i];
-          const url = await uploadFile(file);
-          yeniler.push({ id: Date.now().toString() + '_' + i, label: file.name || `Dosya ${i + 1}`, url, uploadedBy: currentUser?.fullName || 'Sistem', date: new Date().toISOString() });
-        }
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri', belge.id), {
-          dosyalar: [...(belge.dosyalar || []), ...yeniler],
-          history: [...(belge.history || []), { date: new Date().toISOString(), text: `${yeniler.length} dosya eklendi`, by: currentUser?.fullName || 'Sistem' }]
-        });
-        addSystemLog?.('Şirket Evrakı', `${belge.baslik} kaydına ${yeniler.length} dosya eklendi.`);
-      } catch (err) { alert('Dosya yüklenemedi.'); }
-      setDetayUploading(null);
-    };
-    const handleDetayDosyaRemove = async (belge, id) => {
-      const d = (belge.dosyalar || []).find(x => x.id === id);
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri', belge.id), {
-        dosyalar: (belge.dosyalar || []).filter(x => x.id !== id),
-        history: [...(belge.history || []), { date: new Date().toISOString(), text: `Dosya silindi: ${d?.label || ''}`, by: currentUser?.fullName || 'Sistem' }]
-      });
-    };
-    const handleDetayDosyaRename = async (belge, id) => {
-      const cur = (belge.dosyalar || []).find(d => d.id === id);
-      const yeni = window.prompt('Dosya adını düzenleyin:', cur?.label || '');
-      if (yeni === null || !yeni.trim()) return;
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri', belge.id), { dosyalar: (belge.dosyalar || []).map(d => d.id === id ? { ...d, label: yeni.trim() } : d) });
-    };
-
-    // Belge kaydet (yeni veya düzenleme)
-    const handleSaveBelge = async () => {
-      if (!form.baslik.trim()) return;
-      if (editingId) {
-        const eski = belgeler.find(b => b.id === editingId);
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri', editingId), {
-          ...form,
-          history: [...(eski?.history || []), { date: new Date().toISOString(), text: 'Belge bilgileri güncellendi', by: currentUser?.fullName || 'Sistem' }]
-        });
-        addSystemLog?.('Şirket Evrakı Güncellendi', `${form.baslik} evrakı güncellendi.`);
-      } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri'), {
-          ...form,
-          history: [{ date: new Date().toISOString(), text: 'Belge arşive eklendi', by: currentUser?.fullName || 'Sistem' }],
-          createdBy: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
-        });
-        addSystemLog?.('Yeni Şirket Evrakı', `${form.baslik} (${form.kategori}) arşive eklendi.`);
-      }
-      setForm(emptyForm); setEditingId(null); setShowForm(false); setDosyaLabel('');
-    };
-
-    // --- GEÇERLİLİK (SÜRE) HESAPLARI ---
-    const bugun = new Date(); bugun.setHours(0, 0, 0, 0);
-    // YENİ: "SÜRESİZ" işaretli (tarihi olmayan) evraklar süre hesabına hiç girmez —
-    // ne süresi geçti uyarısı ne de "kritik evraklar" şeridinde görünür.
-    const kalanGun = (t) => (t && t !== 'SÜRESİZ') ? Math.ceil((new Date(t) - bugun) / (1000 * 60 * 60 * 24)) : null;
-    // Süresi geçmiş veya 30 gün içinde dolacak belgeler (uyarı şeridi için)
-    const suresiKritikler = belgeler
-      .map(b => ({ ...b, kalan: kalanGun(b.gecerlilikTarihi) }))
-      .filter(b => b.kalan !== null && b.kalan <= 30)
-      .sort((a, b) => a.kalan - b.kalan);
-
-    // Kategori bazlı belge sayıları
-    const kategoriSayisi = (kat) => belgeler.filter(b => b.kategori === kat).length;
-
-    // Filtrelenmiş + sıralanmış arşiv listesi
-    const filtered = belgeler.filter(b => {
-      const q = searchQuery.toLowerCase();
-      const matchQ = !q
-        || (b.baslik || '').toLowerCase().includes(q)
-        || (b.aciklama || '').toLowerCase().includes(q)
-        || (b.etiketler || '').toLowerCase().includes(q)
-        || (b.dosyalar || []).some(d => (d.label || '').toLowerCase().includes(q));
-      const matchKat = kategoriFilter === 'Tümü' || b.kategori === kategoriFilter;
-      return matchQ && matchKat;
-    }).sort((a, b) => {
-      if (siralama === 'az') return (a.baslik || '').localeCompare(b.baslik || '', 'tr');
-      if (siralama === 'gecerlilik') {
-        // Geçerlilik tarihi olanlar en yakından uzağa; olmayanlar sona
-        const ka = kalanGun(a.gecerlilikTarihi), kb = kalanGun(b.gecerlilikTarihi);
-        if (ka === null && kb === null) return 0;
-        if (ka === null) return 1; if (kb === null) return -1;
-        return ka - kb;
-      }
-      return (b.createdAt || '').localeCompare(a.createdAt || ''); // 'yeni'
-    });
-
-    const katOf = (id) => KATEGORILER.find(k => k.id === id) || KATEGORILER[KATEGORILER.length - 1];
-    const tarihGoster = (t) => t === 'SÜRESİZ' ? 'Süresiz' : (t ? new Date(t).toLocaleDateString('tr-TR') : '—');
-    // Geçerlilik rozeti: süresi geçmiş / yaklaşan / normal
-    const gecerlilikRozet = (t) => {
-      const k = kalanGun(t);
-      if (k === null) return null;
-      if (k < 0) return <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-red-100 text-red-600 border border-red-200">SÜRESİ GEÇTİ ({Math.abs(k)} gün)</span>;
-      if (k <= 30) return <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-700 border border-amber-200">{k === 0 ? 'BUGÜN DOLUYOR' : `${k} GÜN KALDI`}</span>;
-      return <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-700 border border-emerald-200">GEÇERLİ</span>;
-    };
-
-    return (
-      <div className="max-w-6xl mx-auto animate-in fade-in space-y-5">
-        {/* BAŞLIK — mor/indigo geçişli arşiv paneli */}
-        <div className="bg-gradient-to-r from-indigo-600 via-purple-700 to-fuchsia-950 rounded-2xl p-5 md:p-6 text-white shadow-lg">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><FolderOpen className="w-6 h-6" /> Şirket Evrakları — Arşiv Merkezi</h2>
-              <p className="text-purple-200 text-xs md:text-sm mt-1">İmza sirküleri, kira kontratı, vergi levhası ve tüm şirket evrakları bölüm bölüm arşivlenir; anında aranır ve bulunur.</p>
-            </div>
-            <button onClick={() => { setForm(emptyForm); setEditingId(null); setShowForm(true); setDosyaLabel(''); }}
-              className="shrink-0 px-4 py-2.5 bg-white text-purple-900 font-black rounded-xl shadow hover:scale-[1.03] transition flex items-center gap-2 text-sm">
-              <PlusCircle className="w-4 h-4" /> Yeni Evrak Ekle
-            </button>
-          </div>
-          {/* Genel sayaçlar */}
-          <div className="grid grid-cols-3 gap-2 mt-4">
-            <div className="rounded-xl px-3 py-2.5 bg-white/10 border border-white/20"><div className="text-lg font-black leading-none">{belgeler.length}</div><div className="text-[9px] font-bold mt-1 opacity-90">TOPLAM EVRAK</div></div>
-            <div className="rounded-xl px-3 py-2.5 bg-white/10 border border-white/20"><div className="text-lg font-black leading-none">{belgeler.reduce((s, b) => s + (b.dosyalar || []).length, 0)}</div><div className="text-[9px] font-bold mt-1 opacity-90">TOPLAM DOSYA</div></div>
-            <div className={`rounded-xl px-3 py-2.5 border ${suresiKritikler.length > 0 ? 'bg-red-500/30 border-red-300/40' : 'bg-white/10 border-white/20'}`}><div className="text-lg font-black leading-none">{suresiKritikler.length}</div><div className="text-[9px] font-bold mt-1 opacity-90">SÜRESİ KRİTİK EVRAK</div></div>
-          </div>
-        </div>
-
-        {/* SÜRESİ KRİTİK BELGE UYARILARI (geçmiş veya 30 gün içinde dolacak) */}
-        {suresiKritikler.length > 0 && (() => {
-          // YENİ: Varsayılan olarak yalnızca EN ÖNEMLİ 5 kayıt gösterilir.
-          // "Önem" sıralaması mevcut mantıkla aynıdır (suresiKritikler zaten
-          // kalan güne göre artan sıralı; yani süresi en çok geçmiş olan en başta).
-          const GOSTERILECEK = 5;
-          const gizliSayisi = suresiKritikler.length - GOSTERILECEK;
-          const listelenenler = tumKritikleriGoster ? suresiKritikler : suresiKritikler.slice(0, GOSTERILECEK);
-          return (
-            <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-3">
-              <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
-                <div className="text-[10px] font-black text-red-500 uppercase flex items-center gap-1.5">
-                  <AlertTriangle className="w-3.5 h-3.5" /> Geçerlilik Süresi Kritik Evraklar
-                  {/* Toplam sayı rozeti — kaç kayıt olduğu daraltılmış haldeyken de görünür */}
-                  <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full border border-red-200">{suresiKritikler.length}</span>
-                </div>
-                {/* YENİ: Tümünü Göster / Daralt butonu (yalnızca 5'ten fazla kayıt varsa) */}
-                {gizliSayisi > 0 && (
-                  <button type="button" onClick={() => setTumKritikleriGoster(v => !v)}
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-black border transition bg-red-50 text-red-600 border-red-200 hover:bg-red-100 flex items-center gap-1">
-                    {tumKritikleriGoster
-                      ? <><ChevronUp className="w-3 h-3" /> Daralt</>
-                      : <><ChevronDown className="w-3 h-3" /> Tümünü Göster (+{gizliSayisi})</>}
-                  </button>
-                )}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {listelenenler.map(b => (
-                  <button key={b.id} onClick={() => { setKategoriFilter('Tümü'); setExpandedId(b.id); }}
-                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition ${b.kalan < 0 ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}>
-                    {b.baslik} — {b.kalan < 0 ? `${Math.abs(b.kalan)} gün geçti` : b.kalan === 0 ? 'BUGÜN doluyor' : `${b.kalan} gün kaldı`}
-                  </button>
-                ))}
-              </div>
-              {/* Daraltılmış haldeyken kaç kaydın gizli olduğunu belirt */}
-              {!tumKritikleriGoster && gizliSayisi > 0 && (
-                <p className="text-[10px] font-bold text-neutral-400 mt-2">
-                  {gizliSayisi} evrak daha var — tamamını görmek için yukarıdaki butona basın.
-                </p>
-              )}
-            </div>
-          );
-        })()}
-
-        {/* KATEGORİ (BÖLÜM) KARTLARI — arşiv bölümleri, tıklayınca filtreler */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {KATEGORILER.map(k => {
-            const Icon = k.icon;
-            const aktif = kategoriFilter === k.id;
+        <div className="grid grid-cols-7 gap-1.5">
+          {rHucreler.map((gun, i) => {
+            if (gun === null) return <div key={`rb${i}`} />;
+            const tarihStr = `${rTakvim.yil}-${String(rTakvim.ay + 1).padStart(2, '0')}-${String(gun).padStart(2, '0')}`;
+            const gunRnd = rGunRandevulari(tarihStr);
+            const secili = tarihStr === rSecilenGun;
+            const buGun = tarihStr === bugunStr();
+            const gecikmisVar = gunRnd.some(r => r.durum === 'bekliyor' && tarihStr < bugunStr());
             return (
-              <button key={k.id} onClick={() => setKategoriFilter(aktif ? 'Tümü' : k.id)}
-                className={`text-left rounded-2xl border p-3 transition hover:scale-[1.02] ${aktif ? 'bg-purple-700 border-purple-700 text-white shadow-lg' : 'bg-white border-neutral-200 hover:border-purple-300'}`}>
-                <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 ${aktif ? 'bg-white/20' : k.bg}`}>
-                  <Icon className={`w-4.5 h-4.5 w-5 h-5 ${aktif ? 'text-white' : k.color}`} />
-                </div>
-                <div className={`text-xs font-black ${aktif ? 'text-white' : 'text-black'}`}>{k.id}</div>
-                <div className={`text-[10px] font-bold mt-0.5 ${aktif ? 'text-purple-100' : 'text-neutral-400'}`}>{kategoriSayisi(k.id)} evrak</div>
+              <button key={gun} type="button" onClick={() => setRSecilenGun(tarihStr)}
+                className={`relative min-h-[54px] p-1.5 rounded-xl border-2 text-left transition flex flex-col justify-between
+                  ${secili ? 'bg-indigo-50 border-indigo-500 shadow-md' : gecikmisVar ? 'bg-red-50/60 border-red-200 hover:border-red-400' : 'bg-white border-neutral-200 hover:border-neutral-400'}
+                  ${buGun && !secili ? 'border-indigo-300' : ''}`}>
+                <span className={`text-sm font-black ${buGun ? 'text-indigo-600' : 'text-neutral-700'}`}>{gun}</span>
+                {gunRnd.length > 0 && (
+                  <span className="flex flex-wrap items-center gap-0.5">
+                    {gunRnd.slice(0, 4).map((r, x) => (
+                      r.durum === 'gidildi'
+                        ? <CheckCircle key={x} className="w-3.5 h-3.5 text-green-600" title={`${r.saat || ''} ${r.firmaAdi} — Gidildi`} />
+                        : r.durum === 'iptal'
+                          ? <XCircle key={x} className="w-3.5 h-3.5 text-neutral-300" title={`${r.firmaAdi} — İptal`} />
+                          : tarihStr < bugunStr()
+                            ? <AlertTriangle key={x} className="w-3.5 h-3.5 text-red-500" title={`${r.firmaAdi} — Gecikmiş (gidilmedi)`} />
+                            : <Clock key={x} className="w-3.5 h-3.5 text-indigo-500" title={`${r.saat || ''} ${r.firmaAdi} — Bekliyor`} />
+                    ))}
+                    {gunRnd.length > 4 && <span className="text-[8px] font-black text-neutral-500">+{gunRnd.length - 4}</span>}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
-
-        {/* ARAMA + SIRALAMA */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex flex-col md:flex-row gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Arşivde ara: evrak adı, açıklama, etiket veya dosya adı..."
-              className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-purple-600 outline-none text-sm" />
-          </div>
-          <div className="flex gap-1.5">
-            {[{ id: 'yeni', l: 'Yeni Eklenen' }, { id: 'gecerlilik', l: 'Geçerlilik Tarihi' }, { id: 'az', l: 'A → Z' }].map(s => (
-              <button key={s.id} onClick={() => setSiralama(s.id)} className={`px-3 py-2 rounded-xl text-[11px] font-bold border transition whitespace-nowrap ${siralama === s.id ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}>{s.l}</button>
-            ))}
-            {kategoriFilter !== 'Tümü' && (
-              <button onClick={() => setKategoriFilter('Tümü')} className="px-3 py-2 rounded-xl text-[11px] font-bold bg-neutral-100 text-neutral-600 border border-neutral-200 flex items-center gap-1"><X className="w-3 h-3" /> {kategoriFilter}</button>
-            )}
-          </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-3 text-[10px] font-bold text-neutral-500">
+          <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-indigo-500" /> Bekleyen randevu</span>
+          <span className="flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 text-red-500" /> Gecikmiş (gidilmedi)</span>
+          <span className="flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5 text-green-600" /> Gidildi</span>
+          <span className="flex items-center gap-1"><XCircle className="w-3.5 h-3.5 text-neutral-300" /> İptal</span>
         </div>
 
-        {/* BELGE KARTLARI */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {filtered.length === 0 && (
-            <div className="md:col-span-2 bg-white rounded-2xl border border-dashed border-neutral-300 p-10 text-center text-sm font-bold text-neutral-400">Arşivde evrak bulunamadı. "Yeni Evrak Ekle" ile ilk evrakı arşive ekleyin.</div>
-          )}
-          {filtered.map(b => {
-            const kat = katOf(b.kategori);
-            const Icon = kat.icon;
-            const acik = expandedId === b.id;
-            return (
-              <div key={b.id} className={`bg-white rounded-2xl shadow-sm border overflow-hidden ${acik ? 'border-purple-300 md:col-span-2' : 'border-neutral-200'}`}>
-                {/* KART BAŞLIĞI */}
-                <button onClick={() => setExpandedId(acik ? null : b.id)} className="w-full text-left p-4 hover:bg-neutral-50 transition">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${kat.bg}`}><Icon className={`w-5 h-5 ${kat.color}`} /></div>
-                      <div className="min-w-0">
-                        <div className="font-black text-black text-sm truncate">{b.baslik}</div>
-                        <div className="text-[11px] text-neutral-500 font-bold mt-0.5">{b.kategori} • {(b.dosyalar || []).length} dosya</div>
-                        {b.etiketler && <div className="text-[10px] text-purple-600 font-bold mt-0.5 truncate">🏷 {b.etiketler}</div>}
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      {gecerlilikRozet(b.gecerlilikTarihi)}
-                      <span className="text-[10px] font-bold text-neutral-400">{tarihGoster(b.createdAt)}</span>
-                    </div>
-                  </div>
-                </button>
-
-                {/* DETAY PANELİ */}
-                {acik && (
-                  <div className="border-t border-neutral-100 p-4 space-y-4 animate-in slide-in-from-top-2 bg-neutral-50/50">
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[11px]">
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Bölüm</div><div className="font-black text-black">{b.kategori}</div></div>
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Geçerlilik Tarihi</div><div className="font-black text-black">{tarihGoster(b.gecerlilikTarihi)}</div></div>
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Ekleyen</div><div className="font-black text-black">{b.createdBy || '—'}</div></div>
-                      <div className="bg-white rounded-xl border border-neutral-200 p-2.5"><div className="text-neutral-400 font-bold">Eklenme Tarihi</div><div className="font-black text-black">{tarihGoster(b.createdAt)}</div></div>
-                    </div>
-                    {b.aciklama && <div className="bg-white rounded-xl border border-neutral-200 p-3 text-xs text-neutral-600"><span className="font-black text-neutral-400 text-[10px] uppercase block mb-1">Açıklama</span>{b.aciklama}</div>}
-
-                    {/* İşlem butonları */}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button onClick={() => { setForm({ ...emptyForm, ...b }); setEditingId(b.id); setShowForm(true); }} className="px-3 py-2 bg-neutral-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-black transition"><Edit className="w-3.5 h-3.5" /> Düzenle</button>
-                      <button onClick={() => setDeleteId(b.id)} className="px-3 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-red-100 transition"><X className="w-3.5 h-3.5" /> Sil</button>
-                    </div>
-
-                    {/* EKLİ DOSYALAR — çoklu yükleme; yükleyen kişi + tarih görünür */}
-                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-purple-600" /> Ekli Dosyalar</span>
-                        <MediaCaptureMenu compact multiple disabled={detayUploading === b.id}
-                          buttonLabel={detayUploading === b.id ? 'Yükleniyor...' : 'Dosya Ekle'}
-                          onChange={(e) => handleDetayDosyaUpload(b, e)} />
-                      </div>
-                      {(b.dosyalar || []).length === 0 && <div className="text-[11px] text-neutral-400 font-bold py-2">Henüz dosya yüklenmemiş.</div>}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
-                        {(b.dosyalar || []).map(d => (
-                          <div key={d.id} className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1.5 text-xs">
-                            <FileText className="w-3.5 h-3.5 text-purple-500 shrink-0" />
-                            <div className="flex-1 min-w-0">
-                              <div className="font-bold text-neutral-700 truncate">{d.label}</div>
-                              <div className="text-[10px] text-neutral-400 font-bold">{d.uploadedBy || '—'} • {d.date ? new Date(d.date).toLocaleString('tr-TR') : ''}</div>
-                            </div>
-                            <button onClick={() => setViewingImage?.({ title: d.label, name: d.url })} className="text-neutral-500 hover:text-black" title="Görüntüle"><Eye className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => handleDetayDosyaRename(b, d.id)} className="text-neutral-500 hover:text-black" title="Adını değiştir"><Edit className="w-3.5 h-3.5" /></button>
-                            <button onClick={() => handleDetayDosyaRemove(b, d.id)} className="text-red-400 hover:text-red-600" title="Sil"><X className="w-3.5 h-3.5" /></button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* KAYIT GEÇMİŞİ */}
-                    <div className="bg-white rounded-xl border border-neutral-200 p-3">
-                      <span className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5 mb-2"><History className="w-3.5 h-3.5 text-purple-600" /> Kayıt Geçmişi</span>
-                      <div className="space-y-1 max-h-32 overflow-y-auto">
-                        {[...(b.history || [])].reverse().map((h, i) => (
-                          <div key={i} className="text-[11px] text-neutral-500 font-bold flex gap-2">
-                            <span className="text-neutral-400 shrink-0">{new Date(h.date).toLocaleString('tr-TR')}</span>
-                            <span className="text-neutral-700">{h.text}</span>
-                            <span className="text-purple-600 ml-auto shrink-0">{h.by}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-
-        {/* YENİ / DÜZENLE BELGE MODALI */}
-        {showForm && (
-          <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in overflow-y-auto">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-5 animate-in zoom-in-95 my-8 max-h-[90vh] overflow-y-auto">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-black text-black flex items-center gap-2"><FolderOpen className="w-5 h-5 text-purple-700" /> {editingId ? 'Evrakı Düzenle' : 'Yeni Şirket Evrakı'}</h3>
-                <button onClick={() => setShowForm(false)} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-3">
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Evrak Adı *</label>
-                  <input value={form.baslik} onChange={e => setForm({ ...form, baslik: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="Örn: İmza Sirküleri 2026, Merkez Ofis Kira Kontratı" /></div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div><label className="text-xs font-bold text-neutral-600 block mb-1">Bölüm (Kategori)</label>
-                    <select value={form.kategori} onChange={e => setForm({ ...form, kategori: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-purple-600 text-sm">
-                      {KATEGORILER.map(k => <option key={k.id} value={k.id}>{k.id}</option>)}
-                    </select></div>
-                  {/* Süreli belgelerde (kontrat, poliçe, ruhsat vb.) doldurulur; sistem otomatik uyarır.
-                      YENİ: Tarihi olmayan (süresiz) evraklar için tek dokunuşla tarih alanını
-                      pasifleştiren buton — bu evraklarda tarih girmek ZORUNLU DEĞİLDİR. */}
-                  <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-bold text-neutral-600">Geçerlilik / Bitiş Tarihi</label>
-                      <button
-                        type="button"
-                        onClick={() => setForm(f => ({ ...f, gecerlilikTarihi: f.gecerlilikTarihi === 'SÜRESİZ' ? '' : 'SÜRESİZ' }))}
-                        className={`text-[10px] font-black px-2 py-0.5 rounded-full border transition ${form.gecerlilikTarihi === 'SÜRESİZ' ? 'bg-purple-600 text-white border-purple-600' : 'bg-neutral-100 text-neutral-500 border-neutral-200 hover:bg-neutral-200'}`}
-                      >
-                        {form.gecerlilikTarihi === 'SÜRESİZ' ? '✓ Süresiz' : 'Tarihi Yok'}
-                      </button>
-                    </div>
-                    {form.gecerlilikTarihi === 'SÜRESİZ' ? (
-                      <div className="w-full p-2.5 border border-dashed border-neutral-300 rounded-xl text-sm text-neutral-400 font-bold bg-neutral-50">Bu evrakın son kullanma tarihi yok</div>
-                    ) : (
-                      <input type="date" value={form.gecerlilikTarihi} onChange={e => setForm({ ...form, gecerlilikTarihi: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" />
-                    )}
-                  </div>
-                </div>
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Etiketler <span className="text-neutral-400 font-normal">(virgülle ayırın — aramada kullanılır)</span></label>
-                  <input value={form.etiketler} onChange={e => setForm({ ...form, etiketler: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm" placeholder="örn: noter, 2026, merkez ofis" /></div>
-                <div><label className="text-xs font-bold text-neutral-600 block mb-1">Açıklama</label>
-                  <textarea value={form.aciklama} onChange={e => setForm({ ...form, aciklama: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-purple-600 text-sm h-16 resize-none" placeholder="Evraka dair notlar..." /></div>
-
-                {/* DOSYALAR — çoklu yükleme (fotoğraf/PDF/dosya) */}
-                <div className="border border-neutral-200 rounded-xl p-3 bg-neutral-50">
-                  <label className="text-xs font-black text-neutral-700 mb-2 flex items-center gap-1.5"><FolderOpen className="w-3.5 h-3.5 text-purple-600" /> Dosyalar</label>
-                  <div className="flex gap-1.5 mb-2">
-                    <input value={dosyaLabel} onChange={e => setDosyaLabel(e.target.value)} placeholder="Dosya adı (opsiyonel)" className="flex-1 min-w-0 p-2 border border-neutral-300 rounded-lg text-xs outline-none focus:ring-1 focus:ring-purple-600" />
-                    <MediaCaptureMenu compact multiple disabled={dosyaUploading}
-                      buttonLabel={dosyaUploading ? 'Yükleniyor...' : 'Yükle'}
-                      onChange={handleFormDosyaUpload} />
-                  </div>
-                  {(form.dosyalar || []).length > 0 && (
-                    <div className="space-y-1">
-                      {(form.dosyalar || []).map(d => (
-                        <div key={d.id} className="flex items-center gap-2 bg-white border border-neutral-200 rounded-lg px-2 py-1.5 text-xs">
-                          <FileText className="w-3.5 h-3.5 text-purple-500" />
-                          <span className="font-bold text-neutral-700 flex-1 truncate">{d.label} <span className="text-neutral-400 font-normal">({d.uploadedBy})</span></span>
-                          <button onClick={() => setViewingImage?.({ title: d.label, name: d.url })} className="text-neutral-500 hover:text-black"><Eye className="w-3.5 h-3.5" /></button>
-                          <button onClick={() => handleFormDosyaRemove(d.id)} className="text-red-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-2 mt-5">
-                <button onClick={() => setShowForm(false)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl hover:bg-neutral-200 transition text-sm">Vazgeç</button>
-                <button onClick={handleSaveBelge} disabled={!form.baslik.trim()} className="flex-1 py-2.5 bg-purple-700 text-white font-black rounded-xl hover:bg-purple-800 transition text-sm disabled:opacity-40 disabled:cursor-not-allowed">
-                  {editingId ? 'Güncelle' : 'Arşive Ekle'}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* SİLME ONAYI */}
-        {deleteId && (
-          <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs p-5 text-center animate-in zoom-in-95">
-              <AlertTriangle className="w-10 h-10 text-red-500 mx-auto mb-3" />
-              <p className="text-sm font-bold text-neutral-700 mb-4">Bu evrak ve tüm ekli dosya kayıtları arşivden kalıcı olarak silinecek. Emin misiniz?</p>
-              <div className="flex gap-2">
-                <button onClick={() => setDeleteId(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
-                <button onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sirketBelgeleri', deleteId)); addSystemLog?.('Şirket Evrakı Silindi', 'Bir şirket evrakı arşivden silindi.'); setDeleteId(null); }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // ============================================================================
-  // YENİ: AVUKAT ANASAYFASI (SADECE "AVUKAT" POZİSYONUNDAKİ KULLANICIYA ÖZEL)
-  // Avukat pozisyonundaki kullanıcı sisteme girdiğinde standart operasyon
-  // anasayfası yerine BU sayfa açılır. İçerikte maaş, mesai, puantaj, personel
-  // değerlendirme gibi HİÇBİR personel-muhasebe unsuru YOKTUR; tamamen hukuk
-  // süreçlerine odaklıdır:
-  //  - Kişiye özel karşılama + günün hukuk odaklı özeti
-  //  - Dosya istatistikleri (aktif, duruşma bekleyen, kritik tarih, belge sayısı)
-  //  - Duruma göre FİLTRELİ dosya raporu (tek tıkla durum bazlı liste)
-  //  - Yaklaşan duruşma / son tarih ajandası
-  //  - SON EKLENEN BELGELER akışı (kim, hangi dosyaya, ne zaman yükledi)
-  //  - SON HAREKETLER bildirim akışı (tüm dosyalardaki süreç geçmişinden)
-  //  - Avukat muhasebesi özeti (toplam masraf / ödenen / kalan bakiye)
-  // Veriler 'davaDosyalari' ve 'avukatMuhasebe' koleksiyonlarından canlı okunur.
-  // ============================================================================
-  export const AvukatDashboardView = ({ currentUser, setActiveTab, setViewingImage }) => {
-    // DavaDosyalariView ile aynı durum tanımları (renk uyumu için)
-    const DURUMLAR = [
-      { id: 'Yeni',               color: 'bg-sky-100 text-sky-700 border-sky-200' },
-      { id: 'İnceleniyor',        color: 'bg-amber-100 text-amber-700 border-amber-200' },
-      { id: 'Devam Ediyor',       color: 'bg-orange-100 text-orange-700 border-orange-200' },
-      { id: 'Duruşma Bekleniyor', color: 'bg-purple-100 text-purple-700 border-purple-200' },
-      { id: 'İtiraz Süreci',      color: 'bg-rose-100 text-rose-700 border-rose-200' },
-      { id: 'Uzlaşıldı',          color: 'bg-teal-100 text-teal-700 border-teal-200' },
-      { id: 'Kazanıldı',          color: 'bg-green-100 text-green-700 border-green-200' },
-      { id: 'Kaybedildi',         color: 'bg-red-100 text-red-600 border-red-200' },
-      { id: 'Arşiv',              color: 'bg-neutral-100 text-neutral-500 border-neutral-200' },
-    ];
-
-    const [dosyalar, setDosyalar] = useState([]);
-    const [muhasebe, setMuhasebe] = useState([]);
-    const [durumFilter, setDurumFilter] = useState('Tümü'); // duruma göre hızlı rapor filtresi
-
-    // Dava dosyaları canlı dinlenir
-    useEffect(() => {
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari'), snap => {
-        const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-        list.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
-        setDosyalar(list);
-      });
-      return () => unsub();
-    }, []);
-
-    // Avukat muhasebe kayıtları canlı dinlenir
-    useEffect(() => {
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe'), snap => {
-        setMuhasebe(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      });
-      return () => unsub();
-    }, []);
-
-    // --- HESAPLAMALAR ---
-    const paraFormat = (n) => (Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
-    const bugun = new Date(); bugun.setHours(0, 0, 0, 0);
-    const kalanGun = (t) => t ? Math.ceil((new Date(t) - bugun) / (1000 * 60 * 60 * 24)) : null;
-
-    const aktifDosyalar = dosyalar.filter(d => !['Arşiv', 'Kazanıldı', 'Kaybedildi', 'Uzlaşıldı'].includes(d.durum));
-    const durusmaBekleyen = dosyalar.filter(d => d.durum === 'Duruşma Bekleniyor');
-    const toplamBelge = dosyalar.reduce((s, d) => s + (d.belgeler || []).length, 0);
-
-    // Yaklaşan 30 gün ajandası (duruşma veya itiraz/cevap son günü)
-    const yaklasanlar = dosyalar
-      .map(d => {
-        const f1 = kalanGun(d.durusmaTarihi); const f2 = kalanGun(d.sonTarih);
-        const enYakin = [f1, f2].filter(x => x !== null && x >= 0).sort((a, b) => a - b)[0];
-        return { ...d, kalan: enYakin === undefined ? null : enYakin };
-      })
-      .filter(d => d.kalan !== null && d.kalan <= 30 && d.durum !== 'Arşiv')
-      .sort((a, b) => a.kalan - b.kalan);
-
-    // Muhasebe özeti
-    const toplamMasraf = muhasebe.filter(m => m.yon === 'masraf').reduce((s, m) => s + (Number(m.tutar) || 0), 0);
-    const toplamOdenen = muhasebe.filter(m => m.yon === 'odeme').reduce((s, m) => s + (Number(m.tutar) || 0), 0);
-    const kalanBakiye = toplamMasraf - toplamOdenen;
-
-    // SON EKLENEN BELGELER: tüm dosyaların belgeleri tek akışta, en yeniden eskiye
-    const sonBelgeler = dosyalar
-      .flatMap(d => (d.belgeler || []).map(b => ({ ...b, dosyaBaslik: d.baslik, dosyaId: d.id })))
-      .filter(b => b.date)
-      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-      .slice(0, 10);
-
-    // SON HAREKETLER (bildirim akışı): tüm dosyaların süreç geçmişi birleşik
-    const sonHareketler = dosyalar
-      .flatMap(d => (d.history || []).map(h => ({ ...h, dosyaBaslik: d.baslik })))
-      .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
-      .slice(0, 12);
-
-    // Duruma göre filtreli rapor listesi
-    const filtreliDosyalar = (durumFilter === 'Tümü' ? dosyalar : dosyalar.filter(d => d.durum === durumFilter));
-    const durumOf = (id) => DURUMLAR.find(s => s.id === id) || DURUMLAR[0];
-    const tarihGoster = (t) => t ? new Date(t).toLocaleDateString('tr-TR') : '—';
-
-    return (
-      <div className="max-w-6xl mx-auto animate-in fade-in space-y-5">
-        {/* KİŞİYE ÖZEL KARŞILAMA — hukuk odaklı anasayfa başlığı */}
-        <div className="bg-gradient-to-r from-purple-700 via-purple-900 to-fuchsia-950 rounded-2xl p-5 md:p-7 text-white shadow-lg">
-          <h2 className="text-xl md:text-2xl font-black flex items-center gap-2">
-            <Scale className="w-7 h-7" /> Hoş Geldiniz, Av. {currentUser?.fullName}
-          </h2>
-          <p className="text-purple-200 text-xs md:text-sm mt-1.5">
-            {new Date().toLocaleDateString('tr-TR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })} — Şirketin tüm hukuki süreçlerinin güncel özeti aşağıdadır.
-          </p>
-          {/* Hızlı istatistikler */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mt-4">
-            <button onClick={() => setActiveTab?.('davaDosyalari')} className="rounded-xl px-3 py-3 bg-white/10 border border-white/20 text-left hover:bg-white/20 transition">
-              <div className="text-2xl font-black leading-none">{aktifDosyalar.length}</div>
-              <div className="text-[10px] font-bold mt-1.5 opacity-90">AKTİF DOSYA</div>
+        {/* SEÇİLİ GÜNÜN RANDEVULARI */}
+        <div className="mt-4 border-t border-neutral-100 pt-3">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-black text-neutral-700">
+              {new Date(rSecilenGun + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' })}
+              <span className="text-neutral-400"> • {rSecilenGunListesi.length} randevu</span>
+            </h4>
+            <button type="button" onClick={() => { setRandevuForm({ ...bosRandevuForm, tarih: rSecilenGun, atanan: currentUser?.fullName || '' }); setRandevuDuzenlenenId(null); setRandevuFormAcik(true); }}
+              className="px-3 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 border border-indigo-200 rounded-xl text-xs font-black transition flex items-center gap-1.5">
+              <PlusCircle className="w-4 h-4" /> Bu Güne Randevu Ekle
             </button>
-            <button onClick={() => { setDurumFilter('Duruşma Bekleniyor'); }} className="rounded-xl px-3 py-3 bg-white/10 border border-white/20 text-left hover:bg-white/20 transition">
-              <div className="text-2xl font-black leading-none">{durusmaBekleyen.length}</div>
-              <div className="text-[10px] font-bold mt-1.5 opacity-90">DURUŞMA BEKLEYEN</div>
-            </button>
-            <div className={`rounded-xl px-3 py-3 border ${yaklasanlar.length > 0 ? 'bg-red-500/30 border-red-300/40' : 'bg-white/10 border-white/20'}`}>
-              <div className="text-2xl font-black leading-none">{yaklasanlar.length}</div>
-              <div className="text-[10px] font-bold mt-1.5 opacity-90">KRİTİK TARİH (30 GÜN)</div>
-            </div>
-            <div className="rounded-xl px-3 py-3 bg-white/10 border border-white/20">
-              <div className="text-2xl font-black leading-none">{toplamBelge}</div>
-              <div className="text-[10px] font-bold mt-1.5 opacity-90">TOPLAM BELGE</div>
-            </div>
           </div>
-        </div>
-
-        {/* YAKLAŞAN DURUŞMA / SON TARİH AJANDASI */}
-        {yaklasanlar.length > 0 && (
-          <div className="bg-white rounded-2xl shadow-sm border border-red-200 p-4">
-            <div className="text-xs font-black text-red-500 uppercase mb-3 flex items-center gap-1.5"><CalendarDays className="w-4 h-4" /> Yaklaşan Duruşma & Son Tarihler</div>
+          {rSecilenGunListesi.length === 0 ? (
+            <p className="text-xs font-medium text-neutral-400 py-4 text-center">Bu güne randevu yok.</p>
+          ) : (
             <div className="space-y-2">
-              {yaklasanlar.map(d => (
-                <button key={d.id} onClick={() => setActiveTab?.('davaDosyalari')}
-                  className={`w-full text-left flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition ${d.kalan <= 7 ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-amber-50 border-amber-200 hover:bg-amber-100'}`}>
-                  <div className="min-w-0">
-                    <div className="text-xs font-black text-black truncate">{d.baslik}</div>
-                    <div className="text-[10px] font-bold text-neutral-500">{d.dosyaTuru} {d.mahkeme ? `• ${d.mahkeme}` : ''} {d.durusmaTarihi ? `• Duruşma: ${tarihGoster(d.durusmaTarihi)}` : ''} {d.sonTarih ? `• Son gün: ${tarihGoster(d.sonTarih)}` : ''}</div>
-                  </div>
-                  <span className={`shrink-0 text-xs font-black ${d.kalan <= 7 ? 'text-red-600' : 'text-amber-600'}`}>{d.kalan === 0 ? 'BUGÜN' : `${d.kalan} gün`}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* DURUMA GÖRE FİLTRELİ DOSYA RAPORU */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-xs font-black text-neutral-700 uppercase flex items-center gap-1.5"><ClipboardList className="w-4 h-4 text-purple-600" /> Duruma Göre Dosya Raporu</div>
-            <button onClick={() => setActiveTab?.('davaDosyalari')} className="text-[11px] font-black text-purple-700 hover:underline flex items-center gap-1">Tüm Dosyalara Git <ArrowUpRight className="w-3.5 h-3.5" /></button>
-          </div>
-          {/* Durum filtresi: sayaçlı çipler */}
-          <div className="flex items-center gap-1.5 flex-wrap mb-3">
-            <button onClick={() => setDurumFilter('Tümü')} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${durumFilter === 'Tümü' ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}>Tümü ({dosyalar.length})</button>
-            {DURUMLAR.map(s => {
-              const cnt = dosyalar.filter(d => d.durum === s.id).length;
-              if (cnt === 0) return null; // boş durumları gizle, rapor sade kalsın
-              return (
-                <button key={s.id} onClick={() => setDurumFilter(durumFilter === s.id ? 'Tümü' : s.id)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${durumFilter === s.id ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200 hover:border-purple-400'}`}>
-                  {s.id} ({cnt})
-                </button>
-              );
-            })}
-          </div>
-          {/* Filtreli mini dosya listesi */}
-          <div className="space-y-1.5 max-h-80 overflow-y-auto">
-            {filtreliDosyalar.length === 0 && <div className="text-[11px] text-neutral-400 font-bold py-3 text-center">Bu durumda dosya bulunmuyor.</div>}
-            {filtreliDosyalar.map(d => {
-              const st = durumOf(d.durum);
-              return (
-                <button key={d.id} onClick={() => setActiveTab?.('davaDosyalari')} className="w-full text-left flex items-center justify-between gap-3 rounded-xl border border-neutral-200 px-3 py-2.5 hover:bg-neutral-50 transition">
-                  <div className="min-w-0 flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center shrink-0"><Scale className="w-4 h-4 text-purple-700" /></div>
-                    <div className="min-w-0">
-                      <div className="text-xs font-black text-black truncate">{d.baslik}</div>
-                      <div className="text-[10px] font-bold text-neutral-500 truncate">{d.dosyaTuru}{d.dosyaNo ? ` • ${d.dosyaNo}` : ''}{d.karsiTaraf ? ` • ${d.karsiTaraf}` : ''}</div>
-                    </div>
-                  </div>
-                  <span className={`shrink-0 px-2 py-0.5 rounded-full text-[10px] font-black border ${st.color}`}>{d.durum}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          {/* SON EKLENEN BELGELER AKIŞI */}
-          <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
-            <div className="text-xs font-black text-neutral-700 uppercase mb-3 flex items-center gap-1.5"><FolderOpen className="w-4 h-4 text-purple-600" /> Son Eklenen Belgeler</div>
-            <div className="space-y-1.5 max-h-80 overflow-y-auto">
-              {sonBelgeler.length === 0 && <div className="text-[11px] text-neutral-400 font-bold py-3 text-center">Henüz belge yüklenmemiş.</div>}
-              {sonBelgeler.map(b => (
-                <div key={b.dosyaId + '_' + b.id} className="flex items-center gap-2 bg-neutral-50 border border-neutral-200 rounded-lg px-2.5 py-2 text-xs">
-                  <FileText className="w-3.5 h-3.5 text-purple-500 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold text-neutral-700 truncate">{b.label}</div>
-                    <div className="text-[10px] text-neutral-400 font-bold truncate">{b.dosyaBaslik} • {b.uploadedBy || '—'} • {b.date ? new Date(b.date).toLocaleString('tr-TR') : ''}</div>
-                  </div>
-                  <button onClick={() => setViewingImage?.({ title: b.label, name: b.url })} className="text-neutral-500 hover:text-black shrink-0" title="Görüntüle"><Eye className="w-4 h-4" /></button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* SON HAREKETLER — bildirim akışı */}
-          <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
-            <div className="text-xs font-black text-neutral-700 uppercase mb-3 flex items-center gap-1.5"><Bell className="w-4 h-4 text-purple-600" /> Son Hareketler & Bildirimler</div>
-            <div className="space-y-1.5 max-h-80 overflow-y-auto">
-              {sonHareketler.length === 0 && <div className="text-[11px] text-neutral-400 font-bold py-3 text-center">Henüz hareket kaydı yok.</div>}
-              {sonHareketler.map((h, i) => (
-                <div key={i} className="flex items-start gap-2 border-b border-neutral-100 pb-1.5 text-[11px]">
-                  <div className="w-1.5 h-1.5 rounded-full bg-purple-500 mt-1.5 shrink-0"></div>
-                  <div className="min-w-0">
-                    <span className="font-black text-black">{h.dosyaBaslik}:</span>{' '}
-                    <span className="text-neutral-600 font-bold">{h.text}</span>
-                    <div className="text-[10px] text-neutral-400 font-bold">{new Date(h.date).toLocaleString('tr-TR')} • {h.by}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* AVUKAT MUHASEBESİ ÖZETİ — sadece dava/hukuk muhasebesi (maaş/mesai YOK) */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4">
-          <div className="flex items-center justify-between mb-3">
-            <div className="text-xs font-black text-neutral-700 uppercase flex items-center gap-1.5"><Wallet className="w-4 h-4 text-purple-600" /> Hukuk Muhasebesi Özeti</div>
-            <button onClick={() => setActiveTab?.('davaDosyalari')} className="text-[11px] font-black text-purple-700 hover:underline flex items-center gap-1">Detaylı Muhasebe <ArrowUpRight className="w-3.5 h-3.5" /></button>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-base md:text-lg font-black text-amber-600">{paraFormat(toplamMasraf)} ₺</div><div className="text-[9px] md:text-[10px] font-black text-neutral-400 uppercase mt-1">Toplam Masraf / Ücret</div></div>
-            <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className="text-base md:text-lg font-black text-emerald-600">{paraFormat(toplamOdenen)} ₺</div><div className="text-[9px] md:text-[10px] font-black text-neutral-400 uppercase mt-1">Ödenen Tutar</div></div>
-            <div className="rounded-xl border border-neutral-200 p-3 text-center"><div className={`text-base md:text-lg font-black ${kalanBakiye > 0 ? 'text-red-600' : 'text-emerald-600'}`}>{paraFormat(kalanBakiye)} ₺</div><div className="text-[9px] md:text-[10px] font-black text-neutral-400 uppercase mt-1">Kalan Bakiye</div></div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // ==========================================================================
-  // YENİ: SAHA RAPORLAMASI — Şeflerin sahada yaptığı denetimlerin yönetim ekranı.
-  // En son rapordan eskiye doğru listelenir; ay bazlı özet (kaç denetim, kaç iş,
-  // ortalama puan, kayıt doğruluğu dağılımı), şef bazlı performans ve puanlanan
-  // personel dökümü bir arada sunulur.
-  // ==========================================================================
-  // ==========================================================================
-  // YENİ (kullanıcı talebi): DENETİMDE BİREYSEL PERSONEL NOTLARI GÖRÜNÜR
-  // ==========================================================================
-  // SORUN: Şef denetim sırasında bir personele özel not yazdığında
-  // (personelPuanlari[].ozelNot) bu not ekranda GÖRÜNMÜYORDU. Yalnızca
-  // personel rozetinin yanına küçük bir konuşma balonu simgesi konuyor ve
-  // notun kendisi tarayıcı ipucunda (title) gizli kalıyordu. Yönetici
-  // ekranda gezerken notun varlığını fark etse bile içeriğini okuyamıyordu.
-  //
-  // ÇÖZÜM: Puan rozetlerinin altına, notu olan personeller için ayrı bir blok
-  // eklendi. Her satırda personelin adı, aldığı puan ve şefin yazdığı notun
-  // TAM METNİ görünür. Notu olmayan personeller bu blokta listelenmez;
-  // hiç not yoksa blok hiç çizilmez (ekran kalabalıklaşmaz).
-  //
-  // Ayrı bileşen olarak tutuldu ki denetim kartı daha da şişmesin.
-  // ==========================================================================
-  const DenetimBireyselNotlari = ({ personelPuanlari = [] }) => {
-    // Yalnızca şefin gerçekten not yazdığı personeller
-    const notlular = (personelPuanlari || []).filter(pp => (pp.ozelNot || '').trim());
-    if (notlular.length === 0) return null;
-    return (
-      <div className="pl-7 mb-2">
-        <p className="text-[9px] font-black text-amber-600 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-          <MessageSquareText className="w-3 h-3" /> Şefin personel notları ({notlular.length})
-        </p>
-        <div className="space-y-1.5">
-          {notlular.map((pp, i) => {
-            const puan = parseInt(pp.puan) || 0;
-            // Puan rengi, puan rozetleriyle aynı ölçek (5 yeşil ... 1-2 kırmızı)
-            const puanRenk = puan >= 5 ? 'bg-green-100 text-green-800 border-green-300'
-              : puan === 4 ? 'bg-lime-100 text-lime-800 border-lime-300'
-              : puan === 3 ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
-              : 'bg-red-100 text-red-800 border-red-300';
-            return (
-              <div key={i} className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-lg p-2">
-                {/* Kime yazıldığı ve kaç puan aldığı */}
-                <span className={`inline-flex items-center gap-1 text-[10px] font-black px-2 py-0.5 rounded border shrink-0 ${puanRenk}`}>
-                  {pp.personelAdi}
-                  {puan > 0 && <span className="flex items-center gap-0.5">{puan}<Star className="w-2.5 h-2.5 fill-current" /></span>}
-                </span>
-                {/* Notun TAM metni — kesilmez, gerekirse alt satıra sarar */}
-                <p className="flex-1 min-w-0 text-[11px] font-bold text-amber-900 break-words leading-snug pt-0.5">
-                  {pp.ozelNot}
-                </p>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  };
-
-  export const SahaRaporlamasiView = ({ personnelList = [], db, appId, setViewingImage, jobs = [], onViewCari }) => {
-    const aylarTR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
-    const buAy = new Date().toISOString().substring(0, 7); // YYYY-MM
-
-    const bugunStr = new Date().toISOString().split('T')[0];
-    const [denetimler, setDenetimler] = useState([]);
-    // DEĞİŞİKLİK: Ay filtresi yerine GÜNLÜK takip. Sayfa her zaman BUGÜN ile açılır,
-    // sağ/sol oklarla gün değiştirilir.
-    const [tarih, setTarih] = useState(bugunStr);
-    const [sefFiltre, setSefFiltre] = useState('Tümü');
-    // YENİ: Denetim notları açık olan personel kartının anahtarı (akordiyon)
-    const [acikPuanKarti, setAcikPuanKarti] = useState(null);
-    const [arama, setArama] = useState('');
-    // NOT: acikId state'i, alttaki "Denetim Yapılan İşler" açılır listesi kaldırıldığı için silindi.
-    const [yukleniyor, setYukleniyor] = useState(true);
-
-    useEffect(() => {
-      if (!db) return;
-      // NOT: Bu sayfa "Tüm Zamanlar" raporlama seçeneği sunduğu için (ay filtresi
-      // 'tum' olabilir) buraya limit KONULMADI — limit koymak eski dönemlerin
-      // raporunu sessizce eksik gösterebilirdi. Sayfa yalnızca ziyaret edildiğinde
-      // açık olduğu için (arka planda sürekli çalışan bir maliyet değil) bu risk
-      // kabul edilebilir düzeyde.
-      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'sahaDenetimleri'), snap => {
-        // DEĞİŞTİ: Kayıtlar tek noktada süzülür. 'denetimKaydiniTemizle' sistem dışı
-        // yevmiyecilerin puan/yorum satırlarını atar ve ortalamayı kalan mavi yaka
-        // personele göre yeniden hesaplar. Bu sayede aşağıdaki TÜM istatistikler
-        // (ortalama puan, puanlanan personel sayısı, şef performansı, notlar)
-        // otomatik olarak doğru değerleri kullanır.
-        setDenetimler(snap.docs.map(d => denetimKaydiniTemizle({ id: d.id, ...d.data() })));
-        setYukleniyor(false);
-      }, e => { console.error(e); setYukleniyor(false); });
-      return () => unsub();
-    }, [db, appId]);
-
-    // Ay listesi: kayıtlardan otomatik üretilir (en yeni en üstte)
-    const mevcutAylar = [...new Set(denetimler.map(d => (d.jobDate || '').substring(0, 7)).filter(Boolean))].sort().reverse();
-    const sefler = [...new Set(denetimler.map(d => d.sefAdi).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'tr-TR'));
-
-    // Filtrelenmiş + EN YENİDEN ESKİYE sıralı liste
-    // Denetim GÜNÜ: kaydın oluşturulma tarihi (şefin sahaya gittiği gün) esas alınır;
-    // yoksa işin tarihine düşülür.
-    const denetimGunu = (d) => (d.denetimTarihi || '').substring(0, 10) || (d.jobDate || '');
-    const filtreli = denetimler
-      .filter(d => denetimGunu(d) === tarih)
-      .filter(d => sefFiltre === 'Tümü' || d.sefAdi === sefFiltre)
-      .filter(d => {
-        const q = arama.trim().toLocaleLowerCase('tr-TR');
-        if (!q) return true;
-        const havuz = [d.jobCustomerName, d.genelRapor, d.kayitAcan, d.sefAdi, d.jobRoute,
-          ...(d.personelPuanlari || []).map(p => `${p.personelAdi} ${p.ozelNot}`)].join(' ').toLocaleLowerCase('tr-TR');
-        return havuz.includes(q);
-      })
-      .sort((a, b) => new Date(b.denetimTarihi || b.jobDate || 0) - new Date(a.denetimTarihi || a.jobDate || 0));
-
-    // ---- ÖZET İSTATİSTİKLER (filtrelenmiş küme üzerinden) ----
-    const toplamDenetim = filtreli.length;
-    const denetlenenIsler = new Set(filtreli.map(d => String(d.jobId))).size;
-    const tumPuanlar = filtreli.flatMap(d => (d.personelPuanlari || []).map(p => parseInt(p.puan) || 0)).filter(n => n > 0);
-    const genelOrtalama = tumPuanlar.length > 0 ? Math.round((tumPuanlar.reduce((t, n) => t + n, 0) / tumPuanlar.length) * 10) / 10 : 0;
-    const notluDenetim = filtreli.filter(d => (d.personelPuanlari || []).some(p => (p.ozelNot || '').trim())).length;
-
-    // Kayıt doğruluğu dağılımı — satış/kayıt kalitesini gösterir
-    const DOGRULUK_STIL = {
-      'Hepsi doğru':             { bar: 'bg-green-500',  yazi: 'text-green-700',  kutu: 'bg-green-50 border-green-200' },
-      'Hemen hemen doğru':       { bar: 'bg-lime-500',   yazi: 'text-lime-700',   kutu: 'bg-lime-50 border-lime-200' },
-      'Çok yanlış bilgiler var': { bar: 'bg-orange-500', yazi: 'text-orange-700', kutu: 'bg-orange-50 border-orange-200' },
-      'Tamamen yanlış':          { bar: 'bg-red-500',    yazi: 'text-red-700',    kutu: 'bg-red-50 border-red-200' },
-    };
-    const dogrulukDagilim = Object.keys(DOGRULUK_STIL).map(k => ({
-      ad: k, sayi: filtreli.filter(d => d.kayitDogrulugu === k).length,
-    }));
-    const dogrulukToplam = dogrulukDagilim.reduce((t, x) => t + x.sayi, 0) || 1;
-
-    // Şef bazlı performans: kaç denetim, kaç personel puanladı, ortalaması
-    const sefPerformans = sefler.map(s => {
-      const kendi = filtreli.filter(d => d.sefAdi === s);
-      const puanlar = kendi.flatMap(d => (d.personelPuanlari || []).map(p => parseInt(p.puan) || 0)).filter(n => n > 0);
-      return {
-        ad: s, denetim: kendi.length, personel: puanlar.length,
-        ortalama: puanlar.length > 0 ? Math.round((puanlar.reduce((t, n) => t + n, 0) / puanlar.length) * 10) / 10 : 0,
-        raporlu: kendi.filter(d => (d.genelRapor || '').trim()).length,
-      };
-    }).filter(x => x.denetim > 0).sort((a, b) => b.denetim - a.denetim);
-
-    // Personel bazlı saha puanı sıralaması (en düşük puanlılar üstte — dikkat gerektirenler)
-    // ==========================================================================
-    // GÜNLÜK ŞEF TAKİBİ
-    // Her şefin o gün yaptığı denetimler; her denetimde hangi işe gittiği,
-    // hangi plakalı araçla, işin tutarı, müşteri bilgisi ve kime kaç puan
-    // verdiği tek bakışta görünür.
-    // Eski kayıtlarda plaka/fiyat alanı bulunmadığı için, iş listesinden
-    // (jobs) tamamlanmaya çalışılır.
-    // ==========================================================================
-    const isBul = (jobId) => jobs.find(j => String(j.id) === String(jobId)) || null;
-    const denetimDetay = (d) => {
-      const is = isBul(d.jobId);
-      return {
-        plaka: d.jobVehiclePlate || is?.assignedVehiclePlate || '',
-        fiyat: d.jobPrice || is?.price || '',
-        telefon: d.jobCustomerPhone || is?.customerPhone || '',
-        musteri: d.jobCustomerName || is?.customerName || 'Bilinmiyor',
-        rota: d.jobRoute || (is ? `${is.fromDistrict || '?'} → ${is.toDistrict || '?'}` : ''),
-        tur: d.jobType || is?.type || '',
-        saat: d.jobTime || is?.time || '',
-      };
-    };
-
-    const sefGunlukTakip = [...new Set(filtreli.map(d => d.sefAdi).filter(Boolean))]
-      .map(sef => {
-        const kendi = filtreli
-          .filter(d => d.sefAdi === sef)
-          .sort((a, b) => new Date(a.denetimTarihi || 0) - new Date(b.denetimTarihi || 0));
-        const puanlar = kendi.flatMap(d => (d.personelPuanlari || []).map(pp => parseInt(pp.puan) || 0)).filter(n => n > 0);
-        const toplamCiro = kendi.reduce((t, d) => t + (parseFloat(denetimDetay(d).fiyat) || 0), 0);
-        return {
-          ad: sef,
-          denetimler: kendi,
-          denetimSayisi: kendi.length,
-          puanlananPersonel: puanlar.length,
-          ortalama: puanlar.length ? Math.round((puanlar.reduce((t, n) => t + n, 0) / puanlar.length) * 10) / 10 : 0,
-          toplamCiro,
-        };
-      })
-      .sort((a, b) => b.denetimSayisi - a.denetimSayisi);
-
-    // Gün gezinme yardımcıları
-    const gunKaydir = (adet) => {
-      const d = new Date(tarih);
-      d.setDate(d.getDate() + adet);
-      setTarih(d.toISOString().split('T')[0]);
-    };
-    const tarihEtiketi = new Date(tarih).toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric', weekday: 'long' });
-
-    const personelPuanOzet = (() => {
-      const harita = {};
-      filtreli.forEach(d => (d.personelPuanlari || []).forEach(p => {
-        const puan = parseInt(p.puan) || 0;
-        if (!puan) return;
-        const k = String(p.personelId);
-        if (!harita[k]) harita[k] = { ad: p.personelAdi, pozisyon: p.pozisyon || '', puanlar: [], notlar: [] };
-        harita[k].puanlar.push(puan);
-        // DEĞİŞTİ: Not artık düz metin değil, BAĞLAMIYLA saklanıyor — hangi işte,
-        // hangi şef tarafından, kaç puanla yazıldığı ekranda gösterilebilsin diye.
-        // (Eskiden yalnızca metin tutuluyordu ve ekranda sadece "1 not" yazıyordu.)
-        if ((p.ozelNot || '').trim()) harita[k].notlar.push({
-          metin: p.ozelNot.trim(),
-          is: d.jobCustomerName || '',
-          sef: d.sefAdi || '',
-          puan,
-          // Denetim saati kayıtta ayrı bir alan değil; denetimTarihi'nden türetilir
-          // (üstteki denetim kartı da aynı kaynağı kullanıyor).
-          saat: d.denetimTarihi ? new Date(d.denetimTarihi).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : ''
-        });
-      }));
-      return Object.values(harita).map(x => ({
-        ...x, ortalama: Math.round((x.puanlar.reduce((t, n) => t + n, 0) / x.puanlar.length) * 10) / 10,
-      })).sort((a, b) => a.ortalama - b.ortalama);
-    })();
-
-    // NOT: Aylık etiket kaldırıldı; sayfa artık GÜNLÜK çalışıyor (tarihEtiketi).
-    const puanRenk = (p) => p >= 4.5 ? 'text-green-600' : p >= 3.5 ? 'text-lime-600' : p >= 2.5 ? 'text-orange-500' : 'text-red-600';
-
-    return (
-      <div className="max-w-6xl mx-auto animate-in fade-in space-y-5 pb-8">
-        {/* BAŞLIK + ÖZET */}
-        <div className="bg-gradient-to-r from-purple-700 via-purple-800 to-neutral-900 rounded-2xl p-5 md:p-6 text-white shadow-lg">
-          <div className="flex items-center gap-2 mb-1">
-            <ClipboardCheck className="w-6 h-6" />
-            <h2 className="text-xl font-black">Saha Raporlaması</h2>
-          </div>
-          <p className="text-xs font-bold text-purple-200 mb-4">Şeflerin sahada yaptığı denetimler, personel puanlamaları ve saha notları — <b className="text-white">{tarihEtiketi}</b></p>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="bg-white/10 rounded-xl p-3 border border-white/10">
-              <div className="text-[10px] font-black uppercase text-purple-200">Yapılan Denetim</div>
-              <div className="text-2xl font-black mt-0.5">{toplamDenetim}</div>
-            </div>
-            <div className="bg-white/10 rounded-xl p-3 border border-white/10">
-              <div className="text-[10px] font-black uppercase text-purple-200">Gidilen İş</div>
-              <div className="text-2xl font-black mt-0.5">{denetlenenIsler}</div>
-            </div>
-            <div className="bg-white/10 rounded-xl p-3 border border-white/10">
-              <div className="text-[10px] font-black uppercase text-purple-200">Ortalama Saha Puanı</div>
-              <div className="text-2xl font-black mt-0.5">{genelOrtalama % 1 === 0 ? genelOrtalama : String(genelOrtalama).replace('.', ',')} <span className="text-sm text-purple-200">/ 5</span></div>
-            </div>
-            <div className="bg-white/10 rounded-xl p-3 border border-white/10">
-              <div className="text-[10px] font-black uppercase text-purple-200">Özel Not Girilen</div>
-              <div className="text-2xl font-black mt-0.5">{notluDenetim}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* FİLTRELER */}
-        <div className="bg-white rounded-2xl border border-neutral-200 p-3 flex flex-col md:flex-row gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Rapor, müşteri, personel veya şef adı ara..."
-              className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-purple-600 transition" />
-          </div>
-          {/* GÜN SEÇİCİ: sol/sağ ok + tarih + BUGÜN kısayolu (açılış her zaman bugün) */}
-          <div className="flex items-stretch gap-1">
-            <button onClick={() => gunKaydir(-1)} title="Önceki gün"
-              className="px-2.5 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 text-neutral-600 transition">
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-            <input type="date" value={tarih} onChange={e => setTarih(e.target.value || bugunStr)}
-              className="px-2 py-2.5 border border-neutral-300 rounded-xl text-sm font-black outline-none focus:ring-2 focus:ring-purple-600" />
-            <button onClick={() => gunKaydir(1)} title="Sonraki gün"
-              className="px-2.5 rounded-xl border border-neutral-300 bg-white hover:bg-neutral-100 text-neutral-600 transition">
-              <ChevronRight className="w-4 h-4" />
-            </button>
-            {tarih !== bugunStr && (
-              <button onClick={() => setTarih(bugunStr)} title="Bugüne dön"
-                className="px-3 rounded-xl bg-purple-700 text-white text-[10px] font-black hover:bg-purple-800 transition whitespace-nowrap">BUGÜN</button>
-            )}
-          </div>
-          <select value={sefFiltre} onChange={e => setSefFiltre(e.target.value)} className="p-2.5 border border-neutral-300 rounded-xl text-sm font-bold bg-white outline-none focus:ring-2 focus:ring-purple-600">
-            <option value="Tümü">Tüm Şefler</option>
-            {sefler.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </div>
-
-        {/* KAYIT DOĞRULUĞU DAĞILIMI — satış/kayıt kalitesi denetimi */}
-        {toplamDenetim > 0 && (
-          <div className="bg-white rounded-2xl border border-neutral-200 p-4">
-            <h3 className="text-[11px] font-black text-neutral-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-              <UserPlus className="w-3.5 h-3.5 text-neutral-400" /> Kayıt Doğruluğu (İşi Açan Kişilerin Doğruluk Değerlendirmesi)
-            </h3>
-            <div className="space-y-2">
-              {dogrulukDagilim.map(x => {
-                const st = DOGRULUK_STIL[x.ad];
-                const oran = Math.round((x.sayi / dogrulukToplam) * 100);
+              {rSecilenGunListesi.map(r => {
+                const gecikmis = r.durum === 'bekliyor' && r.tarih < bugunStr();
                 return (
-                  <div key={x.ad}>
-                    <div className="flex justify-between text-[11px] font-bold mb-0.5">
-                      <span className={st.yazi}>{x.ad}</span>
-                      <span className="text-neutral-500">{x.sayi} denetim • %{oran}</span>
+                  <div key={r.id} className={`rounded-xl border-2 p-3 flex flex-col sm:flex-row sm:items-center gap-2 ${
+                    r.durum === 'gidildi' ? 'border-green-200 bg-green-50/60'
+                    : r.durum === 'iptal' ? 'border-neutral-200 bg-neutral-50 opacity-60'
+                    : gecikmis ? 'border-red-300 bg-red-50/70' : 'border-indigo-200 bg-indigo-50/40'}`}>
+                    <div className="flex items-start gap-2 flex-1 min-w-0">
+                      <span className="shrink-0 text-xs font-black bg-neutral-900 text-white rounded-lg px-2 py-1">{r.saat || '--:--'}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="font-black text-sm text-neutral-800 break-words flex items-center gap-1.5 flex-wrap">
+                          {r.firmaAdi}
+                          <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-white border border-neutral-200 text-neutral-500">{r.tip}</span>
+                          {/* DEĞİŞTİ: "PORTFÖYDE" rozeti bayrağa değil GERÇEK kayda bakar */}
+                          {r.durum === 'gidildi' && (() => {
+                            const pfVar = !!randevununPortfoyu(r);
+                            return (
+                              <>
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-green-600 text-white">GİDİLDİ{pfVar ? ' • PORTFÖYDE' : ''}</span>
+                                {!pfVar && (
+                                  <button type="button" onClick={() => randevuBilgisiylePortfoyFormuAc(r, { gidildiIsaretle: true })}
+                                    title="Bu görüşme portföye eklenmemiş — aynı bilgilerle ekle"
+                                    className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 transition">
+                                    + Portföye Ekle
+                                  </button>
+                                )}
+                              </>
+                            );
+                          })()}
+                          {r.durum === 'iptal' && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-neutral-400 text-white">İPTAL</span>}
+                          {gecikmis && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-red-600 text-white">GECİKMİŞ</span>}
+                        </div>
+                        <div className="text-[11px] font-bold text-neutral-500 mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                          {r.yetkili && <span className="flex items-center gap-1"><User className="w-3 h-3" />{r.yetkili}</span>}
+                          {r.telefon && <a href={`tel:${r.telefon}`} className="flex items-center gap-1 text-indigo-600 hover:underline"><Phone className="w-3 h-3" />{r.telefon}</a>}
+                          {r.bolge && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{r.bolge}</span>}
+                          {r.atanan && <span className="flex items-center gap-1 text-purple-600"><Handshake className="w-3 h-3" />{r.atanan}</span>}
+                        </div>
+                        {r.not && <p className="text-[11px] font-medium text-neutral-500 italic mt-1">{r.not}</p>}
+                      </div>
                     </div>
-                    <div className="h-2 bg-neutral-100 rounded-full overflow-hidden">
-                      <div className={`h-full ${st.bar}`} style={{ width: `${oran}%` }}></div>
+                    <div className="flex items-center gap-1.5 flex-wrap sm:shrink-0">
+                      {r.durum === 'bekliyor' && (() => {
+                        // DEĞİŞTİ (kullanıcı talebi): seçenekler DURUMA GÖRE sunulur.
+                        //  • Firma zaten portföydeyse tek seçenek: "Gidildi" (portföye
+                        //    ziyaret olarak işlenir) + İptal. "Portföye Ekle" gösterilmez.
+                        //  • Firma portföyde değilse iki seçenek: "Gidildi → Portföye Ekle"
+                        //    veya "Sadece Gidildi" + İptal.
+                        const portfoy = randevununPortfoyu(r);
+                        return (
+                          <>
+                            {portfoy ? (
+                              <button type="button" onClick={() => portfoyRandevusuGidildi(r, portfoy)}
+                                title={`${portfoy.firmaAdi} zaten portföyde — görüşme ziyaret günlüğüne işlenir`}
+                                className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-[10px] font-black rounded-lg transition whitespace-nowrap flex items-center gap-1">
+                                <CheckCircle className="w-3.5 h-3.5" /> Gidildi
+                              </button>
+                            ) : (
+                              <>
+                                {/* ANA AKIŞ: görüşme yapıldı → bilgiler hazır dolu portföy formu açılır */}
+                                <button type="button" onClick={() => randevudanPortfoyeEkle(r)}
+                                  className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-[10px] font-black rounded-lg transition whitespace-nowrap flex items-center gap-1">
+                                  <CheckCircle className="w-3.5 h-3.5" /> Gidildi → Portföye Ekle
+                                </button>
+                                <button type="button" onClick={() => randevuDurum(r, 'gidildi')}
+                                  title="Görüşme yapıldı ama şimdilik portföye eklenmeyecek"
+                                  className="px-2.5 py-1.5 bg-white border border-green-400 text-green-700 hover:bg-green-50 text-[10px] font-black rounded-lg transition whitespace-nowrap">Sadece Gidildi</button>
+                              </>
+                            )}
+                            {/* YENİ (kullanıcı talebi): Randevuyu ertele — yeni tarih/saat seç */}
+                            <button type="button" onClick={() => setTarihDegistir({ randevu: r, tarih: r.tarih, saat: r.saat || '10:00' })}
+                              title="Randevunun tarihini / saatini değiştir"
+                              className="px-2.5 py-1.5 bg-white border border-amber-400 text-amber-700 hover:bg-amber-50 text-[10px] font-black rounded-lg transition whitespace-nowrap flex items-center gap-1">
+                              <CalendarDays className="w-3 h-3" /> Tarihi Değiştir{(r.ertelemeGecmisi || []).length > 0 ? ` (${r.ertelemeGecmisi.length}×)` : ''}
+                            </button>
+                            <button type="button" onClick={() => randevuDurum(r, 'iptal')}
+                              title="Randevuyu iptal et (gerekirse sonra tekrar aktifleştirilebilir)"
+                              className="px-2.5 py-1.5 bg-white border border-neutral-300 text-neutral-500 hover:bg-neutral-100 text-[10px] font-black rounded-lg transition">İptal Et</button>
+                          </>
+                        );
+                      })()}
+                      {r.durum === 'iptal' && (
+                        <button type="button" onClick={() => randevuDurum(r, 'bekliyor')}
+                          className="px-2.5 py-1.5 bg-white border border-indigo-300 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black rounded-lg transition">Tekrar Aktifleştir</button>
+                      )}
+                      <button type="button" onClick={() => { setRandevuForm({ firmaAdi: r.firmaAdi || '', tip: r.tip || 'Emlak Ofisi', yetkili: r.yetkili || '', telefon: r.telefon || '', bolge: r.bolge || '', adres: r.adres || '', tarih: r.tarih, saat: r.saat || '', atanan: r.atanan || '', not: r.not || '' }); setRandevuDuzenlenenId(r.id); setRandevuFormAcik(true); }}
+                        className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle"><Edit className="w-4 h-4" /></button>
+                      <button type="button" onClick={() => setRandevuSilinecekId(r.id)}
+                        className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Sil"><Trash2 className="w-4 h-4" /></button>
                     </div>
                   </div>
                 );
               })}
             </div>
-          </div>
-        )}
+          )}
+        </div>
+      </div>
 
-        {/* ====================================================================
-            GÜNLÜK ŞEF DENETİM DÖKÜMÜ (yeni)
-            Seçili günde her şefin kaç denetim yaptığı; her denetimde hangi işe
-            gittiği, plaka, tutar, müşteri ve kime kaç puan verdiği.
-            ==================================================================== */}
-        {sefGunlukTakip.length > 0 && (
-          <div className="space-y-4">
-            {sefGunlukTakip.map(sef => (
-              <div key={sef.ad} className="bg-white rounded-2xl border border-neutral-200 overflow-hidden shadow-sm">
-                {/* ŞEF BAŞLIĞI + günün özeti */}
-                <div className="bg-gradient-to-r from-purple-700 to-purple-900 text-white p-4 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center font-black text-lg shrink-0">
-                      {sef.ad.charAt(0).toLocaleUpperCase('tr-TR')}
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="font-black text-base truncate">{sef.ad}</h3>
-                      <p className="text-[11px] font-bold text-purple-200">Bu gün sahada yaptığı denetimler</p>
-                    </div>
+      {/* RANDEVU FORMU (yeni / düzenle) */}
+      {/* HATA DÜZELTMESİ (kullanıcı bildirimi): Portföy detayındaki "Randevu Ekle"
+          basılınca form ARKADA kalıyordu. Sebep: detay penceresi z-[9997], randevu
+          formu z-50 idi. Form artık detayın üstünde (z-[9998]); detay açıkken
+          doğrudan buradan randevu eklenebilir, detay kapanmaz. */}
+      {randevuFormAcik && (
+        <div className="fixed inset-0 bg-black/50 z-[9998] flex items-center justify-center p-4" onClick={() => setRandevuFormAcik(false)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-5 space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-lg text-indigo-700 flex items-center gap-2"><CalendarDays className="w-5 h-5" /> {randevuDuzenlenenId ? 'Randevuyu Düzenle' : 'Yeni Randevu'}</h3>
+              <button type="button" onClick={() => setRandevuFormAcik(false)} className="p-2 hover:bg-neutral-100 rounded-xl transition"><X className="w-5 h-5" /></button>
+            </div>
+            {/* YENİ (kullanıcı talebi): Mevcut portföyden seç — ad yazınca listeden bul */}
+            {!randevuDuzenlenenId && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-2.5">
+                <label className="text-[10px] font-black uppercase text-indigo-600 flex items-center gap-1"><Search className="w-3 h-3" /> Mevcut Portföyden Seç (isteğe bağlı)</label>
+                {randevuForm.portfoyId ? (
+                  <div className="flex items-center justify-between gap-2 mt-1 bg-white border border-indigo-300 rounded-lg px-2.5 py-1.5">
+                    <span className="text-xs font-black text-indigo-800 truncate">✓ {randevuForm.firmaAdi} <span className="font-bold text-neutral-400">• portföye bağlı</span></span>
+                    <button type="button" onClick={() => setRandevuForm({ ...bosRandevuForm, tarih: randevuForm.tarih, saat: randevuForm.saat, atanan: randevuForm.atanan, not: randevuForm.not })}
+                      className="text-[10px] font-black text-red-600 hover:underline shrink-0">Bağı kaldır</button>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <div className="bg-white/15 rounded-lg px-3 py-1.5 text-center">
-                      <div className="text-lg font-black leading-none">{sef.denetimSayisi}</div>
-                      <div className="text-[9px] font-black text-purple-200 uppercase">denetim</div>
-                    </div>
-                    <div className="bg-white/15 rounded-lg px-3 py-1.5 text-center">
-                      <div className="text-lg font-black leading-none">{sef.puanlananPersonel}</div>
-                      <div className="text-[9px] font-black text-purple-200 uppercase">personel</div>
-                    </div>
-                    <div className="bg-white/15 rounded-lg px-3 py-1.5 text-center">
-                      <div className="text-lg font-black leading-none">{String(sef.ortalama).replace('.', ',')}</div>
-                      <div className="text-[9px] font-black text-purple-200 uppercase">ort. puan</div>
-                    </div>
-                    {sef.toplamCiro > 0 && (
-                      <div className="bg-white/15 rounded-lg px-3 py-1.5 text-center">
-                        <div className="text-lg font-black leading-none">₺{sef.toplamCiro.toLocaleString('tr-TR')}</div>
-                        <div className="text-[9px] font-black text-purple-200 uppercase">gidilen iş tutarı</div>
+                ) : (
+                  <div className="relative mt-1">
+                    <input value={randevuPortfoyArama} onChange={e => setRandevuPortfoyArama(e.target.value)}
+                      placeholder="Firma / yetkili / bölge yazın..." className="w-full p-2.5 border border-indigo-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-indigo-600" />
+                    {randevuPortfoySonuclari.length > 0 && (
+                      <div className="absolute z-10 left-0 right-0 mt-1 bg-white border border-indigo-200 rounded-xl shadow-xl max-h-52 overflow-y-auto">
+                        {randevuPortfoySonuclari.map(pf => (
+                          <button key={pf.id} type="button" onClick={() => portfoydenRandevuFormunuDoldur(pf)}
+                            className="w-full text-left px-3 py-2 hover:bg-indigo-50 border-b border-neutral-100 last:border-0">
+                            <div className="text-xs font-black text-neutral-800">{pf.firmaAdi}</div>
+                            <div className="text-[10px] font-bold text-neutral-500">{pf.tip}{pf.yetkili ? ` • ${pf.yetkili}` : ''}{pf.bolge ? ` • ${pf.bolge}` : ''} • {pf.durum}</div>
+                          </button>
+                        ))}
                       </div>
                     )}
+                    {randevuPortfoyArama.trim().length >= 2 && randevuPortfoySonuclari.length === 0 && (
+                      <p className="text-[10px] font-bold text-neutral-400 mt-1">Portföyde eşleşen kayıt yok — aşağıya yeni firma olarak yazabilirsiniz.</p>
+                    )}
                   </div>
-                </div>
-
-                {/* DENETİM DÖKÜMÜ */}
-                <div className="divide-y divide-neutral-100">
-                  {sef.denetimler.map((d, sira) => {
-                    const bilgi = denetimDetay(d);
-                    const saat = d.denetimTarihi ? new Date(d.denetimTarihi).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '';
-                    return (
-                      <div key={d.id} className="p-4 hover:bg-neutral-50/70 transition">
-                        {/* İŞ BİLGİSİ */}
-                        <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="w-5 h-5 rounded-md bg-neutral-800 text-white text-[10px] font-black flex items-center justify-center shrink-0">{sira + 1}</span>
-                              {/* Müşteri kartı: cari profiline gidilebilir */}
-                              <button
-                                onClick={() => onViewCari && d.jobCustomerName && onViewCari(bilgi.telefon)}
-                                disabled={!onViewCari || !bilgi.telefon}
-                                className={`font-black text-sm text-black truncate text-left ${onViewCari && bilgi.telefon ? 'hover:text-purple-700 hover:underline' : ''}`}
-                                title={onViewCari && bilgi.telefon ? 'Cari profiline git' : ''}
-                              >
-                                {bilgi.musteri}
-                              </button>
-                              {bilgi.tur && <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600">{bilgi.tur}</span>}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1.5 pl-7 text-[11px] font-bold text-neutral-500">
-                              {bilgi.telefon && <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {bilgi.telefon}</span>}
-                              {bilgi.rota && <span className="flex items-center gap-1"><MapPin className="w-3 h-3" /> {bilgi.rota}</span>}
-                              {bilgi.saat && <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> İş saati {bilgi.saat}</span>}
-                              {saat && <span className="flex items-center gap-1 text-purple-600"><ClipboardCheck className="w-3 h-3" /> Denetim {saat}</span>}
-                            </div>
-                          </div>
-                          <div className="flex flex-wrap gap-1.5 shrink-0">
-                            {/* Araç plakası */}
-                            {bilgi.plaka ? (
-                              <span className="flex items-center gap-1.5 text-[11px] font-black bg-purple-50 text-purple-700 border border-purple-200 px-2.5 py-1 rounded-lg">
-                                <Truck className="w-3.5 h-3.5" /> {bilgi.plaka}
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-bold text-neutral-300 px-2 py-1">Araç bilgisi yok</span>
-                            )}
-                            {/* İş tutarı */}
-                            {bilgi.fiyat ? (
-                              <span className="text-[11px] font-black bg-green-50 text-green-700 border border-green-200 px-2.5 py-1 rounded-lg">
-                                ₺{(parseFloat(bilgi.fiyat) || 0).toLocaleString('tr-TR')}
-                              </span>
-                            ) : null}
-                            {/* Kayıt doğruluğu */}
-                            {d.kayitDogrulugu && (
-                              <span className={`text-[10px] font-black px-2.5 py-1 rounded-lg border ${(DOGRULUK_STIL[d.kayitDogrulugu] || {}).kutu || 'bg-neutral-50 border-neutral-200'} ${(DOGRULUK_STIL[d.kayitDogrulugu] || {}).yazi || 'text-neutral-600'}`}>
-                                {d.kayitDogrulugu}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* PERSONEL PUANLARI: kime kaç verdi */}
-                        {(d.personelPuanlari || []).length > 0 && (
-                          <div className="pl-7 flex flex-wrap gap-1.5 mb-2">
-                            {d.personelPuanlari.map((pp, i) => {
-                              const puan = parseInt(pp.puan) || 0;
-                              const renk = puan >= 5 ? 'bg-green-100 text-green-800 border-green-300'
-                                : puan === 4 ? 'bg-lime-100 text-lime-800 border-lime-300'
-                                : puan === 3 ? 'bg-yellow-100 text-yellow-800 border-yellow-300'
-                                : 'bg-red-100 text-red-800 border-red-300';
-                              return (
-                                <span key={i} className={`inline-flex items-center gap-1.5 text-[11px] font-black px-2.5 py-1 rounded-lg border ${renk}`}
-                                      title={pp.ozelNot ? `Not: ${pp.ozelNot}` : ''}>
-                                  {pp.personelAdi}
-                                  <span className="flex items-center gap-0.5">{puan}<Star className="w-3 h-3 fill-current" /></span>
-                                  {pp.ozelNot ? <MessageSquareText className="w-3 h-3 opacity-70" /> : null}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        {/* YENİ: Şefin tek tek personellere yazdığı bireysel notlar.
-                            Eskiden yalnızca rozetin title ipucunda gizliydi; artık
-                            notun tam metni ekranda okunabiliyor. */}
-                        <DenetimBireyselNotlari personelPuanlari={d.personelPuanlari} />
-
-                        {/* Şefin genel raporu (tüm ekip için tek not) */}
-                        {(d.genelRapor || '').trim() && (
-                          <div className="pl-7">
-                            <p className="text-[9px] font-black text-neutral-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                              <ClipboardCheck className="w-3 h-3" /> Genel rapor
-                            </p>
-                            <p className="text-[11px] font-bold text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-lg p-2.5">
-                              {d.genelRapor}
-                            </p>
-                          </div>
-                        )}
-
-                        {/* ============================================================
-                            SAHADA ÇEKİLEN FOTOĞRAFLAR
-                            Şefin denetim sırasında yüklediği görseller. Tıklayınca
-                            büyük önizleme açılır. Video ise kamera simgesi gösterilir.
-                            ============================================================ */}
-                        {(() => {
-                          const medya = (d.medya || []).filter(Boolean);
-                          if (medya.length === 0) return null;
-                          return (
-                            <div className="pl-7 mt-2">
-                              <p className="text-[9px] font-black text-neutral-400 uppercase tracking-wider mb-1.5 flex items-center gap-1">
-                                <Camera className="w-3 h-3" /> Sahada çekilen görseller ({medya.length})
-                              </p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {medya.map((url, i) => (
-                                  <button
-                                    key={url + i}
-                                    type="button"
-                                    onClick={() => setViewingImage?.({ title: `${bilgi.musteri} — Saha Görseli ${i + 1}`, name: url })}
-                                    className="w-16 h-16 rounded-lg overflow-hidden border border-neutral-200 bg-neutral-100 shrink-0 cursor-pointer hover:ring-2 hover:ring-purple-500 transition flex items-center justify-center"
-                                    title="Büyütmek için tıklayın"
-                                  >
-                                    {isVideoUrl(url)
-                                      ? <Camera className="w-5 h-5 text-neutral-500" />
-                                      : <img src={url} alt="" className="w-full h-full object-cover" onError={e => { e.target.style.display = 'none'; }} />}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    );
-                  })}
-                </div>
+                )}
               </div>
-            ))}
-          </div>
-        )}
-
-        {/* Seçili günde hiç denetim yoksa */}
-        {!yukleniyor && sefGunlukTakip.length === 0 && (
-          <div className="bg-white rounded-2xl border border-dashed border-neutral-300 p-10 text-center">
-            <ClipboardCheck className="w-10 h-10 text-neutral-300 mx-auto mb-2" />
-            <p className="text-sm font-black text-neutral-500">Bu gün için saha denetimi kaydı yok</p>
-            <p className="text-[11px] font-bold text-neutral-400 mt-1">Oklarla başka bir güne geçebilirsiniz.</p>
-          </div>
-        )}
-
-        {/* ŞEF PERFORMANSI + DİKKAT GEREKTİREN PERSONEL */}
-        {toplamDenetim > 0 && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-white rounded-2xl border border-neutral-200 p-4">
-              <h3 className="text-[11px] font-black text-neutral-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                <Shield className="w-3.5 h-3.5 text-purple-500" /> Şef Performansı
-              </h3>
-              <div className="space-y-2">
-                {sefPerformans.map(s => (
-                  <div key={s.ad} className="flex items-center gap-3 bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
-                    <div className="w-9 h-9 rounded-lg bg-purple-600 text-white flex items-center justify-center font-black text-sm shrink-0">
-                      {s.ad.charAt(0).toLocaleUpperCase('tr-TR')}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="font-black text-sm text-black block truncate">{s.ad}</span>
-                      <span className="text-[10px] font-bold text-neutral-400">{s.denetim} denetim • {s.personel} personel puanladı • {s.raporlu} rapor yazdı</span>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <span className={`text-lg font-black ${puanRenk(s.ortalama)}`}>{String(s.ortalama).replace('.', ',')}</span>
-                      <span className="block text-[9px] font-black text-neutral-400 uppercase">verdiği ort.</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="sm:col-span-2"><label className="text-[10px] font-black uppercase text-neutral-400">Firma Adı *</label>
+                <input value={randevuForm.firmaAdi} onChange={e => setRandevuForm({ ...randevuForm, firmaAdi: e.target.value })} placeholder="Örn: İstanbul Kepenk" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-indigo-600" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Tip</label>
+                <select value={randevuForm.tip} onChange={e => setRandevuForm({ ...randevuForm, tip: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm bg-white outline-none">
+                  {PARTNER_TIPLERI.map(t => <option key={t.id} value={t.id}>{t.id}</option>)}
+                </select></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Yetkili</label>
+                <input value={randevuForm.yetkili} onChange={e => setRandevuForm({ ...randevuForm, yetkili: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Telefon</label>
+                <input value={randevuForm.telefon} onChange={e => setRandevuForm({ ...randevuForm, telefon: e.target.value })} inputMode="tel" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Bölge</label>
+                <input value={randevuForm.bolge} onChange={e => setRandevuForm({ ...randevuForm, bolge: e.target.value })} placeholder="Örn: Başakşehir" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div className="sm:col-span-2"><label className="text-[10px] font-black uppercase text-neutral-400">Adres</label>
+                <input value={randevuForm.adres} onChange={e => setRandevuForm({ ...randevuForm, adres: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Tarih *</label>
+                <input type="date" value={randevuForm.tarih} onChange={e => setRandevuForm({ ...randevuForm, tarih: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Saat</label>
+                <input type="time" value={randevuForm.saat} onChange={e => setRandevuForm({ ...randevuForm, saat: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none" /></div>
+              <div className="sm:col-span-2"><label className="text-[10px] font-black uppercase text-neutral-400">Görüşmeye Gidecek (Saha Pazarlamacı)</label>
+                <select value={randevuForm.atanan} onChange={e => setRandevuForm({ ...randevuForm, atanan: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm bg-white outline-none">
+                  <option value="">— Seçin —</option>
+                  {satisPersonelleri.map(s => <option key={s} value={s}>{s}</option>)}
+                </select></div>
+              <div className="sm:col-span-2"><label className="text-[10px] font-black uppercase text-neutral-400">Not (görüşme amacı, dikkat edilecekler)</label>
+                <textarea value={randevuForm.not} onChange={e => setRandevuForm({ ...randevuForm, not: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none h-16 resize-none" /></div>
             </div>
+            <button type="button" onClick={randevuKaydet} disabled={randevuKaydediliyor}
+              className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-2xl transition flex items-center justify-center gap-2 disabled:opacity-50">
+              {randevuKaydediliyor ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />}
+              {randevuDuzenlenenId ? 'Randevuyu Güncelle' : 'Randevuyu Kaydet'}
+            </button>
+            {/* YENİ (kullanıcı talebi): Düzenleme penceresinden doğrudan portföye ekle.
+                Buradaki bilgiler (firma, yetkili, telefon, bölge, adres, not) aynen
+                portföy formuna geçer; randevu bekliyor kalır ve kayıt oluşunca bağlanır. */}
+            {randevuDuzenlenenId && !randevununPortfoyu(randevular.find(x => x.id === randevuDuzenlenenId)) && (
+              <button type="button" onClick={duzenlenenRandevudanPortfoyeEkle}
+                className="w-full py-2.5 bg-white border-2 border-red-500 text-red-700 hover:bg-red-50 font-black rounded-2xl transition flex items-center justify-center gap-2">
+                <PlusCircle className="w-4 h-4" /> Bu Bilgilerle Portföye Ekle
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
-            <div className="bg-white rounded-2xl border border-neutral-200 p-4">
-              <h3 className="text-[11px] font-black text-neutral-500 uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                <Star className="w-3.5 h-3.5 text-yellow-500" /> Personel Saha Puanları <span className="normal-case font-bold text-neutral-400">(en düşük puanlı üstte)</span>
-              </h3>
-              <div className="space-y-2 max-h-[320px] overflow-y-auto custom-scrollbar pr-1">
-                {personelPuanOzet.map((p, i) => {
-                  // YENİ: Notu olan kartlar açılabilir. Tıklanınca o personele
-                  // yazılmış tüm denetim notları, hangi işte ve hangi şef
-                  // tarafından yazıldığıyla birlikte listelenir.
-                  const anahtar = p.ad + i;
-                  const acik = acikPuanKarti === anahtar;
-                  const notVar = p.notlar.length > 0;
-                  return (
-                    <div key={anahtar} className="bg-neutral-50 rounded-xl border border-neutral-200 overflow-hidden">
-                      <div
-                        onClick={() => { if (notVar) setAcikPuanKarti(acik ? null : anahtar); }}
-                        className={`flex items-center gap-3 p-2.5 ${notVar ? 'cursor-pointer hover:bg-neutral-100 transition' : ''}`}>
-                        <div className="flex-1 min-w-0">
-                          <span className="font-black text-sm text-black block truncate">{p.ad}</span>
-                          <span className="text-[10px] font-bold text-neutral-400">
-                            {p.pozisyon || '—'} • {p.puanlar.length} denetim
-                            {notVar && <span className="text-purple-600"> • {p.notlar.length} not</span>}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <span className={`text-lg font-black ${puanRenk(p.ortalama)}`}>{String(p.ortalama).replace('.', ',')}</span>
-                          <Star className="w-3.5 h-3.5 text-yellow-500" />
-                          {notVar && <ChevronDown className={`w-4 h-4 text-neutral-400 transition ${acik ? 'rotate-180' : ''}`} />}
-                        </div>
-                      </div>
-                      {/* DENETİM NOTLARI */}
-                      {acik && notVar && (
-                        <div className="px-2.5 pb-2.5 space-y-1.5 border-t border-neutral-200 pt-2">
-                          {p.notlar.map((n, ni) => (
-                            <div key={ni} className="bg-white rounded-lg p-2 border border-neutral-200">
-                              <p className="text-xs font-medium text-neutral-700 leading-relaxed">{n.metin}</p>
-                              <p className="text-[10px] font-bold text-neutral-400 mt-1">
-                                {n.puan} <Star className="w-2.5 h-2.5 text-yellow-500 inline -mt-0.5" />
-                                {n.is ? ` • ${n.is}` : ''}
-                                {n.sef ? ` • ${n.sef}` : ''}
-                                {n.saat ? ` • ${n.saat}` : ''}
-                              </p>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+      {/* RANDEVU SİLME ONAYI */}
+      {/* YENİ: TARİHİ DEĞİŞTİR penceresi — detay penceresinin de üstünde açılır */}
+      {tarihDegistir && (
+        <div className="fixed inset-0 bg-black/50 z-[9998] flex items-center justify-center p-4" onClick={() => setTarihDegistir(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-5 space-y-3" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <h3 className="font-black text-amber-700 flex items-center gap-2"><CalendarDays className="w-5 h-5" /> Tarihi Değiştir</h3>
+              <button type="button" onClick={() => setTarihDegistir(null)} className="p-1.5 hover:bg-neutral-100 rounded-lg"><X className="w-4 h-4" /></button>
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs">
+              <p className="font-black text-amber-900">{tarihDegistir.randevu.firmaAdi}</p>
+              <p className="font-bold text-amber-700">Mevcut: {tarihDegistir.randevu.tarih?.split('-').reverse().join('.')} {tarihDegistir.randevu.saat || ''}</p>
+              {(tarihDegistir.randevu.ertelemeGecmisi || []).length > 0 && (
+                <p className="text-[10px] font-bold text-amber-600 mt-1">Bu randevu daha önce {tarihDegistir.randevu.ertelemeGecmisi.length} kez ertelendi.</p>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Yeni Tarih *</label>
+                <input type="date" value={tarihDegistir.tarih} onChange={e => setTarihDegistir({ ...tarihDegistir, tarih: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-amber-500" /></div>
+              <div><label className="text-[10px] font-black uppercase text-neutral-400">Saat</label>
+                <input type="time" value={tarihDegistir.saat} onChange={e => setTarihDegistir({ ...tarihDegistir, saat: e.target.value })} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-amber-500" /></div>
+            </div>
+            {/* Hızlı seçimler */}
+            <div className="flex flex-wrap gap-1.5">
+              {[['Yarın', 1], ['+3 gün', 3], ['1 hafta', 7], ['2 hafta', 14]].map(([ad, gun]) => {
+                const d = new Date(); d.setDate(d.getDate() + gun);
+                const t = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                return <button key={ad} type="button" onClick={() => setTarihDegistir({ ...tarihDegistir, tarih: t })}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black border transition ${tarihDegistir.tarih === t ? 'bg-amber-600 text-white border-amber-600' : 'bg-white border-neutral-300 text-neutral-600 hover:bg-neutral-50'}`}>{ad}</button>;
+              })}
+            </div>
+            {tarihDegistir.randevu.portfoyId && <p className="text-[10px] font-bold text-indigo-600">Portföy kartındaki "Sonraki randevu" da bu tarihe güncellenecek.</p>}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setTarihDegistir(null)} className="flex-1 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl transition">Vazgeç</button>
+              <button type="button" onClick={randevuTarihiniDegistir} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-black rounded-xl transition">Tarihi Kaydet</button>
             </div>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* NOT: Alttaki "Denetim Yapılan İşler" listesi kullanıcı isteğiyle KALDIRILDI.
-            Aynı bilgiler (iş, plaka, tutar, personel puanları, şef raporu ve sahada
-            çekilen fotoğraflar) yukarıdaki günlük şef denetim dökümünde gösteriliyor. */}
+      {randevuSilinecekId && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={() => setRandevuSilinecekId(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-5 space-y-3 text-center" onClick={e => e.stopPropagation()}>
+            <AlertTriangle className="w-10 h-10 text-red-500 mx-auto" />
+            <p className="font-black text-neutral-800">Randevu silinsin mi?</p>
+            <p className="text-xs font-medium text-neutral-500">Bu işlem geri alınamaz. Görüşme yapıldıysa silmek yerine "Gidildi" olarak işaretleyin.</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setRandevuSilinecekId(null)} className="flex-1 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl transition">Vazgeç</button>
+              <button type="button" onClick={randevuSil} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl transition">Sil</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FİLTRELER */}
+      <div className="bg-white p-3 rounded-2xl shadow-sm border border-neutral-200 flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[180px]">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Firma, yetkili, telefon veya bölge ara..."
+            className="w-full pl-9 pr-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-600" />
+        </div>
+        <select value={tipFiltre} onChange={e => setTipFiltre(e.target.value)} className="px-3 py-2 text-xs font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none">
+          <option value="Tümü">Tüm Tipler</option>
+          {PARTNER_TIPLERI.map(t => <option key={t.id} value={t.id}>{t.id}</option>)}
+        </select>
+        <select value={durumFiltre} onChange={e => setDurumFiltre(e.target.value)} className="px-3 py-2 text-xs font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none">
+          <option value="Tümü">Tüm Durumlar</option>
+          {PORTFOY_DURUMLARI.map(d => <option key={d.id} value={d.id}>{d.id}</option>)}
+        </select>
+        {/* Portföy sahibi filtresi: kim kimin portföyü tek bakışta */}
+        <select value={sahipFiltre} onChange={e => setSahipFiltre(e.target.value)} className="px-3 py-2 text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200 rounded-xl outline-none">
+          <option value="Tümü">Tüm Portföy Sahipleri</option>
+          {[...new Set(partnerlar.map(p => p.portfoySahibi).filter(Boolean))].sort().map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
       </div>
-    );
-  };
+
+      {/* PARTNER TABLOSU */}
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-hidden">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-neutral-900 text-white">
+              <tr>
+                <th className="p-3 font-bold">Firma / Yetkili</th>
+                <th className="p-3 font-bold text-center">Tip</th>
+                <th className="p-3 font-bold">Bölge</th>
+                <th className="p-3 font-bold text-center">Durum</th>
+                <th className="p-3 font-bold">Portföy Sahibi</th>
+                <th className="p-3 font-bold text-center">Ziyaret</th>
+                <th className="p-3 font-bold text-center">Yönlendirme</th>
+                <th className="p-3 font-bold text-right">Komisyon / Teminat</th>
+                <th className="p-3 font-bold"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {filtreli.length === 0 && (
+                <tr><td colSpan="9" className="p-10 text-center text-neutral-400 font-medium">
+                  {partnerlar.length === 0 ? 'Henüz portföy kaydı yok. "Portföye Ekle" ile ilk iş ortağı adayınızı ekleyin.' : 'Filtrelere uygun kayıt bulunamadı.'}
+                </td></tr>
+              )}
+              {filtreli.map(p => {
+                const tip = tipBul(p.tip);
+                const durum = durumBul(p.durum);
+                const TipIkon = tip.ikon;
+                const co = cariOzet(p);
+                return (
+                  <tr key={p.id} className="hover:bg-neutral-50 transition cursor-pointer" onClick={() => setDetayId(p.id)}>
+                    <td className="p-3">
+                      <p className="font-black text-black flex items-center gap-1.5">{p.firmaAdi}{p.durum === 'Anlaşıldı' && <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-400" />}</p>
+                      <p className="text-[10px] font-bold text-neutral-500 flex items-center gap-1 mt-0.5"><User className="w-3 h-3" /> {p.yetkili || '—'} {p.telefon && <>• <Phone className="w-3 h-3" /> {p.telefon}</>}</p>
+                    </td>
+                    <td className="p-3 text-center"><span className={`px-2 py-1 rounded-lg text-[9px] font-black border inline-flex items-center gap-1 ${tip.renk}`}><TipIkon className="w-3 h-3" /> {p.tip}</span></td>
+                    <td className="p-3 font-bold text-neutral-600">{p.bolge || '—'}</td>
+                    <td className="p-3 text-center"><span className={`px-2 py-1 rounded-full text-[9px] font-black border ${durum.renk}`}>{p.durum}</span></td>
+                    <td className="p-3">
+                      <span className="font-black text-purple-700">{p.portfoySahibi || '—'}</span>
+                      {p.baglayan && <p className="text-[9px] font-bold text-green-600 mt-0.5">Bağlayan: {p.baglayan}</p>}
+                    </td>
+                    <td className="p-3 text-center font-black text-blue-700">{(p.ziyaretler || []).length}</td>
+                    <td className="p-3 text-center font-black text-neutral-700">{p.yonlendirmeSayisi || 0} iş</td>
+                    <td className="p-3 text-right">
+                      <span className="font-black text-green-700">{tl(co.komisyon)}</span>
+                      <span className="text-neutral-300 mx-1">/</span>
+                      <span className="font-black text-orange-600">{tl(co.teminat)}</span>
+                    </td>
+                    <td className="p-3 text-right"><ChevronRight className="w-4 h-4 text-neutral-300" /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ============================ DETAY PANELİ ============================ */}
+      {detay && (
+        <div className="fixed inset-0 bg-black/70 z-[9997] flex items-center justify-center p-3 animate-in fade-in" onClick={() => setDetayId(null)}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+            {/* Panel başlığı */}
+            <div className="p-4 border-b border-neutral-200 flex items-start justify-between shrink-0 gap-3">
+              <div className="min-w-0">
+                <h3 className="font-black text-lg text-black flex items-center gap-2">{detay.firmaAdi}{detay.durum === 'Anlaşıldı' && <Star className="w-4 h-4 text-yellow-500 fill-yellow-400" />}</h3>
+                <p className="text-[11px] font-bold text-neutral-500 mt-0.5">{detay.tip} • {detay.bolge || 'Bölge girilmemiş'} • Portföy: <span className="text-purple-700">{detay.portfoySahibi}</span>{detay.baglayan && <> • Bağlayan: <span className="text-green-600">{detay.baglayan}</span></>}</p>
+              </div>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {/* YENİ (kullanıcı talebi): Mevcut portföye doğrudan randevu ekle */}
+                <button type="button" onClick={() => portfoydenRandevuAc(detay)}
+                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5" title="Bu firmaya yeni randevu oluştur (takvime düşer)">
+                  <CalendarDays className="w-4 h-4" /> Randevu Ekle
+                </button>
+                <button type="button" onClick={() => { setForm({ firmaAdi: detay.firmaAdi, tip: detay.tip, yetkili: detay.yetkili || '', telefon: detay.telefon || '', bolge: detay.bolge || '', adres: detay.adres || '', portfoySahibi: detay.portfoySahibi || '', durum: detay.durum, komisyonNotu: detay.komisyonNotu || '', sonrakiRandevu: detay.sonrakiRandevu || '', notlar: detay.notlar || '', kartvizitler: detay.kartvizitler || [] }); setDuzenlenenId(detay.id); setFormAcik(true); }}
+                  className="p-2 bg-blue-50 hover:bg-blue-100 text-blue-600 rounded-xl border border-blue-100 transition" title="Düzenle"><Edit className="w-4 h-4" /></button>
+                <button type="button" onClick={() => setSilinecekId(detay.id)} className="p-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl border border-red-100 transition" title="Sil"><Trash2 className="w-4 h-4" /></button>
+                <button type="button" onClick={() => setDetayId(null)} className="p-2 text-neutral-400 hover:text-black transition"><X className="w-5 h-5" /></button>
+              </div>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+              {/* Durum akışı — tıklanabilir süreç şeridi */}
+              <div>
+                <p className="text-[10px] font-black text-neutral-400 uppercase tracking-wide mb-1.5">Süreç Durumu (tıklayarak ilerletin)</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {PORTFOY_DURUMLARI.map(d => (
+                    <button key={d.id} type="button" onClick={() => handleDurumDegistir(detay, d.id)}
+                      className={`px-3 py-1.5 rounded-xl text-[10px] font-black border-2 transition ${detay.durum === d.id ? 'bg-black text-white border-black' : d.renk}`}>{d.id}</button>
+                  ))}
+                </div>
+                {detay.komisyonNotu && <p className="text-[11px] font-bold text-neutral-500 mt-2 bg-green-50 border border-green-100 rounded-xl p-2">💰 Anlaşma şartı: {detay.komisyonNotu}</p>}
+                {detay.sonrakiRandevu && <p className="text-[11px] font-bold text-yellow-700 mt-1.5 flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" /> Sonraki randevu: {detay.sonrakiRandevu}</p>}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* ZİYARET GÜNLÜĞÜ */}
+                <div className="border border-neutral-200 rounded-2xl p-3.5">
+                  <h4 className="font-black text-sm flex items-center gap-1.5 mb-2"><MapPin className="w-4 h-4 text-blue-600" /> Ziyaret Günlüğü ({(detay.ziyaretler || []).length})</h4>
+                  <div className="flex gap-1.5 mb-2">
+                    <input type="date" value={ziyaretForm.tarih} onChange={e => setZiyaretForm({ ...ziyaretForm, tarih: e.target.value })} className="p-2 border border-neutral-200 rounded-lg text-[11px] font-bold outline-none w-[120px]" />
+                    <input value={ziyaretForm.not} onChange={e => setZiyaretForm({ ...ziyaretForm, not: e.target.value })} placeholder="Görüşme sonucu..." className="flex-1 p-2 border border-neutral-200 rounded-lg text-[11px] font-medium outline-none min-w-0" />
+                    <button type="button" onClick={() => handleZiyaretEkle(detay)} disabled={!ziyaretForm.not.trim()} className="px-2.5 bg-blue-600 text-white rounded-lg text-[10px] font-black disabled:opacity-40">Ekle</button>
+                  </div>
+                  <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                    {(detay.ziyaretler || []).slice().reverse().map((z, i) => (
+                      <div key={i} className="bg-blue-50/60 border border-blue-100 rounded-xl p-2 text-[11px]">
+                        <p className="font-bold text-neutral-700">{z.not}</p>
+                        <p className="text-[9px] font-bold text-neutral-400 mt-0.5">{z.tarih} • {z.yapan}</p>
+                      </div>
+                    ))}
+                    {(detay.ziyaretler || []).length === 0 && <p className="text-[11px] text-neutral-400 font-medium text-center py-3">Henüz ziyaret kaydı yok.</p>}
+                  </div>
+                </div>
+
+                {/* CARİ: KOMİSYON & TEMİNAT */}
+                <div className="border border-neutral-200 rounded-2xl p-3.5">
+                  <h4 className="font-black text-sm flex items-center gap-1.5 mb-2"><Wallet className="w-4 h-4 text-green-600" /> Cari — Komisyon & Teminat</h4>
+                  <div className="grid grid-cols-2 gap-1.5 mb-2 text-center">
+                    <div className="bg-green-50 border border-green-100 rounded-xl p-2"><p className="text-[9px] font-black text-green-700 uppercase">Ödenen Komisyon</p><p className="font-black text-green-700">{tl(cariOzet(detay).komisyon)}</p></div>
+                    <div className="bg-orange-50 border border-orange-100 rounded-xl p-2"><p className="text-[9px] font-black text-orange-700 uppercase">Açık Teminat</p><p className="font-black text-orange-600">{tl(cariOzet(detay).teminat)}</p></div>
+                  </div>
+                  <div className="flex gap-1.5 mb-2">
+                    <select value={cariForm.tip} onChange={e => setCariForm({ ...cariForm, tip: e.target.value })} className="p-2 border border-neutral-200 rounded-lg text-[10px] font-bold outline-none bg-white">
+                      <option value="komisyon">Komisyon Öde</option>
+                      <option value="teminat">Teminat Ver</option>
+                      <option value="teminatIade">Teminat İade Al</option>
+                    </select>
+                    <input type="number" value={cariForm.tutar} onChange={e => setCariForm({ ...cariForm, tutar: e.target.value })} placeholder="Tutar" className="w-20 p-2 border border-neutral-200 rounded-lg text-[11px] font-bold outline-none" />
+                    <input value={cariForm.aciklama} onChange={e => setCariForm({ ...cariForm, aciklama: e.target.value })} placeholder="Açıklama" className="flex-1 p-2 border border-neutral-200 rounded-lg text-[11px] font-medium outline-none min-w-0" />
+                    <button type="button" onClick={() => handleCariEkle(detay)} disabled={!cariForm.tutar} className="px-2.5 bg-green-600 text-white rounded-lg text-[10px] font-black disabled:opacity-40">Ekle</button>
+                  </div>
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto">
+                    {(detay.cariHareketler || []).slice().reverse().map((c, i) => (
+                      <div key={i} className="flex items-center justify-between bg-neutral-50 border border-neutral-100 rounded-xl p-2 text-[11px]">
+                        <span className="font-bold text-neutral-600">{c.tip === 'komisyon' ? '💰 Komisyon' : c.tip === 'teminat' ? '🛡 Teminat' : '↩ Teminat İade'} {c.aciklama && `— ${c.aciklama}`}</span>
+                        <span className={`font-black ${c.tip === 'komisyon' ? 'text-green-700' : 'text-orange-600'}`}>{tl(c.tutar)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  {/* Yönlendirilen iş sayacı */}
+                  <button type="button" onClick={() => handleYonlendirmeEkle(detay)}
+                    className="w-full mt-2 py-2 bg-neutral-900 hover:bg-black text-white rounded-xl text-[11px] font-black transition flex items-center justify-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5" /> Yönlendirilen İş Kaydet (+1) — Toplam: {detay.yonlendirmeSayisi || 0}
+                  </button>
+                </div>
+              </div>
+
+              {/* KARTVİZİT ARŞİVİ */}
+              <div className="border border-neutral-200 rounded-2xl p-3.5">
+                <div className="flex items-center justify-between mb-2">
+                  <h4 className="font-black text-sm flex items-center gap-1.5"><Camera className="w-4 h-4 text-red-600" /> Kartvizit Arşivi ({(detay.kartvizitler || []).length})</h4>
+                  <MediaCaptureMenu
+                    onChange={(e) => handleKartvizitYukle(e, detay)}
+                    disabled={kartvizitYukleniyor}
+                    buttonLabel={kartvizitYukleniyor ? 'Yükleniyor...' : 'Kartvizit Çek / Yükle'}
+                    compact={true}
+                    multiple={true}
+                    buttonClassName="cursor-pointer px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-600 font-black text-[10px] rounded-lg border border-red-200 flex items-center gap-1.5 transition"
+                  />
+                </div>
+                {(detay.kartvizitler || []).length > 0 ? (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                    {(detay.kartvizitler || []).map((k, i) => (
+                      <button key={i} type="button" onClick={() => setViewingImage && setViewingImage({ title: `Kartvizit — ${detay.firmaAdi}`, name: k.url })}
+                        className="border border-neutral-200 rounded-xl overflow-hidden hover:border-red-400 transition group">
+                        <img src={k.url} alt={k.name} className="w-full h-16 object-cover bg-neutral-100" />
+                        <p className="text-[8px] font-bold text-neutral-400 p-1 truncate group-hover:text-red-600">{k.yukleyen || ''}</p>
+                      </button>
+                    ))}
+                  </div>
+                ) : <p className="text-[11px] text-neutral-400 font-medium text-center py-3">Ziyarette aldığınız kartviziti kamerayla çekip buraya kaydedin.</p>}
+              </div>
+
+              {/* HAREKET GEÇMİŞİ: kim ne yaptı */}
+              <div className="border border-neutral-200 rounded-2xl p-3.5">
+                <h4 className="font-black text-sm flex items-center gap-1.5 mb-2"><History className="w-4 h-4 text-neutral-500" /> Hareket Geçmişi</h4>
+                <div className="space-y-1 max-h-40 overflow-y-auto">
+                  {(detay.hareketGecmisi || []).slice().reverse().map((h, i) => (
+                    <p key={i} className="text-[10px] font-medium text-neutral-500 border-b border-neutral-50 pb-1">
+                      <b className="text-purple-700">{h.yapan}</b> — {h.detay} <span className="text-neutral-300">• {new Date(h.tarih).toLocaleString('tr-TR')}</span>
+                    </p>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================ EKLE / DÜZENLE FORMU ============================ */}
+      {formAcik && (
+        <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-3 animate-in fade-in" onClick={() => { setFormAcik(false); setDuzenlenenId(null); }}>
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-xl max-h-[92vh] flex flex-col animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+            <div className="p-4 border-b border-neutral-200 flex items-center justify-between shrink-0">
+              <h3 className="font-black text-lg text-red-600 flex items-center gap-2"><Handshake className="w-5 h-5" /> {duzenlenenId ? 'Portföy Kaydını Düzenle' : 'Portföye Ekle'}</h3>
+              <button type="button" onClick={() => { setFormAcik(false); setDuzenlenenId(null); }} className="text-neutral-400 hover:text-black"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3.5">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">Firma / Kurum Adı *</label>
+                  <input value={form.firmaAdi} onChange={e => setForm({ ...form, firmaAdi: e.target.value })} placeholder="Örn: Yıldız Emlak, Marina Sitesi Yönetimi..." className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">Tip</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {PARTNER_TIPLERI.map(t => {
+                      const Ikon = t.ikon;
+                      return (
+                        <button key={t.id} type="button" onClick={() => setForm({ ...form, tip: t.id })}
+                          className={`px-3 py-2 rounded-xl text-[11px] font-black border-2 transition flex items-center gap-1.5 ${form.tip === t.id ? 'bg-black text-white border-black' : t.renk}`}>
+                          <Ikon className="w-3.5 h-3.5" /> {t.id}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">Yetkili Kişi</label>
+                  <input value={form.yetkili} onChange={e => setForm({ ...form, yetkili: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">Telefon</label>
+                  <input value={form.telefon} onChange={e => setForm({ ...form, telefon: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">Bölge / Semt</label>
+                  <input value={form.bolge} onChange={e => setForm({ ...form, bolge: e.target.value })} placeholder="Örn: Kadıköy" className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">Sonraki Randevu (Ops.)</label>
+                  <input type="date" value={form.sonrakiRandevu} onChange={e => setForm({ ...form, sonrakiRandevu: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">Portföy Sahibi (Satış Personeli)</label>
+                  <select value={form.portfoySahibi} onChange={e => setForm({ ...form, portfoySahibi: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-600 bg-white">
+                    <option value="">— Seç —</option>
+                    {satisPersonelleri.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">Anlaşma / Komisyon Şartı (Ops.)</label>
+                  <input value={form.komisyonNotu} onChange={e => setForm({ ...form, komisyonNotu: e.target.value })} placeholder="Örn: İş başına %5 komisyon, ya da yıllık 10.000 TL teminat" className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-red-600" />
+                </div>
+                <div className="col-span-2">
+                  <label className="text-[10px] font-black text-neutral-400 uppercase tracking-wide block mb-1">Notlar</label>
+                  <textarea value={form.notlar} onChange={e => setForm({ ...form, notlar: e.target.value })} rows={2} className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-red-600 resize-none" />
+                </div>
+              </div>
+              {/* Kartvizit — yeni kayıtta da çekilebilir */}
+              <div className="border-2 border-dashed border-red-200 rounded-xl p-3 bg-red-50/30">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <p className="text-[10px] font-black text-neutral-500 uppercase flex items-center gap-1.5"><Camera className="w-3.5 h-3.5 text-red-600" /> Kartvizit ({form.kartvizitler.length})</p>
+                  <MediaCaptureMenu
+                    onChange={(e) => handleKartvizitYukle(e, null)}
+                    disabled={kartvizitYukleniyor}
+                    buttonLabel={kartvizitYukleniyor ? 'Yükleniyor...' : 'Kartvizit Çek / Yükle'}
+                    compact={true}
+                    multiple={true}
+                    buttonClassName="cursor-pointer px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white font-black text-[10px] rounded-lg flex items-center gap-1.5 transition"
+                  />
+                </div>
+                {form.kartvizitler.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {form.kartvizitler.map((k, i) => (
+                      <span key={i} className="flex items-center gap-1 bg-white border border-red-100 rounded-lg px-2 py-1 text-[10px] font-bold text-neutral-600">
+                        <img src={k.url} alt="" className="w-6 h-6 object-cover rounded" /> <span className="max-w-[80px] truncate">{k.name}</span>
+                        <button type="button" onClick={() => setForm(f => ({ ...f, kartvizitler: f.kartvizitler.filter((_, x) => x !== i) }))} className="text-neutral-400 hover:text-red-600"><X className="w-3 h-3" /></button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="p-4 border-t border-neutral-200 flex gap-2 shrink-0">
+              <button type="button" onClick={() => { setFormAcik(false); setDuzenlenenId(null); }} className="px-5 py-3 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 font-black rounded-xl transition text-sm">İptal</button>
+              <button type="button" onClick={handleKaydet} disabled={kaydediliyor || !form.firmaAdi.trim()}
+                className="flex-1 py-3 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-black rounded-xl transition flex justify-center items-center gap-2">
+                {kaydediliyor ? <Loader2 className="w-5 h-5 animate-spin" /> : <CheckCircle className="w-5 h-5" />} Kaydet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SİLME ONAYI */}
+      {silinecekId && (
+        <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setSilinecekId(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+            <h3 className="font-black text-black flex items-center gap-2 mb-2"><Trash2 className="w-5 h-5 text-red-600" /> Portföyden Sil</h3>
+            <p className="text-sm text-neutral-600 font-medium mb-4">Bu iş ortağı kaydı, ziyaret ve cari geçmişiyle birlikte kalıcı olarak silinecek. Emin misiniz?</p>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setSilinecekId(null)} className="flex-1 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 font-black rounded-xl transition text-sm">Vazgeç</button>
+              <button type="button" onClick={handleSil} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl transition text-sm">Sil</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
