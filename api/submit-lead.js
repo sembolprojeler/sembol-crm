@@ -134,8 +134,10 @@ function resolveWizardType(source) {
 
 // CRM'de hizmetTipi SADECE bu dört değerden birini kabul ediyor.
 // depoevimDepolama da 'Depo' kovasına düşer — DepoEvim de bir depolama hizmeti;
-// hangi SİTEDEN geldiği hizmetTipi'nde değil, kaynak/wizardKaynagi ve
-// sonMesaj etiketinde ("DepoEvim - Eşya Depolama") ayırt edilir.
+// hangi SİTEDEN geldiği hizmetTipi'nde değil, aşağıdaki SITE_BY_WIZARD ile
+// hesapId alanına yazılır (Satis.jsx'te "Hesap" sütununda "DepoEvim" /
+// "Sembol Nakliyat Sitesi" olarak görünür — satış ekibi tıklamadan, tek
+// bakışta hangi siteden geldiğini görür).
 const HIZMET_TIPI_BY_WIZARD = {
   evdenEve: 'Nakliye',
   parcaEsya: 'Nakliye',
@@ -143,6 +145,19 @@ const HIZMET_TIPI_BY_WIZARD = {
   depolama: 'Depo',
   asansor: 'Asansör',
   depoevimDepolama: 'Depo',
+};
+
+// Satış ekibinin "Hesap" sütununda göreceği site etiketi — yeni-musteri.js'te
+// (tıklama bildirimleri) kullanılan "depoevim"/"sembolevdeneve" değerleriyle
+// BİREBİR AYNI — Satis.jsx'teki hesapAdi() fonksiyonu bu iki değeri özel
+// olarak tanıyıp "DepoEvim" / "Sembol Nakliyat Sitesi" diye gösteriyor.
+const SITE_BY_WIZARD = {
+  evdenEve: 'sembolevdeneve',
+  parcaEsya: 'sembolevdeneve',
+  ofis: 'sembolevdeneve',
+  depolama: 'sembolevdeneve',
+  asansor: 'sembolevdeneve',
+  depoevimDepolama: 'depoevim',
 };
 
 // Satış ekibinin Müşteri Havuzu listesinde formu ayırt edebilmesi için
@@ -406,11 +421,16 @@ export default async function handler(req, res) {
       kanal: 'web',
       musteriAdi: String(body.fullName || '').trim(),
       iletisim: String(body.phone || '').trim(),
-      hesapId: '',
+      hesapId: SITE_BY_WIZARD[wizardType] || 'sembolevdeneve',
       hizmetTipi: HIZMET_TIPI_BY_WIZARD[wizardType] || 'Nakliye',
       sonMesaj: buildSonMesaj(wizardType, body),
       kaynak: `web-sihirbaz-${wizardType}`,
       wizardKaynagi: body.source || '',
+      // Ziyaretçi Google reklamından mı (gclid/utm_source=google&utm_medium=cpc)
+      // yoksa organik mi geldi — wizard sayfa yüklenirken URL'den okuyup
+      // gönderiyor (bkz. wizard dosyasındaki reklamKaynagiTespitEt()). Eski
+      // wizard sürümleri bu alanı hiç göndermez, o yüzden varsayılan 'organik'.
+      reklamKaynagi: body.reklamKaynagi === 'google_ads' ? 'google_ads' : 'organik',
 
       // Wizard'ın kendi akış durumu (partial/completed/callback_requested).
       // DİKKAT: CRM'in satış-hattı durumu olan "durum" alanıyla KARIŞTIRILMAMALI —

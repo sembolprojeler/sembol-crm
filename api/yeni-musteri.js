@@ -127,10 +127,15 @@ export default async function handler(req, res) {
       musteriAdi,
       iletisim: 'Tıklama (Bekleniyor)',
       kanal: kanalTipi,
-      hesapId: crmData.site || 'Web Sitesi',
+      // "site" değişkeni her zaman "depoevim" veya "sembolevdeneve" — Satis.jsx
+      // bu iki değeri "Hesap" sütununda okunaklı bir etikete çeviriyor.
+      hesapId: site,
       hizmetTipi,
       durum: 'Yeni',
       sonMesaj: `${siteEtiket} sitesinden ${crmData.kaynak === 'google_ads' ? 'Google reklamlarından ' : ''}tıklama geldi`,
+      // submit-lead.js ile AYNI alan adı — Satis.jsx artık Ads/Organik
+      // sayımını metin eşleştirme yerine doğrudan bu alandan yapıyor.
+      reklamKaynagi: crmData.kaynak === 'google_ads' ? 'google_ads' : 'organik',
       // Bu alan sayesinde Satis.jsx (istenirse) gerçek isim/telefon verilmiş
       // kayıtlarla salt tıklama bildirimlerini ayırt edebilir; iletisim alanına
       // güvenmek zorunda kalmaz.

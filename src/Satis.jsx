@@ -2893,6 +2893,13 @@ const KANALLAR = [
   { id: 'web',       ad: 'Web Sitesi Teklifleri', Ikon: Globe,       renk: 'purple',  hesapEtiket: 'Sayfa',              hesapOrnek: 'sembolevdeneve.com',      iletisimEtiket: 'Telefon No' },
 ];
 
+// Web sihirbazlarından (submit-lead.js) ve tıklama bildirimlerinden
+// (yeni-musteri.js) gelen kayıtlarda hesapId gerçek bir "bağlı hesap" değil,
+// hangi SİTEDEN geldiğini gösteren sabit bir değer ("depoevim" |
+// "sembolevdeneve") — hesapAdi() bu ikisini özel olarak tanıyıp okunaklı
+// gösteriyor (aşağıda).
+const SITE_ETIKETLERI = { depoevim: 'DepoEvim', sembolevdeneve: 'Sembol Nakliyat Sitesi' };
+
 // Takip durumları — sıralama satış hunisine göredir
 const DURUMLAR = [
   { id: 'Yeni',              renk: 'bg-neutral-100 text-neutral-700 border-neutral-300' },
@@ -2930,6 +2937,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [durumFiltre, setDurumFiltre] = useState('Tümü');
   const [hizmetFiltre, setHizmetFiltre] = useState('Tümü');
   const [hesapFiltre, setHesapFiltre] = useState('Tümü');
+  // Hangi şirketin verisini görüyoruz: "sembolevdeneve" | "depoevim". Sadece
+  // depoevim'den gelen kayıtlarda hesapId==='depoevim' işaretli olduğu için,
+  // geri kalan HER ŞEY (gerçek telefon/whatsapp hesapları, Instagram, Gmail,
+  // eski web kayıtları) otomatik olarak "sembolevdeneve" sayılır.
+  const [siteSecimi, setSiteSecimi] = useState('sembolevdeneve');
   const [arama, setArama] = useState('');
   const [detayKayit, setDetayKayit] = useState(null); // Detay/hareket penceresi
   const [detayFotoGoster, setDetayFotoGoster] = useState(null); // Detay penceresinde açılan fotoğraf (yan panel)
@@ -3065,8 +3077,12 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     setTimeout(() => setSenkronDurum(''), 5000);
   };
 
+  // Bir kaydın hangi şirkete ait olduğunu belirler — SADECE depoevim'den
+  // gelenler hesapId==='depoevim' taşır, gerisi sembolevdeneve sayılır.
+  const kayitSitesi = (k) => (k.hesapId === 'depoevim' ? 'depoevim' : 'sembolevdeneve');
+
   const kanalHesaplari = hesaplar.filter(h => h.kanal === aktifKanal);
-  const kanalKayitlari = kayitlar.filter(k => k.kanal === aktifKanal);
+  const kanalKayitlari = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi);
   const filtreli = kanalKayitlari.filter(k => {
     if (durumFiltre !== 'Tümü' && (k.durum || 'Yeni') !== durumFiltre) return false;
     if (hizmetFiltre !== 'Tümü' && (k.hizmetTipi || 'Nakliye') !== hizmetFiltre) return false;
@@ -3082,7 +3098,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   DURUMLAR.forEach(d => { durumSayaclari[d.id] = kanalKayitlari.filter(k => (k.durum || 'Yeni') === d.id).length; });
 
   const satiscilar = personnelList.filter(p => p.position !== 'Firma Sahibi');
-  const hesapAdi = (id) => kanalHesaplari.find(h => h.id === id)?.etiket || '—';
+  const hesapAdi = (id) => SITE_ETIKETLERI[id] || kanalHesaplari.find(h => h.id === id)?.etiket || '—';
   const durumRenk = (d) => DURUMLAR.find(x => x.id === (d || 'Yeni'))?.renk || DURUMLAR[0].renk;
 
   const iletisimLink = (k) => {
@@ -3096,30 +3112,52 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
 
   // YENİ: AKTİF SEÇİLİ KANALA GÖRE GÜNLÜK PERFORMANS İSTATİSTİKLERİ
   const bugunStr = new Date().toISOString().split('T')[0];
-  const aktifKanalBugun = kayitlar.filter(k => k.kanal === aktifKanal && k.createdAt && k.createdAt.startsWith(bugunStr));
-  const bugunAdsSayisi = aktifKanalBugun.filter(k => k.sonMesaj?.includes('Google reklam') || k.musteriAdi?.includes('Google Ads')).length;
-  const bugunOrganikSayisi = aktifKanalBugun.filter(k => !k.sonMesaj?.includes('Google reklam') && !k.musteriAdi?.includes('Google Ads')).length;
+  const aktifKanalBugun = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi && k.createdAt && k.createdAt.startsWith(bugunStr));
+  // Ads/organik ayrımı ARTIK doğrudan "reklamKaynagi" alanından okunuyor —
+  // bunu hem tıklama bildirimleri (yeni-musteri.js) hem de wizard form
+  // gönderimleri (submit-lead.js, gclid/utm_source=google tespiti ile) dolduruyor.
+  // Bu alan henüz olmayan ESKİ kayıtlar için (bu düzeltmeden önce oluşmuş),
+  // eski metin-tabanlı tespiti YEDEK olarak kullanmaya devam ediyoruz.
+  const reklamKaynagiAds = (k) => k.reklamKaynagi
+    ? k.reklamKaynagi === 'google_ads'
+    : (k.sonMesaj?.includes('Google reklam') || k.musteriAdi?.includes('Google Ads'));
+  const bugunAdsSayisi = aktifKanalBugun.filter(reklamKaynagiAds).length;
+  const bugunOrganikSayisi = aktifKanalBugun.filter(k => !reklamKaynagiAds(k)).length;
 
   // ================================================================ RENDER ===
   return (
     <div className="max-w-7xl mx-auto animate-in fade-in space-y-4">
 
       {/* BAŞLIK */}
-      <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 rounded-2xl p-5 text-white shadow-lg flex flex-col md:flex-row justify-between md:items-center gap-4">
-        <div>
-          <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><Users className="w-6 h-6 text-yellow-400" /> Müşteri Havuzu</h2>
-          <p className="text-neutral-300 text-xs md:text-sm mt-1">Şirketi arayan ve mesaj atan tüm müşteri adayları tek havuzda.</p>
+      <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 rounded-2xl p-5 text-white shadow-lg space-y-4">
+        <div className="flex flex-col md:flex-row justify-between md:items-center gap-4">
+          <div>
+            <h2 className="text-xl md:text-2xl font-black flex items-center gap-2"><Users className="w-6 h-6 text-yellow-400" /> Müşteri Havuzu</h2>
+            <p className="text-neutral-300 text-xs md:text-sm mt-1">Şirketi arayan ve mesaj atan tüm müşteri adayları tek havuzda.</p>
+          </div>
+
+          {/* YENİ: HANGİ ŞİRKETİN VERİSİNİ GÖRÜYORUZ — aşağıdaki her şey buna göre değişir */}
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setSiteSecimi('sembolevdeneve')}
+              className={`px-6 py-3 rounded-2xl text-sm font-black tracking-wide transition ${siteSecimi === 'sembolevdeneve' ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 scale-105' : 'bg-white/10 text-red-200 hover:bg-white/20'}`}>
+              SEMBOL
+            </button>
+            <button type="button" onClick={() => setSiteSecimi('depoevim')}
+              className={`px-6 py-3 rounded-2xl text-sm font-black tracking-wide transition ${siteSecimi === 'depoevim' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 scale-105' : 'bg-white/10 text-blue-200 hover:bg-white/20'}`}>
+              DEPOEVİM
+            </button>
+          </div>
         </div>
-        
-        {/* YENİ: SEÇİLİ KANALA GÖRE GÜNLÜK ÖZET KUTULARI */}
-        <div className="flex gap-2">
+
+        {/* YENİ: SEÇİLİ KANALA (VE SEÇİLİ ŞİRKETE) GÖRE GÜNLÜK ÖZET KUTULARI */}
+        <div className="flex gap-2 flex-wrap">
           <div className="bg-white/10 border border-white/20 px-4 py-2 rounded-xl backdrop-blur-sm">
             <p className="text-[10px] font-black text-green-400 uppercase">🟢 Bugün {kanal.ad} (Ads)</p>
-            <p className="text-lg font-black text-white">{bugunAdsSayisi} Tıklama</p>
+            <p className="text-lg font-black text-white">{bugunAdsSayisi}</p>
           </div>
           <div className="bg-white/10 border border-white/20 px-4 py-2 rounded-xl backdrop-blur-sm">
             <p className="text-[10px] font-black text-blue-400 uppercase">🔵 Bugün {kanal.ad} (Organik)</p>
-            <p className="text-lg font-black text-white">{bugunOrganikSayisi} Tıklama</p>
+            <p className="text-lg font-black text-white">{bugunOrganikSayisi}</p>
           </div>
         </div>
       </div>
@@ -3128,7 +3166,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         {KANALLAR.map(k => {
           const r = KANAL_RENK[k.renk];
-          const sayi = kayitlar.filter(x => x.kanal === k.id).length;
+          const sayi = kayitlar.filter(x => x.kanal === k.id && kayitSitesi(x) === siteSecimi).length;
           const aktif = aktifKanal === k.id;
           return (
             <button key={k.id} type="button"
