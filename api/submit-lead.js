@@ -69,8 +69,20 @@
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
-const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || 'https://www.sembolevdeneve.com';
+// Birden fazla site bu endpoint'e istek atabiliyor (sembolevdeneve.com ve
+// depoevim.com) — ALLOWED_ORIGINS ortam değişkenine virgülle ayrılmış liste
+// olarak birden fazla adres girilebilir. Hiç ayarlanmazsa iki bilinen site de
+// varsayılan olarak izinlidir, böylece mevcut kurulum bozulmaz.
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGIN || 'https://www.sembolevdeneve.com,https://www.depoevim.com')
+  .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
 const FIRESTORE_APP_ID = process.env.FIRESTORE_APP_ID;
+
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  res.setHeader('Access-Control-Allow-Origin', origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
 
 function getDb() {
   if (!getApps().length) {
@@ -111,6 +123,8 @@ function resolveWizardType(source) {
     case 'parca-esya-tasima':
     case 'web-wizard-parca-esya':
       return 'parcaEsya';
+    case 'depoevim-esya-depolama-wizard':
+      return 'depoevimDepolama';
     case 'evden-eve-nakliyat':
     case 'web-wizard-fullpage':
     default:
@@ -119,12 +133,16 @@ function resolveWizardType(source) {
 }
 
 // CRM'de hizmetTipi SADECE bu dört değerden birini kabul ediyor.
+// depoevimDepolama da 'Depo' kovasına düşer — DepoEvim de bir depolama hizmeti;
+// hangi SİTEDEN geldiği hizmetTipi'nde değil, kaynak/wizardKaynagi ve
+// sonMesaj etiketinde ("DepoEvim - Eşya Depolama") ayırt edilir.
 const HIZMET_TIPI_BY_WIZARD = {
   evdenEve: 'Nakliye',
   parcaEsya: 'Nakliye',
   ofis: 'Nakliye',
   depolama: 'Depo',
   asansor: 'Asansör',
+  depoevimDepolama: 'Depo',
 };
 
 // Satış ekibinin Müşteri Havuzu listesinde formu ayırt edebilmesi için
@@ -135,6 +153,7 @@ const WIZARD_ETIKET = {
   ofis: 'Ofis / İşyeri Taşıma',
   depolama: 'Eşya Depolama',
   asansor: 'Asansör Kiralama',
+  depoevimDepolama: 'DepoEvim - Eşya Depolama',
 };
 
 // ---- Etiket sözlükleri (her wizard'ın kendi HTML'indeki seçeneklerle birebir) ----
@@ -179,6 +198,17 @@ const KIRALAMA_SURESI_LABEL = { saatlik: 'Saatlik (1-3 saat)', yarim_gun: 'Yarı
 const ARAC_YANASMA_LABEL = { sifir: 'Araç tam yanaşabiliyor', uzak: 'Araç yanaşamıyor / mesafe var' };
 const KURULUM_KAT_LABEL = {
   normal: '1-8. kat (standart kurulum)', orta: '9-15. kat (teleskopik asansör)', yuksek: '16+ kat (büyük bomlu vinç)',
+};
+// ---- DepoEvim (depoevim.com) Eşya Depolama sihirbazına özel etiketler ----
+const DEPOEVIM_BOYUT_LABEL = {
+  '10': '10 m³ Depo', '15': '15 m³ Depo', '22': '22 m³ Depo', '30': '30 m³ Depo',
+};
+const DEPOEVIM_SUBE_LABEL = {
+  kartal: 'Kartal Şubesi', umraniye: 'Ümraniye Şubesi', cekmekoy: 'Çekmeköy Şubesi',
+  basaksehir: 'Başakşehir Şubesi', farketmez: 'Şube farketmez',
+};
+const DEPOEVIM_TESLIM_LABEL = {
+  kendim: 'Müşteri kendi getirecek', anahtar_teslim: 'Anahtar teslim (firma alım yapacak)',
 };
 
 function ortakKuyruk(satirlar, p) {
@@ -276,12 +306,30 @@ function buildSonMesajAsansor(p) {
   return ortakKuyruk(satirlar, p);
 }
 
+// ---- DepoEvim (depoevim.com) Eşya Depolama ----
+// DİKKAT: Bu, yukarıdaki Sembol'ün kendi "depolama" wizard'ından FARKLI bir
+// form — depoevim.com'un site geneli marka rengiyle (mavi) ve kendi
+// şube/teslim şekli/fiyat mantığıyla çalışıyor. Alan adları da farklı
+// (fromCity/fromDistrict yerine "sube"), bu yüzden ayrı bir builder gerekiyor.
+function buildSonMesajDepoEvim(p) {
+  const satirlar = [];
+  if (p.depoBoyutu) satirlar.push(`Depo Boyutu: ${DEPOEVIM_BOYUT_LABEL[p.depoBoyutu] || p.depoBoyutu}`);
+  if (p.kiralamaSuresi) satirlar.push(`Kiralama Süresi: ${SURE_KIRALAMA_LABEL[p.kiralamaSuresi] || p.kiralamaSuresi}`);
+  if (p.sube) satirlar.push(`Şube: ${DEPOEVIM_SUBE_LABEL[p.sube] || p.sube}`);
+  if (p.teslimSekli) satirlar.push(`Teslim Şekli: ${DEPOEVIM_TESLIM_LABEL[p.teslimSekli] || p.teslimSekli}`);
+  if (p.baslangicTarihi) satirlar.push(`Başlangıç Tarihi: ${p.baslangicTarihi}`);
+  if (p.fiyatAylik) satirlar.push(`Aylık Fiyat: ${fmtTL(p.fiyatAylik)} TL`);
+  if (p.fiyatToplam) satirlar.push(`Toplam Ödenecek (peşin): ${fmtTL(p.fiyatToplam)} TL`);
+  return ortakKuyruk(satirlar, p);
+}
+
 const SON_MESAJ_BUILDERS = {
   evdenEve: buildSonMesajEvdenEve,
   parcaEsya: buildSonMesajParcaEsya,
   ofis: buildSonMesajOfis,
   depolama: buildSonMesajDepolama,
   asansor: buildSonMesajAsansor,
+  depoevimDepolama: buildSonMesajDepoEvim,
 };
 
 function buildSonMesaj(wizardType, p) {
@@ -305,6 +353,10 @@ function buildGuzergah(wizardType, body) {
       fromCity: body.kurulumCity || '', fromDistrict: body.kurulumDistrict || '',
     };
   }
+  if (wizardType === 'depoevimDepolama') {
+    // Bu wizard'da şehir/ilçe yok, müşteri bir DepoEvim şubesi seçiyor.
+    return { fromDistrict: DEPOEVIM_SUBE_LABEL[body.sube] || body.sube || '' };
+  }
   // evdenEve / parcaEsya / ofis
   return {
     fromCity: body.fromCity || '', fromDistrict: body.fromDistrict || '',
@@ -315,10 +367,8 @@ function buildGuzergah(wizardType, body) {
 }
 
 export default async function handler(req, res) {
-  // ---- CORS: wizardlar, CRM'den FARKLI bir alan adından (sembolevdeneve.com) çağırıyor ----
-  res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // ---- CORS: wizardlar, CRM'den FARKLI alan adlarından (sembolevdeneve.com / depoevim.com) çağırıyor ----
+  applyCors(req, res);
 
   if (req.method === 'OPTIONS') { res.status(204).end(); return; }
   if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
@@ -378,7 +428,9 @@ export default async function handler(req, res) {
       paketlemeTercihi: body.paketleme || '',
       kirilacakEsya: body.kirilacak || '',
       ambalajTalebi: body.ambalaj || '',
-      tasinmaTarihi: body.moveDate || '',
+      // depoevimDepolama "moveDate" değil "baslangicTarihi" gönderiyor — diğer
+      // wizard'lar baslangicTarihi hiç göndermediği için bu satır onları etkilemez.
+      tasinmaTarihi: body.moveDate || body.baslangicTarihi || '',
       tarihEsnek: !!body.dateFlexible,
       ozelEsyalar: Array.isArray(body.specialItems) ? body.specialItems : [],
 

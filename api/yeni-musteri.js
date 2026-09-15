@@ -1,65 +1,150 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, collection, addDoc } from 'firebase/firestore';
-// YENİ: Güvenlik kapısını geçmek için Auth modülünü ekledik
-import { getAuth, signInAnonymously } from 'firebase/auth';
+// api/yeni-musteri.js
+// ============================================================================
+// Sembol CRM — Site Tıklama Bildirimi (WhatsApp / Telefon)
+// ----------------------------------------------------------------------------
+// Bu uç, Ali'nin AÇIKLADIĞI ve zaten sembolevdeneve.com'da ÇALIŞAN sistemin
+// GÜVENLİ ve HATASIZ hâlidir. Amaç DEĞİŞMEDİ: bir ziyaretçi sitedeki
+// WhatsApp/telefon butonuna bastığında, satış ekibinin Müşteri Havuzu'nda
+// (Satis.jsx) o kanalın (Telefon Çağrıları / WhatsApp Mesajları) sekmesinde
+// GERÇEK bir çağrı/mesaj gibi görünen bir kayıt açılır — isim/telefon henüz
+// bilinmese bile ("Google Ads Ziyaretçisi" / "Organik Ziyaretçi" olarak).
+//
+// BU DOSYADA NE DEĞİŞTİ VE NEDEN:
+//   1) GÜVENLİK: Eski sürüm tarayıcıdan (client) Firebase SDK'sı ve
+//      "signInAnonymously" ile anonim oturum açıp Firestore güvenlik
+//      kurallarını (Security Rules) "request.auth != null" şartını sağlayarak
+//      AŞIYORDU. Bu, herkesin (bu sayfanın JS'ini okuyan biri) aynı anonim
+//      girişi taklit ederek CRM'e istediği veriyi YAZABİLECEĞİ anlamına
+//      geliyordu. Şimdi diğer tüm uçlarımız (submit-lead.js, track-click.js)
+//      gibi SUNUCU tarafında firebase-admin SDK'sı kullanıyor — güvenlik
+//      kurallarını admin yetkisiyle atlıyor, tarayıcıya HİÇBİR Firebase
+//      anahtarı göndermiyor.
+//   2) HİZMET TİPİ: Eski sürüm hizmetTipi'ni "Belirsiz" olarak sabitliyordu.
+//      Ama CRM'den "Belirsiz" kategorisi TAMAMEN KALDIRILDI (artık öyle bir
+//      seçenek yok). Bu yüzden site bazında mantıklı bir varsayıma geçtik:
+//      DepoEvim sadece depolama hizmeti sattığı için "Depo", Sembol Nakliyat
+//      sitesi (ve bilinmeyen/varsayılan durumlar) için "Nakliye".
+//   3) CORS: Eski sürüm Access-Control-Allow-Origin: '*' (herkese açık)
+//      kullanıyordu. Artık submit-lead.js/track-click.js ile AYNI
+//      ALLOWED_ORIGINS listesini paylaşıyor.
+//   4) ÇOK SİTELİ: "site" alanı artık hem sembolevdeneve.com hem depoevim.com
+//      için kullanılabiliyor — aynı uç, iki sitenin de tıklamalarını kabul
+//      eder.
+//
+// İSTEK SÖZLEŞMESİ (front-end tarafı DEĞİŞMEDEN çalışsın diye AYNEN korundu):
+//   POST body: {
+//     islem:  string   — örn. "Ziyaretçi WhatsApp butonuna bastı" (içinde
+//                         "WhatsApp" geçiyorsa whatsapp, aksi halde telefon
+//                         sayılır — eski davranışla BİREBİR aynı)
+//     kaynak: string    — "google_ads" ise "Google Ads Ziyaretçisi", aksi
+//                         halde "Organik Ziyaretçi"
+//     site:   string    — "depoevim" | "sembolevdeneve" (hangi site)
+//   }
+// Yanıt sözleşmesi de AYNEN korundu: { success: true, message } veya
+// { success: false, error, detay }.
+//
+// Gerekli ortam değişkenleri: submit-lead.js / track-click.js ile TAMAMEN
+// AYNI (ayrıca bir kurulum GEREKMEZ):
+//   FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY,
+//   FIRESTORE_APP_ID, ALLOWED_ORIGINS
+// ============================================================================
 
-const firebaseConfig = {
-  apiKey: "AIzaSyD8ofu_2rZwJeHWftmr6STilgF_qjO3LVI",
-  authDomain: "sembol-operasyon-merkezi.firebaseapp.com",
-  projectId: "sembol-operasyon-merkezi",
-  storageBucket: "sembol-operasyon-merkezi.firebasestorage.app",
-  messagingSenderId: "1054049299174",
-  appId: "1:1054049299174:web:2193f916a3501543d92927"
+import { initializeApp, cert, getApps } from 'firebase-admin/app';
+import { getFirestore } from 'firebase-admin/firestore';
+
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGIN || 'https://www.sembolevdeneve.com,https://www.depoevim.com')
+  .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+const FIRESTORE_APP_ID = process.env.FIRESTORE_APP_ID;
+
+function applyCors(req, res) {
+  const origin = req.headers.origin;
+  res.setHeader('Access-Control-Allow-Origin', origin && ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0]);
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+}
+
+function getDb() {
+  if (!getApps().length) {
+    initializeApp({
+      credential: cert({
+        projectId: process.env.FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+      }),
+    });
+  }
+  return getFirestore();
+}
+
+// Site → hizmetTipi eşlemesi. "Belirsiz" artık CRM'de yok, bu yüzden her
+// site için en mantıklı sabit değeri seçiyoruz (formun tam detayı zaten yok,
+// ama en azından hangi iş koluna ait olduğu bellidir).
+const HIZMET_TIPI_BY_SITE = {
+  depoevim: 'Depo',
+  sembolevdeneve: 'Nakliye',
 };
 
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
-const db = getFirestore(app);
-const auth = getAuth(app); // YENİ: Auth tanımlandı
+// Site → satış ekibinin göreceği okunaklı etiket.
+const SITE_ETIKET = {
+  depoevim: 'DepoEvim',
+  sembolevdeneve: 'Sembol Nakliyat Sitesi',
+};
 
 export default async function handler(req, res) {
-  res.setHeader('Access-Control-Allow-Credentials', true);
-  res.setHeader('Access-Control-Allow-Origin', '*'); 
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader('Access-Control-Allow-Headers', 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version');
+  applyCors(req, res);
 
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
+  if (req.method === 'OPTIONS') { res.status(200).end(); return; }
+  if (req.method !== 'POST') { res.status(405).json({ message: 'Sadece POST metoduna izin verilir' }); return; }
+
+  if (!FIRESTORE_APP_ID) {
+    console.error('[yeni-musteri] FIRESTORE_APP_ID ortam değişkeni tanımlı değil.');
+    res.status(500).json({ success: false, error: 'Sunucu yapılandırma hatası' });
     return;
   }
 
-  if (req.method === 'POST') {
-    try {
-      // YENİ VE EN ÖNEMLİ KISIM: Güvenlik kurallarını (Permission Denied) aşmak için anonim giriş yapıyoruz!
-      await signInAnonymously(auth);
-
-      const crmData = typeof req.body === 'string' ? JSON.parse(req.body) : (req.body || {});
-      
-      const targetAppId = "sembol-crm-lokal"; 
-      const dbPath = collection(db, 'artifacts', targetAppId, 'public', 'data', 'havuzKayitlari');
-      
-      const suAnkiTarih = new Date().toISOString();
-      const kanalTipi = (crmData.islem || "").includes('WhatsApp') ? 'whatsapp' : 'telefon';
-
-      await addDoc(dbPath, {
-        musteriAdi: crmData.kaynak === 'google_ads' ? "Google Ads Ziyaretçisi" : "Organik Ziyaretçi",
-        iletisim: "Tıklama (Bekleniyor)", 
-        kanal: kanalTipi,
-        hesapId: crmData.site || "Web Sitesi",
-        hizmetTipi: "Belirsiz",
-        durum: "Yeni",
-        sonMesaj: crmData.kaynak === 'google_ads' ? "Google reklamlarından tıklama geldi" : "Normal siteden tıklama geldi",
-        createdAt: suAnkiTarih, 
-        hareketler: [
-           { tarih: suAnkiTarih, kullanici: 'Sistem API', islem: `Ziyaretçi siteden ${kanalTipi} butonuna tıkladı.` }
-        ]
-      });
-
-      res.status(200).json({ success: true, message: 'Harika, müşteri CRM havuzuna düştü!' });
-    } catch (error) {
-      console.error("Firebase Yazma Hatası:", error);
-      res.status(500).json({ success: false, error: 'Sunucu hatası', detay: error.message });
+  try {
+    let crmData = req.body;
+    if (typeof crmData === 'string') {
+      try { crmData = JSON.parse(crmData); } catch { crmData = {}; }
     }
-  } else {
-    res.status(405).json({ message: 'Sadece POST metoduna izin verilir' });
+    crmData = crmData || {};
+
+    const site = HIZMET_TIPI_BY_SITE[crmData.site] ? crmData.site : (crmData.site || 'sembolevdeneve');
+    const siteEtiket = SITE_ETIKET[site] || site || 'Web Sitesi';
+    const hizmetTipi = HIZMET_TIPI_BY_SITE[site] || 'Nakliye';
+
+    const suAnkiTarih = new Date().toISOString();
+    const kanalTipi = (crmData.islem || '').includes('WhatsApp') ? 'whatsapp' : 'telefon';
+    const musteriAdi = crmData.kaynak === 'google_ads' ? 'Google Ads Ziyaretçisi' : 'Organik Ziyaretçi';
+
+    const db = getDb();
+    const ref = db
+      .collection('artifacts').doc(FIRESTORE_APP_ID)
+      .collection('public').doc('data')
+      .collection('havuzKayitlari');
+
+    await ref.add({
+      musteriAdi,
+      iletisim: 'Tıklama (Bekleniyor)',
+      kanal: kanalTipi,
+      hesapId: crmData.site || 'Web Sitesi',
+      hizmetTipi,
+      durum: 'Yeni',
+      sonMesaj: `${siteEtiket} sitesinden ${crmData.kaynak === 'google_ads' ? 'Google reklamlarından ' : ''}tıklama geldi`,
+      // Bu alan sayesinde Satis.jsx (istenirse) gerçek isim/telefon verilmiş
+      // kayıtlarla salt tıklama bildirimlerini ayırt edebilir; iletisim alanına
+      // güvenmek zorunda kalmaz.
+      sadeceTiklama: true,
+      kaynak: 'api',
+      createdAt: suAnkiTarih,
+      hareketler: [
+        { tarih: suAnkiTarih, kullanici: 'Sistem API', islem: `Ziyaretçi ${siteEtiket} sitesinde ${kanalTipi} butonuna tıkladı.` }
+      ],
+    });
+
+    res.status(200).json({ success: true, message: 'Harika, müşteri CRM havuzuna düştü!' });
+  } catch (error) {
+    console.error('Firebase Yazma Hatası:', error);
+    res.status(500).json({ success: false, error: 'Sunucu hatası', detay: error.message });
   }
 }
