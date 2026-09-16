@@ -3143,7 +3143,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
 
           {/* YENİ: HANGİ ŞİRKETİN VERİSİNİ GÖRÜYORUZ — aşağıdaki her şey buna göre değişir */}
           <div className="flex gap-2">
-            <button type="button" onClick={() => setSiteSecimi('sembolevdeneve')}
+            <button type="button" onClick={() => { setSiteSecimi('sembolevdeneve'); if (aktifKanal === 'iyzico') setAktifKanal('telefon'); }}
               className={`px-6 py-3 rounded-2xl text-sm font-black tracking-wide transition ${siteSecimi === 'sembolevdeneve' ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 scale-105' : 'bg-white/10 text-red-200 hover:bg-white/20'}`}>
               SEMBOL
             </button>
@@ -3167,9 +3167,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         </div>
       </div>
 
-      {/* KANAL SEKMELERİ — 4 bölüm */}
+      {/* KANAL SEKMELERİ — İyzico Siparişleri SADECE DepoEvim'de gösteriliyor,
+          çünkü kredi kartıyla depo kiralama satışı sadece DepoEvim'de var,
+          Sembol Nakliyat'ta yok. */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        {KANALLAR.map(k => {
+        {KANALLAR.filter(k => k.id !== 'iyzico' || siteSecimi === 'depoevim').map(k => {
           const r = KANAL_RENK[k.renk];
           const sayi = kayitlar.filter(x => x.kanal === k.id && kayitSitesi(x) === siteSecimi).length;
           const aktif = aktifKanal === k.id;
