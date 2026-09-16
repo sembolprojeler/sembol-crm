@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe } from 'lucide-react';
+import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe, CreditCard } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
 import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul,
   // YENİ: Çok günlü iş (1. gün / 2. gün) — profilde tek iş gösterimi ve kapora koruması
@@ -2891,6 +2891,7 @@ const KANALLAR = [
   { id: 'instagram', ad: 'Instagram Mesajları', Ikon: Camera,        renk: 'pink',    hesapEtiket: 'Instagram Hesabı',   hesapOrnek: '@sembolnakliyat',       iletisimEtiket: 'Kullanıcı Adı' },
   { id: 'gmail',     ad: 'Gmail / E-posta',     Ikon: Mail,          renk: 'red',     hesapEtiket: 'E-posta Adresi',     hesapOrnek: 'info@sembolevdeneve.com', iletisimEtiket: 'E-posta' },
   { id: 'web',       ad: 'Web Sitesi Teklifleri', Ikon: Globe,       renk: 'purple',  hesapEtiket: 'Sayfa',              hesapOrnek: 'sembolevdeneve.com',      iletisimEtiket: 'Telefon No' },
+  { id: 'iyzico',    ad: 'İyzico Siparişleri',    Ikon: CreditCard,  renk: 'amber',   hesapEtiket: 'Site',               hesapOrnek: 'depoevim.com',            iletisimEtiket: 'Telefon No' },
 ];
 
 // Web sihirbazlarından (submit-lead.js) ve tıklama bildirimlerinden
@@ -2924,6 +2925,7 @@ const KANAL_RENK = {
   pink:  { aktif: 'bg-pink-600 text-white shadow-md',  pasif: 'bg-pink-50 text-pink-700 border-pink-200 hover:border-pink-400',   nokta: 'bg-pink-600',  koyu: 'text-pink-700' },
   red:   { aktif: 'bg-red-600 text-white shadow-md',   pasif: 'bg-red-50 text-red-700 border-red-200 hover:border-red-400',      nokta: 'bg-red-600',   koyu: 'text-red-700' },
   purple: { aktif: 'bg-purple-600 text-white shadow-md', pasif: 'bg-purple-50 text-purple-700 border-purple-200 hover:border-purple-400', nokta: 'bg-purple-600', koyu: 'text-purple-700' },
+  amber: { aktif: 'bg-amber-600 text-white shadow-md', pasif: 'bg-amber-50 text-amber-700 border-amber-200 hover:border-amber-400', nokta: 'bg-amber-600', koyu: 'text-amber-700' },
 };
 
 // Tarihi kısa Türkçe biçimde göster
@@ -3107,7 +3109,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     // "web" sekmesindeki iletisim alanı da bir TELEFON numarasıdır (web
     // sihirbazlarından gelen "phone" alanı) — buton zaten "Mesaj At" yazıyor,
     // WhatsApp'a gitmesi lazım; mailto: yanlıştı.
-    if (aktifKanal === 'whatsapp' || aktifKanal === 'web') return `https://wa.me/${v.replace(/^0/, '90')}`;
+    if (aktifKanal === 'whatsapp' || aktifKanal === 'web' || aktifKanal === 'iyzico') return `https://wa.me/${v.replace(/^0/, '90')}`;
     if (aktifKanal === 'instagram') return `https://instagram.com/${v.replace('@', '')}`;
     return `mailto:${v}`;
   };

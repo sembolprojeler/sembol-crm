@@ -131,6 +131,8 @@ function resolveWizardType(source) {
       return 'parcaEsya';
     case 'depoevim-esya-depolama-wizard':
       return 'depoevimDepolama';
+    case 'depoevim-woocommerce-siparis':
+      return 'depoevimSiparis';
     case 'evden-eve-nakliyat':
     case 'web-wizard-fullpage':
     default:
@@ -151,6 +153,15 @@ const HIZMET_TIPI_BY_WIZARD = {
   depolama: 'Depo',
   asansor: 'Asansör',
   depoevimDepolama: 'Depo',
+  depoevimSiparis: 'Depo',
+};
+
+// Satis.jsx'teki hangi SEKMEDE (kanal) görüneceği. Tüm teklif talepleri
+// "web" (Web Sitesi Teklifleri) sekmesinde toplanır; ödemesi zaten alınmış
+// WooCommerce siparişleri ise kendi ayrı sekmesinde ("İyzico Siparişleri")
+// görünür — ikisi karışmasın diye.
+const KANAL_BY_WIZARD = {
+  depoevimSiparis: 'iyzico',
 };
 
 // Satış ekibinin "Hesap" sütununda göreceği site etiketi — yeni-musteri.js'te
@@ -164,6 +175,7 @@ const SITE_BY_WIZARD = {
   depolama: 'sembolevdeneve',
   asansor: 'sembolevdeneve',
   depoevimDepolama: 'depoevim',
+  depoevimSiparis: 'depoevim',
 };
 
 // Satış ekibinin Müşteri Havuzu listesinde formu ayırt edebilmesi için
@@ -175,6 +187,7 @@ const WIZARD_ETIKET = {
   depolama: 'Eşya Depolama',
   asansor: 'Asansör Kiralama',
   depoevimDepolama: 'DepoEvim - Eşya Depolama',
+  depoevimSiparis: 'DepoEvim - WooCommerce Siparişi',
 };
 
 // ---- Etiket sözlükleri (her wizard'ın kendi HTML'indeki seçeneklerle birebir) ----
@@ -344,6 +357,22 @@ function buildSonMesajDepoEvim(p) {
   return ortakKuyruk(satirlar, p);
 }
 
+// ---- DepoEvim WooCommerce Siparişi (iyzico ile ödeme alınmış) ----
+// Bu, bir "teklif talebi" DEĞİL, ödemesi zaten tamamlanmış GERÇEK bir sipariş
+// — WordPress tarafında bir PHP snippet (woocommerce_payment_complete hook'u)
+// tarafından gönderiliyor. Alan adları wizard'lardan farklı: urunler,
+// toplamTutar, siparisNo, odemeYontemi, faturaAdresi.
+function buildSonMesajDepoEvimSiparis(p) {
+  const satirlar = [];
+  if (p.siparisNo) satirlar.push(`Sipariş No: #${p.siparisNo}`);
+  if (p.urunler) satirlar.push(`Ürün(ler): ${p.urunler}`);
+  if (p.toplamTutar) satirlar.push(`Ödenen Tutar: ${fmtTL(p.toplamTutar)} TL`);
+  if (p.odemeYontemi) satirlar.push(`Ödeme Yöntemi: ${p.odemeYontemi}`);
+  if (p.faturaAdresi) satirlar.push(`Adres: ${p.faturaAdresi}`);
+  satirlar.push('Ödeme başarıyla alındı — bu bir teklif talebi değil, kesinleşmiş sipariş.');
+  return ortakKuyruk(satirlar, p);
+}
+
 const SON_MESAJ_BUILDERS = {
   evdenEve: buildSonMesajEvdenEve,
   parcaEsya: buildSonMesajParcaEsya,
@@ -351,6 +380,7 @@ const SON_MESAJ_BUILDERS = {
   depolama: buildSonMesajDepolama,
   asansor: buildSonMesajAsansor,
   depoevimDepolama: buildSonMesajDepoEvim,
+  depoevimSiparis: buildSonMesajDepoEvimSiparis,
 };
 
 function buildSonMesaj(wizardType, p) {
@@ -377,6 +407,10 @@ function buildGuzergah(wizardType, body) {
   if (wizardType === 'depoevimDepolama') {
     // Bu wizard'da şehir/ilçe yok, müşteri bir DepoEvim şubesi seçiyor.
     return { fromDistrict: DEPOEVIM_SUBE_LABEL[body.sube] || body.sube || '' };
+  }
+  if (wizardType === 'depoevimSiparis') {
+    // WooCommerce sipariş adresini olduğu gibi tutuyoruz.
+    return { fromDistrict: body.faturaAdresi || '' };
   }
   // evdenEve / parcaEsya / ofis
   return {
@@ -424,7 +458,7 @@ export default async function handler(req, res) {
     const existingSnap = await ref.get();
 
     const kayit = {
-      kanal: 'web',
+      kanal: KANAL_BY_WIZARD[wizardType] || 'web',
       musteriAdi: String(body.fullName || '').trim(),
       iletisim: String(body.phone || '').trim(),
       hesapId: SITE_BY_WIZARD[wizardType] || 'sembolevdeneve',
@@ -465,12 +499,17 @@ export default async function handler(req, res) {
 
     if (!existingSnap.exists) {
       // İlk kayıt — Müşteri Havuzu'nun beklediği satış-hattı alanlarını burada açıyoruz.
-      kayit.durum = 'Yeni';
+      // depoevimSiparis İSTİSNA: bu bir "olası müşteri" değil, ödemesi zaten
+      // tamamlanmış kesin bir sipariş — satış ekibini "yeni takip gerekiyor"
+      // diye yanıltmamak için doğrudan "İşi Aldık" durumunda açılıyor.
+      kayit.durum = wizardType === 'depoevimSiparis' ? 'İşi Aldık' : 'Yeni';
       kayit.atanan = '';
       kayit.notlar = [];
       kayit.hareketler = [{
-        tarih: nowIso, kullanici: 'Web Sihirbazı',
-        islem: `Web sitesinden yeni teklif talebi alındı (${WIZARD_ETIKET[wizardType] || 'Web Formu'})`,
+        tarih: nowIso, kullanici: wizardType === 'depoevimSiparis' ? 'WooCommerce' : 'Web Sihirbazı',
+        islem: wizardType === 'depoevimSiparis'
+          ? `WooCommerce üzerinden ödemesi tamamlanmış yeni sipariş (#${body.siparisNo || '-'})`
+          : `Web sitesinden yeni teklif talebi alındı (${WIZARD_ETIKET[wizardType] || 'Web Formu'})`,
       }];
       kayit.createdAt = nowIso;
     } else if (body.status === 'completed' || body.status === 'callback_requested') {
