@@ -66,7 +66,9 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
   // YENİ: Saha denetim kayıtları uygulama genelinde yevmiyecilerden arındırılmış
   // olarak dağıtılır; alt ekranlar ayrıca filtre uygulamak zorunda kalmaz.
   denetimKaydiniTemizle } from './shared.jsx';
-import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView } from './Satis.jsx';
+import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView,
+  // YENİ: Sol menüdeki "yeni teklif" rozetleri için canlı sayaç hook'u (Hızlı Teklifler)
+  useHizliTeklifYeniSayilari } from './Satis.jsx';
 import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJobsView, CancelledJobsView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, IsMerkeziView, IsKilavuzuView, HatirlatmalarView } from './OperasyonIsler.jsx';
 import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './OperasyonPersonel.jsx';
 import { MaterialListView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView } from './OperasyonAracMalzeme.jsx';
@@ -4007,6 +4009,16 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [markDamageSaving, setMarkDamageSaving] = useState(false); // Firestore'a yazılırken buton kilitlenir
     const [markDamageDone, setMarkDamageDone] = useState(false);     // true ise "aktarıldı" ekranı gösterilir
     const [markDamageError, setMarkDamageError] = useState('');      // Hata olursa kullanıcıya gösterilir
+    // ======================================================================
+    // YENİ (kullanıcı talebi): SATIŞ MENÜSÜ "YENİ TEKLİF" ROZETLERİ
+    // ----------------------------------------------------------------------
+    // Hızlı Teklifler'de durumu hâlâ "Yeni" olan kayıt sayısı canlı izlenir:
+    //   hizliTeklifYeni.sembol   → KIRMIZI rozet (Sembol Nakliyat)
+    //   hizliTeklifYeni.depoevim → MAVİ rozet  (Depoevim)
+    // Durum değiştirilince sayı otomatik azalır. Kullanıcı giriş yapmadıysa
+    // (firebaseUser yok) hiç abone olunmaz — gereksiz Firestore okuması yok.
+    // ======================================================================
+    const hizliTeklifYeni = useHizliTeklifYeniSayilari(!!firebaseUser);
     // DEĞİŞTİ: cost (Hasar Tutarı ₺) alanı eklendi — hasar kapatılırken maliyet girilir
     // DEĞİŞTİ: files (çözüm belgeleri) eklendi — fotoğraf/PDF/dekont, çoklu ve isteğe bağlı
     // YENİ (kullanıcı talebi): sorumlular = hasar bedelinin kesileceği personel kimlikleri.
@@ -7637,7 +7649,16 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   <div className="flex items-center gap-3">
                     <PlusCircle className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Satış</span>
                   </div>
-                  {isAddJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  <div className="flex items-center gap-1.5">
+                    {/* YENİ: Yeni teklif rozetleri — kırmızı Sembol, mavi Depoevim; sayı 0 ise gizli */}
+                    {showSatisMusteriHavuzu && hizliTeklifYeni.sembol > 0 && (
+                      <span title={`Sembol Nakliyat: ${hizliTeklifYeni.sembol} yeni teklif`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-red-600/40 animate-pulse">{hizliTeklifYeni.sembol}</span>
+                    )}
+                    {showSatisMusteriHavuzu && hizliTeklifYeni.depoevim > 0 && (
+                      <span title={`Depoevim: ${hizliTeklifYeni.depoevim} yeni teklif`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-blue-600/40 animate-pulse">{hizliTeklifYeni.depoevim}</span>
+                    )}
+                    {isAddJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </div>
                 </button>
                 
                 {isAddJobSubMenuOpen && (
@@ -7674,6 +7695,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'musteriHavuzu' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'musteriHavuzu' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Havuzu
+                      {/* YENİ: Alt menüde de aynı rozetler — hangi şirkette kaç yeni Hızlı Teklif beklediği görünür */}
+                      {(hizliTeklifYeni.sembol > 0 || hizliTeklifYeni.depoevim > 0) && (
+                        <span className="ml-auto flex items-center gap-1">
+                          {hizliTeklifYeni.sembol > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-600 text-white text-[10px] font-black flex items-center justify-center animate-pulse">{hizliTeklifYeni.sembol}</span>}
+                          {hizliTeklifYeni.depoevim > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center animate-pulse">{hizliTeklifYeni.depoevim}</span>}
+                        </span>
+                      )}
                     </button>
                     )}
                     {/* YENİ: SAHA PORTFÖY — Satış Bölümü'nün EN ALTINDA. Saha pazarlama
