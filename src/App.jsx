@@ -7695,13 +7695,6 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'musteriHavuzu' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'musteriHavuzu' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Havuzu
-                      {/* YENİ: Alt menüde de aynı rozetler — hangi şirkette kaç yeni Hızlı Teklif beklediği görünür */}
-                      {(hizliTeklifYeni.sembol > 0 || hizliTeklifYeni.depoevim > 0) && (
-                        <span className="ml-auto flex items-center gap-1">
-                          {hizliTeklifYeni.sembol > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-600 text-white text-[10px] font-black flex items-center justify-center animate-pulse">{hizliTeklifYeni.sembol}</span>}
-                          {hizliTeklifYeni.depoevim > 0 && <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center animate-pulse">{hizliTeklifYeni.depoevim}</span>}
-                        </span>
-                      )}
                     </button>
                     )}
                     {/* YENİ: SAHA PORTFÖY — Satış Bölümü'nün EN ALTINDA. Saha pazarlama
