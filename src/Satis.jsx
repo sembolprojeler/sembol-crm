@@ -2951,6 +2951,27 @@ const tarihSaat = (iso) => iso ? new Date(iso).toLocaleString('tr-TR', { day: '2
 const hizliTeklifSitesi = (k) => (k.hesapId === 'depoevim' ? 'depoevim' : 'sembolevdeneve');
 
 // ============================================================================
+// YENİ (kullanıcı talebi): HAVUZ KAYDINI KİM SİLEBİLİR?
+// ----------------------------------------------------------------------------
+// "Sil" butonu artık YALNIZCA Firma Sahibi / Yönetici / Müdür (ve düzenleme
+// yetkisi açıkça verilmiş kullanıcılar) tarafından görülür. Satış personeli,
+// operasyon vb. kullanıcılarda buton hiç çizilmez.
+//
+// Kural App.jsx'teki isManager tanımıyla BİREBİR AYNIDIR; oradaki koda
+// dokunmamak için burada currentUser üzerinden yeniden hesaplanır.
+// NOT: Bu bir arayüz kısıtıdır. Kalıcı güvenlik için Firestore güvenlik
+// kurallarında da havuzKayitlari silme yetkisi sınırlandırılmalıdır.
+// ============================================================================
+const havuzKaydiSilebilirMi = (currentUser) => {
+  const poz = currentUser?.position || '';
+  const superAdmin = currentUser?.fullName === 'Sistem Yöneticisi' || poz === 'Firma Sahibi';
+  return superAdmin
+    || poz.includes('Yönetici')
+    || currentUser?.rank === 'Müdür'
+    || currentUser?.permissions?.canEdit === true;
+};
+
+// ============================================================================
 // YENİ: TEKLİF ÖZETİ AYRIŞTIRICI — teklifOzetiAyristir
 // ----------------------------------------------------------------------------
 // Web sihirbazı, teklifi TEK SATIR düz metin olarak gönderiyor. Örnek:
@@ -3100,11 +3121,31 @@ export const useHizliTeklifYeniSayilari = (aktif = true) => {
 // ============================================================================
 const HizliTekliflerTablosu = ({
   kayitlar, siteSecimi, hesapAdi, durumRenk, satiscilar, reklamKaynagiAds,
-  onDurumDegistir, onAta, onNotEkle, onDetay, onSil,
+  onDurumDegistir, onAta, onNotEkle, onNotGuncelle, onDetay, onSil,
+  silebilir = false,   // YENİ: yalnızca yetkili kullanıcıda "Sil" butonu çizilir
 }) => {
-  const [notAcikId, setNotAcikId] = useState(null);   // Hangi satırda not kutusu açık
-  const [notTaslak, setNotTaslak] = useState('');      // Yazılan not metni
+  // ==========================================================================
+  // DEĞİŞTİ (kullanıcı talebi): NOTLAR ARTIK PENCEREDE YÖNETİLİR
+  // --------------------------------------------------------------------------
+  // ESKİSİ: Satırın içinde küçük bir metin kutusu açılıyordu; uzun not yazmak
+  // ve eski notları okumak zordu.
+  // YENİSİ: "Not Ekle" penceresi açar. Not varsa "Notu Gör (N)" butonu çıkar;
+  // pencerede tüm notlar tarih/kullanıcı bilgisiyle listelenir, her not
+  // düzenlenebilir ve aynı pencereden yeni not eklenebilir.
+  // ==========================================================================
+  const [notPenceresi, setNotPenceresi] = useState(null); // { kayitId, mod: 'ekle' | 'liste' }
+  const [notTaslak, setNotTaslak] = useState('');          // Yeni not metni
   const [notKaydediliyor, setNotKaydediliyor] = useState(false);
+  const [duzenleIndex, setDuzenleIndex] = useState(null);  // Düzenlenen notun sırası
+  const [duzenleMetin, setDuzenleMetin] = useState('');    // Düzenlenen notun yeni metni
+
+  // Pencere açıkken kayıt her zaman GÜNCEL listeden okunur; böylece not
+  // eklenince onSnapshot tetiklendiğinde pencere de anında tazelenir.
+  const notKaydi = notPenceresi ? kayitlar.find(x => x.id === notPenceresi.kayitId) : null;
+
+  const notPenceresiKapat = () => {
+    setNotPenceresi(null); setNotTaslak(''); setDuzenleIndex(null); setDuzenleMetin('');
+  };
 
   // Şirkete göre vurgu renkleri (Tailwind dinamik sınıf üretmediği için açık yazılır)
   const sembolMu = siteSecimi !== 'depoevim';
@@ -3125,18 +3166,29 @@ const HizliTekliflerTablosu = ({
     grup.kayitlar.push(k);
   });
 
-  // Satır içi not kaydetme
-  const notuKaydet = async (k) => {
+  // Penceredeki "Notu Kaydet" — yeni not ekler, ardından liste moduna geçer
+  const notuKaydet = async () => {
     const metin = notTaslak.trim();
-    if (!metin) return;
+    if (!metin || !notKaydi) return;
     setNotKaydediliyor(true);
-    await onNotEkle(k, metin);
+    await onNotEkle(notKaydi, metin);
     setNotKaydediliyor(false);
     setNotTaslak('');
-    setNotAcikId(null);
+    setNotPenceresi({ kayitId: notKaydi.id, mod: 'liste' });
+  };
+
+  // Penceredeki "Güncelle" — mevcut bir notun metnini değiştirir
+  const notuGuncelle = async () => {
+    const metin = duzenleMetin.trim();
+    if (!metin || duzenleIndex === null || !notKaydi) return;
+    setNotKaydediliyor(true);
+    await onNotGuncelle(notKaydi, duzenleIndex, metin);
+    setNotKaydediliyor(false);
+    setDuzenleIndex(null); setDuzenleMetin('');
   };
 
   return (
+    <>
     <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-x-auto">
       <table className="w-full text-left text-xs min-w-[1080px]">
         <thead className="bg-neutral-900 text-white">
@@ -3254,29 +3306,27 @@ const HizliTekliflerTablosu = ({
 
                       {/* NOT — son not + satır içi hızlı not ekleme */}
                       <td className="p-3 align-top">
-                        {sonNot && notAcikId !== k.id && (
-                          <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1.5 mb-1.5">
+                        {/* Son notun kısa önizlemesi — tıklanınca da pencere açılır */}
+                        {sonNot && (
+                          <button type="button" onClick={() => setNotPenceresi({ kayitId: k.id, mod: 'liste' })}
+                            className="w-full text-left bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1.5 mb-1.5 hover:bg-yellow-100 transition">
                             <p className="text-[11px] text-neutral-800 line-clamp-2" title={sonNot.metin}>{sonNot.metin}</p>
-                            <p className="text-[9px] font-bold text-neutral-400 mt-0.5">{sonNot.kullanici} • {tarihSaat(sonNot.tarih)}{(k.notlar || []).length > 1 ? ` • +${k.notlar.length - 1} not daha` : ''}</p>
-                          </div>
-                        )}
-                        {notAcikId === k.id ? (
-                          <div className="flex gap-1">
-                            <input autoFocus value={notTaslak} onChange={e => setNotTaslak(e.target.value)}
-                              onKeyDown={e => { if (e.key === 'Enter') notuKaydet(k); if (e.key === 'Escape') { setNotAcikId(null); setNotTaslak(''); } }}
-                              placeholder="Notu yazıp Enter'a basın..." className="flex-1 min-w-0 p-1.5 border border-neutral-300 rounded-lg text-[11px] outline-none focus:ring-2 focus:ring-yellow-400" />
-                            <button type="button" onClick={() => notuKaydet(k)} disabled={!notTaslak.trim() || notKaydediliyor}
-                              className="px-2 py-1.5 bg-neutral-900 text-white rounded-lg text-[10px] font-black disabled:opacity-40">
-                              {notKaydediliyor ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
-                            </button>
-                            <button type="button" onClick={() => { setNotAcikId(null); setNotTaslak(''); }} className="px-1.5 text-neutral-400 hover:text-neutral-700"><X className="w-3.5 h-3.5" /></button>
-                          </div>
-                        ) : (
-                          <button type="button" onClick={() => { setNotAcikId(k.id); setNotTaslak(''); }}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-yellow-50 text-yellow-800 border border-yellow-200 hover:bg-yellow-100 transition">
-                            <StickyNote className="w-3 h-3" /> {sonNot ? 'Not Ekle' : '+ Not'}
+                            <p className="text-[9px] font-bold text-neutral-400 mt-0.5">{sonNot.kullanici} • {tarihSaat(sonNot.tarih)}</p>
                           </button>
                         )}
+                        <div className="flex flex-col gap-1.5">
+                          {/* Not varsa önce "Notu Gör", yoksa doğrudan "Not Ekle" */}
+                          {(k.notlar || []).length > 0 && (
+                            <button type="button" onClick={() => setNotPenceresi({ kayitId: k.id, mod: 'liste' })}
+                              className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-black bg-neutral-900 text-white hover:bg-neutral-700 transition">
+                              <Eye className="w-3 h-3" /> Notu Gör ({k.notlar.length})
+                            </button>
+                          )}
+                          <button type="button" onClick={() => { setNotPenceresi({ kayitId: k.id, mod: 'ekle' }); setNotTaslak(''); }}
+                            className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-black bg-yellow-50 text-yellow-800 border border-yellow-200 hover:bg-yellow-100 transition">
+                            <StickyNote className="w-3 h-3" /> Not Ekle
+                          </button>
+                        </div>
                       </td>
 
                       {/* İŞLEM — DEĞİŞTİ: butonlar yan yana değil SÜTUN (alt alta) dizilir */}
@@ -3286,10 +3336,13 @@ const HizliTekliflerTablosu = ({
                             className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 bg-neutral-900 hover:bg-neutral-700 text-white rounded-lg text-[10px] font-black transition">
                             <Eye className="w-3 h-3" /> Detayı Gör
                           </button>
-                          <button type="button" onClick={() => onSil(k.id)}
-                            className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white hover:bg-red-50 text-red-500 border border-red-200 rounded-lg text-[10px] font-black transition">
-                            <Trash2 className="w-3 h-3" /> Sil
-                          </button>
+                          {/* DEĞİŞTİ: Sil yalnızca Müdür / Yönetici / Firma Sahibi'nde görünür */}
+                          {silebilir && (
+                            <button type="button" onClick={() => onSil(k.id)}
+                              className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white hover:bg-red-50 text-red-500 border border-red-200 rounded-lg text-[10px] font-black transition">
+                              <Trash2 className="w-3 h-3" /> Sil
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -3301,6 +3354,110 @@ const HizliTekliflerTablosu = ({
         </tbody>
       </table>
     </div>
+
+    {/* ======================================================================
+        YENİ: NOT PENCERESİ
+        ----------------------------------------------------------------------
+        İki modda çalışır:
+          mod 'ekle'  → doğrudan yeni not yazma ekranı
+          mod 'liste' → tüm notlar; her notun yanında "Düzenle", altta yeni not
+        Notlar, kaydın notlar[] dizisinde durur; ekleme ve güncelleme
+        işlemlerinin ikisi de hareket geçmişine yazılır.
+        ====================================================================== */}
+    {notPenceresi && notKaydi && (
+      <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={notPenceresiKapat}>
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col animate-in zoom-in-95 overflow-hidden" onClick={e => e.stopPropagation()}>
+
+          {/* Başlık */}
+          <div className="bg-neutral-900 text-white p-4 flex items-start gap-3 shrink-0">
+            <span className="w-10 h-10 rounded-xl bg-yellow-400 text-black flex items-center justify-center shrink-0">
+              <StickyNote className="w-5 h-5" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <h3 className="font-black text-sm truncate">{notKaydi.musteriAdi || 'İsimsiz'}</h3>
+              <p className="text-[11px] font-bold text-neutral-400 truncate">{notKaydi.iletisim} • {(notKaydi.notlar || []).length} not</p>
+            </div>
+            <button onClick={notPenceresiKapat} className="text-neutral-400 hover:text-white shrink-0"><X className="w-5 h-5" /></button>
+          </div>
+
+          {/* İki mod arası geçiş — not yoksa sadece "Not Ekle" anlamlıdır */}
+          <div className="flex gap-1 p-2 bg-neutral-100 border-b border-neutral-200 shrink-0">
+            <button type="button" onClick={() => setNotPenceresi({ kayitId: notKaydi.id, mod: 'liste' })} disabled={(notKaydi.notlar || []).length === 0}
+              className={`flex-1 py-2 rounded-xl text-[11px] font-black transition disabled:opacity-40 ${notPenceresi.mod === 'liste' ? 'bg-neutral-900 text-white' : 'bg-white text-neutral-600 hover:bg-neutral-50'}`}>
+              Notlar ({(notKaydi.notlar || []).length})
+            </button>
+            <button type="button" onClick={() => { setNotPenceresi({ kayitId: notKaydi.id, mod: 'ekle' }); setDuzenleIndex(null); }}
+              className={`flex-1 py-2 rounded-xl text-[11px] font-black transition ${notPenceresi.mod === 'ekle' ? 'bg-yellow-400 text-black' : 'bg-white text-neutral-600 hover:bg-neutral-50'}`}>
+              Yeni Not
+            </button>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto p-4 bg-neutral-50">
+
+            {/* ---------- MOD: YENİ NOT EKLE ---------- */}
+            {notPenceresi.mod === 'ekle' && (
+              <div className="bg-white border border-neutral-200 rounded-2xl p-3">
+                <p className="text-[10px] font-black text-neutral-400 uppercase mb-2">Yeni Not</p>
+                <textarea autoFocus rows={5} value={notTaslak} onChange={e => setNotTaslak(e.target.value)}
+                  placeholder="Örn: Fiyat verildi, perşembe dönecek. Asansör gerekiyor, ek ücret konuşuldu..."
+                  className="w-full p-3 border border-neutral-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-yellow-400 resize-none" />
+                <button type="button" onClick={notuKaydet} disabled={!notTaslak.trim() || notKaydediliyor}
+                  className="w-full mt-2 py-2.5 bg-neutral-900 text-white rounded-xl text-xs font-black disabled:opacity-40 flex items-center justify-center gap-1.5 transition hover:bg-neutral-700">
+                  {notKaydediliyor ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Kaydediliyor</> : <><Send className="w-3.5 h-3.5" /> Notu Kaydet</>}
+                </button>
+              </div>
+            )}
+
+            {/* ---------- MOD: NOTLARI GÖR / DÜZENLE ---------- */}
+            {notPenceresi.mod === 'liste' && (
+              <div className="space-y-2">
+                {(notKaydi.notlar || []).length === 0 && (
+                  <p className="text-center text-neutral-400 font-bold text-xs py-8">Bu kayıtta henüz not yok.</p>
+                )}
+                {/* En yeni not en üstte; düzenleme için gerçek dizi sırası korunur */}
+                {(notKaydi.notlar || []).map((n, i) => ({ n, i })).reverse().map(({ n, i }) => (
+                  <div key={i} className="bg-white border border-neutral-200 rounded-2xl p-3">
+                    {duzenleIndex === i ? (
+                      <>
+                        <textarea autoFocus rows={4} value={duzenleMetin} onChange={e => setDuzenleMetin(e.target.value)}
+                          className="w-full p-2.5 border border-neutral-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-yellow-400 resize-none" />
+                        <div className="flex gap-2 mt-2">
+                          <button type="button" onClick={() => { setDuzenleIndex(null); setDuzenleMetin(''); }}
+                            className="flex-1 py-2 bg-neutral-100 text-neutral-600 rounded-xl text-[11px] font-black hover:bg-neutral-200 transition">Vazgeç</button>
+                          <button type="button" onClick={notuGuncelle} disabled={!duzenleMetin.trim() || notKaydediliyor}
+                            className="flex-1 py-2 bg-neutral-900 text-white rounded-xl text-[11px] font-black disabled:opacity-40 flex items-center justify-center gap-1.5 hover:bg-neutral-700 transition">
+                            {notKaydediliyor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Güncelle
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-neutral-800 leading-relaxed whitespace-pre-wrap">{n.metin}</p>
+                        <div className="flex items-center justify-between gap-2 mt-2 pt-2 border-t border-neutral-100">
+                          <p className="text-[9px] font-bold text-neutral-400">
+                            {n.kullanici} • {tarihSaat(n.tarih)}
+                            {n.duzenlendi && <span className="ml-1 text-neutral-500">(düzenlendi)</span>}
+                          </p>
+                          <button type="button" onClick={() => { setDuzenleIndex(i); setDuzenleMetin(n.metin); }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-yellow-50 text-yellow-800 border border-yellow-200 hover:bg-yellow-100 transition">
+                            <Edit className="w-3 h-3" /> Düzenle
+                          </button>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 border-t border-neutral-200 shrink-0">
+            <button onClick={notPenceresiKapat} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm transition">Kapat</button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 };
 
@@ -3387,6 +3544,21 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     if (!temiz) return;
     const not = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, metin: temiz };
     await hareketliGuncelle(kayit, { notlar: [...(kayit.notlar || []), not] }, `Not eklendi: "${temiz.slice(0, 60)}"`);
+  };
+
+  // YENİ: Not penceresindeki "Güncelle" — mevcut bir notun metnini değiştirir.
+  // Not SİLİNMEZ, üzerine yazılır; kim yazdıysa o bilgi korunur, sadece metin
+  // ve "duzenlendi" işareti güncellenir. Değişiklik hareket geçmişine düşer.
+  const handleHizliNotGuncelle = async (kayit, index, yeniMetin) => {
+    const temiz = (yeniMetin || '').trim();
+    const mevcut = kayit.notlar || [];
+    if (!temiz || index < 0 || index >= mevcut.length) return;
+    const eski = mevcut[index];
+    if (eski.metin === temiz) return;   // Değişiklik yoksa yazma yapılmaz
+    const yeniNotlar = mevcut.map((n, i) => i === index
+      ? { ...n, metin: temiz, duzenlendi: true, duzenlemeTarihi: new Date().toISOString(), duzenleyen: kullaniciAdi }
+      : n);
+    await hareketliGuncelle(kayit, { notlar: yeniNotlar }, `Not güncellendi: "${temiz.slice(0, 60)}"`);
   };
 
   const handleHizmetDegistir = async (kayit, tip) => {
@@ -3496,6 +3668,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   //     ancak bir kayda ATANMIŞ eski satışçının adı seçili kalmaya devam eder
   //     (aşağıdaki <select>'lerde mevcut değer zaten k.atanan'dan okunur).
   // ==========================================================================
+  // YENİ: Havuz kaydını silme yetkisi — "Sil" butonları buna göre çizilir
+  const silebilir = havuzKaydiSilebilirMi(currentUser);
+
   const satiscilar = personnelList.filter(p =>
     normalizePozisyon(p.position) === 'Satış Personeli' && p.employmentStatus !== 'Pasif'
   );
@@ -3736,6 +3911,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           onDurumDegistir={handleDurumDegistir}
           onAta={handleAta}
           onNotEkle={handleHizliNotEkle}
+          onNotGuncelle={handleHizliNotGuncelle}
           onDetay={(k) => {
             // Mevcut "Detay" butonuyla birebir aynı hazırlık
             setDetayKayit(k);
@@ -3744,6 +3920,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             setDuzenleMusteriAdi((k.musteriAdi || '').includes('Ziyaretçi') ? '' : (k.musteriAdi || ''));
           }}
           onSil={(id) => setSilinecekId(id)}
+          silebilir={silebilir}
         />
       ) : (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-x-auto">
@@ -3823,7 +4000,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg text-[10px] font-black mr-1.5">
                       <Eye className="w-3 h-3" /> Detayı Gör
                     </button>
-                    <button type="button" onClick={() => setSilinecekId(k.id)} className="text-red-300 hover:text-red-600 align-middle"><Trash2 className="w-3.5 h-3.5" /></button>
+                    {/* DEĞİŞTİ: Sil yalnızca Müdür / Yönetici / Firma Sahibi'nde görünür */}
+                    {silebilir && (
+                      <button type="button" onClick={() => setSilinecekId(k.id)} className="text-red-300 hover:text-red-600 align-middle"><Trash2 className="w-3.5 h-3.5" /></button>
+                    )}
                   </td>
                 </tr>
               );
