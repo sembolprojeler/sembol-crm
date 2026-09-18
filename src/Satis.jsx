@@ -2,6 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe, CreditCard } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
 import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul,
+  // YENİ: Müşteri Havuzu'nda "Atanan Satışçı" listesini yalnızca Satış Personeli
+  // ile sınırlamak için — eski/hatalı pozisyon adlarını da doğru eşler.
+  normalizePozisyon,
   // YENİ: Çok günlü iş (1. gün / 2. gün) — profilde tek iş gösterimi ve kapora koruması
   anaIsleriFiltrele, isToplamGun, isToplamArac } from './shared.jsx';
 
@@ -2947,6 +2950,61 @@ const tarihSaat = (iso) => iso ? new Date(iso).toLocaleString('tr-TR', { day: '2
 // kayitSitesi ile AYNI kural (sadece depoevim işaretli olanlar depoevim'dir).
 const hizliTeklifSitesi = (k) => (k.hesapId === 'depoevim' ? 'depoevim' : 'sembolevdeneve');
 
+// ============================================================================
+// YENİ: TEKLİF ÖZETİ AYRIŞTIRICI — teklifOzetiAyristir
+// ----------------------------------------------------------------------------
+// Web sihirbazı, teklifi TEK SATIR düz metin olarak gönderiyor. Örnek:
+//   "[Evden Eve Nakliyat] İstanbul/Pendik → Afyonkarahisar/Diğer İlçeler
+//    Tip: 3+1 Kat: 5 → 0 Çıkış asansör: Merdivenden Varış asansör: ... Tarih: Esnek"
+// Bu metin detay penceresinde okunaksızdı. Burada başlık / güzergâh / alan
+// satırlarına ayrıştırılıp tablo gibi gösterilir.
+//
+// GÜVENLİ YAKLAŞIM: Rastgele "kelime:" kalıbı aranmaz (çünkü metnin içindeki
+// serbest cümleler yanlış bölünürdü). Yalnızca sihirbazın kullandığı BİLİNEN
+// alan adları aranır; tanınmayan her şey olduğu gibi üstteki özet satırında
+// kalır. Hiç eşleşme olmazsa ham metin aynen gösterilir — veri kaybı olmaz.
+// Yeni bir alan eklenirse aşağıdaki listeye tek satır yazmak yeterlidir.
+// ============================================================================
+const TEKLIF_ALANLARI = [
+  'Çıkış asansör', 'Varış asansör', 'Ambalaj malzemesi', 'Ek hizmetler',
+  'Paketleme', 'Hizmet', 'Tarih', 'Tip', 'Kat', 'Eşya', 'Hacim', 'Süre',
+  'Depo', 'Adres', 'Bütçe', 'Not', 'Asansör', 'Kişi', 'Mesafe',
+];
+
+const teklifOzetiAyristir = (ham) => {
+  const metin = (ham || '').trim();
+  if (!metin) return null;
+
+  // 1) Baştaki [Köşeli parantez] hizmet başlığıdır
+  const baslikEsleme = metin.match(/^\[([^\]]+)\]\s*/);
+  const baslik = baslikEsleme ? baslikEsleme[1] : '';
+  let kalan = baslikEsleme ? metin.slice(baslikEsleme[0].length) : metin;
+
+  // 2) Bilinen alan adlarını metin içinde bul (uzun adlar önce denenir ki
+  //    "Çıkış asansör" varken sadece "Asansör" yakalanmasın)
+  const adlar = [...TEKLIF_ALANLARI].sort((a, b) => b.length - a.length);
+  const kacis = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const desen = new RegExp(`(?:^|\\s)(${adlar.map(kacis).join('|')})\\s*:\\s*`, 'gi');
+
+  const isaretler = [];
+  let e;
+  while ((e = desen.exec(kalan)) !== null) {
+    isaretler.push({ etiket: e[1], basla: e.index, degerBasla: e.index + e[0].length });
+  }
+
+  // 3) Hiç alan bulunamadıysa metni olduğu gibi göster
+  if (isaretler.length === 0) return { baslik, ozet: kalan.trim(), satirlar: [], ham: metin };
+
+  // 4) İlk alandan önceki kısım güzergâh/serbest özet olarak kalır
+  const ozet = kalan.slice(0, isaretler[0].basla).trim();
+  const satirlar = isaretler.map((im, i) => ({
+    etiket: im.etiket,
+    deger: kalan.slice(im.degerBasla, i + 1 < isaretler.length ? isaretler[i + 1].basla : kalan.length).trim(),
+  })).filter(s => s.deger);
+
+  return { baslik, ozet, satirlar, ham: metin };
+};
+
 // Sadece saat kısmı (gün ayracında tarih zaten yazdığı için satırda saat yeter)
 const sadeceSaat = (iso) => iso ? new Date(iso).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '—';
 
@@ -3221,13 +3279,18 @@ const HizliTekliflerTablosu = ({
                         )}
                       </td>
 
-                      {/* İŞLEM */}
-                      <td className="p-3 align-top text-right whitespace-nowrap">
-                        <button type="button" onClick={() => onDetay(k)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg text-[10px] font-black mr-1.5">
-                          <FileText className="w-3 h-3" /> Detay
-                        </button>
-                        <button type="button" onClick={() => onSil(k.id)} className="text-red-300 hover:text-red-600 align-middle"><Trash2 className="w-3.5 h-3.5" /></button>
+                      {/* İŞLEM — DEĞİŞTİ: butonlar yan yana değil SÜTUN (alt alta) dizilir */}
+                      <td className="p-3 align-top">
+                        <div className="flex flex-col items-stretch gap-1.5 w-[104px] ml-auto">
+                          <button type="button" onClick={() => onDetay(k)}
+                            className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 bg-neutral-900 hover:bg-neutral-700 text-white rounded-lg text-[10px] font-black transition">
+                            <Eye className="w-3 h-3" /> Detayı Gör
+                          </button>
+                          <button type="button" onClick={() => onSil(k.id)}
+                            className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 bg-white hover:bg-red-50 text-red-500 border border-red-200 rounded-lg text-[10px] font-black transition">
+                            <Trash2 className="w-3 h-3" /> Sil
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -3420,7 +3483,22 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const durumSayaclari = { 'Tümü': kanalKayitlari.length };
   DURUMLAR.forEach(d => { durumSayaclari[d.id] = kanalKayitlari.filter(k => (k.durum || 'Yeni') === d.id).length; });
 
-  const satiscilar = personnelList.filter(p => p.position !== 'Firma Sahibi');
+  // ==========================================================================
+  // DEĞİŞTİ (kullanıcı talebi): "Atanan Satışçı" listesinde ARTIK SADECE
+  // SATIŞ PERSONELİ görünür.
+  // --------------------------------------------------------------------------
+  // ESKİSİ: Firma Sahibi dışındaki HERKES (şoförler, taşıma elemanları, depo
+  // sorumluları...) listeleniyordu; liste onlarca isimle doluyordu.
+  // YENİSİ: Yalnızca pozisyonu "Satış Personeli" olanlar gelir.
+  //   • normalizePozisyon: "satış destek", "Satis Personeli" gibi eski/hatalı
+  //     yazımlar da "Satış Personeli" sayılır (shared.jsx'teki ortak eşleme).
+  //   • employmentStatus === 'Pasif' olan (işten ayrılmış) personel listelenmez;
+  //     ancak bir kayda ATANMIŞ eski satışçının adı seçili kalmaya devam eder
+  //     (aşağıdaki <select>'lerde mevcut değer zaten k.atanan'dan okunur).
+  // ==========================================================================
+  const satiscilar = personnelList.filter(p =>
+    normalizePozisyon(p.position) === 'Satış Personeli' && p.employmentStatus !== 'Pasif'
+  );
   const hesapAdi = (id) => SITE_ETIKETLERI[id] || kanalHesaplari.find(h => h.id === id)?.etiket || '—';
   const durumRenk = (d) => DURUMLAR.find(x => x.id === (d || 'Yeni'))?.renk || DURUMLAR[0].renk;
 
@@ -3743,7 +3821,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                         setDuzenleMusteriAdi(k.musteriAdi.includes('Ziyaretçi') ? '' : k.musteriAdi);
                       }}
                       className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg text-[10px] font-black mr-1.5">
-                      <StickyNote className="w-3 h-3" /> Detay
+                      <Eye className="w-3 h-3" /> Detayı Gör
                     </button>
                     <button type="button" onClick={() => setSilinecekId(k.id)} className="text-red-300 hover:text-red-600 align-middle"><Trash2 className="w-3.5 h-3.5" /></button>
                   </td>
@@ -3758,19 +3836,52 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
       {/* DETAY / HAREKET PENCERESİ */}
       {detayKayit && (
         <div className="fixed inset-0 bg-black/70 z-[9998] flex flex-col sm:flex-row items-center justify-center p-4 gap-4 overflow-y-auto animate-in fade-in" onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); }}>
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[88vh] flex flex-col animate-in zoom-in-95 shrink-0" onClick={e => e.stopPropagation()}>
-            <div className={`p-4 text-white rounded-t-2xl shrink-0 ${renk.aktif}`}>
-              <div className="flex items-center justify-between">
-                <h3 className="font-black flex items-center gap-2 text-sm"><kanal.Ikon className="w-5 h-5" /> {detayKayit.musteriAdi || 'İsimsiz'} — {detayKayit.iletisim}</h3>
-                <button onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); }} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col animate-in zoom-in-95 shrink-0 overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* ================================================================
+                DEĞİŞTİ (kullanıcı talebi): DETAY PENCERESİ YENİDEN TASARLANDI
+                ----------------------------------------------------------------
+                Başlıkta artık: baş harf avatarı, müşteri adı, durum rozeti,
+                doğrudan ARA / WHATSAPP butonları ve künye satırı (kanal, hesap,
+                tarih, kaynak) yer alır. Tüm işleyiciler eskisiyle aynıdır.
+                ================================================================ */}
+            <div className={`p-4 text-white shrink-0 ${renk.aktif}`}>
+              <div className="flex items-start gap-3">
+                <span className="w-11 h-11 rounded-2xl bg-white/20 flex items-center justify-center text-base font-black shrink-0">
+                  {(detayKayit.musteriAdi || detayKayit.iletisim || '?').charAt(0).toUpperCase()}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-black text-base truncate">{detayKayit.musteriAdi || 'İsimsiz'}</h3>
+                    <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/25">{detayKayit.durum || 'Yeni'}</span>
+                  </div>
+                  <p className="text-sm font-bold opacity-95 mt-0.5">{detayKayit.iletisim}</p>
+                  <p className="text-[10px] font-bold opacity-75 mt-1 flex items-center gap-1.5 flex-wrap">
+                    <kanal.Ikon className="w-3 h-3" /> {kanal.ad}
+                    <span className="opacity-50">|</span> {hesapAdi(detayKayit.hesapId)}
+                    <span className="opacity-50">|</span> {tarihSaat(detayKayit.createdAt)}
+                    <span className="opacity-50">|</span> {detayKayit.kaynak === 'api' ? 'Otomatik' : 'Manuel'} kayıt
+                  </p>
+                </div>
+                <button onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); }} className="text-white/70 hover:text-white shrink-0"><X className="w-5 h-5" /></button>
               </div>
-              <p className="text-[11px] font-bold opacity-80 mt-1">{hesapAdi(detayKayit.hesapId)} • {tarihSaat(detayKayit.createdAt)} • Kaynak: {detayKayit.kaynak === 'api' ? 'API' : 'Manuel'}</p>
+
+              {/* Hızlı iletişim — numarası yoksa butonlar pasif */}
+              {telefonGecerliMi(detayKayit.iletisim) && (
+                <div className="flex gap-2 mt-3">
+                  <a href={`tel:${telefonRakam(detayKayit.iletisim)}`} className="flex-1 py-2 rounded-xl bg-white/20 hover:bg-white/30 transition text-xs font-black flex items-center justify-center gap-1.5">
+                    <Phone className="w-3.5 h-3.5" /> Ara
+                  </a>
+                  <a href={`https://wa.me/${waNumarasi(detayKayit.iletisim)}`} target="_blank" rel="noopener noreferrer" className="flex-1 py-2 rounded-xl bg-white/20 hover:bg-white/30 transition text-xs font-black flex items-center justify-center gap-1.5">
+                    <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
+                  </a>
+                </div>
+              )}
             </div>
             
-            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-neutral-50">
               
               {/* Müşteri Eşleştirme / Bilgi Güncelleme Alanı */}
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
+              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3">
                 <p className="text-[10px] font-black text-blue-700 uppercase mb-2">Müşteri Bilgilerini Eşleştir</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
                   <input
@@ -3796,14 +3907,50 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 </button>
               </div>
 
-              {detayKayit.sonMesaj && (
-                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
-                  <p className="text-[10px] font-black text-neutral-400 uppercase mb-1">İlk Mesaj / Görüşme Özeti</p>
-                  <p className="text-xs text-neutral-700">{detayKayit.sonMesaj}</p>
-                </div>
-              )}
+              {/* ==============================================================
+                  DEĞİŞTİ: TEKLİF DETAYI ARTIK TABLO GİBİ AYRIŞTIRILIR
+                  --------------------------------------------------------------
+                  Web sihirbazından gelen tek satırlık uzun metin
+                  (teklifOzetiAyristir ile) başlık / güzergâh / alan satırlarına
+                  bölünür. Tanınmayan metin üstteki özet satırında aynen kalır,
+                  hiç alan bulunamazsa ham metin gösterilir — veri kaybolmaz.
+                  ============================================================== */}
+              {detayKayit.sonMesaj && (() => {
+                const teklif = teklifOzetiAyristir(detayKayit.sonMesaj);
+                return (
+                  <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
+                    <div className="px-3 py-2 bg-neutral-100 border-b border-neutral-200 flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-black text-neutral-700 flex items-center gap-1.5">
+                        <FileText className="w-3.5 h-3.5" /> Teklif Detayı
+                      </p>
+                      {teklif.baslik && (
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-neutral-900 text-white">{teklif.baslik}</span>
+                      )}
+                    </div>
+
+                    {/* Güzergâh / serbest özet — büyük puntoyla en üstte */}
+                    {teklif.ozet && (
+                      <p className="px-3 pt-3 text-sm font-black text-black leading-snug">{teklif.ozet}</p>
+                    )}
+
+                    {/* Alanlar: etiket solda, değer sağda; okunaklı satırlar */}
+                    {teklif.satirlar.length > 0 ? (
+                      <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0">
+                        {teklif.satirlar.map((satir, i) => (
+                          <div key={i} className="flex items-start gap-2 py-1.5 border-b border-neutral-100 last:border-0">
+                            <span className="text-[10px] font-black text-neutral-400 uppercase shrink-0 w-[92px] pt-0.5">{satir.etiket}</span>
+                            <span className="text-xs font-bold text-neutral-800 flex-1 leading-snug">{satir.deger}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      !teklif.ozet && <p className="p-3 text-xs text-neutral-700 leading-relaxed">{teklif.ham}</p>
+                    )}
+                  </div>
+                );
+              })()}
               {Array.isArray(detayKayit.fotograflar) && detayKayit.fotograflar.length > 0 && (
-                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+                <div className="bg-white border border-neutral-200 rounded-2xl p-3">
                   <p className="text-[10px] font-black text-neutral-400 uppercase mb-1">Müşterinin Yüklediği Fotoğraflar</p>
                   <HasarCozumBelgeleri
                     files={detayKayit.fotograflar.map((url, i) => ({ url, name: `Fotoğraf ${i + 1}` }))}
@@ -3811,8 +3958,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   />
                 </div>
               )}
-              {/* Hızlı durum ve hizmet tipi değişimi */}
-              <div>
+              {/* Hızlı durum ve hizmet tipi değişimi — DEĞİŞTİ: kart içine alındı */}
+              <div className="bg-white border border-neutral-200 rounded-2xl p-3">
                 <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Durum</p>
                 <div className="flex flex-wrap gap-1.5">
                   {DURUMLAR.map(d => (
@@ -3823,7 +3970,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   ))}
                 </div>
               </div>
-              <div>
+              <div className="bg-white border border-neutral-200 rounded-2xl p-3">
                 <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Hizmet Tipi</p>
                 <div className="flex gap-1.5">
                   {HIZMET_TIPLERI.map(t => (
@@ -3835,7 +3982,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 </div>
               </div>
               {/* Not ekleme */}
-              <div>
+              <div className="bg-white border border-neutral-200 rounded-2xl p-3">
                 <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Not Ekle</p>
                 <div className="flex gap-2">
                   <input value={notMetni} onChange={e => setNotMetni(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleNotEkle(detayKayit); }}
@@ -3850,7 +3997,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 ))}
               </div>
               {/* Hareket geçmişi */}
-              <div>
+              <div className="bg-white border border-neutral-200 rounded-2xl p-3">
                 <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5 flex items-center gap-1"><History className="w-3 h-3" /> Hareket Geçmişi</p>
                 <div className="space-y-1.5">
                   {(detayKayit.hareketler || []).slice().reverse().map((h, i) => (
