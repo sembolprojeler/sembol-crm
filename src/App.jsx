@@ -3995,6 +3995,18 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [cancelJobId, setCancelJobId] = useState(null); 
     const [deleteJobId, setDeleteJobId] = useState(null);
     const [markDamageJobId, setMarkDamageJobId] = useState(null);
+    // ======================================================================
+    // YENİ (kullanıcı talebi): SONRADAN HASAR BİLDİRİMİ PENCERESİ DURUMLARI
+    // ----------------------------------------------------------------------
+    // İş Onaylama Tahtası'nda kapatılmış bir işe "Hasar Oluştu Bildir" ile
+    // hasar yazıldığında kayıt "Hasarlı İşler > Çözüm Bekleyenler" listesine
+    // aktarılır. Aşağıdaki durumlar o pencerenin not girişi, yükleniyor ve
+    // başarı ekranını yönetir.
+    // ======================================================================
+    const [markDamageNote, setMarkDamageNote] = useState('');        // İsteğe bağlı hasar açıklaması
+    const [markDamageSaving, setMarkDamageSaving] = useState(false); // Firestore'a yazılırken buton kilitlenir
+    const [markDamageDone, setMarkDamageDone] = useState(false);     // true ise "aktarıldı" ekranı gösterilir
+    const [markDamageError, setMarkDamageError] = useState('');      // Hata olursa kullanıcıya gösterilir
     // DEĞİŞTİ: cost (Hasar Tutarı ₺) alanı eklendi — hasar kapatılırken maliyet girilir
     // DEĞİŞTİ: files (çözüm belgeleri) eklendi — fotoğraf/PDF/dekont, çoklu ve isteğe bağlı
     // YENİ (kullanıcı talebi): sorumlular = hasar bedelinin kesileceği personel kimlikleri.
@@ -5884,21 +5896,95 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       }
     };
 
-    const handleMarkAsDamaged = async (id) => {
-      if (!firebaseUser) return;
+    // ======================================================================
+    // DEĞİŞTİ (kullanıcı talebi): SONRADAN HASAR BİLDİRİMİ -> HASARLI İŞLER
+    // ----------------------------------------------------------------------
+    // SORUN: Eski sürüm yalnızca damageStatus alanını 'Hasar var' yapıyordu.
+    // Ancak Hasarlı İşler ekranı (DamagedJobsView) varsayılan olarak SADECE
+    // endJobDetails.damageResolved === false olan kayıtları listeler. Daha
+    // önce bir kez hasar açılıp ÇÖZÜLMÜŞ bir işte bu alan true kaldığı için,
+    // yeni bildirilen hasar "Çözülen İşler" sekmesinde kalıyor ve "Çözüm
+    // Bekleyenler" listesinde görünmüyordu.
+    //
+    // ÇÖZÜM: Kayıt açıkça "çözüm bekliyor" durumuna alınır. Eski çözüm bilgisi
+    // SİLİNMEZ; damageGecmisi dizisine arşivlenir ki Finans tarafındaki geçmiş
+    // hasar maliyeti verisi kaybolmasın.
+    //
+    // not  : Onay penceresinde yazılan hasar açıklaması (boş bırakılabilir)
+    // Dönüş: { ok: true } veya { ok: false, error: '...' }
+    // ======================================================================
+    const handleMarkAsDamaged = async (id, not = '') => {
+      if (!firebaseUser) return { ok: false, error: 'Oturum bulunamadı.' };
       const job = jobs.find(j => j.id === id);
-      if (!job) return;
-      
+      if (!job) return { ok: false, error: 'İş kaydı bulunamadı.' };
+
+      const mevcut = job.endJobDetails || {};
+
+      // ARŞİVLEME: Bu iş daha önce hasar alıp çözüldüyse, eski çözüm kaydı
+      // (not, maliyet, belgeler) geçmişe taşınır; üzerine yazılmaz.
+      const oncekiGecmis = Array.isArray(mevcut.damageGecmisi) ? mevcut.damageGecmisi : [];
+      const yeniGecmis = mevcut.damageResolved
+        ? [...oncekiGecmis, {
+            damageDetails: mevcut.damageDetails || '',
+            damageResolutionNote: mevcut.damageResolutionNote || '',
+            damageResolutionFiles: mevcut.damageResolutionFiles || [],
+            damageCost: mevcut.damageCost || '',
+            damageCostPerPerson: mevcut.damageCostPerPerson || 0,
+            damageCostTeamCount: mevcut.damageCostTeamCount || 0,
+            arsivTarihi: new Date().toISOString(),
+          }]
+        : oncekiGecmis;
+
       const updatedEndJobDetails = {
-        ...(job.endJobDetails || {}),
+        ...mevcut,
+        // (1) Hasarlı İşler filtresinin baktığı ana alan
         damageStatus: 'Hasar var',
-        damageDetails: job.endJobDetails?.damageDetails || 'Sonradan hasar bildirimi yapıldı.'
+        // (2) Açıklama: kullanıcı not yazdıysa o, yoksa eski not, o da yoksa varsayılan
+        damageDetails: (not || '').trim() || mevcut.damageDetails || 'Sonradan hasar bildirimi yapıldı.',
+        // (3) KRİTİK: kayıt "Çözüm Bekleyenler" listesine düşsün diye sıfırlanır
+        damageResolved: false,
+        damageResolutionNote: '',
+        damageResolutionFiles: [],
+        damageCost: '',
+        damageCostPerPerson: 0,
+        damageCostTeamCount: 0,
+        // (4) İzlenebilirlik: kim, ne zaman bildirdi
+        damageReportedAt: new Date().toISOString(),
+        damageReportedBy: currentUser?.fullName || 'Bilinmiyor',
+        // (5) Varsa eski çözüm kaydı arşivi
+        damageGecmisi: yeniGecmis,
       };
 
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id), { 
-        endJobDetails: updatedEndJobDetails 
-      });
-      addSystemLog('Hasar Bildirimi', `${job.customerName} müşterisinin tamamlanan operasyonuna hasar kaydı eklendi.`);
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', id), {
+          endJobDetails: updatedEndJobDetails
+        });
+        addSystemLog('Hasar Bildirimi', `${job.customerName} müşterisinin tamamlanan operasyonuna hasar kaydı eklendi. Kayıt "Hasarlı İşler > Çözüm Bekleyenler" listesine aktarıldı.`);
+        return { ok: true };
+      } catch (err) {
+        console.error('Hasar kaydı oluşturulamadı:', err);
+        return { ok: false, error: 'Hasar kaydı oluşturulurken bir hata oluştu. Lütfen tekrar deneyin.' };
+      }
+    };
+
+    // Onay penceresini sıfırlayarak kapatır (not, hata ve başarı ekranı temizlenir)
+    const closeMarkDamageModal = () => {
+      setMarkDamageJobId(null);
+      setMarkDamageNote('');
+      setMarkDamageSaving(false);
+      setMarkDamageDone(false);
+      setMarkDamageError('');
+    };
+
+    // "Evet, Onaylıyorum" butonunun akışı: kaydet -> başarı ekranını göster
+    const submitMarkAsDamaged = async () => {
+      if (!markDamageJobId) return;
+      setMarkDamageSaving(true);
+      setMarkDamageError('');
+      const sonuc = await handleMarkAsDamaged(markDamageJobId, markDamageNote);
+      setMarkDamageSaving(false);
+      if (sonuc?.ok) setMarkDamageDone(true);
+      else setMarkDamageError(sonuc?.error || 'Beklenmeyen bir hata oluştu.');
     };
 
     const handleOpenResolveDamageModal = (id) => {
@@ -9135,19 +9221,81 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           </div>
         )}
 
-        {markDamageJobId && (
+        {/* ====================================================================
+            DEĞİŞTİ: SONRADAN HASAR BİLDİRİMİ ONAY PENCERESİ
+            --------------------------------------------------------------------
+            Eklenenler: (1) isteğe bağlı hasar açıklaması alanı, (2) kaydederken
+            kilitlenen buton, (3) hata mesajı, (4) kayıt sonrası doğrudan
+            "Hasarlı İşler" sekmesine geçiş butonu.
+            ==================================================================== */}
+        {markDamageJobId && (() => {
+          // Pencerede müşteri/tarih özeti göstermek için ilgili iş bulunur
+          const mdJob = jobs.find(j => j.id === markDamageJobId);
+          return (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
             <div className="bg-white p-6 rounded-2xl w-full max-w-sm text-center animate-in zoom-in-95 shadow-2xl">
-              <AlertTriangle className="w-16 h-16 text-orange-500 mx-auto mb-4" />
-              <h3 className="font-black text-xl text-black mb-2">Hasar Kaydı Oluştur</h3>
-              <p className="text-neutral-600 mb-6 text-sm font-medium">Bu operasyonda hasar oluştuğunu onaylıyor musunuz? İşlem sonrası bu kayıt "Hasarlı İşler" sekmesinde görüntülenecektir.</p>
-              <div className="flex gap-3">
-                <button onClick={() => setMarkDamageJobId(null)} className="flex-1 p-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition">Hayır, Vazgeç</button>
-                <button onClick={() => { handleMarkAsDamaged(markDamageJobId); setMarkDamageJobId(null); }} className="flex-1 p-3 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 transition shadow-lg shadow-orange-600/30">Evet, Onaylıyorum</button>
-              </div>
+
+              {!markDamageDone ? (
+                <>
+                  {/* ---------- DURUM 1: ONAY EKRANI ---------- */}
+                  <AlertTriangle className="w-16 h-16 text-orange-500 mx-auto mb-4" />
+                  <h3 className="font-black text-xl text-black mb-1">Hasar Kaydı Oluştur</h3>
+                  {mdJob && (
+                    <p className="text-[11px] font-bold text-neutral-500 mb-4">{mdJob.customerName} • {mdJob.date} {mdJob.time}</p>
+                  )}
+                  <p className="text-neutral-600 mb-4 text-sm font-medium">
+                    Bu operasyonda hasar oluştuğunu onaylıyor musunuz? İşlem sonrası bu kayıt <span className="font-bold text-black">"Hasarlı İşler → Çözüm Bekleyenler"</span> listesine aktarılacaktır.
+                  </p>
+
+                  {/* Hasar açıklaması — zorunlu değil; boş bırakılırsa varsayılan metin yazılır */}
+                  <div className="text-left mb-4">
+                    <label className="block text-xs font-bold text-black mb-1.5">Hasar Detayı <span className="font-medium text-neutral-400">(isteğe bağlı)</span></label>
+                    <textarea
+                      rows={3}
+                      value={markDamageNote}
+                      onChange={e => setMarkDamageNote(e.target.value)}
+                      placeholder="Örn: Gardırop kapağı çizildi, müşteri fotoğraf gönderdi..."
+                      className="w-full p-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-orange-500 outline-none transition text-sm font-medium resize-none"
+                    />
+                    <p className="text-[10px] text-neutral-400 font-medium mt-1">Boş bırakılırsa "Sonradan hasar bildirimi yapıldı." olarak kaydedilir.</p>
+                  </div>
+
+                  {/* Firestore hatası olursa kullanıcı sessizce kalmasın */}
+                  {markDamageError && (
+                    <p className="text-xs font-bold text-red-600 bg-red-50 border border-red-200 rounded-xl p-2.5 mb-3">{markDamageError}</p>
+                  )}
+
+                  <div className="flex gap-3">
+                    <button onClick={closeMarkDamageModal} disabled={markDamageSaving} className="flex-1 p-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition disabled:opacity-50">Hayır, Vazgeç</button>
+                    <button onClick={submitMarkAsDamaged} disabled={markDamageSaving} className="flex-1 p-3 bg-orange-600 text-white font-bold rounded-xl hover:bg-orange-700 transition shadow-lg shadow-orange-600/30 flex justify-center items-center gap-2 disabled:opacity-60">
+                      {markDamageSaving ? (<><Loader2 className="w-4 h-4 animate-spin" /> Kaydediliyor</>) : 'Evet, Onaylıyorum'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* ---------- DURUM 2: BAŞARI EKRANI ---------- */}
+                  <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+                  <h3 className="font-black text-xl text-black mb-2">Hasar Kaydı Oluşturuldu</h3>
+                  <p className="text-neutral-600 mb-5 text-sm font-medium">
+                    <span className="font-bold text-black">{mdJob?.customerName}</span> işi <span className="font-bold text-red-600">Hasarlı İşler → Çözüm Bekleyenler</span> listesine aktarıldı.
+                  </p>
+                  <div className="flex flex-col gap-2">
+                    {/* Doğrudan Hasarlı İşler ekranına geçiş */}
+                    <button onClick={() => { closeMarkDamageModal(); setActiveTab('damagedJobs'); }} className="w-full p-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 flex justify-center items-center gap-2">
+                      <ArrowUpRight className="w-4 h-4" /> Hasarlı İşler'e Git
+                    </button>
+                    <button onClick={closeMarkDamageModal} className="w-full p-3 bg-neutral-100 text-neutral-700 font-bold rounded-xl hover:bg-neutral-200 transition flex justify-center items-center gap-2">
+                      <X className="w-4 h-4" /> Kapat
+                    </button>
+                  </div>
+                </>
+              )}
+
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {showAssignModal && jobToAssign && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">
