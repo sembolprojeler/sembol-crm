@@ -2890,7 +2890,10 @@ const KANALLAR = [
   { id: 'whatsapp',  ad: 'WhatsApp Mesajları',  Ikon: MessageCircle, renk: 'green',   hesapEtiket: 'WhatsApp Numarası',  hesapOrnek: '0532 XXX XX XX',        iletisimEtiket: 'Telefon No' },
   { id: 'instagram', ad: 'Instagram Mesajları', Ikon: Camera,        renk: 'pink',    hesapEtiket: 'Instagram Hesabı',   hesapOrnek: '@sembolnakliyat',       iletisimEtiket: 'Kullanıcı Adı' },
   { id: 'gmail',     ad: 'Gmail / E-posta',     Ikon: Mail,          renk: 'red',     hesapEtiket: 'E-posta Adresi',     hesapOrnek: 'info@sembolevdeneve.com', iletisimEtiket: 'E-posta' },
-  { id: 'web',       ad: 'Web Sitesi Teklifleri', Ikon: Globe,       renk: 'purple',  hesapEtiket: 'Sayfa',              hesapOrnek: 'sembolevdeneve.com',      iletisimEtiket: 'Telefon No' },
+  // DEĞİŞTİ (kullanıcı talebi): "Web Sitesi Teklifleri" → "Hızlı Teklifler".
+  // id 'web' AYNEN korunur; Firestore'daki mevcut kayıtlar (kanal: 'web') ve
+  // api/submit-lead.js bu id ile yazmaya devam eder, hiçbir veri kaybı olmaz.
+  { id: 'web',       ad: 'Hızlı Teklifler',     Ikon: Globe,         renk: 'purple',  hesapEtiket: 'Sayfa',              hesapOrnek: 'sembolevdeneve.com',      iletisimEtiket: 'Telefon No' },
   { id: 'iyzico',    ad: 'İyzico Siparişleri',    Ikon: CreditCard,  renk: 'amber',   hesapEtiket: 'Site',               hesapOrnek: 'depoevim.com',            iletisimEtiket: 'Telefon No' },
 ];
 
@@ -2931,9 +2934,317 @@ const KANAL_RENK = {
 // Tarihi kısa Türkçe biçimde göster
 const tarihSaat = (iso) => iso ? new Date(iso).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—';
 
+// ============================================================================
+// YENİ (kullanıcı talebi): HIZLI TEKLİFLER YARDIMCILARI
+// ----------------------------------------------------------------------------
+// Web sitesi sihirbazından gelen teklif talepleri ("web" kanalı) artık
+// Müşteri Havuzu'nun EN BAŞINDA, "Hızlı Teklifler" adıyla ve gün gün ayrılmış
+// daha okunaklı bir tabloda gösterilir. Aşağıdaki yardımcılar bu tabloyu ve
+// sol menüdeki "yeni teklif" bildirim rozetlerini besler.
+// ============================================================================
+
+// Bir kaydın hangi şirkete ait olduğunu belirler — MusteriHavuzuView içindeki
+// kayitSitesi ile AYNI kural (sadece depoevim işaretli olanlar depoevim'dir).
+const hizliTeklifSitesi = (k) => (k.hesapId === 'depoevim' ? 'depoevim' : 'sembolevdeneve');
+
+// Sadece saat kısmı (gün ayracında tarih zaten yazdığı için satırda saat yeter)
+const sadeceSaat = (iso) => iso ? new Date(iso).toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' }) : '—';
+
+// Yerel (Türkiye) güne göre anahtar: "2026-09-18" — gün ayracı gruplaması için.
+// toISOString kullanılmaz; UTC'ye çevirirse gece 00:00-03:00 arası kayıtlar
+// önceki güne kayardı.
+const gunAnahtari = (iso) => {
+  if (!iso) return 'bilinmiyor';
+  const d = new Date(iso);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+
+// Gün ayracı başlığı: "18 Eylül 2026 Teklifleri"
+const gunBasligi = (anahtar) => {
+  if (anahtar === 'bilinmiyor') return 'Tarihi Bilinmeyen Teklifler';
+  const [y, m, g] = anahtar.split('-').map(Number);
+  return `${new Date(y, m - 1, g).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' })} Teklifleri`;
+};
+
+// "Bugün" / "Dün" etiketi — diğer günlerde boş döner
+const gunGoreliEtiket = (anahtar) => {
+  const bugun = gunAnahtari(new Date().toISOString());
+  const dunTarih = new Date(); dunTarih.setDate(dunTarih.getDate() - 1);
+  const dun = gunAnahtari(dunTarih.toISOString());
+  if (anahtar === bugun) return 'Bugün';
+  if (anahtar === dun) return 'Dün';
+  return '';
+};
+
+// Telefonu tel: ve WhatsApp (wa.me) bağlantısına uygun hale getirir.
+// "05366933490", "+905452602112", "5078681629" biçimlerinin hepsini 90XXXXXXXXXX yapar.
+const telefonRakam = (v) => (v || '').replace(/\D/g, '');
+const waNumarasi = (v) => {
+  let r = telefonRakam(v);
+  if (r.startsWith('90') && r.length === 12) return r;
+  if (r.startsWith('0')) r = r.slice(1);
+  if (r.length === 10) return '90' + r;
+  return r;
+};
+// "Tıklama (Bekleniyor)" gibi henüz numarası olmayan kayıtlarda arama yapılamaz
+const telefonGecerliMi = (v) => telefonRakam(v).length >= 10 && !(v || '').includes('Bekleniyor');
+
+// ============================================================================
+// YENİ: SOL MENÜ BİLDİRİM SAYACI — useHizliTeklifYeniSayilari
+// ----------------------------------------------------------------------------
+// App.jsx bu hook'u çağırır ve Satış menüsünde iki rozet gösterir:
+//   • KIRMIZI  → Sembol Nakliyat için durumu hâlâ "Yeni" olan teklif sayısı
+//   • MAVİ     → Depoevim için durumu hâlâ "Yeni" olan teklif sayısı
+// Durum değiştirilince (Görüşme Sağlandı, Dönüş Bekliyor, ...) onSnapshot
+// anında tetiklenir ve sayı otomatik azalır.
+//
+// FİRESTORE OKUMA DİKKATİ: Yalnızca kanal=='web' kayıtları dinlenir (tüm
+// havuz değil). "Yeni" süzmesi istemci tarafında yapılır ki durum alanı hiç
+// yazılmamış eski kayıtlar da (varsayılan "Yeni") doğru sayılsın.
+//   aktif: false verilirse (kullanıcı giriş yapmadıysa) hiç abone olunmaz.
+// ============================================================================
+export const useHizliTeklifYeniSayilari = (aktif = true) => {
+  const [sayilar, setSayilar] = useState({ sembol: 0, depoevim: 0 });
+  useEffect(() => {
+    if (!aktif) return;
+    const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari'), where('kanal', '==', 'web'));
+    const unsub = onSnapshot(q, snap => {
+      let sembol = 0, depoevim = 0;
+      snap.docs.forEach(d => {
+        const k = d.data();
+        if ((k.durum || 'Yeni') !== 'Yeni') return;   // Durumu değişen teklif sayılmaz
+        if (hizliTeklifSitesi(k) === 'depoevim') depoevim++; else sembol++;
+      });
+      setSayilar({ sembol, depoevim });
+    }, err => console.error('Hızlı teklif sayacı dinlenemedi:', err));
+    return () => unsub();
+  }, [aktif]);
+  return sayilar;
+};
+
+// ============================================================================
+// YENİ: HIZLI TEKLİFLER TABLOSU — HizliTekliflerTablosu
+// ----------------------------------------------------------------------------
+// Web sihirbazından gelen teklifleri gün gün ayrılmış, okunaklı bir tabloda
+// gösterir. Hem Sembol Nakliyat hem Depoevim için aynı bileşen kullanılır;
+// yalnızca vurgu rengi değişir (Sembol kırmızı, Depoevim mavi).
+//
+// Her satırda:
+//   • Müşteri adı, geliş kaynağı (Google Ads / Organik), saat, teklif özeti
+//   • Telefon + ARA ve WHATSAPP butonları (numarası yoksa pasif)
+//   • Hizmet rozeti, Durum ve Satışçı seçicileri (mevcut işlevler aynen)
+//   • NOT sütunu: son not görünür, "+ Not" ile satırdan çıkmadan yeni not eklenir
+//   • Detay ve Sil
+//
+// Props: filtrelenmiş kayıtlar ve MusteriHavuzuView'daki mevcut işleyiciler.
+// Bileşen kendi Firestore çağrısı yapmaz; her şeyi üst bileşenden alır.
+// ============================================================================
+const HizliTekliflerTablosu = ({
+  kayitlar, siteSecimi, hesapAdi, durumRenk, satiscilar, reklamKaynagiAds,
+  onDurumDegistir, onAta, onNotEkle, onDetay, onSil,
+}) => {
+  const [notAcikId, setNotAcikId] = useState(null);   // Hangi satırda not kutusu açık
+  const [notTaslak, setNotTaslak] = useState('');      // Yazılan not metni
+  const [notKaydediliyor, setNotKaydediliyor] = useState(false);
+
+  // Şirkete göre vurgu renkleri (Tailwind dinamik sınıf üretmediği için açık yazılır)
+  const sembolMu = siteSecimi !== 'depoevim';
+  const vurgu = sembolMu
+    ? { avatar: 'bg-red-600', cizgi: 'bg-red-600', ayracArka: 'bg-red-50 border-red-200', ayracYazi: 'text-red-800', rozet: 'bg-red-600 text-white' }
+    : { avatar: 'bg-blue-600', cizgi: 'bg-blue-600', ayracArka: 'bg-blue-50 border-blue-200', ayracYazi: 'text-blue-800', rozet: 'bg-blue-600 text-white' };
+
+  // Kayıtlar zaten createdAt'e göre yeniden eskiye sıralı gelir; gün değiştiğinde
+  // araya ayraç satırı eklenir. Ayraçta o günün toplam ve "Yeni" sayısı yazar.
+  const gunGruplari = [];
+  kayitlar.forEach(k => {
+    const anahtar = gunAnahtari(k.createdAt);
+    let grup = gunGruplari[gunGruplari.length - 1];
+    if (!grup || grup.anahtar !== anahtar) {
+      grup = { anahtar, kayitlar: [] };
+      gunGruplari.push(grup);
+    }
+    grup.kayitlar.push(k);
+  });
+
+  // Satır içi not kaydetme
+  const notuKaydet = async (k) => {
+    const metin = notTaslak.trim();
+    if (!metin) return;
+    setNotKaydediliyor(true);
+    await onNotEkle(k, metin);
+    setNotKaydediliyor(false);
+    setNotTaslak('');
+    setNotAcikId(null);
+  };
+
+  return (
+    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-x-auto">
+      <table className="w-full text-left text-xs min-w-[1080px]">
+        <thead className="bg-neutral-900 text-white">
+          <tr>
+            <th className="p-3 font-bold rounded-tl-2xl w-[26%]">Müşteri / Teklif</th>
+            <th className="p-3 font-bold">Telefon</th>
+            <th className="p-3 font-bold text-center">Hizmet</th>
+            <th className="p-3 font-bold text-center">Durum</th>
+            <th className="p-3 font-bold">Satışçı</th>
+            <th className="p-3 font-bold w-[20%]">Not</th>
+            <th className="p-3 font-bold text-right rounded-tr-2xl">İşlem</th>
+          </tr>
+        </thead>
+        <tbody>
+          {kayitlar.length === 0 && (
+            <tr><td colSpan={7} className="p-10 text-center">
+              <Globe className="w-10 h-10 text-neutral-300 mx-auto mb-2" />
+              <p className="text-neutral-500 font-bold">Bu filtrelerde teklif yok.</p>
+              <p className="text-neutral-400 text-[11px] mt-1">Web sitesi sihirbazından gelen talepler burada gün gün listelenir.</p>
+            </td></tr>
+          )}
+
+          {gunGruplari.map(grup => {
+            const yeniSayisi = grup.kayitlar.filter(k => (k.durum || 'Yeni') === 'Yeni').length;
+            const goreli = gunGoreliEtiket(grup.anahtar);
+            return (
+              <React.Fragment key={grup.anahtar}>
+                {/* ---------- GÜN AYRACI: "18 Eylül 2026 Teklifleri" ---------- */}
+                <tr className={`border-y ${vurgu.ayracArka}`}>
+                  <td colSpan={7} className="px-3 py-2">
+                    <div className="flex items-center gap-3">
+                      <span className={`w-1.5 h-6 rounded-full ${vurgu.cizgi}`}></span>
+                      <CalendarDays className={`w-4 h-4 ${vurgu.ayracYazi}`} />
+                      <span className={`font-black text-sm ${vurgu.ayracYazi}`}>{gunBasligi(grup.anahtar)}</span>
+                      {goreli && <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${vurgu.rozet}`}>{goreli}</span>}
+                      <span className="text-[11px] font-bold text-neutral-500 ml-auto">
+                        {grup.kayitlar.length} teklif
+                        {yeniSayisi > 0 && <span className="ml-2 text-neutral-800">• {yeniSayisi} yeni</span>}
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+
+                {/* ---------- O GÜNÜN TEKLİF SATIRLARI ---------- */}
+                {grup.kayitlar.map(k => {
+                  const tip = HIZMET_TIPLERI.find(t => t.id === (k.hizmetTipi || 'Nakliye')) || HIZMET_TIPLERI[0];
+                  const yeni = (k.durum || 'Yeni') === 'Yeni';
+                  const sonNot = (k.notlar || [])[k.notlar?.length - 1];
+                  const telefonVar = telefonGecerliMi(k.iletisim);
+                  const adsMi = reklamKaynagiAds(k);
+                  return (
+                    <tr key={k.id} className={`border-b border-neutral-100 transition ${yeni ? 'bg-yellow-50/40 hover:bg-yellow-50' : 'hover:bg-neutral-50'}`}>
+
+                      {/* MÜŞTERİ + TEKLİF ÖZETİ */}
+                      <td className="p-3 align-top">
+                        <div className="flex items-start gap-2.5">
+                          <span className={`w-8 h-8 rounded-full ${vurgu.avatar} text-white flex items-center justify-center text-[11px] font-black shrink-0`}>
+                            {(k.musteriAdi || k.iletisim || '?').charAt(0).toUpperCase()}
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-black text-black text-[13px] truncate">{k.musteriAdi || 'İsimsiz'}</span>
+                              {yeni && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-yellow-400 text-black">YENİ</span>}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5 text-[10px] font-bold text-neutral-500 flex-wrap">
+                              <Clock className="w-3 h-3" /> {sadeceSaat(k.createdAt)}
+                              <span className={`px-1.5 py-0.5 rounded ${adsMi ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>{adsMi ? 'Google Ads' : 'Organik'}</span>
+                              <span className="text-neutral-400">{hesapAdi(k.hesapId)}</span>
+                            </div>
+                            {k.sonMesaj && (
+                              <p className="text-[11px] text-neutral-600 mt-1 leading-snug line-clamp-2" title={k.sonMesaj}>{k.sonMesaj}</p>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* TELEFON + ARA / WHATSAPP */}
+                      <td className="p-3 align-top whitespace-nowrap">
+                        <p className={`font-black text-[13px] ${telefonVar ? 'text-black' : 'text-neutral-400'}`}>{k.iletisim || '—'}</p>
+                        <div className="flex gap-1.5 mt-1.5">
+                          <a href={telefonVar ? `tel:${telefonRakam(k.iletisim)}` : undefined}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black transition ${telefonVar ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-neutral-200 text-neutral-400 pointer-events-none'}`}>
+                            <Phone className="w-3 h-3" /> Ara
+                          </a>
+                          <a href={telefonVar ? `https://wa.me/${waNumarasi(k.iletisim)}` : undefined} target="_blank" rel="noopener noreferrer"
+                            className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black transition ${telefonVar ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100' : 'bg-neutral-200 text-neutral-400 pointer-events-none'}`}>
+                            <MessageCircle className="w-3 h-3" /> WhatsApp
+                          </a>
+                        </div>
+                      </td>
+
+                      {/* HİZMET */}
+                      <td className="p-3 align-top text-center">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black ${tip.renk}`}>
+                          <tip.Ikon className="w-3 h-3" /> {tip.id.toUpperCase()}
+                        </span>
+                      </td>
+
+                      {/* DURUM — değişince sol menüdeki "yeni" rozeti otomatik azalır */}
+                      <td className="p-3 align-top text-center">
+                        <select value={k.durum || 'Yeni'} onChange={e => onDurumDegistir(k, e.target.value)}
+                          className={`px-2 py-1 rounded-lg text-[10px] font-black border outline-none cursor-pointer ${durumRenk(k.durum)}`}>
+                          {DURUMLAR.map(d => <option key={d.id}>{d.id}</option>)}
+                        </select>
+                      </td>
+
+                      {/* SATIŞÇI */}
+                      <td className="p-3 align-top">
+                        <select value={k.atanan || ''} onChange={e => onAta(k, e.target.value)}
+                          className="px-2 py-1 rounded-lg text-[10px] font-bold border border-neutral-200 bg-white outline-none cursor-pointer max-w-[130px]">
+                          <option value="">— Atanmadı —</option>
+                          {satiscilar.map(p => <option key={p.id} value={p.fullName}>{p.fullName}</option>)}
+                        </select>
+                      </td>
+
+                      {/* NOT — son not + satır içi hızlı not ekleme */}
+                      <td className="p-3 align-top">
+                        {sonNot && notAcikId !== k.id && (
+                          <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1.5 mb-1.5">
+                            <p className="text-[11px] text-neutral-800 line-clamp-2" title={sonNot.metin}>{sonNot.metin}</p>
+                            <p className="text-[9px] font-bold text-neutral-400 mt-0.5">{sonNot.kullanici} • {tarihSaat(sonNot.tarih)}{(k.notlar || []).length > 1 ? ` • +${k.notlar.length - 1} not daha` : ''}</p>
+                          </div>
+                        )}
+                        {notAcikId === k.id ? (
+                          <div className="flex gap-1">
+                            <input autoFocus value={notTaslak} onChange={e => setNotTaslak(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') notuKaydet(k); if (e.key === 'Escape') { setNotAcikId(null); setNotTaslak(''); } }}
+                              placeholder="Notu yazıp Enter'a basın..." className="flex-1 min-w-0 p-1.5 border border-neutral-300 rounded-lg text-[11px] outline-none focus:ring-2 focus:ring-yellow-400" />
+                            <button type="button" onClick={() => notuKaydet(k)} disabled={!notTaslak.trim() || notKaydediliyor}
+                              className="px-2 py-1.5 bg-neutral-900 text-white rounded-lg text-[10px] font-black disabled:opacity-40">
+                              {notKaydediliyor ? <Loader2 className="w-3 h-3 animate-spin" /> : <Send className="w-3 h-3" />}
+                            </button>
+                            <button type="button" onClick={() => { setNotAcikId(null); setNotTaslak(''); }} className="px-1.5 text-neutral-400 hover:text-neutral-700"><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={() => { setNotAcikId(k.id); setNotTaslak(''); }}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-yellow-50 text-yellow-800 border border-yellow-200 hover:bg-yellow-100 transition">
+                            <StickyNote className="w-3 h-3" /> {sonNot ? 'Not Ekle' : '+ Not'}
+                          </button>
+                        )}
+                      </td>
+
+                      {/* İŞLEM */}
+                      <td className="p-3 align-top text-right whitespace-nowrap">
+                        <button type="button" onClick={() => onDetay(k)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-lg text-[10px] font-black mr-1.5">
+                          <FileText className="w-3 h-3" /> Detay
+                        </button>
+                        <button type="button" onClick={() => onSil(k.id)} className="text-red-300 hover:text-red-600 align-middle"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </React.Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+};
+
 export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLog, setViewingImage }) => {
   // ---------------------------------------------------------------- STATE ---
-  const [aktifKanal, setAktifKanal] = useState('telefon');
+  // DEĞİŞTİ (kullanıcı talebi): Havuz açılınca ilk sekme artık "Hızlı Teklifler" ('web')
+  const [aktifKanal, setAktifKanal] = useState('web');
   const [kayitlar, setKayitlar] = useState([]);       // Tüm kanalların kayıtları (canlı)
   const [hesaplar, setHesaplar] = useState([]);       // Bağlı hesaplar (canlı)
   const [durumFiltre, setDurumFiltre] = useState('Tümü');
@@ -3003,6 +3314,16 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     const not = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, metin: notMetni.trim() };
     await hareketliGuncelle(kayit, { notlar: [...(kayit.notlar || []), not] }, `Not eklendi: "${notMetni.trim().slice(0, 60)}"`);
     setNotMetni('');
+  };
+
+  // YENİ: Hızlı Teklifler tablosundaki satır içi not kutusu için — metni
+  // doğrudan parametre olarak alır (detay penceresindeki notMetni state'ine
+  // bağlı değildir). Aynı veri yapısına (notlar[] + hareketler[]) yazar.
+  const handleHizliNotEkle = async (kayit, metin) => {
+    const temiz = (metin || '').trim();
+    if (!temiz) return;
+    const not = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, metin: temiz };
+    await hareketliGuncelle(kayit, { notlar: [...(kayit.notlar || []), not] }, `Not eklendi: "${temiz.slice(0, 60)}"`);
   };
 
   const handleHizmetDegistir = async (kayit, tip) => {
@@ -3167,25 +3488,66 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         </div>
       </div>
 
-      {/* KANAL SEKMELERİ — İyzico Siparişleri SADECE DepoEvim'de gösteriliyor,
-          çünkü kredi kartıyla depo kiralama satışı sadece DepoEvim'de var,
-          Sembol Nakliyat'ta yok. */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        {KANALLAR.filter(k => k.id !== 'iyzico' || siteSecimi === 'depoevim').map(k => {
-          const r = KANAL_RENK[k.renk];
-          const sayi = kayitlar.filter(x => x.kanal === k.id && kayitSitesi(x) === siteSecimi).length;
-          const aktif = aktifKanal === k.id;
-          return (
-            <button key={k.id} type="button"
-              onClick={() => { setAktifKanal(k.id); setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setHesapFiltre('Tümü'); setArama(''); setYeniKayitAcik(false); setHesapYonetimAcik(false); }}
-              className={`p-3 rounded-2xl border-2 transition flex items-center gap-2.5 ${aktif ? `${r.aktif} border-transparent` : `bg-white ${r.pasif}`}`}>
-              <k.Ikon className="w-5 h-5 shrink-0" />
-              <span className="text-xs font-black text-left leading-tight flex-1">{k.ad}</span>
-              <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${aktif ? 'bg-white/25' : 'bg-white'}`}>{sayi}</span>
+      {/* ====================================================================
+          DEĞİŞTİ (kullanıcı talebi): KANAL SEKMELERİ YENİ DÜZEN
+          --------------------------------------------------------------------
+          1) "Hızlı Teklifler" (web) EN BAŞTA, tek başına geniş bir buton olarak.
+             Üzerinde toplam ve yanıp sönen "X yeni" rozeti (Sembol kırmızı,
+             Depoevim mavi) bulunur.
+          2) Telefon / WhatsApp / Instagram / Gmail (ve DepoEvim'de İyzico)
+             "Diğer" başlığı altında toplu durur.
+          Sekme tıklama davranışı (filtre sıfırlama vb.) eskisiyle birebir aynı.
+          ==================================================================== */}
+      {(() => {
+        const sekmeSec = (id) => { setAktifKanal(id); setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setHesapFiltre('Tümü'); setArama(''); setYeniKayitAcik(false); setHesapYonetimAcik(false); };
+        const webKanal = KANALLAR.find(k => k.id === 'web');
+        const webKayitlari = kayitlar.filter(x => x.kanal === 'web' && kayitSitesi(x) === siteSecimi);
+        const webYeni = webKayitlari.filter(x => (x.durum || 'Yeni') === 'Yeni').length;
+        const webAktif = aktifKanal === 'web';
+        const siteRenk = siteSecimi === 'depoevim' ? 'bg-blue-600' : 'bg-red-600';
+        return (
+          <div className="space-y-2">
+            {/* ---- HIZLI TEKLİFLER ---- */}
+            <button type="button" onClick={() => sekmeSec('web')}
+              className={`w-full p-4 rounded-2xl border-2 transition flex items-center gap-3 ${webAktif ? 'bg-purple-600 text-white border-transparent shadow-lg shadow-purple-600/30' : 'bg-white text-purple-700 border-purple-200 hover:border-purple-400'}`}>
+              <span className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${webAktif ? 'bg-white/20' : 'bg-purple-50'}`}>
+                <Globe className="w-6 h-6" />
+              </span>
+              <span className="text-left flex-1 min-w-0">
+                <span className="block text-base font-black leading-tight">{webKanal.ad}</span>
+                <span className={`block text-[11px] font-bold mt-0.5 ${webAktif ? 'text-white/80' : 'text-purple-500'}`}>
+                  {siteSecimi === 'depoevim' ? 'depoevim.com' : 'sembolevdeneve.com'} sihirbazından gelen teklif talepleri — gün gün listelenir
+                </span>
+              </span>
+              {/* Yeni teklif rozeti — durum "Yeni" olan kayıt varsa yanıp söner */}
+              {webYeni > 0 && (
+                <span className={`text-xs font-black px-2.5 py-1 rounded-full text-white animate-pulse ${siteRenk}`}>{webYeni} yeni</span>
+              )}
+              <span className={`text-sm font-black px-2.5 py-1 rounded-full ${webAktif ? 'bg-white/25' : 'bg-purple-50'}`}>{webKayitlari.length}</span>
             </button>
-          );
-        })}
-      </div>
+
+            {/* ---- DİĞER KANALLAR ---- */}
+            <div className="bg-white rounded-2xl border border-neutral-200 p-3">
+              <p className="text-[11px] font-black text-neutral-500 mb-2 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> Diğer</p>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                {KANALLAR.filter(k => k.id !== 'web' && (k.id !== 'iyzico' || siteSecimi === 'depoevim')).map(k => {
+                  const r = KANAL_RENK[k.renk];
+                  const sayi = kayitlar.filter(x => x.kanal === k.id && kayitSitesi(x) === siteSecimi).length;
+                  const aktif = aktifKanal === k.id;
+                  return (
+                    <button key={k.id} type="button" onClick={() => sekmeSec(k.id)}
+                      className={`p-3 rounded-2xl border-2 transition flex items-center gap-2.5 ${aktif ? `${r.aktif} border-transparent` : `bg-white ${r.pasif}`}`}>
+                      <k.Ikon className="w-5 h-5 shrink-0" />
+                      <span className="text-xs font-black text-left leading-tight flex-1">{k.ad}</span>
+                      <span className={`text-[10px] font-black px-1.5 py-0.5 rounded-full ${aktif ? 'bg-white/25' : 'bg-white'}`}>{sayi}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ARAÇ ÇUBUĞU: hesap filtresi + arama + aksiyonlar */}
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex flex-col lg:flex-row gap-2 lg:items-center">
@@ -3280,7 +3642,32 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         ))}
       </div>
 
-      {/* HAVUZ TABLOSU */}
+      {/* ====================================================================
+          DEĞİŞTİ: "Hızlı Teklifler" sekmesinde gün ayraçlı yeni tablo
+          (HizliTekliflerTablosu) gösterilir. Diğer kanallarda aşağıdaki
+          mevcut havuz tablosu AYNEN çalışmaya devam eder.
+          ==================================================================== */}
+      {aktifKanal === 'web' ? (
+        <HizliTekliflerTablosu
+          kayitlar={filtreli}
+          siteSecimi={siteSecimi}
+          hesapAdi={hesapAdi}
+          durumRenk={durumRenk}
+          satiscilar={satiscilar}
+          reklamKaynagiAds={reklamKaynagiAds}
+          onDurumDegistir={handleDurumDegistir}
+          onAta={handleAta}
+          onNotEkle={handleHizliNotEkle}
+          onDetay={(k) => {
+            // Mevcut "Detay" butonuyla birebir aynı hazırlık
+            setDetayKayit(k);
+            setDetayFotoGoster(null);
+            setDuzenleIletisim((k.iletisim || '').includes('Bekleniyor') ? '' : (k.iletisim || ''));
+            setDuzenleMusteriAdi((k.musteriAdi || '').includes('Ziyaretçi') ? '' : (k.musteriAdi || ''));
+          }}
+          onSil={(id) => setSilinecekId(id)}
+        />
+      ) : (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-x-auto">
         <table className="w-full text-left text-xs min-w-[900px]">
           <thead className="bg-neutral-900 text-white">
@@ -3366,6 +3753,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           </tbody>
         </table>
       </div>
+      )}
 
       {/* DETAY / HAREKET PENCERESİ */}
       {detayKayit && (
