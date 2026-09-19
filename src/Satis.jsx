@@ -3059,7 +3059,25 @@ const TEKLIF_ALANLARI = [
   'Çıkış asansör', 'Varış asansör', 'Ambalaj malzemesi', 'Ek hizmetler',
   'Paketleme', 'Hizmet', 'Tarih', 'Tip', 'Kat', 'Eşya', 'Hacim', 'Süre',
   'Depo', 'Adres', 'Bütçe', 'Not', 'Asansör', 'Kişi', 'Mesafe',
+  // YENİ (kullanıcı talebi): DepoEvim sihirbazının alanları — depolama
+  // teklifleri de artık nakliye gibi satır satır ayrıştırılır.
+  // (Ayrıştırıcı uzun adı önce dener: "Depo Boyutu" varken "Depo" yakalanmaz.)
+  'Depo Boyutu', 'Depo Kiralama Süresi', 'Kiralama Süresi', 'Şube',
+  'Teslim Şekli', 'Başlangıç Tarihi', 'Aylık Fiyat', 'Toplam Ödenecek (peşin)',
+  'Toplam Ödenecek', 'Oda Sayısı', 'Kullanım Amacı', 'Kurulum yeri',
 ];
+
+// YENİ: Teklif detayı satırlarına dönüşümlü etiket renkleri — her bölüm farklı
+// renkte görünsün diye. Fiyat/tutar alanları her zaman yeşil vurgulanır.
+const TEKLIF_SATIR_RENKLERI = [
+  { etiket: 'bg-blue-100 text-blue-800',     nokta: 'bg-blue-500' },
+  { etiket: 'bg-purple-100 text-purple-800', nokta: 'bg-purple-500' },
+  { etiket: 'bg-amber-100 text-amber-800',   nokta: 'bg-amber-500' },
+  { etiket: 'bg-rose-100 text-rose-800',     nokta: 'bg-rose-500' },
+  { etiket: 'bg-teal-100 text-teal-800',     nokta: 'bg-teal-500' },
+  { etiket: 'bg-indigo-100 text-indigo-800', nokta: 'bg-indigo-500' },
+];
+const TEKLIF_PARA_ALANLARI = ['Aylık Fiyat', 'Toplam Ödenecek (peşin)', 'Toplam Ödenecek', 'Bütçe'];
 
 const teklifOzetiAyristir = (ham) => {
   const metin = (ham || '').trim();
@@ -3190,7 +3208,7 @@ export const useHizliTeklifYeniSayilari = (aktif = true) => {
 // ============================================================================
 const HizliTekliflerTablosu = ({
   kayitlar, siteSecimi, hesapAdi, durumRenk, satiscilar, reklamKaynagiAds,
-  onDurumDegistir, onAta, onNotEkle, onNotGuncelle, onDetay, onSil,
+  onDurumDegistir, onAta, onNotEkle, onNotGuncelle, onNotSil, onDetay, onSil,
   silebilir = false,   // YENİ: yalnızca yetkili kullanıcıda "Sil" butonu çizilir
 }) => {
   // ==========================================================================
@@ -3543,10 +3561,17 @@ const HizliTekliflerTablosu = ({
                             {n.kullanici} • {tarihSaat(n.tarih)}
                             {n.duzenlendi && <span className="ml-1 text-neutral-500">(düzenlendi)</span>}
                           </p>
-                          <button type="button" onClick={() => { setDuzenleIndex(i); setDuzenleMetin(n.metin); }}
-                            className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-yellow-50 text-yellow-800 border border-yellow-200 hover:bg-yellow-100 transition">
-                            <Edit className="w-3 h-3" /> Düzenle
-                          </button>
+                          <span className="flex gap-1.5 shrink-0">
+                            <button type="button" onClick={() => { setDuzenleIndex(i); setDuzenleMetin(n.metin); }}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-yellow-50 text-yellow-800 border border-yellow-200 hover:bg-yellow-100 transition">
+                              <Edit className="w-3 h-3" /> Düzenle
+                            </button>
+                            {/* YENİ: not penceresinde de Kaldır — onayı tarayıcı sorar */}
+                            <button type="button" onClick={async () => { if (window.confirm('Bu not kaldırılsın mı?')) { await onNotSil(notKaydi, i); } }}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-black bg-white text-red-500 border border-red-200 hover:bg-red-50 transition">
+                              <Trash2 className="w-3 h-3" /> Kaldır
+                            </button>
+                          </span>
                         </div>
                       </>
                     )}
@@ -3586,6 +3611,12 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [detayKayit, setDetayKayit] = useState(null); // Detay/hareket penceresi
   const [detayFotoGoster, setDetayFotoGoster] = useState(null); // Detay penceresinde açılan fotoğraf (yan panel)
   const [notMetni, setNotMetni] = useState('');
+  // YENİ: Detay penceresindeki "Hazır Şablonlar" listesi açık mı?
+  const [sablonlarAcik, setSablonlarAcik] = useState(false);
+  // YENİ (kullanıcı talebi): detay penceresinde not düzenleme / kaldırma
+  const [detayNotDuzenle, setDetayNotDuzenle] = useState(null);   // Düzenlenen notun gerçek sırası
+  const [detayNotMetin, setDetayNotMetin] = useState('');          // Düzenlenen notun yeni metni
+  const [detayNotSil, setDetayNotSil] = useState(null);            // Kaldırma onayı bekleyen notun sırası
   const [yeniKayitAcik, setYeniKayitAcik] = useState(false);
   const [hesapYonetimAcik, setHesapYonetimAcik] = useState(false);
   const [yeniHesap, setYeniHesap] = useState({ etiket: '', deger: '', apiAnahtari: '' });
@@ -3651,6 +3682,16 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     if (!temiz) return;
     const not = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, metin: temiz };
     await hareketliGuncelle(kayit, { notlar: [...(kayit.notlar || []), not] }, `Not eklendi: "${temiz.slice(0, 60)}"`);
+  };
+
+  // YENİ (kullanıcı talebi): NOT SİLME — notu kayıttan kaldırır. Silinen notun
+  // metni hareket geçmişine yazılır; böylece "kim, neyi, ne zaman sildi" izi kalır.
+  const handleNotSil = async (kayit, index) => {
+    const mevcut = kayit.notlar || [];
+    if (index < 0 || index >= mevcut.length) return;
+    const silinen = mevcut[index];
+    await hareketliGuncelle(kayit, { notlar: mevcut.filter((_, i) => i !== index) },
+      `Not silindi: "${(silinen?.metin || '').slice(0, 60)}"`);
   };
 
   // YENİ: Not penceresindeki "Güncelle" — mevcut bir notun metnini değiştirir.
@@ -4035,6 +4076,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           onAta={handleAta}
           onNotEkle={handleHizliNotEkle}
           onNotGuncelle={handleHizliNotGuncelle}
+          onNotSil={handleNotSil}
           onDetay={(k) => {
             // Mevcut "Detay" butonuyla birebir aynı hazırlık
             setDetayKayit(k);
@@ -4236,15 +4278,24 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                       <p className="px-3 pt-3 text-sm font-black text-black leading-snug">{teklif.ozet}</p>
                     )}
 
-                    {/* Alanlar: etiket solda, değer sağda; okunaklı satırlar */}
+                    {/* DEĞİŞTİ (kullanıcı talebi): alanlar TABLO görünümünde, her satırın
+                        etiketi farklı renkte rozet; fiyat alanları yeşil vurgulu, satırlar
+                        zebra desenli. Nakliye ve DepoEvim teklifleri aynı biçimde çıkar. */}
                     {teklif.satirlar.length > 0 ? (
-                      <div className="p-3 grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0">
-                        {teklif.satirlar.map((satir, i) => (
-                          <div key={i} className="flex items-start gap-2 py-1.5 border-b border-neutral-100 last:border-0">
-                            <span className="text-[10px] font-black text-neutral-400 uppercase shrink-0 w-[92px] pt-0.5">{satir.etiket}</span>
-                            <span className="text-xs font-bold text-neutral-800 flex-1 leading-snug">{satir.deger}</span>
-                          </div>
-                        ))}
+                      <div className="p-3">
+                        <div className="border border-neutral-200 rounded-xl overflow-hidden">
+                          {teklif.satirlar.map((satir, i) => {
+                            const para = TEKLIF_PARA_ALANLARI.includes(satir.etiket);
+                            const renk = TEKLIF_SATIR_RENKLERI[i % TEKLIF_SATIR_RENKLERI.length];
+                            return (
+                              <div key={i} className={`flex items-center gap-2.5 px-2.5 py-2 ${i % 2 === 1 ? 'bg-neutral-50' : 'bg-white'} ${i > 0 ? 'border-t border-neutral-100' : ''}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${para ? 'bg-green-500' : renk.nokta}`}></span>
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full shrink-0 w-[132px] text-center ${para ? 'bg-green-100 text-green-800' : renk.etiket}`}>{satir.etiket}</span>
+                                <span className={`text-xs flex-1 leading-snug ${para ? 'font-black text-green-700' : 'font-bold text-neutral-800'}`}>{satir.deger}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     ) : (
                       !teklif.ozet && <p className="p-3 text-xs text-neutral-700 leading-relaxed">{teklif.ham}</p>
@@ -4286,16 +4337,79 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               </div>
               {/* Not ekleme */}
               <div className="bg-white border border-neutral-200 rounded-2xl p-3">
-                <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Not Ekle</p>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-[10px] font-black text-neutral-400 uppercase">Not Ekle</p>
+                  {/* YENİ (kullanıcı talebi): HAZIR ŞABLONLAR butonu — tıklayınca
+                      şablon listesi açılır, seçilen şablon not kutusuna yazılır */}
+                  <button type="button" onClick={() => setSablonlarAcik(a => !a)}
+                    className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-black border transition ${sablonlarAcik ? 'bg-yellow-400 border-yellow-400 text-black' : 'bg-yellow-50 border-yellow-200 text-yellow-800 hover:bg-yellow-100'}`}>
+                    <Zap className="w-3 h-3" /> Hazır Şablonlar <ChevronDown className={`w-3 h-3 transition-transform ${sablonlarAcik ? 'rotate-180' : ''}`} />
+                  </button>
+                </div>
+                {sablonlarAcik && (
+                  <div className="flex flex-wrap gap-1.5 mb-2 p-2 bg-yellow-50/60 border border-yellow-100 rounded-xl">
+                    {(NOT_SABLONLARI[kayitSitesi(detayKayit)] || NOT_SABLONLARI.sembolevdeneve).map((sablon, i) => (
+                      <button key={i} type="button" onClick={() => { setNotMetni(sablon); setSablonlarAcik(false); }}
+                        className="text-left px-2.5 py-1.5 rounded-lg text-[10px] font-bold bg-white border border-yellow-200 text-yellow-900 hover:bg-yellow-100 transition">
+                        {sablon}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <input value={notMetni} onChange={e => setNotMetni(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleNotEkle(detayKayit); }}
                     placeholder="Örn: Fiyat verildi, perşembe dönecek..." className="flex-1 p-2.5 border border-neutral-300 rounded-xl text-xs outline-none" />
                   <button type="button" onClick={() => handleNotEkle(detayKayit)} disabled={!notMetni.trim()} className="px-3 py-2 bg-neutral-900 text-white rounded-xl text-xs font-black disabled:opacity-40 flex items-center gap-1"><Send className="w-3 h-3" /> Ekle</button>
                 </div>
-                {(detayKayit.notlar || []).slice().reverse().map((n, i) => (
+                {/* DEĞİŞTİ (kullanıcı talebi): her notta Düzenle ve Kaldır var.
+                    Liste en yeniden eskiye gösterilir; düzenleme/silme için notun
+                    dizideki GERÇEK sırası (i) korunur. */}
+                {(detayKayit.notlar || []).map((n, i) => ({ n, i })).reverse().map(({ n, i }) => (
                   <div key={i} className="mt-2 bg-yellow-50 border border-yellow-200 rounded-xl p-2.5">
-                    <p className="text-xs text-neutral-800">{n.metin}</p>
-                    <p className="text-[9px] font-bold text-neutral-400 mt-1">{n.kullanici} • {tarihSaat(n.tarih)}</p>
+                    {detayNotDuzenle === i ? (
+                      <>
+                        {/* ---------- DÜZENLEME MODU ---------- */}
+                        <textarea autoFocus rows={3} value={detayNotMetin} onChange={e => setDetayNotMetin(e.target.value)}
+                          className="w-full p-2 border border-yellow-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-yellow-400 resize-none bg-white" />
+                        <div className="flex gap-1.5 mt-1.5">
+                          <button type="button" onClick={() => { setDetayNotDuzenle(null); setDetayNotMetin(''); }}
+                            className="flex-1 py-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg text-[10px] font-black hover:bg-neutral-50 transition">Vazgeç</button>
+                          <button type="button" disabled={!detayNotMetin.trim()}
+                            onClick={async () => { await handleHizliNotGuncelle(detayKayit, i, detayNotMetin); setDetayNotDuzenle(null); setDetayNotMetin(''); }}
+                            className="flex-1 py-1.5 bg-neutral-900 text-white rounded-lg text-[10px] font-black disabled:opacity-40 hover:bg-neutral-700 transition flex items-center justify-center gap-1">
+                            <Save className="w-3 h-3" /> Güncelle
+                          </button>
+                        </div>
+                      </>
+                    ) : detayNotSil === i ? (
+                      <>
+                        {/* ---------- KALDIRMA ONAYI ---------- */}
+                        <p className="text-xs text-neutral-800 line-through opacity-60">{n.metin}</p>
+                        <p className="text-[10px] font-black text-red-600 mt-1.5">Bu not kaldırılsın mı?</p>
+                        <div className="flex gap-1.5 mt-1.5">
+                          <button type="button" onClick={() => setDetayNotSil(null)}
+                            className="flex-1 py-1.5 bg-white border border-neutral-200 text-neutral-600 rounded-lg text-[10px] font-black hover:bg-neutral-50 transition">Vazgeç</button>
+                          <button type="button" onClick={async () => { await handleNotSil(detayKayit, i); setDetayNotSil(null); }}
+                            className="flex-1 py-1.5 bg-red-600 text-white rounded-lg text-[10px] font-black hover:bg-red-700 transition flex items-center justify-center gap-1">
+                            <Trash2 className="w-3 h-3" /> Evet, Kaldır
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {/* ---------- NORMAL GÖRÜNÜM ---------- */}
+                        <p className="text-xs text-neutral-800 whitespace-pre-wrap">{n.metin}</p>
+                        <div className="flex items-center justify-between gap-2 mt-1">
+                          <p className="text-[9px] font-bold text-neutral-400">{n.kullanici} • {tarihSaat(n.tarih)}{n.duzenlendi && <span className="ml-1 text-neutral-500">(düzenlendi)</span>}</p>
+                          <span className="flex gap-1 shrink-0">
+                            <button type="button" onClick={() => { setDetayNotDuzenle(i); setDetayNotMetin(n.metin); setDetayNotSil(null); }}
+                              className="p-1 rounded-md text-neutral-400 hover:text-black hover:bg-yellow-100 transition" title="Notu düzenle"><Edit className="w-3.5 h-3.5" /></button>
+                            <button type="button" onClick={() => { setDetayNotSil(i); setDetayNotDuzenle(null); }}
+                              className="p-1 rounded-md text-neutral-400 hover:text-red-600 hover:bg-red-50 transition" title="Notu kaldır"><Trash2 className="w-3.5 h-3.5" /></button>
+                          </span>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -4316,7 +4430,29 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               </div>
             </div>
             <div className="p-3 border-t border-neutral-200 shrink-0">
-              <button onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); }} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm transition">Kapat</button>
+              {/* ================================================================
+                  DEĞİŞTİ (kullanıcı talebi): "Kapat" → "KAYDET"
+                  ----------------------------------------------------------------
+                  Kaydet'e basan kullanıcı bu işin SATIŞÇISI olarak atanır
+                  (k.atanan = aktif kullanıcı) ve pencere kapanır. Durum, hizmet
+                  tipi ve notlar zaten anında kaydedildiği için burada ek bir
+                  yazma yoktur; atamanın kendisi de hareket geçmişine düşer.
+                  ================================================================ */}
+              <div className="flex gap-2">
+                <button onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false); setDetayNotDuzenle(null); setDetayNotSil(null); }}
+                  className="px-4 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-500 font-black rounded-xl text-sm transition">Vazgeç</button>
+                <button onClick={async () => {
+                    // Kaydeden kişi işin satışçısı olur (zaten oysa tekrar yazılmaz)
+                    if (detayKayit && kullaniciAdi && detayKayit.atanan !== kullaniciAdi) {
+                      await handleAta(detayKayit, kullaniciAdi);
+                    }
+                    setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false);
+                  }}
+                  className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl text-sm transition shadow-lg shadow-green-600/30 flex items-center justify-center gap-2">
+                  <Save className="w-4 h-4" /> Kaydet
+                </button>
+              </div>
+              <p className="text-[10px] font-bold text-neutral-400 text-center mt-1.5">Kaydet'e basan kullanıcı ({kullaniciAdi}) bu işin satışçısı olarak atanır.</p>
             </div>
           </div>
 
