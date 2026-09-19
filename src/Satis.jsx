@@ -3295,6 +3295,22 @@ const HizliTekliflerTablosu = ({
 
   return (
     <>
+    {/* ======================================================================
+        YENİ (kullanıcı talebi): YENİ TEKLİF SATIRLARINA YANIP SÖNEN ÇERÇEVE
+        ----------------------------------------------------------------------
+        Durumu "Yeni" olan satırın TAMAMI ince bir çizgiyle çerçevelenir ve
+        çerçeve yanıp söner: Sembol işlerinde KIRMIZI, Depoevim işlerinde MAVİ.
+        Tailwind'de kenarlık rengini yakıp söndüren hazır sınıf olmadığı için
+        küçük bir keyframe tanımlanır (outline kullanılır; tablo satırında
+        güvenilir çalışır ve hücre hizasını bozmaz). Durum "Yeni"den çıkınca
+        çerçeve kendiliğinden kaybolur.
+        ====================================================================== */}
+    <style>{`
+      @keyframes hizliYeniYanip { 50% { outline-color: transparent; } }
+      .hizli-yeni-cerceve { outline: 2px solid; outline-offset: -2px; animation: hizliYeniYanip 1.1s ease-in-out infinite; }
+      .hizli-yeni-kirmizi { outline-color: #dc2626; }  /* Sembol Nakliyat */
+      .hizli-yeni-mavi    { outline-color: #2563eb; }  /* Depoevim */
+    `}</style>
     <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-x-auto">
       <table className="w-full text-left text-xs min-w-[1080px]">
         {/* DEĞİŞTİ (kullanıcı talebi): SÜTUN SIRASI
@@ -3348,7 +3364,7 @@ const HizliTekliflerTablosu = ({
                   const telefonVar = telefonGecerliMi(k.iletisim);
                   const adsMi = reklamKaynagiAds(k);
                   return (
-                    <tr key={k.id} className={`border-b border-neutral-100 transition ${yeni ? 'bg-yellow-50/40 hover:bg-yellow-50' : 'hover:bg-neutral-50'}`}>
+                    <tr key={k.id} className={`border-b border-neutral-100 transition ${yeni ? `bg-yellow-50/40 hover:bg-yellow-50 hizli-yeni-cerceve ${sembolMu ? 'hizli-yeni-kirmizi' : 'hizli-yeni-mavi'}` : 'hover:bg-neutral-50'}`}>
 
                       {/* MÜŞTERİ + TEKLİF ÖZETİ */}
                       <td className="p-3 align-top">
@@ -3782,9 +3798,35 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const kayitSitesi = (k) => (k.hesapId === 'depoevim' ? 'depoevim' : 'sembolevdeneve');
 
   const kanalHesaplari = hesaplar.filter(h => h.kanal === aktifKanal);
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): MÜKERRER KAYIT GİZLEME (Hızlı Teklifler)
+  // --------------------------------------------------------------------------
+  // Müşteri ADI ve TELEFONU aynı olan tekliflerden yalnızca EN YENİSİ
+  // gösterilir; eskileri listede gizlenir. Kayıtlar Firestore'dan SİLİNMEZ —
+  // yalnızca görünümden kaldırılır, veri kaybı olmaz.
+  //
+  // Güvenlik: karşılaştırma ad (küçük harf, boşluksuz) + telefonun SADECE
+  // rakamları ile yapılır ve yalnızca GERÇEK numarası olan kayıtlarda çalışır;
+  // "Tıklama (Bekleniyor)" gibi numarasız kayıtlar asla birbirinin mükerreri
+  // sayılmaz. Liste en yeniden eskiye sıralı geldiği için ilk görülen kayıt
+  // en yenisidir, sonrakiler elenir.
+  // ==========================================================================
+  const mukerrerleriGizle = (liste) => {
+    const gorulen = new Set();
+    return liste.filter(k => {
+      if (!telefonGecerliMi(k.iletisim)) return true;            // Numarasız kayıt elenmez
+      const anahtar = `${(k.musteriAdi || '').trim().toLowerCase()}|${telefonRakam(k.iletisim)}`;
+      if (gorulen.has(anahtar)) return false;                    // Daha yenisi zaten listede
+      gorulen.add(anahtar);
+      return true;
+    });
+  };
+
   // DEĞİŞTİ: zaman filtresi en başta uygulanır; böylece durum sayaçları da
   // (Tümü (20), Yeni (0) ...) seçilen döneme göre hesaplanır.
-  const kanalKayitlari = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi && zamanUyar(k, zamanFiltre));
+  // DEĞİŞTİ: Hızlı Teklifler'de mükerrer kayıtlar gizlenir (sayaçlar da tekilleşir).
+  const kanalKayitlariHam = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi && zamanUyar(k, zamanFiltre));
+  const kanalKayitlari = aktifKanal === 'web' ? mukerrerleriGizle(kanalKayitlariHam) : kanalKayitlariHam;
   const filtreli = kanalKayitlari.filter(k => {
     if (durumFiltre !== 'Tümü' && (k.durum || 'Yeni') !== durumFiltre) return false;
     if (hizmetFiltre !== 'Tümü' && (k.hizmetTipi || 'Nakliye') !== hizmetFiltre) return false;
