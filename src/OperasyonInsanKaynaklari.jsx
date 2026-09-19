@@ -1158,6 +1158,92 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
     // YENİ: "Dekontu Gör" penceresinde gösterilecek kayıt
     const [muhBelgeGoster, setMuhBelgeGoster] = useState(null);
 
+    // ========================================================================
+    // YENİ (kullanıcı talebi): DEKONT PENCERESİNDE BELGE YÖNETİMİ
+    // ------------------------------------------------------------------------
+    // "Dekontu Gör" penceresi artık salt görüntüleme değil; kayıt oluşturulduktan
+    // SONRA da belge eklenebilir, adı düzenlenebilir ve belge kaldırılabilir.
+    // Üçü de doğrudan avukatMuhasebe kaydının 'belgeler' dizisini günceller.
+    //
+    // NOT: "Kaldır" yalnızca belgeyi KAYITTAN çıkarır; sunucudaki dosya silinmez
+    // (aynı dosya başka kayda da bağlı olabilir). Muhasebe kaydının kendisi de
+    // silinmez — o iş tablodaki kırmızı çarpı butonundadır.
+    // ========================================================================
+    const [belgeIslemYapiliyor, setBelgeIslemYapiliyor] = useState(false);
+    const [belgeDuzenleIndex, setBelgeDuzenleIndex] = useState(null); // Adı düzenlenen belge
+    const [belgeDuzenleAd, setBelgeDuzenleAd] = useState('');
+    const [belgeSilIndex, setBelgeSilIndex] = useState(null);         // Kaldırma onayı bekleyen belge
+
+    // Kaydın belgeler dizisini Firestore'a yazar ve açık pencereyi tazeler
+    const muhBelgeleriKaydet = async (kayit, yeniBelgeler, logMetni) => {
+      setBelgeIslemYapiliyor(true);
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe', kayit.id), { belgeler: yeniBelgeler });
+        // Pencere açık kaldığı için ekrandaki kaydı da güncelliyoruz
+        setMuhBelgeGoster(prev => (prev && prev.id === kayit.id ? { ...prev, belgeler: yeniBelgeler } : prev));
+        addSystemLog?.('Avukat Muhasebe', logMetni);
+      } catch (err) {
+        console.error('Belge güncellenemedi:', err);
+        alert('Belge güncellenirken bir hata oluştu. Lütfen tekrar deneyin.');
+      }
+      setBelgeIslemYapiliyor(false);
+    };
+
+    // (1) EKLE — mevcut kayda sonradan dekont/belge yükler
+    const handleMuhBelgeEkle = async (e) => {
+      const files = Array.from(e.target.files || []);
+      const kayit = muhBelgeGoster;
+      if (files.length === 0 || !kayit) return;
+      setBelgeIslemYapiliyor(true);
+      const yeniler = [];
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+          const res = await fetch('https://www.sembolevdeneve.com/crm/upload.php', { method: 'POST', body: fd });
+          const text = await res.text();
+          let uploadedUrl = file.name;
+          try { const json = JSON.parse(text); uploadedUrl = json.url || json.fileName || json.file || text; } catch (hata) { uploadedUrl = text.trim(); }
+          const uzanti = (file.name.split('.').pop() || '').toLowerCase();
+          const tip = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'bmp'].includes(uzanti) ? 'image' : (uzanti === 'pdf' ? 'pdf' : 'file');
+          yeniler.push({ url: uploadedUrl, name: file.name, type: tip, ekleyen: currentUser?.fullName || 'Sistem', eklemeTarihi: new Date().toISOString() });
+        } catch (err) {
+          console.error('Dekont yüklenemedi:', file.name, err);
+          alert(`"${file.name}" yüklenemedi.`);
+        }
+      }
+      e.target.value = ''; // Aynı dosya tekrar seçilebilsin
+      setBelgeIslemYapiliyor(false);
+      if (yeniler.length === 0) return;
+      await muhBelgeleriKaydet(kayit, [...(kayit.belgeler || []), ...yeniler],
+        `${tarihGoster(kayit.tarih)} tarihli ${kayit.tur} kaydına ${yeniler.length} belge eklendi.`);
+    };
+
+    // (2) DÜZENLE — belgenin görünen adını değiştirir (dosya aynı kalır)
+    const handleMuhBelgeAdKaydet = async () => {
+      const kayit = muhBelgeGoster;
+      const yeniAd = belgeDuzenleAd.trim();
+      if (!kayit || belgeDuzenleIndex === null || !yeniAd) return;
+      const mevcut = kayit.belgeler || [];
+      if (mevcut[belgeDuzenleIndex]?.name === yeniAd) { setBelgeDuzenleIndex(null); return; }
+      const yeniBelgeler = mevcut.map((b, i) => i === belgeDuzenleIndex
+        ? { ...b, name: yeniAd, duzenleyen: currentUser?.fullName || 'Sistem', duzenlemeTarihi: new Date().toISOString() }
+        : b);
+      await muhBelgeleriKaydet(kayit, yeniBelgeler, `Belge adı güncellendi: "${yeniAd}".`);
+      setBelgeDuzenleIndex(null); setBelgeDuzenleAd('');
+    };
+
+    // (3) KALDIR — belgeyi kayıttan çıkarır (onay sorulduktan sonra)
+    const handleMuhBelgeKaldir = async () => {
+      const kayit = muhBelgeGoster;
+      if (!kayit || belgeSilIndex === null) return;
+      const mevcut = kayit.belgeler || [];
+      const kaldirilan = mevcut[belgeSilIndex];
+      await muhBelgeleriKaydet(kayit, mevcut.filter((_, i) => i !== belgeSilIndex),
+        `Belge kayıttan kaldırıldı: "${kaldirilan?.name || 'Belge'}".`);
+      setBelgeSilIndex(null);
+    };
+
     // Dava dosyaları Firestore'dan canlı dinlenir
     useEffect(() => {
       const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari'), snap => {
@@ -1713,43 +1799,127 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
             Kayda bağlı tüm belgeleri listeler. Fotoğraflar doğrudan gösterilir
             (tıklayınca yeni sekmede tam boyut açılır), PDF'ler görüntüleme
             bağlantısı olarak sunulur. */}
-        {muhBelgeGoster && (
-          <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setMuhBelgeGoster(null)}>
-            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+        {muhBelgeGoster && (() => {
+          // Pencere kapanırken açık kalan düzenleme/onay durumları temizlenir
+          const pencereKapat = () => { setMuhBelgeGoster(null); setBelgeDuzenleIndex(null); setBelgeDuzenleAd(''); setBelgeSilIndex(null); };
+          const belgeler = muhBelgeGoster.belgeler || [];
+          return (
+          <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={pencereKapat}>
+            <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[88vh] flex flex-col animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
               <div className="p-4 border-b border-neutral-200 flex items-center justify-between shrink-0">
                 <div className="min-w-0">
                   <h3 className="font-black text-black flex items-center gap-2 text-sm"><Wallet className="w-5 h-5 text-purple-700" /> Ödeme Dekontu / Belgeler</h3>
                   <p className="text-[11px] font-bold text-neutral-500 mt-1 truncate">
                     {tarihGoster(muhBelgeGoster.tarih)} • {muhBelgeGoster.tur} • {muhBelgeGoster.yon === 'masraf' ? '+' : '−'}{paraFormat(muhBelgeGoster.tutar)} ₺
+                    <span className="text-neutral-400"> • {belgeler.length} belge</span>
                   </p>
                 </div>
-                <button onClick={() => setMuhBelgeGoster(null)} className="text-neutral-400 hover:text-black shrink-0"><X className="w-5 h-5" /></button>
+                <button onClick={pencereKapat} className="text-neutral-400 hover:text-black shrink-0"><X className="w-5 h-5" /></button>
               </div>
-              <div className="flex-1 min-h-0 overflow-y-auto p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {(muhBelgeGoster.belgeler || []).map((b, i) => (
-                  <a key={i} href={b.url} target="_blank" rel="noopener noreferrer"
-                    className="border border-neutral-200 rounded-xl overflow-hidden hover:border-purple-400 hover:shadow-md transition group">
-                    {b.type === 'image' ? (
-                      <img src={b.url} alt={b.name} className="w-full h-40 object-cover bg-neutral-100" />
-                    ) : (
-                      <div className="w-full h-40 bg-red-50 flex flex-col items-center justify-center gap-2 text-red-600">
-                        <FileText className="w-10 h-10" />
-                        <span className="text-[10px] font-black uppercase">{b.type === 'pdf' ? 'PDF Belge' : 'Dosya'}</span>
+
+              {/* ================================================================
+                  YENİ: BELGE EKLEME ŞERİDİ
+                  Kayıt oluşturulduktan sonra da dekont/belge yüklenebilir.
+                  ================================================================ */}
+              <div className="px-4 py-3 bg-purple-50 border-b border-purple-100 shrink-0">
+                <label className={`w-full py-2.5 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition ${belgeIslemYapiliyor ? 'bg-purple-300 text-white cursor-wait' : 'bg-purple-600 hover:bg-purple-700 text-white cursor-pointer'}`}>
+                  <input type="file" multiple accept="image/*,application/pdf,.pdf" className="hidden" onChange={handleMuhBelgeEkle} disabled={belgeIslemYapiliyor} />
+                  {belgeIslemYapiliyor ? <><Loader2 className="w-4 h-4 animate-spin" /> İşleniyor...</> : <><PlusCircle className="w-4 h-4" /> Yeni Dekont / Belge Ekle</>}
+                </label>
+                <p className="text-[10px] font-bold text-purple-400 text-center mt-1.5">PDF ve fotoğraf seçebilirsiniz (birden fazla)</p>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto p-4">
+                {belgeler.length === 0 ? (
+                  <div className="py-12 text-center">
+                    <FileText className="w-12 h-12 text-neutral-200 mx-auto mb-2" />
+                    <p className="text-neutral-500 font-bold text-sm">Bu kayıtta belge kalmadı.</p>
+                    <p className="text-neutral-400 text-[11px] mt-1">Yukarıdaki butondan yeni dekont/belge ekleyebilirsiniz.</p>
+                  </div>
+                ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {belgeler.map((b, i) => (
+                    <div key={i} className="border border-neutral-200 rounded-xl overflow-hidden bg-white hover:border-purple-300 transition">
+                      {/* Önizleme — tıklanınca dosya yeni sekmede açılır */}
+                      <a href={b.url} target="_blank" rel="noopener noreferrer" className="block group">
+                        {b.type === 'image' ? (
+                          <img src={b.url} alt={b.name} className="w-full h-40 object-cover bg-neutral-100" />
+                        ) : (
+                          <div className="w-full h-40 bg-red-50 flex flex-col items-center justify-center gap-2 text-red-600 group-hover:bg-red-100 transition">
+                            <FileText className="w-10 h-10" />
+                            <span className="text-[10px] font-black uppercase">{b.type === 'pdf' ? 'PDF Belge' : 'Dosya'}</span>
+                          </div>
+                        )}
+                      </a>
+
+                      <div className="p-2 border-t border-neutral-100">
+                        {/* ---------- AD DÜZENLEME MODU ---------- */}
+                        {belgeDuzenleIndex === i ? (
+                          <div className="flex gap-1">
+                            <input autoFocus value={belgeDuzenleAd} onChange={e => setBelgeDuzenleAd(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') handleMuhBelgeAdKaydet(); if (e.key === 'Escape') setBelgeDuzenleIndex(null); }}
+                              className="flex-1 min-w-0 p-1.5 border border-neutral-300 rounded-lg text-[11px] outline-none focus:ring-2 focus:ring-purple-400" />
+                            <button type="button" onClick={handleMuhBelgeAdKaydet} disabled={!belgeDuzenleAd.trim() || belgeIslemYapiliyor}
+                              className="px-2 bg-purple-600 text-white rounded-lg disabled:opacity-40" title="Kaydet">
+                              {belgeIslemYapiliyor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                            </button>
+                            <button type="button" onClick={() => { setBelgeDuzenleIndex(null); setBelgeDuzenleAd(''); }}
+                              className="px-1.5 text-neutral-400 hover:text-black" title="Vazgeç"><X className="w-3.5 h-3.5" /></button>
+                          </div>
+                        ) : (
+                          <>
+                            <a href={b.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 group">
+                              <Eye className="w-3.5 h-3.5 text-purple-600 shrink-0" />
+                              <span className="text-[11px] font-bold text-neutral-700 truncate group-hover:text-purple-700">{b.name || 'Belge'}</span>
+                            </a>
+                            {(b.ekleyen || b.duzenleyen) && (
+                              <p className="text-[9px] font-bold text-neutral-400 mt-0.5 truncate">
+                                {b.duzenleyen ? `${b.duzenleyen} düzenledi` : `${b.ekleyen} ekledi`}
+                              </p>
+                            )}
+                            {/* ---------- DÜZENLE / KALDIR ---------- */}
+                            <div className="flex gap-1.5 mt-1.5">
+                              <button type="button" onClick={() => { setBelgeDuzenleIndex(i); setBelgeDuzenleAd(b.name || ''); }}
+                                className="flex-1 py-1 rounded-lg text-[10px] font-black bg-neutral-100 hover:bg-neutral-200 text-neutral-700 inline-flex items-center justify-center gap-1 transition">
+                                <Edit className="w-3 h-3" /> Düzenle
+                              </button>
+                              <button type="button" onClick={() => setBelgeSilIndex(i)}
+                                className="flex-1 py-1 rounded-lg text-[10px] font-black bg-white hover:bg-red-50 text-red-500 border border-red-200 inline-flex items-center justify-center gap-1 transition">
+                                <Trash2 className="w-3 h-3" /> Kaldır
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
-                    )}
-                    <div className="p-2 flex items-center gap-1.5 bg-white">
-                      <Eye className="w-3.5 h-3.5 text-purple-600 shrink-0" />
-                      <span className="text-[11px] font-bold text-neutral-700 truncate group-hover:text-purple-700">{b.name || 'Belge'}</span>
                     </div>
-                  </a>
-                ))}
+                  ))}
+                </div>
+                )}
               </div>
               <div className="p-3 border-t border-neutral-200 shrink-0">
-                <button onClick={() => setMuhBelgeGoster(null)} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm transition">Kapat</button>
+                <button onClick={pencereKapat} className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm transition">Kapat</button>
               </div>
+
+              {/* YENİ: KALDIRMA ONAYI — yanlışlıkla belge kaybı olmasın diye */}
+              {belgeSilIndex !== null && (
+                <div className="absolute inset-0 bg-black/60 rounded-2xl flex items-center justify-center p-4" onClick={() => setBelgeSilIndex(null)}>
+                  <div className="bg-white rounded-2xl p-5 w-full max-w-xs text-center shadow-2xl" onClick={e => e.stopPropagation()}>
+                    <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-3" />
+                    <h4 className="font-black text-black text-sm mb-1">Belgeyi Kaldır</h4>
+                    <p className="text-[11px] font-bold text-neutral-500 mb-4 break-all">"{belgeler[belgeSilIndex]?.name || 'Belge'}" bu muhasebe kaydından çıkarılacak.</p>
+                    <div className="flex gap-2">
+                      <button onClick={() => setBelgeSilIndex(null)} className="flex-1 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-xs transition">Vazgeç</button>
+                      <button onClick={handleMuhBelgeKaldir} disabled={belgeIslemYapiliyor}
+                        className="flex-1 py-2 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-xs transition disabled:opacity-50 flex items-center justify-center gap-1.5">
+                        {belgeIslemYapiliyor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Kaldır
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {/* YENİ / DÜZENLE DOSYA MODALI */}
         {showForm && (
