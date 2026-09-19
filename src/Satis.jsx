@@ -2896,7 +2896,8 @@ const KANALLAR = [
   // DEĞİŞTİ (kullanıcı talebi): "Web Sitesi Teklifleri" → "Hızlı Teklifler".
   // id 'web' AYNEN korunur; Firestore'daki mevcut kayıtlar (kanal: 'web') ve
   // api/submit-lead.js bu id ile yazmaya devam eder, hiçbir veri kaybı olmaz.
-  { id: 'web',       ad: 'Hızlı Teklifler',     Ikon: Globe,         renk: 'purple',  hesapEtiket: 'Sayfa',              hesapOrnek: 'sembolevdeneve.com',      iletisimEtiket: 'Telefon No' },
+  // DEĞİŞTİ (kullanıcı talebi): Hızlı Teklifler mor değil TURUNCU
+  { id: 'web',       ad: 'Hızlı Teklifler',     Ikon: Globe,         renk: 'orange',  hesapEtiket: 'Sayfa',              hesapOrnek: 'sembolevdeneve.com',      iletisimEtiket: 'Telefon No' },
   { id: 'iyzico',    ad: 'İyzico Siparişleri',    Ikon: CreditCard,  renk: 'amber',   hesapEtiket: 'Site',               hesapOrnek: 'depoevim.com',            iletisimEtiket: 'Telefon No' },
 ];
 
@@ -3001,6 +3002,8 @@ const KANAL_RENK = {
   red:   { aktif: 'bg-red-600 text-white shadow-md',   pasif: 'bg-red-50 text-red-700 border-red-200 hover:border-red-400',      nokta: 'bg-red-600',   koyu: 'text-red-700' },
   purple: { aktif: 'bg-purple-600 text-white shadow-md', pasif: 'bg-purple-50 text-purple-700 border-purple-200 hover:border-purple-400', nokta: 'bg-purple-600', koyu: 'text-purple-700' },
   amber: { aktif: 'bg-amber-600 text-white shadow-md', pasif: 'bg-amber-50 text-amber-700 border-amber-200 hover:border-amber-400', nokta: 'bg-amber-600', koyu: 'text-amber-700' },
+  // YENİ (kullanıcı talebi): Hızlı Teklifler için turuncu
+  orange: { aktif: 'bg-orange-500 text-white shadow-md', pasif: 'bg-orange-50 text-orange-700 border-orange-200 hover:border-orange-400', nokta: 'bg-orange-500', koyu: 'text-orange-700' },
 };
 
 // Tarihi kısa Türkçe biçimde göster
@@ -3393,48 +3396,39 @@ const HizliTekliflerTablosu = ({
                         </button>
                       </td>
 
-                      {/* NOT */}
+                      {/* NOT — DEĞİŞTİ (kullanıcı talebi): SADECE GÖRÜNTÜLEME
+                          Not ekleme/düzenleme artık yalnızca "Teklife Bak"
+                          penceresinden yapılır; burada son not (veya "Not yok")
+                          gösterilir. */}
                       <td className="p-3 align-top">
-                        {/* Son notun kısa önizlemesi — tıklanınca da pencere açılır */}
-                        {sonNot && (
-                          <button type="button" onClick={() => setNotPenceresi({ kayitId: k.id, mod: 'liste' })}
-                            className="w-full text-left bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1.5 mb-1.5 hover:bg-yellow-100 transition">
-                            <p className="text-[11px] text-neutral-800 line-clamp-2" title={sonNot.metin}>{sonNot.metin}</p>
-                            <p className="text-[9px] font-bold text-neutral-400 mt-0.5">{sonNot.kullanici} • {tarihSaat(sonNot.tarih)}</p>
-                          </button>
+                        {sonNot ? (
+                          <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-2 py-1.5">
+                            <p className="text-[11px] text-neutral-800 line-clamp-2 whitespace-pre-wrap" title={sonNot.metin}>{sonNot.metin}</p>
+                            <p className="text-[9px] font-bold text-neutral-400 mt-0.5">
+                              {sonNot.kullanici} • {tarihSaat(sonNot.tarih)}
+                              {(k.notlar || []).length > 1 && <span className="ml-1 text-neutral-500">• +{k.notlar.length - 1} not daha</span>}
+                            </p>
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-neutral-400"><StickyNote className="w-3 h-3" /> Not yok</span>
                         )}
-                        <div className="flex flex-col gap-1.5">
-                          {/* Not varsa önce "Notu Gör", yoksa doğrudan "Not Ekle" */}
-                          {(k.notlar || []).length > 0 && (
-                            <button type="button" onClick={() => setNotPenceresi({ kayitId: k.id, mod: 'liste' })}
-                              className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-black bg-neutral-900 text-white hover:bg-neutral-700 transition">
-                              <Eye className="w-3 h-3" /> Notu Gör ({k.notlar.length})
-                            </button>
-                          )}
-                          <button type="button" onClick={() => { setNotPenceresi({ kayitId: k.id, mod: 'ekle' }); setNotTaslak(''); }}
-                            className="inline-flex items-center justify-center gap-1 px-2 py-1.5 rounded-lg text-[10px] font-black bg-yellow-50 text-yellow-800 border border-yellow-200 hover:bg-yellow-100 transition">
-                            <StickyNote className="w-3 h-3" /> Not Ekle
-                          </button>
-                        </div>
                       </td>
 
-
-                      {/* DURUM — DEĞİŞTİ: Hizmet + Durum + Satışçı tek sütunda alt alta */}
+                      {/* DURUM — DEĞİŞTİ (kullanıcı talebi): SADECE GÖRÜNTÜLEME
+                          Hizmet tipi, durum ve satışçı burada rozet olarak görünür;
+                          değiştirme yalnızca "Teklife Bak" penceresinden yapılır
+                          (durum/hizmet butonları + Kaydet ile satışçı ataması). */}
                       <td className="p-3 align-top">
                         <div className="flex flex-col gap-1.5 w-[150px]">
                           <span className={`inline-flex items-center justify-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black ${tip.renk}`}>
                             <tip.Ikon className="w-3 h-3" /> {tip.id.toUpperCase()}
                           </span>
-                          {/* Durum değişince sol menüdeki "yeni" rozeti otomatik azalır */}
-                          <select value={k.durum || 'Yeni'} onChange={e => onDurumDegistir(k, e.target.value)}
-                            className={`w-full px-2 py-1 rounded-lg text-[10px] font-black border outline-none cursor-pointer ${durumRenk(k.durum)}`}>
-                            {DURUMLAR.map(d => <option key={d.id}>{d.id}</option>)}
-                          </select>
-                          <select value={k.atanan || ''} onChange={e => onAta(k, e.target.value)}
-                            className="w-full px-2 py-1 rounded-lg text-[10px] font-bold border border-neutral-200 bg-white outline-none cursor-pointer">
-                            <option value="">— Satışçı —</option>
-                            {satiscilar.map(p => <option key={p.id} value={p.fullName}>{p.fullName}</option>)}
-                          </select>
+                          <span className={`inline-flex items-center justify-center px-2 py-1 rounded-lg text-[10px] font-black border ${durumRenk(k.durum)}`}>
+                            {k.durum || 'Yeni'}
+                          </span>
+                          <span className={`inline-flex items-center justify-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold border ${k.atanan ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-400 border-neutral-200'}`}>
+                            <User className="w-3 h-3" /> {k.atanan || 'Atanmadı'}
+                          </span>
                         </div>
                       </td>
 
@@ -3914,13 +3908,13 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             {/* ---- HIZLI TEKLİFLER ---- */}
             {/* DEĞİŞTİ: Hızlı Teklifler butonu ~%20 küçültüldü */}
             <button type="button" onClick={() => sekmeSec('web')}
-              className={`w-full px-3 py-2.5 rounded-2xl border-2 transition flex items-center gap-2.5 ${webAktif ? 'bg-purple-600 text-white border-transparent shadow-lg shadow-purple-600/30' : 'bg-white text-purple-700 border-purple-200 hover:border-purple-400'}`}>
-              <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${webAktif ? 'bg-white/20' : 'bg-purple-50'}`}>
+              className={`w-full px-3 py-2.5 rounded-2xl border-2 transition flex items-center gap-2.5 ${webAktif ? 'bg-orange-500 text-white border-transparent shadow-lg shadow-orange-500/30' : 'bg-white text-orange-700 border-orange-200 hover:border-orange-400'}`}>
+              <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${webAktif ? 'bg-white/20' : 'bg-orange-50'}`}>
                 <Globe className="w-5 h-5" />
               </span>
               <span className="text-left flex-1 min-w-0">
                 <span className="block text-sm font-black leading-tight">{webKanal.ad}</span>
-                <span className={`block text-[10px] font-bold mt-0.5 ${webAktif ? 'text-white/80' : 'text-purple-500'}`}>
+                <span className={`block text-[10px] font-bold mt-0.5 ${webAktif ? 'text-white/80' : 'text-orange-600'}`}>
                   {siteSecimi === 'depoevim' ? 'depoevim.com' : 'sembolevdeneve.com'} sihirbazından gelen teklif talepleri — gün gün listelenir
                 </span>
               </span>
@@ -3928,7 +3922,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               {webYeni > 0 && (
                 <span className={`text-[11px] font-black px-2 py-0.5 rounded-full text-white animate-pulse ${siteRenk}`}>{webYeni} yeni</span>
               )}
-              <span className={`text-xs font-black px-2 py-0.5 rounded-full ${webAktif ? 'bg-white/25' : 'bg-purple-50'}`}>{webKayitlari.length}</span>
+              <span className={`text-xs font-black px-2 py-0.5 rounded-full ${webAktif ? 'bg-white/25' : 'bg-orange-50'}`}>{webKayitlari.length}</span>
             </button>
 
             {/* ---- DİĞER KANALLAR ----
@@ -4030,25 +4024,36 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         </div>
       )}
 
-      {/* DURUM + HİZMET FİLTRELERİ */}
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex flex-wrap items-center gap-2">
-        <span className="text-[10px] font-black text-neutral-400 uppercase">Durum:</span>
-        {['Tümü', ...DURUMLAR.map(d => d.id)].map(d => (
-          <button key={d} type="button" onClick={() => setDurumFiltre(d)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${durumFiltre === d ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
-            {d} <span className="opacity-60">({durumSayaclari[d]})</span>
-          </button>
-        ))}
-        <span className="text-[10px] font-black text-neutral-400 uppercase ml-2">Hizmet:</span>
-        {['Tümü', 'Nakliye', 'Depo', 'Asansör'].map(t => (
-          <button key={t} type="button" onClick={() => setHizmetFiltre(t)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${hizmetFiltre === t ? (t === 'Nakliye' ? 'bg-red-600 text-white border-red-600' : t === 'Depo' ? 'bg-blue-600 text-white border-blue-600' : t === 'Asansör' ? 'bg-green-600 text-white border-green-600' : 'bg-neutral-900 text-white border-neutral-900') : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
-            {t}
-          </button>
-        ))}
+      {/* DURUM + HİZMET FİLTRELERİ
+          DEĞİŞTİ (kullanıcı talebi): Durum satırı TEK SATIRA sığar (taşarsa yatay
+          kaydırılır) ve her durum butonu, tablodaki durum rozetleriyle AYNI
+          renktedir; seçili olan koyu halka (ring) ile belli olur. */}
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 space-y-2">
+        <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-0.5">
+          <span className="text-[10px] font-black text-neutral-400 uppercase shrink-0">Durum:</span>
+          {['Tümü', ...DURUMLAR.map(d => d.id)].map(d => {
+            const secili = durumFiltre === d;
+            const renk = d === 'Tümü'
+              ? (secili ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400')
+              : durumRenk(d);
+            return (
+              <button key={d} type="button" onClick={() => setDurumFiltre(d)}
+                className={`px-2 py-1 rounded-lg text-[10px] font-black border transition shrink-0 ${renk} ${secili && d !== 'Tümü' ? 'ring-2 ring-neutral-900 ring-offset-1' : ''} ${!secili && d !== 'Tümü' ? 'opacity-80 hover:opacity-100' : ''}`}>
+                {d} <span className="opacity-60">({durumSayaclari[d]})</span>
+              </button>
+            );
+          })}
+          <span className="text-[10px] font-black text-neutral-400 uppercase ml-1 shrink-0">Hizmet:</span>
+          {['Tümü', 'Nakliye', 'Depo', 'Asansör'].map(t => (
+            <button key={t} type="button" onClick={() => setHizmetFiltre(t)}
+              className={`px-2 py-1 rounded-lg text-[10px] font-black border transition shrink-0 ${hizmetFiltre === t ? (t === 'Nakliye' ? 'bg-red-600 text-white border-red-600' : t === 'Depo' ? 'bg-blue-600 text-white border-blue-600' : t === 'Asansör' ? 'bg-green-600 text-white border-green-600' : 'bg-neutral-900 text-white border-neutral-900') : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+              {t}
+            </button>
+          ))}
+        </div>
 
         {/* YENİ (kullanıcı talebi): ZAMAN FİLTRESİ — yeni satırda, Tüm Zamanlar varsayılan */}
-        <div className="w-full flex flex-wrap items-center gap-2 pt-2 mt-1 border-t border-neutral-100">
+        <div className="w-full flex flex-wrap items-center gap-1.5 pt-2 border-t border-neutral-100">
           <span className="text-[10px] font-black text-neutral-400 uppercase flex items-center gap-1"><CalendarDays className="w-3 h-3" /> Zaman:</span>
           {ZAMAN_FILTRELERI.map(z => (
             <button key={z} type="button" onClick={() => setZamanFiltre(z)}
@@ -4200,6 +4205,15 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/25">{detayKayit.durum || 'Yeni'}</span>
                   </div>
                   <p className="text-sm font-bold opacity-95 mt-0.5">{detayKayit.iletisim}</p>
+                  {/* YENİ: mevcut satışçı — canlı kayıttan okunur, başka kullanıcı Kaydet'le devralırsa pencere açıkken bile güncellenir */}
+                  {(() => {
+                    const canli = kayitlar.find(x => x.id === detayKayit.id) || detayKayit;
+                    return (
+                      <span className={`inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-black ${canli.atanan ? 'bg-white/25 text-white' : 'bg-black/20 text-white/70'}`}>
+                        <User className="w-3 h-3" /> Satışçı: {canli.atanan || 'Atanmadı'}
+                      </span>
+                    );
+                  })()}
                   <p className="text-[10px] font-bold opacity-75 mt-1 flex items-center gap-1.5 flex-wrap">
                     <kanal.Ikon className="w-3 h-3" /> {kanal.ad}
                     <span className="opacity-50">|</span> {hesapAdi(detayKayit.hesapId)}
@@ -4442,17 +4456,30 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 <button onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false); setDetayNotDuzenle(null); setDetayNotSil(null); }}
                   className="px-4 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-500 font-black rounded-xl text-sm transition">Vazgeç</button>
                 <button onClick={async () => {
-                    // Kaydeden kişi işin satışçısı olur (zaten oysa tekrar yazılmaz)
+                    // ============================================================
+                    // DEĞİŞTİ (kullanıcı talebi): SATIŞÇI = EN SON KAYDET'E BASAN
+                    // ------------------------------------------------------------
+                    // Kısıt yoktur: Kaydet'e basan HER kullanıcı (pozisyonu ne
+                    // olursa olsun) bu işin satışçısı olarak yazılır. Daha önce
+                    // başka biri atanmışsa isim onunkiyle DEĞİŞTİRİLİR; tabloda
+                    // ve pencerede hep en son kaydedenin adı görünür. Devralma,
+                    // hareket geçmişine kimden kime geçtiğiyle birlikte yazılır.
+                    // ============================================================
                     if (detayKayit && kullaniciAdi && detayKayit.atanan !== kullaniciAdi) {
-                      await handleAta(detayKayit, kullaniciAdi);
+                      await hareketliGuncelle(detayKayit, { atanan: kullaniciAdi },
+                        detayKayit.atanan
+                          ? `Satışçı değişti: ${detayKayit.atanan} → ${kullaniciAdi} (Kaydet ile devraldı)`
+                          : `Kayıt ${kullaniciAdi} adlı satışçıya atandı (Kaydet ile)`);
                     }
-                    setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false);
+                    setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false); setDetayNotDuzenle(null); setDetayNotSil(null);
                   }}
                   className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl text-sm transition shadow-lg shadow-green-600/30 flex items-center justify-center gap-2">
                   <Save className="w-4 h-4" /> Kaydet
                 </button>
               </div>
-              <p className="text-[10px] font-bold text-neutral-400 text-center mt-1.5">Kaydet'e basan kullanıcı ({kullaniciAdi}) bu işin satışçısı olarak atanır.</p>
+              <p className="text-[10px] font-bold text-neutral-400 text-center mt-1.5">
+                Kaydet'e basan kullanıcı ({kullaniciAdi}) bu işin satışçısı olur; daha sonra başka biri Kaydet'e basarsa satışçı <span className="font-black text-neutral-500">en son basan kişi</span> olarak güncellenir.
+              </p>
             </div>
           </div>
 
