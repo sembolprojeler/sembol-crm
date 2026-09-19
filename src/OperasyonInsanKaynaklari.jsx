@@ -1244,6 +1244,77 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
       setBelgeSilIndex(null);
     };
 
+    // ========================================================================
+    // YENİ (kullanıcı talebi): TEK SEFERLİK YÖN DÜZELTMESİ
+    // ------------------------------------------------------------------------
+    // 18.09.2026 ve öncesindeki avukat muhasebe kayıtlarında "Masraf" ve
+    // "Ödeme" yönleri TERS girilmiş. Bu araç o kayıtların yönünü birbiriyle
+    // değiştirir (masraf ⇄ ödeme).
+    //
+    // GÜVENLİK ÖNLEMLERİ:
+    //   • Yalnızca tarih <= 2026-09-18 olan kayıtlara dokunur.
+    //   • Düzeltilen kayda yonDuzeltmeV1 damgası vurulur; araç bir daha aynı
+    //     kaydı çevirmez, yani yanlışlıkla iki kez çalıştırılamaz.
+    //   • Orijinal yön yonOncesi alanında saklanır, bu sayede "Geri Al" ile
+    //     her şey eski haline döndürülebilir.
+    //   • Tür adlarına (Harç, Avukata Ödeme vb.) DOKUNULMAZ; sadece yön değişir.
+    //   • İş bitince panel kendiliğinden kaybolur.
+    // ========================================================================
+    const YON_DUZELTME_SON_TARIH = '2026-09-18';  // Bu tarih DAHİL
+    const [yonDuzeltmeCalisiyor, setYonDuzeltmeCalisiyor] = useState(false);
+    const [yonDuzeltmeOnay, setYonDuzeltmeOnay] = useState(null); // 'duzelt' | 'geri'
+
+    // Düzeltilecek kayıtlar: tarihi sınırda/öncesinde ve henüz çevrilmemiş olanlar
+    const yonDuzeltilecekler = muhasebe.filter(m =>
+      (m.tarih || '') <= YON_DUZELTME_SON_TARIH && m.yonDuzeltmeV1 !== true
+    );
+    // Daha önce bu araçla çevrilmiş kayıtlar (geri alma için)
+    const yonDuzeltilmisler = muhasebe.filter(m => m.yonDuzeltmeV1 === true);
+
+    // Yönü çevirir: masraf ⇄ ödeme
+    const yonuCevir = (yon) => (yon === 'masraf' ? 'odeme' : 'masraf');
+
+    // (A) DÜZELT — seçili kayıtların yönünü tersine çevirir
+    const handleYonDuzelt = async () => {
+      setYonDuzeltmeCalisiyor(true);
+      let basarili = 0;
+      for (const m of yonDuzeltilecekler) {
+        try {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe', m.id), {
+            yon: yonuCevir(m.yon),
+            yonOncesi: m.yon,                       // Geri alma için orijinal yön
+            yonDuzeltmeV1: true,                    // Tekrar çevrilmesini engeller
+            yonDuzeltmeTarihi: new Date().toISOString(),
+            yonDuzelten: currentUser?.fullName || 'Sistem',
+          });
+          basarili++;
+        } catch (err) { console.error('Yön düzeltilemedi:', m.id, err); }
+      }
+      setYonDuzeltmeCalisiyor(false);
+      setYonDuzeltmeOnay(null);
+      addSystemLog?.('Avukat Muhasebe', `Tek seferlik düzeltme: ${YON_DUZELTME_SON_TARIH} ve öncesindeki ${basarili} kaydın masraf/ödeme yönü tersine çevrildi.`);
+      alert(`${basarili} kaydın yönü düzeltildi.`);
+    };
+
+    // (B) GERİ AL — düzeltmeyi iptal edip kayıtları eski haline döndürür
+    const handleYonGeriAl = async () => {
+      setYonDuzeltmeCalisiyor(true);
+      let basarili = 0;
+      for (const m of yonDuzeltilmisler) {
+        try {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe', m.id), {
+            yon: m.yonOncesi || yonuCevir(m.yon),   // Kayıtlı orijinal yöne dönülür
+            yonDuzeltmeV1: false,
+          });
+          basarili++;
+        } catch (err) { console.error('Yön geri alınamadı:', m.id, err); }
+      }
+      setYonDuzeltmeCalisiyor(false);
+      setYonDuzeltmeOnay(null);
+      addSystemLog?.('Avukat Muhasebe', `Tek seferlik düzeltme geri alındı: ${basarili} kayıt eski yönüne döndürüldü.`);
+      alert(`${basarili} kayıt eski haline döndürüldü.`);
+    };
+
     // Dava dosyaları Firestore'dan canlı dinlenir
     useEffect(() => {
       const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'davaDosyalari'), snap => {
@@ -1738,6 +1809,72 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
             )}
           </div>
         </div>
+
+        {/* ====================================================================
+            YENİ: TEK SEFERLİK YÖN DÜZELTME PANELİ
+            İşi bitince (düzeltilecek kayıt kalmayınca) kendiliğinden kaybolur.
+            ==================================================================== */}
+        {(yonDuzeltilecekler.length > 0 || yonDuzeltilmisler.length > 0) && (
+          <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <h4 className="font-black text-amber-900 text-sm">Tek Seferlik Düzeltme: Masraf / Ödeme Yönü</h4>
+                <p className="text-[11px] font-bold text-amber-700 mt-1 leading-relaxed">
+                  {new Date(YON_DUZELTME_SON_TARIH).toLocaleDateString('tr-TR')} ve öncesindeki kayıtlarda yön ters girilmiş.
+                  Bu araç <span className="underline">Masraf → Ödeme</span>, <span className="underline">Ödeme → Masraf</span> olarak çevirir.
+                  Tutar, tür, dosya ve belgeler değişmez. Her kayıt yalnızca bir kez çevrilir.
+                </p>
+
+                <div className="flex flex-wrap gap-2 mt-3">
+                  {yonDuzeltilecekler.length > 0 && (
+                    <button onClick={() => setYonDuzeltmeOnay('duzelt')} disabled={yonDuzeltmeCalisiyor}
+                      className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-black inline-flex items-center gap-2 transition disabled:opacity-50">
+                      {yonDuzeltmeCalisiyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <ArrowRightLeft className="w-4 h-4" />}
+                      {yonDuzeltilecekler.length} Kaydı Düzelt
+                    </button>
+                  )}
+                  {yonDuzeltilmisler.length > 0 && (
+                    <button onClick={() => setYonDuzeltmeOnay('geri')} disabled={yonDuzeltmeCalisiyor}
+                      className="px-4 py-2 bg-white hover:bg-neutral-100 text-neutral-700 border border-neutral-300 rounded-xl text-xs font-black inline-flex items-center gap-2 transition disabled:opacity-50">
+                      <History className="w-4 h-4" /> Geri Al ({yonDuzeltilmisler.length})
+                    </button>
+                  )}
+                </div>
+
+                {yonDuzeltilecekler.length === 0 && yonDuzeltilmisler.length > 0 && (
+                  <p className="text-[11px] font-black text-emerald-700 mt-2 flex items-center gap-1.5">
+                    <CheckCircle className="w-3.5 h-3.5" /> Düzeltme tamamlandı — bekleyen kayıt yok.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Onay penceresi — işlem geri alınabilir olsa da sayı teyit ettirilir */}
+            {yonDuzeltmeOnay && (
+              <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4" onClick={() => setYonDuzeltmeOnay(null)}>
+                <div className="bg-white rounded-2xl p-5 w-full max-w-sm text-center shadow-2xl" onClick={e => e.stopPropagation()}>
+                  <AlertTriangle className={`w-14 h-14 mx-auto mb-3 ${yonDuzeltmeOnay === 'duzelt' ? 'text-amber-500' : 'text-neutral-400'}`} />
+                  <h4 className="font-black text-black text-base mb-1">
+                    {yonDuzeltmeOnay === 'duzelt' ? 'Yönleri Çevir' : 'Düzeltmeyi Geri Al'}
+                  </h4>
+                  <p className="text-xs font-bold text-neutral-500 mb-4 leading-relaxed">
+                    {yonDuzeltmeOnay === 'duzelt'
+                      ? `${new Date(YON_DUZELTME_SON_TARIH).toLocaleDateString('tr-TR')} ve öncesindeki ${yonDuzeltilecekler.length} kaydın yönü tersine çevrilecek. İsterseniz sonradan "Geri Al" ile eski haline döndürebilirsiniz.`
+                      : `${yonDuzeltilmisler.length} kayıt düzeltmeden önceki yönüne döndürülecek.`}
+                  </p>
+                  <div className="flex gap-2">
+                    <button onClick={() => setYonDuzeltmeOnay(null)} className="flex-1 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-xs transition">Vazgeç</button>
+                    <button onClick={yonDuzeltmeOnay === 'duzelt' ? handleYonDuzelt : handleYonGeriAl} disabled={yonDuzeltmeCalisiyor}
+                      className={`flex-1 py-2.5 text-white font-black rounded-xl text-xs transition disabled:opacity-50 flex items-center justify-center gap-1.5 ${yonDuzeltmeOnay === 'duzelt' ? 'bg-amber-600 hover:bg-amber-700' : 'bg-neutral-800 hover:bg-neutral-900'}`}>
+                      {yonDuzeltmeCalisiyor ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> İşleniyor</> : 'Onayla'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* DOSYAYA GÖRE FİLTRE */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex items-center gap-2 flex-wrap">
