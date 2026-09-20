@@ -874,7 +874,10 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       </div>
     );
   };
-  export const CalendarView = ({ jobs, handleEditJob, currentUser, setJobToChangeDate, setNewJobDate, setShowChangeDateModal, setCancelJobId, setDeleteJobId, onDonemGerekli, donemYukleniyor }) => {
+  export const CalendarView = ({ jobs, handleEditJob, currentUser, setJobToChangeDate, setNewJobDate, setShowChangeDateModal, setCancelJobId, setDeleteJobId, onDonemGerekli, donemYukleniyor,
+    // YENİ (kullanıcı talebi): Müşteri adına tıklanınca cari profilini açar.
+    // App.jsx'ten gelir; yetki yoksa null gelir ve ad eskisi gibi düz metin kalır.
+    onViewCustomer = null }) => {
     const canAssign = currentUser?.position?.includes('Operasyon') || currentUser?.position?.includes('Firma Sahibi') || currentUser?.permissions?.canEdit;
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
@@ -1152,9 +1155,18 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                   <div key={job.id} className={`bg-white p-3.5 rounded-xl shadow-sm border ${job.status === 'cancelled' ? 'border-red-400 bg-red-50/40' : job.isSpecial ? 'border-yellow-400 ring-1 ring-yellow-100 bg-yellow-50/20' : 'border-neutral-200 hover:border-red-400'} flex flex-col gap-2.5 transition group`}>
                     <div className="flex justify-between items-center gap-2">
                       <div className="flex flex-wrap items-center gap-1.5">
+                        {/* DEĞİŞTİ (kullanıcı talebi): müşteri adı artık TIKLANABİLİR —
+                            cari profiline gider. Yetki yoksa eskisi gibi düz metin kalır. */}
                         <span className="font-bold text-sm text-black flex items-center gap-1">
                           {job.isSpecial && <Star className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500 drop-shadow-sm" />}
-                          {job.customerName}
+                          {onViewCustomer ? (
+                            <button type="button"
+                              onClick={(e) => { e.stopPropagation(); onViewCustomer(job); }}
+                              title={`${job.customerName} — cari profilini aç`}
+                              className="text-black hover:text-red-600 hover:underline decoration-red-400 underline-offset-2 transition text-left">
+                              {job.customerName}
+                            </button>
+                          ) : job.customerName}
                         </span>
                         <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold text-white uppercase tracking-wider ${job.type === 'Depo' ? 'bg-blue-600' : job.type === 'Asansör' ? 'bg-green-500' : 'bg-red-600'}`}>
                           {job.type || 'Nakliye'}
