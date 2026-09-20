@@ -3020,7 +3020,15 @@ const tarihSaat = (iso) => iso ? new Date(iso).toLocaleString('tr-TR', { day: '2
 
 // Bir kaydın hangi şirkete ait olduğunu belirler — MusteriHavuzuView içindeki
 // kayitSitesi ile AYNI kural (sadece depoevim işaretli olanlar depoevim'dir).
-const hizliTeklifSitesi = (k) => (k.hesapId === 'depoevim' ? 'depoevim' : 'sembolevdeneve');
+// DEĞİŞTİ: MusteriHavuzuView'daki kayitSitesi ile AYNI kural — hizmet tipi
+// belirleyicidir (Depo → Depoevim, Nakliye/Asansör → Sembol); tipi olmayan
+// eski kayıtlarda hesabına bakılır. Sol menüdeki rozetler de bu kurala uyar.
+const hizliTeklifSitesi = (k) => {
+  const tip = k.hizmetTipi;
+  if (tip === 'Depo') return 'depoevim';
+  if (tip === 'Nakliye' || tip === 'Asansör') return 'sembolevdeneve';
+  return k.hesapId === 'depoevim' ? 'depoevim' : 'sembolevdeneve';
+};
 
 // ============================================================================
 // YENİ (kullanıcı talebi): HAVUZ KAYDINI KİM SİLEBİLİR?
@@ -3601,7 +3609,11 @@ const HizliTekliflerTablosu = ({
   );
 };
 
-export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLog, setViewingImage }) => {
+export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLog, setViewingImage,
+  // YENİ (kullanıcı talebi): "Teklife Bak" penceresindeki "Kayıt Aç" butonu.
+  // App.jsx'ten gelir; hizmet tipine göre doğru kayıt sekmesini açar ve
+  // müşteri ad/telefonunu forma doldurur. Yetkisi yoksa null gelir → buton çizilmez.
+  onKayitAc = null }) => {
   // ---------------------------------------------------------------- STATE ---
   // DEĞİŞTİ (kullanıcı talebi): Havuz açılınca ilk sekme artık "Hızlı Teklifler" ('web')
   const [aktifKanal, setAktifKanal] = useState('web');
@@ -3795,7 +3807,28 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
 
   // Bir kaydın hangi şirkete ait olduğunu belirler — SADECE depoevim'den
   // gelenler hesapId==='depoevim' taşır, gerisi sembolevdeneve sayılır.
-  const kayitSitesi = (k) => (k.hesapId === 'depoevim' ? 'depoevim' : 'sembolevdeneve');
+  // ==========================================================================
+  // DEĞİŞTİ (kullanıcı talebi): KAYIT HANGİ ŞİRKETTE GÖRÜNÜR?
+  // --------------------------------------------------------------------------
+  // ESKİSİ: Yalnızca hesabına (hesapId) bakılıyordu. Bu yüzden Sembol
+  // sitesinden gelen bir DEPO talebi (örn. Tülay Sezdi) Sembol sekmesinde
+  // kalıyordu.
+  // YENİSİ: HİZMET TİPİ belirleyicidir —
+  //     Depo    → DEPOEVİM sekmesi
+  //     Nakliye → SEMBOL sekmesi
+  //     Asansör → SEMBOL sekmesi
+  // Hizmet tipi "Teklife Bak" penceresinden değiştirilince kayıt otomatik
+  // olarak diğer sekmeye taşınır (ayrıca bir işlem gerekmez).
+  //
+  // Hizmet tipi hiç yazılmamış eski kayıtlarda eski kurala (hesapId) düşülür,
+  // böylece geçmiş veri yerinden oynamaz.
+  // ==========================================================================
+  const kayitSitesi = (k) => {
+    const tip = k.hizmetTipi;
+    if (tip === 'Depo') return 'depoevim';
+    if (tip === 'Nakliye' || tip === 'Asansör') return 'sembolevdeneve';
+    return k.hesapId === 'depoevim' ? 'depoevim' : 'sembolevdeneve';
+  };
 
   const kanalHesaplari = hesaplar.filter(h => h.kanal === aktifKanal);
   // ==========================================================================
@@ -4390,7 +4423,44 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                     </button>
                   ))}
                 </div>
+                {/* YENİ: Hizmet tipi hangi şirkette listeleneceğini belirler.
+                    Kayıt bulunduğumuz sekmeden farklı şirkete düşüyorsa uyarılır. */}
+                {kayitSitesi(detayKayit) !== siteSecimi && (
+                  <p className="mt-2 text-[10px] font-black text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex items-center gap-1.5">
+                    <ArrowUpRight className="w-3 h-3 shrink-0" />
+                    Bu hizmet tipiyle kayıt <span className="underline">{kayitSitesi(detayKayit) === 'depoevim' ? 'DEPOEVİM' : 'SEMBOL'}</span> sekmesinde listelenir.
+                  </p>
+                )}
               </div>
+
+              {/* ==============================================================
+                  YENİ (kullanıcı talebi): KAYIT AÇ
+                  --------------------------------------------------------------
+                  Teklifi gerçek işe çevirir: hizmet tipine göre Nakliye / Depo /
+                  Asansör kayıt sekmesi açılır, müşteri adı ve telefonu forma
+                  otomatik yazılır. Hem Sembol hem Depoevim tarafında çalışır.
+                  ============================================================== */}
+              {onKayitAc && (() => {
+                const tip = detayKayit.hizmetTipi || 'Nakliye';
+                const tipBilgi = HIZMET_TIPLERI.find(t => t.id === tip) || HIZMET_TIPLERI[0];
+                const renk = tip === 'Depo' ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30'
+                  : tip === 'Asansör' ? 'bg-green-600 hover:bg-green-700 shadow-green-600/30'
+                  : 'bg-red-600 hover:bg-red-700 shadow-red-600/30';
+                return (
+                  <button type="button"
+                    onClick={() => {
+                      // Eşleştirme kutularında düzeltilmiş bilgi varsa o kullanılır
+                      const ad = (duzenleMusteriAdi || detayKayit.musteriAdi || '').trim();
+                      const tel = (duzenleIletisim || detayKayit.iletisim || '').trim();
+                      onKayitAc({ hizmetTipi: tip, musteriAdi: ad, telefon: telefonGecerliMi(tel) ? tel : '' });
+                      setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false);
+                    }}
+                    className={`w-full py-3 rounded-2xl text-white text-sm font-black transition shadow-lg flex items-center justify-center gap-2 ${renk}`}>
+                    <tipBilgi.Ikon className="w-4 h-4" /> {tip} Kaydı Aç
+                    <span className="text-[10px] font-bold opacity-80">— müşteri bilgileri otomatik dolar</span>
+                  </button>
+                );
+              })()}
               {/* Not ekleme */}
               <div className="bg-white border border-neutral-200 rounded-2xl p-3">
                 <div className="flex items-center justify-between mb-1.5">
