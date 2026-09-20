@@ -3090,6 +3090,16 @@ const TEKLIF_SATIR_RENKLERI = [
 ];
 const TEKLIF_PARA_ALANLARI = ['Aylık Fiyat', 'Toplam Ödenecek (peşin)', 'Toplam Ödenecek', 'Bütçe'];
 
+// YENİ (kullanıcı talebi): Bazı alanların EKRANDA görünen adı değiştirilir.
+// Ham metindeki anahtar (sihirbazın gönderdiği ad) AYNEN kalır — ayrıştırma
+// bozulmaz, sadece etiket okunaklı hale gelir. Yeni bir ad değişikliği için
+// bu listeye tek satır eklemek yeterlidir.
+const TEKLIF_ETIKET_ADLARI = {
+  'Çıkış asansör': 'Yükleme Şekli',
+  'Varış asansör': 'Boşaltma Şekli',
+};
+const teklifEtiketAdi = (etiket) => TEKLIF_ETIKET_ADLARI[etiket] || etiket;
+
 const teklifOzetiAyristir = (ham) => {
   const metin = (ham || '').trim();
   if (!metin) return null;
@@ -4275,11 +4285,16 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   {(detayKayit.musteriAdi || detayKayit.iletisim || '?').charAt(0).toUpperCase()}
                 </span>
                 <div className="min-w-0 flex-1">
+                  {/* DEĞİŞTİ (kullanıcı talebi): ad ve numara SİYAH, kalın ve
+                      daha belirgin — turuncu başlık üzerinde beyaz bir kutu
+                      içinde birlikte gösterilir. */}
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-black text-base truncate">{detayKayit.musteriAdi || 'İsimsiz'}</h3>
+                    <span className="bg-white rounded-xl px-3 py-1.5 inline-flex items-baseline gap-2 flex-wrap shadow-sm">
+                      <h3 className="font-black text-lg text-black leading-tight">{detayKayit.musteriAdi || 'İsimsiz'}</h3>
+                      <span className="font-black text-sm text-black/80 tracking-wide">{detayKayit.iletisim}</span>
+                    </span>
                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/25">{detayKayit.durum || 'Yeni'}</span>
                   </div>
-                  <p className="text-sm font-bold opacity-95 mt-0.5">{detayKayit.iletisim}</p>
                   {/* YENİ: mevcut satışçı — canlı kayıttan okunur, başka kullanıcı Kaydet'le devralırsa pencere açıkken bile güncellenir */}
                   {(() => {
                     const canli = kayitlar.find(x => x.id === detayKayit.id) || detayKayit;
@@ -4302,10 +4317,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               {/* Hızlı iletişim — numarası yoksa butonlar pasif */}
               {telefonGecerliMi(detayKayit.iletisim) && (
                 <div className="flex gap-2 mt-3">
-                  <a href={`tel:${telefonRakam(detayKayit.iletisim)}`} className="flex-1 py-2 rounded-xl bg-white/20 hover:bg-white/30 transition text-xs font-black flex items-center justify-center gap-1.5">
+                  {/* DEĞİŞTİ (kullanıcı talebi): Ara MAVİ, WhatsApp YEŞİL */}
+                  <a href={`tel:${telefonRakam(detayKayit.iletisim)}`} className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition text-xs font-black flex items-center justify-center gap-1.5 shadow-md">
                     <Phone className="w-3.5 h-3.5" /> Ara
                   </a>
-                  <a href={`https://wa.me/${waNumarasi(detayKayit.iletisim)}`} target="_blank" rel="noopener noreferrer" className="flex-1 py-2 rounded-xl bg-white/20 hover:bg-white/30 transition text-xs font-black flex items-center justify-center gap-1.5">
+                  <a href={`https://wa.me/${waNumarasi(detayKayit.iletisim)}`} target="_blank" rel="noopener noreferrer" className="flex-1 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white transition text-xs font-black flex items-center justify-center gap-1.5 shadow-md">
                     <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
                   </a>
                 </div>
@@ -4339,6 +4355,36 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 >
                   Bilgileri Güncelle ve Eşleştir
                 </button>
+
+                {/* ==============================================================
+                    TAŞINDI (kullanıcı talebi): KAYIT AÇ — artık "Bilgileri
+                    Güncelle ve Eşleştir" butonunun hemen altında ve onunla
+                    AYNI boyutta (w-full py-2, text-xs).
+                    --------------------------------------------------------------
+                    Teklifi gerçek işe çevirir: hizmet tipine göre Nakliye / Depo /
+                    Asansör kayıt sekmesi açılır, müşteri adı ve telefonu forma
+                    otomatik yazılır. Hem Sembol hem Depoevim tarafında çalışır.
+                    Yukarıdaki kutularda düzeltilmiş bilgi varsa o kullanılır.
+                    ============================================================== */}
+                {onKayitAc && (() => {
+                  const tip = detayKayit.hizmetTipi || 'Nakliye';
+                  const tipBilgi = HIZMET_TIPLERI.find(t => t.id === tip) || HIZMET_TIPLERI[0];
+                  const renk = tip === 'Depo' ? 'bg-blue-600 hover:bg-blue-700'
+                    : tip === 'Asansör' ? 'bg-green-600 hover:bg-green-700'
+                    : 'bg-red-600 hover:bg-red-700';
+                  return (
+                    <button type="button"
+                      onClick={() => {
+                        const ad = (duzenleMusteriAdi || detayKayit.musteriAdi || '').trim();
+                        const tel = (duzenleIletisim || detayKayit.iletisim || '').trim();
+                        onKayitAc({ hizmetTipi: tip, musteriAdi: ad, telefon: telefonGecerliMi(tel) ? tel : '' });
+                        setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false);
+                      }}
+                      className={`w-full mt-2 py-2 rounded-xl text-white text-xs font-black transition flex items-center justify-center gap-1.5 ${renk}`}>
+                      <tipBilgi.Ikon className="w-3.5 h-3.5" /> {tip} Kaydı Aç
+                    </button>
+                  );
+                })()}
               </div>
 
               {/* ==============================================================
@@ -4379,7 +4425,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                             return (
                               <div key={i} className={`flex items-center gap-2.5 px-2.5 py-2 ${i % 2 === 1 ? 'bg-neutral-50' : 'bg-white'} ${i > 0 ? 'border-t border-neutral-100' : ''}`}>
                                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${para ? 'bg-green-500' : renk.nokta}`}></span>
-                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full shrink-0 w-[132px] text-center ${para ? 'bg-green-100 text-green-800' : renk.etiket}`}>{satir.etiket}</span>
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full shrink-0 w-[132px] text-center ${para ? 'bg-green-100 text-green-800' : renk.etiket}`}>{teklifEtiketAdi(satir.etiket)}</span>
                                 <span className={`text-xs flex-1 leading-snug ${para ? 'font-black text-green-700' : 'font-bold text-neutral-800'}`}>{satir.deger}</span>
                               </div>
                             );
@@ -4433,34 +4479,6 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 )}
               </div>
 
-              {/* ==============================================================
-                  YENİ (kullanıcı talebi): KAYIT AÇ
-                  --------------------------------------------------------------
-                  Teklifi gerçek işe çevirir: hizmet tipine göre Nakliye / Depo /
-                  Asansör kayıt sekmesi açılır, müşteri adı ve telefonu forma
-                  otomatik yazılır. Hem Sembol hem Depoevim tarafında çalışır.
-                  ============================================================== */}
-              {onKayitAc && (() => {
-                const tip = detayKayit.hizmetTipi || 'Nakliye';
-                const tipBilgi = HIZMET_TIPLERI.find(t => t.id === tip) || HIZMET_TIPLERI[0];
-                const renk = tip === 'Depo' ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30'
-                  : tip === 'Asansör' ? 'bg-green-600 hover:bg-green-700 shadow-green-600/30'
-                  : 'bg-red-600 hover:bg-red-700 shadow-red-600/30';
-                return (
-                  <button type="button"
-                    onClick={() => {
-                      // Eşleştirme kutularında düzeltilmiş bilgi varsa o kullanılır
-                      const ad = (duzenleMusteriAdi || detayKayit.musteriAdi || '').trim();
-                      const tel = (duzenleIletisim || detayKayit.iletisim || '').trim();
-                      onKayitAc({ hizmetTipi: tip, musteriAdi: ad, telefon: telefonGecerliMi(tel) ? tel : '' });
-                      setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false);
-                    }}
-                    className={`w-full py-3 rounded-2xl text-white text-sm font-black transition shadow-lg flex items-center justify-center gap-2 ${renk}`}>
-                    <tipBilgi.Ikon className="w-4 h-4" /> {tip} Kaydı Aç
-                    <span className="text-[10px] font-bold opacity-80">— müşteri bilgileri otomatik dolar</span>
-                  </button>
-                );
-              })()}
               {/* Not ekleme */}
               <div className="bg-white border border-neutral-200 rounded-2xl p-3">
                 <div className="flex items-center justify-between mb-1.5">
