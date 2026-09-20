@@ -4019,6 +4019,37 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // (firebaseUser yok) hiç abone olunmaz — gereksiz Firestore okuması yok.
     // ======================================================================
     const hizliTeklifYeni = useHizliTeklifYeniSayilari(!!firebaseUser);
+
+    // ======================================================================
+    // YENİ (kullanıcı talebi): HAVUZDAN "KAYIT AÇ"
+    // ----------------------------------------------------------------------
+    // Müşteri Havuzu > Teklife Bak penceresindeki "Kayıt Aç" butonu buraya
+    // bağlanır. Teklifin HİZMET TİPİNE göre doğru kayıt sekmesi açılır
+    // (Nakliye / Depo / Asansör) ve müşterinin ADI ile TELEFONU forma
+    // otomatik yazılır; kalan alanlar o sekmenin kendi varsayılanlarıyla
+    // gelir — yani sekme butonlarına elle basılmış gibi davranır.
+    // ======================================================================
+    const havuzdanKayitAc = ({ hizmetTipi, musteriAdi, telefon }) => {
+      const tip = hizmetTipi === 'Depo' ? 'Depo' : (hizmetTipi === 'Asansör' ? 'Asansör' : 'Nakliye');
+      const ortak = {
+        ...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '',
+        customerName: musteriAdi || '', customerPhone: telefon || '', altPhone: '',
+        wallMounting: [], esyaDurumu: [], contractDetails: '', notes: '',
+      };
+      setEditingJobId(null);
+      setRecordType(tip);
+      if (tip === 'Depo') {
+        setActiveTab('addDepo');
+        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', selectedDepo: '', depoDirection: 'toDepo' });
+      } else if (tip === 'Asansör') {
+        setActiveTab('addAsansor');
+        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '' });
+      } else {
+        setActiveTab('addNakliye');
+        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '' });
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
     // DEĞİŞTİ: cost (Hasar Tutarı ₺) alanı eklendi — hasar kapatılırken maliyet girilir
     // DEĞİŞTİ: files (çözüm belgeleri) eklendi — fotoğraf/PDF/dekont, çoklu ve isteğe bağlı
     // YENİ (kullanıcı talebi): sorumlular = hasar bedelinin kesileceği personel kimlikleri.
@@ -8477,7 +8508,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             
             {/* YENİ: MÜŞTERİ HAVUZU EKRANI — kendi alt yetkisiyle görünür */}
             {activeTab === 'musteriHavuzu' && showSatisMusteriHavuzu &&
-              <MusteriHavuzuView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
+              <MusteriHavuzuView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} setViewingImage={setViewingImage}
+                /* YENİ: Teklife Bak penceresindeki "Kayıt Aç" butonu için */
+                onKayitAc={showSatisMusteriKayit ? havuzdanKayitAc : null} />}
 
             {/* YENİ: SAHA PORTFÖY EKRANI — kendi alt yetkisiyle görünür */}
             {activeTab === 'sahaPortfoy' && showSatisSahaPortfoy &&
