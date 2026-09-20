@@ -4734,6 +4734,9 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
   // portföyü parça parça (50'şer) çizmek için eklendi.
   // ==========================================================================
   const [siralama, setSiralama] = useState('yeni');   // yeni | ad | ziyaret | komisyon | randevu
+  // YENİ (kullanıcı talebi): Takvim büyüt/küçült — büyükken tam satır olur
+  // (eski boyut), küçükken sağ sütunda mini takvim kalır.
+  const [takvimBuyuk, setTakvimBuyuk] = useState(false);
   const PORTFOY_SAYFA = 50;
   const [gosterSayisi, setGosterSayisi] = useState(PORTFOY_SAYFA);
   // Filtre / arama değişince liste başa döner
@@ -5335,11 +5338,11 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
         ))}
       </div>
 
-      {/* GÖVDE — iki sütun */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+      {/* GÖVDE — iki sütun (takvim büyütülünce tek sütun: takvim üstte tam satır) */}
+      <div className={`grid grid-cols-1 gap-4 items-start ${takvimBuyuk ? '' : 'lg:grid-cols-3'}`}>
 
         {/* ============================ SOL: PORTFÖY ============================ */}
-        <div className="lg:col-span-2 space-y-3">
+        <div className={`space-y-3 ${takvimBuyuk ? 'order-2' : 'lg:col-span-2'}`}>
 
           {/* PIPELINE — süreç durumları sekme gibi; sayılar arama/filtreye göre */}
           <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-2 flex items-center gap-1.5 overflow-x-auto">
@@ -5464,12 +5467,18 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
         </div>
 
         {/* ============================ SAĞ: AJANDA ============================ */}
-        <div className="lg:col-span-1 lg:sticky lg:top-4 space-y-3">
+        <div className={`space-y-3 ${takvimBuyuk ? 'order-1' : 'lg:col-span-1 lg:sticky lg:top-4'}`}>
           <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
             {/* Ajanda başlığı + uyarılar */}
             <div className="p-3 bg-indigo-600 text-white">
               <div className="flex items-center justify-between gap-2">
                 <h3 className="font-black flex items-center gap-2"><CalendarDays className="w-5 h-5" /> Ajanda</h3>
+                {/* YENİ (kullanıcı talebi): üst ORTADA Büyüt / Küçült */}
+                <button type="button" onClick={() => setTakvimBuyuk(b => !b)}
+                  title={takvimBuyuk ? 'Takvimi küçült (sağ sütuna al)' : 'Takvimi büyüt (tam satır, eski boyut)'}
+                  className="text-[11px] font-black px-3 py-1.5 rounded-lg bg-white text-indigo-700 hover:bg-indigo-50 transition flex items-center gap-1.5 shadow-sm">
+                  {takvimBuyuk ? <><ChevronDown className="w-3.5 h-3.5 rotate-180" /> Küçült</> : <><ArrowUpRight className="w-3.5 h-3.5" /> Büyüt</>}
+                </button>
                 <button type="button" onClick={() => { const d = new Date(); setRTakvim({ yil: d.getFullYear(), ay: d.getMonth() }); setRSecilenGun(bugunStr()); }}
                   className="text-[10px] font-black px-2 py-1 rounded-lg bg-white/20 hover:bg-white/30 transition">Bugün</button>
               </div>
@@ -5490,9 +5499,9 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
                 <button type="button" onClick={() => setRTakvim(t => { const d = new Date(t.yil, t.ay + 1, 1); return { yil: d.getFullYear(), ay: d.getMonth() }; })} className="p-1.5 hover:bg-neutral-100 rounded-lg transition"><ChevronRight className="w-4 h-4" /></button>
               </div>
               <div className="grid grid-cols-7 gap-1 mb-1">
-                {R_GUNLER.map(g => <div key={g} className="text-center text-[9px] font-black text-neutral-400">{g}</div>)}
+                {R_GUNLER.map(g => <div key={g} className={`text-center font-black text-neutral-400 ${takvimBuyuk ? 'text-[11px] py-1' : 'text-[9px]'}`}>{g}</div>)}
               </div>
-              <div className="grid grid-cols-7 gap-1">
+              <div className={`grid grid-cols-7 ${takvimBuyuk ? 'gap-1.5' : 'gap-1'}`}>
                 {rHucreler.map((gun, i) => {
                   if (gun === null) return <div key={`rb${i}`} />;
                   const tarihStr = `${rTakvim.yil}-${String(rTakvim.ay + 1).padStart(2, '0')}-${String(gun).padStart(2, '0')}`;
@@ -5508,31 +5517,45 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
                   return (
                     <button key={gun} type="button" onClick={() => setRSecilenGun(tarihStr)}
                       title={oz.toplam ? `${oz.toplam} randevu` : ''}
-                      className={`relative h-10 rounded-lg border text-xs font-black transition flex flex-col items-center justify-center ${zemin} ${buGun && !secili ? 'ring-2 ring-indigo-400 ring-offset-1' : ''}`}>
-                      {gun}
-                      {oz.toplam > 0 && (
-                        <span className="flex gap-0.5 mt-0.5">
-                          {oz.gecikmis > 0 && <span className={`w-1.5 h-1.5 rounded-full ${secili ? 'bg-white' : 'bg-red-500'}`} />}
-                          {oz.bekleyen > 0 && <span className={`w-1.5 h-1.5 rounded-full ${secili ? 'bg-white/80' : 'bg-indigo-500'}`} />}
-                          {oz.gidildi > 0 && <span className={`w-1.5 h-1.5 rounded-full ${secili ? 'bg-white/60' : 'bg-green-500'}`} />}
-                          {oz.iptal > 0 && <span className={`w-1.5 h-1.5 rounded-full ${secili ? 'bg-white/40' : 'bg-neutral-300'}`} />}
-                        </span>
-                      )}
+                      className={`relative rounded-lg border font-black transition ${zemin} ${buGun && !secili ? 'ring-2 ring-indigo-400 ring-offset-1' : ''}
+                        ${takvimBuyuk ? 'min-h-[54px] p-1.5 text-sm flex flex-col justify-between items-start rounded-xl border-2' : 'h-11 text-xs flex flex-col items-center justify-center'}`}>
+                      <span>{gun}</span>
+                      {/* DEĞİŞTİ (kullanıcı talebi): HER randevu için ayrı simge —
+                          eskisi gibi. Küçük modda mini, büyük modda eski boyut. */}
+                      {oz.toplam > 0 && (() => {
+                        const gunRnd = rGunRandevulari(tarihStr);
+                        const ik = takvimBuyuk ? 'w-3.5 h-3.5' : 'w-2.5 h-2.5';
+                        const maks = takvimBuyuk ? 4 : 3;
+                        return (
+                          <span className="flex flex-wrap items-center gap-0.5 mt-0.5">
+                            {gunRnd.slice(0, maks).map((r, x) => (
+                              r.durum === 'gidildi'
+                                ? <CheckCircle key={x} className={`${ik} ${secili ? 'text-white' : 'text-green-600'}`} title={`${r.saat || ''} ${r.firmaAdi} — Gidildi`} />
+                                : r.durum === 'iptal'
+                                  ? <XCircle key={x} className={`${ik} ${secili ? 'text-white/60' : 'text-neutral-300'}`} title={`${r.firmaAdi} — İptal`} />
+                                  : tarihStr < bugunStr()
+                                    ? <AlertTriangle key={x} className={`${ik} ${secili ? 'text-white' : 'text-red-500'}`} title={`${r.firmaAdi} — Gecikmiş (gidilmedi)`} />
+                                    : <Clock key={x} className={`${ik} ${secili ? 'text-white' : 'text-indigo-500'}`} title={`${r.saat || ''} ${r.firmaAdi} — Bekliyor`} />
+                            ))}
+                            {gunRnd.length > maks && <span className={`text-[8px] font-black ${secili ? 'text-white' : 'text-neutral-500'}`}>+{gunRnd.length - maks}</span>}
+                          </span>
+                        );
+                      })()}
                       {oz.toplam > 1 && <span className={`absolute -top-1 -right-1 text-[8px] font-black px-1 rounded-full ${secili ? 'bg-white text-indigo-700' : 'bg-neutral-900 text-white'}`}>{oz.toplam}</span>}
                     </button>
                   );
                 })}
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[9px] font-bold text-neutral-500">
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500" /> Bekleyen</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-500" /> Gecikmiş</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /> Gidildi</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-neutral-300" /> İptal</span>
+                <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-indigo-500" /> Bekleyen</span>
+                <span className="flex items-center gap-1"><AlertTriangle className="w-3 h-3 text-red-500" /> Gecikmiş</span>
+                <span className="flex items-center gap-1"><CheckCircle className="w-3 h-3 text-green-600" /> Gidildi</span>
+                <span className="flex items-center gap-1"><XCircle className="w-3 h-3 text-neutral-300" /> İptal</span>
               </div>
             </div>
 
             {/* Seçili günün randevuları — mevcut liste kodu AYNEN korunur */}
-            <div className="border-t border-neutral-100 p-3 max-h-[60vh] overflow-y-auto">
+            <div className={`border-t border-neutral-100 p-3 ${takvimBuyuk ? '' : 'max-h-[60vh] overflow-y-auto'}`}>
               <div className="flex items-center justify-between gap-2 mb-2">
                 <h4 className="text-xs font-black text-neutral-700 leading-tight">
                   {new Date(rSecilenGun + 'T00:00:00').toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', weekday: 'long' })}
@@ -5550,7 +5573,7 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
               {rSecilenGunListesi.map(r => {
                 const gecikmis = r.durum === 'bekliyor' && r.tarih < bugunStr();
                 return (
-                  <div key={r.id} className={`rounded-xl border-2 p-3 flex flex-col sm:flex-row sm:items-center gap-2 ${
+                  <div key={r.id} className={`rounded-xl border-2 p-3 flex flex-col gap-2 ${
                     r.durum === 'gidildi' ? 'border-green-200 bg-green-50/60'
                     : r.durum === 'iptal' ? 'border-neutral-200 bg-neutral-50 opacity-60'
                     : gecikmis ? 'border-red-300 bg-red-50/70' : 'border-indigo-200 bg-indigo-50/40'}`}>
@@ -5588,7 +5611,8 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
                         {r.not && <p className="text-[11px] font-medium text-neutral-500 italic mt-1">{r.not}</p>}
                       </div>
                     </div>
-                    <div className="flex items-center gap-1.5 flex-wrap sm:shrink-0">
+                    {/* DEĞİŞTİ (kullanıcı talebi): işlem butonları randevu bilgisinin ALTINDA, ayraçla */}
+                    <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-black/5">
                       {r.durum === 'bekliyor' && (() => {
                         // DEĞİŞTİ (kullanıcı talebi): seçenekler DURUMA GÖRE sunulur.
                         //  • Firma zaten portföydeyse tek seçenek: "Gidildi" (portföye
