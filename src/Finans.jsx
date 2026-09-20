@@ -4251,7 +4251,31 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
       const hesaplananBanka = (bankaParasiBase / 30) * odenecekGun;
       
-      const resmiAvans = parseFloat(row.resmiAvans) || 0;
+      // ======================================================================
+      // DEĞİŞTİ (kullanıcı talebi): DEFTER > ÖDEMELER'DEN GİRİLEN BANKA
+      // (RESMİ) AVANSI BU LİSTEDE DE GÖRÜNSÜN
+      // ----------------------------------------------------------------------
+      // SORUN: Defter > Ödemeler ekranındaki "Avans Gir" penceresi, tutarı
+      // maas kaydının BEKLEYEN alanına (bekleyenResmiAvans) yazar; gerçek
+      // alana (resmiAvans) ancak "Öde" butonuna basılınca aktarılır. Bu yüzden
+      // avans girilmiş olsa bile Personel Ödemeleri > "Resmi Avans Ödemesi"
+      // listesi boş görünüyordu ve banka Excel'i indirilemiyordu.
+      //
+      // ÇÖZÜM: Burada "efektif" avans kullanılır:
+      //   • Ödeme yapılmışsa (resmiAvans dolu) → resmiAvans,
+      //   • Henüz ödenmemişse                   → bekleyenResmiAvans.
+      // Böylece avans girilir girilmez personel listede belirir, Excel
+      // indirilip banka ödemesi yapılabilir; ödeme sonrasında da aynı rakam
+      // gösterilmeye devam eder (çift sayım olmaz).
+      //
+      // ÖNEMLİ: Kalan Banka hesabı da bu efektif değeri düşer. Aksi halde
+      // avans girilmiş bir personele hem tam banka kalanı hem de avans
+      // ödenmiş olurdu.
+      // ======================================================================
+      const resmiAvansOdenen  = parseFloat(row.resmiAvans) || 0;
+      const resmiAvansBekleyen = parseFloat(row.bekleyenResmiAvans) || 0;
+      const resmiAvans = resmiAvansOdenen > 0 ? resmiAvansOdenen : resmiAvansBekleyen;
+
       const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
       const bankaKalan = hesaplananBanka - icraKesintisi - resmiAvans;
       
@@ -4259,6 +4283,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
 
       return {
           resmiAvans: resmiAvans,
+          // Tutar bekleyen alandan geliyorsa (henüz ödenmediyse) satırda
+          // "BEKLEYEN" rozeti gösterilir.
+          resmiAvansBekliyor: resmiAvansOdenen <= 0 && resmiAvansBekleyen > 0,
           bankaKalan: bankaKalan,
           yol: yol
       };
@@ -4661,12 +4688,20 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                     <tbody className="divide-y divide-neutral-100">
                         {goruntulenenPersonel.map(p => {
                             const amount = getAmountForTab(p.id);
+                            // YENİ: Bu tutar Defter > Ödemeler'den girilmiş ama henüz
+                            // "Öde" ile kapatılmamışsa kullanıcı bilsin diye işaretlenir.
+                            const bekliyor = activeTab === 'Resmi Avans Ödemesi' && calcRow(p.id).resmiAvansBekliyor;
                             return (
                                 <tr key={p.id} className="hover:bg-neutral-50 transition">
                                     <td className="p-4 text-center">
                                         <input type="checkbox" className="w-4 h-4 rounded border-neutral-300 text-green-600 focus:ring-green-600 cursor-pointer" checked={selectedPersonnel.includes(p.id)} onChange={() => handleSelectPerson(p.id)} />
                                     </td>
-                                    <td className="p-4 font-bold text-black">{p.fullName}</td>
+                                    <td className="p-4 font-bold text-black">
+                                      {p.fullName}
+                                      {bekliyor && (
+                                        <span className="ml-2 text-[9px] font-black px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 align-middle" title="Defter > Ödemeler'den girildi, henüz ödenmedi">BEKLEYEN</span>
+                                      )}
+                                    </td>
                                     <td className="p-4 font-mono text-xs text-neutral-600">{p.iban || 'Belirtilmedi'}</td>
                                     <td className="p-4 text-center">
                                         <input type="text" readOnly value={amount > 0 ? amount.toLocaleString('tr-TR', {minimumFractionDigits: 2}) : '0,00'} className="w-28 p-2 border border-neutral-200 rounded-lg text-center font-black text-green-700 bg-neutral-100 outline-none" />
@@ -7930,6 +7965,26 @@ const nakitYuvarla = (tutar) => {
       mavi: (p) => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)),
       beyaz: (p) => p.collarType === 'Beyaz Yaka',
     };
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): TOPLU AVANS LİSTESİ SADECE AKTİF PERSONEL
+    // ------------------------------------------------------------------------
+    // İşten ayrılmış (employmentStatus === 'Pasif') personele avans verilemez,
+    // bu yüzden toplu avans penceresinde listelenmezler.
+    //
+    // Filtre olarak isPersonnelVisibleInMonth kullanılır — puantaj, mesai ve
+    // maaş tablolarının kullandığı AYNI kural:
+    //   • Pasif olmayan herkes görünür.
+    //   • Pasif olan, ayrılma AYINA KADAR görünür (o ayki hak edişi/avansı
+    //     hâlâ işlenebilsin diye); sonraki aylarda listeden düşer.
+    //   • Uzaktan çalışanlar bu tablolarda zaten görünmez.
+    // Seçilen ödeme ayına göre çalışır, bu yüzden geçmiş bir aya bakarken o ay
+    // çalışan personel doğru şekilde listelenmeye devam eder.
+    // ========================================================================
+    const avansPersoneliAktifMi = (p) => {
+      const [ay_yil, ay_ay] = odemeAyi.split('-').map(Number);
+      return isPersonnelVisibleInMonth(p, ay_yil, ay_ay);
+    };
     const avansSatirlari = useMemo(() => {
       // DEĞİŞTİ: defter açık olmasa da (liste ekranı) hesaplanır
       if (!odemeDefteriId || !avansVeri) return [];
@@ -8100,7 +8155,8 @@ const nakitYuvarla = (tutar) => {
     // Kanal (Nakit/Resmi) ve yaka (Mavi/Beyaz) pencere içinden değiştirilir.
     const avansTopluAc = (kanal, baslangicYaka = 'mavi') => {
       const yaka = baslangicYaka;
-      const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p));
+      // DEĞİŞTİ: işten ayrılanlar listelenmez (avansPersoneliAktifMi)
+      const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p) && avansPersoneliAktifMi(p));
       const alan = kanal === 'resmi' ? 'bekleyenResmiAvans' : 'bekleyenNakitAvans';
       const tutarlar = {}; const secim = [];
       kisiler.forEach(p => {
@@ -8113,7 +8169,8 @@ const nakitYuvarla = (tutar) => {
     const avansTopluYakaDegistir = (yaka) => {
       if (!avansTopluModal) return;
       const alan = avansTopluModal.kanal === 'resmi' ? 'bekleyenResmiAvans' : 'bekleyenNakitAvans';
-      const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p));
+      // DEĞİŞTİ: işten ayrılanlar listelenmez (avansPersoneliAktifMi)
+      const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p) && avansPersoneliAktifMi(p));
       const tutarlar = {}; const secim = [];
       kisiler.forEach(p => {
         const mevcut = parseFloat((avansVeri?.[yaka]?.[p.id] || {})[alan]) || 0;
@@ -8126,7 +8183,8 @@ const nakitYuvarla = (tutar) => {
       if (!avansTopluModal) return;
       const alan = kanal === 'resmi' ? 'bekleyenResmiAvans' : 'bekleyenNakitAvans';
       const yaka = avansTopluModal.yaka;
-      const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p));
+      // DEĞİŞTİ: işten ayrılanlar listelenmez (avansPersoneliAktifMi)
+      const kisiler = (personnelList || []).filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[yaka](p) && avansPersoneliAktifMi(p));
       const tutarlar = {}; const secim = [];
       kisiler.forEach(p => {
         const mevcut = parseFloat((avansVeri?.[yaka]?.[p.id] || {})[alan]) || 0;
@@ -12276,7 +12334,8 @@ silinmeTarihi: new Date().toISOString()`}</pre>
           const m2 = avansTopluModal;
           const alanEtiket = m2.kanal === 'resmi' ? 'Resmi Avans' : 'Nakit Avans';
           const kisiler = (personnelList || [])
-            .filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[m2.yaka](p))
+            // DEĞİŞTİ: işten ayrılanlar toplu avans listesinde gösterilmez
+            .filter(p => p.position !== 'Firma Sahibi' && YAKA_FILTRELERI[m2.yaka](p) && avansPersoneliAktifMi(p))
             .filter(p => !m2.arama.trim() || (p.fullName || p.name || '').toLocaleLowerCase('tr-TR').includes(m2.arama.toLocaleLowerCase('tr-TR')))
             .sort((a, b) => (a.fullName || a.name || '').localeCompare(b.fullName || b.name || '', 'tr'));
           const tumu = kisiler.length > 0 && kisiler.every(p => m2.secim.includes(p.id));
