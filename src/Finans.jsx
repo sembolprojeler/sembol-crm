@@ -8025,6 +8025,8 @@ const nakitYuvarla = (tutar) => {
           // Kalem kimliğine YAKA da eklendi ki 4 satır ayrı ayrı ödenebilsin
           const kalemId = `avans_${yaka.id}_${kanal.id}_${yil}_${ay}`;
           const mahsup = islemler.find(i => !i.silindi && i.defterId === odemeDefteriId && i.tip === 'giris' && i.odemeMahsup && i.odemeKalemId === kalemId);
+          // YENİ: "Bu ay avans yok" işaretiyle kapatılmış mı? (tutarı ₺0 mahsup)
+          const avansYok = !!mahsup?.avansYokIsareti;
           const vadeTarihi = `${odemeAyi}-20`; // her ayın 20'si
           // YENİ (kullanıcı talebi): 1 Eylül 2026 (sistem devri) ÖNCESİ avanslar
           // ARTIK HİÇ GÖSTERİLMEZ (eski girişler Ödemeler bölümünde yer almaz).
@@ -8039,11 +8041,91 @@ const nakitYuvarla = (tutar) => {
             kisiler,
             odendi: devir || !!mahsup,
             odemeTarihi: mahsup?.tarih || null,
+            avansYok,                                   // YENİ: ödendi değil, "verilmedi"
+            mahsupId: mahsup?.id || null,               // YENİ: geri alma için
           });
         });
       });
       return satirlar;
     }, [odemeDefteriId, avansVeri, personnelList, islemler, odemeAyi]);
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): SATIR İÇİ AVANS DÜZENLE / KALDIR
+    // ------------------------------------------------------------------------
+    // Avans satırı açıldığında her personelin yanında kalem ve çöp kutusu
+    // simgeleri çıkar. Tutar değiştirilebilir ya da kişi listeden çıkarılabilir
+    // (bekleyen alan boşaltılır). Toplu pencereyi açmaya gerek kalmaz.
+    //
+    // GÜVENLİK: Yalnızca ÖDENMEMİŞ satırlarda gösterilir. Ödeme yapıldıktan
+    // sonra tutar muhasebeye işlendiği için düzenleme kapalıdır; bu durumda
+    // düzeltme, ödemeyi geri alarak yapılmalıdır.
+    // Yazma yeri avansTopluKaydet ile AYNI: maas/<yıl>_<ay> (beyaz için
+    // beyaz_ önekli) dokümanındaki records[personId][bekleyenAlan].
+    // ========================================================================
+    const [avansKisiDuzenle, setAvansKisiDuzenle] = useState(null); // { satirId, personId, deger }
+    const [avansKisiKaydediliyor, setAvansKisiKaydediliyor] = useState(false);
+
+    const avansKisiTutarYaz = async (satir, personId, yeniDeger) => {
+      const [yil, ay] = odemeAyi.split('-').map(Number);
+      const docAdi = satir.yaka === 'beyaz' ? `beyaz_${yil}_${ay}` : `${yil}_${ay}`;
+      setAvansKisiKaydediliyor(true);
+      try {
+        const mRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', docAdi);
+        const mSnap = await getDoc(mRef);
+        const records = mSnap.exists() ? (mSnap.data().records || {}) : {};
+        if (!records[personId]) records[personId] = {};
+        const sayi = parseFloat(String(yeniDeger).replace(',', '.'));
+        // Boş / 0 / geçersiz → kişi listeden düşer (bekleyen alan temizlenir)
+        records[personId][satir.bekleyenAlan] = (sayi > 0) ? String(sayi) : '';
+        await setDoc(mRef, { records, updatedAt: new Date().toISOString() }, { merge: true });
+        setAvansYenile(x => x + 1);                 // satır tutarları anında tazelensin
+        setAvansKisiDuzenle(null);
+        return true;
+      } catch (e) {
+        console.error('Avans tutarı güncellenemedi:', e);
+        alert('Güncellenemedi, tekrar deneyin.');
+        return false;
+      } finally { setAvansKisiKaydediliyor(false); }
+    };
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): "BU AY AVANS YOK" İŞARETİ
+    // ------------------------------------------------------------------------
+    // Bazı aylarda bir kanaldan (örn. Beyaz Yaka Nakit) hiç avans verilmez.
+    // Satır ₺0 olarak bekleyenlerde kalır ve "4 bekleyen" sayısını şişirir.
+    // Bu işaretle satır, o ay için KAPATILIR ve "Ödenenler" bölümüne düşer.
+    //
+    // NASIL ÇALIŞIR: Satır zaten "o kaleme ait mahsup kaydı var mı?" diye
+    // bakarak ödendi sayılıyor. Burada da aynı desende, TUTARI ₺0 olan bir
+    // mahsup kaydı yazılır — para hareketi olmaz, defter bakiyesi değişmez.
+    // avansYokIsareti:true alanı sayesinde bu kayıt "ödendi"den ayırt edilir
+    // ve listede "Avans verilmedi" etiketiyle gösterilir; gerekirse geri alınır.
+    // ========================================================================
+    const [avansYokModal, setAvansYokModal] = useState(null);   // { satir }
+    const [avansYokKaydediliyor, setAvansYokKaydediliyor] = useState(false);
+
+    const avansYokIsaretle = async () => {
+      const a = avansYokModal?.satir;
+      if (!a || !seciliDefter) return;
+      if (a.tutar > 0) { alert('Bu satırda girilmiş avans var. Önce avansı kaldırın ya da "Öde" ile kapatın.'); return; }
+      setAvansYokKaydediliyor(true);
+      try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          tarih: bugunStr(), kategori: 'Avans', etiketler: [],
+          odemeId: `avansyok_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          odemeKalemId: a.id, odemeDefterId: seciliDefter.id,
+          kaynak: 'Personel Avans', createdAt: new Date().toISOString(),
+          by: currentUser?.fullName || 'Sistem',
+          tip: 'giris', tutar: 0, odemeMahsup: true,
+          avansYokIsareti: true,                       // "ödendi" değil, "verilmedi"
+          defterId: seciliDefter.id,
+          aciklama: `${a.ad} — ${a.kaynakEtiket}: bu ay avans verilmedi (kapatıldı)`,
+        });
+        addSystemLog?.('Personel Avansı', `${a.ad} — ${a.kaynakEtiket}: bu ay avans verilmediği işaretlendi, kalem kapatıldı.`);
+        setAvansYokModal(null);
+      } catch (e) { console.error('Avans yok işareti yazılamadı:', e); alert('İşaretlenemedi, tekrar deneyin.'); }
+      finally { setAvansYokKaydediliyor(false); }
+    };
 
     // AVANS ÖDEMESİ — kaynak hesap seçilir; varsayılan: Nakit avans için
     // Sembol Nakliyat'ın NAKİT defteri, Resmi avans için BANKA defteri.
@@ -9681,15 +9763,62 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                                 {acikA && (
                                   <div className="border-t border-amber-200 bg-white p-2 max-h-56 overflow-y-auto space-y-1">
                                     {avansliKisiler.length === 0 && (
-                                      <p className="text-[11px] font-bold text-neutral-400 text-center py-3">Bu ay bu kanaldan avans girilmemiş. "Avans Gir" ile ekleyin.</p>
+                                      <div className="text-center py-3">
+                                        <p className="text-[11px] font-bold text-neutral-400">Bu ay bu kanaldan avans girilmemiş. "Avans Gir" ile ekleyin.</p>
+                                        {/* YENİ (kullanıcı talebi): Bu ay hiç avans verilmeyecekse satır
+                                            kapatılır ve "Ödenenler" bölümüne düşer; bekleyen sayısını şişirmez. */}
+                                        <button type="button"
+                                          onClick={e => { e.stopPropagation(); setAvansYokModal({ satir: a }); }}
+                                          className="mt-2.5 px-3 py-2 bg-white border-2 border-neutral-300 hover:border-neutral-500 hover:bg-neutral-50 text-neutral-700 text-[11px] font-black rounded-xl transition inline-flex items-center gap-1.5">
+                                          <Ban className="w-3.5 h-3.5" /> Bu Ay Avans Yok
+                                        </button>
+                                        <p className="text-[10px] font-bold text-neutral-300 mt-1.5">Onaylarsanız bu kalem bu ay için kapatılır.</p>
+                                      </div>
                                     )}
-                                    {avansliKisiler.map(k => (
+                                    {/* DEĞİŞTİ (kullanıcı talebi): her personelin yanında
+                                        DÜZENLE ve KALDIR — yalnızca ödenmemiş satırlarda. */}
+                                    {avansliKisiler.map(k => {
+                                      const duzenleniyor = avansKisiDuzenle?.satirId === a.id && avansKisiDuzenle?.personId === k.person.id;
+                                      return (
                                       <div key={k.person.id} className="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-amber-50/60 border border-amber-100">
                                         <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full shrink-0 ${k.yaka === 'beyaz' ? 'bg-neutral-500' : 'bg-blue-600'}`}>{k.yaka === 'beyaz' ? 'BEYAZ' : 'MAVİ'}</span>
                                         <span className="flex-1 min-w-0 text-xs font-bold text-neutral-700 truncate">{k.person.fullName || k.person.name}</span>
-                                        <span className="text-xs font-black tabular-nums text-amber-700 shrink-0">₺{paraFmt(k.tutar)}</span>
+                                        {duzenleniyor ? (
+                                          <>
+                                            <input autoFocus type="number" inputMode="decimal" value={avansKisiDuzenle.deger}
+                                              onChange={e => setAvansKisiDuzenle({ ...avansKisiDuzenle, deger: e.target.value })}
+                                              onKeyDown={e => { if (e.key === 'Enter') avansKisiTutarYaz(a, k.person.id, avansKisiDuzenle.deger); if (e.key === 'Escape') setAvansKisiDuzenle(null); }}
+                                              className="w-24 px-2 py-1 border border-amber-400 rounded-lg text-xs font-black text-right outline-none focus:ring-2 focus:ring-amber-500 shrink-0" />
+                                            <button type="button" title="Kaydet" disabled={avansKisiKaydediliyor}
+                                              onClick={() => avansKisiTutarYaz(a, k.person.id, avansKisiDuzenle.deger)}
+                                              className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition disabled:opacity-50 shrink-0">
+                                              {avansKisiKaydediliyor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
+                                            </button>
+                                            <button type="button" title="Vazgeç" onClick={() => setAvansKisiDuzenle(null)}
+                                              className="p-1.5 text-neutral-400 hover:text-black hover:bg-neutral-100 rounded-lg transition shrink-0"><X className="w-3.5 h-3.5" /></button>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <span className="text-xs font-black tabular-nums text-amber-700 shrink-0">₺{paraFmt(k.tutar)}</span>
+                                            {!a.odendi && (
+                                              <>
+                                                <button type="button" title="Tutarı değiştir"
+                                                  onClick={() => setAvansKisiDuzenle({ satirId: a.id, personId: k.person.id, deger: String(k.tutar) })}
+                                                  className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition shrink-0"><Edit className="w-3.5 h-3.5" /></button>
+                                                <button type="button" title="Bu personeli avanstan çıkar"
+                                                  onClick={() => { if (window.confirm(`${k.person.fullName || k.person.name} bu avanstan çıkarılsın mı? (₺${paraFmt(k.tutar)} silinecek)`)) avansKisiTutarYaz(a, k.person.id, ''); }}
+                                                  className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+                                              </>
+                                            )}
+                                          </>
+                                        )}
                                       </div>
-                                    ))}
+                                      );
+                                    })}
+                                    {/* Ödenmiş satırda düzenleme kapalıdır — nedeni açıkça yazılır */}
+                                    {a.odendi && avansliKisiler.length > 0 && (
+                                      <p className="text-[10px] font-bold text-neutral-400 text-center pt-1">Bu avans ödendi; tutarlar muhasebeye işlendiği için düzenlenemez.</p>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -9857,11 +9986,35 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                           </div>
                           <div className="space-y-1">
                             {/* YENİ: ödenen avans satırları */}
+                            {/* DEĞİŞTİ: "Bu ay avans yok" ile kapatılan satırlar gri gösterilir
+                                ve geri alınabilir; gerçek ödemeler eskisi gibi yeşil kalır. */}
                             {odenenAvanslar.map(a => (
-                              <div key={a.id} className="flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-50 border border-emerald-200 opacity-80">
-                                <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-                                <span className="flex-1 text-xs font-bold text-emerald-900 truncate line-through">{a.ad} — {a.kaynakEtiket} (₺{paraFmt(a.tutar)})</span>
-                                <span className="text-[10px] font-black text-emerald-700 shrink-0">{a.devir ? 'Devir (sistem öncesi)' : (a.odemeTarihi ? trh(a.odemeTarihi) : 'Ödendi')} ✓</span>
+                              <div key={a.id} className={`flex items-center gap-2 px-2.5 py-2 rounded-lg border opacity-90 ${a.avansYok ? 'bg-neutral-100 border-neutral-300' : 'bg-emerald-50 border-emerald-200'}`}>
+                                {a.avansYok
+                                  ? <Ban className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                                  : <CheckCircle className="w-3.5 h-3.5 text-emerald-600 shrink-0" />}
+                                <span className={`flex-1 text-xs font-bold truncate ${a.avansYok ? 'text-neutral-600' : 'text-emerald-900 line-through'}`}>
+                                  {a.ad} — {a.kaynakEtiket}{a.avansYok ? '' : ` (₺${paraFmt(a.tutar)})`}
+                                </span>
+                                {a.avansYok ? (
+                                  <>
+                                    <span className="text-[10px] font-black text-neutral-500 shrink-0">Bu ay avans verilmedi</span>
+                                    <button type="button" title="İşareti kaldır, kalem tekrar bekleyenlere dönsün"
+                                      onClick={async () => {
+                                        if (!a.mahsupId) return;
+                                        if (!window.confirm('"Bu ay avans yok" işareti kaldırılsın mı? Kalem tekrar bekleyen ödemelere döner.')) return;
+                                        try {
+                                          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', a.mahsupId), { silindi: true });
+                                          addSystemLog?.('Personel Avansı', `${a.ad} — ${a.kaynakEtiket}: "avans yok" işareti geri alındı.`);
+                                        } catch (e) { console.error(e); alert('Geri alınamadı.'); }
+                                      }}
+                                      className="p-1 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-md transition shrink-0">
+                                      <History className="w-3.5 h-3.5" />
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="text-[10px] font-black text-emerald-700 shrink-0">{a.devir ? 'Devir (sistem öncesi)' : (a.odemeTarihi ? trh(a.odemeTarihi) : 'Ödendi')} ✓</span>
+                                )}
                               </div>
                             ))}
                             {odenenMaaslar.map(m => (
@@ -12279,6 +12432,37 @@ silinmeTarihi: new Date().toISOString()`}</pre>
             Varsayılan hesap: Nakit avans -> Sembol Nakliyat NAKİT defteri,
             Resmi avans -> Sembol Nakliyat BANKA defteri. Duruma göre başka
             hesap da seçilebilir. */}
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): "BU AY AVANS YOK" ONAY PENCERESİ
+            ------------------------------------------------------------------
+            Onaylanınca kalem ₺0 tutarlı bir mahsup kaydıyla kapatılır; para
+            hareketi olmaz, defter bakiyesi değişmez. Kalem "Ödenenler"
+            bölümüne "Bu ay avans verilmedi" etiketiyle düşer ve oradan
+            geri alınabilir.
+            ================================================================== */}
+        {avansYokModal && (
+          <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setAvansYokModal(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 text-center animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+              <span className="w-14 h-14 rounded-2xl bg-neutral-100 text-neutral-500 flex items-center justify-center mx-auto mb-3"><Ban className="w-7 h-7" /></span>
+              <h3 className="font-black text-black text-base mb-1">Bu Ay Avans Yok</h3>
+              <p className="text-[11px] font-black text-neutral-500 mb-3">{avansYokModal.satir.ad} • {avansYokModal.satir.kaynakEtiket}</p>
+              <p className="text-xs font-bold text-neutral-500 leading-relaxed mb-4">
+                Bu kalem <span className="text-black">bu ay için kapatılacak</span> ve bekleyen ödemelerden çıkıp
+                <span className="text-black"> "Ödenenler"</span> bölümüne düşecek.
+                Hiçbir para hareketi oluşmaz, defter bakiyesi değişmez. Gerekirse sonra geri alabilirsiniz.
+              </p>
+              <div className="flex gap-2">
+                <button onClick={() => setAvansYokModal(null)} disabled={avansYokKaydediliyor}
+                  className="flex-1 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-xs transition disabled:opacity-50">Vazgeç</button>
+                <button onClick={avansYokIsaretle} disabled={avansYokKaydediliyor}
+                  className="flex-1 py-2.5 bg-neutral-900 hover:bg-black text-white font-black rounded-xl text-xs transition disabled:opacity-50 flex items-center justify-center gap-1.5">
+                  {avansYokKaydediliyor ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> İşleniyor</> : <><CheckCircle className="w-3.5 h-3.5" /> Evet, Onaylıyorum</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {avansOdeModal && (
           <div className="fixed inset-0 bg-black/60 z-[9997] flex items-center justify-center p-4 animate-in fade-in">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-5 animate-in zoom-in-95 max-h-[90vh] overflow-y-auto">
