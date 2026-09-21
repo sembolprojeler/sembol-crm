@@ -3076,6 +3076,11 @@ const TEKLIF_ALANLARI = [
   'Depo Boyutu', 'Depo Kiralama Süresi', 'Kiralama Süresi', 'Şube',
   'Teslim Şekli', 'Başlangıç Tarihi', 'Aylık Fiyat', 'Toplam Ödenecek (peşin)',
   'Toplam Ödenecek', 'Oda Sayısı', 'Kullanım Amacı', 'Kurulum yeri',
+  // YENİ: DepoEvim "Firma adresimden alsın (Anahtar Teslim)" seçilince 2.
+  // adımda açılan "Eşyalar Nereden Alınacak?" il/ilçe seçimi ve buna bağlı
+  // tahmini alım/nakliye ücreti — uzun ad önce denenir ki "Toplam Ödenecek"
+  // yakalanmadan önce doğru eşleşsin.
+  'Eşyaların Alınacağı Yer', 'Tahmini Alım/Nakliye Ücreti',
 ];
 
 // YENİ: Teklif detayı satırlarına dönüşümlü etiket renkleri — her bölüm farklı
@@ -3088,7 +3093,7 @@ const TEKLIF_SATIR_RENKLERI = [
   { etiket: 'bg-teal-100 text-teal-800',     nokta: 'bg-teal-500' },
   { etiket: 'bg-indigo-100 text-indigo-800', nokta: 'bg-indigo-500' },
 ];
-const TEKLIF_PARA_ALANLARI = ['Aylık Fiyat', 'Toplam Ödenecek (peşin)', 'Toplam Ödenecek', 'Bütçe'];
+const TEKLIF_PARA_ALANLARI = ['Aylık Fiyat', 'Toplam Ödenecek (peşin)', 'Toplam Ödenecek', 'Bütçe', 'Tahmini Alım/Nakliye Ücreti'];
 
 // YENİ (kullanıcı talebi): Bazı alanların EKRANDA görünen adı değiştirilir.
 // Ham metindeki anahtar (sihirbazın gönderdiği ad) AYNEN kalır — ayrıştırma
