@@ -164,6 +164,13 @@ const KANAL_BY_WIZARD = {
   depoevimSiparis: 'iyzico',
 };
 
+// Wizard'ların "reklamKaynagi" alanında gönderebileceği geçerli değerler —
+// Satis.jsx (Müşteri Havuzu) bu değerlere göre Google Ads / Facebook Ads /
+// Instagram Ads / Organik ayrımını yapıyor. Bu listede olmayan (ör. eski
+// wizard sürümünden hiç gelmeyen ya da bozuk bir) değer güvenli şekilde
+// 'organik' sayılır.
+const REKLAM_KAYNAGI_DEGERLERI = ['google_ads', 'facebook_ads', 'instagram_ads'];
+
 // Satış ekibinin "Hesap" sütununda göreceği site etiketi — yeni-musteri.js'te
 // (tıklama bildirimleri) kullanılan "depoevim"/"sembolevdeneve" değerleriyle
 // BİREBİR AYNI — Satis.jsx'teki hesapAdi() fonksiyonu bu iki değeri özel
@@ -351,16 +358,9 @@ function buildSonMesajDepoEvim(p) {
   if (p.kiralamaSuresi) satirlar.push(`Kiralama Süresi: ${SURE_KIRALAMA_LABEL[p.kiralamaSuresi] || p.kiralamaSuresi}`);
   if (p.sube) satirlar.push(`Şube: ${DEPOEVIM_SUBE_LABEL[p.sube] || p.sube}`);
   if (p.teslimSekli) satirlar.push(`Teslim Şekli: ${DEPOEVIM_TESLIM_LABEL[p.teslimSekli] || p.teslimSekli}`);
-  // "Firma adresimden alsın (Anahtar Teslim)" seçilince wizard'ın 2. adımında
-  // açılan "Eşyalar Nereden Alınacak?" il/ilçe seçimi — sadece bu seçenekte
-  // gönderiliyor, bu yüzden diğer teslimSekli değerlerinde satır eklenmiyor.
-  if (p.teslimSekli === 'anahtar_teslim' && (p.pickupCity || p.pickupDistrict)) {
-    satirlar.push(`Eşyaların Alınacağı Yer: ${[p.pickupCity, p.pickupDistrict].filter(Boolean).join('/')}`);
-  }
   if (p.baslangicTarihi) satirlar.push(`Başlangıç Tarihi: ${p.baslangicTarihi}`);
   if (p.fiyatAylik) satirlar.push(`Aylık Fiyat: ${fmtTL(p.fiyatAylik)} TL`);
   if (p.fiyatToplam) satirlar.push(`Toplam Ödenecek (peşin): ${fmtTL(p.fiyatToplam)} TL`);
-  if (p.nakliyeMin) satirlar.push(`Tahmini Alım/Nakliye Ücreti: ${fmtTL(p.nakliyeMin)} - ${fmtTL(p.nakliyeMax || p.nakliyeMin)} TL`);
   return ortakKuyruk(satirlar, p);
 }
 
@@ -473,11 +473,13 @@ export default async function handler(req, res) {
       sonMesaj: buildSonMesaj(wizardType, body),
       kaynak: `web-sihirbaz-${wizardType}`,
       wizardKaynagi: body.source || '',
-      // Ziyaretçi Google reklamından mı (gclid/utm_source=google&utm_medium=cpc)
-      // yoksa organik mi geldi — wizard sayfa yüklenirken URL'den okuyup
-      // gönderiyor (bkz. wizard dosyasındaki reklamKaynagiTespitEt()). Eski
-      // wizard sürümleri bu alanı hiç göndermez, o yüzden varsayılan 'organik'.
-      reklamKaynagi: body.reklamKaynagi === 'google_ads' ? 'google_ads' : 'organik',
+      // Ziyaretçi Google reklamından mı (gclid/utm_source=google&utm_medium=cpc),
+      // Meta (Facebook/Instagram) reklamından mı (fbclid/utm_source=facebook
+      // veya instagram) yoksa organik mi geldi — wizard sayfa yüklenirken
+      // URL'den okuyup gönderiyor (bkz. wizard dosyasındaki REKLAM_KAYNAGI).
+      // Eski wizard sürümleri bu alanı hiç göndermez, o yüzden varsayılan
+      // 'organik'; tanınmayan bir değer de güvenli şekilde 'organik' sayılır.
+      reklamKaynagi: REKLAM_KAYNAGI_DEGERLERI.includes(body.reklamKaynagi) ? body.reklamKaynagi : 'organik',
 
       // Wizard'ın kendi akış durumu (partial/completed/callback_requested).
       // DİKKAT: CRM'in satış-hattı durumu olan "durum" alanıyla KARIŞTIRILMAMALI —

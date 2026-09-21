@@ -36,8 +36,10 @@
 //     islem:  string   — örn. "Ziyaretçi WhatsApp butonuna bastı" (içinde
 //                         "WhatsApp" geçiyorsa whatsapp, aksi halde telefon
 //                         sayılır — eski davranışla BİREBİR aynı)
-//     kaynak: string    — "google_ads" ise "Google Ads Ziyaretçisi", aksi
-//                         halde "Organik Ziyaretçi"
+//     kaynak: string    — "google_ads" ise "Google Ads Ziyaretçisi",
+//                         "facebook_ads" ise "Facebook Ads Ziyaretçisi",
+//                         "instagram_ads" ise "Instagram Ads Ziyaretçisi",
+//                         aksi halde "Organik Ziyaretçi"
 //     site:   string    — "depoevim" | "sembolevdeneve" (hangi site)
 //   }
 // Yanıt sözleşmesi de AYNEN korundu: { success: true, message } veya
@@ -90,6 +92,15 @@ const HIZMET_TIPI_BY_SITE = {
   sembolevdeneve: 'Nakliye',
 };
 
+// "kaynak" (ziyaretciKaynagi()'nin site-tiklama-takip script'inden gönderdiği
+// değer) → satış ekibinin göreceği isim + sonMesaj'a eklenecek kısa ifade.
+// submit-lead.js'teki REKLAM_KAYNAGI_DEGERLERI ile AYNI değerler kullanılır.
+const KAYNAK_ETIKETLERI = {
+  google_ads: { ad: 'Google Ads Ziyaretçisi', reklamMetni: 'Google reklamlarından ' },
+  facebook_ads: { ad: 'Facebook Ads Ziyaretçisi', reklamMetni: 'Facebook reklamlarından ' },
+  instagram_ads: { ad: 'Instagram Ads Ziyaretçisi', reklamMetni: 'Instagram reklamlarından ' },
+};
+
 // Site → satış ekibinin göreceği okunaklı etiket.
 const SITE_ETIKET = {
   depoevim: 'DepoEvim',
@@ -121,7 +132,8 @@ export default async function handler(req, res) {
 
     const suAnkiTarih = new Date().toISOString();
     const kanalTipi = (crmData.islem || '').includes('WhatsApp') ? 'whatsapp' : 'telefon';
-    const musteriAdi = crmData.kaynak === 'google_ads' ? 'Google Ads Ziyaretçisi' : 'Organik Ziyaretçi';
+    const kaynakBilgi = KAYNAK_ETIKETLERI[crmData.kaynak];
+    const musteriAdi = kaynakBilgi ? kaynakBilgi.ad : 'Organik Ziyaretçi';
 
     const db = getDb();
     const ref = db
@@ -138,10 +150,10 @@ export default async function handler(req, res) {
       hesapId: site,
       hizmetTipi,
       durum: 'Yeni',
-      sonMesaj: `${siteEtiket} sitesinden ${crmData.kaynak === 'google_ads' ? 'Google reklamlarından ' : ''}tıklama geldi`,
+      sonMesaj: `${siteEtiket} sitesinden ${kaynakBilgi ? kaynakBilgi.reklamMetni : ''}tıklama geldi`,
       // submit-lead.js ile AYNI alan adı — Satis.jsx artık Ads/Organik
       // sayımını metin eşleştirme yerine doğrudan bu alandan yapıyor.
-      reklamKaynagi: crmData.kaynak === 'google_ads' ? 'google_ads' : 'organik',
+      reklamKaynagi: kaynakBilgi ? crmData.kaynak : 'organik',
       // Bu alan sayesinde Satis.jsx (istenirse) gerçek isim/telefon verilmiş
       // kayıtlarla salt tıklama bildirimlerini ayırt edebilir; iletisim alanına
       // güvenmek zorunda kalmaz.

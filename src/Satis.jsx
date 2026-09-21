@@ -3233,7 +3233,7 @@ export const useHizliTeklifYeniSayilari = (aktif = true) => {
 // Bileşen kendi Firestore çağrısı yapmaz; her şeyi üst bileşenden alır.
 // ============================================================================
 const HizliTekliflerTablosu = ({
-  kayitlar, siteSecimi, hesapAdi, durumRenk, satiscilar, reklamKaynagiAds,
+  kayitlar, siteSecimi, hesapAdi, durumRenk, satiscilar, reklamKaynagiEtiket,
   onDurumDegistir, onAta, onNotEkle, onNotGuncelle, onNotSil, onDetay, onSil,
   silebilir = false,   // YENİ: yalnızca yetkili kullanıcıda "Sil" butonu çizilir
 }) => {
@@ -3385,7 +3385,7 @@ const HizliTekliflerTablosu = ({
                   const yeni = (k.durum || 'Yeni') === 'Yeni';
                   const sonNot = (k.notlar || [])[k.notlar?.length - 1];
                   const telefonVar = telefonGecerliMi(k.iletisim);
-                  const adsMi = reklamKaynagiAds(k);
+                  const kaynakEtiket = reklamKaynagiEtiket(k);
                   return (
                     <tr key={k.id} className={`border-b border-neutral-100 transition ${yeni ? `bg-yellow-50/40 hover:bg-yellow-50 hizli-yeni-cerceve ${sembolMu ? 'hizli-yeni-kirmizi' : 'hizli-yeni-mavi'}` : 'hover:bg-neutral-50'}`}>
 
@@ -3402,7 +3402,7 @@ const HizliTekliflerTablosu = ({
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5 text-[10px] font-bold text-neutral-500 flex-wrap">
                               <Clock className="w-3 h-3" /> {sadeceSaat(k.createdAt)}
-                              <span className={`px-1.5 py-0.5 rounded ${adsMi ? 'bg-green-100 text-green-700' : 'bg-blue-100 text-blue-700'}`}>{adsMi ? 'Google Ads' : 'Organik'}</span>
+                              <span className={`px-1.5 py-0.5 rounded ${kaynakEtiket.renk}`}>{kaynakEtiket.ad}</span>
                               <span className="text-neutral-400">{hesapAdi(k.hesapId)}</span>
                             </div>
                             {k.sonMesaj && (
@@ -3926,15 +3926,34 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // YENİ: AKTİF SEÇİLİ KANALA GÖRE GÜNLÜK PERFORMANS İSTATİSTİKLERİ
   const bugunStr = new Date().toISOString().split('T')[0];
   const aktifKanalBugun = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi && k.createdAt && k.createdAt.startsWith(bugunStr));
-  // Ads/organik ayrımı ARTIK doğrudan "reklamKaynagi" alanından okunuyor —
-  // bunu hem tıklama bildirimleri (yeni-musteri.js) hem de wizard form
-  // gönderimleri (submit-lead.js, gclid/utm_source=google tespiti ile) dolduruyor.
-  // Bu alan henüz olmayan ESKİ kayıtlar için (bu düzeltmeden önce oluşmuş),
-  // eski metin-tabanlı tespiti YEDEK olarak kullanmaya devam ediyoruz.
-  const reklamKaynagiAds = (k) => k.reklamKaynagi
-    ? k.reklamKaynagi === 'google_ads'
-    : (k.sonMesaj?.includes('Google reklam') || k.musteriAdi?.includes('Google Ads'));
-  const bugunAdsSayisi = aktifKanalBugun.filter(reklamKaynagiAds).length;
+  // Google Ads / Facebook Ads / Instagram Ads / Organik ayrımı ARTIK doğrudan
+  // "reklamKaynagi" alanından okunuyor — bunu hem tıklama bildirimleri
+  // (yeni-musteri.js) hem de wizard form gönderimleri (submit-lead.js,
+  // gclid/fbclid/utm_source tespiti ile) dolduruyor. Bu alan henüz olmayan
+  // ESKİ kayıtlar için (bu düzeltmeden önce oluşmuş), eski metin-tabanlı
+  // Google tespitini YEDEK olarak kullanmaya devam ediyoruz (Facebook/
+  // Instagram için eski kayıtlarda böyle bir metin izi yok, o yüzden sadece
+  // reklamKaynagi alanına bakılıyor).
+  const reklamKaynagiEsit = (k, deger) => k.reklamKaynagi
+    ? k.reklamKaynagi === deger
+    : (deger === 'google_ads' && (k.sonMesaj?.includes('Google reklam') || k.musteriAdi?.includes('Google Ads')));
+  const reklamKaynagiAds = (k) => reklamKaynagiEsit(k, 'google_ads') || reklamKaynagiEsit(k, 'facebook_ads') || reklamKaynagiEsit(k, 'instagram_ads');
+  // Satır rozetinde ve özet kutularında gösterilecek etiket + renk — platforma
+  // göre ayrı ayrı, tanınmıyorsa "Organik".
+  const REKLAM_KAYNAGI_ETIKETLERI = {
+    google_ads: { ad: 'Google Ads', renk: 'bg-green-100 text-green-700' },
+    facebook_ads: { ad: 'Facebook Ads', renk: 'bg-blue-100 text-blue-700' },
+    instagram_ads: { ad: 'Instagram Ads', renk: 'bg-pink-100 text-pink-700' },
+  };
+  const reklamKaynagiEtiket = (k) => {
+    if (reklamKaynagiEsit(k, 'google_ads')) return REKLAM_KAYNAGI_ETIKETLERI.google_ads;
+    if (reklamKaynagiEsit(k, 'facebook_ads')) return REKLAM_KAYNAGI_ETIKETLERI.facebook_ads;
+    if (reklamKaynagiEsit(k, 'instagram_ads')) return REKLAM_KAYNAGI_ETIKETLERI.instagram_ads;
+    return { ad: 'Organik', renk: 'bg-neutral-100 text-neutral-600' };
+  };
+  const bugunGoogleAdsSayisi = aktifKanalBugun.filter(k => reklamKaynagiEsit(k, 'google_ads')).length;
+  const bugunFacebookAdsSayisi = aktifKanalBugun.filter(k => reklamKaynagiEsit(k, 'facebook_ads')).length;
+  const bugunInstagramAdsSayisi = aktifKanalBugun.filter(k => reklamKaynagiEsit(k, 'instagram_ads')).length;
   const bugunOrganikSayisi = aktifKanalBugun.filter(k => !reklamKaynagiAds(k)).length;
 
   // ================================================================ RENDER ===
@@ -3966,11 +3985,19 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         {/* YENİ: SEÇİLİ KANALA (VE SEÇİLİ ŞİRKETE) GÖRE GÜNLÜK ÖZET KUTULARI */}
         <div className="flex gap-2 flex-wrap">
           <div className="bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
-            <p className="text-[9px] font-black text-green-400 uppercase">🟢 Bugün {kanal.ad} (Ads)</p>
-            <p className="text-base font-black text-white">{bugunAdsSayisi}</p>
+            <p className="text-[9px] font-black text-green-400 uppercase">🟢 Bugün {kanal.ad} (Google Ads)</p>
+            <p className="text-base font-black text-white">{bugunGoogleAdsSayisi}</p>
           </div>
           <div className="bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
-            <p className="text-[9px] font-black text-blue-400 uppercase">🔵 Bugün {kanal.ad} (Organik)</p>
+            <p className="text-[9px] font-black text-sky-400 uppercase">🔵 Bugün {kanal.ad} (Facebook Ads)</p>
+            <p className="text-base font-black text-white">{bugunFacebookAdsSayisi}</p>
+          </div>
+          <div className="bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
+            <p className="text-[9px] font-black text-pink-400 uppercase">🟣 Bugün {kanal.ad} (Instagram Ads)</p>
+            <p className="text-base font-black text-white">{bugunInstagramAdsSayisi}</p>
+          </div>
+          <div className="bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
+            <p className="text-[9px] font-black text-neutral-400 uppercase">⚪ Bugün {kanal.ad} (Organik)</p>
             <p className="text-base font-black text-white">{bugunOrganikSayisi}</p>
           </div>
         </div>
@@ -4166,7 +4193,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           hesapAdi={hesapAdi}
           durumRenk={durumRenk}
           satiscilar={satiscilar}
-          reklamKaynagiAds={reklamKaynagiAds}
+          reklamKaynagiEtiket={reklamKaynagiEtiket}
           onDurumDegistir={handleDurumDegistir}
           onAta={handleAta}
           onNotEkle={handleHizliNotEkle}
