@@ -4526,30 +4526,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   />
                 </div>
               )}
-              {/* KALDIRILDI (kullanıcı talebi): "Durum" buton satırı — durum artık
-                  Kaydet'e basıldıktan sonra açılan "Müşteriyle görüşme durumu nedir?"
-                  penceresinden seçilir; kayıt o ana kadar "Yeni" kalır. */}
-              <div className="bg-white border border-neutral-200 rounded-2xl p-3">
-                <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Hizmet Tipi</p>
-                <div className="flex gap-1.5">
-                  {HIZMET_TIPLERI.map(t => (
-                    <button key={t.id} type="button" onClick={() => handleHizmetDegistir(detayKayit, t.id)}
-                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition flex items-center gap-1 ${(detayKayit.hizmetTipi || 'Nakliye') === t.id ? t.renk : 'bg-white text-neutral-500 border border-neutral-200'}`}>
-                      <t.Ikon className="w-3 h-3" /> {t.id}
-                    </button>
-                  ))}
-                </div>
-                {/* YENİ: Hizmet tipi hangi şirkette listeleneceğini belirler.
-                    Kayıt bulunduğumuz sekmeden farklı şirkete düşüyorsa uyarılır. */}
-                {kayitSitesi(detayKayit) !== siteSecimi && (
-                  <p className="mt-2 text-[10px] font-black text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex items-center gap-1.5">
-                    <ArrowUpRight className="w-3 h-3 shrink-0" />
-                    Bu hizmet tipiyle kayıt <span className="underline">{kayitSitesi(detayKayit) === 'depoevim' ? 'DEPOEVİM' : 'SEMBOL'}</span> sekmesinde listelenir.
-                  </p>
-                )}
-              </div>
-
-              {/* Not ekleme — DEĞİŞTİ (kullanıcı talebi): daha BELİRGİN — sarı zemin,
+              {/* TAŞINDI (kullanıcı talebi): NOT EKLE artık Hizmet Tipi'nin ÜSTÜNDE.
+              Not ekleme — DEĞİŞTİ (kullanıcı talebi): daha BELİRGİN — sarı zemin,
                   kalın çerçeve, büyük başlık, çok satırlı geniş metin alanı */}
               <div className="bg-yellow-50 border-2 border-yellow-300 rounded-2xl p-3 shadow-sm">
                 <div className="flex items-center justify-between mb-2">
@@ -4632,6 +4610,29 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   </div>
                 ))}
               </div>
+              {/* KALDIRILDI (kullanıcı talebi): "Durum" buton satırı — durum artık
+                  Kaydet'e basıldıktan sonra açılan "Müşteriyle görüşme durumu nedir?"
+                  penceresinden seçilir; kayıt o ana kadar "Yeni" kalır. */}
+              <div className="bg-white border border-neutral-200 rounded-2xl p-3">
+                <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Hizmet Tipi</p>
+                <div className="flex gap-1.5">
+                  {HIZMET_TIPLERI.map(t => (
+                    <button key={t.id} type="button" onClick={() => handleHizmetDegistir(detayKayit, t.id)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black transition flex items-center gap-1 ${(detayKayit.hizmetTipi || 'Nakliye') === t.id ? t.renk : 'bg-white text-neutral-500 border border-neutral-200'}`}>
+                      <t.Ikon className="w-3 h-3" /> {t.id}
+                    </button>
+                  ))}
+                </div>
+                {/* YENİ: Hizmet tipi hangi şirkette listeleneceğini belirler.
+                    Kayıt bulunduğumuz sekmeden farklı şirkete düşüyorsa uyarılır. */}
+                {kayitSitesi(detayKayit) !== siteSecimi && (
+                  <p className="mt-2 text-[10px] font-black text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex items-center gap-1.5">
+                    <ArrowUpRight className="w-3 h-3 shrink-0" />
+                    Bu hizmet tipiyle kayıt <span className="underline">{kayitSitesi(detayKayit) === 'depoevim' ? 'DEPOEVİM' : 'SEMBOL'}</span> sekmesinde listelenir.
+                  </p>
+                )}
+              </div>
+
               {/* Hareket geçmişi */}
               <div className="bg-white border border-neutral-200 rounded-2xl p-3">
                 <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5 flex items-center gap-1"><History className="w-3 h-3" /> Hareket Geçmişi</p>
