@@ -922,6 +922,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     const [duzenlenenId, setDuzenlenenId] = useState(null);
     const [kaydediliyor, setKaydediliyor] = useState(false);
     const [personelArama, setPersonelArama] = useState('');
+    // YENİ (kullanıcı talebi): personel listesi varsayılan KAPALI; "Personel Seç"
+    // butonuna tıklanınca açılır. Form kısa kalır, seçim yapmak kolaylaşır.
+    const [personelListesiAcik, setPersonelListesiAcik] = useState(false);
     const [tarihDegistir, setTarihDegistir] = useState(null);   // { kayit, tarih, saat }
     const [silinecek, setSilinecek] = useState(null);
     const [iptalEdilecek, setIptalEdilecek] = useState(null);
@@ -950,8 +953,17 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     // ---------------------------------------------------- BEYAZ YAKA LİSTESİ ---
     // Keşife gidecek personel: yalnızca AKTİF Beyaz Yaka (Firma Sahibi hariç);
     // arama kutusuyla ada göre daraltılır.
+    // DEĞİŞTİ (kullanıcı talebi): Keşfe gidebilecek personel listesinden
+    // MUHASEBE ve TEMİZLİK pozisyonları çıkarıldı (keşfe gitmiyorlar).
+    // Pozisyon adları panelden serbestçe tanımlandığı için tam eşleşme yerine
+    // metin içinde arama yapılır: "Muhasebe", "Ön Muhasebe", "Muhasebe Müdürü",
+    // "Temizlik Görevlisi", "Temizlik Personeli" hepsi elenir.
+    const keşfeGidemez = (p) => {
+      const poz = (p.position || '').toLocaleLowerCase('tr-TR');
+      return poz.includes('muhasebe') || poz.includes('temizlik');
+    };
     const beyazYaka = (personnelList || [])
-      .filter(p => p.position !== 'Firma Sahibi' && !isMaviYakaPersonel(p) && p.employmentStatus !== 'Pasif')
+      .filter(p => p.position !== 'Firma Sahibi' && !isMaviYakaPersonel(p) && p.employmentStatus !== 'Pasif' && !keşfeGidemez(p))
       .filter(p => !personelArama.trim() || (p.fullName || '').toLowerCase().includes(personelArama.toLowerCase()))
       .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'tr'));
 
@@ -962,7 +974,7 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     };
 
     const formuAc = (kayit = null, tarih = null) => {
-      setPersonelArama('');
+      setPersonelArama(''); setPersonelListesiAcik(false);
       if (kayit) {
         setDuzenlenenId(kayit.id);
         setForm({ musteriAdi: kayit.musteriAdi || '', telefon: kayit.telefon || '', yedekTelefon: kayit.yedekTelefon || '', adres: kayit.adres || '', konumLinki: kayit.konumLinki || '', tarih: kayit.tarih || ekspertizBugun(), saat: kayit.saat || '10:00', hizmetTipi: kayit.hizmetTipi || 'Nakliye', atanan: kayit.atanan || '', not: kayit.not || '' });
@@ -1277,19 +1289,34 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                     {form.konumLinki && <a href={form.konumLinki} target="_blank" rel="noopener noreferrer" className="px-3 flex items-center bg-neutral-100 hover:bg-neutral-200 rounded-xl text-xs font-black"><MapPin className="w-4 h-4" /></a>}
                   </div></div>
                 {/* Keşfe gidecek personel — yalnızca beyaz yaka, aranabilir */}
+                {/* DEĞİŞTİ (kullanıcı talebi): liste hep açık değil — "Personel Seç"
+                    butonuna tıklanınca açılır. Seçili personel butonda görünür. */}
                 <div>
-                  <label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Keşfe Gidecek Personel <span className="text-neutral-300">(opsiyonel — sadece Beyaz Yaka)</span></label>
-                  <div className="relative mb-2">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                    <input value={personelArama} onChange={e => setPersonelArama(e.target.value)} placeholder="Personel adı ara..." className="w-full pl-9 pr-3 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-neutral-900" />
-                  </div>
-                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1">
-                    <button type="button" onClick={() => setForm({ ...form, atanan: '' })} className={`px-2.5 py-1.5 rounded-lg text-xs font-black border transition ${!form.atanan ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>— Atanmadı —</button>
-                    {beyazYaka.map(p => (
-                      <button key={p.id} type="button" onClick={() => setForm({ ...form, atanan: p.fullName })} className={`px-2.5 py-1.5 rounded-lg text-xs font-black border transition flex items-center gap-1 ${form.atanan === p.fullName ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-neutral-700 border-neutral-200 hover:border-purple-400'}`}><User className="w-3 h-3" /> {p.fullName}</button>
-                    ))}
-                    {beyazYaka.length === 0 && <span className="text-xs font-bold text-neutral-400 p-1">Eşleşen beyaz yaka personel yok.</span>}
-                  </div>
+                  <label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Keşfe Gidecek Personel <span className="text-neutral-300">(opsiyonel)</span></label>
+                  <button type="button" onClick={() => setPersonelListesiAcik(a => !a)}
+                    className={`w-full p-3 rounded-xl border-2 text-sm font-black transition flex items-center justify-between gap-2 ${form.atanan ? 'bg-purple-50 border-purple-300 text-purple-800' : 'bg-white border-neutral-300 text-neutral-500 hover:border-neutral-500'}`}>
+                    <span className="flex items-center gap-2 min-w-0">
+                      <User className="w-4 h-4 shrink-0" />
+                      <span className="truncate">{form.atanan || 'Personel Seç'}</span>
+                    </span>
+                    <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${personelListesiAcik ? 'rotate-180' : ''}`} />
+                  </button>
+
+                  {personelListesiAcik && (
+                    <div className="mt-2 border-2 border-neutral-200 rounded-xl p-2 bg-neutral-50 animate-in fade-in slide-in-from-top-1">
+                      <div className="relative mb-2">
+                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                        <input autoFocus value={personelArama} onChange={e => setPersonelArama(e.target.value)} placeholder="Personel adı ara..." className="w-full pl-9 pr-3 py-2.5 bg-white border border-neutral-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-neutral-900" />
+                      </div>
+                      <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
+                        <button type="button" onClick={() => { setForm({ ...form, atanan: '' }); setPersonelListesiAcik(false); }} className={`px-2.5 py-1.5 rounded-lg text-xs font-black border transition ${!form.atanan ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>— Atanmadı —</button>
+                        {beyazYaka.map(p => (
+                          <button key={p.id} type="button" onClick={() => { setForm({ ...form, atanan: p.fullName }); setPersonelListesiAcik(false); setPersonelArama(''); }} className={`px-2.5 py-1.5 rounded-lg text-xs font-black border transition flex items-center gap-1 ${form.atanan === p.fullName ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-neutral-700 border-neutral-200 hover:border-purple-400'}`}><User className="w-3 h-3" /> {p.fullName}</button>
+                        ))}
+                        {beyazYaka.length === 0 && <span className="text-xs font-bold text-neutral-400 p-1">Eşleşen personel yok.</span>}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {/* Not */}
                 <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Not</label>
