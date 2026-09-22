@@ -399,10 +399,23 @@ const SON_MESAJ_BUILDERS = {
   depoevimSiparis: buildSonMesajDepoEvimSiparis,
 };
 
+// YENİ (Ali'nin talebi): DepoEvim sihirbazında müşteri "Eşyalarımı kendim
+// getiririm" (teslimSekli === 'kendim') derse, firma hiçbir alım/nakliye işi
+// yapmıyor — müşteri sadece boş depo alanı kiralıyor demektir. Bu yüzden satış
+// ekibinin listede gördüğü başlık bu durumda "DepoEvim - Depo Kiralama"
+// olmalı; "Firma adresimden alsın (Anahtar Teslim)" seçilirse (firma eşyayı
+// alıp getiriyor, gerçek bir "eşya depolama" hizmeti) başlık eskisi gibi
+// "DepoEvim - Eşya Depolama" kalır. Yalnızca BAŞLIK (köşeli parantez) değişir;
+// hizmetTipi hâlâ 'Depo' — filtre/istatistik davranışı etkilenmez.
+function wizardBasligi(wizardType, p) {
+  if (wizardType === 'depoevimDepolama' && p.teslimSekli === 'kendim') return 'DepoEvim - Depo Kiralama';
+  return WIZARD_ETIKET[wizardType] || 'Web Formu';
+}
+
 function buildSonMesaj(wizardType, p) {
   const builder = SON_MESAJ_BUILDERS[wizardType] || buildSonMesajEvdenEve;
   const govde = builder(p).join('\n');
-  return `[${WIZARD_ETIKET[wizardType] || 'Web Formu'}]\n${govde}`;
+  return `[${wizardBasligi(wizardType, p)}]\n${govde}`;
 }
 
 // Her form türünün güzergah/lokasyon bilgisini tek tip bir "guzergah" nesnesine
