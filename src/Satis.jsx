@@ -2915,10 +2915,28 @@ const DURUMLAR = [
   // YENİ (kullanıcı talebi): iki ara durum eklendi — filtre çubuğu, tablolar ve
   // detay penceresi bu listeyi okuduğu için hepsinde otomatik görünür.
   { id: 'Ulaşılamadı',       renk: 'bg-orange-50 text-orange-700 border-orange-200' },
+  // YENİ (kullanıcı talebi): Kaydet sonrası görüşme durumu sorusundaki seçenek
+  { id: 'Tekrar Aranacak',   renk: 'bg-sky-50 text-sky-700 border-sky-200' },
   { id: 'Bilgi Aldı',        renk: 'bg-purple-50 text-purple-700 border-purple-200' },
   { id: 'Dönüş Bekliyor',    renk: 'bg-amber-50 text-amber-700 border-amber-200' },
   { id: 'Reddedildi',        renk: 'bg-red-50 text-red-700 border-red-200' },
   { id: 'İşi Aldık',         renk: 'bg-green-50 text-green-700 border-green-200' },
+];
+
+// ============================================================================
+// YENİ (kullanıcı talebi): KAYDET SONRASI "GÖRÜŞME DURUMU" SORUSU
+// ----------------------------------------------------------------------------
+// Teklife Bak penceresinde Kaydet'e basılınca durum butonları yerine bu soru
+// açılır. Kayıt ilk etapta "Yeni" kalır; seçim yapılınca durum değişir.
+// etiket = ekranda görünen metin, id = DURUMLAR'daki gerçek durum kodu.
+// ============================================================================
+const GORUSME_DURUMU_SECENEKLERI = [
+  { id: 'Dönüş Bekliyor',  etiket: 'Dönüş Bekliyoruz',        renk: 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/30' },
+  { id: 'Tekrar Aranacak', etiket: 'Tekrar Aranacak',         renk: 'bg-sky-500 hover:bg-sky-600 shadow-sky-500/30' },
+  { id: 'Ulaşılamadı',     etiket: 'Ulaşılmadı',              renk: 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/30' },
+  { id: 'Bilgi Aldı',      etiket: 'Kesin Değil · Bilgi Aldı', renk: 'bg-purple-600 hover:bg-purple-700 shadow-purple-600/30' },
+  { id: 'İşi Aldık',       etiket: 'İşi Aldık',               renk: 'bg-green-600 hover:bg-green-700 shadow-green-600/30' },
+  { id: 'Reddedildi',      etiket: 'Reddedildi',              renk: 'bg-red-600 hover:bg-red-700 shadow-red-600/30' },
 ];
 
 // ============================================================================
@@ -3657,6 +3675,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [notMetni, setNotMetni] = useState('');
   // YENİ: Detay penceresindeki "Hazır Şablonlar" listesi açık mı?
   const [sablonlarAcik, setSablonlarAcik] = useState(false);
+  // YENİ (kullanıcı talebi): Kaydet sonrası açılan "Görüşme durumu nedir?" penceresi
+  const [gorusmeDurumuKayit, setGorusmeDurumuKayit] = useState(null);   // sorulacak kayıt
+  const [gorusmeDurumuKaydediliyor, setGorusmeDurumuKaydediliyor] = useState(false);
+  // YENİ (kullanıcı talebi): Başlıkta ad/telefon düzenleme modu (eski eşleştirme kartının yerine)
+  const [baslikDuzenle, setBaslikDuzenle] = useState(false);
   // YENİ (kullanıcı talebi): detay penceresinde not düzenleme / kaldırma
   const [detayNotDuzenle, setDetayNotDuzenle] = useState(null);   // Düzenlenen notun gerçek sırası
   const [detayNotMetin, setDetayNotMetin] = useState('');          // Düzenlenen notun yeni metni
@@ -3854,23 +3877,61 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
 
   const kanalHesaplari = hesaplar.filter(h => h.kanal === aktifKanal);
   // ==========================================================================
-  // YENİ (kullanıcı talebi): MÜKERRER KAYIT GİZLEME (Hızlı Teklifler)
+  // YENİ (kullanıcı talebi): MÜKERRER KAYIT GİZLEME + ŞÜPHELİ İSİM FİLTRESİ
   // --------------------------------------------------------------------------
-  // Müşteri ADI ve TELEFONU aynı olan tekliflerden yalnızca EN YENİSİ
-  // gösterilir; eskileri listede gizlenir. Kayıtlar Firestore'dan SİLİNMEZ —
-  // yalnızca görünümden kaldırılır, veri kaybı olmaz.
-  //
-  // Güvenlik: karşılaştırma ad (küçük harf, boşluksuz) + telefonun SADECE
-  // rakamları ile yapılır ve yalnızca GERÇEK numarası olan kayıtlarda çalışır;
-  // "Tıklama (Bekleniyor)" gibi numarasız kayıtlar asla birbirinin mükerreri
-  // sayılmaz. Liste en yeniden eskiye sıralı geldiği için ilk görülen kayıt
-  // en yenisidir, sonrakiler elenir.
+  // (Hızlı Teklifler sekmesinde) İki iş yapılır, ikisi de yalnızca GÖRÜNÜMDE:
+  //   1) Aynı müşterinin mükerrer teklifleri → yalnızca EN YENİSİ gösterilir.
+  //   2) Rastgele / anlamsız (spam) isimli kayıtlar → gizlenir.
+  // Kayıtlar Firestore'dan SİLİNMEZ, sadece listeden düşer — veri kaybı olmaz.
   // ==========================================================================
+
+  // Türkçe-uyumlu ad anahtarı: büyük/küçük harf VE aksan farklarını yok sayar.
+  // Sorun: JS'in varsayılan toLowerCase()'i "SATIRLI" → "satirli", ama
+  // "Satırlı" → "satırlı" verir; bu yüzden "YEŞİM SATIRLI" ile "YEŞİM Satırlı"
+  // (aynı numara) mükerrer sayılmıyordu. Burada tüm Türkçe harfler ASCII'ye
+  // indirgenip küçültülür (ç→c, ğ→g, ı/İ→i, ö→o, ş→s, ü→u), boşluklar
+  // sadeleştirilir. Böylece iki yazım da AYNI anahtara iner.
+  const adAnahtari = (ad) => (ad || '')
+    .replace(/İ/g, 'i').replace(/I/g, 'i').replace(/ı/g, 'i')
+    .replace(/Ş/g, 's').replace(/ş/g, 's').replace(/Ğ/g, 'g').replace(/ğ/g, 'g')
+    .replace(/Ç/g, 'c').replace(/ç/g, 'c').replace(/Ö/g, 'o').replace(/ö/g, 'o')
+    .replace(/Ü/g, 'u').replace(/ü/g, 'u')
+    .toLowerCase().replace(/\s+/g, ' ').trim();
+
+  // ŞÜPHELİ / SPAM İSİM TESPİTİ — sadece AÇIKÇA sahte olanları eler; gerçek
+  // isimleri (tek/çift kelime, yabancı, aksanlı) korur. Kararsız kalınan
+  // hiçbir isim elenmez; amaç gerçek talebi asla kaçırmamaktır.
+  const supheliIsim = (ad) => {
+    const ham = (ad || '').trim();
+    const norm = adAnahtari(ham);
+    if (!norm) return true;                                   // boş
+    // (a) 2'den az HARF içeriyorsa (".", "E", "1", "--") → spam
+    const harfler = norm.replace(/[^a-z]/g, '');
+    if (harfler.length < 2) return true;
+    // (b) Hiç sesli harf yoksa (klavye ezmesi "sk", "bcd") → spam
+    if (!/[aeıioöuü]/.test(ham.toLocaleLowerCase('tr')) && !/[aeiou]/.test(norm)) return true;
+    // (c) Tek karakterin tekrarı ("aaaa", "xxxx", "....") → spam
+    if (/^(.)\1+$/.test(norm.replace(/\s/g, ''))) return true;
+    // (d) Bilinen test/şirket kelimeleri (tam kelime eşleşmesi) → spam
+    const karaListe = ['test','deneme','asd','asdf','asdasd','sdf','dsa','sda','qwe','qwer','qwerty','zxc','zxcv','aaa','xxx','sss','abc','ncnc','asdfg','fiyat','random','spam','depoevim','depo evim','sembol','sembol nakliyat'];
+    const kelimeler = norm.split(' ');
+    if (karaListe.includes(norm) || kelimeler.every(k => karaListe.includes(k))) return true;
+    // (e) Herhangi bir kelime 3+ ARDIŞIK sessiz harfle BAŞLIYORSA → spam.
+    //     Türkçede (ve neredeyse tüm dillerde) kelime 3 sessizle başlamaz;
+    //     "Smsöal" (Sms...) gibi ezmeleri yakalar, gerçek isimleri etkilemez.
+    const sessiz = '[bcçdfgğhjklmnprsştvyzqwx]';
+    if (kelimeler.some(k => new RegExp(`^${sessiz}{3,}`, 'i').test(k))) return true;
+    return false;
+  };
+
   const mukerrerleriGizle = (liste) => {
     const gorulen = new Set();
     return liste.filter(k => {
-      if (!telefonGecerliMi(k.iletisim)) return true;            // Numarasız kayıt elenmez
-      const anahtar = `${(k.musteriAdi || '').trim().toLowerCase()}|${telefonRakam(k.iletisim)}`;
+      // (1) Şüpheli/spam isimli kayıtlar gizlenir
+      if (supheliIsim(k.musteriAdi)) return false;
+      // (2) Aynı ad + telefondan yalnızca en yenisi kalır
+      if (!telefonGecerliMi(k.iletisim)) return true;            // Numarasız kayıt eşleştirilmez
+      const anahtar = `${adAnahtari(k.musteriAdi)}|${telefonRakam(k.iletisim)}`;
       if (gorulen.has(anahtar)) return false;                    // Daha yenisi zaten listede
       gorulen.add(anahtar);
       return true;
@@ -4337,10 +4398,32 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                       daha belirgin — turuncu başlık üzerinde beyaz bir kutu
                       içinde birlikte gösterilir. */}
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="bg-white rounded-xl px-3 py-1.5 inline-flex items-baseline gap-2 flex-wrap shadow-sm">
-                      <h3 className="font-black text-lg text-black leading-tight">{detayKayit.musteriAdi || 'İsimsiz'}</h3>
-                      <span className="font-black text-sm text-black/80 tracking-wide">{detayKayit.iletisim}</span>
-                    </span>
+                    {/* DEĞİŞTİ (kullanıcı talebi): eski "Müşteri Bilgilerini Eşleştir"
+                        kartı kaldırıldı; aynı iş artık BURADA yapılır. Kalem simgesine
+                        basılınca ad ve numara yerinde metin kutusuna dönüşür, onaylanınca
+                        handleMusteriGuncelle (eşleştirme) çalışır. */}
+                    {baslikDuzenle ? (
+                      <span className="bg-white rounded-xl px-2 py-1.5 inline-flex items-center gap-1.5 flex-wrap shadow-sm">
+                        <input autoFocus value={duzenleMusteriAdi} onChange={e => setDuzenleMusteriAdi(e.target.value)}
+                          placeholder="Ad Soyad" className="w-40 px-2 py-1 border border-neutral-300 rounded-lg text-sm font-black text-black outline-none focus:ring-2 focus:ring-orange-400" />
+                        <input value={duzenleIletisim} onChange={e => setDuzenleIletisim(e.target.value)}
+                          placeholder="Telefon" className="w-36 px-2 py-1 border border-neutral-300 rounded-lg text-sm font-black text-black outline-none focus:ring-2 focus:ring-orange-400"
+                          onKeyDown={e => { if (e.key === 'Enter') { handleMusteriGuncelle(detayKayit); setBaslikDuzenle(false); } if (e.key === 'Escape') setBaslikDuzenle(false); }} />
+                        <button type="button" title="Kaydet ve eşleştir"
+                          disabled={(!duzenleIletisim.trim() && !duzenleMusteriAdi.trim()) || (duzenleIletisim === detayKayit.iletisim && duzenleMusteriAdi === detayKayit.musteriAdi)}
+                          onClick={async () => { await handleMusteriGuncelle(detayKayit); setBaslikDuzenle(false); }}
+                          className="p-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg transition disabled:opacity-40"><CheckCircle className="w-4 h-4" /></button>
+                        <button type="button" title="Vazgeç" onClick={() => { setBaslikDuzenle(false); setDuzenleMusteriAdi((detayKayit.musteriAdi || '').includes('Ziyaretçi') ? '' : (detayKayit.musteriAdi || '')); setDuzenleIletisim((detayKayit.iletisim || '').includes('Bekleniyor') ? '' : (detayKayit.iletisim || '')); }}
+                          className="p-1.5 bg-neutral-200 hover:bg-neutral-300 text-neutral-700 rounded-lg transition"><X className="w-4 h-4" /></button>
+                      </span>
+                    ) : (
+                      <span className="bg-white rounded-xl px-3 py-1.5 inline-flex items-center gap-2 flex-wrap shadow-sm">
+                        <h3 className="font-black text-lg text-black leading-tight">{detayKayit.musteriAdi || 'İsimsiz'}</h3>
+                        <span className="font-black text-sm text-black/80 tracking-wide">{detayKayit.iletisim}</span>
+                        <button type="button" onClick={() => setBaslikDuzenle(true)} title="Ad / telefonu düzenle ve eşleştir"
+                          className="ml-1 p-1 rounded-md text-neutral-400 hover:text-orange-600 hover:bg-orange-50 transition"><Edit className="w-4 h-4" /></button>
+                      </span>
+                    )}
                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/25">{detayKayit.durum || 'Yeni'}</span>
                   </div>
                   {/* YENİ: mevcut satışçı — canlı kayıttan okunur, başka kullanıcı Kaydet'le devralırsa pencere açıkken bile güncellenir */}
@@ -4379,61 +4462,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-neutral-50">
               
               {/* Müşteri Eşleştirme / Bilgi Güncelleme Alanı */}
-              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-3">
-                <p className="text-[10px] font-black text-blue-700 uppercase mb-2">Müşteri Bilgilerini Eşleştir</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                  <input
-                    value={duzenleMusteriAdi}
-                    onChange={e => setDuzenleMusteriAdi(e.target.value)}
-                    placeholder="Gerçek Ad Soyad"
-                    className="p-2.5 border border-blue-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                  <input
-                    value={duzenleIletisim}
-                    onChange={e => setDuzenleIletisim(e.target.value)}
-                    placeholder="Gerçek Telefon No"
-                    className="p-2.5 border border-blue-200 rounded-xl text-xs outline-none focus:ring-2 focus:ring-blue-600"
-                  />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleMusteriGuncelle(detayKayit)}
-                  disabled={(!duzenleIletisim.trim() && !duzenleMusteriAdi.trim()) || (duzenleIletisim === detayKayit.iletisim && duzenleMusteriAdi === detayKayit.musteriAdi)}
-                  className="w-full py-2 bg-blue-600 text-white rounded-xl text-xs font-black disabled:opacity-40 transition"
-                >
-                  Bilgileri Güncelle ve Eşleştir
-                </button>
-
-                {/* ==============================================================
-                    TAŞINDI (kullanıcı talebi): KAYIT AÇ — artık "Bilgileri
-                    Güncelle ve Eşleştir" butonunun hemen altında ve onunla
-                    AYNI boyutta (w-full py-2, text-xs).
-                    --------------------------------------------------------------
-                    Teklifi gerçek işe çevirir: hizmet tipine göre Nakliye / Depo /
-                    Asansör kayıt sekmesi açılır, müşteri adı ve telefonu forma
-                    otomatik yazılır. Hem Sembol hem Depoevim tarafında çalışır.
-                    Yukarıdaki kutularda düzeltilmiş bilgi varsa o kullanılır.
-                    ============================================================== */}
-                {onKayitAc && (() => {
-                  const tip = detayKayit.hizmetTipi || 'Nakliye';
-                  const tipBilgi = HIZMET_TIPLERI.find(t => t.id === tip) || HIZMET_TIPLERI[0];
-                  const renk = tip === 'Depo' ? 'bg-blue-600 hover:bg-blue-700'
-                    : tip === 'Asansör' ? 'bg-green-600 hover:bg-green-700'
-                    : 'bg-red-600 hover:bg-red-700';
-                  return (
-                    <button type="button"
-                      onClick={() => {
-                        const ad = (duzenleMusteriAdi || detayKayit.musteriAdi || '').trim();
-                        const tel = (duzenleIletisim || detayKayit.iletisim || '').trim();
-                        onKayitAc({ hizmetTipi: tip, musteriAdi: ad, telefon: telefonGecerliMi(tel) ? tel : '' });
-                        setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false);
-                      }}
-                      className={`w-full mt-2 py-2 rounded-xl text-white text-xs font-black transition flex items-center justify-center gap-1.5 ${renk}`}>
-                      <tipBilgi.Ikon className="w-3.5 h-3.5" /> {tip} Kaydı Aç
-                    </button>
-                  );
-                })()}
-              </div>
+              {/* KALDIRILDI (kullanıcı talebi): "Müşteri Bilgilerini Eşleştir" kartı →
+                  düzenleme artık başlıktaki kalem simgesinde. "Kayıt Aç" butonu →
+                  alt çubuğa (Vazgeç · Kaydet · Kayıt Aç) taşındı. */}
 
               {/* ==============================================================
                   DEĞİŞTİ: TEKLİF DETAYI ARTIK TABLO GİBİ AYRIŞTIRILIR
@@ -4495,18 +4526,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   />
                 </div>
               )}
-              {/* Hızlı durum ve hizmet tipi değişimi — DEĞİŞTİ: kart içine alındı */}
-              <div className="bg-white border border-neutral-200 rounded-2xl p-3">
-                <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Durum</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {DURUMLAR.map(d => (
-                    <button key={d.id} type="button" onClick={() => handleDurumDegistir(detayKayit, d.id)}
-                      className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border transition ${(detayKayit.durum || 'Yeni') === d.id ? 'bg-neutral-900 text-white border-neutral-900' : d.renk}`}>
-                      {d.id}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              {/* KALDIRILDI (kullanıcı talebi): "Durum" buton satırı — durum artık
+                  Kaydet'e basıldıktan sonra açılan "Müşteriyle görüşme durumu nedir?"
+                  penceresinden seçilir; kayıt o ana kadar "Yeni" kalır. */}
               <div className="bg-white border border-neutral-200 rounded-2xl p-3">
                 <p className="text-[10px] font-black text-neutral-400 uppercase mb-1.5">Hizmet Tipi</p>
                 <div className="flex gap-1.5">
@@ -4527,10 +4549,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 )}
               </div>
 
-              {/* Not ekleme */}
-              <div className="bg-white border border-neutral-200 rounded-2xl p-3">
-                <div className="flex items-center justify-between mb-1.5">
-                  <p className="text-[10px] font-black text-neutral-400 uppercase">Not Ekle</p>
+              {/* Not ekleme — DEĞİŞTİ (kullanıcı talebi): daha BELİRGİN — sarı zemin,
+                  kalın çerçeve, büyük başlık, çok satırlı geniş metin alanı */}
+              <div className="bg-yellow-50 border-2 border-yellow-300 rounded-2xl p-3 shadow-sm">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm font-black text-yellow-900 flex items-center gap-1.5"><StickyNote className="w-4 h-4" /> Not Ekle</p>
                   {/* YENİ (kullanıcı talebi): HAZIR ŞABLONLAR butonu — tıklayınca
                       şablon listesi açılır, seçilen şablon not kutusuna yazılır */}
                   <button type="button" onClick={() => setSablonlarAcik(a => !a)}
@@ -4548,11 +4571,15 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                     ))}
                   </div>
                 )}
-                <div className="flex gap-2">
-                  <input value={notMetni} onChange={e => setNotMetni(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') handleNotEkle(detayKayit); }}
-                    placeholder="Örn: Fiyat verildi, perşembe dönecek..." className="flex-1 p-2.5 border border-neutral-300 rounded-xl text-xs outline-none" />
-                  <button type="button" onClick={() => handleNotEkle(detayKayit)} disabled={!notMetni.trim()} className="px-3 py-2 bg-neutral-900 text-white rounded-xl text-xs font-black disabled:opacity-40 flex items-center gap-1"><Send className="w-3 h-3" /> Ekle</button>
+                <div className="flex gap-2 items-stretch">
+                  <textarea rows={2} value={notMetni} onChange={e => setNotMetni(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleNotEkle(detayKayit); } }}
+                    placeholder="Görüşme notunu buraya yazın… (Enter: ekle, Shift+Enter: yeni satır)"
+                    className="flex-1 p-3 bg-white border-2 border-yellow-300 rounded-xl text-sm font-medium outline-none focus:ring-2 focus:ring-yellow-400 resize-none" />
+                  <button type="button" onClick={() => handleNotEkle(detayKayit)} disabled={!notMetni.trim()}
+                    className="px-4 bg-yellow-400 hover:bg-yellow-500 text-black rounded-xl text-sm font-black disabled:opacity-40 flex items-center gap-1.5 transition shadow-md"><Send className="w-4 h-4" /> Ekle</button>
                 </div>
+                <p className="text-[10px] font-bold text-yellow-700/70 mt-1.5">Yazıp "Ekle"ye basmasanız bile Kaydet'te otomatik eklenir.</p>
                 {/* DEĞİŞTİ (kullanıcı talebi): her notta Düzenle ve Kaldır var.
                     Liste en yeniden eskiye gösterilir; düzenleme/silme için notun
                     dizideki GERÇEK sırası (i) korunur. */}
@@ -4630,30 +4657,69 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   tipi ve notlar zaten anında kaydedildiği için burada ek bir
                   yazma yoktur; atamanın kendisi de hareket geçmişine düşer.
                   ================================================================ */}
+              {/* ================================================================
+                  DEĞİŞTİ (kullanıcı talebi): ALT ÇUBUK — Vazgeç %25 · Kaydet %50 · Kayıt Aç %25
+                  ----------------------------------------------------------------
+                  • Kaydet: yazılmamış notu ekler + satışçıyı en son basana atar,
+                    ardından "Müşteriyle görüşme durumu nedir?" penceresini AÇAR
+                    (durum orada seçilir; seçim yapılmazsa kayıt "Yeni" kalır).
+                  • Kayıt Aç: hizmet tipine göre Nakliye/Depo/Asansör kaydı açar,
+                    ad ve telefonu forma doldurur (eşleştirme kartından taşındı).
+                  ================================================================ */}
               <div className="flex gap-2">
-                <button onClick={() => { setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false); setDetayNotDuzenle(null); setDetayNotSil(null); }}
-                  className="px-4 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-500 font-black rounded-xl text-sm transition">Vazgeç</button>
+                <button onClick={() => { setNotMetni(''); setBaslikDuzenle(false); setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false); setDetayNotDuzenle(null); setDetayNotSil(null); }}
+                  className="basis-1/4 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-500 font-black rounded-xl text-sm transition">Vazgeç</button>
                 <button onClick={async () => {
-                    // ============================================================
-                    // DEĞİŞTİ (kullanıcı talebi): SATIŞÇI = EN SON KAYDET'E BASAN
-                    // ------------------------------------------------------------
-                    // Kısıt yoktur: Kaydet'e basan HER kullanıcı (pozisyonu ne
-                    // olursa olsun) bu işin satışçısı olarak yazılır. Daha önce
-                    // başka biri atanmışsa isim onunkiyle DEĞİŞTİRİLİR; tabloda
-                    // ve pencerede hep en son kaydedenin adı görünür. Devralma,
-                    // hareket geçmişine kimden kime geçtiğiyle birlikte yazılır.
-                    // ============================================================
-                    if (detayKayit && kullaniciAdi && detayKayit.atanan !== kullaniciAdi) {
-                      await hareketliGuncelle(detayKayit, { atanan: kullaniciAdi },
-                        detayKayit.atanan
+                    // (1) Yazılmamış not + satışçı ataması tek yazmada (mevcut mantık)
+                    if (detayKayit) {
+                      const bekleyenNot = notMetni.trim();
+                      const guncelle = {};
+                      let logMetni = '';
+                      if (bekleyenNot) {
+                        const not = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, metin: bekleyenNot };
+                        guncelle.notlar = [...(detayKayit.notlar || []), not];
+                        logMetni = `Not eklendi: "${bekleyenNot.slice(0, 60)}"`;
+                      }
+                      if (kullaniciAdi && detayKayit.atanan !== kullaniciAdi) {
+                        guncelle.atanan = kullaniciAdi;
+                        const atamaLog = detayKayit.atanan
                           ? `Satışçı değişti: ${detayKayit.atanan} → ${kullaniciAdi} (Kaydet ile devraldı)`
-                          : `Kayıt ${kullaniciAdi} adlı satışçıya atandı (Kaydet ile)`);
+                          : `Kayıt ${kullaniciAdi} adlı satışçıya atandı (Kaydet ile)`;
+                        logMetni = logMetni ? `${logMetni} • ${atamaLog}` : atamaLog;
+                      }
+                      if (Object.keys(guncelle).length > 0) {
+                        await hareketliGuncelle(detayKayit, guncelle, logMetni);
+                      }
+                      setNotMetni('');
+                      // (2) YENİ: durum sorusu için kaydı sakla — pencere kapanınca soru açılır
+                      setGorusmeDurumuKayit({ ...detayKayit, ...guncelle });
                     }
+                    setBaslikDuzenle(false);
                     setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false); setDetayNotDuzenle(null); setDetayNotSil(null);
                   }}
-                  className="flex-1 py-2.5 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl text-sm transition shadow-lg shadow-green-600/30 flex items-center justify-center gap-2">
+                  className="basis-1/2 py-2.5 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl text-sm transition shadow-lg shadow-green-600/30 flex items-center justify-center gap-2">
                   <Save className="w-4 h-4" /> Kaydet
                 </button>
+                {onKayitAc ? (() => {
+                  const tip = detayKayit.hizmetTipi || 'Nakliye';
+                  const tipBilgi = HIZMET_TIPLERI.find(t => t.id === tip) || HIZMET_TIPLERI[0];
+                  const renk = tip === 'Depo' ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30'
+                    : tip === 'Asansör' ? 'bg-green-700 hover:bg-green-800 shadow-green-700/30'
+                    : 'bg-red-600 hover:bg-red-700 shadow-red-600/30';
+                  return (
+                    <button type="button" title={`${tip} kaydı aç — müşteri bilgileri otomatik dolar`}
+                      onClick={() => {
+                        const ad = (duzenleMusteriAdi || detayKayit.musteriAdi || '').trim();
+                        const tel = (duzenleIletisim || detayKayit.iletisim || '').trim();
+                        onKayitAc({ hizmetTipi: tip, musteriAdi: ad, telefon: telefonGecerliMi(tel) ? tel : '' });
+                        setNotMetni(''); setBaslikDuzenle(false);
+                        setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false);
+                      }}
+                      className={`basis-1/4 py-2.5 rounded-xl text-white text-sm font-black transition shadow-lg flex items-center justify-center gap-1.5 ${renk}`}>
+                      <tipBilgi.Ikon className="w-4 h-4" /> Kayıt Aç
+                    </button>
+                  );
+                })() : <span className="basis-1/4" />}
               </div>
               <p className="text-[10px] font-bold text-neutral-400 text-center mt-1.5">
                 Kaydet'e basan kullanıcı ({kullaniciAdi}) bu işin satışçısı olur; daha sonra başka biri Kaydet'e basarsa satışçı <span className="font-black text-neutral-500">en son basan kişi</span> olarak güncellenir.
@@ -4683,6 +4749,54 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ==================================================================
+          YENİ (kullanıcı talebi): "MÜŞTERİYLE GÖRÜŞME DURUMU NEDİR?"
+          ------------------------------------------------------------------
+          Teklife Bak → Kaydet'ten sonra açılır. Seçenekler alt alta, her biri
+          kendi renginde. Seçilince kayıt durumu değişir (hareket geçmişine
+          düşer) ve pencere kapanır. "Şimdilik değiştirme" ile kayıt "Yeni"
+          (ya da mevcut durumunda) kalır.
+          ================================================================== */}
+      {gorusmeDurumuKayit && (
+        <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setGorusmeDurumuKayit(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+            <div className="bg-neutral-900 text-white p-4">
+              <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Kaydedildi ✓</p>
+              <h3 className="font-black text-base mt-0.5">Müşteriyle Görüşme Durumu Nedir?</h3>
+              <p className="text-[11px] font-bold text-neutral-300 mt-1 truncate">{gorusmeDurumuKayit.musteriAdi || 'İsimsiz'} • {gorusmeDurumuKayit.iletisim}</p>
+            </div>
+            <div className="p-3 space-y-2">
+              {GORUSME_DURUMU_SECENEKLERI.map(sec => (
+                <button key={sec.id} type="button" disabled={gorusmeDurumuKaydediliyor}
+                  onClick={async () => {
+                    setGorusmeDurumuKaydediliyor(true);
+                    try {
+                      // ÖNEMLİ: Kayıt CANLI listeden okunur (onSnapshot ile güncel).
+                      // Böylece bir önceki adımda (Kaydet) yazılan not/atama hareketi
+                      // hareketler dizisinde korunur; eski kopya üzerine yazılmaz.
+                      const canli = kayitlar.find(x => x.id === gorusmeDurumuKayit.id) || gorusmeDurumuKayit;
+                      await handleDurumDegistir(canli, sec.id);
+                    }
+                    finally { setGorusmeDurumuKaydediliyor(false); setGorusmeDurumuKayit(null); }
+                  }}
+                  className={`w-full py-3 rounded-xl text-white text-sm font-black transition shadow-lg disabled:opacity-60 flex items-center justify-between px-4 ${sec.renk} ${(gorusmeDurumuKayit.durum || 'Yeni') === sec.id ? 'ring-2 ring-offset-2 ring-neutral-900' : ''}`}>
+                  <span>{sec.etiket}</span>
+                  {(gorusmeDurumuKayit.durum || 'Yeni') === sec.id
+                    ? <span className="text-[10px] font-black bg-white/25 px-2 py-0.5 rounded-full">Mevcut</span>
+                    : <ChevronRight className="w-4 h-4 opacity-70" />}
+                </button>
+              ))}
+            </div>
+            <div className="p-3 border-t border-neutral-100">
+              <button type="button" onClick={() => setGorusmeDurumuKayit(null)} disabled={gorusmeDurumuKaydediliyor}
+                className="w-full py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-600 font-black rounded-xl text-xs transition disabled:opacity-50">
+                Şimdilik değiştirme — <span className="text-neutral-800">{gorusmeDurumuKayit.durum || 'Yeni'}</span> olarak kalsın
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
