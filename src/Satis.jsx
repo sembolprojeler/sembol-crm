@@ -3073,7 +3073,14 @@ const TEKLIF_ALANLARI = [
   // YENİ (kullanıcı talebi): DepoEvim sihirbazının alanları — depolama
   // teklifleri de artık nakliye gibi satır satır ayrıştırılır.
   // (Ayrıştırıcı uzun adı önce dener: "Depo Boyutu" varken "Depo" yakalanmaz.)
-  'Depo Boyutu', 'Depo Kiralama Süresi', 'Kiralama Süresi', 'Şube',
+  // NOT: "Depo Kiralama Süresi" kasıtlı olarak YOK — hiçbir builder bu bileşik
+  // adı üretmiyor, ama "Depo Boyutu" değeri "...m³ Depo" ile bittiği için bir
+  // önceki alanın sonundaki "Depo" kelimesiyle sıradaki "Kiralama Süresi:"
+  // etiketi birleşip yanlışlıkla "Depo Kiralama Süresi" olarak eşleşiyordu —
+  // hem bu satırın adını bozuyor hem "Depo Boyutu" değerinin sonundaki
+  // "Depo" kelimesini çalıyordu. Bu isim kaldırılınca "Kiralama Süresi" tek
+  // başına doğru eşleşiyor.
+  'Depo Boyutu', 'Kiralama Süresi', 'Şube',
   'Teslim Şekli', 'Başlangıç Tarihi', 'Aylık Fiyat', 'Toplam Ödenecek (peşin)',
   'Toplam Ödenecek', 'Oda Sayısı', 'Kullanım Amacı', 'Kurulum yeri',
   // YENİ: DepoEvim "Firma adresimden alsın (Anahtar Teslim)" seçilince 2.
@@ -3924,8 +3931,17 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const iletisimBtnMetin = aktifKanal === 'telefon' ? 'Ara' : aktifKanal === 'gmail' ? 'Mail At' : 'Mesaj At';
 
   // YENİ: AKTİF SEÇİLİ KANALA GÖRE GÜNLÜK PERFORMANS İSTATİSTİKLERİ
-  const bugunStr = new Date().toISOString().split('T')[0];
-  const aktifKanalBugun = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi && k.createdAt && k.createdAt.startsWith(bugunStr));
+  // DÜZELTME: eskiden "new Date().toISOString().split('T')[0]" (UTC güne göre)
+  // ile karşılaştırılıyordu — bu, gunAnahtari()'nin yukarıda (satır ~3148)
+  // TAM OLARAK aynı sebeple düzeltilmiş olan hatayı burada TEKRAR üretiyordu:
+  // Türkiye saatiyle gece 00:00–03:00 arası gelen kayıtlar UTC'de hâlâ "dün"
+  // sayıldığı için özet kutularından (Google/Facebook/Instagram/Organik
+  // toplamı) düşüyor, ama "Hızlı Teklifler" gün ayracı listesi (gunAnahtari
+  // kullandığı için) onları doğru şekilde "bugün" gösteriyordu — bu da kutu
+  // toplamının listedeki gerçek "bugün" sayısından az çıkmasına yol açıyordu.
+  // Artık ikisi de AYNI gunAnahtari() fonksiyonuyla (yerel/Türkiye günü)
+  // karşılaştırılıyor, sayılar tutarlı olacak.
+  const aktifKanalBugun = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi && k.createdAt && gunAnahtari(k.createdAt) === gunAnahtari(new Date().toISOString()));
   // Google Ads / Facebook Ads / Instagram Ads / Organik ayrımı ARTIK doğrudan
   // "reklamKaynagi" alanından okunuyor — bunu hem tıklama bildirimleri
   // (yeni-musteri.js) hem de wizard form gönderimleri (submit-lead.js,
