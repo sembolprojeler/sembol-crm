@@ -4029,24 +4029,27 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // otomatik yazılır; kalan alanlar o sekmenin kendi varsayılanlarıyla
     // gelir — yani sekme butonlarına elle basılmış gibi davranır.
     // ======================================================================
-    const havuzdanKayitAc = ({ hizmetTipi, musteriAdi, telefon }) => {
+    // GENİŞLETİLDİ: Ekspertiz Takvimi'nden gelen kayıtlar yedek telefon ve keşif
+    // adresini de gönderebilir (opsiyonel); adres "AL" (alış) adresine yazılır.
+    const havuzdanKayitAc = ({ hizmetTipi, musteriAdi, telefon, yedekTelefon = '', adres = '' }) => {
       const tip = hizmetTipi === 'Depo' ? 'Depo' : (hizmetTipi === 'Asansör' ? 'Asansör' : 'Nakliye');
       const ortak = {
         ...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '',
-        customerName: musteriAdi || '', customerPhone: telefon || '', altPhone: '',
+        customerName: musteriAdi || '', customerPhone: telefon || '', altPhone: yedekTelefon || '',
         wallMounting: [], esyaDurumu: [], contractDetails: '', notes: '',
       };
+      const alAdresi = adres || '';
       setEditingJobId(null);
       setRecordType(tip);
       if (tip === 'Depo') {
         setActiveTab('addDepo');
-        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', selectedDepo: '', depoDirection: 'toDepo' });
+        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: alAdresi, toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', selectedDepo: '', depoDirection: 'toDepo' });
       } else if (tip === 'Asansör') {
         setActiveTab('addAsansor');
-        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '' });
+        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: alAdresi, toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '' });
       } else {
         setActiveTab('addNakliye');
-        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '' });
+        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: alAdresi, toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '' });
       }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
@@ -8353,7 +8356,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'notifications' && <NotificationsView notifications={visibleNotifications} markNotificationsAsRead={markNotificationsAsRead} currentUser={currentUser} canAddInfo={showAddInfo} onAddInfo={() => setActiveTab('addInfo')} />}
             {activeTab === 'calendar' && showCalendar && <CalendarView jobs={currentUser?.position === 'Operatör' ? jobs : visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} setJobToChangeDate={setJobToChangeDate} setNewJobDate={setNewJobDate} setShowChangeDateModal={setShowChangeDateModal} setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} onDonemGerekli={donemIsleriYukle} donemYukleniyor={donemYukleniyor}
               /* YENİ: Takvimde müşteri adına tıklanınca cari profili açılır */
-              onViewCustomer={showCustomers ? ((job) => { setViewingCariKey(normalizeCariPhone(job.customerPhone)); setActiveTab('customerProfile'); }) : null} />}
+              onViewCustomer={showCustomers ? ((job) => { setViewingCariKey(normalizeCariPhone(job.customerPhone)); setActiveTab('customerProfile'); }) : null}
+              /* YENİ: Ekspertiz Takvimi — beyaz yaka listesi, "Kayıt Aç" köprüsü ve sistem günlüğü */
+              personnelList={personnelList} onKayitAc={showSatisMusteriKayit ? havuzdanKayitAc : null} addSystemLog={addSystemLog} />}
             {activeTab === 'profileSettings' && showProfileSettings && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} showMySpecialTasks={showMySpecialTasks} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} showMyComplaint={showMyComplaint} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'myAssignedJobs' && <MyAssignedJobsView currentUser={currentUser} jobs={visibleJobs} handleOpenEndJobModal={handleOpenEndJobModal} markNotificationsAsRead={markNotificationsAsRead} />}
             {activeTab === 'mySpecialTasks' && showMySpecialTasks && <MyTasksView currentUser={currentUser} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
