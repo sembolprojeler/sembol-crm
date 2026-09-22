@@ -358,9 +358,18 @@ function buildSonMesajDepoEvim(p) {
   if (p.kiralamaSuresi) satirlar.push(`Kiralama Süresi: ${SURE_KIRALAMA_LABEL[p.kiralamaSuresi] || p.kiralamaSuresi}`);
   if (p.sube) satirlar.push(`Şube: ${DEPOEVIM_SUBE_LABEL[p.sube] || p.sube}`);
   if (p.teslimSekli) satirlar.push(`Teslim Şekli: ${DEPOEVIM_TESLIM_LABEL[p.teslimSekli] || p.teslimSekli}`);
+  // YENİ: "Firma adresimden alsın (Anahtar Teslim)" seçilince 2. adımda
+  // alınan İl/İlçe ve buna bağlı tahmini nakliye (toplama) ücreti — bu iki
+  // alan CRM özet metninde EKSİKTİ (payload'da geliyordu ama sonMesaj'a hiç
+  // yazılmıyordu, o yüzden "Teklif Detayı" penceresinde hiç görünmüyorlardı).
+  // Etiketler Satis.jsx'teki TEKLIF_ALANLARI listesindeki adlarla BİREBİR
+  // aynı olmak zorunda, yoksa ayrıştırıcı bunları ayrı satır olarak yakalayıp
+  // bölemez — bir önceki alanın değerine yapışık görünürler.
+  if (p.pickupCity) satirlar.push(`Eşyaların Alınacağı Yer: ${p.pickupCity}${p.pickupDistrict ? '/' + p.pickupDistrict : ''}`);
   if (p.baslangicTarihi) satirlar.push(`Başlangıç Tarihi: ${p.baslangicTarihi}`);
   if (p.fiyatAylik) satirlar.push(`Aylık Fiyat: ${fmtTL(p.fiyatAylik)} TL`);
   if (p.fiyatToplam) satirlar.push(`Toplam Ödenecek (peşin): ${fmtTL(p.fiyatToplam)} TL`);
+  if (p.nakliyeMin) satirlar.push(`Tahmini Alım/Nakliye Ücreti: ${fmtTL(p.nakliyeMin)} - ${fmtTL(p.nakliyeMax || p.nakliyeMin)} TL`);
   return ortakKuyruk(satirlar, p);
 }
 
