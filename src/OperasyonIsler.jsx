@@ -874,10 +874,488 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       </div>
     );
   };
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): EKSPERTİZ TAKVİMİ
+  // --------------------------------------------------------------------------
+  // Amaç: Henüz iş kaydı AÇILMAMIŞ müşterilerin eşyasına bakmaya (keşif /
+  // ekspertiz) gidilen randevuları ayrı bir takvimde tutmak. Randevu takvimi
+  // ile aynı mantıkta çalışır; aylık görünüm, güne tıklayınca altta liste.
+  //
+  // Veri: Firestore → artifacts/{appId}/public/data/ekspertizler
+  //   musteriAdi, telefon, yedekTelefon?, adres, konumLinki?, tarih (YYYY-MM-DD),
+  //   saat (HH:MM), hizmetTipi ('Nakliye'|'Depo'|'Asansör'), atanan? (beyaz yaka
+  //   personel adı), not?, durum ('bekliyor'|'gidildi'|'isiAldik'|'isiAlamadik'|
+  //   'iptal'), olusturan, createdAt, hareketler[] (kim ne zaman ne yaptı)
+  //
+  // Takvimde her ekspertiz BÜYÜTEÇ (keşif) simgesiyle gösterilir; renk hizmet
+  // tipine göre: Nakliye kırmızı, Depo mavi, Asansör yeşil.
+  // Yalnızca seçili ayın kayıtları dinlenir (Firestore okuma sayısı düşük kalır).
+  // ==========================================================================
+  const EKSPERTIZ_TIP = {
+    'Nakliye': { renk: 'text-red-600',   zemin: 'bg-red-50 border-red-200',     dolu: 'bg-red-600',   Ikon: Truck },
+    'Depo':    { renk: 'text-blue-600',  zemin: 'bg-blue-50 border-blue-200',   dolu: 'bg-blue-600',  Ikon: Package },
+    'Asansör': { renk: 'text-green-600', zemin: 'bg-green-50 border-green-200', dolu: 'bg-green-600', Ikon: ArrowUpRight },
+  };
+  const EKSPERTIZ_DURUM = {
+    bekliyor:   { ad: 'Bekliyor',       renk: 'bg-neutral-100 text-neutral-700 border-neutral-300' },
+    gidildi:    { ad: 'Gidildi',        renk: 'bg-blue-50 text-blue-700 border-blue-200' },
+    isiAldik:   { ad: 'İşi Aldık',      renk: 'bg-green-50 text-green-700 border-green-200' },
+    isiAlamadik:{ ad: 'İşi Alamadık',   renk: 'bg-red-50 text-red-700 border-red-200' },
+    iptal:      { ad: 'İptal',          renk: 'bg-neutral-100 text-neutral-400 border-neutral-200 line-through' },
+  };
+  const EKSPERTIZ_AYLAR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+  const EKSPERTIZ_GUNLER = ['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'];
+  const ekspertizBugun = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+  const ekspertizTarihGoster = (t) => t ? t.split('-').reverse().join('.') : '—';
+  const ekspertizZaman = (iso) => iso ? new Date(iso).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  const ekspertizRakam = (v) => (v || '').replace(/\D/g, '');
+  const ekspertizWa = (v) => { let r = ekspertizRakam(v); if (r.startsWith('0')) r = r.slice(1); if (r.length === 10) r = '90' + r; return r; };
+
+  export const EkspertizTakvimiView = ({ currentUser, personnelList = [], onKayitAc = null, addSystemLog }) => {
+    // ------------------------------------------------------------ STATE ---
+    const simdi = new Date();
+    const [takvim, setTakvim] = useState({ yil: simdi.getFullYear(), ay: simdi.getMonth() });
+    const [secilenGun, setSecilenGun] = useState(ekspertizBugun());
+    const [kayitlar, setKayitlar] = useState([]);
+    const [yukleniyor, setYukleniyor] = useState(true);
+    const [formAcik, setFormAcik] = useState(false);
+    const [duzenlenenId, setDuzenlenenId] = useState(null);
+    const [kaydediliyor, setKaydediliyor] = useState(false);
+    const [personelArama, setPersonelArama] = useState('');
+    const [tarihDegistir, setTarihDegistir] = useState(null);   // { kayit, tarih, saat }
+    const [silinecek, setSilinecek] = useState(null);
+    const [iptalEdilecek, setIptalEdilecek] = useState(null);
+    const kullaniciAdi = currentUser?.fullName || 'Sistem';
+
+    const bosForm = { musteriAdi: '', telefon: '', yedekTelefon: '', adres: '', konumLinki: '', tarih: ekspertizBugun(), saat: '10:00', hizmetTipi: 'Nakliye', atanan: '', not: '' };
+    const [form, setForm] = useState(bosForm);
+
+    // ------------------------------------------------- CANLI VERİ (AYLIK) ---
+    // Sadece görüntülenen ayın kayıtları dinlenir; ay değişince abonelik yenilenir.
+    const ayBasi = `${takvim.yil}-${String(takvim.ay + 1).padStart(2, '0')}-01`;
+    const aySonu = `${takvim.yil}-${String(takvim.ay + 1).padStart(2, '0')}-${String(new Date(takvim.yil, takvim.ay + 1, 0).getDate()).padStart(2, '0')}`;
+    useEffect(() => {
+      setYukleniyor(true);
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'ekspertizler'), where('tarih', '>=', ayBasi), where('tarih', '<=', aySonu));
+      const unsub = onSnapshot(q, snap => {
+        setKayitlar(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.tarih + (a.saat || '')).localeCompare(b.tarih + (b.saat || ''))));
+        setYukleniyor(false);
+      }, err => { console.error('Ekspertizler dinlenemedi:', err); setYukleniyor(false); });
+      return () => unsub();
+    }, [ayBasi, aySonu]);
+
+    // Seçilen gün görüntülenen ayın dışındaysa ayın 1'ine çek (ay değişince liste boş kalmasın)
+    useEffect(() => { if (!secilenGun.startsWith(ayBasi.slice(0, 7))) setSecilenGun(ayBasi); }, [ayBasi]); // eslint-disable-line
+
+    // ---------------------------------------------------- BEYAZ YAKA LİSTESİ ---
+    // Keşife gidecek personel: yalnızca AKTİF Beyaz Yaka (Firma Sahibi hariç);
+    // arama kutusuyla ada göre daraltılır.
+    const beyazYaka = (personnelList || [])
+      .filter(p => p.position !== 'Firma Sahibi' && !isMaviYakaPersonel(p) && p.employmentStatus !== 'Pasif')
+      .filter(p => !personelArama.trim() || (p.fullName || '').toLowerCase().includes(personelArama.toLowerCase()))
+      .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'tr'));
+
+    // ------------------------------------------------------------ YAZMA ---
+    const hareketliGuncelle = async (kayit, degisiklik, islem) => {
+      const hareket = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, islem };
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'ekspertizler', kayit.id), { ...degisiklik, hareketler: [...(kayit.hareketler || []), hareket], updatedAt: new Date().toISOString() });
+    };
+
+    const formuAc = (kayit = null, tarih = null) => {
+      setPersonelArama('');
+      if (kayit) {
+        setDuzenlenenId(kayit.id);
+        setForm({ musteriAdi: kayit.musteriAdi || '', telefon: kayit.telefon || '', yedekTelefon: kayit.yedekTelefon || '', adres: kayit.adres || '', konumLinki: kayit.konumLinki || '', tarih: kayit.tarih || ekspertizBugun(), saat: kayit.saat || '10:00', hizmetTipi: kayit.hizmetTipi || 'Nakliye', atanan: kayit.atanan || '', not: kayit.not || '' });
+      } else {
+        setDuzenlenenId(null);
+        setForm({ ...bosForm, tarih: tarih || secilenGun || ekspertizBugun() });
+      }
+      setFormAcik(true);
+    };
+
+    const kaydet = async () => {
+      if (!form.musteriAdi.trim() || !form.telefon.trim() || !form.tarih) { alert('Müşteri adı, telefon ve tarih zorunludur.'); return; }
+      setKaydediliyor(true);
+      try {
+        const veri = { ...form, musteriAdi: form.musteriAdi.trim(), telefon: form.telefon.trim(), yedekTelefon: form.yedekTelefon.trim(), adres: form.adres.trim(), konumLinki: form.konumLinki.trim(), not: form.not.trim() };
+        if (duzenlenenId) {
+          const eski = kayitlar.find(k => k.id === duzenlenenId);
+          await hareketliGuncelle(eski || { id: duzenlenenId, hareketler: [] }, veri, 'Ekspertiz bilgileri düzenlendi');
+          addSystemLog?.('Ekspertiz', `${veri.musteriAdi} ekspertiz kaydı düzenlendi.`);
+        } else {
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ekspertizler'), {
+            ...veri, durum: 'bekliyor', olusturan: kullaniciAdi, createdAt: new Date().toISOString(),
+            hareketler: [{ tarih: new Date().toISOString(), kullanici: kullaniciAdi, islem: 'Ekspertiz randevusu oluşturuldu' }],
+          });
+          addSystemLog?.('Ekspertiz', `${veri.musteriAdi} için ${ekspertizTarihGoster(veri.tarih)} ${veri.saat} ekspertiz randevusu oluşturuldu.`);
+          setSecilenGun(veri.tarih);
+          if (!veri.tarih.startsWith(ayBasi.slice(0, 7))) setTakvim({ yil: Number(veri.tarih.slice(0, 4)), ay: Number(veri.tarih.slice(5, 7)) - 1 });
+        }
+        setFormAcik(false); setDuzenlenenId(null); setForm(bosForm);
+      } catch (e) { console.error(e); alert('Kaydedilemedi, tekrar deneyin.'); }
+      finally { setKaydediliyor(false); }
+    };
+
+    // Durum değişimleri: gidildi / işi aldık / işi alamadık / iptal / tekrar bekliyor
+    const durumYap = async (kayit, durum) => {
+      const adlar = { gidildi: 'Ekspertiz yapıldı (gidildi)', isiAldik: 'Sonuç: İşi aldık', isiAlamadik: 'Sonuç: İşi alamadık', iptal: 'Ekspertiz iptal edildi', bekliyor: 'Tekrar bekleyen duruma alındı' };
+      await hareketliGuncelle(kayit, { durum, sonucTarihi: new Date().toISOString(), sonucKullanici: kullaniciAdi }, adlar[durum] || durum);
+      addSystemLog?.('Ekspertiz', `${kayit.musteriAdi}: ${adlar[durum] || durum}.`);
+    };
+
+    const tarihiKaydet = async () => {
+      if (!tarihDegistir?.tarih) return;
+      const k = tarihDegistir.kayit;
+      await hareketliGuncelle(k, { tarih: tarihDegistir.tarih, saat: tarihDegistir.saat || k.saat || '' }, `Tarih değişti: ${ekspertizTarihGoster(k.tarih)} ${k.saat || ''} → ${ekspertizTarihGoster(tarihDegistir.tarih)} ${tarihDegistir.saat || ''}`);
+      setSecilenGun(tarihDegistir.tarih);
+      if (!tarihDegistir.tarih.startsWith(ayBasi.slice(0, 7))) setTakvim({ yil: Number(tarihDegistir.tarih.slice(0, 4)), ay: Number(tarihDegistir.tarih.slice(5, 7)) - 1 });
+      setTarihDegistir(null);
+    };
+
+    const sil = async () => {
+      if (!silinecek) return;
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'ekspertizler', silinecek.id));
+      addSystemLog?.('Ekspertiz', `${silinecek.musteriAdi} ekspertiz kaydı kalıcı silindi.`);
+      setSilinecek(null);
+    };
+
+    // -------------------------------------------------------- TAKVİM VERİ ---
+    const ilkGunIdx = (new Date(takvim.yil, takvim.ay, 1).getDay() + 6) % 7;   // Pazartesi=0
+    const gunSayisi = new Date(takvim.yil, takvim.ay + 1, 0).getDate();
+    const hucreler = [...Array(ilkGunIdx).fill(null), ...Array.from({ length: gunSayisi }, (_, i) => i + 1)];
+    const gunKayitlari = (t) => kayitlar.filter(k => k.tarih === t);
+    const secilenListe = gunKayitlari(secilenGun);
+    const bugun = ekspertizBugun();
+    const ozet = {
+      toplam: kayitlar.filter(k => k.durum !== 'iptal').length,
+      bekleyen: kayitlar.filter(k => k.durum === 'bekliyor').length,
+      gecikmis: kayitlar.filter(k => k.durum === 'bekliyor' && k.tarih < bugun).length,
+      gidildi: kayitlar.filter(k => k.durum === 'gidildi').length,
+      aldik: kayitlar.filter(k => k.durum === 'isiAldik').length,
+      alamadik: kayitlar.filter(k => k.durum === 'isiAlamadik').length,
+    };
+
+    return (
+      <div className="space-y-4 animate-in fade-in">
+
+        {/* ================= BAŞLIK + ÖZET + EKSPERTİZ EKLE ================= */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="w-11 h-11 rounded-2xl bg-neutral-900 text-white flex items-center justify-center shrink-0"><Search className="w-5 h-5" /></span>
+            <div>
+              <h2 className="text-lg font-black text-black leading-tight">Ekspertiz Takvimi</h2>
+              <p className="text-[11px] font-bold text-neutral-500">Kayıt açılmadan önce yapılan keşif randevuları — {EKSPERTIZ_AYLAR[takvim.ay]} {takvim.yil}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[10px] font-black px-2 py-1 rounded-full bg-neutral-100 text-neutral-700">{ozet.toplam} keşif</span>
+            <span className="text-[10px] font-black px-2 py-1 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">{ozet.bekleyen} bekleyen</span>
+            {ozet.gecikmis > 0 && <span className="text-[10px] font-black px-2 py-1 rounded-full bg-red-600 text-white animate-pulse">{ozet.gecikmis} gecikmiş</span>}
+            <span className="text-[10px] font-black px-2 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200">{ozet.gidildi} gidildi</span>
+            <span className="text-[10px] font-black px-2 py-1 rounded-full bg-green-50 text-green-700 border border-green-200">{ozet.aldik} işi aldık</span>
+            {ozet.alamadik > 0 && <span className="text-[10px] font-black px-2 py-1 rounded-full bg-red-50 text-red-700 border border-red-200">{ozet.alamadik} alamadık</span>}
+            <button type="button" onClick={() => formuAc(null)}
+              className="ml-1 px-4 py-2.5 bg-neutral-900 hover:bg-black text-white font-black rounded-xl text-sm transition shadow-lg flex items-center gap-2">
+              <PlusCircle className="w-4 h-4" /> Ekspertiz Ekle
+            </button>
+          </div>
+        </div>
+
+        {/* ============================== TAKVİM ============================== */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={() => setTakvim(t => { const d = new Date(t.yil, t.ay - 1, 1); return { yil: d.getFullYear(), ay: d.getMonth() }; })} className="p-2.5 hover:bg-neutral-100 rounded-xl transition"><ChevronLeft className="w-5 h-5" /></button>
+              <h3 className="text-xl font-black min-w-[150px] text-center">{EKSPERTIZ_AYLAR[takvim.ay]} {takvim.yil}</h3>
+              <button type="button" onClick={() => setTakvim(t => { const d = new Date(t.yil, t.ay + 1, 1); return { yil: d.getFullYear(), ay: d.getMonth() }; })} className="p-2.5 hover:bg-neutral-100 rounded-xl transition"><ChevronRight className="w-5 h-5" /></button>
+              <button type="button" onClick={() => { setTakvim({ yil: simdi.getFullYear(), ay: simdi.getMonth() }); setSecilenGun(bugun); }} className="ml-1 text-[11px] font-black px-3 py-1.5 rounded-lg bg-neutral-100 hover:bg-neutral-200 transition">Bugün</button>
+              {yukleniyor && <Loader2 className="w-4 h-4 animate-spin text-neutral-400" />}
+            </div>
+            <div className="hidden md:flex items-center gap-3 text-[11px] font-bold text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-1.5">
+              <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-red-600" /> Nakliye</span>
+              <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-blue-600" /> Depo</span>
+              <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-green-600" /> Asansör</span>
+              <span className="text-neutral-300">|</span>
+              <span className="flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5 text-neutral-400" /> Gidildi (soluk)</span>
+              <span className="flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 text-red-500" /> Gecikmiş</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-7 gap-2 mb-2">
+            {EKSPERTIZ_GUNLER.map(g => <div key={g} className="text-center text-[11px] font-black text-neutral-400 py-1">{g}</div>)}
+          </div>
+          <div className="grid grid-cols-7 gap-2">
+            {hucreler.map((gun, i) => {
+              if (gun === null) return <div key={`b${i}`} />;
+              const t = `${takvim.yil}-${String(takvim.ay + 1).padStart(2, '0')}-${String(gun).padStart(2, '0')}`;
+              const l = gunKayitlari(t).filter(k => k.durum !== 'iptal');
+              const secili = t === secilenGun;
+              const buGun = t === bugun;
+              const gecikmisVar = l.some(k => k.durum === 'bekliyor' && t < bugun);
+              return (
+                <button key={gun} type="button" onClick={() => setSecilenGun(t)} onDoubleClick={() => formuAc(null, t)}
+                  title={l.length ? `${l.length} ekspertiz — çift tık: bu güne ekle` : 'Çift tık: bu güne ekspertiz ekle'}
+                  className={`relative min-h-[64px] p-2 rounded-xl border-2 text-left transition flex flex-col
+                    ${secili ? 'bg-neutral-900 text-white border-neutral-900 shadow-lg' : gecikmisVar ? 'bg-red-50 border-red-300 hover:border-red-500' : l.length ? 'bg-white border-neutral-200 hover:border-neutral-900' : 'bg-white border-neutral-100 hover:border-neutral-300'}
+                    ${buGun && !secili ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}>
+                  <div className="flex items-start justify-between w-full">
+                    <span className="text-sm font-black">{gun}</span>
+                    {l.length > 0 && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${secili ? 'bg-white/20' : 'bg-neutral-900 text-white'}`}>{l.length} keşif</span>}
+                  </div>
+                  {/* Her ekspertiz için BÜYÜTEÇ simgesi — rengi hizmet tipine göre;
+                      gidilmişler soluk, gecikmişler ünlemle */}
+                  {l.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {l.slice(0, 8).map(k => {
+                        const tip = EKSPERTIZ_TIP[k.hizmetTipi] || EKSPERTIZ_TIP.Nakliye;
+                        const bitti = k.durum !== 'bekliyor';
+                        const gec = k.durum === 'bekliyor' && t < bugun;
+                        return gec
+                          ? <AlertTriangle key={k.id} className={`w-4 h-4 ${secili ? 'text-red-300' : 'text-red-500'}`} title={`${k.saat || ''} ${k.musteriAdi} — GECİKMİŞ`} />
+                          : <Search key={k.id} className={`w-4 h-4 ${secili ? 'text-white' : tip.renk} ${bitti ? 'opacity-40' : ''}`} title={`${k.saat || ''} ${k.musteriAdi} (${k.hizmetTipi}) — ${EKSPERTIZ_DURUM[k.durum]?.ad || ''}`} />;
+                      })}
+                      {l.length > 8 && <span className="text-[9px] font-black">+{l.length - 8}</span>}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ======================= SEÇİLİ GÜNÜN EKSPERTİZLERİ ======================= */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6">
+          <div className="flex items-center justify-between gap-2 mb-4">
+            <h3 className="text-lg font-black text-black flex items-center gap-2">
+              <ClipboardCheck className="w-5 h-5 text-red-600" /> {ekspertizTarihGoster(secilenGun)} Tarihindeki Ekspertizler
+              <span className="text-sm font-bold text-neutral-400">({secilenListe.length})</span>
+            </h3>
+            <button type="button" onClick={() => formuAc(null, secilenGun)} className="px-3 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-xl text-xs font-black transition flex items-center gap-1.5"><PlusCircle className="w-4 h-4" /> Bu Güne Ekle</button>
+          </div>
+
+          {secilenListe.length === 0 ? (
+            <div className="py-10 text-center">
+              <Search className="w-12 h-12 text-neutral-200 mx-auto mb-2" />
+              <p className="text-neutral-500 font-bold">Bu güne ekspertiz randevusu yok.</p>
+              <p className="text-neutral-400 text-xs mt-1">"Ekspertiz Ekle" ile keşif randevusu oluşturun ya da takvimde güne çift tıklayın.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {secilenListe.map(k => {
+                const tip = EKSPERTIZ_TIP[k.hizmetTipi] || EKSPERTIZ_TIP.Nakliye;
+                const durum = EKSPERTIZ_DURUM[k.durum] || EKSPERTIZ_DURUM.bekliyor;
+                const gec = k.durum === 'bekliyor' && k.tarih < bugun;
+                const iptal = k.durum === 'iptal';
+                return (
+                  <div key={k.id} className={`rounded-2xl border-2 overflow-hidden ${iptal ? 'opacity-60 border-neutral-200' : gec ? 'border-red-300' : 'border-neutral-200'}`}>
+                    {/* Üst şerit — hizmet tipi rengi */}
+                    <div className={`h-1.5 ${tip.dolu}`} />
+                    <div className="p-4">
+                      <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          {/* Başlık satırı */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-sm font-black flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {k.saat || '—'}</span>
+                            <h4 className={`font-black text-black text-base ${iptal ? 'line-through' : ''}`}>{k.musteriAdi}</h4>
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full text-white ${tip.dolu} flex items-center gap-1`}><tip.Ikon className="w-3 h-3" /> {k.hizmetTipi}</span>
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${durum.renk}`}>{durum.ad}</span>
+                            {gec && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-600 text-white animate-pulse">GECİKMİŞ</span>}
+                          </div>
+
+                          {/* İletişim */}
+                          <div className="flex flex-wrap items-center gap-2 mt-2.5">
+                            <a href={`tel:${ekspertizRakam(k.telefon)}`} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-black transition"><Phone className="w-3.5 h-3.5" /> {k.telefon}</a>
+                            <a href={`https://wa.me/${ekspertizWa(k.telefon)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-black transition"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</a>
+                            {k.yedekTelefon && <a href={`tel:${ekspertizRakam(k.yedekTelefon)}`} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-neutral-300 text-neutral-700 text-xs font-bold hover:bg-neutral-50 transition"><Phone className="w-3.5 h-3.5" /> Yedek: {k.yedekTelefon}</a>}
+                          </div>
+
+                          {/* Adres + konum */}
+                          {(k.adres || k.konumLinki) && (
+                            <div className="mt-2.5 flex items-start gap-2 bg-neutral-50 border border-neutral-200 rounded-xl p-2.5">
+                              <MapPin className={`w-4 h-4 shrink-0 mt-0.5 ${tip.renk}`} />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[10px] font-black text-neutral-400 uppercase">Keşif Adresi</p>
+                                <p className="text-xs font-bold text-neutral-800 leading-snug">{k.adres || '—'}</p>
+                              </div>
+                              {k.konumLinki && (
+                                <a href={k.konumLinki} target="_blank" rel="noopener noreferrer" className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-black text-white text-[11px] font-black transition"><MapPin className="w-3.5 h-3.5" /> Konumu Aç</a>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Not */}
+                          {k.not && (
+                            <div className="mt-2 bg-yellow-50 border border-yellow-200 rounded-xl px-3 py-2 text-xs font-medium text-neutral-800"><span className="font-black text-yellow-800">Not:</span> {k.not}</div>
+                          )}
+
+                          {/* Künye: keşfe giden / oluşturan */}
+                          <div className="flex flex-wrap items-center gap-2 mt-2.5 text-[11px] font-bold">
+                            <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border ${k.atanan ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-white text-neutral-400 border-neutral-200'}`}><User className="w-3 h-3" /> Keşfe giden: {k.atanan || 'Atanmadı'}</span>
+                            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-neutral-50 text-neutral-500 border border-neutral-200"><UserPlus className="w-3 h-3" /> Oluşturan: {k.olusturan || '—'} • {ekspertizZaman(k.createdAt)}</span>
+                            {k.sonucKullanici && k.durum !== 'bekliyor' && <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-neutral-50 text-neutral-500 border border-neutral-200"><History className="w-3 h-3" /> {durum.ad}: {k.sonucKullanici} • {ekspertizZaman(k.sonucTarihi)}</span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* ---------------- İŞLEM BUTONLARI (bilginin altında) ---------------- */}
+                      <div className="flex flex-wrap items-center gap-1.5 pt-3 mt-3 border-t border-neutral-100">
+                        {k.durum === 'bekliyor' && (
+                          <button type="button" onClick={() => durumYap(k, 'gidildi')} className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5"><CheckCircle className="w-3.5 h-3.5" /> Yapıldı / Gidildi</button>
+                        )}
+                        {(k.durum === 'bekliyor' || k.durum === 'gidildi' || k.durum === 'isiAlamadik') && (
+                          <button type="button" onClick={() => durumYap(k, 'isiAldik')} className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5"><Star className="w-3.5 h-3.5" /> İşi Aldık</button>
+                        )}
+                        {(k.durum === 'bekliyor' || k.durum === 'gidildi' || k.durum === 'isiAldik') && (
+                          <button type="button" onClick={() => durumYap(k, 'isiAlamadik')} className="px-3 py-2 bg-white hover:bg-red-50 text-red-600 border border-red-300 rounded-xl text-xs font-black transition flex items-center gap-1.5"><XCircle className="w-3.5 h-3.5" /> İşi Alamadık</button>
+                        )}
+                        {onKayitAc && !iptal && (
+                          <button type="button" onClick={() => onKayitAc({ hizmetTipi: k.hizmetTipi || 'Nakliye', musteriAdi: k.musteriAdi, telefon: k.telefon, yedekTelefon: k.yedekTelefon || '', adres: k.adres || '' })}
+                            className={`px-3 py-2 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 ${tip.dolu} hover:opacity-90`}><PlusCircle className="w-3.5 h-3.5" /> Kayıt Aç</button>
+                        )}
+                        <span className="flex-1" />
+                        {!iptal && (
+                          <button type="button" onClick={() => setTarihDegistir({ kayit: k, tarih: k.tarih, saat: k.saat || '' })} className="px-3 py-2 bg-white hover:bg-amber-50 text-amber-700 border border-amber-300 rounded-xl text-xs font-black transition flex items-center gap-1.5"><CalendarDays className="w-3.5 h-3.5" /> Tarihi Değiştir</button>
+                        )}
+                        <button type="button" onClick={() => formuAc(k)} className="px-3 py-2 bg-white hover:bg-neutral-100 text-neutral-700 border border-neutral-300 rounded-xl text-xs font-black transition flex items-center gap-1.5"><Edit className="w-3.5 h-3.5" /> Düzenle</button>
+                        {k.durum === 'bekliyor' ? (
+                          <button type="button" onClick={() => setIptalEdilecek(k)} className="px-3 py-2 bg-white hover:bg-neutral-100 text-neutral-500 border border-neutral-300 rounded-xl text-xs font-black transition flex items-center gap-1.5"><Ban className="w-3.5 h-3.5" /> İptal Et</button>
+                        ) : (
+                          <button type="button" onClick={() => durumYap(k, 'bekliyor')} title="Tekrar bekleyen duruma al" className="px-3 py-2 bg-white hover:bg-neutral-100 text-neutral-500 border border-neutral-300 rounded-xl text-xs font-black transition flex items-center gap-1.5"><History className="w-3.5 h-3.5" /> Geri Al</button>
+                        )}
+                        <button type="button" onClick={() => setSilinecek(k)} className="p-2 text-neutral-300 hover:text-red-600 hover:bg-red-50 rounded-xl transition" title="Kalıcı sil"><Trash2 className="w-4 h-4" /></button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* ============================ FORM PENCERESİ ============================ */}
+        {formAcik && (
+          <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setFormAcik(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] flex flex-col animate-in zoom-in-95 overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className={`p-4 text-white flex items-center justify-between shrink-0 ${(EKSPERTIZ_TIP[form.hizmetTipi] || EKSPERTIZ_TIP.Nakliye).dolu}`}>
+                <h3 className="font-black flex items-center gap-2"><Search className="w-5 h-5" /> {duzenlenenId ? 'Ekspertizi Düzenle' : 'Yeni Ekspertiz Randevusu'}</h3>
+                <button type="button" onClick={() => setFormAcik(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4">
+                {/* Hizmet tipi */}
+                <div>
+                  <label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Hizmet Tipi *</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {Object.entries(EKSPERTIZ_TIP).map(([id, t]) => (
+                      <button key={id} type="button" onClick={() => setForm({ ...form, hizmetTipi: id })}
+                        className={`py-2.5 rounded-xl text-sm font-black border-2 transition flex items-center justify-center gap-1.5 ${form.hizmetTipi === id ? `${t.dolu} text-white border-transparent shadow-md` : `bg-white ${t.renk} border-neutral-200 hover:border-neutral-400`}`}>
+                        <t.Ikon className="w-4 h-4" /> {id}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {/* Müşteri */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Müşteri Ad Soyad *</label>
+                    <input value={form.musteriAdi} onChange={e => setForm({ ...form, musteriAdi: e.target.value })} placeholder="Örn: Mehmet Şen" className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-neutral-900" /></div>
+                  <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Telefon *</label>
+                    <input value={form.telefon} onChange={e => setForm({ ...form, telefon: e.target.value })} placeholder="05xx xxx xx xx" className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-neutral-900" /></div>
+                  <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Yedek Telefon <span className="text-neutral-300">(opsiyonel)</span></label>
+                    <input value={form.yedekTelefon} onChange={e => setForm({ ...form, yedekTelefon: e.target.value })} placeholder="İsteğe bağlı" className="w-full p-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-neutral-900" /></div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Tarih *</label>
+                      <input type="date" value={form.tarih} onChange={e => setForm({ ...form, tarih: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-neutral-900" /></div>
+                    <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Saat</label>
+                      <input type="time" value={form.saat} onChange={e => setForm({ ...form, saat: e.target.value })} className="w-full p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-neutral-900" /></div>
+                  </div>
+                </div>
+                {/* Adres + konum */}
+                <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Keşif Adresi</label>
+                  <textarea rows={2} value={form.adres} onChange={e => setForm({ ...form, adres: e.target.value })} placeholder="Mahalle, sokak, bina/daire no, ilçe" className="w-full p-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-neutral-900 resize-none" /></div>
+                <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Konum Linki <span className="text-neutral-300">(opsiyonel — Google Maps / Yandex)</span></label>
+                  <div className="flex gap-2">
+                    <input value={form.konumLinki} onChange={e => setForm({ ...form, konumLinki: e.target.value })} placeholder="https://maps.app.goo.gl/..." className="flex-1 p-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-neutral-900" />
+                    {form.konumLinki && <a href={form.konumLinki} target="_blank" rel="noopener noreferrer" className="px-3 flex items-center bg-neutral-100 hover:bg-neutral-200 rounded-xl text-xs font-black"><MapPin className="w-4 h-4" /></a>}
+                  </div></div>
+                {/* Keşfe gidecek personel — yalnızca beyaz yaka, aranabilir */}
+                <div>
+                  <label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Keşfe Gidecek Personel <span className="text-neutral-300">(opsiyonel — sadece Beyaz Yaka)</span></label>
+                  <div className="relative mb-2">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                    <input value={personelArama} onChange={e => setPersonelArama(e.target.value)} placeholder="Personel adı ara..." className="w-full pl-9 pr-3 py-2.5 bg-neutral-50 border border-neutral-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-neutral-900" />
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1">
+                    <button type="button" onClick={() => setForm({ ...form, atanan: '' })} className={`px-2.5 py-1.5 rounded-lg text-xs font-black border transition ${!form.atanan ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>— Atanmadı —</button>
+                    {beyazYaka.map(p => (
+                      <button key={p.id} type="button" onClick={() => setForm({ ...form, atanan: p.fullName })} className={`px-2.5 py-1.5 rounded-lg text-xs font-black border transition flex items-center gap-1 ${form.atanan === p.fullName ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-neutral-700 border-neutral-200 hover:border-purple-400'}`}><User className="w-3 h-3" /> {p.fullName}</button>
+                    ))}
+                    {beyazYaka.length === 0 && <span className="text-xs font-bold text-neutral-400 p-1">Eşleşen beyaz yaka personel yok.</span>}
+                  </div>
+                </div>
+                {/* Not */}
+                <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Not</label>
+                  <textarea rows={2} value={form.not} onChange={e => setForm({ ...form, not: e.target.value })} placeholder="Örn: 3+1, 5. kat, asansör yok; kapıcıya haber verilecek..." className="w-full p-3 border border-neutral-300 rounded-xl text-sm outline-none focus:ring-2 focus:ring-neutral-900 resize-none" /></div>
+              </div>
+              <div className="p-4 border-t border-neutral-200 flex gap-2 shrink-0">
+                <button type="button" onClick={() => setFormAcik(false)} className="px-5 py-3 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm transition">Vazgeç</button>
+                <button type="button" onClick={kaydet} disabled={kaydediliyor || !form.musteriAdi.trim() || !form.telefon.trim() || !form.tarih}
+                  className="flex-1 py-3 bg-neutral-900 hover:bg-black text-white font-black rounded-xl text-sm transition shadow-lg disabled:opacity-40 flex items-center justify-center gap-2">
+                  {kaydediliyor ? <><Loader2 className="w-4 h-4 animate-spin" /> Kaydediliyor</> : <><Save className="w-4 h-4" /> {duzenlenenId ? 'Güncelle' : 'Ekspertizi Kaydet'}</>}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================ TARİH DEĞİŞTİR ============================ */}
+        {tarihDegistir && (
+          <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setTarihDegistir(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+              <h3 className="font-black text-black flex items-center gap-2 mb-1"><CalendarDays className="w-5 h-5 text-amber-600" /> Tarihi Değiştir</h3>
+              <p className="text-[11px] font-bold text-neutral-500 mb-4">{tarihDegistir.kayit.musteriAdi} • şu an {ekspertizTarihGoster(tarihDegistir.kayit.tarih)} {tarihDegistir.kayit.saat}</p>
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <input type="date" value={tarihDegistir.tarih} onChange={e => setTarihDegistir({ ...tarihDegistir, tarih: e.target.value })} className="p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-amber-500" />
+                <input type="time" value={tarihDegistir.saat} onChange={e => setTarihDegistir({ ...tarihDegistir, saat: e.target.value })} className="p-3 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-amber-500" />
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setTarihDegistir(null)} className="flex-1 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-xs transition">Vazgeç</button>
+                <button type="button" onClick={tarihiKaydet} className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-black rounded-xl text-xs transition">Kaydet</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================ İPTAL / SİL ONAYI ============================ */}
+        {(iptalEdilecek || silinecek) && (
+          <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => { setIptalEdilecek(null); setSilinecek(null); }}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 text-center animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+              {silinecek ? <Trash2 className="w-12 h-12 text-red-500 mx-auto mb-3" /> : <Ban className="w-12 h-12 text-neutral-500 mx-auto mb-3" />}
+              <h3 className="font-black text-black text-base mb-1">{silinecek ? 'Kalıcı Olarak Sil' : 'Ekspertizi İptal Et'}</h3>
+              <p className="text-xs font-bold text-neutral-500 mb-4">
+                <span className="text-black">{(silinecek || iptalEdilecek).musteriAdi}</span> — {ekspertizTarihGoster((silinecek || iptalEdilecek).tarih)} {(silinecek || iptalEdilecek).saat}
+                <br />{silinecek ? 'Bu kayıt geri alınamaz şekilde silinecek.' : 'Kayıt iptal olarak işaretlenir; takvimde soluk görünür, geçmişi korunur.'}
+              </p>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => { setIptalEdilecek(null); setSilinecek(null); }} className="flex-1 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-xs transition">Vazgeç</button>
+                {silinecek
+                  ? <button type="button" onClick={sil} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-xs transition">Evet, Sil</button>
+                  : <button type="button" onClick={async () => { await durumYap(iptalEdilecek, 'iptal'); setIptalEdilecek(null); }} className="flex-1 py-2.5 bg-neutral-900 hover:bg-black text-white font-black rounded-xl text-xs transition">Evet, İptal Et</button>}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   export const CalendarView = ({ jobs, handleEditJob, currentUser, setJobToChangeDate, setNewJobDate, setShowChangeDateModal, setCancelJobId, setDeleteJobId, onDonemGerekli, donemYukleniyor,
     // YENİ (kullanıcı talebi): Müşteri adına tıklanınca cari profilini açar.
     // App.jsx'ten gelir; yetki yoksa null gelir ve ad eskisi gibi düz metin kalır.
-    onViewCustomer = null }) => {
+    onViewCustomer = null,
+    // YENİ (kullanıcı talebi): Ekspertiz Takvimi için personel listesi, kayıt açma
+    // köprüsü ve sistem günlüğü — App.jsx'ten gelir.
+    personnelList = [], onKayitAc = null, addSystemLog = null }) => {
+    // YENİ: Hangi takvim görünüyor? 'randevu' (mevcut iş takvimi) | 'ekspertiz'
+    const [takvimModu, setTakvimModu] = useState('randevu');
     const canAssign = currentUser?.position?.includes('Operasyon') || currentUser?.position?.includes('Firma Sahibi') || currentUser?.permissions?.canEdit;
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
@@ -988,6 +1466,31 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     };
 
     return (
+      <div className="space-y-4">
+        {/* ================================================================
+            YENİ (kullanıcı talebi): TAKVİM GEÇİŞ ÇUBUĞU
+            Randevu Takvimi (iş kayıtları) ⇄ Ekspertiz Takvimi (keşifler).
+            Tek butonla iki takvim arasında geçilir; her ikisinin de kendi
+            ay/gün seçimi vardır.
+            ================================================================ */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-2 flex items-center gap-2">
+          <button type="button" onClick={() => setTakvimModu('randevu')}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-black transition flex items-center justify-center gap-2 ${takvimModu === 'randevu' ? 'bg-neutral-900 text-white shadow-md' : 'bg-white text-neutral-500 hover:bg-neutral-50'}`}>
+            <CalendarDays className="w-4 h-4" /> Randevu Takvimi
+          </button>
+          <button type="button" onClick={() => setTakvimModu(m => m === 'randevu' ? 'ekspertiz' : 'randevu')} title="İki takvim arasında geçiş yap"
+            className="px-3 py-2.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-800 transition" aria-label="Geçiş yap">
+            <ArrowRightLeft className="w-4 h-4" />
+          </button>
+          <button type="button" onClick={() => setTakvimModu('ekspertiz')}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-black transition flex items-center justify-center gap-2 ${takvimModu === 'ekspertiz' ? 'bg-neutral-900 text-white shadow-md' : 'bg-white text-neutral-500 hover:bg-neutral-50'}`}>
+            <Search className="w-4 h-4" /> Ekspertiz Takvimi
+          </button>
+        </div>
+
+        {takvimModu === 'ekspertiz' ? (
+          <EkspertizTakvimiView currentUser={currentUser} personnelList={personnelList} onKayitAc={onKayitAc} addSystemLog={addSystemLog} />
+        ) : (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
         {/* YENİ: Bugünün hücresi için dikkat çeken SARI nabız (pulse) çerçeve animasyonu (daha belirgin ve hızlı) */}
         <style>{`
@@ -1378,6 +1881,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
           </div>
         )}
 
+      </div>
+        )}
       </div>
     );
   };
