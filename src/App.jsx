@@ -4797,12 +4797,31 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       unsubs.push(onSnapshot(qTrans, snap => { setTransactions(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, trans: true})); }, console.error));
       unsubs.push(onSnapshot(qTasks, snap => { setTasks(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, tasks: true})); }, console.error));
             
-      const qNotifs = query(getCol('notifications'), limit(100));
+      // ======================================================================
+      // DÜZELTME (kullanıcı talebi): YENİ BİLDİRİMLER GÖRÜNMÜYORDU
+      // ----------------------------------------------------------------------
+      // SORUN: Sorgu `limit(100)` idi ama SIRALAMA yoktu. Firestore bu durumda
+      // belge kimliğine göre ilk 100 kaydı döndürür; koleksiyon 100'ü aştığı
+      // için YENİ eklenen bildirimler bu pencereye hiç girmiyordu. Zil rozeti
+      // (ayrı koleksiyondan sayıldığı için) yanıyor ama Bildirim Merkezi'nde
+      // kayıt görünmüyordu.
+      //
+      // ÇÖZÜM: Sorgu artık SADECE oturumdaki kullanıcının bildirimlerini çeker
+      // (userId eşitliği). Kaç bildirim olursa olsun kişinin kendi kayıtlarının
+      // tamamı gelir; okunan belge sayısı da düşer. notifications state'i zaten
+      // yalnızca aktif kullanıcı için kullanılıyor (Bildirim Merkezi, zil
+      // rozeti, okundu işaretleme), bu yüzden başka bir yeri etkilemez.
+      // ======================================================================
+      const qNotifs = currentUser?.id
+        ? query(getCol('notifications'), where('userId', '==', currentUser.id), limit(300))
+        : null;
       const qMsgs = query(getCol('messages'), limit(50));
       const qLogs = query(getCol('systemLogs'), limit(100));
       const qComplaints = query(getCol('complaints'), limit(50));
 
-      unsubs.push(onSnapshot(qNotifs, snap => { setNotifications(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
+      if (qNotifs) {
+        unsubs.push(onSnapshot(qNotifs, snap => { setNotifications(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, notif: true})); }, console.error));
+      } else { setNotifications([]); setDataLoadStatus(p => ({...p, notif: true})); }
       unsubs.push(onSnapshot(qMsgs, snap => { setMessages(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, msg: true})); }, console.error));
       unsubs.push(onSnapshot(qLogs, snap => { setSystemLogs(snap.docs.map(d => ({...d.data(), id: d.id}))); setDataLoadStatus(p => ({...p, logs: true})); }, console.error));
       unsubs.push(onSnapshot(qComplaints, snap => { setComplaints(snap.docs.map(d => ({...d.data(), id: d.id}))); }, console.error));
@@ -5001,7 +5020,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       }, console.error));
 
       return () => unsubs.forEach(unsub => unsub());
-    }, [firebaseUser]);
+    }, [firebaseUser, currentUser?.id]);   // DEĞİŞTİ: bildirimler kullanıcıya göre çekildiği için kullanıcı değişince yenilenir
 
     useEffect(() => {
       if (personnelList.length > 0 && !isAuthenticated) {
