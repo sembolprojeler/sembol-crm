@@ -7581,11 +7581,15 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 <span className="whitespace-nowrap font-black text-black">{isMaviYakaUser ? 'Puan Tablosu' : 'Randevular'}</span>
                 {/* YENİ: Bekleyen ekspertiz rozetleri — nakliye kırmızı, depo mavi,
                     asansör yeşil; sayı 0 ise gizli. Mavi yaka görünümünde çizilmez. */}
-                {!isMaviYakaUser && (
+                {/* DEĞİŞTİ (kullanıcı talebi): Rozet artık TÜM bekleyen keşifleri değil,
+                    SADECE bugüne denk gelen (ve tarihi geçtiği hâlde hâlâ bekleyen)
+                    keşifleri gösterir — yani "ekspertiz günü geldiğinde" yanar.
+                    Renkler tipe göre: nakliye kırmızı, depo mavi, asansör yeşil. */}
+                {!isMaviYakaUser && ekspertizBekleyen.bugun > 0 && (
                   <span className="ml-auto flex items-center gap-1">
-                    {ekspertizBekleyen.nakliye > 0 && <span title={`${ekspertizBekleyen.nakliye} bekleyen nakliye ekspertizi`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-red-600/40 animate-pulse">{ekspertizBekleyen.nakliye}</span>}
-                    {ekspertizBekleyen.depo > 0 && <span title={`${ekspertizBekleyen.depo} bekleyen depo ekspertizi`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-blue-600/40 animate-pulse">{ekspertizBekleyen.depo}</span>}
-                    {ekspertizBekleyen.asansor > 0 && <span title={`${ekspertizBekleyen.asansor} bekleyen asansör ekspertizi`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-green-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-green-600/40 animate-pulse">{ekspertizBekleyen.asansor}</span>}
+                    {ekspertizBekleyen.bugunNakliye > 0 && <span title={`Bugün ${ekspertizBekleyen.bugunNakliye} nakliye keşfi var`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-red-600/40 animate-pulse">{ekspertizBekleyen.bugunNakliye}</span>}
+                    {ekspertizBekleyen.bugunDepo > 0 && <span title={`Bugün ${ekspertizBekleyen.bugunDepo} depo keşfi var`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-blue-600/40 animate-pulse">{ekspertizBekleyen.bugunDepo}</span>}
+                    {ekspertizBekleyen.bugunAsansor > 0 && <span title={`Bugün ${ekspertizBekleyen.bugunAsansor} asansör keşfi var`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-green-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-green-600/40 animate-pulse">{ekspertizBekleyen.bugunAsansor}</span>}
                   </span>
                 )}
               </button>
