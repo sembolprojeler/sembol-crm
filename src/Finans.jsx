@@ -5882,6 +5882,24 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [islemForm, setIslemForm] = useState(emptyIslem);
     const [editingIslemId, setEditingIslemId] = useState(null);
     const [deleteIslemId, setDeleteIslemId] = useState(null);
+    // ========================================================================
+    // YENİ (kullanıcı talebi): POS / MAIL ORDER KESİNTİSİ
+    // ------------------------------------------------------------------------
+    // Kredi kartıyla tahsil edilen tutarın TAMAMI hesaba geçmez; mail order /
+    // POS sağlayıcısı komisyon keser. Örn. müşteriden ₺120.000 çekilir, hesaba
+    // ₺115.000 yatar, ₺5.000 komisyondur.
+    //
+    // ÇÖZÜM: Gelir işlemi OLDUĞU GİBİ kalır (müşteriden tahsil edilen gerçek
+    // tutar; cari ve ciro doğru kalsın diye). Aradaki fark, AYNI deftere ayrı
+    // bir GİDER işlemi olarak yazılır. Böylece:
+    //   • Kasa bakiyesi hesaba gerçekten yatan tutara eşitlenir,
+    //   • Komisyon gideri raporlarda ayrı bir kalem olarak görünür,
+    //   • Cari/ciro rakamları bozulmaz.
+    // Kesinti işlemi, kaynak gelir işlemine posKesintiKaynakId ile bağlanır;
+    // böylece aynı işleme ikinci kez kesinti girilemez ve geri alınabilir.
+    // ========================================================================
+    const [posKesintiModal, setPosKesintiModal] = useState(null);   // { islem, netTutar }
+    const [posKesintiKaydediliyor, setPosKesintiKaydediliyor] = useState(false);
 
     // Detay filtreleri
     const [detayArama, setDetayArama] = useState('');
@@ -7434,6 +7452,66 @@ const nakitYuvarla = (tutar) => {
     // Kayıttaki odemeYontemi alanı listede rozet olarak gösterildiği ve eski
     // kayıtlarda arandığı için korunuyor; artık elle seçilmiyor, hesabın
     // türünden otomatik geliyor.
+    // Bir gelir işlemine ait POS kesinti kaydı (varsa) — silinmişler sayılmaz
+    const posKesintisiBul = (islemId) => islemler.find(x => !x.silindi && x.posKesintiKaynakId === islemId) || null;
+
+    // Bu işleme kesinti girilebilir mi? Kredi kartı ile alınmış, silinmemiş,
+    // mahsup/teknik olmayan GELİR işlemleri.
+    // DEĞİŞTİ (kullanıcı talebi): Buton, işlemin ödeme yöntemi kredi kartı OLMASA
+    // bile, DEFTERİN TÜRÜ "Kredi Kartı" ise görünür. Otomatik iş sonlandırma ile
+    // düşen tahsilatlarda odemeYontemi alanı bazen boş/farklı geliyordu ve buton
+    // hiç çıkmıyordu; defter türü daha güvenilir bir ölçüt.
+    const posKesintisiUygunMu = (i) => {
+      if (i.silindi || i.tip !== 'giris' || i.odemeMahsup || i.krediMahsup) return false;
+      if (i.posKesintiKaynakId) return false;                       // kesinti kaydının kendisi
+      const yontemKK = String(i.odemeYontemi || '').toLocaleLowerCase('tr-TR').includes('kredi kart');
+      const defter = (defterler || []).find(d => d.id === (i.defterId || seciliDefterId));
+      const defterKK = defter?.tur === 'Kredi Kartı' || defter?.tur === 'Cari (Kişi/Firma)';
+      return yontemKK || defterKK;
+    };
+
+    const posKesintisiKaydet = async () => {
+      const i = posKesintiModal?.islem;
+      const brut = Number(i?.tutar) || 0;
+      const net = parseFloat(String(posKesintiModal?.netTutar || '').replace(',', '.'));
+      if (!i || !(net >= 0)) { alert('Hesaba yatan tutarı girin.'); return; }
+      if (net > brut) { alert('Hesaba yatan tutar, çekilen tutardan büyük olamaz.'); return; }
+      const kesinti = Math.round((brut - net) * 100) / 100;
+      if (kesinti <= 0) { alert('Kesinti tutarı sıfır — kayıt oluşturulmadı.'); return; }
+      setPosKesintiKaydediliyor(true);
+      try {
+        // DEĞİŞTİ (kullanıcı talebi): Gider kaydı AYNI İŞ BİLGİLERİYLE ve AYNI
+        // ETİKETLERLE açılır — müşteri, telefon, plaka, araç, ekip şefi ve
+        // teslim kodu kopyalanır; işlemin kendi etiketlerine "Kesinti" eklenir.
+        // Böylece raporlarda hangi işin kesintisi olduğu kaybolmaz.
+        const kesintiEtiketleri = [...new Set([...(i.etiketler || []), 'Kesinti'])];
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          tip: 'cikis', tutar: kesinti,
+          defterId: i.defterId,
+          tarih: i.tarih,                              // gelirle aynı güne yazılır
+          kategori: 'Kredi Kartı Kesintisi',
+          etiketler: kesintiEtiketleri,
+          odemeYontemi: i.odemeYontemi || 'Kredi Kartı',
+          kaynak: 'Kredi Kartı Kesintisi',
+          posKesintiKaynakId: i.id,                    // hangi gelire ait olduğu
+          posKesintiBrut: brut, posKesintiNet: net,
+          // İş künyesi — gelir işlemiyle birebir aynı
+          musteriAdi: i.musteriAdi || '', musteriTel: i.musteriTel || '',
+          plaka: i.plaka || '', aracId: i.aracId || '',
+          ekipSefi: i.ekipSefi || '', ekipSefiId: i.ekipSefiId || '',
+          teslimKodu: i.teslimKodu || '', jobId: i.jobId || '',
+          aciklama: `Kredi kartı kesintisi — ${i.musteriAdi || i.aciklama || 'tahsilat'}`
+            + (i.teslimKodu ? ` (Teslim kodu: ${i.teslimKodu})` : '')
+            + ` • Çekilen ₺${paraFmt(brut)} → Hesaba yatan ₺${paraFmt(net)}`,
+          createdAt: new Date().toISOString(),
+          by: currentUser?.fullName || 'Sistem',
+        });
+        addSystemLog?.('Kredi Kartı Kesintisi', `${seciliDefter?.ad || 'Defter'}: ₺${paraFmt(brut)} tahsilattan ₺${paraFmt(kesinti)} kredi kartı kesintisi gider yazıldı (hesaba yatan ₺${paraFmt(net)}).`);
+        setPosKesintiModal(null);
+      } catch (e) { console.error('POS kesintisi yazılamadı:', e); alert('Kesinti kaydedilemedi, tekrar deneyin.'); }
+      finally { setPosKesintiKaydediliyor(false); }
+    };
+
     const defterdenOdemeYontemi = (defterId) => {
       const tur = defterler.find(d => d.id === defterId)?.tur;
       if (tur === 'Banka') return 'Banka / Havale';
@@ -10769,6 +10847,29 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                       ))}
                     </div>
                   )}
+                  {/* ============================================================
+                      YENİ (kullanıcı talebi): POS / MAIL ORDER KESİNTİSİ
+                      ------------------------------------------------------------
+                      Kredi kartı tahsilatlarında, hesaba yatan net tutarı girip
+                      aradaki komisyonu aynı deftere GİDER olarak yazdırır.
+                      Kesinti girilmişse buton yerine tutarı gösteren rozet çıkar.
+                      ============================================================ */}
+                  {posKesintisiUygunMu(i) && (() => {
+                    const kes = posKesintisiBul(i.id);
+                    return kes ? (
+                      <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                        <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200 inline-flex items-center gap-1" title={`Hesaba yatan: ₺${paraFmt(kes.posKesintiNet ?? (Number(i.tutar) - Number(kes.tutar)))}`}>
+                          <CreditCard className="w-3 h-3" /> Kesinti: ₺{paraFmt(kes.tutar)}
+                        </span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                          Hesaba yatan: ₺{paraFmt(kes.posKesintiNet ?? (Number(i.tutar) - Number(kes.tutar)))}
+                        </span>
+                        <button type="button" title="Kesinti kaydını sil"
+                          onClick={(ev) => { ev.stopPropagation(); setDeleteIslemId(kes.id); }}
+                          className="p-0.5 text-neutral-300 hover:text-red-600 transition"><X className="w-3 h-3" /></button>
+                      </div>
+                    ) : null;
+                  })()}
                   <div className="text-[9px] sm:text-[10px] font-bold text-neutral-300 truncate">{i.by}</div>
                   {/* DEĞİŞTİ (kullanıcı talebi): Düzenle/Sil düğmeleri artık
                       MOBİLDE HER İŞLEMDE görünür (telefonda hover yok, gizli
@@ -10780,6 +10881,14 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                         className="text-[10px] font-black text-blue-700 px-2.5 py-1.5 rounded-lg bg-blue-100 border border-blue-300 hover:bg-blue-200 transition flex items-center gap-1"><Edit className="w-3 h-3" /> Düzenle</button>
                       <button onClick={(ev) => { ev.stopPropagation(); setDeleteIslemId(i.id); setAcikIslemId(null); }}
                         className="text-[10px] font-black text-red-700 px-2.5 py-1.5 rounded-lg bg-red-100 border border-red-300 hover:bg-red-200 transition flex items-center gap-1 ml-1"><X className="w-3 h-3" /> Sil</button>
+                      {/* TAŞINDI (kullanıcı talebi): "Kesintili Tutarı Gir" artık
+                          Düzenle / Sil butonlarının yanında. Yalnızca kredi kartı
+                          tahsilatlarında ve kesinti henüz girilmemişse çıkar. */}
+                      {posKesintisiUygunMu(i) && !posKesintisiBul(i.id) && (
+                        <button onClick={(ev) => { ev.stopPropagation(); setPosKesintiModal({ islem: i, netTutar: '' }); }}
+                          title="Hesaba yatan net tutarı gir — aradaki kesinti gider olarak yazılsın"
+                          className="text-[10px] font-black text-rose-700 px-2.5 py-1.5 rounded-lg bg-rose-100 border border-rose-300 hover:bg-rose-200 transition flex items-center gap-1 ml-1"><CreditCard className="w-3 h-3" /> Kesintili Tutarı Gir</button>
+                      )}
                     </div>
                   )}
                   {i.silindi && (
@@ -12440,6 +12549,65 @@ silinmeTarihi: new Date().toISOString()`}</pre>
             bölümüne "Bu ay avans verilmedi" etiketiyle düşer ve oradan
             geri alınabilir.
             ================================================================== */}
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): KREDİ KARTI KESİNTİSİ PENCERESİ
+            ================================================================== */}
+        {posKesintiModal && (() => {
+          const brut = Number(posKesintiModal.islem?.tutar) || 0;
+          const netSayi = parseFloat(String(posKesintiModal.netTutar || '').replace(',', '.'));
+          const gecerli = netSayi >= 0 && netSayi <= brut;
+          const kesinti = gecerli ? Math.round((brut - netSayi) * 100) / 100 : 0;
+          const oran = gecerli && brut > 0 ? ((kesinti / brut) * 100) : 0;
+          return (
+          <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setPosKesintiModal(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+              <div className="bg-rose-600 text-white p-4 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h3 className="font-black flex items-center gap-2"><CreditCard className="w-5 h-5" /> Kredi Kartı Kesintisi</h3>
+                  <p className="text-[11px] font-bold text-white/80 mt-0.5 truncate">{posKesintiModal.islem.musteriAdi || posKesintiModal.islem.aciklama || 'Tahsilat'} • {new Date(posKesintiModal.islem.tarih).toLocaleDateString('tr-TR')}</p>
+                </div>
+                <button onClick={() => setPosKesintiModal(null)} className="text-white/70 hover:text-white shrink-0"><X className="w-5 h-5" /></button>
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3 flex items-center justify-between">
+                  <span className="text-[11px] font-black text-neutral-500 uppercase">Müşteriden çekilen</span>
+                  <span className="text-lg font-black text-neutral-900">₺{paraFmt(brut)}</span>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Hesaba Yatan Net Tutar *</label>
+                  <input autoFocus type="number" inputMode="decimal" value={posKesintiModal.netTutar}
+                    onChange={e => setPosKesintiModal({ ...posKesintiModal, netTutar: e.target.value })}
+                    onKeyDown={e => { if (e.key === 'Enter' && gecerli && kesinti > 0) posKesintisiKaydet(); }}
+                    placeholder={`Örn: ${paraFmt(Math.max(0, brut - Math.round(brut * 0.04)))}`}
+                    className="w-full p-3 border-2 border-neutral-300 rounded-xl text-lg font-black text-right outline-none focus:ring-2 focus:ring-rose-500" />
+                </div>
+                {/* Canlı özet */}
+                <div className={`rounded-xl p-3 border-2 ${gecerli && kesinti > 0 ? 'bg-rose-50 border-rose-200' : 'bg-neutral-50 border-neutral-200'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black text-neutral-500 uppercase">Kesinti (gider yazılacak)</span>
+                    <span className={`text-xl font-black ${gecerli && kesinti > 0 ? 'text-rose-700' : 'text-neutral-400'}`}>₺{paraFmt(kesinti)}</span>
+                  </div>
+                  {gecerli && kesinti > 0 && <p className="text-[11px] font-bold text-rose-600/80 mt-1">Komisyon oranı ≈ %{oran.toFixed(2)}</p>}
+                  {!gecerli && posKesintiModal.netTutar !== '' && <p className="text-[11px] font-black text-red-600 mt-1">Net tutar 0 ile ₺{paraFmt(brut)} arasında olmalı.</p>}
+                </div>
+                <p className="text-[10px] font-bold text-neutral-400 leading-relaxed">
+                  Gelir kaydı <span className="text-neutral-600">değişmez</span> (cari ve ciro doğru kalsın diye). Fark, aynı deftere
+                  <span className="text-neutral-600"> "Kredi Kartı Kesintisi"</span> kategorisinde gider olarak yazılır; böylece kasa bakiyesi hesaba yatan tutara eşitlenir.
+                </p>
+              </div>
+              <div className="p-3 border-t border-neutral-200 flex gap-2">
+                <button onClick={() => setPosKesintiModal(null)} disabled={posKesintiKaydediliyor}
+                  className="px-4 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-xs transition disabled:opacity-50">Vazgeç</button>
+                <button onClick={posKesintisiKaydet} disabled={posKesintiKaydediliyor || !gecerli || kesinti <= 0}
+                  className="flex-1 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-black rounded-xl text-xs transition disabled:opacity-40 flex items-center justify-center gap-1.5">
+                  {posKesintiKaydediliyor ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Kaydediliyor</> : <><CheckCircle className="w-3.5 h-3.5" /> Kesintiyi Gider Yaz</>}
+                </button>
+              </div>
+            </div>
+          </div>
+          );
+        })()}
+
         {avansYokModal && (
           <div className="fixed inset-0 bg-black/70 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setAvansYokModal(null)}>
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5 text-center animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
