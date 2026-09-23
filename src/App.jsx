@@ -44,7 +44,7 @@ if (typeof Node === 'function' && Node.prototype && !Node.prototype.__sembolCevi
 }
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
+import { MapPin, Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where, documentId } from 'firebase/firestore';
 import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
