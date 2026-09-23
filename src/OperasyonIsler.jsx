@@ -955,9 +955,12 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     // DEĞİŞTİ (kullanıcı talebi): İki ayrı sayım döner —
     //   toplam / nakliye / depo / asansor : TÜM bekleyen keşifler
     //     → Ekspertiz Takvimi butonunda "gidilecek toplam keşif" olarak gösterilir.
-    //   bugun (+bugunNakliye/bugunDepo/bugunAsansor) : SADECE bugüne denk gelen
-    //     ve GECİKMİŞ (tarihi geçmiş ama hâlâ bekleyen) keşifler
-    //     → Sol menüdeki "Randevular" rozeti yalnızca bunlar varsa yanar.
+    //   bugun (+bugunNakliye/bugunDepo/bugunAsansor) : SADECE BUGÜNE denk gelen
+    //     keşifler → Sol menüdeki "Randevular" rozeti yalnızca keşif GÜNÜ yanar.
+    //     İleri tarihli keşifler (örn. bugün 23'ü, keşif 26'sında) rozeti yakmaz;
+    //     26'sı geldiğinde yanar. Tarihi geçmiş ama hâlâ bekleyen keşifler de
+    //     burada sayılmaz (onlar Ekspertiz Takvimi'ndeki toplam rozette ve
+    //     takvimde kırmızı/yanıp sönen simgeyle görünür).
     const [sayilar, setSayilar] = useState({ nakliye: 0, depo: 0, asansor: 0, toplam: 0, bugunNakliye: 0, bugunDepo: 0, bugunAsansor: 0, bugun: 0 });
     useEffect(() => {
       if (!aktif) return;
@@ -970,8 +973,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
           const k = d.data();
           const tip = k.hizmetTipi || 'Nakliye';
           if (tip === 'Depo') depo++; else if (tip === 'Asansör') asansor++; else nakliye++;
-          // Bugün yapılacak ya da tarihi geçtiği hâlde hâlâ bekleyen keşifler
-          if (k.tarih && k.tarih <= bugunStr) {
+          // DEĞİŞTİ (kullanıcı talebi): SADECE bugünün tarihi — ne öncesi ne sonrası
+          if (k.tarih === bugunStr) {
             if (tip === 'Depo') bDepo++; else if (tip === 'Asansör') bAsansor++; else bNakliye++;
           }
         });
@@ -1074,15 +1077,20 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     // Sadece görüntülenen ayın kayıtları dinlenir; ay değişince abonelik yenilenir.
     const ayBasi = `${takvim.yil}-${String(takvim.ay + 1).padStart(2, '0')}-01`;
     const aySonu = `${takvim.yil}-${String(takvim.ay + 1).padStart(2, '0')}-${String(new Date(takvim.yil, takvim.ay + 1, 0).getDate()).padStart(2, '0')}`;
+    // YENİ (kullanıcı talebi): takvimde komşu ayların uç günleri de göründüğü için
+    // dinleme aralığı 7 gün öncesi – 7 gün sonrasına genişletilir (küçük ek okuma).
+    const dizgeYap = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const dinlemeBas = dizgeYap(new Date(takvim.yil, takvim.ay, -6));
+    const dinlemeSon = dizgeYap(new Date(takvim.yil, takvim.ay + 1, 7));
     useEffect(() => {
       setYukleniyor(true);
-      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'ekspertizler'), where('tarih', '>=', ayBasi), where('tarih', '<=', aySonu));
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'ekspertizler'), where('tarih', '>=', dinlemeBas), where('tarih', '<=', dinlemeSon));
       const unsub = onSnapshot(q, snap => {
         setKayitlar(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a, b) => (a.tarih + (a.saat || '')).localeCompare(b.tarih + (b.saat || ''))));
         setYukleniyor(false);
       }, err => { console.error('Ekspertizler dinlenemedi:', err); setYukleniyor(false); });
       return () => unsub();
-    }, [ayBasi, aySonu]);
+    }, [dinlemeBas, dinlemeSon]);
 
     // Seçilen gün görüntülenen ayın dışındaysa ayın 1'ine çek (ay değişince liste boş kalmasın)
     useEffect(() => { if (!secilenGun.startsWith(ayBasi.slice(0, 7))) setSecilenGun(ayBasi); }, [ayBasi]); // eslint-disable-line
@@ -1246,17 +1254,34 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     // -------------------------------------------------------- TAKVİM VERİ ---
     const ilkGunIdx = (new Date(takvim.yil, takvim.ay, 1).getDay() + 6) % 7;   // Pazartesi=0
     const gunSayisi = new Date(takvim.yil, takvim.ay + 1, 0).getDate();
-    const hucreler = [...Array(ilkGunIdx).fill(null), ...Array.from({ length: gunSayisi }, (_, i) => i + 1)];
+    // DEĞİŞTİ (kullanıcı talebi): boş hücreler yerine KOMŞU AYIN GÜNLERİ
+    // (soluk, ay etiketli). Izgara hep tam satırla biter (7'nin katı).
+    const KISA_AY_E = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
+    const hucreler = [];
+    const oncekiAyGun = new Date(takvim.yil, takvim.ay, 0).getDate();
+    const oncekiAyTarih = new Date(takvim.yil, takvim.ay - 1, 1);
+    for (let i = ilkGunIdx - 1; i >= 0; i--) {
+      const g = oncekiAyGun - i;
+      hucreler.push({ gun: g, tarih: dizgeYap(new Date(oncekiAyTarih.getFullYear(), oncekiAyTarih.getMonth(), g)), disariAy: true, ayEtiketi: KISA_AY_E[oncekiAyTarih.getMonth()] });
+    }
+    for (let g = 1; g <= gunSayisi; g++) hucreler.push({ gun: g, tarih: dizgeYap(new Date(takvim.yil, takvim.ay, g)), disariAy: false });
+    const sonrakiAyTarih = new Date(takvim.yil, takvim.ay + 1, 1);
+    for (let g = 1; hucreler.length % 7 !== 0; g++) {
+      hucreler.push({ gun: g, tarih: dizgeYap(new Date(sonrakiAyTarih.getFullYear(), sonrakiAyTarih.getMonth(), g)), disariAy: true, ayEtiketi: KISA_AY_E[sonrakiAyTarih.getMonth()] });
+    }
     const gunKayitlari = (t) => kayitlar.filter(k => k.tarih === t);
     const secilenListe = gunKayitlari(secilenGun);
     const bugun = ekspertizBugun();
+    // Özet rozetleri yalnızca GÖRÜNTÜLENEN ayın kayıtlarını sayar (komşu ayların
+    // takvimde soluk görünen günleri bu sayılara karışmaz)
+    const ayKayitlari = kayitlar.filter(k => k.tarih >= ayBasi && k.tarih <= aySonu);
     const ozet = {
-      toplam: kayitlar.filter(k => k.durum !== 'iptal').length,
-      bekleyen: kayitlar.filter(k => k.durum === 'bekliyor').length,
-      gecikmis: kayitlar.filter(k => k.durum === 'bekliyor' && k.tarih < bugun).length,
-      gidildi: kayitlar.filter(k => k.durum === 'gidildi').length,
-      aldik: kayitlar.filter(k => k.durum === 'isiAldik').length,
-      alamadik: kayitlar.filter(k => k.durum === 'isiAlamadik').length,
+      toplam: ayKayitlari.filter(k => k.durum !== 'iptal').length,
+      bekleyen: ayKayitlari.filter(k => k.durum === 'bekliyor').length,
+      gecikmis: ayKayitlari.filter(k => k.durum === 'bekliyor' && k.tarih < bugun).length,
+      gidildi: ayKayitlari.filter(k => k.durum === 'gidildi').length,
+      aldik: ayKayitlari.filter(k => k.durum === 'isiAldik').length,
+      alamadik: ayKayitlari.filter(k => k.durum === 'isiAlamadik').length,
     };
 
     return (
@@ -1320,9 +1345,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
             {EKSPERTIZ_GUNLER.map(g => <div key={g} className="text-center font-bold text-neutral-500 text-xs py-2">{g}</div>)}
           </div>
           <div className="grid grid-cols-7 gap-1 md:gap-2">
-            {hucreler.map((gun, i) => {
-              if (gun === null) return <div key={`b${i}`} />;
-              const t = `${takvim.yil}-${String(takvim.ay + 1).padStart(2, '0')}-${String(gun).padStart(2, '0')}`;
+            {hucreler.map((h, i) => {
+              const gun = h.gun;
+              const t = h.tarih;
               const l = gunKayitlari(t).filter(k => k.durum !== 'iptal');
               // DEĞİŞTİ (kullanıcı talebi): randevu takvimiyle aynı mantık —
               // Nakliye + Depo keşifleri "ana kapasite"yi belirler (üst satır),
@@ -1333,14 +1358,19 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
               const buGun = t === bugun;
               const dolu = anaKesifler.length >= 5;   // siyah hücre
               return (
-                <button key={gun} type="button" onClick={() => setSecilenGun(t)} onDoubleClick={() => formuAc(null, t)}
-                  title={l.length ? `${l.length} ekspertiz — çift tık: bu güne ekle` : 'Çift tık: bu güne ekspertiz ekle'}
+                <button key={t} type="button" onClick={() => setSecilenGun(t)} onDoubleClick={() => formuAc(null, t)}
+                  title={(h.disariAy ? `${h.ayEtiketi} ayı — ` : '') + (l.length ? `${l.length} ekspertiz — çift tık: bu güne ekle` : 'Çift tık: bu güne ekspertiz ekle')}
                   className={`relative min-h-[64px] p-1.5 rounded-xl border text-left transition flex flex-col overflow-hidden
                     ${ekspertizKapasiteRengi(anaKesifler.length)}
                     ${secili ? 'ring-2 ring-red-600 ring-offset-1' : ''}
-                    ${buGun && !secili ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}>
+                    ${buGun && !secili ? 'ring-2 ring-amber-400 ring-offset-1' : ''}
+                    ${h.disariAy ? 'opacity-45 border-dashed saturate-50 hover:opacity-80' : ''}`}>
                   <div className="flex justify-between items-center mb-1">
-                    <span className={`text-[11px] font-black ${dolu ? 'text-white' : 'text-black'}`}>{gun}</span>
+                    <span className={`text-[11px] font-black flex items-center gap-1 ${dolu ? 'text-white' : 'text-black'}`}>
+                      {gun}
+                      {/* YENİ: komşu ay günlerinde küçük ay etiketi */}
+                      {h.disariAy && <span className={`text-[8px] font-black uppercase px-1 rounded ${dolu ? 'bg-white/20 text-white' : 'bg-neutral-200 text-neutral-600'}`}>{h.ayEtiketi}</span>}
+                    </span>
                     {l.length > 0 && <span className={`text-[9px] font-bold ${dolu ? 'text-neutral-300' : 'text-neutral-500'}`}>{l.length} keşif</span>}
                   </div>
 
@@ -1768,6 +1798,16 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       const sonGun = new Date(currentYear, currentMonth + 1, 0).getDate();
       const aySonu = `${currentYear}-${iki(currentMonth + 1)}-${iki(sonGun)}`;
       onDonemGerekli(ayBasi, aySonu);
+      // YENİ (kullanıcı talebi): takvimde komşu ayların uç günleri de görünür;
+      // o günlerin işleri de yüklensin diye önceki ayın son 7 ve sonraki ayın
+      // ilk 7 günü için küçük birer aralık daha istenir (dar aralık = az okuma).
+      const oncekiSon = new Date(currentYear, currentMonth, 0);           // önceki ayın son günü
+      const oncekiBas = new Date(currentYear, currentMonth, -6);          // 7 gün öncesi
+      const sonrakiBas = new Date(currentYear, currentMonth + 1, 1);
+      const sonrakiSon = new Date(currentYear, currentMonth + 1, 7);
+      const f = (d) => `${d.getFullYear()}-${iki(d.getMonth() + 1)}-${iki(d.getDate())}`;
+      onDonemGerekli(f(oncekiBas), f(oncekiSon));
+      onDonemGerekli(f(sonrakiBas), f(sonrakiSon));
     }, [currentYear, currentMonth, onDonemGerekli]);
 
     const isOperator = currentUser?.position === 'Operatör';
@@ -1817,10 +1857,25 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       return acc;
     }, {});
 
+    // ======================================================================
+    // DEĞİŞTİ (kullanıcı talebi): BOŞ HÜCRELER YERİNE KOMŞU AYIN GÜNLERİ
+    // ----------------------------------------------------------------------
+    // Ayın ilk gününden önceki boşluklar ÖNCEKİ ayın son günleriyle, son
+    // gününden sonraki boşluklar SONRAKİ ayın ilk günleriyle doldurulur. Bu
+    // günler işleri ve simgeleriyle birlikte ama SOLUK ve ay etiketiyle
+    // gösterilir; böylece Eylül'e bakarken 31 Ağustos'u ve 1-4 Ekim'i göz
+    // ucuyla görmek mümkün olur. Izgara hep tam satırlarla (7'nin katı) biter.
+    // ======================================================================
+    const tarihStrOf = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const KISA_AY = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
     const days = [];
     let startDay = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1;
-    for (let i = 0; i < startDay; i++) {
-      days.push(null);
+    const oncekiAyGunSayisi = new Date(currentYear, currentMonth, 0).getDate();
+    for (let i = startDay - 1; i >= 0; i--) {
+      const gun = oncekiAyGunSayisi - i;
+      const oncekiTarih = new Date(currentYear, currentMonth - 1, 1);
+      const dateStr = tarihStrOf(oncekiTarih.getFullYear(), oncekiTarih.getMonth(), gun);
+      days.push({ day: gun, date: dateStr, jobs: jobsByDate[dateStr] || [], disariAy: true, ayEtiketi: KISA_AY[oncekiTarih.getMonth()] });
     }
     for (let i = 1; i <= daysInMonth; i++) {
       const dateStr = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
@@ -1829,6 +1884,14 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
         date: dateStr,
         jobs: jobsByDate[dateStr] || []
       });
+    }
+    // Son satırı sonraki ayın günleriyle tamamla
+    const sonrakiTarih = new Date(currentYear, currentMonth + 1, 1);
+    let ek = 1;
+    while (days.length % 7 !== 0) {
+      const dateStr = tarihStrOf(sonrakiTarih.getFullYear(), sonrakiTarih.getMonth(), ek);
+      days.push({ day: ek, date: dateStr, jobs: jobsByDate[dateStr] || [], disariAy: true, ayEtiketi: KISA_AY[sonrakiTarih.getMonth()] });
+      ek++;
     }
 
     const nextMonth = () => {
@@ -1958,13 +2021,16 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
               <div 
                 key={index} 
                 onClick={() => item && setSelectedDate(item.date)}
-                className={`min-h-[64px] p-1.5 rounded-xl border transition cursor-pointer flex flex-col overflow-hidden ${cellClass} ${item && selectedDate === item.date ? 'ring-2 ring-red-600 ring-offset-1' : ''} ${isToday ? 'today-pulse-ring' : ''}`}
+                title={item?.disariAy ? `${item.ayEtiketi} ayı — komşu ayın günü` : undefined}
+                className={`min-h-[64px] p-1.5 rounded-xl border transition cursor-pointer flex flex-col overflow-hidden ${cellClass} ${item && selectedDate === item.date ? 'ring-2 ring-red-600 ring-offset-1' : ''} ${isToday ? 'today-pulse-ring' : ''} ${item?.disariAy ? 'opacity-45 border-dashed saturate-50 hover:opacity-80' : ''}`}
               >
                 {item && (
                   <>
                     <div className="flex justify-between items-center mb-1">
-                      <span className={`text-[11px] font-black ${isToday ? (isFull && !isMaviYaka ? 'text-red-400' : 'text-red-600') : (isFull && !isMaviYaka ? 'text-white font-bold' : 'text-black font-bold')}`}>
+                      <span className={`text-[11px] font-black flex items-center gap-1 ${isToday ? (isFull && !isMaviYaka ? 'text-red-400' : 'text-red-600') : (isFull && !isMaviYaka ? 'text-white font-bold' : 'text-black font-bold')}`}>
                         {item.day}
+                        {/* YENİ: komşu ay günlerinde küçük ay etiketi ("Ağu", "Eki") */}
+                        {item.disariAy && <span className={`text-[8px] font-black uppercase px-1 rounded ${isFull && !isMaviYaka ? 'bg-white/20 text-white' : 'bg-neutral-200 text-neutral-600'}`}>{item.ayEtiketi}</span>}
                       </span>
                       {coreJobs.length > 0 && !isMaviYaka && (
                         <span className={`text-[9px] font-bold ${isFull ? 'text-neutral-300' : 'text-neutral-500'}`}>
