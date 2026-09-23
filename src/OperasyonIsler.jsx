@@ -896,12 +896,17 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     'Depo':    { renk: 'text-blue-600',  zemin: 'bg-blue-50 border-blue-200',   dolu: 'bg-blue-600',  Ikon: Package },
     'Asansör': { renk: 'text-green-600', zemin: 'bg-green-50 border-green-200', dolu: 'bg-green-600', Ikon: ArrowUpRight },
   };
+  // DEĞİŞTİ (kullanıcı talebi): her duruma kendi SİMGESİ ve takvim rengi eklendi.
+  //   bekliyor    → büyüteç (keşif bekliyor)
+  //   gidildi     → YEŞİL TİK
+  //   isiAldik    → KABUL (ödül/onay) işareti
+  //   isiAlamadik → ÇARPI
   const EKSPERTIZ_DURUM = {
-    bekliyor:   { ad: 'Bekliyor',       renk: 'bg-neutral-100 text-neutral-700 border-neutral-300' },
-    gidildi:    { ad: 'Gidildi',        renk: 'bg-blue-50 text-blue-700 border-blue-200' },
-    isiAldik:   { ad: 'İşi Aldık',      renk: 'bg-green-50 text-green-700 border-green-200' },
-    isiAlamadik:{ ad: 'İşi Alamadık',   renk: 'bg-red-50 text-red-700 border-red-200' },
-    iptal:      { ad: 'İptal',          renk: 'bg-neutral-100 text-neutral-400 border-neutral-200 line-through' },
+    bekliyor:   { ad: 'Bekliyor',       renk: 'bg-neutral-100 text-neutral-700 border-neutral-300', Ikon: Search,         takvimRenk: '' },
+    gidildi:    { ad: 'Gidildi',        renk: 'bg-blue-50 text-blue-700 border-blue-200',           Ikon: CheckCircle,    takvimRenk: 'text-green-600' },
+    isiAldik:   { ad: 'İşi Aldık',      renk: 'bg-green-50 text-green-700 border-green-200',        Ikon: Award,          takvimRenk: 'text-green-700' },
+    isiAlamadik:{ ad: 'İşi Alamadık',   renk: 'bg-red-50 text-red-700 border-red-200',              Ikon: XCircle,        takvimRenk: 'text-red-600' },
+    iptal:      { ad: 'İptal',          renk: 'bg-neutral-100 text-neutral-400 border-neutral-200 line-through', Ikon: Ban, takvimRenk: 'text-neutral-400' },
   };
   const EKSPERTIZ_AYLAR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran','Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
   const EKSPERTIZ_GUNLER = ['Pzt','Sal','Çar','Per','Cum','Cmt','Paz'];
@@ -1237,10 +1242,14 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
             </div>
             {/* DEĞİŞTİ: gösterge randevu takvimindekiyle aynı düzende — tip renkleri + doluluk */}
             <div className="flex flex-col items-end gap-1.5">
-              <div className="flex items-center gap-2 text-[11px] font-bold text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-1.5">
+              <div className="flex items-center gap-2 text-[11px] font-bold text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-1.5 flex-wrap justify-end">
                 <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-red-600" /> Nakliye</span>
                 <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-blue-600" /> Depo</span>
                 <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-green-600" /> Asansör</span>
+                <span className="text-neutral-300">|</span>
+                <span className="flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5 text-green-600" /> Gidildi</span>
+                <span className="flex items-center gap-1"><Award className="w-3.5 h-3.5 text-green-700" /> İşi Aldık</span>
+                <span className="flex items-center gap-1"><XCircle className="w-3.5 h-3.5 text-red-600" /> Alamadık</span>
               </div>
               <div className="hidden sm:flex items-center gap-2 text-[10px] font-bold text-neutral-500 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-1">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-white border border-neutral-300" /> Boş (0)</span>
@@ -1287,11 +1296,16 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                     <div className="grid grid-cols-5 gap-0.5 w-fit content-start h-[26px] overflow-hidden">
                       {anaKesifler.slice(0, 10).map(k => {
                         const tip = EKSPERTIZ_TIP[k.hizmetTipi] || EKSPERTIZ_TIP.Nakliye;
-                        const bitti = k.durum !== 'bekliyor';
-                        const gec = k.durum === 'bekliyor' && t < bugun;
-                        return <Search key={k.id}
-                          title={`${k.saat || ''} ${k.musteriAdi} (${k.hizmetTipi}) — ${gec ? 'GECİKMİŞ' : (EKSPERTIZ_DURUM[k.durum]?.ad || '')}`}
-                          className={`w-3 h-3 shrink-0 ${dolu ? 'text-white' : (gec ? 'text-red-500' : tip.renk)} ${bitti ? 'opacity-40' : ''} ${gec ? 'animate-pulse' : ''}`} />;
+                        const d = EKSPERTIZ_DURUM[k.durum] || EKSPERTIZ_DURUM.bekliyor;
+                        const bekliyor = k.durum === 'bekliyor';
+                        const gec = bekliyor && t < bugun;
+                        // DEĞİŞTİ: simge duruma göre — bekleyende büyüteç (tip rengi),
+                        // sonuçlananda tik / kabul / çarpı (kendi renginde)
+                        const Ikon = d.Ikon || Search;
+                        const renk = dolu ? 'text-white' : (bekliyor ? (gec ? 'text-red-500' : tip.renk) : d.takvimRenk);
+                        return <Ikon key={k.id}
+                          title={`${k.saat || ''} ${k.musteriAdi} (${k.hizmetTipi}) — ${gec ? 'GECİKMİŞ' : d.ad}`}
+                          className={`w-3 h-3 shrink-0 ${renk} ${gec ? 'animate-pulse' : ''}`} />;
                       })}
                     </div>
 
@@ -1299,11 +1313,14 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                         render edilir (hizalama sabit kalsın diye); yeşil büyüteç. */}
                     <div className="flex flex-nowrap gap-0.5 mt-auto pt-1 w-full items-center h-[14px] overflow-hidden border-t border-yellow-400">
                       {asansorKesifler.slice(0, 5).map(k => {
-                        const bitti = k.durum !== 'bekliyor';
-                        const gec = k.durum === 'bekliyor' && t < bugun;
-                        return <Search key={k.id}
-                          title={`${k.saat || ''} ${k.musteriAdi} (Asansör) — ${gec ? 'GECİKMİŞ' : (EKSPERTIZ_DURUM[k.durum]?.ad || '')}`}
-                          className={`w-2.5 h-2.5 shrink-0 ${dolu ? 'text-green-300' : 'text-green-600'} ${bitti ? 'opacity-40' : ''} ${gec ? 'animate-pulse' : ''}`} />;
+                        const d = EKSPERTIZ_DURUM[k.durum] || EKSPERTIZ_DURUM.bekliyor;
+                        const bekliyor = k.durum === 'bekliyor';
+                        const gec = bekliyor && t < bugun;
+                        const Ikon = d.Ikon || Search;
+                        const renk = dolu ? 'text-green-300' : (bekliyor ? (gec ? 'text-red-500' : 'text-green-600') : d.takvimRenk);
+                        return <Ikon key={k.id}
+                          title={`${k.saat || ''} ${k.musteriAdi} (Asansör) — ${gec ? 'GECİKMİŞ' : d.ad}`}
+                          className={`w-2.5 h-2.5 shrink-0 ${renk} ${gec ? 'animate-pulse' : ''}`} />;
                       })}
                     </div>
                   </div>
@@ -1348,7 +1365,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                             <span className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-sm font-black flex items-center gap-1"><Clock className="w-3.5 h-3.5" /> {k.saat || '—'}</span>
                             <h4 className={`font-black text-black text-base ${iptal ? 'line-through' : ''}`}>{k.musteriAdi}</h4>
                             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full text-white ${tip.dolu} flex items-center gap-1`}><tip.Ikon className="w-3 h-3" /> {k.hizmetTipi}</span>
-                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${durum.renk}`}>{durum.ad}</span>
+                            <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border inline-flex items-center gap-1 ${durum.renk}`}>
+                              {durum.Ikon && <durum.Ikon className="w-3 h-3" />} {durum.ad}
+                            </span>
                             {gec && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-600 text-white animate-pulse">GECİKMİŞ</span>}
                           </div>
 
