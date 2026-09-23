@@ -4002,7 +4002,14 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // toplamının listedeki gerçek "bugün" sayısından az çıkmasına yol açıyordu.
   // Artık ikisi de AYNI gunAnahtari() fonksiyonuyla (yerel/Türkiye günü)
   // karşılaştırılıyor, sayılar tutarlı olacak.
-  const aktifKanalBugun = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi && k.createdAt && gunAnahtari(k.createdAt) === gunAnahtari(new Date().toISOString()));
+  // DEĞİŞTİ (kullanıcı talebi): özet kutuları artık sadece "Bugün" değil,
+  // "Bu Ay" ve "Tüm Zamanlar" sayılarını da gösteriyor. Ay karşılaştırması da
+  // aynı gunAnahtari() (yerel/Türkiye günü) anahtarının "YYYY-AA" kısmıyla yapılır.
+  const aktifKanalTumu = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi);
+  const bugunAnahtari = gunAnahtari(new Date().toISOString());
+  const buAyAnahtari = bugunAnahtari.slice(0, 7);
+  const aktifKanalBugun = aktifKanalTumu.filter(k => k.createdAt && gunAnahtari(k.createdAt) === bugunAnahtari);
+  const aktifKanalBuAy = aktifKanalTumu.filter(k => k.createdAt && gunAnahtari(k.createdAt).slice(0, 7) === buAyAnahtari);
   // Google Ads / Facebook Ads / Instagram Ads / Organik ayrımı ARTIK doğrudan
   // "reklamKaynagi" alanından okunuyor — bunu hem tıklama bildirimleri
   // (yeni-musteri.js) hem de wizard form gönderimleri (submit-lead.js,
@@ -4028,10 +4035,18 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     if (reklamKaynagiEsit(k, 'instagram_ads')) return REKLAM_KAYNAGI_ETIKETLERI.instagram_ads;
     return { ad: 'Organik', renk: 'bg-neutral-100 text-neutral-600' };
   };
-  const bugunGoogleAdsSayisi = aktifKanalBugun.filter(k => reklamKaynagiEsit(k, 'google_ads')).length;
-  const bugunFacebookAdsSayisi = aktifKanalBugun.filter(k => reklamKaynagiEsit(k, 'facebook_ads')).length;
-  const bugunInstagramAdsSayisi = aktifKanalBugun.filter(k => reklamKaynagiEsit(k, 'instagram_ads')).length;
-  const bugunOrganikSayisi = aktifKanalBugun.filter(k => !reklamKaynagiAds(k)).length;
+  // Her kaynak için { bugun, buAy, tumu } sayıları
+  const kaynakSayilari = (kosul) => ({
+    bugun: aktifKanalBugun.filter(kosul).length,
+    buAy: aktifKanalBuAy.filter(kosul).length,
+    tumu: aktifKanalTumu.filter(kosul).length,
+  });
+  const OZET_KUTULARI = [
+    { etiket: '🟢 Google Ads', renk: 'text-green-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'google_ads')) },
+    { etiket: '🔵 Facebook Ads', renk: 'text-sky-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'facebook_ads')) },
+    { etiket: '🟣 Instagram Ads', renk: 'text-pink-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'instagram_ads')) },
+    { etiket: '⚪ Organik', renk: 'text-neutral-400', sayilar: kaynakSayilari(k => !reklamKaynagiAds(k)) },
+  ];
 
   // ================================================================ RENDER ===
   return (
@@ -4059,24 +4074,21 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           </div>
         </div>
 
-        {/* YENİ: SEÇİLİ KANALA (VE SEÇİLİ ŞİRKETE) GÖRE GÜNLÜK ÖZET KUTULARI */}
+        {/* SEÇİLİ KANALA (VE SEÇİLİ ŞİRKETE) GÖRE ÖZET KUTULARI — Bugün / Bu Ay / Tüm Zamanlar */}
         <div className="flex gap-2 flex-wrap">
-          <div className="bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
-            <p className="text-[9px] font-black text-green-400 uppercase">🟢 Bugün {kanal.ad} (Google Ads)</p>
-            <p className="text-base font-black text-white">{bugunGoogleAdsSayisi}</p>
-          </div>
-          <div className="bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
-            <p className="text-[9px] font-black text-sky-400 uppercase">🔵 Bugün {kanal.ad} (Facebook Ads)</p>
-            <p className="text-base font-black text-white">{bugunFacebookAdsSayisi}</p>
-          </div>
-          <div className="bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
-            <p className="text-[9px] font-black text-pink-400 uppercase">🟣 Bugün {kanal.ad} (Instagram Ads)</p>
-            <p className="text-base font-black text-white">{bugunInstagramAdsSayisi}</p>
-          </div>
-          <div className="bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
-            <p className="text-[9px] font-black text-neutral-400 uppercase">⚪ Bugün {kanal.ad} (Organik)</p>
-            <p className="text-base font-black text-white">{bugunOrganikSayisi}</p>
-          </div>
+          {OZET_KUTULARI.map(kutu => (
+            <div key={kutu.etiket} className="bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
+              <p className={`text-[9px] font-black uppercase ${kutu.renk}`}>{kutu.etiket} · {kanal.ad}</p>
+              <div className="flex gap-3 mt-0.5">
+                {[['Bugün', kutu.sayilar.bugun], ['Bu Ay', kutu.sayilar.buAy], ['Tüm Zamanlar', kutu.sayilar.tumu]].map(([ad, sayi]) => (
+                  <div key={ad}>
+                    <p className="text-base font-black text-white leading-tight">{sayi}</p>
+                    <p className="text-[8px] font-bold text-neutral-400 uppercase">{ad}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 
