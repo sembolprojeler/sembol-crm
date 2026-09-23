@@ -69,7 +69,11 @@ import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, i
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView,
   // YENİ: Sol menüdeki "yeni teklif" rozetleri için canlı sayaç hook'u (Hızlı Teklifler)
   useHizliTeklifYeniSayilari } from './Satis.jsx';
-import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJobsView, CancelledJobsView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, IsMerkeziView, IsKilavuzuView, HatirlatmalarView } from './OperasyonIsler.jsx';
+import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJobsView, CancelledJobsView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, IsMerkeziView, IsKilavuzuView, HatirlatmalarView,
+  // YENİ: "Randevular" menüsündeki bekleyen ekspertiz rozetleri için canlı sayaç
+  useEkspertizBekleyenSayilari,
+  // YENİ: Zil rozetine eklenecek — BANA atanmış, henüz yapılmamış keşif sayısı
+  useBanaAtananEkspertizSayisi } from './OperasyonIsler.jsx';
 import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './OperasyonPersonel.jsx';
 import { MaterialListView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView } from './OperasyonAracMalzeme.jsx';
 import { AddInfoView, ComplaintsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, SahaRaporlamasiView } from './OperasyonInsanKaynaklari.jsx';
@@ -3441,6 +3445,62 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                      )}
                    </h4>
                    <p className="text-sm text-neutral-600 mt-1.5 leading-relaxed">{n.message}</p>
+
+                   {/* ============================================================
+                       YENİ (kullanıcı talebi): EKSPERTİZ (KEŞİF) GÖREV KARTI
+                       ------------------------------------------------------------
+                       Keşfe atanan personelin bildiriminde randevu bilgileri
+                       düzenli görünür: tarih/saat, hizmet tipi, müşteri, telefon
+                       ve adres. Telefon, WhatsApp ve Yol Tarifi butonları da var.
+                       ============================================================ */}
+                   {n.type === 'ekspertiz' && (
+                     <div className="mt-3 rounded-xl border-2 border-neutral-200 overflow-hidden">
+                       <div className={`h-1.5 ${n.ekspertizHizmetTipi === 'Depo' ? 'bg-blue-600' : n.ekspertizHizmetTipi === 'Asansör' ? 'bg-green-600' : 'bg-red-600'}`} />
+                       <div className="p-3 bg-neutral-50 space-y-2">
+                         <div className="flex items-center gap-2 flex-wrap">
+                           <span className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-xs font-black flex items-center gap-1">
+                             <Clock className="w-3.5 h-3.5" /> {n.ekspertizTarihi ? n.ekspertizTarihi.split('-').reverse().join('.') : ''} {n.ekspertizSaati}
+                           </span>
+                           <span className={`text-[10px] font-black px-2 py-1 rounded-full text-white ${n.ekspertizHizmetTipi === 'Depo' ? 'bg-blue-600' : n.ekspertizHizmetTipi === 'Asansör' ? 'bg-green-600' : 'bg-red-600'}`}>{n.ekspertizHizmetTipi || 'Nakliye'} Keşfi</span>
+                           {n.ekspertizMusteri && <span className="font-black text-black text-sm">{n.ekspertizMusteri}</span>}
+                           {n.atayan && <span className="text-[10px] font-bold text-neutral-400">atayan: {n.atayan}</span>}
+                         </div>
+
+                         {n.ekspertizAdres && (
+                           <div className="flex items-start gap-2 bg-white border border-neutral-200 rounded-lg p-2">
+                             <MapPin className="w-4 h-4 text-neutral-400 shrink-0 mt-0.5" />
+                             <div className="min-w-0">
+                               <p className="text-[10px] font-black text-neutral-400 uppercase">Keşif Adresi</p>
+                               <p className="text-xs font-bold text-neutral-800 leading-snug">{n.ekspertizAdres}</p>
+                             </div>
+                           </div>
+                         )}
+
+                         <div className="flex flex-wrap items-center gap-1.5">
+                           {n.ekspertizTelefon && (
+                             <a href={`tel:${(n.ekspertizTelefon || '').replace(/\D/g, '')}`} onClick={(e) => e.stopPropagation()}
+                               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-black transition"><Phone className="w-3.5 h-3.5" /> {n.ekspertizTelefon}</a>
+                           )}
+                           {n.ekspertizTelefon && (() => {
+                             let r = (n.ekspertizTelefon || '').replace(/\D/g, '');
+                             if (r.startsWith('0')) r = r.slice(1);
+                             if (r.length === 10) r = '90' + r;
+                             return (
+                               <a href={`https://wa.me/${r}`} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                                 className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-black transition"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</a>
+                             );
+                           })()}
+                           {(n.ekspertizKonumLinki || n.ekspertizAdres) && (
+                             <a href={n.ekspertizKonumLinki
+                                   ? (/^https?:\/\//i.test(n.ekspertizKonumLinki) ? n.ekspertizKonumLinki : `https://${n.ekspertizKonumLinki}`)
+                                   : `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(n.ekspertizAdres)}`}
+                               target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+                               className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-black text-white text-xs font-black transition"><MapPin className="w-3.5 h-3.5" /> Yol Tarifi Al</a>
+                           )}
+                         </div>
+                       </div>
+                     </div>
+                   )}
                  </div>
                  <div className="shrink-0 text-right space-y-2">
                     <span className="inline-block text-xs font-bold text-neutral-500 bg-neutral-100 px-3 py-1.5 rounded-lg border border-neutral-200">
@@ -3819,6 +3879,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // Zil ikonundaki rozet, görev tamamlanana kadar yanıp sönmeye devam eder
     // (bildirim okunsa bile — çünkü iş bitmediyse hatırlatma sürmelidir).
     const [atanmisGorevSayisi, setAtanmisGorevSayisi] = useState(0);
+    // YENİ (kullanıcı talebi): Bana atanmış, henüz yapılmamış EKSPERTİZ sayısı.
+    // Zil rozetine eklenir; bildirim okunsa bile keşif tamamlanana kadar yanar.
+    const atanmisEkspertizSayisi = useBanaAtananEkspertizSayisi(currentUser?.fullName || '');
     // ========================================================================
     // DÜZELTME (Firestore okuma patlaması denetimi): Bu koleksiyon ('hatirlatmalar')
     // eskiden İKİ AYRI onSnapshot ile dinleniyordu (biri sadece rozet sayısı için,
@@ -4019,6 +4082,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // (firebaseUser yok) hiç abone olunmaz — gereksiz Firestore okuması yok.
     // ======================================================================
     const hizliTeklifYeni = useHizliTeklifYeniSayilari(!!firebaseUser);
+    // YENİ (kullanıcı talebi): Bekleyen ekspertiz sayıları — "Randevular"
+    // menüsünde tipe göre renkli, yanıp sönen rozet olarak gösterilir.
+    // Ekspertiz "Yapıldı / İşi Aldık / İşi Alamadık" ile sonuçlanınca düşer.
+    const ekspertizBekleyen = useEkspertizBekleyenSayilari(!!firebaseUser);
 
     // ======================================================================
     // YENİ (kullanıcı talebi): HAVUZDAN "KAYIT AÇ"
@@ -7448,7 +7515,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       eder — böylece iş unutulmaz.
                       ============================================================ */}
                   {(() => {
-                    const zilSayisi = unreadNotifCount + atanmisGorevSayisi;
+                    const zilSayisi = unreadNotifCount + atanmisGorevSayisi + atanmisEkspertizSayisi;
                     if (zilSayisi <= 0) return null;
                     return (
                       <span className="absolute -top-1 -right-1 flex items-center justify-center">
@@ -7493,6 +7560,15 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 {/* MAVİ YAKA'da bu sayfa puan takvimi olarak kullanıldığı için
                     menü adı "Puan Tablosu" olarak görünür. Sayfa/rota aynı. */}
                 <span className="whitespace-nowrap font-black text-black">{isMaviYakaUser ? 'Puan Tablosu' : 'Randevular'}</span>
+                {/* YENİ: Bekleyen ekspertiz rozetleri — nakliye kırmızı, depo mavi,
+                    asansör yeşil; sayı 0 ise gizli. Mavi yaka görünümünde çizilmez. */}
+                {!isMaviYakaUser && (
+                  <span className="ml-auto flex items-center gap-1">
+                    {ekspertizBekleyen.nakliye > 0 && <span title={`${ekspertizBekleyen.nakliye} bekleyen nakliye ekspertizi`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-red-600/40 animate-pulse">{ekspertizBekleyen.nakliye}</span>}
+                    {ekspertizBekleyen.depo > 0 && <span title={`${ekspertizBekleyen.depo} bekleyen depo ekspertizi`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-blue-600/40 animate-pulse">{ekspertizBekleyen.depo}</span>}
+                    {ekspertizBekleyen.asansor > 0 && <span title={`${ekspertizBekleyen.asansor} bekleyen asansör ekspertizi`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-green-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-green-600/40 animate-pulse">{ekspertizBekleyen.asansor}</span>}
+                  </span>
+                )}
               </button>
             )}
 
