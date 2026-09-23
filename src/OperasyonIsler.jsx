@@ -908,10 +908,82 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
   const ekspertizBugun = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
   const ekspertizTarihGoster = (t) => t ? t.split('-').reverse().join('.') : '—';
   const ekspertizZaman = (iso) => iso ? new Date(iso).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
+  // DEĞİŞTİ (kullanıcı talebi): Gün hücresi arka planı RANDEVU TAKVİMİYLE AYNI
+  // doluluk mantığını kullanır: 0 boş, 1-3 müsait, 4 yoğun (kırmızı),
+  // 5+ dolu (siyah). Asansör keşifleri kapasiteye dahil edilmez — tıpkı
+  // randevu takviminde asansör işlerinin ayrı satırda sayılması gibi.
+  const ekspertizKapasiteRengi = (sayi) => {
+    if (sayi === 0) return 'bg-white border-neutral-200 hover:bg-neutral-50';
+    if (sayi <= 3) return 'bg-neutral-50 border-neutral-300 hover:bg-neutral-100';
+    if (sayi === 4) return 'bg-red-50 border-red-200 hover:bg-red-100';
+    return 'bg-black border-black text-white hover:bg-neutral-900';
+  };
+
   const ekspertizRakam = (v) => (v || '').replace(/\D/g, '');
   const ekspertizWa = (v) => { let r = ekspertizRakam(v); if (r.startsWith('0')) r = r.slice(1); if (r.length === 10) r = '90' + r; return r; };
 
-  export const EkspertizTakvimiView = ({ currentUser, personnelList = [], onKayitAc = null, addSystemLog }) => {
+  // YENİ (kullanıcı talebi): YOL TARİFİ BAĞLANTISI
+  // Kullanıcı konum linki girdiyse (Google Maps / Yandex / Apple Haritalar kısa
+  // linki olabilir) doğrudan o açılır — telefon hangi uygulamayı kayıtlıysa onu
+  // kullanır. Konum linki yoksa adres metniyle evrensel bir harita araması
+  // üretilir; iOS'ta Apple Haritalar, Android'de Google Haritalar uygulamasında
+  // açılır (tarayıcıda da çalışır).
+  const ekspertizYolTarifi = (kayit) => {
+    const link = (kayit?.konumLinki || '').trim();
+    if (link) return /^https?:\/\//i.test(link) ? link : `https://${link}`;
+    const adres = (kayit?.adres || '').trim();
+    if (!adres) return '';
+    return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(adres)}`;
+  };
+
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): BEKLEYEN EKSPERTİZ SAYAÇLARI
+  // --------------------------------------------------------------------------
+  // Hizmet tipine göre, durumu hâlâ 'bekliyor' olan ekspertiz sayısını canlı
+  // izler. "Yapıldı / Gidildi", "İşi Aldık" veya "İşi Alamadık" seçilir seçilmez
+  // kayıt bu sayımdan düşer; iptal edilenler de sayılmaz.
+  //   nakliye → KIRMIZI rozet, depo → MAVİ rozet, asansor → YEŞİL rozet
+  // Hem takvim geçiş çubuğunda hem App.jsx'teki "Randevular" menüsünde kullanılır.
+  // aktif=false verilirse (kullanıcı yoksa) hiç abone olunmaz.
+  // ==========================================================================
+  export const useEkspertizBekleyenSayilari = (aktif = true) => {
+    const [sayilar, setSayilar] = useState({ nakliye: 0, depo: 0, asansor: 0, toplam: 0 });
+    useEffect(() => {
+      if (!aktif) return;
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'ekspertizler'), where('durum', '==', 'bekliyor'));
+      const unsub = onSnapshot(q, snap => {
+        let nakliye = 0, depo = 0, asansor = 0;
+        snap.docs.forEach(d => {
+          const tip = d.data().hizmetTipi || 'Nakliye';
+          if (tip === 'Depo') depo++; else if (tip === 'Asansör') asansor++; else nakliye++;
+        });
+        setSayilar({ nakliye, depo, asansor, toplam: nakliye + depo + asansor });
+      }, err => console.error('Ekspertiz sayacı dinlenemedi:', err));
+      return () => unsub();
+    }, [aktif]);
+    return sayilar;
+  };
+
+  // YENİ (kullanıcı talebi): BANA ATANMIŞ bekleyen ekspertiz sayısı — zil
+  // rozetinde kullanılır. Bildirim okunsa bile keşif yapılana kadar sayılır;
+  // "Yapıldı / İşi Aldık / İşi Alamadık" seçilince düşer.
+  export const useBanaAtananEkspertizSayisi = (kullaniciAdi) => {
+    const [sayi, setSayi] = useState(0);
+    useEffect(() => {
+      if (!kullaniciAdi) { setSayi(0); return; }
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'ekspertizler'),
+        where('durum', '==', 'bekliyor'), where('atanan', '==', kullaniciAdi));
+      const unsub = onSnapshot(q, snap => setSayi(snap.size),
+        err => console.error('Atanan ekspertiz sayacı dinlenemedi:', err));
+      return () => unsub();
+    }, [kullaniciAdi]);
+    return sayi;
+  };
+
+  export const EkspertizTakvimiView = ({ currentUser, personnelList = [], onKayitAc = null, addSystemLog,
+    // YENİ (kullanıcı talebi): "Mevcut Müşteriden Seç" için iş kayıtları.
+    // CalendarView zaten jobs alıyor; buraya aktarılır.
+    jobs = [] }) => {
     // ------------------------------------------------------------ STATE ---
     const simdi = new Date();
     const [takvim, setTakvim] = useState({ yil: simdi.getFullYear(), ay: simdi.getMonth() });
@@ -925,6 +997,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     // YENİ (kullanıcı talebi): personel listesi varsayılan KAPALI; "Personel Seç"
     // butonuna tıklanınca açılır. Form kısa kalır, seçim yapmak kolaylaşır.
     const [personelListesiAcik, setPersonelListesiAcik] = useState(false);
+    // YENİ (kullanıcı talebi): Mevcut müşteri seçme penceresi
+    const [musteriSecAcik, setMusteriSecAcik] = useState(false);
+    const [musteriArama, setMusteriArama] = useState('');
     const [tarihDegistir, setTarihDegistir] = useState(null);   // { kayit, tarih, saat }
     const [silinecek, setSilinecek] = useState(null);
     const [iptalEdilecek, setIptalEdilecek] = useState(null);
@@ -932,6 +1007,47 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
 
     const bosForm = { musteriAdi: '', telefon: '', yedekTelefon: '', adres: '', konumLinki: '', tarih: ekspertizBugun(), saat: '10:00', hizmetTipi: 'Nakliye', atanan: '', not: '' };
     const [form, setForm] = useState(bosForm);
+
+    // ==========================================================================
+    // YENİ (kullanıcı talebi): MEVCUT MÜŞTERİ LİSTESİ
+    // --------------------------------------------------------------------------
+    // Daha önce iş kaydı açılmış müşteriler, telefona göre TEKİLLEŞTİRİLİR
+    // (son 10 hane karşılaştırılır; +90 / baştaki 0 farkı sorun çıkarmaz).
+    // Her müşteri için en SON işin bilgileri tutulur: ad, telefon, yedek telefon,
+    // adres ve iş sayısı. Böylece seçilince form güncel bilgiyle dolar.
+    // ==========================================================================
+    const mevcutMusteriler = useMemo(() => {
+      const harita = new Map();
+      (jobs || []).forEach(j => {
+        const tel = (j.customerPhone || '').replace(/\D/g, '').slice(-10);
+        if (!tel || !j.customerName) return;
+        const mevcut = harita.get(tel);
+        const buTarih = j.date || j.createdAt || '';
+        const adres = [j.fromAddress, [j.fromProvince, j.fromDistrict].filter(Boolean).join('/')].filter(Boolean).join(' — ');
+        if (!mevcut || buTarih > (mevcut.sonTarih || '')) {
+          harita.set(tel, {
+            tel, sonTarih: buTarih,
+            musteriAdi: j.customerName,
+            telefon: j.customerPhone || '',
+            yedekTelefon: j.altPhone || '',
+            adres,
+            isSayisi: (mevcut?.isSayisi || 0) + 1,
+          });
+        } else if (mevcut) { mevcut.isSayisi += 1; }
+      });
+      return [...harita.values()].sort((a, b) => (b.sonTarih || '').localeCompare(a.sonTarih || ''));
+    }, [jobs]);
+
+    // Aramaya göre süzülmüş liste (ad veya telefon)
+    const musteriSonuclari = (() => {
+      const q = musteriArama.trim().toLocaleLowerCase('tr-TR');
+      const qRakam = musteriArama.replace(/\D/g, '');
+      const liste = !q ? mevcutMusteriler : mevcutMusteriler.filter(m =>
+        (m.musteriAdi || '').toLocaleLowerCase('tr-TR').includes(q) ||
+        (qRakam.length >= 3 && m.tel.includes(qRakam))
+      );
+      return liste.slice(0, 100);   // uzun listelerde ekranı boğmasın
+    })();
 
     // ------------------------------------------------- CANLI VERİ (AYLIK) ---
     // Sadece görüntülenen ayın kayıtları dinlenir; ay değişince abonelik yenilenir.
@@ -967,6 +1083,36 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       .filter(p => !personelArama.trim() || (p.fullName || '').toLowerCase().includes(personelArama.toLowerCase()))
       .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'tr'));
 
+    // ========================================================================
+    // YENİ (kullanıcı talebi): KEŞFE ATANAN PERSONELE BİLDİRİM
+    // ------------------------------------------------------------------------
+    // Bir ekspertize personel atandığında o kişinin Bildirim Merkezi'ne kayıt
+    // düşer ve sol üstteki zil simgesinde okunmamış sayısı yanıp söner.
+    // Bildirim; müşteri adı, tarih/saat, hizmet tipi, telefon ve adresi içerir.
+    // type: 'ekspertiz' — mevcut bildirim tipleriyle karışmasın diye ayrı.
+    // Atama değişirse yalnızca YENİ kişiye bildirim gider (eskisine değil).
+    // ========================================================================
+    const ekspertizBildirimGonder = async (kayit, personelAdi) => {
+      const p = (personnelList || []).find(x => x.fullName === personelAdi);
+      if (!p?.id) return;                                  // kullanıcı kaydı yoksa bildirim atlanır
+      try {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notifications'), {
+          userId: p.id,
+          title: 'Yeni Ekspertiz (Keşif) Görevi',
+          message: `${kayit.musteriAdi} — ${ekspertizTarihGoster(kayit.tarih)} ${kayit.saat || ''} • ${kayit.hizmetTipi || 'Nakliye'} keşfi için görevlendirildiniz.`
+            + (kayit.telefon ? ` Tel: ${kayit.telefon}.` : '')
+            + (kayit.adres ? ` Adres: ${kayit.adres}` : ''),
+          date: new Date().toLocaleString('tr-TR'), read: false,
+          type: 'ekspertiz',
+          ekspertizTarihi: kayit.tarih, ekspertizSaati: kayit.saat || '',
+          ekspertizHizmetTipi: kayit.hizmetTipi || 'Nakliye',
+          ekspertizMusteri: kayit.musteriAdi || '', ekspertizTelefon: kayit.telefon || '',
+          ekspertizAdres: kayit.adres || '', ekspertizKonumLinki: kayit.konumLinki || '',
+          atayan: kullaniciAdi,
+        });
+      } catch (e) { console.error('Ekspertiz bildirimi gönderilemedi:', e); }
+    };
+
     // ------------------------------------------------------------ YAZMA ---
     const hareketliGuncelle = async (kayit, degisiklik, islem) => {
       const hareket = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, islem };
@@ -974,7 +1120,7 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     };
 
     const formuAc = (kayit = null, tarih = null) => {
-      setPersonelArama(''); setPersonelListesiAcik(false);
+      setPersonelArama(''); setPersonelListesiAcik(false); setMusteriSecAcik(false); setMusteriArama('');
       if (kayit) {
         setDuzenlenenId(kayit.id);
         setForm({ musteriAdi: kayit.musteriAdi || '', telefon: kayit.telefon || '', yedekTelefon: kayit.yedekTelefon || '', adres: kayit.adres || '', konumLinki: kayit.konumLinki || '', tarih: kayit.tarih || ekspertizBugun(), saat: kayit.saat || '10:00', hizmetTipi: kayit.hizmetTipi || 'Nakliye', atanan: kayit.atanan || '', not: kayit.not || '' });
@@ -994,12 +1140,18 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
           const eski = kayitlar.find(k => k.id === duzenlenenId);
           await hareketliGuncelle(eski || { id: duzenlenenId, hareketler: [] }, veri, 'Ekspertiz bilgileri düzenlendi');
           addSystemLog?.('Ekspertiz', `${veri.musteriAdi} ekspertiz kaydı düzenlendi.`);
+          // Atama DEĞİŞTİYSE yalnızca yeni kişiye bildirim gider
+          if (veri.atanan && veri.atanan !== (eski?.atanan || '')) {
+            await ekspertizBildirimGonder({ ...veri, id: duzenlenenId }, veri.atanan);
+          }
         } else {
           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ekspertizler'), {
             ...veri, durum: 'bekliyor', olusturan: kullaniciAdi, createdAt: new Date().toISOString(),
             hareketler: [{ tarih: new Date().toISOString(), kullanici: kullaniciAdi, islem: 'Ekspertiz randevusu oluşturuldu' }],
           });
           addSystemLog?.('Ekspertiz', `${veri.musteriAdi} için ${ekspertizTarihGoster(veri.tarih)} ${veri.saat} ekspertiz randevusu oluşturuldu.`);
+          // Oluştururken personel seçildiyse hemen bildirim gönder
+          if (veri.atanan) await ekspertizBildirimGonder(veri, veri.atanan);
           setSecilenGun(veri.tarih);
           if (!veri.tarih.startsWith(ayBasi.slice(0, 7))) setTakvim({ yil: Number(veri.tarih.slice(0, 4)), ay: Number(veri.tarih.slice(5, 7)) - 1 });
         }
@@ -1083,52 +1235,78 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
               <button type="button" onClick={() => { setTakvim({ yil: simdi.getFullYear(), ay: simdi.getMonth() }); setSecilenGun(bugun); }} className="ml-1 text-[11px] font-black px-3 py-1.5 rounded-lg bg-neutral-100 hover:bg-neutral-200 transition">Bugün</button>
               {yukleniyor && <Loader2 className="w-4 h-4 animate-spin text-neutral-400" />}
             </div>
-            <div className="hidden md:flex items-center gap-3 text-[11px] font-bold text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-1.5">
-              <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-red-600" /> Nakliye</span>
-              <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-blue-600" /> Depo</span>
-              <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-green-600" /> Asansör</span>
-              <span className="text-neutral-300">|</span>
-              <span className="flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5 text-neutral-400" /> Gidildi (soluk)</span>
-              <span className="flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 text-red-500" /> Gecikmiş</span>
+            {/* DEĞİŞTİ: gösterge randevu takvimindekiyle aynı düzende — tip renkleri + doluluk */}
+            <div className="flex flex-col items-end gap-1.5">
+              <div className="flex items-center gap-2 text-[11px] font-bold text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-1.5">
+                <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-red-600" /> Nakliye</span>
+                <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-blue-600" /> Depo</span>
+                <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-green-600" /> Asansör</span>
+              </div>
+              <div className="hidden sm:flex items-center gap-2 text-[10px] font-bold text-neutral-500 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-1">
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-white border border-neutral-300" /> Boş (0)</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-neutral-300" /> Müsait (1-3)</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-600" /> Yoğun (4)</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-black" /> Dolu (5+)</span>
+              </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-7 gap-2 mb-2">
-            {EKSPERTIZ_GUNLER.map(g => <div key={g} className="text-center text-[11px] font-black text-neutral-400 py-1">{g}</div>)}
+          {/* DEĞİŞTİ: randevu takvimiyle aynı ızgara boşlukları (mobilde dar) */}
+          <div className="grid grid-cols-7 gap-1 md:gap-2 mb-1">
+            {EKSPERTIZ_GUNLER.map(g => <div key={g} className="text-center font-bold text-neutral-500 text-xs py-2">{g}</div>)}
           </div>
-          <div className="grid grid-cols-7 gap-2">
+          <div className="grid grid-cols-7 gap-1 md:gap-2">
             {hucreler.map((gun, i) => {
               if (gun === null) return <div key={`b${i}`} />;
               const t = `${takvim.yil}-${String(takvim.ay + 1).padStart(2, '0')}-${String(gun).padStart(2, '0')}`;
               const l = gunKayitlari(t).filter(k => k.durum !== 'iptal');
+              // DEĞİŞTİ (kullanıcı talebi): randevu takvimiyle aynı mantık —
+              // Nakliye + Depo keşifleri "ana kapasite"yi belirler (üst satır),
+              // Asansör keşifleri ayrı satırda ve kapasiteye sayılmaz.
+              const anaKesifler = l.filter(k => (k.hizmetTipi || 'Nakliye') !== 'Asansör');
+              const asansorKesifler = l.filter(k => k.hizmetTipi === 'Asansör');
               const secili = t === secilenGun;
               const buGun = t === bugun;
-              const gecikmisVar = l.some(k => k.durum === 'bekliyor' && t < bugun);
+              const dolu = anaKesifler.length >= 5;   // siyah hücre
               return (
                 <button key={gun} type="button" onClick={() => setSecilenGun(t)} onDoubleClick={() => formuAc(null, t)}
                   title={l.length ? `${l.length} ekspertiz — çift tık: bu güne ekle` : 'Çift tık: bu güne ekspertiz ekle'}
-                  className={`relative min-h-[64px] p-2 rounded-xl border-2 text-left transition flex flex-col
-                    ${secili ? 'bg-neutral-900 text-white border-neutral-900 shadow-lg' : gecikmisVar ? 'bg-red-50 border-red-300 hover:border-red-500' : l.length ? 'bg-white border-neutral-200 hover:border-neutral-900' : 'bg-white border-neutral-100 hover:border-neutral-300'}
+                  className={`relative min-h-[64px] p-1.5 rounded-xl border text-left transition flex flex-col overflow-hidden
+                    ${ekspertizKapasiteRengi(anaKesifler.length)}
+                    ${secili ? 'ring-2 ring-red-600 ring-offset-1' : ''}
                     ${buGun && !secili ? 'ring-2 ring-amber-400 ring-offset-1' : ''}`}>
-                  <div className="flex items-start justify-between w-full">
-                    <span className="text-sm font-black">{gun}</span>
-                    {l.length > 0 && <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${secili ? 'bg-white/20' : 'bg-neutral-900 text-white'}`}>{l.length} keşif</span>}
+                  <div className="flex justify-between items-center mb-1">
+                    <span className={`text-[11px] font-black ${dolu ? 'text-white' : 'text-black'}`}>{gun}</span>
+                    {l.length > 0 && <span className={`text-[9px] font-bold ${dolu ? 'text-neutral-300' : 'text-neutral-500'}`}>{l.length} keşif</span>}
                   </div>
-                  {/* Her ekspertiz için BÜYÜTEÇ simgesi — rengi hizmet tipine göre;
-                      gidilmişler soluk, gecikmişler ünlemle */}
-                  {l.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {l.slice(0, 8).map(k => {
+
+                  <div className="flex flex-col gap-0.5 w-full mt-auto">
+                    {/* ANA KEŞİFLER (Nakliye kırmızı / Depo mavi) — her satırda KESİN
+                        5 büyüteç; mobilde de yan yana sığar. 2 satır = en fazla 10.
+                        Alan sabit yükseklikte olduğu için tüm günler eşit görünür. */}
+                    <div className="grid grid-cols-5 gap-0.5 w-fit content-start h-[26px] overflow-hidden">
+                      {anaKesifler.slice(0, 10).map(k => {
                         const tip = EKSPERTIZ_TIP[k.hizmetTipi] || EKSPERTIZ_TIP.Nakliye;
                         const bitti = k.durum !== 'bekliyor';
                         const gec = k.durum === 'bekliyor' && t < bugun;
-                        return gec
-                          ? <AlertTriangle key={k.id} className={`w-4 h-4 ${secili ? 'text-red-300' : 'text-red-500'}`} title={`${k.saat || ''} ${k.musteriAdi} — GECİKMİŞ`} />
-                          : <Search key={k.id} className={`w-4 h-4 ${secili ? 'text-white' : tip.renk} ${bitti ? 'opacity-40' : ''}`} title={`${k.saat || ''} ${k.musteriAdi} (${k.hizmetTipi}) — ${EKSPERTIZ_DURUM[k.durum]?.ad || ''}`} />;
+                        return <Search key={k.id}
+                          title={`${k.saat || ''} ${k.musteriAdi} (${k.hizmetTipi}) — ${gec ? 'GECİKMİŞ' : (EKSPERTIZ_DURUM[k.durum]?.ad || '')}`}
+                          className={`w-3 h-3 shrink-0 ${dolu ? 'text-white' : (gec ? 'text-red-500' : tip.renk)} ${bitti ? 'opacity-40' : ''} ${gec ? 'animate-pulse' : ''}`} />;
                       })}
-                      {l.length > 8 && <span className="text-[9px] font-black">+{l.length - 8}</span>}
                     </div>
-                  )}
+
+                    {/* ASANSÖR KEŞİFLERİ — sarı ayraç çizgisinin altında, her zaman
+                        render edilir (hizalama sabit kalsın diye); yeşil büyüteç. */}
+                    <div className="flex flex-nowrap gap-0.5 mt-auto pt-1 w-full items-center h-[14px] overflow-hidden border-t border-yellow-400">
+                      {asansorKesifler.slice(0, 5).map(k => {
+                        const bitti = k.durum !== 'bekliyor';
+                        const gec = k.durum === 'bekliyor' && t < bugun;
+                        return <Search key={k.id}
+                          title={`${k.saat || ''} ${k.musteriAdi} (Asansör) — ${gec ? 'GECİKMİŞ' : (EKSPERTIZ_DURUM[k.durum]?.ad || '')}`}
+                          className={`w-2.5 h-2.5 shrink-0 ${dolu ? 'text-green-300' : 'text-green-600'} ${bitti ? 'opacity-40' : ''} ${gec ? 'animate-pulse' : ''}`} />;
+                      })}
+                    </div>
+                  </div>
                 </button>
               );
             })}
@@ -1178,6 +1356,14 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                           <div className="flex flex-wrap items-center gap-2 mt-2.5">
                             <a href={`tel:${ekspertizRakam(k.telefon)}`} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-black transition"><Phone className="w-3.5 h-3.5" /> {k.telefon}</a>
                             <a href={`https://wa.me/${ekspertizWa(k.telefon)}`} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white text-xs font-black transition"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp</a>
+                            {/* YENİ (kullanıcı talebi): YOL TARİFİ AL — konum linki varsa
+                                onu, yoksa adresi haritada açar. Telefonda kayıtlı harita
+                                uygulaması (Google/Apple/Yandex) devreye girer. */}
+                            {ekspertizYolTarifi(k) && (
+                              <a href={ekspertizYolTarifi(k)} target="_blank" rel="noopener noreferrer"
+                                title={k.konumLinki ? 'Kaydedilen konumu aç' : 'Adrese yol tarifi al'}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-black text-white text-xs font-black transition"><MapPin className="w-3.5 h-3.5" /> Yol Tarifi Al</a>
+                            )}
                             {k.yedekTelefon && <a href={`tel:${ekspertizRakam(k.yedekTelefon)}`} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-white border border-neutral-300 text-neutral-700 text-xs font-bold hover:bg-neutral-50 transition"><Phone className="w-3.5 h-3.5" /> Yedek: {k.yedekTelefon}</a>}
                           </div>
 
@@ -1189,8 +1375,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                                 <p className="text-[10px] font-black text-neutral-400 uppercase">Keşif Adresi</p>
                                 <p className="text-xs font-bold text-neutral-800 leading-snug">{k.adres || '—'}</p>
                               </div>
-                              {k.konumLinki && (
-                                <a href={k.konumLinki} target="_blank" rel="noopener noreferrer" className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-black text-white text-[11px] font-black transition"><MapPin className="w-3.5 h-3.5" /> Konumu Aç</a>
+                              {ekspertizYolTarifi(k) && (
+                                <a href={ekspertizYolTarifi(k)} target="_blank" rel="noopener noreferrer" className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-black text-white text-[11px] font-black transition"><MapPin className="w-3.5 h-3.5" /> {k.konumLinki ? 'Konumu Aç' : 'Yol Tarifi'}</a>
                               )}
                             </div>
                           )}
@@ -1265,6 +1451,15 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                     ))}
                   </div>
                 </div>
+                {/* YENİ (kullanıcı talebi): MEVCUT MÜŞTERİDEN SEÇ — daha önce iş kaydı
+                    açılmış müşteriyi arayıp seçince ad, telefon, yedek telefon ve
+                    adres alanları otomatik dolar. */}
+                <button type="button" onClick={() => { setMusteriArama(''); setMusteriSecAcik(true); }}
+                  className="w-full p-3 rounded-xl border-2 border-dashed border-neutral-300 hover:border-neutral-900 hover:bg-neutral-50 text-neutral-600 text-sm font-black transition flex items-center justify-center gap-2">
+                  <Search className="w-4 h-4" /> Mevcut Müşteriden Seç
+                  <span className="text-[10px] font-bold text-neutral-400">({mevcutMusteriler.length} kayıtlı müşteri)</span>
+                </button>
+
                 {/* Müşteri */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Müşteri Ad Soyad *</label>
@@ -1289,34 +1484,22 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                     {form.konumLinki && <a href={form.konumLinki} target="_blank" rel="noopener noreferrer" className="px-3 flex items-center bg-neutral-100 hover:bg-neutral-200 rounded-xl text-xs font-black"><MapPin className="w-4 h-4" /></a>}
                   </div></div>
                 {/* Keşfe gidecek personel — yalnızca beyaz yaka, aranabilir */}
-                {/* DEĞİŞTİ (kullanıcı talebi): liste hep açık değil — "Personel Seç"
-                    butonuna tıklanınca açılır. Seçili personel butonda görünür. */}
+                {/* DEĞİŞTİ (kullanıcı talebi): Liste artık formun içinde AÇILIP
+                    sayfayı uzatmıyor. "Personel Seç" AYRI BİR PENCERE açar;
+                    pencerede arama kutusu hep açık ve odaklı, isim yazdıkça
+                    liste anında süzülür, kaydırmalı olarak seçilir. */}
                 <div>
                   <label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Keşfe Gidecek Personel <span className="text-neutral-300">(opsiyonel)</span></label>
-                  <button type="button" onClick={() => setPersonelListesiAcik(a => !a)}
+                  <button type="button" onClick={() => { setPersonelArama(''); setPersonelListesiAcik(true); }}
                     className={`w-full p-3 rounded-xl border-2 text-sm font-black transition flex items-center justify-between gap-2 ${form.atanan ? 'bg-purple-50 border-purple-300 text-purple-800' : 'bg-white border-neutral-300 text-neutral-500 hover:border-neutral-500'}`}>
                     <span className="flex items-center gap-2 min-w-0">
                       <User className="w-4 h-4 shrink-0" />
                       <span className="truncate">{form.atanan || 'Personel Seç'}</span>
                     </span>
-                    <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${personelListesiAcik ? 'rotate-180' : ''}`} />
+                    {form.atanan
+                      ? <span onClick={(e) => { e.stopPropagation(); setForm({ ...form, atanan: '' }); }} title="Atamayı kaldır" className="p-1 rounded-md text-purple-400 hover:text-red-600 hover:bg-white transition"><X className="w-4 h-4" /></span>
+                      : <ChevronDown className="w-4 h-4 shrink-0" />}
                   </button>
-
-                  {personelListesiAcik && (
-                    <div className="mt-2 border-2 border-neutral-200 rounded-xl p-2 bg-neutral-50 animate-in fade-in slide-in-from-top-1">
-                      <div className="relative mb-2">
-                        <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
-                        <input autoFocus value={personelArama} onChange={e => setPersonelArama(e.target.value)} placeholder="Personel adı ara..." className="w-full pl-9 pr-3 py-2.5 bg-white border border-neutral-200 rounded-xl text-sm outline-none focus:ring-2 focus:ring-neutral-900" />
-                      </div>
-                      <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto">
-                        <button type="button" onClick={() => { setForm({ ...form, atanan: '' }); setPersonelListesiAcik(false); }} className={`px-2.5 py-1.5 rounded-lg text-xs font-black border transition ${!form.atanan ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>— Atanmadı —</button>
-                        {beyazYaka.map(p => (
-                          <button key={p.id} type="button" onClick={() => { setForm({ ...form, atanan: p.fullName }); setPersonelListesiAcik(false); setPersonelArama(''); }} className={`px-2.5 py-1.5 rounded-lg text-xs font-black border transition flex items-center gap-1 ${form.atanan === p.fullName ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-neutral-700 border-neutral-200 hover:border-purple-400'}`}><User className="w-3 h-3" /> {p.fullName}</button>
-                        ))}
-                        {beyazYaka.length === 0 && <span className="text-xs font-bold text-neutral-400 p-1">Eşleşen personel yok.</span>}
-                      </div>
-                    </div>
-                  )}
                 </div>
                 {/* Not */}
                 <div><label className="block text-[10px] font-black text-neutral-400 uppercase mb-1.5">Not</label>
@@ -1328,6 +1511,111 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                   className="flex-1 py-3 bg-neutral-900 hover:bg-black text-white font-black rounded-xl text-sm transition shadow-lg disabled:opacity-40 flex items-center justify-center gap-2">
                   {kaydediliyor ? <><Loader2 className="w-4 h-4 animate-spin" /> Kaydediliyor</> : <><Save className="w-4 h-4" /> {duzenlenenId ? 'Güncelle' : 'Ekspertizi Kaydet'}</>}
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ====================== MEVCUT MÜŞTERİ PENCERESİ ======================
+            Arama kutusu hep açık; ad veya telefonla aranır, tıklanınca form
+            alanları (ad, telefon, yedek telefon, adres) otomatik eşleşir. */}
+        {musteriSecAcik && (
+          <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setMusteriSecAcik(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[82vh] flex flex-col animate-in zoom-in-95 overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="p-4 bg-neutral-900 text-white shrink-0">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <h3 className="font-black flex items-center gap-2"><Users className="w-5 h-5" /> Mevcut Müşteriden Seç</h3>
+                  <button type="button" onClick={() => setMusteriSecAcik(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                  <input autoFocus value={musteriArama} onChange={e => setMusteriArama(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && musteriSonuclari.length === 1) {
+                        const m = musteriSonuclari[0];
+                        setForm(f => ({ ...f, musteriAdi: m.musteriAdi, telefon: m.telefon, yedekTelefon: m.yedekTelefon || f.yedekTelefon, adres: m.adres || f.adres }));
+                        setMusteriSecAcik(false); setMusteriArama('');
+                      }
+                      if (e.key === 'Escape') setMusteriSecAcik(false);
+                    }}
+                    placeholder="Müşteri adı veya telefon yazın..." className="w-full pl-9 pr-3 py-3 bg-white text-black rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-red-500" />
+                </div>
+                <p className="text-[10px] font-bold text-neutral-400 mt-1.5">{musteriSonuclari.length} sonuç · en son iş tarihine göre sıralı</p>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto p-2">
+                {musteriSonuclari.map(m => (
+                  <button key={m.tel} type="button"
+                    onClick={() => {
+                      setForm(f => ({ ...f, musteriAdi: m.musteriAdi, telefon: m.telefon, yedekTelefon: m.yedekTelefon || f.yedekTelefon, adres: m.adres || f.adres }));
+                      setMusteriSecAcik(false); setMusteriArama('');
+                    }}
+                    className="w-full mb-1 px-3 py-2.5 rounded-xl border-2 border-neutral-200 hover:border-red-500 hover:bg-red-50 transition text-left">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-black text-sm text-black truncate">{m.musteriAdi}</span>
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600 shrink-0">{m.isSayisi} iş</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px] font-bold text-neutral-500 mt-0.5 flex-wrap">
+                      <span className="flex items-center gap-1"><Phone className="w-3 h-3" /> {m.telefon}</span>
+                      {m.yedekTelefon && <span className="text-neutral-400">yedek: {m.yedekTelefon}</span>}
+                      {m.sonTarih && <span className="text-neutral-400">son iş: {ekspertizTarihGoster(m.sonTarih)}</span>}
+                    </div>
+                    {m.adres && <p className="text-[11px] text-neutral-500 mt-0.5 truncate flex items-center gap-1"><MapPin className="w-3 h-3 shrink-0" /> {m.adres}</p>}
+                  </button>
+                ))}
+                {musteriSonuclari.length === 0 && (
+                  <div className="py-10 text-center">
+                    <Users className="w-10 h-10 text-neutral-200 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-neutral-400">{mevcutMusteriler.length === 0 ? 'Henüz kayıtlı müşteri yok.' : 'Eşleşen müşteri bulunamadı.'}</p>
+                    <p className="text-xs text-neutral-400 mt-1">Bilgileri elle de yazabilirsiniz.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ====================== PERSONEL SEÇME PENCERESİ ======================
+            Arama kutusu hep açık ve odaklıdır; yazdıkça liste süzülür.
+            Liste kaydırmalıdır, form penceresinin boyunu uzatmaz. */}
+        {personelListesiAcik && (
+          <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setPersonelListesiAcik(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[80vh] flex flex-col animate-in zoom-in-95 overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="p-4 bg-neutral-900 text-white shrink-0">
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <h3 className="font-black flex items-center gap-2"><User className="w-5 h-5" /> Keşfe Gidecek Personel</h3>
+                  <button type="button" onClick={() => setPersonelListesiAcik(false)} className="text-white/70 hover:text-white"><X className="w-5 h-5" /></button>
+                </div>
+                {/* Arama kutusu HEP AÇIK — pencere açılır açılmaz yazmaya başlanabilir */}
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+                  <input autoFocus value={personelArama} onChange={e => setPersonelArama(e.target.value)}
+                    onKeyDown={e => {
+                      // Enter: tek sonuç kaldıysa doğrudan seç; Esc: kapat
+                      if (e.key === 'Enter' && beyazYaka.length === 1) { setForm({ ...form, atanan: beyazYaka[0].fullName }); setPersonelListesiAcik(false); setPersonelArama(''); }
+                      if (e.key === 'Escape') setPersonelListesiAcik(false);
+                    }}
+                    placeholder="Personel adı yazın..." className="w-full pl-9 pr-3 py-3 bg-white text-black rounded-xl text-sm font-bold outline-none focus:ring-2 focus:ring-purple-500" />
+                </div>
+                <p className="text-[10px] font-bold text-neutral-400 mt-1.5">{beyazYaka.length} personel listeleniyor · Muhasebe ve temizlik hariç</p>
+              </div>
+
+              <div className="flex-1 min-h-0 overflow-y-auto p-2">
+                <button type="button" onClick={() => { setForm({ ...form, atanan: '' }); setPersonelListesiAcik(false); setPersonelArama(''); }}
+                  className={`w-full mb-1 px-3 py-3 rounded-xl text-sm font-black border-2 transition text-left ${!form.atanan ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>— Atanmadı —</button>
+                {beyazYaka.map(p => (
+                  <button key={p.id} type="button" onClick={() => { setForm({ ...form, atanan: p.fullName }); setPersonelListesiAcik(false); setPersonelArama(''); }}
+                    className={`w-full mb-1 px-3 py-3 rounded-xl text-sm font-black border-2 transition text-left flex items-center justify-between gap-2 ${form.atanan === p.fullName ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-neutral-800 border-neutral-200 hover:border-purple-400 hover:bg-purple-50'}`}>
+                    <span className="flex items-center gap-2 min-w-0"><User className="w-4 h-4 shrink-0" /> <span className="truncate">{p.fullName}</span></span>
+                    {p.position && <span className={`text-[10px] font-bold shrink-0 ${form.atanan === p.fullName ? 'text-white/70' : 'text-neutral-400'}`}>{p.position}</span>}
+                  </button>
+                ))}
+                {beyazYaka.length === 0 && (
+                  <div className="py-10 text-center">
+                    <Search className="w-10 h-10 text-neutral-200 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-neutral-400">Eşleşen personel bulunamadı.</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1383,6 +1671,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     personnelList = [], onKayitAc = null, addSystemLog = null }) => {
     // YENİ: Hangi takvim görünüyor? 'randevu' (mevcut iş takvimi) | 'ekspertiz'
     const [takvimModu, setTakvimModu] = useState('randevu');
+    // YENİ: Bekleyen ekspertiz sayıları (rozetler için) — canlı
+    const ekspertizBekleyen = useEkspertizBekleyenSayilari(true);
     const canAssign = currentUser?.position?.includes('Operasyon') || currentUser?.position?.includes('Firma Sahibi') || currentUser?.permissions?.canEdit;
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
@@ -1512,11 +1802,22 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
           <button type="button" onClick={() => setTakvimModu('ekspertiz')}
             className={`flex-1 py-2.5 rounded-xl text-sm font-black transition flex items-center justify-center gap-2 ${takvimModu === 'ekspertiz' ? 'bg-neutral-900 text-white shadow-md' : 'bg-white text-neutral-500 hover:bg-neutral-50'}`}>
             <Search className="w-4 h-4" /> Ekspertiz Takvimi
+            {/* YENİ (kullanıcı talebi): bekleyen ekspertiz rozetleri — tipe göre
+                renkli ve yanıp sönen; sonuçlandırılınca kendiliğinden kaybolur. */}
+            {ekspertizBekleyen.nakliye > 0 && (
+              <span title={`${ekspertizBekleyen.nakliye} bekleyen nakliye ekspertizi`} className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-600 text-white text-[11px] font-black flex items-center justify-center animate-pulse shadow-md shadow-red-600/40">{ekspertizBekleyen.nakliye}</span>
+            )}
+            {ekspertizBekleyen.depo > 0 && (
+              <span title={`${ekspertizBekleyen.depo} bekleyen depo ekspertizi`} className="min-w-[20px] h-5 px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-black flex items-center justify-center animate-pulse shadow-md shadow-blue-600/40">{ekspertizBekleyen.depo}</span>
+            )}
+            {ekspertizBekleyen.asansor > 0 && (
+              <span title={`${ekspertizBekleyen.asansor} bekleyen asansör ekspertizi`} className="min-w-[20px] h-5 px-1.5 rounded-full bg-green-600 text-white text-[11px] font-black flex items-center justify-center animate-pulse shadow-md shadow-green-600/40">{ekspertizBekleyen.asansor}</span>
+            )}
           </button>
         </div>
 
         {takvimModu === 'ekspertiz' ? (
-          <EkspertizTakvimiView currentUser={currentUser} personnelList={personnelList} onKayitAc={onKayitAc} addSystemLog={addSystemLog} />
+          <EkspertizTakvimiView currentUser={currentUser} personnelList={personnelList} onKayitAc={onKayitAc} addSystemLog={addSystemLog} jobs={jobs} />
         ) : (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
         {/* YENİ: Bugünün hücresi için dikkat çeken SARI nabız (pulse) çerçeve animasyonu (daha belirgin ve hızlı) */}
