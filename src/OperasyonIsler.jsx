@@ -952,17 +952,33 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
   // aktif=false verilirse (kullanıcı yoksa) hiç abone olunmaz.
   // ==========================================================================
   export const useEkspertizBekleyenSayilari = (aktif = true) => {
-    const [sayilar, setSayilar] = useState({ nakliye: 0, depo: 0, asansor: 0, toplam: 0 });
+    // DEĞİŞTİ (kullanıcı talebi): İki ayrı sayım döner —
+    //   toplam / nakliye / depo / asansor : TÜM bekleyen keşifler
+    //     → Ekspertiz Takvimi butonunda "gidilecek toplam keşif" olarak gösterilir.
+    //   bugun (+bugunNakliye/bugunDepo/bugunAsansor) : SADECE bugüne denk gelen
+    //     ve GECİKMİŞ (tarihi geçmiş ama hâlâ bekleyen) keşifler
+    //     → Sol menüdeki "Randevular" rozeti yalnızca bunlar varsa yanar.
+    const [sayilar, setSayilar] = useState({ nakliye: 0, depo: 0, asansor: 0, toplam: 0, bugunNakliye: 0, bugunDepo: 0, bugunAsansor: 0, bugun: 0 });
     useEffect(() => {
       if (!aktif) return;
       const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'ekspertizler'), where('durum', '==', 'bekliyor'));
       const unsub = onSnapshot(q, snap => {
+        const bugunStr = ekspertizBugun();
         let nakliye = 0, depo = 0, asansor = 0;
+        let bNakliye = 0, bDepo = 0, bAsansor = 0;
         snap.docs.forEach(d => {
-          const tip = d.data().hizmetTipi || 'Nakliye';
+          const k = d.data();
+          const tip = k.hizmetTipi || 'Nakliye';
           if (tip === 'Depo') depo++; else if (tip === 'Asansör') asansor++; else nakliye++;
+          // Bugün yapılacak ya da tarihi geçtiği hâlde hâlâ bekleyen keşifler
+          if (k.tarih && k.tarih <= bugunStr) {
+            if (tip === 'Depo') bDepo++; else if (tip === 'Asansör') bAsansor++; else bNakliye++;
+          }
         });
-        setSayilar({ nakliye, depo, asansor, toplam: nakliye + depo + asansor });
+        setSayilar({
+          nakliye, depo, asansor, toplam: nakliye + depo + asansor,
+          bugunNakliye: bNakliye, bugunDepo: bDepo, bugunAsansor: bAsansor, bugun: bNakliye + bDepo + bAsansor,
+        });
       }, err => console.error('Ekspertiz sayacı dinlenemedi:', err));
       return () => unsub();
     }, [aktif]);
@@ -1097,12 +1113,14 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     // type: 'ekspertiz' — mevcut bildirim tipleriyle karışmasın diye ayrı.
     // Atama değişirse yalnızca YENİ kişiye bildirim gider (eskisine değil).
     // ========================================================================
-    const ekspertizBildirimGonder = async (kayit, personelAdi) => {
+    const ekspertizBildirimGonder = async (kayit, personelAdi, ekspertizId = null) => {
       const p = (personnelList || []).find(x => x.fullName === personelAdi);
       if (!p?.id) return;                                  // kullanıcı kaydı yoksa bildirim atlanır
       try {
         await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'notifications'), {
           userId: p.id,
+          // YENİ: Ekspertiz silinir/iptal edilirse bu bildirimi bulup kaldırmak için
+          ekspertizId: ekspertizId || kayit.id || null,
           title: 'Yeni Ekspertiz (Keşif) Görevi',
           message: `${kayit.musteriAdi} — ${ekspertizTarihGoster(kayit.tarih)} ${kayit.saat || ''} • ${kayit.hizmetTipi || 'Nakliye'} keşfi için görevlendirildiniz.`
             + (kayit.telefon ? ` Tel: ${kayit.telefon}.` : '')
@@ -1116,6 +1134,38 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
           atayan: kullaniciAdi,
         });
       } catch (e) { console.error('Ekspertiz bildirimi gönderilemedi:', e); }
+    };
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): EKSPERTİZ SİLİNİNCE/İPTAL EDİLİNCE BİLDİRİMİ DE SİL
+    // ------------------------------------------------------------------------
+    // Keşif kaydı ortadan kalktığında, atanan personelin Bildirim Merkezi'nde
+    // artık var olmayan bir görev görünmesin diye ilgili bildirimler silinir.
+    //   1) ekspertizId ile doğrudan eşleşenler (yeni bildirimler)
+    //   2) Bu alan yazılmadan önce oluşmuş ESKİ bildirimler için yedek eşleşme:
+    //      aynı müşteri + tarih + saat üçlüsü.
+    // ========================================================================
+    const ekspertizBildirimleriniSil = async (ekspertizId, kayit) => {
+      try {
+        const notifCol = collection(db, 'artifacts', appId, 'public', 'data', 'notifications');
+        const silinecekler = new Map();
+
+        if (ekspertizId) {
+          const snap1 = await getDocs(query(notifCol, where('ekspertizId', '==', ekspertizId)));
+          snap1.docs.forEach(d => silinecekler.set(d.id, d.ref));
+        }
+        // Eski bildirimler (ekspertizId alanı yok) — müşteri + tarih ile bul
+        if (kayit?.musteriAdi && kayit?.tarih) {
+          const snap2 = await getDocs(query(notifCol, where('type', '==', 'ekspertiz'), where('ekspertizMusteri', '==', kayit.musteriAdi)));
+          snap2.docs.forEach(d => {
+            const n = d.data();
+            if (n.ekspertizTarihi === kayit.tarih && (!kayit.saat || !n.ekspertizSaati || n.ekspertizSaati === kayit.saat)) {
+              silinecekler.set(d.id, d.ref);
+            }
+          });
+        }
+        for (const ref of silinecekler.values()) await deleteDoc(ref);
+      } catch (e) { console.error('Ekspertiz bildirimleri silinemedi:', e); }
     };
 
     // ------------------------------------------------------------ YAZMA ---
@@ -1145,18 +1195,19 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
           const eski = kayitlar.find(k => k.id === duzenlenenId);
           await hareketliGuncelle(eski || { id: duzenlenenId, hareketler: [] }, veri, 'Ekspertiz bilgileri düzenlendi');
           addSystemLog?.('Ekspertiz', `${veri.musteriAdi} ekspertiz kaydı düzenlendi.`);
-          // Atama DEĞİŞTİYSE yalnızca yeni kişiye bildirim gider
-          if (veri.atanan && veri.atanan !== (eski?.atanan || '')) {
-            await ekspertizBildirimGonder({ ...veri, id: duzenlenenId }, veri.atanan);
+          // Atama DEĞİŞTİYSE: eski kişinin bildirimi kaldırılır, yeni kişiye gönderilir
+          if (veri.atanan !== (eski?.atanan || '')) {
+            await ekspertizBildirimleriniSil(duzenlenenId, eski || veri);
+            if (veri.atanan) await ekspertizBildirimGonder({ ...veri, id: duzenlenenId }, veri.atanan, duzenlenenId);
           }
         } else {
-          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ekspertizler'), {
+          const yeniRef = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'ekspertizler'), {
             ...veri, durum: 'bekliyor', olusturan: kullaniciAdi, createdAt: new Date().toISOString(),
             hareketler: [{ tarih: new Date().toISOString(), kullanici: kullaniciAdi, islem: 'Ekspertiz randevusu oluşturuldu' }],
           });
           addSystemLog?.('Ekspertiz', `${veri.musteriAdi} için ${ekspertizTarihGoster(veri.tarih)} ${veri.saat} ekspertiz randevusu oluşturuldu.`);
-          // Oluştururken personel seçildiyse hemen bildirim gönder
-          if (veri.atanan) await ekspertizBildirimGonder(veri, veri.atanan);
+          // Oluştururken personel seçildiyse hemen bildirim gönder (kayıt id'si ile)
+          if (veri.atanan) await ekspertizBildirimGonder(veri, veri.atanan, yeniRef.id);
           setSecilenGun(veri.tarih);
           if (!veri.tarih.startsWith(ayBasi.slice(0, 7))) setTakvim({ yil: Number(veri.tarih.slice(0, 4)), ay: Number(veri.tarih.slice(5, 7)) - 1 });
         }
@@ -1169,6 +1220,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     const durumYap = async (kayit, durum) => {
       const adlar = { gidildi: 'Ekspertiz yapıldı (gidildi)', isiAldik: 'Sonuç: İşi aldık', isiAlamadik: 'Sonuç: İşi alamadık', iptal: 'Ekspertiz iptal edildi', bekliyor: 'Tekrar bekleyen duruma alındı' };
       await hareketliGuncelle(kayit, { durum, sonucTarihi: new Date().toISOString(), sonucKullanici: kullaniciAdi }, adlar[durum] || durum);
+      // YENİ: İPTAL edilen keşif artık yapılmayacağı için bildirimi de kaldırılır
+      if (durum === 'iptal') await ekspertizBildirimleriniSil(kayit.id, kayit);
       addSystemLog?.('Ekspertiz', `${kayit.musteriAdi}: ${adlar[durum] || durum}.`);
     };
 
@@ -1184,6 +1237,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     const sil = async () => {
       if (!silinecek) return;
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'ekspertizler', silinecek.id));
+      // YENİ: kayıt silindiği için atanan personelin bildirimi de kaldırılır
+      await ekspertizBildirimleriniSil(silinecek.id, silinecek);
       addSystemLog?.('Ekspertiz', `${silinecek.musteriAdi} ekspertiz kaydı kalıcı silindi.`);
       setSilinecek(null);
     };
@@ -1821,16 +1876,11 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
           <button type="button" onClick={() => setTakvimModu('ekspertiz')}
             className={`flex-1 py-2.5 rounded-xl text-sm font-black transition flex items-center justify-center gap-2 ${takvimModu === 'ekspertiz' ? 'bg-neutral-900 text-white shadow-md' : 'bg-white text-neutral-500 hover:bg-neutral-50'}`}>
             <Search className="w-4 h-4" /> Ekspertiz Takvimi
-            {/* YENİ (kullanıcı talebi): bekleyen ekspertiz rozetleri — tipe göre
-                renkli ve yanıp sönen; sonuçlandırılınca kendiliğinden kaybolur. */}
-            {ekspertizBekleyen.nakliye > 0 && (
-              <span title={`${ekspertizBekleyen.nakliye} bekleyen nakliye ekspertizi`} className="min-w-[20px] h-5 px-1.5 rounded-full bg-red-600 text-white text-[11px] font-black flex items-center justify-center animate-pulse shadow-md shadow-red-600/40">{ekspertizBekleyen.nakliye}</span>
-            )}
-            {ekspertizBekleyen.depo > 0 && (
-              <span title={`${ekspertizBekleyen.depo} bekleyen depo ekspertizi`} className="min-w-[20px] h-5 px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-black flex items-center justify-center animate-pulse shadow-md shadow-blue-600/40">{ekspertizBekleyen.depo}</span>
-            )}
-            {ekspertizBekleyen.asansor > 0 && (
-              <span title={`${ekspertizBekleyen.asansor} bekleyen asansör ekspertizi`} className="min-w-[20px] h-5 px-1.5 rounded-full bg-green-600 text-white text-[11px] font-black flex items-center justify-center animate-pulse shadow-md shadow-green-600/40">{ekspertizBekleyen.asansor}</span>
+            {/* DEĞİŞTİ (kullanıcı talebi): tipe göre üç ayrı rozet yerine TEK rozet —
+                gidilecek (bekleyen) TOPLAM keşif sayısı. Sonuçlanan keşifler düşer. */}
+            {ekspertizBekleyen.toplam > 0 && (
+              <span title={`Gidilecek toplam keşif: ${ekspertizBekleyen.toplam} (Nakliye ${ekspertizBekleyen.nakliye} • Depo ${ekspertizBekleyen.depo} • Asansör ${ekspertizBekleyen.asansor})`}
+                className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-amber-400 text-black text-[11px] font-black flex items-center justify-center shadow-md animate-pulse">{ekspertizBekleyen.toplam}</span>
             )}
           </button>
         </div>
