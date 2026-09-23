@@ -892,9 +892,10 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
   // Yalnızca seçili ayın kayıtları dinlenir (Firestore okuma sayısı düşük kalır).
   // ==========================================================================
   const EKSPERTIZ_TIP = {
+    // DEĞİŞTİ: takvim simge renkleri bir ton daha doygun (canlı görünüm)
     'Nakliye': { renk: 'text-red-600',   zemin: 'bg-red-50 border-red-200',     dolu: 'bg-red-600',   Ikon: Truck },
-    'Depo':    { renk: 'text-blue-600',  zemin: 'bg-blue-50 border-blue-200',   dolu: 'bg-blue-600',  Ikon: Package },
-    'Asansör': { renk: 'text-green-600', zemin: 'bg-green-50 border-green-200', dolu: 'bg-green-600', Ikon: ArrowUpRight },
+    'Depo':    { renk: 'text-blue-700',  zemin: 'bg-blue-50 border-blue-200',   dolu: 'bg-blue-600',  Ikon: Package },
+    'Asansör': { renk: 'text-green-700', zemin: 'bg-green-50 border-green-200', dolu: 'bg-green-600', Ikon: ArrowUpRight },
   };
   // DEĞİŞTİ (kullanıcı talebi): her duruma kendi SİMGESİ ve takvim rengi eklendi.
   //   bekliyor    → büyüteç (keşif bekliyor)
@@ -1323,9 +1324,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
             {/* DEĞİŞTİ: gösterge randevu takvimindekiyle aynı düzende — tip renkleri + doluluk */}
             <div className="flex flex-col items-end gap-1.5">
               <div className="flex items-center gap-2 text-[11px] font-bold text-neutral-600 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-1.5 flex-wrap justify-end">
-                <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-red-600" /> Nakliye</span>
-                <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-blue-600" /> Depo</span>
-                <span className="flex items-center gap-1"><Search className="w-3.5 h-3.5 text-green-600" /> Asansör</span>
+                <span className="flex items-center gap-1"><Search strokeWidth={3} className="w-3.5 h-3.5 text-red-600" /> Nakliye</span>
+                <span className="flex items-center gap-1"><Search strokeWidth={3} className="w-3.5 h-3.5 text-blue-700" /> Depo</span>
+                <span className="flex items-center gap-1"><Search strokeWidth={3} className="w-3.5 h-3.5 text-green-700" /> Asansör</span>
                 <span className="text-neutral-300">|</span>
                 <span className="flex items-center gap-1"><CheckCircle className="w-3.5 h-3.5 text-green-600" /> Gidildi</span>
                 <span className="flex items-center gap-1"><Award className="w-3.5 h-3.5 text-green-700" /> İşi Aldık</span>
@@ -1378,7 +1379,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                     {/* ANA KEŞİFLER (Nakliye kırmızı / Depo mavi) — her satırda KESİN
                         5 büyüteç; mobilde de yan yana sığar. 2 satır = en fazla 10.
                         Alan sabit yükseklikte olduğu için tüm günler eşit görünür. */}
-                    <div className="grid grid-cols-5 gap-0.5 w-fit content-start h-[26px] overflow-hidden">
+                    {/* DEĞİŞTİ (kullanıcı talebi): simgeler daha da BÜYÜDÜ (w-[18px]) —
+                        sarı ayraç kaldırıldığı için alan genişledi. */}
+                    <div className="grid grid-cols-5 gap-1 w-fit content-start h-[42px] overflow-hidden">
                       {anaKesifler.slice(0, 10).map(k => {
                         const tip = EKSPERTIZ_TIP[k.hizmetTipi] || EKSPERTIZ_TIP.Nakliye;
                         const d = EKSPERTIZ_DURUM[k.durum] || EKSPERTIZ_DURUM.bekliyor;
@@ -1388,26 +1391,31 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                         // sonuçlananda tik / kabul / çarpı (kendi renginde)
                         const Ikon = d.Ikon || Search;
                         const renk = dolu ? 'text-white' : (bekliyor ? (gec ? 'text-red-500' : tip.renk) : d.takvimRenk);
-                        return <Ikon key={k.id}
+                        // DEĞİŞTİ (kullanıcı talebi): simgeler daha CANLI — kalın çizgi
+                        // (strokeWidth 3), biraz daha büyük ve hafif gölgeli
+                        return <Ikon key={k.id} strokeWidth={3}
                           title={`${k.saat || ''} ${k.musteriAdi} (${k.hizmetTipi}) — ${gec ? 'GECİKMİŞ' : d.ad}`}
-                          className={`w-3 h-3 shrink-0 ${renk} ${gec ? 'animate-pulse' : ''}`} />;
+                          className={`w-[18px] h-[18px] shrink-0 drop-shadow-sm ${renk} ${gec ? 'animate-pulse' : ''}`} />;
                       })}
                     </div>
 
-                    {/* ASANSÖR KEŞİFLERİ — sarı ayraç çizgisinin altında, her zaman
-                        render edilir (hizalama sabit kalsın diye); yeşil büyüteç. */}
-                    <div className="flex flex-nowrap gap-0.5 mt-auto pt-1 w-full items-center h-[14px] overflow-hidden border-t border-yellow-400">
-                      {asansorKesifler.slice(0, 5).map(k => {
-                        const d = EKSPERTIZ_DURUM[k.durum] || EKSPERTIZ_DURUM.bekliyor;
-                        const bekliyor = k.durum === 'bekliyor';
-                        const gec = bekliyor && t < bugun;
-                        const Ikon = d.Ikon || Search;
-                        const renk = dolu ? 'text-green-300' : (bekliyor ? (gec ? 'text-red-500' : 'text-green-600') : d.takvimRenk);
-                        return <Ikon key={k.id}
-                          title={`${k.saat || ''} ${k.musteriAdi} (Asansör) — ${gec ? 'GECİKMİŞ' : d.ad}`}
-                          className={`w-2.5 h-2.5 shrink-0 ${renk} ${gec ? 'animate-pulse' : ''}`} />;
-                      })}
-                    </div>
+                    {/* ASANSÖR KEŞİFLERİ — DEĞİŞTİ (kullanıcı talebi): SARI AYRAÇ ÇİZGİSİ
+                        KALDIRILDI, simgeler büyüdü. Yalnızca asansör keşfi varsa çizilir;
+                        yeşil büyüteç (kapasiteye sayılmaz). */}
+                    {asansorKesifler.length > 0 && (
+                      <div className="flex flex-nowrap gap-1 mt-0.5 w-full items-center overflow-hidden">
+                        {asansorKesifler.slice(0, 5).map(k => {
+                          const d = EKSPERTIZ_DURUM[k.durum] || EKSPERTIZ_DURUM.bekliyor;
+                          const bekliyor = k.durum === 'bekliyor';
+                          const gec = bekliyor && t < bugun;
+                          const Ikon = d.Ikon || Search;
+                          const renk = dolu ? 'text-green-300' : (bekliyor ? (gec ? 'text-red-500' : 'text-green-600') : d.takvimRenk);
+                          return <Ikon key={k.id} strokeWidth={3}
+                            title={`${k.saat || ''} ${k.musteriAdi} (Asansör) — ${gec ? 'GECİKMİŞ' : d.ad}`}
+                            className={`w-[18px] h-[18px] shrink-0 drop-shadow-sm ${renk} ${gec ? 'animate-pulse' : ''}`} />;
+                        })}
+                      </div>
+                    )}
                   </div>
                 </button>
               );
