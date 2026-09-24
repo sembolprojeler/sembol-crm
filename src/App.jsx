@@ -168,7 +168,11 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
   // dokunmanıza gerek yok. db ve appId zaten './shared.jsx' üzerinden modül
   // seviyesinde import edildiği için ekstra prop göndermenize gerek kalmadı.
   // ============================================================================
-  const DashboardView = ({ jobs, allJobs, personnelList, currentUser, setViewingImage, transactions }) => {
+  const DashboardView = ({ jobs, allJobs, personnelList, currentUser, setViewingImage, transactions,
+    // YENİ (kullanıcı talebi): Şikayeti "İnceleniyor" durumuna alınan personelin
+    // anasayfasında bildirim kartı göstermek için şikayet listesi ve kapatma
+    // fonksiyonu App.jsx'ten gelir. Varsayılanlar sayesinde eski çağrılar bozulmaz.
+    complaints = [], onIncelemeBildirimiKapat = null }) => {
     const [filterPeriod, setFilterPeriod] = useState('today');
     const [viewingDashboardJob, setViewingDashboardJob] = useState(null);
     // YENİ: "Son Kaydedilen İşler" için dönem filtresi (bugün/hafta/ay/tümü)
@@ -466,6 +470,58 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
 
     return (
       <div className="space-y-6 animate-in fade-in">
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): ŞİKAYET İNCELEME BİLDİRİMİ — ANASAYFA EN ÜST
+            Yönetici, kişinin şikayetini "İnceleniyor" durumuna aldığında bu
+            kart YALNIZCA ŞİKAYET SAHİBİNİN anasayfasında belirir. Motive edici
+            bir dille inceleme sürecinin başladığını ve gizliliğin korunduğunu
+            söyler. "Bildirimi Kapat" ile kart anasayfadan kalkar (şikayetin
+            kendisi silinmez). "Çözüldü" durumunda hiçbir kart gösterilmez.
+            ================================================================== */}
+        {(complaints || [])
+          .filter(c => c.incelemeBildirim === true && c.senderId === currentUser?.id)
+          .sort((a, b) => new Date(b.incelemeBildirimTarihi || 0) - new Date(a.incelemeBildirimTarihi || 0))
+          .map(c => (
+            <div key={`inceleme-${c.id}`} className="relative overflow-hidden bg-gradient-to-r from-blue-50 via-indigo-50 to-sky-50 border border-blue-200 rounded-2xl p-4 md:p-5 shadow-sm animate-in slide-in-from-top-4">
+              {/* Sol kenarda dikkat çeken renk şeridi */}
+              <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-gradient-to-b from-blue-500 to-indigo-500"></div>
+              <div className="flex items-start gap-3 pl-2">
+                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center shrink-0 shadow-md shadow-blue-600/30">
+                  <Shield className="w-5 h-5 text-white" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-sm md:text-base font-black text-blue-900 flex items-center gap-2 flex-wrap">
+                    Şikayetiniz İncelemeye Alındı
+                    <span className="text-[10px] font-black bg-blue-600 text-white px-2 py-0.5 rounded-full uppercase tracking-wide">İnceleniyor</span>
+                  </h3>
+                  {/* Hangi şikayet olduğu net görünsün diye konu başlığı gösterilir */}
+                  <p className="text-[11px] font-bold text-blue-700/80 mt-0.5">Konu: "{c.subject}"</p>
+                  <p className="text-xs md:text-sm text-blue-900/90 font-medium leading-relaxed mt-2">
+                    Değerli çalışma arkadaşımız, bildirdiğiniz konu ile ilgili <b>inceleme süreci başlatılmıştır</b>.
+                    Şikayetinizin <b>gizliliği ve önemi tarafımızca titizlikle korunmakta</b> olup gerekli
+                    düzenlemeler için çalışmalarımız devam etmektedir. Bizimle paylaştığınız için teşekkür ederiz;
+                    geri bildiriminiz şirketimizi daha iyiye taşıyor. 💙
+                  </p>
+                  <div className="flex items-center justify-between gap-2 mt-3 flex-wrap">
+                    {/* Bildirimin oluşturulma tarihi (yöneticinin İnceleniyor'a aldığı an) */}
+                    {c.incelemeBildirimTarihi && (
+                      <p className="text-[10px] font-bold text-blue-500 flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> {new Date(c.incelemeBildirimTarihi).toLocaleString('tr-TR')}
+                      </p>
+                    )}
+                    {/* Kapat butonu: karta özel bayrağı söndürür, kart anasayfadan kalkar */}
+                    {onIncelemeBildirimiKapat && (
+                      <button type="button" onClick={() => onIncelemeBildirimiKapat(c.id)}
+                        className="ml-auto px-3 py-1.5 bg-white hover:bg-blue-600 hover:text-white text-blue-700 text-xs font-black rounded-lg border border-blue-300 transition flex items-center gap-1.5 shadow-sm">
+                        <X className="w-3.5 h-3.5" /> Bildirimi Kapat
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+
         {/* HOŞ GELDİNİZ + (Mavi Yaka için) AYLIK PUAN */}
         {/* BOYUT: Kart yaklaşık %20 küçültüldü (p-6 -> p-5, başlık 2xl -> xl,
             açıklama 14px -> 12px). Ad-soyad ve açıklama TEK SATIRDA tutulur;
@@ -5822,7 +5878,29 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       if (!firebaseUser) return;
       const updateData = { status };
       if (isRead) updateData.read = true;
+      // ======================================================================
+      // YENİ (kullanıcı talebi): Durum "İnceleniyor" yapıldığında şikayet
+      // SAHİBİNİN anasayfasında en üstte motive edici bir bildirim kartı
+      // gösterilir. Bunun için şikayet belgesine bir bayrak yazılır; kart,
+      // sahibi "Bildirimi Kapat"a basana kadar anasayfada kalır.
+      // ÖNEMLİ: "Çözüldü" durumuna alınırken HİÇBİR bildirim gönderilmez
+      // (bayrağa dokunulmaz) — kullanıcı talebi böyledir.
+      // ======================================================================
+      if (status === 'İnceleniyor') {
+        updateData.incelemeBildirim = true;                       // Anasayfa kartını yakar
+        updateData.incelemeBildirimTarihi = new Date().toISOString(); // Kartta gösterilecek tarih
+      }
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'complaints', id), updateData);
+    };
+
+    // YENİ (kullanıcı talebi): Şikayet sahibi anasayfadaki inceleme bildirimini
+    // "Bildirimi Kapat" ile kaldırır. Sadece bayrak kapatılır; şikayetin kendisi
+    // ve durumu (İnceleniyor) SİLİNMEZ, yönetici tarafında aynen kalır.
+    const handleIncelemeBildirimiKapat = async (id) => {
+      if (!firebaseUser) return;
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'complaints', id), { incelemeBildirim: false });
+      } catch (e) { console.error('İnceleme bildirimi kapatılamadı:', e); }
     };
 
     const handleDeleteComplaint = async (id) => {
@@ -8451,7 +8529,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
             {/* YENİ: Avukat pozisyonundaki kullanıcıya TAMAMEN ÖZEL anasayfa (hukuk odaklı, maaş/mesai içermez) */}
             {activeTab === 'dashboard' && showDashboard && isAvukatUser && <AvukatDashboardView currentUser={currentUser} setActiveTab={setActiveTab} setViewingImage={setViewingImage} />}
-            {activeTab === 'dashboard' && showDashboard && !isAvukatUser && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions} />}
+            {activeTab === 'dashboard' && showDashboard && !isAvukatUser && <DashboardView jobs={visibleJobs} allJobs={jobs} personnelList={personnelList} currentUser={currentUser} setViewingImage={setViewingImage} transactions={transactions}
+              /* YENİ: Şikayeti "İnceleniyor" olan personele anasayfada bildirim kartı */
+              complaints={complaints} onIncelemeBildirimiKapat={handleIncelemeBildirimiKapat} />}
             {activeTab === 'notifications' && <NotificationsView notifications={visibleNotifications} markNotificationsAsRead={markNotificationsAsRead} currentUser={currentUser} canAddInfo={showAddInfo} onAddInfo={() => setActiveTab('addInfo')} />}
             {activeTab === 'calendar' && showCalendar && <CalendarView jobs={currentUser?.position === 'Operatör' ? jobs : visibleJobs} handleEditJob={handleEditJob} currentUser={currentUser} setJobToChangeDate={setJobToChangeDate} setNewJobDate={setNewJobDate} setShowChangeDateModal={setShowChangeDateModal} setCancelJobId={setCancelJobId} setDeleteJobId={setDeleteJobId} onDonemGerekli={donemIsleriYukle} donemYukleniyor={donemYukleniyor}
               /* YENİ: Takvimde müşteri adına tıklanınca cari profili açılır */
