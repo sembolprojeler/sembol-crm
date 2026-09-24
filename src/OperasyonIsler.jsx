@@ -1781,10 +1781,22 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     // YENİ (kullanıcı talebi): Ekspertiz Takvimi için personel listesi, kayıt açma
     // köprüsü ve sistem günlüğü — App.jsx'ten gelir.
     personnelList = [], onKayitAc = null, addSystemLog = null }) => {
+    // ======================================================================
+    // YENİ (kullanıcı talebi): EKSPERTİZ TAKVİMİ YALNIZCA BEYAZ YAKA İÇİNDİR
+    // Mavi yaka personel bu takvimi ve geçiş çubuğunu GÖREMEZ; ona eskisi
+    // gibi yalnızca Randevu Takvimi gösterilir. Rol tanımı, dosyada zaten
+    // kullanılan kuralın AYNISIDIR (mantık değiştirilmedi), sadece hook'tan
+    // ÖNCEYE taşındı ki mavi yakada ekspertiz rozet sayacı hiç dinlenmesin
+    // (gereksiz Firestore okuması yapılmasın).
+    // ======================================================================
+    const isOperator = currentUser?.position === 'Operatör';
+    const isMaviYaka = (currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position))) && !isOperator;
     // YENİ: Hangi takvim görünüyor? 'randevu' (mevcut iş takvimi) | 'ekspertiz'
     const [takvimModu, setTakvimModu] = useState('randevu');
     // YENİ: Bekleyen ekspertiz sayıları (rozetler için) — canlı
-    const ekspertizBekleyen = useEkspertizBekleyenSayilari(true);
+    // DEĞİŞTİ (kullanıcı talebi): Mavi yakada sayaç PASİF (aktif=false) —
+    // ekspertiz takvimini görmeyeceği için canlı dinleme hiç başlatılmaz.
+    const ekspertizBekleyen = useEkspertizBekleyenSayilari(!isMaviYaka);
     const canAssign = currentUser?.position?.includes('Operasyon') || currentUser?.position?.includes('Firma Sahibi') || currentUser?.permissions?.canEdit;
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth());
@@ -1818,8 +1830,9 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
       onDonemGerekli(f(sonrakiBas), f(sonrakiSon));
     }, [currentYear, currentMonth, onDonemGerekli]);
 
-    const isOperator = currentUser?.position === 'Operatör';
-    const isMaviYaka = (currentUser?.collarType === 'Mavi Yaka' || (!currentUser?.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(currentUser?.position))) && !isOperator;
+    // DEĞİŞTİ (kullanıcı talebi): isOperator ve isMaviYaka tanımları, ekspertiz
+    // sayacı hook'undan önce kullanılabilmesi için bileşenin EN BAŞINA taşındı.
+    // Mantıkları birebir aynıdır; burada yeniden tanımlanmaz (const çakışması olmasın).
 
     useEffect(() => {
       if (!isMaviYaka || !currentUser) return;
@@ -1935,6 +1948,10 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
             Tek butonla iki takvim arasında geçilir; her ikisinin de kendi
             ay/gün seçimi vardır.
             ================================================================ */}
+        {/* DEĞİŞTİ (kullanıcı talebi): Geçiş çubuğu YALNIZCA BEYAZ YAKAYA görünür.
+            Mavi yaka personel ekspertiz takvimini göremez; ekranı eski haline
+            döner (tek başına Randevu Takvimi, geçiş çubuğu yok). */}
+        {!isMaviYaka && (
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-2 flex items-center gap-2">
           <button type="button" onClick={() => setTakvimModu('randevu')}
             className={`flex-1 py-2.5 rounded-xl text-sm font-black transition flex items-center justify-center gap-2 ${takvimModu === 'randevu' ? 'bg-neutral-900 text-white shadow-md' : 'bg-white text-neutral-500 hover:bg-neutral-50'}`}>
@@ -1955,8 +1972,12 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
             )}
           </button>
         </div>
+        )}
 
-        {takvimModu === 'ekspertiz' ? (
+        {/* DEĞİŞTİ (kullanıcı talebi): Çifte güvenlik — çubuk gizli olsa bile
+            mavi yaka HİÇBİR koşulda ekspertiz görünümüne düşemez; her zaman
+            eskisi gibi Randevu Takvimi'ni görür. */}
+        {takvimModu === 'ekspertiz' && !isMaviYaka ? (
           <EkspertizTakvimiView currentUser={currentUser} personnelList={personnelList} onKayitAc={onKayitAc} addSystemLog={addSystemLog} jobs={jobs} />
         ) : (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in">
