@@ -6710,8 +6710,13 @@ const nakitYuvarla = (tutar) => {
           if (j.status !== 'completed') return;
           // Ödeme durumu iş sonlandırma ekranından gelir; kaydı yoksa borç sayılmaz
           if (!j.endJobDetails) return;
-          // SADECE "Ödeme Alınmadı" işaretlenen işler borçlu listesine girer
-          if (j.endJobDetails.paymentMethod !== 'Ödeme Alınmadı') return;
+          // SADECE ödeme alınmadan kapatılan işler borçlu listesine girer.
+          // DÜZELTME (kullanıcı bildirimi): Mavi yaka iş sonlandırma ekranı
+          // "Ödeme Yapmadı", beyaz yaka ekranı ise "Ödeme Alınmadı" yazar.
+          // Eskiden yalnızca "Ödeme Alınmadı" kabul edildiği için mavi yakanın
+          // kapattığı borçlu işler (örn. ₺32.000'lik iş) bu listeye HİÇ
+          // düşmüyordu. Artık iki metin de borçlu sayılır.
+          if (!['Ödeme Alınmadı', 'Ödeme Yapmadı'].includes(j.endJobDetails.paymentMethod)) return;
           // YENİ (kullanıcı talebi): 1 Eylül 2026 ÖNCESİ tamamlanan işler devir
           // sayılır (tahsil edilmiş kabul); borçlu defterinde gösterilmez.
           if ((j.date || j.completedDate || '') < SISTEM_DEVIR_TARIHI) return;
@@ -9111,7 +9116,11 @@ silinmeTarihi: new Date().toISOString()`}</pre>
     // her tıklamada (pencere açma dahil) baştan hesaplanıyordu. Binlerce
     // kayıtta asıl gecikme buydu. Artık bu hesaplar yalnızca işlem
     // listesinin gerçekten görüneceği defter türlerinde yapılır.
-    const islemBolumuGerekli = seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi';
+    // DEĞİŞTİ (kullanıcı talebi): BORÇLU defteri de eklendi. TAHSİL BEKLEYEN
+    // (Borçlu) defterinde işlem listesi artık hiç çizilmez — bu sayfa yalnızca
+    // borçluları görme ve tahsil etme amaçlıdır; "Ödeme Yapmadı" işlerinin
+    // otomatik kayıtları burada gelir gibi görünüp kafa karıştırıyordu.
+    const islemBolumuGerekli = seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi' && seciliDefter.tur !== 'Borçlu';
     const dIslemler = !islemBolumuGerekli ? [] : [
       ...defterIslemleri(seciliDefterId),
       // ======================================================================
@@ -9146,6 +9155,16 @@ silinmeTarihi: new Date().toISOString()`}</pre>
       // YENİ (kullanıcı talebi): eski "Maaş Tablosu (Oto)" otomatik kayıtları
       // listede GÖRÜNMEZ. Maaş/avans yalnızca Ödemeler'den ödenince görünür.
       .filter(i => !otomatikMaasKaydi(i))
+      // ======================================================================
+      // YENİ (kullanıcı talebi): "Ödeme Yapmadı / Ödeme Alınmadı" ile kapatılan
+      // işlerin otomatik GİRİŞ kaydı işlem akışında GÖSTERİLMEZ. Bu satırlar
+      // yeşil "gelir" gibi görünüyor ve kafa karıştırıyordu; oysa ortada henüz
+      // tahsil edilmiş para yok. Kayıt Firestore'da AYNEN DURUR (ciro ve defter
+      // bakiyesi bozulmasın diye silinmez), müşteri artık aşağıdaki ALACAK
+      // TAKİBİ bölümünde borçlu kartı olarak görünür ve tahsilat oradan yapılır.
+      // ======================================================================
+      .filter(i => !(i.tip === 'giris' && i.kaynak === 'İş Sonlandırma (Oto)'
+        && ['Ödeme Yapmadı', 'Ödeme Alınmadı'].includes(i.odemeYontemi)))
       // YENİ: GÜNLÜK FİLTRE — en başta uygulanır ki arama ve kategori
       // filtreleri yalnızca o günün hareketleri içinde çalışsın.
       .filter(i => !gunFiltreAktif || i.tarih === seciliGun)
@@ -10253,7 +10272,9 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                   <button type="button" onClick={() => setMevcutBorclularAcik(v => !v)}
                     className={`px-3 py-1.5 text-[11px] font-black rounded-lg transition flex items-center gap-1.5 ${
                       mevcutBorclularAcik ? 'bg-white text-rose-700 hover:bg-rose-50' : 'bg-rose-800 text-white hover:bg-rose-900'}`}>
-                    <ClipboardList className="w-3.5 h-3.5" /> {mevcutBorclularAcik ? 'Aylık Görünüm' : 'Mevcut Borçlular'}
+                    {/* DEĞİŞTİ (kullanıcı talebi): "Aylık Görünüm" etiketi kaldırıldı;
+                        geri dönüş düğmesi artık "Tahsilat Listesi" der. */}
+                    <ClipboardList className="w-3.5 h-3.5" /> {mevcutBorclularAcik ? 'Tahsilat Listesi' : 'Mevcut Borçlular'}
                   </button>
                   <button type="button" onClick={() => setAlacakForm({ ...bosAlacakKalemi })}
                     className="px-3 py-1.5 bg-white text-rose-700 text-[11px] font-black rounded-lg hover:bg-rose-50 transition flex items-center gap-1.5">
@@ -10284,11 +10305,12 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                     <div className="text-[9px] font-black uppercase text-emerald-600">Tahsil Edilen</div>
                     <div className="text-sm font-black text-emerald-700">₺{paraFmt(ad2.toplamTahsil)}</div>
                   </div>
-                  <div className={`rounded-xl p-2.5 border ${ad2.gecikmisAdet > 0 ? 'bg-red-50 border-red-200' : 'bg-neutral-50 border-neutral-200'}`}>
-                    <div className={`text-[9px] font-black uppercase ${ad2.gecikmisAdet > 0 ? 'text-red-600' : 'text-neutral-500'}`}>Gecikmiş</div>
-                    <div className={`text-sm font-black ${ad2.gecikmisAdet > 0 ? 'text-red-700' : 'text-neutral-500'}`}>
-                      {ad2.gecikmisAdet > 0 ? `₺${paraFmt(ad2.gecikmisTutar)}` : 'Yok'}
-                    </div>
+                  {/* DEĞİŞTİ (kullanıcı talebi): "Gecikmiş" kutusu kaldırıldı —
+                      bu bölüm yalnızca borçluları görüp tahsil etmek içindir.
+                      Yerine bilgilendirici "Toplam Alacak" kutusu kondu. */}
+                  <div className="bg-neutral-50 rounded-xl p-2.5 border border-neutral-200">
+                    <div className="text-[9px] font-black uppercase text-neutral-500">Toplam Alacak</div>
+                    <div className="text-sm font-black text-neutral-700">₺{paraFmt(ad2.toplamAlacak)}</div>
                   </div>
                 </div>
               )}
@@ -10296,21 +10318,18 @@ silinmeTarihi: new Date().toISOString()`}</pre>
               {/* GÖRÜNÜM 1: AYLIK TAHSİLATLAR */}
               {ad2.kalemSayisi > 0 && !mevcutBorclularAcik && (
                 <div className="p-4">
-                  <div className="flex items-center justify-between gap-2 bg-neutral-900 text-white rounded-xl px-2 py-2 mb-2">
-                    {/* Ay okları "Tüm Zamanlar" açıkken pasifleşir (ay filtresi yok) */}
-                    <button type="button" onClick={() => ayDegistir(-1)} disabled={alacakTumZamanlar} className="p-2 hover:bg-white/10 rounded-lg transition disabled:opacity-30 disabled:hover:bg-transparent"><ChevronLeft className="w-5 h-5" /></button>
+                  {/* ==============================================================
+                      DEĞİŞTİ (kullanıcı talebi): "Aylık" görünüm tamamen kaldırıldı.
+                      Ay okları ve Aylık/Tüm Zamanlar anahtarı silindi; bu bölüm
+                      artık HER ZAMAN tüm borçluları tek listede gösterir
+                      (alacakTumZamanlar varsayılanı true olduğundan ay filtresi
+                      hiç devreye girmez). Bölümün amacı borçluları görmek ve
+                      tahsil etmektir, ay ay gezmek değil.
+                      ============================================================== */}
+                  <div className="flex items-center justify-center gap-2 bg-neutral-900 text-white rounded-xl px-2 py-2 mb-2">
                     <div className="text-center">
-                      <div className="font-black text-base">{listeBaslik} Tahsilatları</div>
-                      <div className="text-[10px] font-bold text-white/60">{bekleyenler.length} bekleyen • {tahsilEdilenler.length} tahsil edildi</div>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button type="button" onClick={() => ayDegistir(1)} disabled={alacakTumZamanlar} className="p-2 hover:bg-white/10 rounded-lg transition disabled:opacity-30 disabled:hover:bg-transparent"><ChevronRight className="w-5 h-5" /></button>
-                      {/* YENİ: Tüm Zamanları Göster / Aylık Görünüm anahtarı */}
-                      <button type="button" onClick={() => setAlacakTumZamanlar(v => !v)}
-                        title={alacakTumZamanlar ? 'Aylık görünüme dön' : 'Ay filtresini kaldır, tüm bekleyen tahsilatları göster'}
-                        className={`px-2.5 py-1.5 text-[10px] font-black rounded-lg transition whitespace-nowrap ${alacakTumZamanlar ? 'bg-white text-neutral-900 hover:bg-neutral-200' : 'bg-white/15 text-white hover:bg-white/25'}`}>
-                        {alacakTumZamanlar ? 'Aylık' : 'Tüm Zamanlar'}
-                      </button>
+                      <div className="font-black text-base">Tüm Borçlular</div>
+                      <div className="text-[10px] font-bold text-white/60">{bekleyenler.length} bekleyen tahsilat</div>
                     </div>
                   </div>
 
@@ -10346,7 +10365,9 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                             satır iki kata ayrılır: 1. kat rozet + tam isim, 2. kat solda
                             tutar sağda düğmeler. sm ve üzerinde eski tek satır düzeni
                             aynen korunur. */}
-                        <div className={`flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 rounded-xl border ${t.gecikmis ? 'border-red-300 bg-red-50' : tr2.yumusak}`}>
+                        {/* DEĞİŞTİ (kullanıcı talebi): GECİKMİŞ vurgusu (kırmızı zemin)
+                            kaldırıldı — kart her zaman tür rengiyle görünür. */}
+                        <div className={`flex flex-col sm:flex-row sm:items-center gap-2 p-2.5 rounded-xl border ${tr2.yumusak}`}>
                           {/* 1. KAT (mobil) / SOL BLOK (masaüstü): rozet + isim + vade */}
                           <div className="flex items-start gap-2 min-w-0 flex-1">
                             <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full shrink-0 mt-0.5 ${tr2.rozet}`}>{tr2.ad.toUpperCase()}</span>
@@ -10358,7 +10379,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                               </div>
                               <div className="text-[10px] font-bold text-neutral-500 flex flex-wrap items-center gap-1 mt-0.5">
                                 <span>Vade: {trh(t.tarih)}</span>
-                                {t.gecikmis && <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
+                                {/* KALDIRILDI (kullanıcı talebi): GECİKMİŞ rozeti gösterilmez */}
                                 {kalem.icra && <span className="text-[9px] font-black bg-black text-white px-1.5 py-0.5 rounded-full">İCRADA • {trh(kalem.icra)}</span>}
                                 {t.kismi && <span className="text-[9px] font-black bg-sky-600 text-white px-1.5 py-0.5 rounded-full">KISMİ • ₺{paraFmt(t.odenenTutar)} alındı</span>}
                               </div>
@@ -10368,7 +10389,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                           <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
                             <div className="text-left sm:text-right">
                               {/* whitespace-nowrap: tutar asla bölünmez/kesilmez */}
-                              <div className={`font-black tabular-nums whitespace-nowrap ${t.gecikmis ? 'text-red-700' : tr2.yazi}`}>₺{paraFmt(t.kalan ?? t.tutar)}</div>
+                              <div className={`font-black tabular-nums whitespace-nowrap ${tr2.yazi}`}>₺{paraFmt(t.kalan ?? t.tutar)}</div>
                               {t.kismi && <div className="text-[9px] font-bold text-neutral-400 line-through whitespace-nowrap">₺{paraFmt(t.tutar)}</div>}
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
@@ -10420,19 +10441,19 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                     const acik = acikAlacakKalemi === kalem.id;
                     const yuzde = bilgi.toplam > 0 ? Math.round((bilgi.toplamTahsil / bilgi.toplam) * 100) : 0;
                     return (
-                      <div key={kalem.id} className={`rounded-xl border-2 overflow-hidden ${kalem.icra ? 'border-neutral-800' : bilgi.gecikmisAdet > 0 ? 'border-red-300' : 'border-neutral-200'}`}>
+                      <div key={kalem.id} className={`rounded-xl border-2 overflow-hidden ${kalem.icra ? 'border-neutral-800' : 'border-neutral-200'}`}>
                         {/* DÜZELTİLDİ (aynı mobil sorunu): düğme grubu mobilde
                             bilgi bloğunu daraltıyordu. Artık mobilde alt satıra
                             geçer, isim ve tutarlar tam genişlikte görünür.
                             sm ve üzerinde eski yan yana düzen korunur. */}
-                        <div className={`p-3 flex flex-col sm:flex-row sm:items-center gap-3 cursor-pointer transition ${bilgi.gecikmisAdet > 0 ? 'bg-red-50 hover:bg-red-100' : 'bg-neutral-50 hover:bg-neutral-100'}`}
+                        {/* DEĞİŞTİ (kullanıcı talebi): gecikmiş kırmızı zemin ve rozet kaldırıldı */}
+                        <div className={`p-3 flex flex-col sm:flex-row sm:items-center gap-3 cursor-pointer transition bg-neutral-50 hover:bg-neutral-100`}
                           onClick={() => setAcikAlacakKalemi(acik ? null : kalem.id)}>
                           <div className="flex-1 min-w-0">
                             <div className="font-black text-black text-sm flex items-center gap-2 flex-wrap break-words">
                               <span className={`text-[8px] font-black text-white px-1.5 py-0.5 rounded-full ${tr2.rozet}`}>{tr2.ad.toUpperCase()}</span>
                               {kalem.ad}
                               {kalem.icra && <span className="text-[9px] font-black bg-black text-white px-1.5 py-0.5 rounded-full">İCRADA • {trh(kalem.icra)}</span>}
-                              {bilgi.gecikmisAdet > 0 && <span className="text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">{bilgi.gecikmisAdet} GECİKMİŞ</span>}
                             </div>
                             <div className="text-[11px] font-bold text-neutral-500 mt-0.5">
                               Toplam ₺{paraFmt(bilgi.toplam)} • {bilgi.adet > 1 ? `${bilgi.adet} taksit` : 'peşin'} • {bilgi.tahsilAdet}/{bilgi.adet} tahsil edildi
@@ -10482,14 +10503,15 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                           <div className="p-3 bg-white border-t border-neutral-200 max-h-64 overflow-y-auto space-y-1">
                             {bilgi.plan.map(t => (
                               <div key={t.no} className={`flex items-center gap-2 p-2 rounded-lg border text-xs ${
-                                t.odendi ? 'bg-emerald-50 border-emerald-200' : t.gecikmis ? 'bg-red-50 border-red-200' : t.kismi ? 'bg-sky-50 border-sky-200' : 'bg-white border-neutral-200'}`}>
+                                t.odendi ? 'bg-emerald-50 border-emerald-200' : t.kismi ? 'bg-sky-50 border-sky-200' : 'bg-white border-neutral-200'}`}>
                                 <span className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${
-                                  t.odendi ? 'bg-emerald-600 text-white' : t.gecikmis ? 'bg-red-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>{t.no}</span>
+                                  t.odendi ? 'bg-emerald-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>{t.no}</span>
                                 <div className="flex-1 min-w-0">
                                   <div className="font-black text-black">₺{paraFmt(t.odendi ? t.tutar : (t.kalan ?? t.tutar))}</div>
-                                  <div className={`text-[10px] font-bold ${t.gecikmis ? 'text-red-600' : 'text-neutral-500'}`}>
+                                  {/* DEĞİŞTİ (kullanıcı talebi): GECİKMİŞ ibaresi ve kırmızı vurgular kaldırıldı */}
+                                  <div className="text-[10px] font-bold text-neutral-500">
                                     Vade: {trh(t.tarih)}
-                                    {t.odendi && t.odemeTarihi ? ` • Tahsil: ${trh(t.odemeTarihi)}` : t.gecikmis ? ' • GECİKMİŞ' : ''}
+                                    {t.odendi && t.odemeTarihi ? ` • Tahsil: ${trh(t.odemeTarihi)}` : ''}
                                     {t.kismi && <span className="ml-1 text-[9px] font-black bg-sky-600 text-white px-1.5 py-0.5 rounded-full">KISMİ • ₺{paraFmt(t.odenenTutar)}</span>}
                                   </div>
                                 </div>
@@ -10512,7 +10534,13 @@ silinmeTarihi: new Date().toISOString()`}</pre>
           );
         })()}
 
-        {seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi' && (<>
+        {/* DEĞİŞTİ (kullanıcı talebi): 'Borçlu' türü de bu koşula eklendi.
+            TAHSİL BEKLEYEN defterinde işlem listesi, gün gezinme çubuğu,
+            Tümü/Gelir/Gider sekmeleri, günün net tablosu ve işlem araması
+            ARTIK GÖSTERİLMEZ — sayfa yalnızca Alacak Takibi (Tüm Borçlular)
+            modülünden oluşur. Kayıtlar Firestore'da aynen durur; ciro ve
+            bakiye hesapları etkilenmez, yalnızca görünüm kaldırıldı. */}
+        {seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi' && seciliDefter.tur !== 'Borçlu' && (<>
         {/* KALDIRILDI (kullanıcı talebi): AY ÖZETİ ŞERİDİ — aşağıdaki blok
             false ile kapatıldı; geri istenirse false -> true yapılır. */}
         {false && (() => { return null; })()}
@@ -12432,7 +12460,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                   </div>
                   <div className="text-[11px] font-bold text-rose-600">
                     {tahsilModal.taksit.no}. taksit • Vade: {tahsilModal.taksit.tarih.split('-').reverse().join('.')}
-                    {tahsilModal.taksit.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
+                    {/* KALDIRILDI (kullanıcı talebi): GECİKMİŞ ibaresi gösterilmez */}
                   </div>
                   {tahsilModal.taksit.kismi && (
                     <div className="mt-2 pt-2 border-t border-rose-200 grid grid-cols-3 gap-2 text-center">
