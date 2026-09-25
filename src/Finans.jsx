@@ -9263,8 +9263,34 @@ silinmeTarihi: new Date().toISOString()`}</pre>
               <div className="text-[10px] sm:text-xs font-bold text-white/60 mt-0.5">{defterTuruEtiket(seciliDefter.tur)}{seciliDefter.not ? ` • ${seciliDefter.not}` : ''}</div>
             </div>
             <div className="text-right shrink-0">
-              <div className={`text-xl sm:text-2xl font-black tabular-nums leading-tight ${dBakiye >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>₺{paraFmt(Math.abs(dBakiye))}</div>
-              <div className="text-[9px] sm:text-[10px] font-black uppercase text-white/70 leading-tight">{dBakiye > 0 ? 'Alacaklısınız / Kasada Var' : dBakiye < 0 ? 'Borçlusunuz' : 'Bakiye Sıfır'}</div>
+              {/* ==============================================================
+                  DEĞİŞTİ (kullanıcı talebi): BORÇLU defterinde başlıktaki rakam
+                  artık giriş−çıkış bakiyesi DEĞİL, aşağıdaki borç listesindeki
+                  TÜM BORÇLULARIN TOPLAM KALAN BORCUDUR. Eski hâli teknik mahsup
+                  hareketlerinden türeyen anlamsız bir "₺65.500 BORÇLUSUNUZ"
+                  gösteriyordu. Rakam, Alacak Takibi'ndeki "Kalan Alacak" ile
+                  birebir aynı kaynaktan (alacakDefterBilgi) gelir — ikisi hep
+                  tutar. Defter listesi kartındaki desenin aynısıdır.
+                  Diğer defter türlerinde eski bakiye gösterimi AYNEN korunur.
+                  ============================================================== */}
+              {seciliDefter.tur === 'Borçlu' ? (() => {
+                const al = alacakDefterBilgi(seciliDefter);
+                return (
+                  <>
+                    <div className="text-xl sm:text-2xl font-black tabular-nums leading-tight text-red-300">₺{paraFmt(al.kalanAlacak)}</div>
+                    <div className="text-[9px] sm:text-[10px] font-black uppercase text-white/70 leading-tight">
+                      {al.kalemSayisi === 0 ? 'Borçlu Yok'
+                        : al.kalanAlacak > 0 ? `Toplam Kalan Borç • ${al.kalemSayisi} borçlu`
+                        : 'Tüm Borçlar Tahsil Edildi'}
+                    </div>
+                  </>
+                );
+              })() : (
+                <>
+                  <div className={`text-xl sm:text-2xl font-black tabular-nums leading-tight ${dBakiye >= 0 ? 'text-emerald-300' : 'text-red-300'}`}>₺{paraFmt(Math.abs(dBakiye))}</div>
+                  <div className="text-[9px] sm:text-[10px] font-black uppercase text-white/70 leading-tight">{dBakiye > 0 ? 'Alacaklısınız / Kasada Var' : dBakiye < 0 ? 'Borçlusunuz' : 'Bakiye Sıfır'}</div>
+                </>
+              )}
             </div>
           </div>
           {/* KALDIRILDI (kullanıcı talebi): TOPLAM GELİR / TOPLAM GİDER
@@ -10269,13 +10295,20 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                   {ad2.icradaAdet > 0 && <span className="text-[10px] font-black bg-black/40 px-2 py-0.5 rounded-full">{ad2.icradaAdet} İCRADA</span>}
                 </div>
                 <div className="flex items-center gap-1.5">
+                  {/* ==============================================================
+                      KALDIRILDI (kullanıcı talebi): "Mevcut Borçlular" ayrı görünümü
+                      artık yok — bölüm TEK görünümden (Tahsilat Listesi) oluşur.
+                      mevcutBorclularAcik varsayılanı false olduğundan ve bu buton
+                      kaldırıldığından alttaki GÖRÜNÜM 2 bloğu hiç çizilmez.
+                      O görünümdeki Düzenle/Sil ve İcradan Çıkar butonları
+                      kaybolmasın diye Tahsilat Listesi satırlarına taşındı.
+                      Geri istenirse bu blok yorumdan çıkarılır.
                   <button type="button" onClick={() => setMevcutBorclularAcik(v => !v)}
                     className={`px-3 py-1.5 text-[11px] font-black rounded-lg transition flex items-center gap-1.5 ${
                       mevcutBorclularAcik ? 'bg-white text-rose-700 hover:bg-rose-50' : 'bg-rose-800 text-white hover:bg-rose-900'}`}>
-                    {/* DEĞİŞTİ (kullanıcı talebi): "Aylık Görünüm" etiketi kaldırıldı;
-                        geri dönüş düğmesi artık "Tahsilat Listesi" der. */}
                     <ClipboardList className="w-3.5 h-3.5" /> {mevcutBorclularAcik ? 'Tahsilat Listesi' : 'Mevcut Borçlular'}
                   </button>
+                      ============================================================== */}
                   <button type="button" onClick={() => setAlacakForm({ ...bosAlacakKalemi })}
                     className="px-3 py-1.5 bg-white text-rose-700 text-[11px] font-black rounded-lg hover:bg-rose-50 transition flex items-center gap-1.5">
                     <PlusCircle className="w-3.5 h-3.5" /> Yeni Borçlu
@@ -10352,7 +10385,9 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                               <span className={`text-[10px] font-black uppercase tracking-wide ${tr2.yazi}`}>{tr2.ad}ler</span>
                               <span className="text-[10px] font-bold text-neutral-400">({blokAdet})</span>
                             </div>
-                            <span className={`text-[10px] font-black tabular-nums ${tr2.yazi}`}>₺{paraFmt(blokToplam)}</span>
+                            {/* DEĞİŞTİ (kullanıcı talebi): Blok toplamı da KIRMIZI —
+                                ödenmemiş borç toplamı olduğu belli olsun. */}
+                            <span className="text-[10px] font-black tabular-nums text-red-600">₺{paraFmt(blokToplam)}</span>
                           </div>
                         )}
                         {/* HATA DÜZELTMESİ: Bu açıklama JSX içinde süslü parantezsiz
@@ -10389,16 +10424,36 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                           <div className="flex items-center justify-between sm:justify-end gap-2 shrink-0">
                             <div className="text-left sm:text-right">
                               {/* whitespace-nowrap: tutar asla bölünmez/kesilmez */}
-                              <div className={`font-black tabular-nums whitespace-nowrap ${tr2.yazi}`}>₺{paraFmt(t.kalan ?? t.tutar)}</div>
+                              {/* DEĞİŞTİ (kullanıcı talebi): Kalan borç tutarı artık her
+                                  türde (Personel/Kurum/Müşteri) KIRMIZI yazılır — bu bir
+                                  BORÇ listesidir, tutarın ödenmediği tek bakışta belli olsun.
+                                  (Yeşil/mor tür renkleri "ödendi" izlenimi veriyordu.) */}
+                              <div className="font-black tabular-nums whitespace-nowrap text-red-600">₺{paraFmt(t.kalan ?? t.tutar)}</div>
                               {t.kismi && <div className="text-[9px] font-bold text-neutral-400 line-through whitespace-nowrap">₺{paraFmt(t.tutar)}</div>}
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
                               <button type="button" onClick={() => setTahsilModal({ kalem, taksit: t, hedefDefterId: '', tarih: bugunStr(), tutar: String(t.kalan ?? t.tutar) })}
                                 className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg transition whitespace-nowrap">Tahsil Et</button>
-                              {!kalem.icra && (
+                              {/* DEĞİŞTİ (kullanıcı talebi): "Mevcut Borçlular" görünümü
+                                  kaldırıldığı için oradaki İcradan Çıkar, Düzenle ve Sil
+                                  butonları bu tek listeye taşındı. Otomatik borçlularda
+                                  (kaynak veriden canlı gelenler) Düzenle/Sil gösterilmez. */}
+                              {!kalem.icra ? (
                                 <button type="button" onClick={() => alacakIcra(kalem.id, true)}
                                   title="Ödeme alınamazsa icra takibi başlat"
                                   className="px-2 py-1.5 bg-neutral-800 hover:bg-black text-white text-[10px] font-black rounded-lg transition">İcra</button>
+                              ) : (
+                                <button type="button" onClick={() => alacakIcra(kalem.id, false)}
+                                  title="İcra işaretini kaldır"
+                                  className="px-2 py-1.5 bg-white border border-neutral-400 text-neutral-700 hover:bg-neutral-100 text-[10px] font-black rounded-lg transition whitespace-nowrap">İcradan Çıkar</button>
+                              )}
+                              {!kalem.otomatik && (
+                                <>
+                                  <button type="button" onClick={() => setAlacakForm({ ...bosAlacakKalemi, ...kalem })}
+                                    className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle"><Edit className="w-3.5 h-3.5" /></button>
+                                  <button type="button" onClick={() => alacakSil(kalem.id)}
+                                    className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Borçluyu sil"><Trash2 className="w-3.5 h-3.5" /></button>
+                                </>
                               )}
                             </div>
                           </div>
