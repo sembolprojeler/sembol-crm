@@ -6288,6 +6288,19 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
 // ============================================================================
 export const QR_SITE_TURLERI = ['Site', 'Bina', 'İş Yeri', 'Malikane', 'Diğer'];
 
+// ============================================================================
+// DEĞİŞTİ (kullanıcı talebi): MÜŞTERİ HER ZAMAN ŞİRKET NUMARASINI GÖRÜR
+// ----------------------------------------------------------------------------
+// Sakine gösterilen temsilci telefonu YALNIZCA personelin şirket hattıdır
+// (companyPhone). Şahsi numara (personalPhone) hiçbir koşulda kullanılmaz.
+// Personelin şirket hattı girilmemişse afişteki merkez numarası gösterilir.
+// ============================================================================
+export const QR_SIRKET_TELEFONU = '0554 726 16 61';
+export const qrTemsilciSirketTelefonu = (temsilci) => {
+  const sirketHatti = String(temsilci?.companyPhone || '').trim();
+  return sirketHatti || QR_SIRKET_TELEFONU;
+};
+
 // Talep durum akışı: Yeni → Arandı → Keşif Planlandı → İş Alındı / Alamadık
 export const QR_TALEP_DURUMLARI = ['Yeni', 'Arandı', 'Ulaşılamadı', 'Keşif Planlandı', 'İş Alındı', 'Alamadık'];
 
@@ -6722,6 +6735,27 @@ export const QrSiteTakipView = ({ personnelList = [], currentUser, addSystemLog,
       (!a || [s.ad, s.adres, s.ilce, s.il, s.temsilciAd].some(x => String(x || '').toLocaleLowerCase('tr-TR').includes(a))));
   }, [siteler, arama, turFiltre]);
 
+  // ==========================================================================
+  // DEĞİŞTİ (kullanıcı talebi): KAYITLI TEMSİLCİ TELEFONUNU OTOMATİK DÜZELT
+  // Daha önce şahsi numarayla kaydedilmiş yerler (örn. Simpaş / Orhan Güloğlu)
+  // ve sonradan şirket hattı değişen temsilciler için: yönetim ekranı her
+  // açıldığında her yerin temsilciTel'i personel kartındaki ŞİRKET hattıyla
+  // karşılaştırılır, farklıysa Firestore'da sessizce düzeltilir. Böylece sakin
+  // hiçbir zaman şahsi numara görmez.
+  // ==========================================================================
+  useEffect(() => {
+    if (!siteler.length || !personnelList.length) return;
+    siteler.forEach(async (site) => {
+      if (!site.temsilciId) return;
+      const temsilci = personnelList.find(p => String(p.id) === String(site.temsilciId));
+      if (!temsilci) return;
+      const dogruTel = qrTemsilciSirketTelefonu(temsilci);
+      if ((site.temsilciTel || '') !== dogruTel) {
+        try { await updateDoc(qrSiteRef(site.id), { temsilciTel: dogruTel }); } catch { /* sessiz */ }
+      }
+    });
+  }, [siteler, personnelList]);
+
   const seciliSite = siteler.find(s => s.id === seciliId) || null;
   const seciliTalepler = useMemo(() => talepler
     .filter(t => t.siteId === seciliId && (durumFiltre === 'Tümü' || (t.durum || 'Yeni') === durumFiltre)), [talepler, seciliId, durumFiltre]);
@@ -6734,7 +6768,8 @@ export const QrSiteTakipView = ({ personnelList = [], currentUser, addSystemLog,
       bloklar: form.bloklar.trim(), notlar: form.notlar.trim(), aktif: form.aktif !== false,
       temsilciId: form.temsilciId, temsilciAd: temsilci?.fullName || '',
       // Temsilcinin telefonu sakine gösterilir — şirket telefonu öncelikli
-      temsilciTel: temsilci?.companyPhone || temsilci?.personalPhone || '',
+      // DEĞİŞTİ: Şahsi numara ASLA yazılmaz — şirket hattı, yoksa merkez numarası
+      temsilciTel: qrTemsilciSirketTelefonu(temsilci),
       guncellemeTarihi: new Date().toISOString(),
     };
     try {
@@ -6851,7 +6886,7 @@ export const QrSiteTakipView = ({ personnelList = [], currentUser, addSystemLog,
                   <div className="mt-3 bg-white/10 rounded-xl p-2.5">
                     <p className="text-[9px] font-black uppercase text-amber-400">Müşteri Temsilcisi</p>
                     <p className="font-black text-sm">{seciliSite.temsilciAd || '—'}</p>
-                    <p className="text-xs font-bold text-white/70">{seciliSite.temsilciTel || 'Telefon girilmemiş'}</p>
+                    <p className="text-xs font-bold text-white/70">{seciliSite.temsilciTel || QR_SIRKET_TELEFONU} <span className="text-[9px] text-amber-400/80">(şirket hattı — sakinin gördüğü numara)</span></p>
                   </div>
                   <p className="text-[10px] font-bold text-white/50 mt-2">Oluşturma: {qrTrh(seciliSite.olusturmaTarihi)} • Son okutma: {seciliSite.sonTarama ? qrTrhSaat(seciliSite.sonTarama) : '—'}</p>
                   {seciliSite.notlar && <p className="text-[11px] font-bold text-white/60 mt-1 italic">{seciliSite.notlar}</p>}
@@ -6949,7 +6984,9 @@ export const QrSiteLanding = ({ siteId, firebaseUser }) => {
 
   const g = (alan, deger) => setForm(f => ({ ...f, [alan]: deger }));
   const bloklar = (site?.bloklar || '').split(',').map(s => s.trim()).filter(Boolean);
-  const temsilciTel = qrTelefonNormalize(site?.temsilciTel);
+  // DEĞİŞTİ: Kayıtta numara yoksa merkez şirket numarası — şahsi numara asla gösterilmez
+  const temsilciTelGoster = site?.temsilciTel || QR_SIRKET_TELEFONU;
+  const temsilciTel = qrTelefonNormalize(temsilciTelGoster);
 
   // 2) Form gönder → qrSiteTalepleri'ne kayıt
   const gonder = async (e) => {
@@ -7014,12 +7051,12 @@ export const QrSiteLanding = ({ siteId, firebaseUser }) => {
           <div className="mt-5 bg-neutral-50 border border-neutral-200 rounded-2xl p-4">
             <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500">Size özel müşteri temsilciniz</p>
             <p className="text-lg font-black mt-1">{site.temsilciAd || 'Sembol Nakliyat'}</p>
-            {site.temsilciTel && <p className="text-sm font-bold text-neutral-600">{site.temsilciTel}</p>}
+            <p className="text-sm font-bold text-neutral-600">{temsilciTelGoster}</p>
             <p className="text-xs font-bold text-neutral-500 mt-2">Beklemek istemiyorsanız hemen ulaşabilirsiniz:</p>
             <div className="grid grid-cols-2 gap-2 mt-3">
-              <a href={temsilciTel ? `tel:+${temsilciTel}` : 'tel:+905547261661'} onClick={() => iletisimIsle('temsilciyiAradi')}
+              <a href={`tel:+${temsilciTel}`} onClick={() => iletisimIsle('temsilciyiAradi')}
                 className="py-3 bg-black hover:bg-neutral-800 text-white font-black rounded-xl flex items-center justify-center gap-2 text-sm"><Phone className="w-4 h-4" /> Hemen Ara</a>
-              <a href={`https://wa.me/${temsilciTel || '905547261661'}?text=${encodeURIComponent(`Merhaba, ${site.ad} asansöründeki QR üzerinden ulaşıyorum. ${kesif ? 'Keşif talebi bıraktım' : 'Bilgi almak istiyorum'}. Ben ${form.adSoyad}.`)}`}
+              <a href={`https://wa.me/${temsilciTel}?text=${encodeURIComponent(`Merhaba, ${site.ad} asansöründeki QR üzerinden ulaşıyorum. ${kesif ? 'Keşif talebi bıraktım' : 'Bilgi almak istiyorum'}. Ben ${form.adSoyad}.`)}`}
                 target="_blank" rel="noreferrer" onClick={() => iletisimIsle('whatsappYazdi')}
                 className="py-3 bg-[#25D366] hover:bg-[#128C7E] text-white font-black rounded-xl flex items-center justify-center gap-2 text-sm"><MessageCircle className="w-4 h-4" /> WhatsApp</a>
             </div>
