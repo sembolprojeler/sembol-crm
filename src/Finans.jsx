@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp , Banknote, UserMinus, Settings, FileText, Copy } from 'lucide-react';
+import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp, Banknote, UserMinus, Settings, FileText, Copy, ClipboardCheck, Upload, Save } from 'lucide-react';
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 // DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
 // Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
@@ -5431,6 +5431,376 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     );
   };
 
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): DEKONT EŞLEŞTİR — BANKA EKSTRESİ ↔ SİSTEM
+  // ==========================================================================
+  // Bankadan indirilen hesap hareketleri (Garanti .xlsx / .csv) yüklenir,
+  // seçili defterdeki kayıtlarla satır satır eşleştirilir:
+  //   1) AD SOYAD  : dekont açıklamasındaki gönderen adı ↔ sistemdeki müşteri
+  //                  adı / açıklama (Türkçe karakter ve büyük-küçük harf
+  //                  duyarsız, ad-soyad kelime bazlı). Tutar ve yön eşit olmalı.
+  //   2) TESLİM KODU: ad uymazsa açıklamadaki teslim kodu ↔ sistemdeki kod
+  //                  ("X M 1 X M Q", "*BQEZUG*", "Pwtszy" gibi yazımlar da
+  //                  normalize edilir). Gönderen müşteriden farklı olsa da
+  //                  (eşi, yakını ödemiş) doğru işe bağlanır.
+  //   3) ÖNERİ     : ikisi de uymazsa AYNI GÜN + AYNI TUTAR + AYNI YÖN olan
+  //                  eşleşmemiş sistem kaydı öneri olarak gösterilir; yönetici
+  //                  onaylar.
+  //   4) HATALI    : hiçbiri yoksa dekont satırı "sistemde yok" hatasıdır.
+  //                  Sistemde olup dekontta olmayan kayıtlar da ayrıca listelenir.
+  // Eşleşmeler kaydedilirse sistem kaydına dekontNo yazılır; sonraki yüklemede
+  // aynı satırlar "kayıtlı eşleşme" olarak anında bağlanır.
+  // Excel okuma: SheetJS CDN'den anlık yüklenir (npm bağımlılığı eklemez);
+  // yüklenemezse .csv ile devam edilir.
+  // ==========================================================================
+  const DEKONT_XLSX_CDN = 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js';
+  const dekontSheetJsYukle = () => new Promise((res, rej) => {
+    if (window.XLSX) return res(window.XLSX);
+    const sc = document.createElement('script');
+    sc.src = DEKONT_XLSX_CDN; sc.async = true;
+    sc.onload = () => window.XLSX ? res(window.XLSX) : rej(new Error('SheetJS yüklenemedi'));
+    sc.onerror = () => rej(new Error('SheetJS yüklenemedi'));
+    document.head.appendChild(sc);
+  });
+  // Türkçe duyarsız normalize: "İBRAHİM ÖZBİLGE" → "ibrahim ozbilge"
+  const dkNorm = (x) => String(x || '').toLocaleLowerCase('tr-TR')
+    .replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c').replace(/â/g, 'a').replace(/î/g, 'i').replace(/û/g, 'u')
+    .replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+  // Ad eşleştirmede sayılmayacak genel sözcükler
+  const DK_STOP = new Set(['depo', 'kira', 'kirasi', 'tasima', 'nakliye', 'nakliyat', 'bedeli', 'odeme', 'odemesi', 'ucreti', 'fast', 'hvl', 'eft', 'cep', 'sube', 'int', 'sembol', 'depoculuk', 'ticaret', 'limited', 'sirketi', 'anonim', 'sanayi', 've', 'teslim', 'kodu', 'para', 'transferi', 'kismi', 'kapora', 'ltd', 'sti', 'as']);
+  const dkTokenler = (x) => dkNorm(x).split(' ').filter(t => t.length > 1 && !DK_STOP.has(t) && !/^\d+$/.test(t));
+  const dkAdEslesir = (a, b) => {
+    const A = [...new Set(dkTokenler(a))], B = [...new Set(dkTokenler(b))];
+    if (!A.length || !B.length) return false;
+    const [k, u] = A.length <= B.length ? [A, B] : [B, A];
+    const ortak = k.filter(t => u.includes(t)).length;
+    return ortak >= Math.min(2, k.length);
+  };
+  const dkKodNorm = (x) => String(x || '').replace(/[^A-Za-z0-9]/g, '').toLocaleUpperCase('tr-TR').replace(/İ/g, 'I');
+  // "dd/mm/yyyy", "dd.mm.yyyy", "yyyy-mm-dd" veya Excel seri → "yyyy-mm-dd"
+  const dkTarih = (v, XLSX) => {
+    if (v == null || v === '') return '';
+    if (typeof v === 'number' && XLSX?.SSF) { const d = XLSX.SSF.parse_date_code(v); if (d) return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`; }
+    if (v instanceof Date && !isNaN(v)) return `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`;
+    const t = String(v).trim();
+    let m = t.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{4})/); if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+    m = t.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    return '';
+  };
+  // "1.234,56", "-16,76", 25600 → sayı
+  const dkTutar = (v) => {
+    if (typeof v === 'number') return v;
+    let t = String(v || '').replace(/TL|₺|\s/g, '');
+    if (!t) return 0;
+    if (t.includes(',') && t.includes('.')) t = t.replace(/\./g, '').replace(',', '.');
+    else if (t.includes(',')) t = t.replace(',', '.');
+    const n = parseFloat(t); return isNaN(n) ? 0 : n;
+  };
+  const dkGunFarki = (a, b) => Math.abs((new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00')) / 86400000);
+  // Basit CSV ayrıştırıcı (; veya , ayraçlı, tırnaklı alanlar)
+  const dkCsvOku = (metin) => {
+    const satirlar = metin.split(/\r?\n/).filter(l => l.trim());
+    const ayrac = (satirlar[0] || '').split(';').length >= (satirlar[0] || '').split(',').length ? ';' : ',';
+    return satirlar.map(l => { const out = []; let cur = '', q = false; for (const ch of l) { if (ch === '"') q = !q; else if (ch === ayrac && !q) { out.push(cur); cur = ''; } else cur += ch; } out.push(cur); return out.map(x => x.trim()); });
+  };
+
+  export const DekontEslestirPaneli = ({ defter, islemler = [], jobs = [], currentUser, addSystemLog, onKapat }) => {
+    const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const trh = (t) => (t || '').split('-').reverse().join('.');
+    const [dosyaAdi, setDosyaAdi] = useState('');
+    const [yukleniyor, setYukleniyor] = useState(false);
+    const [hata, setHata] = useState('');
+    const [bankaSatirlari, setBankaSatirlari] = useState(null); // ayrıştırılmış dekont
+    const [ozet, setOzet] = useState(null);                     // {baslangic, bitis, bankaBakiye}
+    const [elleEslesme, setElleEslesme] = useState({});         // { bankaId: sistemId } — onaylanan öneriler
+    const [kaldirilan, setKaldirilan] = useState({});           // { bankaId: true } — otomatik eşleşmesi kaldırılanlar
+    const [filtre, setFiltre] = useState('Tümü');
+    const [kaydediliyor, setKaydediliyor] = useState(false);
+
+    // ---------------- DOSYA OKUMA
+    const dosyaSec = async (e) => {
+      const f = e.target.files?.[0]; if (!f) return;
+      setHata(''); setYukleniyor(true); setDosyaAdi(f.name); setBankaSatirlari(null); setElleEslesme({}); setKaldirilan({});
+      try {
+        let matris = [], XLSX = null;
+        if (/\.csv$|\.txt$/i.test(f.name)) {
+          matris = dkCsvOku(await f.text());
+        } else {
+          try { XLSX = await dekontSheetJsYukle(); }
+          catch { throw new Error('Excel okuyucu yüklenemedi (internet/CSP). Dekontu bankadan .csv olarak indirip tekrar deneyin.'); }
+          const wb = XLSX.read(await f.arrayBuffer(), { type: 'array', cellDates: false });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          matris = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' });
+        }
+        // Üst bilgi (başlangıç/bitiş/bakiye) ve başlık satırı tespiti
+        const oz = {};
+        let basIdx = -1;
+        matris.forEach((r, i) => {
+          const a = dkNorm(r[0]); const b = r[1];
+          if (a === 'baslangic') oz.baslangic = dkTarih(b);
+          if (a === 'bitis') oz.bitis = dkTarih(b);
+          if (a === 'bakiye') oz.bankaBakiye = dkTutar(b);
+          const hucreler = r.map(dkNorm);
+          if (basIdx < 0 && hucreler.includes('tarih') && hucreler.includes('tutar')) basIdx = i;
+        });
+        if (basIdx < 0) throw new Error('Başlık satırı bulunamadı (Tarih / Açıklama / Tutar sütunları gerekli).');
+        const bas = matris[basIdx].map(dkNorm);
+        const kol = (ad, alt = []) => { const i = bas.findIndex(h => h === ad || alt.includes(h)); return i; };
+        const iTarih = kol('tarih'), iAcik = kol('aciklama', ['islem aciklamasi', 'aciklama ']), iEtiket = kol('etiket', ['islem turu']), iTutar = kol('tutar', ['islem tutari']), iBakiye = kol('bakiye'), iDekont = kol('dekont no', ['dekont', 'referans', 'referans no']);
+        const satirlar = [];
+        for (let i = basIdx + 1; i < matris.length; i++) {
+          const r = matris[i]; if (!r || r.every(x => x === '' || x == null)) continue;
+          const tarih = dkTarih(r[iTarih], XLSX); const tutar = dkTutar(r[iTutar]);
+          if (!tarih || !tutar) continue;
+          const aciklama = String(r[iAcik] ?? '').replace(/\s+/g, ' ').trim();
+          // Ad = ilk "-" öncesi; kod adayları = ara segmentlerin temizlenmiş hâli + tek kelimeler
+          const segmentler = aciklama.split('-').map(x => x.trim()).filter(Boolean);
+          const gonderen = segmentler[0] || '';
+          const kodAdaylari = new Set();
+          segmentler.slice(1).forEach(sg => {
+            const n = dkNorm(sg);
+            if (/^(fast|hvl|eft|cep sube|int)/.test(n) || /^\d+$/.test(n)) return;
+            const birlesik = dkKodNorm(sg); if (birlesik.length >= 5 && birlesik.length <= 8) kodAdaylari.add(birlesik);
+            sg.split(/\s+/).forEach(w => { const k = dkKodNorm(w); if (k.length >= 5 && k.length <= 8) kodAdaylari.add(k); });
+          });
+          const dekontNo = String(r[iDekont] ?? '').trim() || `${tarih}_${i}`;
+          satirlar.push({
+            id: `bk_${i}_${dekontNo}`, tarih, aciklama, etiket: String(r[iEtiket] ?? ''), tutar: Math.abs(tutar),
+            yon: tutar > 0 ? 'giris' : 'cikis', bakiye: iBakiye >= 0 ? dkTutar(r[iBakiye]) : null, dekontNo, gonderen, kodAdaylari: [...kodAdaylari],
+            icTransfer: /sembol nakliyat/.test(dkNorm(gonderen)) || /^(mustafa besinci)$/.test(dkNorm(gonderen)),
+            bankaMasrafi: /kesinti|komisyon|faiz|bsmv|masraf/.test(dkNorm(aciklama)) || /faiz|komisyon/.test(dkNorm(r[iEtiket])),
+          });
+        }
+        if (!satirlar.length) throw new Error('Dekontta okunabilir hareket satırı bulunamadı.');
+        if (!oz.baslangic) oz.baslangic = satirlar.reduce((m, x) => x.tarih < m ? x.tarih : m, satirlar[0].tarih);
+        if (!oz.bitis) oz.bitis = satirlar.reduce((m, x) => x.tarih > m ? x.tarih : m, satirlar[0].tarih);
+        setOzet(oz); setBankaSatirlari(satirlar);
+      } catch (err) { setHata(err.message || 'Dosya okunamadı.'); }
+      finally { setYukleniyor(false); e.target.value = ''; }
+    };
+
+    // ---------------- SİSTEM KAYITLARI (seçili defter, silinmemiş, sanal değil)
+    const jobHarita = useMemo(() => { const m = new Map(); (jobs || []).forEach(j => m.set(j.id, j)); return m; }, [jobs]);
+    const sistemSatirlari = useMemo(() => islemler.filter(i => i.id && !i.silindi).map(i => {
+      const job = i.isId ? jobHarita.get(i.isId) : null;
+      const kodMetin = (i.aciklama || '').match(/teslim\s*kodu\s*:?\s*([A-Za-z0-9]{4,10})/i)?.[1];
+      const kod = dkKodNorm(i.teslimKodu || kodMetin || job?.deliveryCode || '');
+      const adMetni = [i.musteriAdi, i.cariAd, job?.customerName, (i.aciklama || '').replace(/teslim\s*kodu\s*:?\s*[A-Za-z0-9]+/i, '')].filter(Boolean).join(' ');
+      return { ...i, _kod: kod, _adMetni: adMetni, _tutar: parseFloat(i.tutar) || 0 };
+    }), [islemler, jobHarita]);
+
+    // ---------------- EŞLEŞTİRME MOTORU
+    const sonuc = useMemo(() => {
+      if (!bankaSatirlari) return null;
+      const pencereBas = ozet?.baslangic || '0000-00-00', pencereBit = ozet?.bitis || '9999-99-99';
+      const gunEk = (t, n) => { const d = new Date(t + 'T00:00:00'); d.setDate(d.getDate() + n); return d.toISOString().split('T')[0]; };
+      const sistem = sistemSatirlari.filter(i => i.tarih >= gunEk(pencereBas, -3) && i.tarih <= gunEk(pencereBit, 3));
+      const kullanilan = new Set();
+      const eslesmeler = []; // { banka, sistem, tip: 'kayitli'|'ad'|'kod'|'oneri'|'elle'|'yok' }
+      const aday = (b, gunTol) => sistem.filter(i => !kullanilan.has(i.id) && i.tip === b.yon && Math.abs(i._tutar - b.tutar) < 0.011 && dkGunFarki(i.tarih, b.tarih) <= gunTol)
+        .sort((x, y) => dkGunFarki(x.tarih, b.tarih) - dkGunFarki(y.tarih, b.tarih));
+      // 0) Kayıtlı eşleşmeler (daha önce kaydedilmiş dekontNo) ve elle onaylananlar
+      bankaSatirlari.forEach(b => {
+        if (kaldirilan[b.id]) return;
+        const elle = elleEslesme[b.id] ? sistem.find(i => i.id === elleEslesme[b.id] && !kullanilan.has(i.id)) : null;
+        if (elle) { kullanilan.add(elle.id); eslesmeler.push({ banka: b, sistem: elle, tip: 'elle' }); return; }
+        const kayitli = sistem.find(i => !kullanilan.has(i.id) && i.dekontNo && i.dekontNo === b.dekontNo);
+        if (kayitli) { kullanilan.add(kayitli.id); eslesmeler.push({ banka: b, sistem: kayitli, tip: 'kayitli' }); }
+      });
+      const bitti = new Set(eslesmeler.map(e => e.banka.id));
+      // 1) AD SOYAD  2) TESLİM KODU  (tutar + yön eşit, ±3 gün)
+      bankaSatirlari.forEach(b => {
+        if (bitti.has(b.id) || kaldirilan[b.id]) return;
+        const adaylar = aday(b, 3);
+        let sec = adaylar.find(i => dkAdEslesir(b.gonderen, i._adMetni) || dkAdEslesir(b.aciklama, i._adMetni));
+        let tip = 'ad';
+        if (!sec) { sec = adaylar.find(i => i._kod && b.kodAdaylari.includes(i._kod)); tip = 'kod'; }
+        if (sec) { kullanilan.add(sec.id); eslesmeler.push({ banka: b, sistem: sec, tip }); bitti.add(b.id); }
+      });
+      // 3) ÖNERİ — aynı gün + aynı tutar + aynı yön (onay ister; sistem kaydı "kullanılmış" sayılmaz)
+      bankaSatirlari.forEach(b => {
+        if (bitti.has(b.id)) return;
+        const adaylar = aday(b, 0);
+        if (adaylar.length) { eslesmeler.push({ banka: b, sistem: adaylar[0], tip: 'oneri', digerAdaylar: adaylar.slice(1) }); bitti.add(b.id); }
+      });
+      // 4) HATALI — dekontta var, sistemde yok
+      bankaSatirlari.forEach(b => { if (!bitti.has(b.id)) eslesmeler.push({ banka: b, sistem: null, tip: 'yok' }); });
+      // Sistemde var, dekontta yok (dönem içinde)
+      const oneriSistemIds = new Set(eslesmeler.filter(e => e.tip === 'oneri').map(e => e.sistem.id));
+      const sistemFazla = sistem.filter(i => !kullanilan.has(i.id) && !oneriSistemIds.has(i.id) && i.tarih >= pencereBas && i.tarih <= pencereBit);
+      // Özet rakamlar
+      const say = (t) => eslesmeler.filter(e => e.tip === t).length;
+      const bankaNet = bankaSatirlari.reduce((t, b) => t + (b.yon === 'giris' ? b.tutar : -b.tutar), 0);
+      const sistemNet = sistem.filter(i => i.tarih >= pencereBas && i.tarih <= pencereBit).reduce((t, i) => t + (i.tip === 'giris' ? i._tutar : -i._tutar), 0);
+      const yokNet = eslesmeler.filter(e => e.tip === 'yok').reduce((t, e) => t + (e.banka.yon === 'giris' ? e.banka.tutar : -e.banka.tutar), 0);
+      const fazlaNet = sistemFazla.reduce((t, i) => t + (i.tip === 'giris' ? i._tutar : -i._tutar), 0);
+      return { eslesmeler, sistemFazla, adet: { kayitli: say('kayitli'), elle: say('elle'), ad: say('ad'), kod: say('kod'), oneri: say('oneri'), yok: say('yok'), fazla: sistemFazla.length }, bankaNet, sistemNet, yokNet, fazlaNet };
+    }, [bankaSatirlari, sistemSatirlari, ozet, elleEslesme, kaldirilan]);
+
+    // ---------------- KAYDET: eşleşen sistem kayıtlarına dekontNo yaz
+    const eslesmeleriKaydet = async () => {
+      if (!sonuc) return;
+      const yazilacak = sonuc.eslesmeler.filter(e => ['ad', 'kod', 'elle'].includes(e.tip) && e.sistem && e.sistem.dekontNo !== e.banka.dekontNo);
+      if (!yazilacak.length) { alert('Kaydedilecek yeni eşleşme yok.'); return; }
+      if (!window.confirm(`${yazilacak.length} eşleşme sistem kayıtlarına dekont numarasıyla işlenecek. Sonraki yüklemelerde bu satırlar otomatik "kayıtlı eşleşme" olur. Devam?`)) return;
+      setKaydediliyor(true);
+      try {
+        for (const e of yazilacak) {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', e.sistem.id), {
+            dekontNo: e.banka.dekontNo, dekontTarihi: e.banka.tarih, dekontEslesme: e.tip, dekontEslestiren: currentUser?.fullName || '', dekontEslesmeZamani: new Date().toISOString(),
+          });
+        }
+        addSystemLog?.('Dekont Eşleştirme', `${defter?.ad}: ${yazilacak.length} kayıt banka dekontuyla eşleştirildi (${dosyaAdi}).`);
+        alert(`${yazilacak.length} eşleşme kaydedildi.`);
+      } catch (err) { alert('Kaydedilemedi: ' + err.message); }
+      finally { setKaydediliyor(false); }
+    };
+
+    const TIP = {
+      kayitli: { ad: 'Kayıtlı Eşleşme', stil: 'bg-neutral-800 text-white' },
+      elle:    { ad: 'Elle Onaylandı',  stil: 'bg-emerald-700 text-white' },
+      ad:      { ad: 'Ad Soyad ile',    stil: 'bg-emerald-600 text-white' },
+      kod:     { ad: 'Teslim Kodu ile', stil: 'bg-blue-600 text-white' },
+      oneri:   { ad: 'ÖNERİ • onay bekliyor', stil: 'bg-amber-500 text-black' },
+      yok:     { ad: 'HATALI • sistemde yok', stil: 'bg-red-600 text-white' },
+    };
+    const gorunen = (sonuc?.eslesmeler || []).filter(e => filtre === 'Tümü' ? true : filtre === 'Eşleşti' ? ['kayitli', 'elle', 'ad', 'kod'].includes(e.tip) : filtre === 'Öneri' ? e.tip === 'oneri' : filtre === 'Hatalı' ? e.tip === 'yok' : true);
+
+    const kodVurgula = (b) => {
+      // Açıklamada tespit edilen kodu vurgula
+      const kod = sonuc?.eslesmeler.find(e => e.banka.id === b.id)?.sistem?._kod;
+      if (!kod) return b.aciklama;
+      const idx = dkKodNorm(b.aciklama).indexOf(kod);
+      return b.aciklama;
+    };
+
+    return (
+      <div className="bg-sky-50 border-2 border-sky-300 rounded-2xl p-4 space-y-3 animate-in fade-in">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="font-black text-black flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-sky-600" /> Dekont Eşleştir — {defter?.ad}</h3>
+            <p className="text-[11px] font-bold text-neutral-600 mt-0.5">Bankadan indirdiğiniz hesap hareketlerini (.xlsx / .csv) yükleyin; satırlar önce <b>ad soyad</b>, sonra <b>teslim kodu</b>, o da yoksa <b>aynı gün aynı tutar</b> önerisiyle eşleştirilir.</p>
+          </div>
+          <button type="button" onClick={onKapat} className="p-1.5 hover:bg-sky-200 rounded-lg"><X className="w-4 h-4" /></button>
+        </div>
+
+        {/* DOSYA */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+          <label className="flex-1 flex items-center gap-2 bg-white border-2 border-dashed border-sky-300 hover:border-sky-500 rounded-xl p-3 cursor-pointer transition">
+            <Upload className="w-5 h-5 text-sky-600 shrink-0" />
+            <div className="min-w-0">
+              <div className="text-xs font-black text-black">{dosyaAdi || 'Dekont dosyası seç (Garanti hesap hareketleri .xlsx veya .csv)'}</div>
+              <div className="text-[10px] font-bold text-neutral-500">{yukleniyor ? 'Okunuyor…' : ozet ? `Dönem: ${trh(ozet.baslangic)} – ${trh(ozet.bitis)}${ozet.bankaBakiye != null ? ` • Banka bakiyesi ₺${paraFmt(ozet.bankaBakiye)}` : ''}` : 'Dosya tarayıcıda okunur, sunucuya gönderilmez.'}</div>
+            </div>
+            <input type="file" accept=".xlsx,.xls,.csv,.txt" className="hidden" onChange={dosyaSec} />
+          </label>
+          {sonuc && (
+            <button type="button" onClick={eslesmeleriKaydet} disabled={kaydediliyor} className="px-4 py-2.5 bg-black hover:bg-neutral-800 text-white text-xs font-black rounded-xl flex items-center gap-2 disabled:opacity-60">
+              {kaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Eşleşmeleri Kaydet
+            </button>
+          )}
+        </div>
+        {hata && <p className="text-xs font-black text-red-700 bg-red-50 border border-red-200 rounded-xl p-2.5 flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /> {hata}</p>}
+
+        {sonuc && (
+          <>
+            {/* ÖZET */}
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+              {[
+                { e: 'Eşleşti', v: sonuc.adet.kayitli + sonuc.adet.elle + sonuc.adet.ad + sonuc.adet.kod, s: 'bg-emerald-600 text-white' },
+                { e: 'Ad ile', v: sonuc.adet.ad, s: 'bg-emerald-100 text-emerald-800' },
+                { e: 'Kod ile', v: sonuc.adet.kod, s: 'bg-blue-100 text-blue-800' },
+                { e: 'Öneri', v: sonuc.adet.oneri, s: 'bg-amber-400 text-black' },
+                { e: 'Hatalı (dekontta var)', v: sonuc.adet.yok, s: 'bg-red-600 text-white' },
+                { e: 'Sistemde fazla', v: sonuc.adet.fazla, s: 'bg-purple-600 text-white' },
+              ].map(k => <div key={k.e} className={`rounded-xl p-2 text-center ${k.s}`}><div className="text-lg font-black leading-none">{k.v}</div><div className="text-[8px] font-black uppercase mt-1 opacity-80">{k.e}</div></div>)}
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
+              <div className="bg-white rounded-xl p-2 border"><p className="text-[9px] font-black uppercase text-neutral-500">Dekont Net (dönem)</p><p className="font-black tabular-nums">₺{paraFmt(sonuc.bankaNet)}</p></div>
+              <div className="bg-white rounded-xl p-2 border"><p className="text-[9px] font-black uppercase text-neutral-500">Sistem Net (dönem)</p><p className="font-black tabular-nums">₺{paraFmt(sonuc.sistemNet)}</p></div>
+              <div className="bg-white rounded-xl p-2 border border-red-200"><p className="text-[9px] font-black uppercase text-red-600">Dekontta var, sistemde yok</p><p className="font-black tabular-nums text-red-700">₺{paraFmt(sonuc.yokNet)}</p></div>
+              <div className="bg-white rounded-xl p-2 border border-purple-200"><p className="text-[9px] font-black uppercase text-purple-600">Sistemde var, dekontta yok</p><p className="font-black tabular-nums text-purple-700">₺{paraFmt(sonuc.fazlaNet)}</p></div>
+            </div>
+            <p className="text-[11px] font-bold text-neutral-600">Fark (sistem − dekont): <b className={Math.abs(sonuc.sistemNet - sonuc.bankaNet) > 0.01 ? 'text-red-700' : 'text-emerald-700'}>₺{paraFmt(sonuc.sistemNet - sonuc.bankaNet)}</b> — kırmızı ve mor listeler bu farkı açıklar. Şirket hesapları arası virmanlar ve banka kesintileri ayrıca etiketlenir.</p>
+
+            {/* FİLTRE */}
+            <div className="flex gap-1 flex-wrap">
+              {['Tümü', 'Eşleşti', 'Öneri', 'Hatalı'].map(f => <button key={f} type="button" onClick={() => setFiltre(f)} className={`px-3 py-1.5 text-[11px] font-black rounded-lg ${filtre === f ? 'bg-black text-white' : 'bg-white border border-neutral-300 text-neutral-700 hover:bg-neutral-100'}`}>{f}</button>)}
+            </div>
+
+            {/* DEKONT SATIRLARI */}
+            <div className="space-y-1.5 max-h-[60vh] overflow-y-auto pr-1">
+              {gorunen.map(e => {
+                const b = e.banka, sRow = e.sistem, t = TIP[e.tip];
+                return (
+                  <div key={b.id} className={`rounded-xl border p-2.5 bg-white ${e.tip === 'yok' ? 'border-red-300' : e.tip === 'oneri' ? 'border-amber-300' : 'border-neutral-200'}`}>
+                    <div className="flex flex-col md:flex-row md:items-center gap-2">
+                      {/* BANKA TARAFI */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full ${t.stil}`}>{t.ad}</span>
+                          <span className="text-[10px] font-bold text-neutral-500">{trh(b.tarih)}</span>
+                          {b.icTransfer && <span className="text-[9px] font-black bg-neutral-200 text-neutral-700 px-1.5 py-0.5 rounded-full">ŞİRKET HESAPLARI ARASI</span>}
+                          {b.bankaMasrafi && <span className="text-[9px] font-black bg-neutral-200 text-neutral-700 px-1.5 py-0.5 rounded-full">BANKA KESİNTİSİ</span>}
+                        </div>
+                        <div className="text-xs font-black text-black mt-0.5 break-words">{b.aciklama}</div>
+                        <div className="text-[10px] font-bold text-neutral-400">Dekont: {b.dekontNo}{b.etiket ? ` • ${b.etiket}` : ''}</div>
+                      </div>
+                      <div className={`shrink-0 font-black tabular-nums text-sm ${b.yon === 'giris' ? 'text-emerald-700' : 'text-red-700'}`}>{b.yon === 'giris' ? '+' : '−'}₺{paraFmt(b.tutar)}</div>
+                      {/* SİSTEM TARAFI */}
+                      <div className="flex-1 min-w-0 md:border-l md:pl-3 border-neutral-200">
+                        {sRow ? (
+                          <>
+                            <div className="text-[10px] font-black uppercase text-neutral-400">Sistem kaydı</div>
+                            <div className="text-xs font-bold text-neutral-800 break-words">{trh(sRow.tarih)} • {sRow.musteriAdi || ''} {sRow.aciklama ? `— ${sRow.aciklama}` : ''}{sRow._kod ? <span className="ml-1 text-[9px] font-black bg-blue-100 text-blue-800 px-1 rounded">{sRow._kod}</span> : null}</div>
+                            <div className="text-[10px] font-bold text-neutral-500">{sRow.kategori || ''}{sRow.odemeYontemi ? ` • ${sRow.odemeYontemi}` : ''}{sRow.kaynak ? ` • ${sRow.kaynak}` : ''}</div>
+                            {e.tip === 'oneri' && e.digerAdaylar?.length > 0 && <div className="text-[10px] font-bold text-amber-700">+{e.digerAdaylar.length} aday daha aynı gün/tutar</div>}
+                          </>
+                        ) : (
+                          <div className="text-xs font-black text-red-700">Sistemde karşılığı bulunamadı{b.icTransfer ? ' — virman/transfer olarak girilmemiş olabilir' : b.bankaMasrafi ? ' — banka masrafı gider olarak girilmemiş' : ''}.</div>
+                        )}
+                      </div>
+                      {/* AKSİYON */}
+                      <div className="shrink-0 flex items-center gap-1">
+                        {e.tip === 'oneri' && (
+                          <button type="button" onClick={() => setElleEslesme(m => ({ ...m, [b.id]: sRow.id }))} className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg">Eşleştir</button>
+                        )}
+                        {['ad', 'kod', 'elle'].includes(e.tip) && (
+                          <button type="button" onClick={() => { setElleEslesme(m => { const c = { ...m }; delete c[b.id]; return c; }); setKaldirilan(m => ({ ...m, [b.id]: true })); }} className="px-2 py-1.5 bg-white border border-neutral-300 hover:bg-neutral-100 text-neutral-700 text-[10px] font-black rounded-lg" title="Bu eşleşme yanlışsa kaldır">Kaldır</button>
+                        )}
+                        {e.tip === 'yok' && kaldirilan[b.id] && (
+                          <button type="button" onClick={() => setKaldirilan(m => { const c = { ...m }; delete c[b.id]; return c; })} className="px-2 py-1.5 bg-white border border-neutral-300 text-neutral-700 text-[10px] font-black rounded-lg">Geri Al</button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {gorunen.length === 0 && <div className="text-center text-xs font-bold text-neutral-400 py-6">Bu filtrede satır yok.</div>}
+            </div>
+
+            {/* SİSTEMDE VAR, DEKONTTA YOK */}
+            {sonuc.sistemFazla.length > 0 && (filtre === 'Tümü' || filtre === 'Hatalı') && (
+              <div className="rounded-xl border-2 border-purple-300 bg-purple-50 p-3">
+                <p className="text-xs font-black text-purple-900 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> Sistemde var, dekontta yok ({sonuc.sistemFazla.length}) — bu kayıtlar bankaya hiç yansımamış: mükerrer, yanlış deftere girilmiş ya da başka hesaptan ödenmiş olabilir.</p>
+                <div className="mt-2 space-y-1">
+                  {sonuc.sistemFazla.map(i => (
+                    <div key={i.id} className="flex items-center gap-2 text-[11px] font-bold p-1.5 rounded-lg bg-white">
+                      <span className="text-neutral-500 shrink-0">{trh(i.tarih)}</span>
+                      <span className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full ${i.tip === 'giris' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{i.tip === 'giris' ? 'GELİR' : 'GİDER'}</span>
+                      <span className="flex-1 min-w-0 truncate">{i.musteriAdi ? `${i.musteriAdi} — ` : ''}{i.aciklama || i.kategori || '—'}{i.kaynak ? <span className="text-neutral-400"> • {i.kaynak}</span> : null}</span>
+                      <span className={`shrink-0 tabular-nums font-black ${i.tip === 'giris' ? 'text-emerald-700' : 'text-red-700'}`}>₺{paraFmt(i._tutar)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    );
+  };
+
   export const FinansDefterView = ({ currentUser, addSystemLog, onViewCari, onViewVehicle, onViewPersonnel, jobs = [], vehicles = [], personnelList = [] }) => {
     // Varsayılan işlem kategorileri (giderler + gelirler bir arada)
     // DEĞİŞİKLİK: Eski sabit kategori listesi KALDIRILDI. Kategoriler artık
@@ -5559,6 +5929,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [mevcutBorclularAcik, setMevcutBorclularAcik] = useState(false);
     // YENİ (kullanıcı talebi): Defter Denetim paneli açık/kapalı
     const [denetimAcik, setDenetimAcik] = useState(false);
+    // YENİ (kullanıcı talebi): Dekont Eşleştir paneli açık/kapalı
+    const [dekontAcik, setDekontAcik] = useState(false);
     // YENİ (kullanıcı talebi): "Tüm Zamanları Göster" — ay filtresi kapatılır,
     // tüm bekleyen tahsilatlar tek listede (blok bazlı, en yeniden en eskiye) görünür.
     // DEĞİŞTİ: Varsayılan artık TÜM ZAMANLAR. Borçlu defteri açıldığında hiçbir
@@ -6804,6 +7176,31 @@ const nakitYuvarla = (tutar) => {
                siradaki: plan.find(pp => !pp.odendi) || null };
     };
     // Defterdeki TÜM borçluların özeti
+    // ======================================================================
+    // YENİ (kullanıcı talebi): OTOMATİK BORÇLULARA DÜZENLE / SİL / İCRA
+    // ----------------------------------------------------------------------
+    // Otomatik kalemler (oto_personel_*, oto_musteri_*) kaynak veriden canlı
+    // üretilir, defterin alacaklar dizisinde YOKTUR. Onlara da düzenleme ve
+    // silme verebilmek için defter belgesinde bir AYAR KATMANI tutulur:
+    //   defter.otoAyar = { [kalemId]: { gizli, toplamTutar, ilkTarih, not, ad, icra } }
+    // • Düzenle → tutar/vade/not/ad kaynak değerin ÜZERİNE yazılır.
+    // • Sil     → gizli:true (kaynak iş/personel kaydı korunur, listeden düşer).
+    // • İcra    → icra tarihi burada tutulur.
+    // Kaynak borç kapanınca (ödeme alınınca) kalem zaten kendiliğinden düşer.
+    // ======================================================================
+    const otoAyarUygula = (defter, kalem) => {
+      const ayar = defter?.otoAyar?.[kalem.id];
+      if (!ayar) return kalem;
+      if (ayar.gizli) return null;
+      const { gizli, ...ust } = ayar;
+      return { ...kalem, ...ust, otomatik: true };
+    };
+    const otoAyarYaz = async (kalemId, degisiklik) => {
+      const mevcut = seciliDefter?.otoAyar || {};
+      const yeni = { ...mevcut, [kalemId]: { ...(mevcut[kalemId] || {}), ...degisiklik } };
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), { otoAyar: yeni });
+    };
+
     const alacakDefterBilgi = (defter) => {
       const kalemler = defter?.alacaklar || [];
       const detaylar = kalemler.map(kalem => ({ kalem, bilgi: alacakBilgi(defter, kalem) }));
@@ -6830,7 +7227,9 @@ const nakitYuvarla = (tutar) => {
             // gösterilir ki 1 Eylül devir kuralına takılıp gizlenmesin.
             ilkTarih: bugunStr() >= SISTEM_DEVIR_TARIHI ? bugunStr() : SISTEM_DEVIR_TARIHI,
             not: 'Şirkete borç (personel profilinden otomatik)', icra: null, otomatik: true, kaynak: 'personel', personId: p.id };
-          otoDetaylar.push({ kalem, bilgi: alacakBilgi(defter, kalem) });
+          // YENİ: gizlenmişse atla, düzenlenmişse üzerine yazılmış hâlini kullan
+          const kalemA = otoAyarUygula(defter, kalem);
+          if (kalemA) otoDetaylar.push({ kalem: kalemA, bilgi: alacakBilgi(defter, kalemA) });
         });
         // --- 2) Tamamlanmış ama ödenmemiş müşteri işleri (cari bazında) ---
         // ====================================================================
@@ -6886,7 +7285,9 @@ const nakitYuvarla = (tutar) => {
             toplamTutar: String(c.kalan), taksitSayisi: '', ilkTarih: c.tarih,
             not: 'Tamamlanan iş — ödeme alınmadı (cariden otomatik)', icra: null,
             otomatik: true, kaynak: 'musteri', tel };
-          otoDetaylar.push({ kalem, bilgi: alacakBilgi(defter, kalem) });
+          // YENİ: gizlenmişse atla, düzenlenmişse üzerine yazılmış hâlini kullan
+          const kalemA = otoAyarUygula(defter, kalem);
+          if (kalemA) otoDetaylar.push({ kalem: kalemA, bilgi: alacakBilgi(defter, kalemA) });
         });
       }
       const tumDetaylar = [...detaylar, ...otoDetaylar];
@@ -6911,6 +7312,22 @@ const nakitYuvarla = (tutar) => {
       if (!alacakForm.ad.trim()) { alert('Borçlu adını girin (örn: Melike Özdemir / X Ltd. Şti.).'); return; }
       if (!(parseFloat(alacakForm.toplamTutar) > 0)) { alert('Geçerli bir alacak tutarı girin.'); return; }
       if (!alacakForm.ilkTarih) { alert('İlk vade tarihini seçin.'); return; }
+      // YENİ (kullanıcı talebi): OTOMATİK kalem düzenleniyorsa alacaklar dizisine
+      // değil, otoAyar katmanına yazılır (kaynak veri değişmez, üzerine yazılır).
+      if (alacakForm.otomatik || String(alacakForm.id || '').startsWith('oto_')) {
+        try {
+          await otoAyarYaz(alacakForm.id, {
+            ad: alacakForm.ad.trim(),
+            toplamTutar: String(parseFloat(alacakForm.toplamTutar)),
+            ilkTarih: alacakForm.ilkTarih,
+            not: alacakForm.not || '',
+            taksitSayisi: parseInt(alacakForm.taksitSayisi) > 1 ? String(parseInt(alacakForm.taksitSayisi)) : '',
+          });
+          addSystemLog?.('Alacak Kalemi', `${seciliDefter.ad}: otomatik borçlu "${alacakForm.ad}" düzenlendi (₺${paraFmt(alacakForm.toplamTutar)}).`);
+          setAlacakForm(null);
+        } catch (e) { console.error(e); alert('Kaydedilemedi.'); }
+        return;
+      }
       const mevcut = seciliDefter.alacaklar || [];
       const kalem = {
         ...alacakForm,
@@ -6929,6 +7346,18 @@ const nakitYuvarla = (tutar) => {
 
     // BORÇLU SİL — tahsilat yapılmışsa ek uyarı (ödemeler/kredi ile aynı kural)
     const alacakSil = async (kalemId) => {
+      // YENİ (kullanıcı talebi): OTOMATİK kalem "silinince" gizlenir; kaynak
+      // iş/personel kaydı silinmez. Listenin altındaki "Geri getir" ile döner.
+      if (String(kalemId).startsWith('oto_')) {
+        const d = alacakDefterBilgi(seciliDefter).detaylar.find(x => x.kalem.id === kalemId);
+        const ad = d?.kalem?.ad || 'Otomatik borçlu';
+        if (!window.confirm(`"${ad}" otomatik borçlu kaydı listeden kaldırılsın mı?\n\nKaynak iş/personel kaydı SİLİNMEZ; yalnızca bu listede gizlenir. Listenin altındaki "Geri getir" ile geri alabilirsiniz.`)) return;
+        try {
+          await otoAyarYaz(kalemId, { gizli: true, gizlemeTarihi: new Date().toISOString(), gizleyen: currentUser?.fullName || '' });
+          addSystemLog?.('Alacak Kalemi Gizlendi', `${seciliDefter.ad}: otomatik borçlu "${ad}" listeden kaldırıldı.`);
+        } catch (e) { console.error(e); alert('Kaldırılamadı.'); }
+        return;
+      }
       const kalem = (seciliDefter.alacaklar || []).find(k => k.id === kalemId);
       if (!kalem) return;
       const bilgi = alacakBilgi(seciliDefter, kalem);
@@ -6946,6 +7375,17 @@ const nakitYuvarla = (tutar) => {
     // İCRA İŞLEMİ — başlat / geri al. Kalem üstünde icra tarihi tutulur;
     // listede kırmızı "İCRADA" rozeti görünür, plan ve tahsilat aynen sürer.
     const alacakIcra = async (kalemId, baslat) => {
+      // YENİ (kullanıcı talebi): OTOMATİK kalemde icra işareti otoAyar'da tutulur
+      if (String(kalemId).startsWith('oto_')) {
+        const d = alacakDefterBilgi(seciliDefter).detaylar.find(x => x.kalem.id === kalemId);
+        const ad = d?.kalem?.ad || 'Otomatik borçlu';
+        if (baslat && !window.confirm(`"${ad}" için icra işlemi başlatılsın mı?`)) return;
+        try {
+          await otoAyarYaz(kalemId, { icra: baslat ? bugunStr() : null });
+          addSystemLog?.(baslat ? 'İcra İşlemi Başlatıldı' : 'İcra Kaydı Kaldırıldı', `${seciliDefter.ad}: "${ad}"${baslat ? ' icraya verildi.' : ' icra işareti kaldırıldı.'}`);
+        } catch (e) { console.error(e); alert('Güncellenemedi.'); }
+        return;
+      }
       const kalem = (seciliDefter.alacaklar || []).find(k => k.id === kalemId);
       if (!kalem) return;
       if (baslat && !window.confirm(`"${kalem.ad}" için icra işlemi başlatılsın mı?\n\nKalem "İCRADA" olarak işaretlenir; tahsilat yapılabilir olmaya devam eder.`)) return;
@@ -9400,6 +9840,10 @@ silinmeTarihi: new Date().toISOString()`}</pre>
             <button onClick={() => setSeciliDefterId(null)} className="flex items-center gap-1 text-white/80 hover:text-white font-bold text-xs sm:text-sm transition"><ChevronLeft className="w-4 h-4" /> Defterler</button>
             <div className="flex items-center gap-1.5">
               {/* YENİ (kullanıcı talebi): Bakiye farkı araştırma — Denetim paneli */}
+              {/* YENİ (kullanıcı talebi): Banka dekontu ile sistem kayıtlarını eşleştir */}
+              {!['Ödemeler', 'Kredi', 'Borçlu'].includes(seciliDefter.tur) && (
+                <button onClick={() => setDekontAcik(v => !v)} className={`px-2 py-1.5 rounded-lg transition text-[10px] font-black flex items-center gap-1 ${dekontAcik ? 'bg-sky-400 text-black' : 'bg-white/10 hover:bg-white/20'}`} title="Banka dekontunu yükleyip sistem kayıtlarıyla eşleştir"><ClipboardCheck className="w-3.5 h-3.5" /> Dekont Eşleştir</button>
+              )}
               {!['Ödemeler', 'Kredi', 'Borçlu'].includes(seciliDefter.tur) && (
                 <button onClick={() => setDenetimAcik(v => !v)} className={`px-2 py-1.5 rounded-lg transition text-[10px] font-black flex items-center gap-1 ${denetimAcik ? 'bg-amber-400 text-black' : 'bg-white/10 hover:bg-white/20'}`} title="Mükerrer / gizli / silinen kayıtları denetle"><ShieldCheck className="w-3.5 h-3.5" /> Denetim</button>
               )}
@@ -10201,6 +10645,35 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                                 </div>
                                 <div className="text-[10px] font-bold text-neutral-500">
                                   Vade: {trh(vade.tarih)} • {tur.ad}
+                                  {/* ==========================================================
+                                      YENİ (kullanıcı talebi): TEKRAR / TAKSİT ROZETİ
+                                      • Süresiz tekrarlayan (kira gibi)  → "HER AY" (Her Hafta / Her Yıl)
+                                      • Sayısı belli taksitli/zamanlayıcılı → "2. TAKSİT / 8 • 6 kaldı"
+                                      • Tek seferlik                       → "TEK SEFERLİK"
+                                      Böylece hangi ödemenin sürekli, hangisinin kaçıncı taksit
+                                      olduğu ve kaç taksit kaldığı tek bakışta görünür.
+                                      ========================================================== */}
+                                  {(() => {
+                                    const tekrar = kalem.tekrar || 'tek';
+                                    const toplam = tekrar === 'tek' ? 1 : (parseInt(kalem.tekrarSayisi) || 0);
+                                    const tekrarAd = (TEKRAR_SECENEKLERI.find(t => t.id === tekrar)?.ad || 'Tek Seferlik').toLocaleUpperCase('tr-TR');
+                                    if (tekrar === 'tek') {
+                                      return <span className="ml-1 text-[9px] font-black bg-neutral-700 text-white px-1.5 py-0.5 rounded-full">TEK SEFERLİK</span>;
+                                    }
+                                    if (toplam === 0) {
+                                      // süresiz: her ay / her hafta / her yıl
+                                      return <span className="ml-1 text-[9px] font-black bg-blue-600 text-white px-1.5 py-0.5 rounded-full">{tekrarAd}</span>;
+                                    }
+                                    const kalan = Math.max(0, toplam - vade.no);
+                                    return (
+                                      <>
+                                        <span className="ml-1 text-[9px] font-black bg-indigo-600 text-white px-1.5 py-0.5 rounded-full">{vade.no}. TAKSİT / {toplam}</span>
+                                        <span className={`ml-1 text-[9px] font-black px-1.5 py-0.5 rounded-full ${kalan === 0 ? 'bg-emerald-600 text-white' : 'bg-indigo-100 text-indigo-800'}`}>
+                                          {kalan === 0 ? 'SON TAKSİT' : `${kalan} taksit kaldı`}
+                                        </span>
+                                      </>
+                                    );
+                                  })()}
                                   {vade.gecikmis && <span className="ml-1 text-[9px] font-black bg-red-600 text-white px-1.5 py-0.5 rounded-full">GECİKMİŞ</span>}
                                   {/* YENİ: 12. taksitte sözleşme yılı dolduğu rozeti */}
                                   {vade.yilSonu && <span className="ml-1 text-[9px] font-black bg-amber-500 text-white px-1.5 py-0.5 rounded-full">{vade.yilNo}. YIL SON ÖDEMESİ</span>}
@@ -10525,6 +10998,24 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                     {bekleyenler.length === 0 && (
                       <div className="p-4 text-center text-xs font-bold text-neutral-400 bg-neutral-50 rounded-xl border border-dashed border-neutral-300">{alacakTumZamanlar ? 'Bekleyen tahsilat yok.' : 'Bu ay bekleyen tahsilat yok.'}</div>
                     )}
+                    {/* YENİ (kullanıcı talebi): Listeden kaldırılan (gizlenen) otomatik borçlular
+                        kaybolmasın — tek tıkla geri getirilir. */}
+                    {(() => {
+                      const gizliler = Object.entries(seciliDefter.otoAyar || {}).filter(([, v]) => v?.gizli);
+                      if (!gizliler.length) return null;
+                      return (
+                        <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl border border-dashed border-neutral-300 bg-neutral-50 text-[11px] font-bold text-neutral-500">
+                          <span>{gizliler.length} otomatik borçlu listeden kaldırılmış (kaynak kayıtları duruyor).</span>
+                          <button type="button" onClick={async () => {
+                            if (!window.confirm('Gizlenen tüm otomatik borçlular listeye geri getirilsin mi?')) return;
+                            const yeni = { ...(seciliDefter.otoAyar || {}) };
+                            gizliler.forEach(([id]) => { const { gizli, gizlemeTarihi, gizleyen, ...kalan } = yeni[id]; yeni[id] = kalan; });
+                            try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterler', seciliDefter.id), { otoAyar: yeni }); }
+                            catch (e) { alert('Geri getirilemedi: ' + e.message); }
+                          }} className="px-2.5 py-1 bg-white border border-neutral-300 hover:bg-neutral-100 rounded-lg text-[10px] font-black text-neutral-700">Geri getir</button>
+                        </div>
+                      );
+                    })()}
                     {bekleyenler.map(({ kalem, bilgi, t }, idx) => {
                       const tr2 = alacakTuru(kalem.tur);
                       // YENİ: Blok başlığı — bu satırın türü öncekinden farklıysa bloğun ilk satırıdır
@@ -10586,7 +11077,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                               <div className="font-black tabular-nums whitespace-nowrap text-red-600">₺{paraFmt(t.kalan ?? t.tutar)}</div>
                               {t.kismi && <div className="text-[9px] font-bold text-neutral-400 line-through whitespace-nowrap">₺{paraFmt(t.tutar)}</div>}
                             </div>
-                            <div className="flex items-center gap-1 shrink-0">
+                            <div className="flex items-center justify-end gap-1 shrink-0 sm:min-w-[250px]">
                               <button type="button" onClick={() => setTahsilModal({ kalem, taksit: t, hedefDefterId: '', tarih: bugunStr(), tutar: String(t.kalan ?? t.tutar) })}
                                 className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-lg transition whitespace-nowrap">Tahsil Et</button>
                               {/* DEĞİŞTİ (kullanıcı talebi): "Mevcut Borçlular" görünümü
@@ -10602,14 +11093,12 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                                   title="İcra işaretini kaldır"
                                   className="px-2 py-1.5 bg-white border border-neutral-400 text-neutral-700 hover:bg-neutral-100 text-[10px] font-black rounded-lg transition whitespace-nowrap">İcradan Çıkar</button>
                               )}
-                              {!kalem.otomatik && (
-                                <>
-                                  <button type="button" onClick={() => setAlacakForm({ ...bosAlacakKalemi, ...kalem })}
-                                    className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title="Düzenle"><Edit className="w-3.5 h-3.5" /></button>
-                                  <button type="button" onClick={() => alacakSil(kalem.id)}
-                                    className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title="Borçluyu sil"><Trash2 className="w-3.5 h-3.5" /></button>
-                                </>
-                              )}
+                              {/* DEĞİŞTİ (kullanıcı talebi): Düzenle/Sil artık HER borçluda
+                                  (otomatik dahil) — tüm satırlar aynı hizada. */}
+                              <button type="button" onClick={() => setAlacakForm({ ...bosAlacakKalemi, ...kalem })}
+                                className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition" title={kalem.otomatik ? 'Düzenle (kaynak verinin üzerine yazar)' : 'Düzenle'}><Edit className="w-3.5 h-3.5" /></button>
+                              <button type="button" onClick={() => alacakSil(kalem.id)}
+                                className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition" title={kalem.otomatik ? 'Listeden kaldır (kaynak kayıt korunur)' : 'Borçluyu sil'}><Trash2 className="w-3.5 h-3.5" /></button>
                             </div>
                           </div>
                         </div>
@@ -10751,6 +11240,17 @@ silinmeTarihi: new Date().toISOString()`}</pre>
             modülünden oluşur. Kayıtlar Firestore'da aynen durur; ciro ve
             bakiye hesapları etkilenmez, yalnızca görünüm kaldırıldı. */}
         {seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi' && seciliDefter.tur !== 'Borçlu' && (<>
+        {/* YENİ (kullanıcı talebi): DEKONT EŞLEŞTİR PANELİ — banka ekstresi ↔ sistem */}
+        {dekontAcik && (
+          <DekontEslestirPaneli
+            defter={seciliDefter}
+            islemler={defterIslemleri(seciliDefterId)}
+            jobs={jobs}
+            currentUser={currentUser}
+            addSystemLog={addSystemLog}
+            onKapat={() => setDekontAcik(false)}
+          />
+        )}
         {/* YENİ (kullanıcı talebi): DEFTER DENETİM PANELİ — bakiye farkının kaynağını bulmak için */}
         {denetimAcik && (
           <DefterDenetimPaneli
@@ -12169,7 +12669,16 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                 <div className="p-3 bg-orange-50 border border-orange-200 rounded-xl">
                   <div className="font-black text-orange-900">{vadeOdeme.kalem.ad}</div>
                   <div className="text-[11px] font-bold text-orange-600">
-                    {vadeOdeme.vade.no}. ödeme • Vade: {vadeOdeme.vade.tarih.split('-').reverse().join('.')}
+                    {/* DEĞİŞTİ (kullanıcı talebi): taksitli ödemede "2/8 • 6 taksit kaldı", süresizde "Her Ay" */}
+                    {(() => {
+                      const k = vadeOdeme.kalem || {};
+                      const tekrar = k.tekrar || 'tek';
+                      const toplam = tekrar === 'tek' ? 1 : (parseInt(k.tekrarSayisi) || 0);
+                      if (tekrar === 'tek') return `${vadeOdeme.vade.no}. ödeme (tek seferlik)`;
+                      if (toplam === 0) return `${vadeOdeme.vade.no}. ödeme • ${TEKRAR_SECENEKLERI.find(t => t.id === tekrar)?.ad || 'Tekrarlı'} (süresiz)`;
+                      const kalan = Math.max(0, toplam - vadeOdeme.vade.no);
+                      return `${vadeOdeme.vade.no}. taksit / ${toplam} • ${kalan === 0 ? 'son taksit' : `${kalan} taksit kaldı`}`;
+                    })()} • Vade: {vadeOdeme.vade.tarih.split('-').reverse().join('.')}
                     {vadeOdeme.vade.gecikmis && <span className="text-red-600"> • GECİKMİŞ</span>}
                   </div>
                   {/* YENİ (kullanıcı talebi): Kaleme girilen AÇIKLAMA / NOT ödeme
