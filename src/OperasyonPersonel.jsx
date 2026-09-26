@@ -9012,7 +9012,8 @@ const qrPdfIndir = (qr) => {
 
 // QR matrisini <svg> koduna çevirir. SVG kullanıldığı için kod her ekran
 // boyutunda ve baskıda net görünür, ayrıca hiçbir dış kaynak gerektirmez.
-const qrSvgUret = (deger, kenarModul = 2) => {
+// DEĞİŞTİ: QR Site Takip modülünün de kullanabilmesi için dışa aktarıldı (mantık aynı)
+export const qrSvgUret = (deger, kenarModul = 2) => {
   const q = qrKareKodMatris(deger);
   if (!q) return null;
   const tam = q.boyut + kenarModul * 2; // Sessiz alan (quiet zone) eklenir
@@ -9027,7 +9028,8 @@ const qrSvgUret = (deger, kenarModul = 2) => {
 
 // Küçük yardımcı: seri kodun QR görselini ekranda gösterir.
 // DÜZELTME: Artık CDN beklenmediği için yükleme çemberinde takılı kalmaz.
-const QrGorsel = ({ deger, boyut = 140 }) => {
+// DEĞİŞTİ: QR Site Takip modülünün de kullanabilmesi için dışa aktarıldı (mantık aynı)
+export const QrGorsel = ({ deger, boyut = 140 }) => {
   const svg = useMemo(() => qrSvgUret(deger), [deger]);
   if (!svg) return (
     <div style={{ width: boyut, height: boyut }} className="bg-red-50 border border-red-200 rounded-lg flex items-center justify-center text-center p-2">
