@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe, CreditCard } from 'lucide-react';
-import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
+import { QrCode, Download, Copy, Check, ChevronUp, Sparkles, ExternalLink, Filter, Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe, CreditCard } from 'lucide-react';
+import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs, getDoc, increment, orderBy, limit } from 'firebase/firestore';
 import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul,
   // YENİ: Müşteri Havuzu'nda "Atanan Satışçı" listesini yalnızca Satış Personeli
   // ile sınırlamak için — eski/hatalı pozisyon adlarını da doğru eşler.
   normalizePozisyon,
   // YENİ: Çok günlü iş (1. gün / 2. gün) — profilde tek iş gösterimi ve kapora koruması
   anaIsleriFiltrele, isToplamGun, isToplamArac } from './shared.jsx';
+// YENİ: QR Site Takip bölümü dahili QR üretecini OperasyonPersonel.jsx'ten alır (CDN gerektirmez)
+import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
 
   // ============================================================================
   // YENİ: Ortak Bölüm Başlığı Bileşeni (SectionHeader)
@@ -4885,7 +4887,11 @@ const bugunStr = () => {
 };
 const tl = (n) => `₺${(Number(n) || 0).toLocaleString('tr-TR', { maximumFractionDigits: 0 })}`;
 
-export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog, setViewingImage }) => {
+export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog, setViewingImage,
+  // YENİ (kullanıcı talebi): "QR Site Takip" butonu — App.jsx bu fonksiyonla ilgili sekmeye geçer
+  onQrSiteTakip = null }) => {
+  // YENİ: Yeni (henüz aranmamış) QR taleplerinin sayısı — buton üzerinde rozet olarak görünür
+  const yeniQrTalep = useYeniQrTalepSayisi(!!onQrSiteTakip);
   const [partnerlar, setPartnerlar] = useState([]);
   const [arama, setArama] = useState('');
   const [tipFiltre, setTipFiltre] = useState('Tümü');
@@ -5485,7 +5491,16 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
             <h2 className="text-2xl font-black text-black leading-tight">Saha Portföy</h2>
           </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0 flex-wrap">
+          {/* YENİ (kullanıcı talebi): QR SİTE TAKİP — asansör afişi reklamlarının QR takibi.
+              Yeni talep varsa sayısı sarı rozetle görünür. */}
+          {onQrSiteTakip && (
+            <button type="button" onClick={onQrSiteTakip}
+              className="relative px-4 py-2.5 bg-black hover:bg-neutral-800 text-amber-400 font-black rounded-xl shadow-lg shadow-black/25 transition flex items-center gap-2 text-sm">
+              <QrCode className="w-4 h-4" /> QR Site Takip
+              {yeniQrTalep > 0 && <span className="absolute -top-2 -right-2 min-w-[20px] h-5 px-1.5 bg-amber-400 text-black text-[10px] font-black rounded-full flex items-center justify-center animate-pulse">{yeniQrTalep}</span>}
+            </button>
+          )}
           <button type="button" onClick={() => { setRandevuForm({ ...bosRandevuForm, tarih: rSecilenGun || bugunStr(), atanan: currentUser?.fullName || '' }); setRandevuDuzenlenenId(null); setRandevuFormAcik(true); }}
             className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-xl shadow-lg shadow-indigo-600/25 transition flex items-center gap-2 text-sm">
             <CalendarDays className="w-4 h-4" /> Randevu Ekle
@@ -6231,5 +6246,923 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
         </div>
       )}
     </div>
+  );
+};
+
+// ############################################################################
+// ############################################################################
+// YENİ BÖLÜM (kullanıcı talebi): QR SİTE TAKİP
+// Bu bölüm Satis.jsx içinde yaşar; App.jsx QrSiteTakipView ve QrSiteLanding'i
+// buradan import eder. Bölüme özel yardımcılar dosyanın diğer bölümleriyle
+// çakışmasın diye "qr" önekiyle adlandırılmıştır.
+// ############################################################################
+// ############################################################################
+// AMAÇ: Site / bina / iş yeri / malikane asansörlerine asılan reklam afişine
+// o yere ÖZEL bir QR kod konur. Sakinler QR'ı okutunca giriş gerektirmeyen bir
+// sayfa açılır ve iki seçenek sunulur:
+//   1) HEMEN BİLGİ ALMAK İÇİN DOLDURUN → ad soyad + telefon bırakır; teşekkür
+//      ekranında müşteri temsilcisinin kartı (Ara / WhatsApp) görünür.
+//   2) KEŞİF İÇİN ÇAĞIRIN → adres zaten QR'a gömülüdür; sakin sadece blok /
+//      kat / daire + randevu tarih-saati girer, temsilciyi keşfe çağırır.
+// Yönetim tarafında ise her yer için: kaç kişi QR okuttu, kaç kişi bilgi
+// (arama) istedi, kaç kişi temsilciyi aradı / WhatsApp'tan yazdı, kaç kişi
+// keşif çağırdı — hepsi tek ekranda izlenir; talepler durum takibiyle yönetilir.
+//
+// BÖLÜM YAPISI (modülerlik kuralı):
+//   • Sabitler ve yardımcılar
+//   • useQrSiteler / useQrSiteTalepleri / useYeniQrTalepSayisi (Firestore hook'ları)
+//   • QrSiteForm          → yer ekleme / düzenleme penceresi
+//   • QrKodPaneli         → QR görseli, indirme, bağlantı kopyalama
+//   • QrTalepSatiri       → tek bir talep (lead) satırı
+//   • QrSiteKarti         → yer kartı (istatistik rozetleri)
+//   • QrSiteTakipView     → YÖNETİM EKRANI (App.jsx'ten açılır)
+//   • QrSiteLanding       → HERKESE AÇIK SAYFA (?qr=<yerId> ile açılır)
+//
+// FIRESTORE KOLEKSİYONLARI (artifacts/{appId}/public/data/...):
+//   • qrSiteler        → yerler (ad, tür, adres, temsilci, taramaSayisi ...)
+//   • qrSiteTalepleri  → sakinlerin bıraktığı talepler (bilgi / keşif)
+// ============================================================================
+
+// ============================================================================
+// SABİTLER
+// ============================================================================
+export const QR_SITE_TURLERI = ['Site', 'Bina', 'İş Yeri', 'Malikane', 'Diğer'];
+
+// Talep durum akışı: Yeni → Arandı → Keşif Planlandı → İş Alındı / Alamadık
+export const QR_TALEP_DURUMLARI = ['Yeni', 'Arandı', 'Ulaşılamadı', 'Keşif Planlandı', 'İş Alındı', 'Alamadık'];
+
+// Sakinin seçebileceği hizmet türleri (bilgi formunda, isteğe bağlı)
+export const QR_HIZMETLER = ['Evden Eve Nakliyat', 'Asansörlü Taşıma', 'Depolama', 'Ofis Taşıma', 'Diğer'];
+
+// Randevu saat dilimleri (keşif formu)
+export const QR_RANDEVU_SAATLERI = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
+
+// Durum rozet renkleri (Tailwind)
+const QR_DURUM_STIL = {
+  'Yeni':            'bg-blue-100 text-blue-700 border-blue-200',
+  'Arandı':          'bg-amber-100 text-amber-700 border-amber-200',
+  'Ulaşılamadı':     'bg-neutral-100 text-neutral-600 border-neutral-200',
+  'Keşif Planlandı': 'bg-purple-100 text-purple-700 border-purple-200',
+  'İş Alındı':       'bg-emerald-100 text-emerald-700 border-emerald-200',
+  'Alamadık':        'bg-red-100 text-red-700 border-red-200',
+};
+
+// Tür ikonu
+const QrTurIkonu = ({ tur, className = 'w-4 h-4' }) => {
+  if (tur === 'İş Yeri') return <Briefcase className={className} />;
+  if (tur === 'Malikane') return <Home className={className} />;
+  return <Building2 className={className} />;
+};
+
+// ============================================================================
+// YARDIMCILAR
+// ============================================================================
+const qrBugunStr = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const qrTrh = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso);
+  return d.toLocaleDateString('tr-TR');
+};
+const qrTrhSaat = (iso) => {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (isNaN(d)) return String(iso);
+  return d.toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+// "2026-09-30" → "30.09.2026"
+const qrTarihGoster = (t) => t ? t.split('-').reverse().join('.') : '—';
+
+// Telefonu WhatsApp/tel formatına çevirir (0555... → 90555...)
+export const qrTelefonNormalize = (ham) => {
+  let tel = String(ham || '').replace(/\D/g, '');
+  if (!tel) return '';
+  if (tel.startsWith('0')) tel = '90' + tel.substring(1);
+  else if (!tel.startsWith('90')) tel = '90' + tel;
+  return tel;
+};
+// Basit Türkiye cep telefonu doğrulaması (10-11 hane, 5 ile başlayan)
+const qrTelefonGecerliMi = (ham) => {
+  const tel = String(ham || '').replace(/\D/g, '');
+  const yalın = tel.startsWith('90') ? tel.substring(2) : tel.startsWith('0') ? tel.substring(1) : tel;
+  return yalın.length === 10 && yalın.startsWith('5');
+};
+
+// Sakinin QR ile açacağı herkese açık bağlantı
+export const qrSiteBaglantisi = (siteId) => {
+  if (typeof window === 'undefined') return `?qr=${siteId}`;
+  return `${window.location.origin}${window.location.pathname}?qr=${siteId}`;
+};
+
+// Koleksiyon kısayolları
+const qrSiteKoleksiyonu = () => collection(db, 'artifacts', appId, 'public', 'data', 'qrSiteler');
+const qrTalepKoleksiyonu = () => collection(db, 'artifacts', appId, 'public', 'data', 'qrSiteTalepleri');
+const qrSiteRef = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'qrSiteler', id);
+const qrTalepRef = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'qrSiteTalepleri', id);
+
+// Boş yer formu
+const bosQrSiteForm = {
+  ad: '', tur: 'Site', adres: '', ilce: '', il: 'İstanbul', bloklar: '', temsilciId: '', notlar: '', aktif: true,
+};
+
+// ============================================================================
+// FIRESTORE HOOK'LARI
+// ============================================================================
+// Tüm yerleri canlı dinler (yönetim ekranı)
+export const useQrSiteler = (aktif = true) => {
+  const [siteler, setSiteler] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  useEffect(() => {
+    if (!aktif) return;
+    const unsub = onSnapshot(qrSiteKoleksiyonu(), (snap) => {
+      const liste = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // En yeni yer üstte
+      liste.sort((a, b) => String(b.olusturmaTarihi || '').localeCompare(String(a.olusturmaTarihi || '')));
+      setSiteler(liste);
+      setYukleniyor(false);
+    }, () => setYukleniyor(false));
+    return () => unsub();
+  }, [aktif]);
+  return { siteler, yukleniyor };
+};
+
+// Tüm talepleri canlı dinler (yönetim ekranı). Son 500 kayıtla sınırlı — okuma optimizasyonu.
+export const useQrSiteTalepleri = (aktif = true) => {
+  const [talepler, setTalepler] = useState([]);
+  useEffect(() => {
+    if (!aktif) return;
+    const q = query(qrTalepKoleksiyonu(), orderBy('olusturmaTarihi', 'desc'), limit(500));
+    const unsub = onSnapshot(q, (snap) => {
+      setTalepler(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    }, () => {});
+    return () => unsub();
+  }, [aktif]);
+  return talepler;
+};
+
+// Yalnızca "Yeni" durumundaki talep sayısı — Saha Portföy'deki buton rozeti için
+export const useYeniQrTalepSayisi = (aktif = true) => {
+  const [sayi, setSayi] = useState(0);
+  useEffect(() => {
+    if (!aktif) return;
+    const q = query(qrTalepKoleksiyonu(), where('durum', '==', 'Yeni'));
+    const unsub = onSnapshot(q, (snap) => setSayi(snap.size), () => {});
+    return () => unsub();
+  }, [aktif]);
+  return sayi;
+};
+
+// ============================================================================
+// QR KOD PANELİ — görsel + indirme (SVG/PNG) + bağlantı kopyalama
+// ============================================================================
+export const QrKodPaneli = ({ site, boyut = 160 }) => {
+  const [kopyalandi, setKopyalandi] = useState(false);
+  const baglanti = qrSiteBaglantisi(site.id);
+  const dosyaAdi = `QR_${(site.ad || 'yer').replace(/[^a-zA-Z0-9ğüşıöçĞÜŞİÖÇ]+/g, '_')}`;
+
+  // SVG olarak indir (baskıya en uygun, kalite kaybı olmaz)
+  const svgIndir = () => {
+    const svg = qrSvgUret(baglanti, 4);
+    if (!svg) return;
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${dosyaAdi}.svg`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // PNG olarak indir (tasarımcıya / matbaaya göndermek için 1024px)
+  const pngIndir = () => {
+    const svg = qrSvgUret(baglanti, 4);
+    if (!svg) return;
+    const img = new Image();
+    const blob = new Blob([svg], { type: 'image/svg+xml' });
+    const url = URL.createObjectURL(blob);
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 1024; canvas.height = 1024;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 1024, 1024);
+      ctx.drawImage(img, 0, 0, 1024, 1024);
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png'); a.download = `${dosyaAdi}.png`; a.click();
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  };
+
+  const kopyala = async () => {
+    try { await navigator.clipboard.writeText(baglanti); setKopyalandi(true); setTimeout(() => setKopyalandi(false), 1500); }
+    catch { window.prompt('Bağlantıyı kopyalayın:', baglanti); }
+  };
+
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <div className="p-2 bg-white rounded-xl border-2 border-neutral-200 shadow-sm">
+        <QrGorsel deger={baglanti} boyut={boyut} />
+      </div>
+      <div className="flex flex-wrap justify-center gap-1.5">
+        <button type="button" onClick={pngIndir} className="px-2.5 py-1.5 bg-black hover:bg-neutral-800 text-white text-[10px] font-black rounded-lg flex items-center gap-1 transition"><Download className="w-3 h-3" /> PNG</button>
+        <button type="button" onClick={svgIndir} className="px-2.5 py-1.5 bg-neutral-700 hover:bg-neutral-900 text-white text-[10px] font-black rounded-lg flex items-center gap-1 transition"><Download className="w-3 h-3" /> SVG</button>
+        <button type="button" onClick={kopyala} className="px-2.5 py-1.5 bg-white border border-neutral-300 hover:bg-neutral-50 text-neutral-700 text-[10px] font-black rounded-lg flex items-center gap-1 transition">
+          {kopyalandi ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />} {kopyalandi ? 'Kopyalandı' : 'Bağlantı'}
+        </button>
+        <a href={baglanti} target="_blank" rel="noreferrer" className="px-2.5 py-1.5 bg-white border border-neutral-300 hover:bg-neutral-50 text-neutral-700 text-[10px] font-black rounded-lg flex items-center gap-1 transition"><ExternalLink className="w-3 h-3" /> Önizle</a>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// YER EKLE / DÜZENLE PENCERESİ
+// ============================================================================
+export const QrSiteForm = ({ acik, baslangic, temsilciler = [], onKapat, onKaydet }) => {
+  const [form, setForm] = useState(bosQrSiteForm);
+  const [kaydediliyor, setKaydediliyor] = useState(false);
+  useEffect(() => { if (acik) setForm({ ...bosQrSiteForm, ...(baslangic || {}) }); }, [acik, baslangic]);
+  if (!acik) return null;
+
+  const g = (alan, deger) => setForm(f => ({ ...f, [alan]: deger }));
+  const gonder = async (e) => {
+    e.preventDefault();
+    if (!form.ad.trim()) return alert('Yer adı zorunludur.');
+    if (!form.adres.trim()) return alert('Adres zorunludur — sakin keşif isterken bu adresi görecek.');
+    if (!form.temsilciId) return alert('Bir müşteri temsilcisi seçin — sakin bu kişiyi arayacak.');
+    setKaydediliyor(true);
+    try { await onKaydet(form); } finally { setKaydediliyor(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 animate-in fade-in" onClick={onKapat}>
+      <form onSubmit={gonder} onClick={e => e.stopPropagation()} className="bg-white rounded-2xl w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl">
+        <div className="sticky top-0 bg-black text-white px-5 py-3 flex items-center justify-between rounded-t-2xl">
+          <h3 className="font-black flex items-center gap-2"><QrCode className="w-5 h-5 text-amber-400" /> {form.id ? 'Yeri Düzenle' : 'Yeni Yer + QR Oluştur'}</h3>
+          <button type="button" onClick={onKapat} className="p-1 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-5 space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="col-span-2">
+              <label className="text-[10px] font-black uppercase text-neutral-500">Yer Adı *</label>
+              <input value={form.ad} onChange={e => g('ad', e.target.value)} placeholder="Örn. Ataşehir Park Sitesi" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold focus:border-black outline-none" />
+            </div>
+            <div>
+              <label className="text-[10px] font-black uppercase text-neutral-500">Tür</label>
+              <select value={form.tur} onChange={e => g('tur', e.target.value)} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold bg-white">
+                {QR_SITE_TURLERI.map(t => <option key={t}>{t}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] font-black uppercase text-neutral-500">Açık Adres * <span className="normal-case font-bold text-neutral-400">(sakin keşif formunda bunu görecek)</span></label>
+            <textarea value={form.adres} onChange={e => g('adres', e.target.value)} rows={2} placeholder="Mahalle, cadde, sokak, no…" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold focus:border-black outline-none resize-none" />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-black uppercase text-neutral-500">İlçe</label>
+              <input value={form.ilce} onChange={e => g('ilce', e.target.value)} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold" />
+            </div>
+            <div>
+              <label className="text-[10px] font-black uppercase text-neutral-500">İl</label>
+              <input value={form.il} onChange={e => g('il', e.target.value)} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold" />
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] font-black uppercase text-neutral-500">Bloklar <span className="normal-case font-bold text-neutral-400">(varsa virgülle: A, B, C — sakin listeden seçer)</span></label>
+            <input value={form.bloklar} onChange={e => g('bloklar', e.target.value)} placeholder="A Blok, B Blok" className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold" />
+          </div>
+          <div>
+            <label className="text-[10px] font-black uppercase text-neutral-500">Müşteri Temsilcisi * <span className="normal-case font-bold text-neutral-400">(sakin bu kişiyi arayacak)</span></label>
+            <select value={form.temsilciId} onChange={e => g('temsilciId', e.target.value)} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold bg-white">
+              <option value="">Seçin…</option>
+              {temsilciler.map(p => <option key={p.id} value={p.id}>{p.fullName} {p.position ? `(${p.position})` : ''}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] font-black uppercase text-neutral-500">Notlar (afiş asılma tarihi, kat sayısı vb.)</label>
+            <textarea value={form.notlar} onChange={e => g('notlar', e.target.value)} rows={2} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold resize-none" />
+          </div>
+          <label className="flex items-center gap-2 text-sm font-bold text-neutral-700 cursor-pointer">
+            <input type="checkbox" checked={form.aktif !== false} onChange={e => g('aktif', e.target.checked)} className="w-4 h-4 accent-black" />
+            QR aktif (kapatılırsa sakin "kampanya sona erdi" mesajı görür)
+          </label>
+        </div>
+        <div className="p-4 border-t border-neutral-200 flex justify-end gap-2">
+          <button type="button" onClick={onKapat} className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm">Vazgeç</button>
+          <button type="submit" disabled={kaydediliyor} className="px-5 py-2 bg-black hover:bg-neutral-800 text-white font-black rounded-xl text-sm flex items-center gap-2 disabled:opacity-60">
+            {kaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Kaydet
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+// ============================================================================
+// TALEP SATIRI — tek bir sakin talebi
+// ============================================================================
+export const QrTalepSatiri = ({ talep, onDurum, onSil, onNot }) => {
+  const [notAcik, setNotAcik] = useState(false);
+  const [notMetni, setNotMetni] = useState(talep.yoneticiNotu || '');
+  const tel = qrTelefonNormalize(talep.telefon);
+  const kesif = talep.tur === 'kesif';
+
+  return (
+    <div className={`p-3 rounded-xl border ${kesif ? 'border-purple-200 bg-purple-50/40' : 'border-blue-200 bg-blue-50/40'}`}>
+      <div className="flex flex-col sm:flex-row sm:items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`text-[9px] font-black text-white px-1.5 py-0.5 rounded-full ${kesif ? 'bg-purple-600' : 'bg-blue-600'}`}>{kesif ? 'KEŞİF ÇAĞRISI' : 'BİLGİ TALEBİ'}</span>
+            <span className="font-black text-black text-sm">{talep.adSoyad}</span>
+            <span className="text-xs font-bold text-neutral-500">{talep.telefon}</span>
+            {/* Sakin teşekkür ekranında temsilciyi aradı / WhatsApp'tan yazdı mı? */}
+            {talep.temsilciyiAradi && <span className="text-[9px] font-black bg-emerald-600 text-white px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><Phone className="w-2.5 h-2.5" /> ARADI</span>}
+            {talep.whatsappYazdi && <span className="text-[9px] font-black bg-[#25D366] text-white px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><MessageCircle className="w-2.5 h-2.5" /> WHATSAPP</span>}
+          </div>
+          <div className="text-[11px] font-bold text-neutral-600 mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+            <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> {qrTrhSaat(talep.olusturmaTarihi)}</span>
+            {kesif && (
+              <>
+                {(talep.blok || talep.kat || talep.daire) && (
+                  <span className="flex items-center gap-1"><Home className="w-3 h-3" /> {[talep.blok, talep.kat && `Kat ${talep.kat}`, talep.daire && `Daire ${talep.daire}`].filter(Boolean).join(' • ')}</span>
+                )}
+                <span className="flex items-center gap-1 text-purple-700"><CalendarDays className="w-3 h-3" /> Randevu: {qrTarihGoster(talep.randevuTarihi)} {talep.randevuSaati}</span>
+              </>
+            )}
+            {!kesif && talep.hizmet && <span className="flex items-center gap-1"><Sparkles className="w-3 h-3" /> {talep.hizmet}</span>}
+            {talep.mesaj && <span className="italic text-neutral-500">"{talep.mesaj}"</span>}
+          </div>
+          {talep.yoneticiNotu && !notAcik && <p className="text-[11px] font-bold text-amber-700 mt-1">📝 {talep.yoneticiNotu}</p>}
+          {notAcik && (
+            <div className="flex gap-1 mt-2">
+              <input value={notMetni} onChange={e => setNotMetni(e.target.value)} placeholder="Görüşme notu…" className="flex-1 p-1.5 border border-neutral-300 rounded-lg text-xs font-bold" />
+              <button type="button" onClick={() => { onNot(talep.id, notMetni); setNotAcik(false); }} className="px-2 py-1 bg-black text-white text-[10px] font-black rounded-lg">Kaydet</button>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0 flex-wrap">
+          {/* Durum seçici */}
+          <select value={talep.durum || 'Yeni'} onChange={e => onDurum(talep.id, e.target.value)}
+            className={`text-[10px] font-black px-2 py-1.5 rounded-lg border cursor-pointer ${QR_DURUM_STIL[talep.durum] || QR_DURUM_STIL['Yeni']}`}>
+            {QR_TALEP_DURUMLARI.map(d => <option key={d}>{d}</option>)}
+          </select>
+          {tel && (
+            <>
+              <a href={`tel:+${tel}`} className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg" title="Ara"><Phone className="w-3.5 h-3.5" /></a>
+              <a href={`https://wa.me/${tel}?text=${encodeURIComponent(`Merhaba ${talep.adSoyad}, Sembol Nakliyat'tan arıyorum. Asansörümüzdeki QR üzerinden bıraktığınız ${kesif ? 'keşif' : 'bilgi'} talebiniz için sizinle iletişime geçiyorum. Size nasıl yardımcı olabilirim? 🚚`)}`}
+                target="_blank" rel="noreferrer" className="p-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white rounded-lg" title="WhatsApp"><MessageCircle className="w-3.5 h-3.5" /></a>
+            </>
+          )}
+          <button type="button" onClick={() => setNotAcik(v => !v)} className="p-1.5 text-neutral-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg" title="Not ekle"><Edit className="w-3.5 h-3.5" /></button>
+          <button type="button" onClick={() => onSil(talep.id)} className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Talebi sil"><Trash2 className="w-3.5 h-3.5" /></button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// YER KARTI — istatistik rozetleriyle
+// ============================================================================
+export const QrSiteKarti = ({ site, istatistik, secili, onSec, onDuzenle, onSil }) => {
+  return (
+    <div onClick={onSec} className={`rounded-2xl border-2 p-4 cursor-pointer transition ${secili ? 'border-black bg-neutral-50 shadow-lg' : 'border-neutral-200 bg-white hover:border-neutral-400'} ${site.aktif === false ? 'opacity-60' : ''}`}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="w-8 h-8 rounded-xl bg-black text-amber-400 flex items-center justify-center shrink-0"><QrTurIkonu tur={site.tur} /></span>
+            <div className="min-w-0">
+              <h4 className="font-black text-black text-sm leading-tight truncate">{site.ad}</h4>
+              <p className="text-[10px] font-bold text-neutral-500 truncate">{site.tur} • {[site.ilce, site.il].filter(Boolean).join(' / ')}</p>
+            </div>
+            {site.aktif === false && <span className="text-[9px] font-black bg-neutral-200 text-neutral-600 px-1.5 py-0.5 rounded-full">PASİF</span>}
+          </div>
+          <p className="text-[11px] font-bold text-neutral-600 mt-2 flex items-start gap-1"><MapPin className="w-3 h-3 mt-0.5 shrink-0" /> <span className="line-clamp-2">{site.adres}</span></p>
+          <p className="text-[11px] font-bold text-neutral-500 mt-1 flex items-center gap-1"><Users className="w-3 h-3" /> Temsilci: {site.temsilciAd || '—'}</p>
+        </div>
+        <div className="flex flex-col gap-1 shrink-0">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onDuzenle(); }} className="p-1.5 text-neutral-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Düzenle"><Edit className="w-3.5 h-3.5" /></button>
+          <button type="button" onClick={(e) => { e.stopPropagation(); onSil(); }} className="p-1.5 text-neutral-400 hover:text-red-600 hover:bg-red-50 rounded-lg" title="Sil"><Trash2 className="w-3.5 h-3.5" /></button>
+        </div>
+      </div>
+      {/* İSTATİSTİK ŞERİDİ */}
+      <div className="grid grid-cols-5 gap-1 mt-3">
+        {[
+          { e: 'Okutan', v: site.taramaSayisi || 0, s: 'bg-neutral-900 text-white' },
+          { e: 'Bilgi', v: istatistik.bilgi, s: 'bg-blue-100 text-blue-800' },
+          { e: 'Aradı', v: istatistik.aradi, s: 'bg-emerald-100 text-emerald-800' },
+          { e: 'WhatsApp', v: istatistik.whatsapp, s: 'bg-green-100 text-green-800' },
+          { e: 'Keşif', v: istatistik.kesif, s: 'bg-purple-100 text-purple-800' },
+        ].map(k => (
+          <div key={k.e} className={`rounded-lg px-1 py-1.5 text-center ${k.s}`}>
+            <div className="text-sm font-black leading-none">{k.v}</div>
+            <div className="text-[8px] font-black uppercase mt-0.5 opacity-80">{k.e}</div>
+          </div>
+        ))}
+      </div>
+      {istatistik.yeni > 0 && (
+        <div className="mt-2 text-[10px] font-black text-blue-700 flex items-center gap-1 animate-pulse"><AlertTriangle className="w-3 h-3" /> {istatistik.yeni} yeni talep bekliyor</div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
+// YÖNETİM EKRANI — QR SİTE TAKİP
+// ============================================================================
+export const QrSiteTakipView = ({ personnelList = [], currentUser, addSystemLog, onGeri }) => {
+  const { siteler, yukleniyor } = useQrSiteler(true);
+  const talepler = useQrSiteTalepleri(true);
+  const [formAcik, setFormAcik] = useState(false);
+  const [formBaslangic, setFormBaslangic] = useState(null);
+  const [seciliId, setSeciliId] = useState(null);
+  const [arama, setArama] = useState('');
+  const [durumFiltre, setDurumFiltre] = useState('Tümü');
+  const [turFiltre, setTurFiltre] = useState('Tümü');
+
+  // Müşteri temsilcisi adayları: önce Satış Personeli, yoksa tüm aktif personel
+  const temsilciler = useMemo(() => {
+    const aktif = personnelList.filter(p => p.employmentStatus !== 'Pasif');
+    const satis = aktif.filter(p => normalizePozisyon(p.position) === 'Satış Personeli');
+    return satis.length ? satis : aktif;
+  }, [personnelList]);
+
+  // Yer bazında istatistikler
+  const istatistikler = useMemo(() => {
+    const m = {};
+    siteler.forEach(s => { m[s.id] = { bilgi: 0, kesif: 0, aradi: 0, whatsapp: 0, yeni: 0, isAlindi: 0 }; });
+    talepler.forEach(t => {
+      const i = m[t.siteId]; if (!i) return;
+      if (t.tur === 'kesif') i.kesif++; else i.bilgi++;
+      if (t.temsilciyiAradi) i.aradi++;
+      if (t.whatsappYazdi) i.whatsapp++;
+      if ((t.durum || 'Yeni') === 'Yeni') i.yeni++;
+      if (t.durum === 'İş Alındı') i.isAlindi++;
+    });
+    return m;
+  }, [siteler, talepler]);
+
+  // Genel KPI
+  const kpi = useMemo(() => ({
+    yer: siteler.length,
+    tarama: siteler.reduce((a, s) => a + (s.taramaSayisi || 0), 0),
+    bilgi: talepler.filter(t => t.tur !== 'kesif').length,
+    kesif: talepler.filter(t => t.tur === 'kesif').length,
+    aradi: talepler.filter(t => t.temsilciyiAradi).length,
+    whatsapp: talepler.filter(t => t.whatsappYazdi).length,
+    yeni: talepler.filter(t => (t.durum || 'Yeni') === 'Yeni').length,
+    isAlindi: talepler.filter(t => t.durum === 'İş Alındı').length,
+  }), [siteler, talepler]);
+
+  const gorunenSiteler = useMemo(() => {
+    const a = arama.trim().toLocaleLowerCase('tr-TR');
+    return siteler.filter(s => (turFiltre === 'Tümü' || s.tur === turFiltre) &&
+      (!a || [s.ad, s.adres, s.ilce, s.il, s.temsilciAd].some(x => String(x || '').toLocaleLowerCase('tr-TR').includes(a))));
+  }, [siteler, arama, turFiltre]);
+
+  const seciliSite = siteler.find(s => s.id === seciliId) || null;
+  const seciliTalepler = useMemo(() => talepler
+    .filter(t => t.siteId === seciliId && (durumFiltre === 'Tümü' || (t.durum || 'Yeni') === durumFiltre)), [talepler, seciliId, durumFiltre]);
+
+  // ---- İşlemler
+  const siteKaydet = async (form) => {
+    const temsilci = personnelList.find(p => String(p.id) === String(form.temsilciId));
+    const veri = {
+      ad: form.ad.trim(), tur: form.tur, adres: form.adres.trim(), ilce: form.ilce.trim(), il: form.il.trim(),
+      bloklar: form.bloklar.trim(), notlar: form.notlar.trim(), aktif: form.aktif !== false,
+      temsilciId: form.temsilciId, temsilciAd: temsilci?.fullName || '',
+      // Temsilcinin telefonu sakine gösterilir — şirket telefonu öncelikli
+      temsilciTel: temsilci?.companyPhone || temsilci?.personalPhone || '',
+      guncellemeTarihi: new Date().toISOString(),
+    };
+    try {
+      if (form.id) {
+        await updateDoc(qrSiteRef(form.id), veri);
+        addSystemLog?.('QR Site Takip', `"${veri.ad}" yeri güncellendi.`);
+      } else {
+        const ref = await addDoc(qrSiteKoleksiyonu(), { ...veri, taramaSayisi: 0, olusturmaTarihi: new Date().toISOString(), olusturanId: currentUser?.id || null, olusturanAd: currentUser?.fullName || '' });
+        addSystemLog?.('QR Site Takip', `"${veri.ad}" için yeni QR oluşturuldu (temsilci: ${veri.temsilciAd}).`);
+        setSeciliId(ref.id);
+      }
+      setFormAcik(false);
+    } catch (e) { console.error(e); alert('Kaydedilemedi: ' + e.message); }
+  };
+  const siteSil = async (site) => {
+    const adet = talepler.filter(t => t.siteId === site.id).length;
+    if (!window.confirm(`"${site.ad}" silinsin mi?${adet ? ` Bu yere ait ${adet} talep kaydı da listeden düşer.` : ''} Asılı afişteki QR artık çalışmaz.`)) return;
+    try { await deleteDoc(qrSiteRef(site.id)); if (seciliId === site.id) setSeciliId(null); addSystemLog?.('QR Site Takip', `"${site.ad}" yeri silindi.`); }
+    catch (e) { alert('Silinemedi: ' + e.message); }
+  };
+  const talepDurum = async (id, durum) => {
+    try { await updateDoc(qrTalepRef(id), { durum, durumGuncelleyen: currentUser?.fullName || '', durumTarihi: new Date().toISOString() }); }
+    catch (e) { alert('Güncellenemedi: ' + e.message); }
+  };
+  const talepNot = async (id, not) => {
+    try { await updateDoc(qrTalepRef(id), { yoneticiNotu: not }); } catch (e) { alert('Kaydedilemedi: ' + e.message); }
+  };
+  const talepSil = async (id) => {
+    if (!window.confirm('Bu talep silinsin mi?')) return;
+    try { await deleteDoc(qrTalepRef(id)); } catch (e) { alert('Silinemedi: ' + e.message); }
+  };
+
+  return (
+    <div className="space-y-4 animate-in fade-in">
+      {/* BAŞLIK */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div className="flex items-center gap-3">
+          {onGeri && <button type="button" onClick={onGeri} className="p-2 bg-white border border-neutral-200 hover:bg-neutral-100 rounded-xl" title="Saha Portföy'e dön"><ChevronLeft className="w-5 h-5" /></button>}
+          <span className="w-12 h-12 rounded-2xl bg-black text-amber-400 flex items-center justify-center shadow-lg shrink-0"><QrCode className="w-6 h-6" /></span>
+          <div>
+            <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Asansör Afişi Reklam Takibi</p>
+            <h2 className="text-2xl font-black text-black leading-tight">QR Site Takip</h2>
+          </div>
+        </div>
+        <button type="button" onClick={() => { setFormBaslangic(null); setFormAcik(true); }}
+          className="px-4 py-2.5 bg-black hover:bg-neutral-800 text-white font-black rounded-xl shadow-lg transition flex items-center gap-2 text-sm">
+          <PlusCircle className="w-4 h-4" /> Yeni Yer + QR Oluştur
+        </button>
+      </div>
+
+      {/* KPI ŞERİDİ */}
+      <div className="bg-neutral-900 text-white rounded-2xl p-3 grid grid-cols-4 md:grid-cols-8 gap-2">
+        {[
+          { e: 'Yer', v: kpi.yer, i: Building2 }, { e: 'QR Okutan', v: kpi.tarama, i: QrCode },
+          { e: 'Bilgi Talebi', v: kpi.bilgi, i: Phone }, { e: 'Keşif Çağrısı', v: kpi.kesif, i: CalendarDays },
+          { e: 'Temsilciyi Aradı', v: kpi.aradi, i: Phone }, { e: "WhatsApp'tan Yazdı", v: kpi.whatsapp, i: MessageCircle },
+          { e: 'Yeni Bekleyen', v: kpi.yeni, i: AlertTriangle, vurgu: kpi.yeni > 0 }, { e: 'İş Alındı', v: kpi.isAlindi, i: Star },
+        ].map(k => (
+          <div key={k.e} className={`rounded-xl p-2 text-center ${k.vurgu ? 'bg-blue-600' : 'bg-white/5'}`}>
+            <div className="text-xl font-black tabular-nums leading-none">{k.v}</div>
+            <div className="text-[8px] font-black uppercase text-white/60 mt-1 leading-tight">{k.e}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* NASIL ÇALIŞIR — kısa bilgi */}
+      {siteler.length === 0 && !yukleniyor && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-sm font-bold text-amber-900">
+          <p className="font-black mb-1">Nasıl çalışır?</p>
+          <ol className="list-decimal ml-5 space-y-0.5 text-[13px]">
+            <li>"Yeni Yer + QR Oluştur" ile siteyi/binayı, adresini ve müşteri temsilcisini kaydedin.</li>
+            <li>Oluşan QR'ı PNG/SVG indirip afişe yerleştirin, asansöre asın.</li>
+            <li>Sakin QR'ı okutunca giriş gerektirmeyen sayfa açılır: "Hemen Bilgi Al" veya "Keşif İçin Çağırın".</li>
+            <li>Talepler anında burada belirir; temsilci arar, durumu günceller, sonucu takip edersiniz.</li>
+          </ol>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        {/* SOL: YER LİSTESİ */}
+        <div className="lg:col-span-2 space-y-2">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+              <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Yer, adres, temsilci ara…" className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm font-bold focus:border-black outline-none" />
+            </div>
+            <select value={turFiltre} onChange={e => setTurFiltre(e.target.value)} className="px-3 py-2.5 border border-neutral-300 rounded-xl text-xs font-black bg-white">
+              <option>Tümü</option>{QR_SITE_TURLERI.map(t => <option key={t}>{t}</option>)}
+            </select>
+          </div>
+          {yukleniyor && <div className="text-center py-8 text-neutral-400"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div>}
+          {!yukleniyor && gorunenSiteler.length === 0 && <div className="text-center py-8 text-xs font-bold text-neutral-400">Henüz yer eklenmemiş.</div>}
+          {gorunenSiteler.map(s => (
+            <QrSiteKarti key={s.id} site={s} istatistik={istatistikler[s.id] || { bilgi: 0, kesif: 0, aradi: 0, whatsapp: 0, yeni: 0 }}
+              secili={seciliId === s.id} onSec={() => setSeciliId(s.id)}
+              onDuzenle={() => { setFormBaslangic(s); setFormAcik(true); }} onSil={() => siteSil(s)} />
+          ))}
+        </div>
+
+        {/* SAĞ: SEÇİLİ YER DETAYI */}
+        <div className="lg:col-span-3">
+          {!seciliSite ? (
+            <div className="bg-white rounded-2xl border border-neutral-200 p-10 text-center text-sm font-bold text-neutral-400 flex flex-col items-center gap-2">
+              <Eye className="w-8 h-8" /> Soldan bir yer seçin: QR kodu, bağlantısı ve gelen talepler burada görünür.
+            </div>
+          ) : (
+            <div className="bg-white rounded-2xl border border-neutral-200 overflow-hidden">
+              <div className="bg-black text-white p-4 flex flex-col sm:flex-row gap-4">
+                <QrKodPaneli site={seciliSite} boyut={150} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2"><QrTurIkonu tur={seciliSite.tur} className="w-5 h-5 text-amber-400" /><h3 className="font-black text-lg leading-tight">{seciliSite.ad}</h3></div>
+                  <p className="text-xs font-bold text-white/70 mt-1 flex items-start gap-1"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0" /> {seciliSite.adres}{seciliSite.ilce ? `, ${seciliSite.ilce}` : ''}{seciliSite.il ? ` / ${seciliSite.il}` : ''}</p>
+                  {seciliSite.bloklar && <p className="text-xs font-bold text-white/70 mt-1">Bloklar: {seciliSite.bloklar}</p>}
+                  <div className="mt-3 bg-white/10 rounded-xl p-2.5">
+                    <p className="text-[9px] font-black uppercase text-amber-400">Müşteri Temsilcisi</p>
+                    <p className="font-black text-sm">{seciliSite.temsilciAd || '—'}</p>
+                    <p className="text-xs font-bold text-white/70">{seciliSite.temsilciTel || 'Telefon girilmemiş'}</p>
+                  </div>
+                  <p className="text-[10px] font-bold text-white/50 mt-2">Oluşturma: {qrTrh(seciliSite.olusturmaTarihi)} • Son okutma: {seciliSite.sonTarama ? qrTrhSaat(seciliSite.sonTarama) : '—'}</p>
+                  {seciliSite.notlar && <p className="text-[11px] font-bold text-white/60 mt-1 italic">{seciliSite.notlar}</p>}
+                </div>
+              </div>
+
+              {/* TALEPLER */}
+              <div className="p-4">
+                <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+                  <h4 className="font-black text-black flex items-center gap-2"><ClipboardList className="w-4 h-4" /> Gelen Talepler <span className="text-xs font-bold text-neutral-400">({seciliTalepler.length})</span></h4>
+                  <div className="flex items-center gap-1">
+                    <Filter className="w-3.5 h-3.5 text-neutral-400" />
+                    <select value={durumFiltre} onChange={e => setDurumFiltre(e.target.value)} className="px-2 py-1.5 border border-neutral-300 rounded-lg text-[11px] font-black bg-white">
+                      <option>Tümü</option>{QR_TALEP_DURUMLARI.map(d => <option key={d}>{d}</option>)}
+                    </select>
+                  </div>
+                </div>
+                {seciliTalepler.length === 0 ? (
+                  <div className="text-center py-8 text-xs font-bold text-neutral-400">Bu yerden henüz talep gelmedi. Afiş asıldıysa okutmalar "Okutan" sayacında birikir.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {seciliTalepler.map(t => <QrTalepSatiri key={t.id} talep={t} onDurum={talepDurum} onSil={talepSil} onNot={talepNot} />)}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <QrSiteForm acik={formAcik} baslangic={formBaslangic} temsilciler={temsilciler} onKapat={() => setFormAcik(false)} onKaydet={siteKaydet} />
+    </div>
+  );
+};
+
+// ============================================================================
+// HERKESE AÇIK SAYFA — sakinin QR ile açtığı ekran (giriş gerekmez)
+// ============================================================================
+// App.jsx, URL'de ?qr=<yerId> görünce giriş ekranı yerine bunu çizer.
+// firebaseUser: anonim oturum (App'te otomatik açılır) — yazma işlemleri
+// için beklenir; oturum hazır olmadan form gönderilmez.
+// ============================================================================
+// Herkese açık sayfanın siyah-altın markalı çerçevesi (afiş diliyle uyumlu).
+// ÖNEMLİ: Dosya seviyesinde tanımlıdır; bileşen içinde tanımlanan bir alt
+// bileşen React tarafından her render'da "yeni" sayılır ve içindeki form
+// alanları her tuş vuruşunda yeniden kurulup odağı kaybederdi.
+const QrLandingKabuk = ({ children }) => (
+  <div className="min-h-screen bg-black text-white flex flex-col" style={{ background: 'radial-gradient(ellipse at top, #1f1a10 0%, #000 60%)' }}>
+    <header className="px-5 pt-8 pb-4 text-center">
+      <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl border-2 border-amber-500/60 bg-black mb-3 shadow-lg shadow-amber-500/20">
+        <span className="text-2xl font-black text-amber-400">S</span>
+      </div>
+      <h1 className="text-2xl font-black tracking-wide text-amber-400">SEMBOL NAKLİYAT</h1>
+      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-white/60 mt-1">Evden Eve • Asansörlü Taşıma • Depolama</p>
+    </header>
+    <main className="flex-1 px-4 pb-10 max-w-md w-full mx-auto">{children}</main>
+    <footer className="text-center text-[10px] font-bold text-white/40 pb-6 tracking-widest uppercase">Lüks yaşamın taşınma güvencesi</footer>
+  </div>
+);
+
+export const QrSiteLanding = ({ siteId, firebaseUser }) => {
+  const [site, setSite] = useState(null);
+  const [durum, setDurum] = useState('yukleniyor'); // yukleniyor | hazir | yok | pasif
+  const [secim, setSecim] = useState(null);           // null | 'bilgi' | 'kesif'
+  const [form, setForm] = useState({ adSoyad: '', telefon: '', hizmet: '', blok: '', kat: '', daire: '', randevuTarihi: '', randevuSaati: '', mesaj: '' });
+  const [gonderiliyor, setGonderiliyor] = useState(false);
+  const [tamamlandi, setTamamlandi] = useState(null); // { talepId, tur }
+  const [hata, setHata] = useState('');
+
+  // 1) Yer bilgisini yükle + tarama sayacını artır (aynı tarayıcı oturumunda bir kez)
+  useEffect(() => {
+    if (!siteId || !firebaseUser) return;
+    let iptal = false;
+    (async () => {
+      try {
+        const snap = await getDoc(qrSiteRef(siteId));
+        if (iptal) return;
+        if (!snap.exists()) { setDurum('yok'); return; }
+        const veri = { id: snap.id, ...snap.data() };
+        setSite(veri);
+        if (veri.aktif === false) { setDurum('pasif'); return; }
+        setDurum('hazir');
+        // Tarama sayacı: sayfa yenilemede tekrar saymasın diye sessionStorage
+        try {
+          const anahtar = `qrTarandi_${siteId}`;
+          if (!sessionStorage.getItem(anahtar)) {
+            await updateDoc(qrSiteRef(siteId), { taramaSayisi: increment(1), sonTarama: new Date().toISOString() });
+            sessionStorage.setItem(anahtar, '1');
+          }
+        } catch { /* sayaç artmasa da sayfa çalışsın */ }
+      } catch (e) { if (!iptal) setDurum('yok'); }
+    })();
+    return () => { iptal = true; };
+  }, [siteId, firebaseUser]);
+
+  const g = (alan, deger) => setForm(f => ({ ...f, [alan]: deger }));
+  const bloklar = (site?.bloklar || '').split(',').map(s => s.trim()).filter(Boolean);
+  const temsilciTel = qrTelefonNormalize(site?.temsilciTel);
+
+  // 2) Form gönder → qrSiteTalepleri'ne kayıt
+  const gonder = async (e) => {
+    e.preventDefault();
+    setHata('');
+    if (!form.adSoyad.trim()) return setHata('Lütfen adınızı ve soyadınızı yazın.');
+    if (!qrTelefonGecerliMi(form.telefon)) return setHata('Lütfen geçerli bir cep telefonu yazın (05XX XXX XX XX).');
+    if (secim === 'kesif') {
+      if (!form.randevuTarihi) return setHata('Lütfen keşif için bir tarih seçin.');
+      if (form.randevuTarihi < qrBugunStr()) return setHata('Geçmiş bir tarih seçilemez.');
+      if (!form.randevuSaati) return setHata('Lütfen bir saat seçin.');
+    }
+    setGonderiliyor(true);
+    try {
+      const ref = await addDoc(qrTalepKoleksiyonu(), {
+        siteId: site.id, siteAd: site.ad, siteAdres: site.adres,
+        tur: secim, adSoyad: form.adSoyad.trim(), telefon: form.telefon.trim(),
+        hizmet: secim === 'bilgi' ? form.hizmet : '',
+        blok: secim === 'kesif' ? form.blok : '', kat: secim === 'kesif' ? form.kat : '', daire: secim === 'kesif' ? form.daire : '',
+        randevuTarihi: secim === 'kesif' ? form.randevuTarihi : '', randevuSaati: secim === 'kesif' ? form.randevuSaati : '',
+        mesaj: form.mesaj.trim(),
+        temsilciId: site.temsilciId || '', temsilciAd: site.temsilciAd || '',
+        durum: 'Yeni', temsilciyiAradi: false, whatsappYazdi: false,
+        olusturmaTarihi: new Date().toISOString(),
+      });
+      setTamamlandi({ talepId: ref.id, tur: secim });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) { setHata('Gönderilemedi, lütfen tekrar deneyin. ' + (err?.message || '')); }
+    finally { setGonderiliyor(false); }
+  };
+
+  // 3) Teşekkür ekranındaki Ara / WhatsApp tıklamalarını talebe işle (istatistik)
+  const iletisimIsle = async (alan) => {
+    if (!tamamlandi?.talepId) return;
+    try { await updateDoc(qrTalepRef(tamamlandi.talepId), { [alan]: true, [`${alan}Zamani`]: new Date().toISOString() }); } catch { /* sessiz */ }
+  };
+
+  // Çerçeve bileşeni dosya seviyesinde tanımlıdır (QrLandingKabuk) — bileşen
+  // içinde tanımlansaydı her render'da yeniden kurulup form odağını düşürürdü.
+  const Kabuk = QrLandingKabuk;
+
+  if (!firebaseUser || durum === 'yukleniyor') return <Kabuk><div className="text-center py-16"><Loader2 className="w-8 h-8 animate-spin mx-auto text-amber-400" /><p className="text-xs font-bold text-white/60 mt-3">Hazırlanıyor…</p></div></Kabuk>;
+  if (durum === 'yok') return <Kabuk><div className="bg-white/5 border border-white/10 rounded-2xl p-6 text-center"><AlertTriangle className="w-10 h-10 mx-auto text-amber-400 mb-2" /><p className="font-black">Bu QR kod tanınmadı</p><p className="text-xs font-bold text-white/60 mt-1">Bize <a href="tel:+905547261661" className="text-amber-400 underline">0554 726 16 61</a> numarasından ulaşabilirsiniz.</p></div></Kabuk>;
+  if (durum === 'pasif') return <Kabuk><div className="bg-white/5 border border-white/10 rounded-2xl p-6 text-center"><p className="font-black">Bu kampanya sona erdi</p><p className="text-xs font-bold text-white/60 mt-1">Yine de size yardımcı olmaktan mutluluk duyarız: <a href="tel:+905547261661" className="text-amber-400 underline">0554 726 16 61</a></p></div></Kabuk>;
+
+  // ---------------------------------------------------------------- TEŞEKKÜR EKRANI
+  if (tamamlandi) {
+    const kesif = tamamlandi.tur === 'kesif';
+    return (
+      <Kabuk>
+        <div className="bg-white text-black rounded-3xl p-6 text-center shadow-2xl animate-in zoom-in-95">
+          <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3"><Check className="w-8 h-8" /></div>
+          <h2 className="text-xl font-black">Teşekkürler, {form.adSoyad.split(' ')[0]}! 🎉</h2>
+          {kesif ? (
+            <p className="text-sm font-bold text-neutral-600 mt-2">
+              <b>{qrTarihGoster(form.randevuTarihi)} — {form.randevuSaati}</b> için keşif talebiniz alındı. Müşteri temsilciniz sizi arayarak randevuyu teyit edecek ve belirttiğiniz saatte ücretsiz keşfe gelecek.
+            </p>
+          ) : (
+            <p className="text-sm font-bold text-neutral-600 mt-2">Bilgileriniz saha personelimize iletildi; en kısa sürede sizi arayarak dönüş yapılacaktır.</p>
+          )}
+          {/* TEMSİLCİ KARTI */}
+          <div className="mt-5 bg-neutral-50 border border-neutral-200 rounded-2xl p-4">
+            <p className="text-[10px] font-black uppercase tracking-widest text-neutral-500">Size özel müşteri temsilciniz</p>
+            <p className="text-lg font-black mt-1">{site.temsilciAd || 'Sembol Nakliyat'}</p>
+            {site.temsilciTel && <p className="text-sm font-bold text-neutral-600">{site.temsilciTel}</p>}
+            <p className="text-xs font-bold text-neutral-500 mt-2">Beklemek istemiyorsanız hemen ulaşabilirsiniz:</p>
+            <div className="grid grid-cols-2 gap-2 mt-3">
+              <a href={temsilciTel ? `tel:+${temsilciTel}` : 'tel:+905547261661'} onClick={() => iletisimIsle('temsilciyiAradi')}
+                className="py-3 bg-black hover:bg-neutral-800 text-white font-black rounded-xl flex items-center justify-center gap-2 text-sm"><Phone className="w-4 h-4" /> Hemen Ara</a>
+              <a href={`https://wa.me/${temsilciTel || '905547261661'}?text=${encodeURIComponent(`Merhaba, ${site.ad} asansöründeki QR üzerinden ulaşıyorum. ${kesif ? 'Keşif talebi bıraktım' : 'Bilgi almak istiyorum'}. Ben ${form.adSoyad}.`)}`}
+                target="_blank" rel="noreferrer" onClick={() => iletisimIsle('whatsappYazdi')}
+                className="py-3 bg-[#25D366] hover:bg-[#128C7E] text-white font-black rounded-xl flex items-center justify-center gap-2 text-sm"><MessageCircle className="w-4 h-4" /> WhatsApp</a>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-4 gap-1 text-[9px] font-black uppercase text-neutral-500">
+            {['Profesyonel Ekip', 'Özel Ambalaj', 'Sigortalı Taşıma', 'Güvenli Depolama'].map(x => <div key={x} className="bg-neutral-100 rounded-lg py-2 px-1">{x}</div>)}
+          </div>
+        </div>
+      </Kabuk>
+    );
+  }
+
+  // ---------------------------------------------------------------- SEÇİM EKRANI
+  if (!secim) {
+    return (
+      <Kabuk>
+        {/* Nereden okutuldu */}
+        <div className="bg-white/5 border border-amber-500/30 rounded-2xl p-4 mb-5 flex items-start gap-3">
+          <span className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0"><QrTurIkonu tur={site.tur} className="w-5 h-5" /></span>
+          <div className="min-w-0">
+            <p className="text-[9px] font-black uppercase tracking-widest text-amber-400">Size özel ayrıcalıklı teklif</p>
+            <p className="font-black text-white leading-tight">{site.ad}</p>
+            <p className="text-[11px] font-bold text-white/60 mt-0.5">{site.adres}</p>
+          </div>
+        </div>
+        <h2 className="text-center text-lg font-black mb-1">Size nasıl yardımcı olalım?</h2>
+        <p className="text-center text-xs font-bold text-white/60 mb-5">İki seçenekten birini seçin, 30 saniyede tamamlanır.</p>
+        <div className="space-y-3">
+          <button type="button" onClick={() => setSecim('bilgi')} className="w-full text-left bg-white text-black rounded-2xl p-5 shadow-xl hover:scale-[1.02] transition flex items-center gap-4">
+            <span className="w-14 h-14 rounded-2xl bg-black text-amber-400 flex items-center justify-center shrink-0"><Phone className="w-7 h-7" /></span>
+            <div>
+              <p className="font-black text-base leading-tight">Hemen Bilgi Almak İçin Doldurun</p>
+              <p className="text-xs font-bold text-neutral-500 mt-1">Ad ve telefonunuzu bırakın, saha personelimiz sizi arasın.</p>
+            </div>
+            <ChevronDown className="w-5 h-5 -rotate-90 ml-auto text-neutral-400" />
+          </button>
+          <button type="button" onClick={() => setSecim('kesif')} className="w-full text-left bg-gradient-to-br from-amber-400 to-amber-600 text-black rounded-2xl p-5 shadow-xl shadow-amber-500/30 hover:scale-[1.02] transition flex items-center gap-4">
+            <span className="w-14 h-14 rounded-2xl bg-black text-amber-400 flex items-center justify-center shrink-0"><CalendarDays className="w-7 h-7" /></span>
+            <div>
+              <p className="font-black text-base leading-tight">Keşif İçin Çağırın</p>
+              <p className="text-xs font-bold text-black/70 mt-1">Ücretsiz keşif için gün ve saat seçin, temsilcimiz kapınıza gelsin.</p>
+            </div>
+            <ChevronDown className="w-5 h-5 -rotate-90 ml-auto text-black/50" />
+          </button>
+        </div>
+        <div className="mt-6 grid grid-cols-4 gap-1 text-[9px] font-black uppercase text-white/60 text-center">
+          {['Profesyonel Ekip', 'Özel Ambalajlama', 'Sigortalı Taşıma', 'Güvenli Depolama'].map(x => <div key={x} className="border border-white/10 rounded-lg py-2 px-1">{x}</div>)}
+        </div>
+        <p className="text-center text-xs font-bold text-white/50 mt-5">veya doğrudan arayın: <a href="tel:+905547261661" className="text-amber-400 font-black">0554 726 16 61</a></p>
+      </Kabuk>
+    );
+  }
+
+  // ---------------------------------------------------------------- FORM EKRANI
+  const kesif = secim === 'kesif';
+  return (
+    <Kabuk>
+      <button type="button" onClick={() => { setSecim(null); setHata(''); }} className="text-xs font-black text-white/60 hover:text-white flex items-center gap-1 mb-3"><ChevronLeft className="w-4 h-4" /> Geri</button>
+      <form onSubmit={gonder} className="bg-white text-black rounded-3xl p-5 shadow-2xl space-y-3 animate-in slide-in-from-bottom-4">
+        <div className="flex items-center gap-3">
+          <span className={`w-11 h-11 rounded-xl flex items-center justify-center shrink-0 ${kesif ? 'bg-amber-500 text-black' : 'bg-black text-amber-400'}`}>{kesif ? <CalendarDays className="w-5 h-5" /> : <Phone className="w-5 h-5" />}</span>
+          <div>
+            <h2 className="font-black text-base leading-tight">{kesif ? 'Keşif İçin Çağırın' : 'Hemen Bilgi Alın'}</h2>
+            <p className="text-[11px] font-bold text-neutral-500">{kesif ? 'Ücretsiz keşif — temsilcimiz adresinize gelir' : 'Saha personelimiz sizi hemen arar'}</p>
+          </div>
+        </div>
+
+        {/* Keşif: adres zaten biliniyor — sakin görür, değiştiremez */}
+        {kesif && (
+          <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+            <p className="text-[9px] font-black uppercase text-neutral-500 flex items-center gap-1"><MapPin className="w-3 h-3" /> Keşif adresi (QR'ı okuttuğunuz yer)</p>
+            <p className="text-sm font-black mt-0.5">{site.ad}</p>
+            <p className="text-xs font-bold text-neutral-600">{site.adres}</p>
+          </div>
+        )}
+
+        <div>
+          <label className="text-[10px] font-black uppercase text-neutral-500">Ad Soyad *</label>
+          <input value={form.adSoyad} onChange={e => g('adSoyad', e.target.value)} placeholder="Adınız Soyadınız" className="w-full p-3 border-2 border-neutral-200 rounded-xl text-sm font-bold focus:border-black outline-none" />
+        </div>
+        <div>
+          <label className="text-[10px] font-black uppercase text-neutral-500">Cep Telefonu *</label>
+          <input value={form.telefon} onChange={e => g('telefon', e.target.value)} type="tel" inputMode="tel" placeholder="05XX XXX XX XX" className="w-full p-3 border-2 border-neutral-200 rounded-xl text-sm font-bold focus:border-black outline-none" />
+        </div>
+
+        {!kesif && (
+          <div>
+            <label className="text-[10px] font-black uppercase text-neutral-500">Hangi hizmetle ilgileniyorsunuz? (isteğe bağlı)</label>
+            <select value={form.hizmet} onChange={e => g('hizmet', e.target.value)} className="w-full p-3 border-2 border-neutral-200 rounded-xl text-sm font-bold bg-white">
+              <option value="">Seçin…</option>{QR_HIZMETLER.map(h => <option key={h}>{h}</option>)}
+            </select>
+          </div>
+        )}
+
+        {kesif && (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="text-[10px] font-black uppercase text-neutral-500">Blok</label>
+                {bloklar.length > 0 ? (
+                  <select value={form.blok} onChange={e => g('blok', e.target.value)} className="w-full p-3 border-2 border-neutral-200 rounded-xl text-sm font-bold bg-white">
+                    <option value="">—</option>{bloklar.map(b => <option key={b}>{b}</option>)}
+                  </select>
+                ) : (
+                  <input value={form.blok} onChange={e => g('blok', e.target.value)} placeholder="A" className="w-full p-3 border-2 border-neutral-200 rounded-xl text-sm font-bold" />
+                )}
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-neutral-500">Kat</label>
+                <input value={form.kat} onChange={e => g('kat', e.target.value)} inputMode="numeric" placeholder="5" className="w-full p-3 border-2 border-neutral-200 rounded-xl text-sm font-bold" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-neutral-500">Daire</label>
+                <input value={form.daire} onChange={e => g('daire', e.target.value)} inputMode="numeric" placeholder="12" className="w-full p-3 border-2 border-neutral-200 rounded-xl text-sm font-bold" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-[10px] font-black uppercase text-neutral-500">Keşif Tarihi *</label>
+                <input type="date" min={qrBugunStr()} value={form.randevuTarihi} onChange={e => g('randevuTarihi', e.target.value)} className="w-full p-3 border-2 border-neutral-200 rounded-xl text-sm font-bold bg-white" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black uppercase text-neutral-500">Saat *</label>
+                <select value={form.randevuSaati} onChange={e => g('randevuSaati', e.target.value)} className="w-full p-3 border-2 border-neutral-200 rounded-xl text-sm font-bold bg-white">
+                  <option value="">Seçin…</option>{QR_RANDEVU_SAATLERI.map(s => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+          </>
+        )}
+
+        <div>
+          <label className="text-[10px] font-black uppercase text-neutral-500">Not (isteğe bağlı)</label>
+          <textarea value={form.mesaj} onChange={e => g('mesaj', e.target.value)} rows={2} placeholder={kesif ? 'Örn. 3+1 daire, piyano var' : 'Örn. Ekim başında taşınmayı planlıyoruz'} className="w-full p-3 border-2 border-neutral-200 rounded-xl text-sm font-bold resize-none" />
+        </div>
+
+        {hata && <p className="text-xs font-black text-red-600 bg-red-50 border border-red-200 rounded-xl p-2.5 flex items-center gap-2"><AlertTriangle className="w-4 h-4 shrink-0" /> {hata}</p>}
+
+        <button type="submit" disabled={gonderiliyor} className={`w-full py-3.5 font-black rounded-xl flex items-center justify-center gap-2 text-sm transition disabled:opacity-60 ${kesif ? 'bg-amber-500 hover:bg-amber-600 text-black' : 'bg-black hover:bg-neutral-800 text-white'}`}>
+          {gonderiliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />} {kesif ? 'Temsilciyi Keşfe Çağır' : 'Beni Arayın'}
+        </button>
+        <p className="text-[10px] font-bold text-neutral-400 text-center">Bilgileriniz yalnızca sizinle iletişim kurmak için kullanılır.</p>
+      </form>
+    </Kabuk>
   );
 };
