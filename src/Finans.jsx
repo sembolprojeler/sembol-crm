@@ -5316,8 +5316,24 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     // DEĞİŞTİ (kullanıcı talebi): KAPORA kayıtları mükerrer taramasına GİRMEZ —
     // aynı iş için birden fazla kapora (farklı tarih/tutar) olağan bir durumdur.
     const kaporaMi = (i) => !!i.kaporaKaynakId || /kapora/i.test(i.kaynak || '') || /kapora/i.test(i.kategori || '');
+    // ======================================================================
+    // HATA DÜZELTMESİ (kullanıcı bildirimi): "Böyle mükerrer yok" — örn.
+    // 26.08.2026 tarihli TQDEB4 ×8. Bu kayıtlar 1 Eylül DEVİR TARİHİNDEN ÖNCE;
+    // bakiyeye zaten dahil değiller ve hiçbir dekont o ayı kapsamıyor
+    // ("Dekontta 0 hareket"). Karar verilecek banka verisi yokken bunları
+    // mükerrer diye göstermek yanlış alarmdı.
+    // YENİ KURALLAR — bir kayıt mükerrer taramasına ancak şu koşullarda girer:
+    //   1) Bakiyeye dahil (hesabaKatilir: silinmemiş, devir sonrası)
+    //   2) Tarihinin ayı için dekont YÜKLENMİŞ
+    //   3) Dekontta o hareketten EN AZ 1 tane var ve sistemdeki kayıt sayısı
+    //      dekonttakinden FAZLA. Dekontta hiç yoksa bu bir mükerrer değil,
+    //      "sistemde var, dekontta yok" durumudur (Dekont Eşleştir'de listelenir).
+    // ======================================================================
+    const dekontAylari = new Set(dekontSatirlari.map(b => b._ay || String(b.tarih || '').slice(0, 7)));
     canli.forEach(i => {
       if (kaporaMi(i)) return;
+      if (!hesabaKatilir(i)) return;                                  // 1) devir öncesi / bakiye dışı
+      if (!dekontAylari.has(String(i.tarih || '').slice(0, 7))) return; // 2) o ay için dekont yok
       const k = i.tahsilatKaynakId ? `tahsilat:${i.tahsilatKaynakId}` : i.kaynakId ? `kaynak:${i.kaynakId}` : null;
       if (!k) return;
       (kaynakGruplari[k] = kaynakGruplari[k] || []).push(i);
@@ -5340,17 +5356,18 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const mukerrerler = Object.values(kaynakGruplari).filter(g => g.length > 1)
       .map(g => [...g].sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))))
       .map(g => {
-        const mesru = dekontMesruAdet(g);
-        const asilAdet = mesru === null ? 1 : Math.max(1, mesru); // dekontta hiç yoksa 1 asıl
-        return { kayitlar: g, asilAdet, dekontAdet: mesru };
+        const mesru = dekontMesruAdet(g) ?? 0;
+        return { kayitlar: g, asilAdet: mesru, dekontAdet: mesru };
       })
-      .filter(g => g.kayitlar.length > g.asilAdet); // fazlası yoksa mükerrer değil
+      // 3) Dekontta en az 1 hareket olmalı ve sistem kaydı ondan fazla olmalı
+      .filter(g => g.dekontAdet >= 1 && g.kayitlar.length > g.asilAdet);
     const mukerrerFazla = mukerrerler.reduce((t, g) => t + g.kayitlar.slice(g.asilAdet).reduce((x, i) => x + isaret(i) * tut(i), 0), 0);
 
     // 2) Benzer kayıt (kaynak kimliği olmayanlar dahil)
     const benzerGruplari = {};
     canli.forEach(i => {
       if (kaporaMi(i)) return; // kaporalar benzerlik taramasına da girmez
+      if (!hesabaKatilir(i) || !dekontAylari.has(String(i.tarih || '').slice(0, 7))) return; // aynı kapsam
       const k = `${i.tarih}|${i.tip}|${tut(i)}|${(i.aciklama || '').trim().toLocaleLowerCase('tr-TR')}`;
       (benzerGruplari[k] = benzerGruplari[k] || []).push(i);
     });
@@ -5428,7 +5445,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           <div className="bg-neutral-900 text-white rounded-xl p-2"><p className="text-[9px] font-black uppercase text-white/60">Bakiye</p><p className="font-black tabular-nums">₺{paraFmt(giris - cikis)}</p></div>
         </div>
 
-        <Bolum baslik="Mükerrer Kayıtlar" aciklama={dekontSatirlari.length ? 'Dekont esas alınır: dekontta o hareket kaç kez varsa o kadar kayıt meşru, fazlası mükerrer. Kaporalar taranmaz.' : 'Aynı işten birden fazla canlı kayıt (kaporalar hariç). Dekont yüklenince dekont esas alınır.'} adet={mukerrerler.length} net={mukerrerFazla} renk="red">
+        <Bolum baslik="Mükerrer Kayıtlar" aciklama="Yalnızca dekont yüklenmiş aylar ve bakiyeye dahil kayıtlar taranır: dekontta o hareket kaç kez varsa o kadar kayıt meşru, fazlası mükerrer. Kaporalar ve devir öncesi kayıtlar taranmaz." adet={mukerrerler.length} net={mukerrerFazla} renk="red">
           {mukerrerler.map((g, gi) => (
             <div key={gi} className="rounded-lg border border-red-200 bg-white p-1.5 space-y-1">
               {g.dekontAdet !== null && <p className="text-[9px] font-black text-neutral-500">Dekontta {g.dekontAdet} hareket • sistemde {g.kayitlar.length} kayıt → {g.kayitlar.length - g.asilAdet} fazla</p>}
