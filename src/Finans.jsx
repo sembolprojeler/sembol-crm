@@ -5501,7 +5501,24 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     else if (t.includes(',')) t = t.replace(',', '.');
     const n = parseFloat(t); return isNaN(n) ? 0 : n;
   };
-  const dkGunFarki = (a, b) => Math.abs((new Date(a + 'T00:00:00') - new Date(b + 'T00:00:00')) / 86400000);
+  const dkGunFarki = (a, b) => {
+    const p = (t) => { const [y, m, g] = String(t || '').split('-').map(Number); return (y && m && g) ? new Date(y, m - 1, g).getTime() : NaN; };
+    const f = Math.abs((p(a) - p(b)) / 86400000);
+    return isNaN(f) ? 9999 : f; // geçersiz tarih → asla eşleşmesin, ama çökmesin
+  };
+  // HATA DÜZELTMESİ (iPhone/Safari "Invalid Date" çökmesi):
+  // • Ay sonu artık takvimden hesaplanır ("2026-09-31" gibi geçersiz tarih üretilmez).
+  // • Gün ekleme, toISOString() KULLANMAZ: Safari geçersiz tarihte toISOString'de
+  //   çöküyordu; ayrıca toISOString UTC'ye çevirdiği için Türkiye saatinde günü
+  //   bir geri kaydırıyordu. Yerel bileşenlerden elle biçimlenir.
+  const dkYMD = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const dkAySonu = (ay) => { const [y, m] = ay.split('-').map(Number); return dkYMD(new Date(y, m, 0)); };
+  const dkGunEkle = (t, n) => {
+    const [y, m, g] = String(t || '').split('-').map(Number);
+    if (!y || !m || !g) return t || '';
+    const d = new Date(y, m - 1, g); d.setDate(d.getDate() + n);
+    return isNaN(d) ? t : dkYMD(d);
+  };
   // Basit CSV ayrıştırıcı (; veya , ayraçlı, tırnaklı alanlar)
   const dkCsvOku = (metin) => {
     const satirlar = metin.split(/\r?\n/).filter(l => l.trim());
@@ -5687,8 +5704,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const bankalar = dekont.satirlar;
       const bankaMap = new Map(bankalar.map(b => [b.id, b]));
       const elleEslesme = hafiza.elleEslesme || {}, kaldirilan = hafiza.kaldirilan || {}, gruplar = hafiza.gruplar || {};
-      const ayBas = `${ay}-01`, ayBit = `${ay}-31`;
-      const gunEk = (t, n) => { const d = new Date(t + 'T00:00:00'); d.setDate(d.getDate() + n); return d.toISOString().split('T')[0]; };
+      // DÜZELTME: ay sonu takvimden, gün ekleme Safari-güvenli yardımcıyla
+      const ayBas = `${ay}-01`, ayBit = dkAySonu(ay);
+      const gunEk = dkGunEkle;
       const sistem = sistemSatirlari.filter(i => i.tarih >= gunEk(ayBas, -3) && i.tarih <= gunEk(ayBit, 3));
       const sistemMap = new Map(sistemSatirlari.map(i => [i.id, i]));
       const kullanilanS = new Set(); const bitti = new Set(); const eslesmeler = [];
