@@ -75,6 +75,10 @@ import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJ
   // YENİ: Zil rozetine eklenecek — BANA atanmış, henüz yapılmamış keşif sayısı
   useBanaAtananEkspertizSayisi } from './OperasyonIsler.jsx';
 import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './OperasyonPersonel.jsx';
+// YENİ (kullanıcı talebi): QR SİTE TAKİP — asansör afişi QR reklam modülü
+//   • QrSiteTakipView : yönetim ekranı (Saha Portföy'deki butondan açılır) — Satis.jsx içinde
+//   • QrSiteLanding   : sakinin QR okutunca gördüğü, giriş gerektirmeyen sayfa
+import { QrSiteTakipView, QrSiteLanding } from './Satis.jsx';
 import { MaterialListView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView } from './OperasyonAracMalzeme.jsx';
 import { AddInfoView, ComplaintsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, SahaRaporlamasiView } from './OperasyonInsanKaynaklari.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
@@ -7070,6 +7074,21 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     //    yanlış yere "şifre hatalı" denmez.
     // ========================================================================
 
+    // ========================================================================
+    // YENİ (kullanıcı talebi): QR SİTE TAKİP — HERKESE AÇIK SAYFA
+    // ------------------------------------------------------------------------
+    // Asansör afişindeki QR, uygulamayı "?qr=<yerId>" parametresiyle açar.
+    // Bu durumda GİRİŞ EKRANI GÖSTERİLMEZ; sakin doğrudan bilgi/keşif formunu
+    // görür. Firebase anonim oturumu (firebaseUser) yukarıda otomatik açıldığı
+    // için Firestore'a talep yazabilir. Tüm hook'lar bu satırdan önce
+    // çalıştığından erken dönüş güvenlidir. Personel girişi yapılmış olsa bile
+    // ?qr= varsa bu sayfa öncelikli olur (önizleme için kullanışlı).
+    // ========================================================================
+    const qrSiteParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('qr') : null;
+    if (qrSiteParam) {
+      return <QrSiteLanding siteId={qrSiteParam} firebaseUser={firebaseUser} />;
+    }
+
     if (!isAuthenticated) {
       return <LoginScreen onLogin={handleLogin} error={loginError} appBranding={appBranding} />;
     }
@@ -7816,12 +7835,18 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     </button>
                     {/* Defter'i menünün geri kalanından ayıran ince çizgi */}
                     <div className="h-px bg-neutral-800 my-1.5"></div>
+                    {/* ==============================================================
+                        KALDIRILDI (kullanıcı talebi): "Kasa Özeti" sayfasının önemi
+                        kalmadığı için menüden kaldırıldı. Kod SİLİNMEDİ, yorum satırına
+                        alındı; ileride gerekirse bu blok açılarak tek hamlede geri gelir.
+                        (Finans.jsx'teki FinanceDashboardView bileşenine dokunulmadı.)
                     <button 
                       onClick={() => { setActiveTab('financeDashboard'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'financeDashboard' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'financeDashboard' ? 'bg-white' : 'bg-blue-500'}`}></div> Kasa Özeti
                     </button>
+                    ============================================================== */}
                     <button 
                       onClick={() => { setActiveTab('reporting'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'reporting' ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -8700,7 +8725,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
             {/* YENİ: SAHA PORTFÖY EKRANI — kendi alt yetkisiyle görünür */}
             {activeTab === 'sahaPortfoy' && showSatisSahaPortfoy &&
-              <SahaPortfoyView personnelList={personnelList} currentUser={currentUser} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
+              <SahaPortfoyView personnelList={personnelList} currentUser={currentUser} addSystemLog={addSystemLog} setViewingImage={setViewingImage}
+                /* YENİ: Randevu Ekle'nin yanındaki "QR Site Takip" butonu bu sekmeye geçer */
+                onQrSiteTakip={() => { setActiveTab('qrSiteTakip'); setIsSidebarOpen(false); }} />}
+
+            {/* YENİ (kullanıcı talebi): QR SİTE TAKİP YÖNETİM EKRANI — Saha Portföy ile aynı yetki.
+                Geri oku Saha Portföy'e döndürür. */}
+            {activeTab === 'qrSiteTakip' && showSatisSahaPortfoy &&
+              <QrSiteTakipView personnelList={personnelList} currentUser={currentUser} addSystemLog={addSystemLog} onGeri={() => setActiveTab('sahaPortfoy')} />}
 
             {/* YENİ: HATIRLATMALAR EKRANI — takvim mantığıyla görev/not takibi.
                 jobs/personnelList/vehicles, konuya göre "İlgili" seçimi için geçilir. */}
@@ -9311,7 +9343,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
             {activeTab === 'materialList' && showOperasyon && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} onUpdateStock={handleUpdateMaterialStock} onAdd={handleAddMaterial} systemLogs={systemLogs} />}
             
+            {/* ==================================================================
+                KALDIRILDI (kullanıcı talebi): "Kasa Özeti" sayfası kaldırıldı.
+                Route yorum satırına alındı; menü butonu da yukarıda kapatıldığı
+                için sayfaya hiçbir giriş yolu kalmadı. Geri açmak için bu satırı
+                ve menüdeki butonu yorumdan çıkarmak yeterlidir.
             {activeTab === 'financeDashboard' && showFinance && <FinanceDashboardView jobs={jobs} transactions={transactions} transactionType={transactionType} setTransactionType={setTransactionType} newTransaction={newTransaction} setNewTransaction={setNewTransaction} handleAddTransaction={handleAddTransaction} personnelList={personnelList} handleEditJob={handleEditJob} db={db} appId={appId} />}
+                ================================================================== */}
             {activeTab === 'reporting' && showFinance && <ReportingView jobs={jobs} personnelList={personnelList} />}
             {activeTab === 'advancedReporting' && showFinance && <AdvancedReportingView jobs={jobs} />}
             {/* DEĞİŞİKLİK: currentUser eklendi — avans ve maaş ödemeleri deftere
