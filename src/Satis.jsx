@@ -2132,10 +2132,18 @@ import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
           // Seçilen işin kalan bakiyesi — kapora bu tutardan düşer
           const kalanBakiye = Math.max(0, fiyat - mevcutKapora);
           // İş seçilince %20 önerisi o işe göre yeniden hesaplanır
+          // DEĞİŞTİ (kullanıcı talebi): %20 yalnızca ÖNERİDİR. Kullanıcı tutarı
+          // elle yazdıysa (öneriden farklıysa) iş seçimi değişince tutar SİLİNMEZ,
+          // %20 ile ezilmez — girilen rakam ne ise o kaydedilir (az ya da çok).
           const isSec = (jobId) => {
             const secilen = kaporaIsler.find(j => j.id === jobId);
             const oneri = secilen ? Math.round((parseFloat(secilen.price) || 0) * 0.20) : 0;
-            setKaporaForm(f => ({ ...f, jobId, tutar: oneri ? String(oneri) : '' }));
+            setKaporaForm(f => {
+              const oncekiIs = kaporaIsler.find(j => j.id === f.jobId);
+              const oncekiOneri = oncekiIs ? Math.round((parseFloat(oncekiIs.price) || 0) * 0.20) : 0;
+              const elleGirildi = f.tutar !== '' && String(f.tutar) !== String(oncekiOneri || '');
+              return { ...f, jobId, tutar: elleGirildi ? f.tutar : (oneri ? String(oneri) : '') };
+            });
           };
           const kaydet = async () => {
             // YENİ: İş seçilmeden kapora kaydedilemez
@@ -2216,7 +2224,7 @@ import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
                     <input type="number" inputMode="decimal" value={kaporaForm.tutar}
                       onChange={e => setKaporaForm({ ...kaporaForm, tutar: e.target.value })}
                       className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-lg font-black" />
-                    <p className="text-[10px] font-bold text-neutral-400 mt-1">İş tutarının %20'si önerildi; gerekirse değiştirin.</p>
+                    <p className="text-[10px] font-bold text-neutral-400 mt-1">%20 yalnızca öneridir — daha az ya da daha fazla girebilirsiniz; yazdığınız tutar aynen seçtiğiniz deftere işlenir.</p>
                   </div>
 
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaba yazılsın? *</label>
