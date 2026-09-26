@@ -7593,16 +7593,27 @@ export const beyazYakaOnerileriHesapla = (personeller, qrKayitlari, tarihStr, at
     // personeli çağrısı) bu koşul çalışmaz; onlar için izin/devamsızlık akışı
     // aynen sürer. Fotoğraftaki 3 kişi (34 PCY 589 ekibi) bu daldan FG alır.
     // ====================================================================
-    if (atananIsSeti && atananIsSeti.has(String(person.id))) {
-      sonuc[person.id] = {
-        status: 'FG', hours: '',
-        girisSaati: null, cikisSaati: null,
-        aciklama: 'O gün iş atanmış ama giriş/çıkış basılmamış → şehir dışı nakliye seferi kabul edildi; 1 Fazla Gün (FG) eklendi.',
-        kaynak: 'sefer',
-        seferKaydi: true,
-      };
-      return;
-    }
+    // ====================================================================
+    // KALDIRILDI (kullanıcı talebi — yeni kural): İŞ/EKİP ATANMIŞ AMA HİÇ
+    // BASMAMIŞ personel artık "şehir dışı sefer" sayılıp FAZLA GÜN ALMAZ.
+    // Ekibe yazılmış olsa bile QR okutmadıysa GELMEMİŞ kabul edilir ve
+    // karar haftalık kural motoruna (haftalikMesaiKarari) kalır:
+    //   • O hafta İLK gelmeyişi  → HAFTALIK İZİN (Hİ)
+    //   • İKİNCİ ve sonrası      → DEVAMSIZLIK (D)
+    // Şehir dışından dönüp YALNIZCA ÇIKIŞ basan personelin FG hakkı
+    // (yukarıdaki gecikmeliCikis dalı) AYNEN KORUNUYOR.
+    // Eski davranış geri istenirse bu blok yorumdan çıkarılır:
+    // if (atananIsSeti && atananIsSeti.has(String(person.id))) {
+    //   sonuc[person.id] = {
+    //     status: 'FG', hours: '',
+    //     girisSaati: null, cikisSaati: null,
+    //     aciklama: 'O gün iş atanmış ama giriş/çıkış basılmamış → şehir dışı nakliye seferi kabul edildi; 1 Fazla Gün (FG) eklendi.',
+    //     kaynak: 'sefer',
+    //     seferKaydi: true,
+    //   };
+    //   return;
+    // }
+    // ====================================================================
     // ====================================================================
     // YENİ (kullanıcı talebi): BEYAZ YAKADA SABAH KARAR BEKLEME PENCERESİ
     // --------------------------------------------------------------------
@@ -8486,17 +8497,26 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr, atanan
     // atananIsSeti: o gün en az bir işe atanmış personel id'lerinin kümesi.
     // Küme verilmemişse (null) eski davranış korunur; bu koşul hiç çalışmaz.
     // ====================================================================
-    if (!giris && atananIsSeti && atananIsSeti.has(String(person.id))) {
-      // İzin günündeyse yine de fazla gün mantıklıdır (izinde bile sefere gitmiş)
-      sonuc[person.id] = {
-        status: 'FG', hours: '',
-        girisSaati: null, cikisSaati: cikis?.timeStr || null, ekipCikis: ekipCikisSaati,
-        aciklama: 'O gün iş atanmış ama giriş/çıkış basılmamış → şehir dışı nakliye seferi kabul edildi; 1 Fazla Gün (FG) eklendi.',
-        kaynak: 'sefer',
-        seferKaydi: true,
-      };
-      return;
-    }
+    // ====================================================================
+    // KALDIRILDI (kullanıcı talebi — yeni kural): İŞ/EKİP ATANMIŞ AMA HİÇ
+    // BASMAMIŞ mavi yaka artık "şehir dışı sefer" sayılıp FAZLA GÜN ALMAZ.
+    // Ekibe yazılmış olsa bile QR okutmadıysa GELMEMİŞ kabul edilir;
+    // nihai kararı haftalık kural motoru verir: o hafta ilk gelmeyişi →
+    // HAFTALIK İZİN (Hİ), ikinci ve sonrası → DEVAMSIZLIK (D).
+    // Şehir dışından dönüp YALNIZCA ÇIKIŞ basanın FG hakkı (yukarıdaki
+    // gecikmeliCikis dalı) AYNEN KORUNUYOR.
+    // Eski davranış geri istenirse bu blok yorumdan çıkarılır:
+    // if (!giris && atananIsSeti && atananIsSeti.has(String(person.id))) {
+    //   sonuc[person.id] = {
+    //     status: 'FG', hours: '',
+    //     girisSaati: null, cikisSaati: cikis?.timeStr || null, ekipCikis: ekipCikisSaati,
+    //     aciklama: 'O gün iş atanmış ama giriş/çıkış basılmamış → şehir dışı nakliye seferi kabul edildi; 1 Fazla Gün (FG) eklendi.',
+    //     kaynak: 'sefer',
+    //     seferKaydi: true,
+    //   };
+    //   return;
+    // }
+    // ====================================================================
 
     // KURAL 1: Hiç giriş basmamışsa devamsız
     if (!giris) {
