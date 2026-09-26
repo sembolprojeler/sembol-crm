@@ -7553,6 +7553,63 @@ export const mesaiTakibeDahil = (p) => !!p && p.employmentStatus !== 'Pasif' && 
 // Mesai 09:00'da başladığı için yarım saatlik tolerans bırakılır.
 export const BEYAZ_YAKA_KARAR_SAATI_DK = 9 * 60 + 30;
 
+// ============================================================================
+// YENİ (kullanıcı talebi): QR HATIRLATMA BUTONU — WHATSAPP
+// ============================================================================
+// Mesai Takip tablosunda giriş/çıkış "Basılmadı" görünen personelin yanında
+// yeşil "Hatırlat" butonu çıkar. Tıklanınca WhatsApp, personelin numarasına
+// hazır yazılmış NAZİK bir hatırlatma mesajıyla açılır; yönetici sadece
+// "Gönder"e basar.
+// Mesaj dili bilerek olumlu tutuldu: kesinti / ceza / "mesainizden düşülür"
+// gibi ifadeler YOKTUR. QR'ın önemi; çalışma saatlerinin doğru ve eksiksiz
+// kayıt altına alınması, personelin emeğinin görünür olması üzerinden anlatılır.
+// Telefon biçimlendirmesi, dosyadaki "İzni Bildir" butonuyla aynı kuraldır.
+// ============================================================================
+export const QrHatirlatButonu = ({ kisi, tip = 'giris', tarihStr }) => {
+  // Telefon yoksa buton hiç gösterilmez (boş tıklama olmasın)
+  const hamTel = (kisi?.personalPhone || kisi?.companyPhone || '').replace(/\D/g, '');
+  if (!kisi || !hamTel) return null;
+
+  const gonder = (e) => {
+    e.stopPropagation();
+    // Telefonu WhatsApp formatına çevir (başındaki 0 -> 90)
+    let phone = hamTel;
+    if (phone.startsWith('0')) phone = '90' + phone.substring(1);
+    else if (!phone.startsWith('90')) phone = '90' + phone;
+
+    // Tarihi okunur hale getir: "25 Eylül Cuma"
+    const aylar = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+    const gunler = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+    const d = tarihStr ? new Date(tarihStr + 'T00:00:00') : new Date();
+    const bugunMu = tarihStr === mesaiBugunStr();
+    const gunMetni = bugunMu ? 'bugün' : `${d.getDate()} ${aylar[d.getMonth()]} ${gunler[d.getDay()]} günü`;
+
+    // Giriş ve çıkış için ayrı, olumlu tonda mesaj metinleri
+    const hareket = tip === 'cikis' ? 'mesai ÇIKIŞ' : 'mesai GİRİŞ';
+    const msg =
+      `Merhaba *${kisi.fullName}* 👋\n\n` +
+      `*Sembol Nakliyat* olarak küçük bir hatırlatma yapmak istedik: ${gunMetni} *${hareket}* QR kodunuzu okutmamış görünüyorsunuz. 📲\n\n` +
+      `QR okutma, emeğinizin ve çalışma saatlerinizin *doğru ve eksiksiz* kayıt altına alınmasını sağlıyor. ` +
+      `Böylece çalıştığınız her saat sistemde net şekilde görünür, puantaj ve takip süreçleri sizin için de sorunsuz ilerler. ✅\n\n` +
+      `Unutmamak için giriş ve çıkışta telefonunuzdan QR okutmayı alışkanlık haline getirmenizi rica ederiz. ` +
+      `Okutma sırasında bir sorun yaşadıysanız bu numaradan bize yazabilirsiniz, hemen yardımcı oluruz. 🤝\n\n` +
+      `Emekleriniz için teşekkür eder, iyi çalışmalar dileriz. 🚚`;
+
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={gonder}
+      title={`WhatsApp'tan ${tip === 'cikis' ? 'çıkış' : 'giriş'} QR hatırlatması gönder`}
+      className="flex items-center gap-1 text-[9px] font-black text-white bg-[#25D366] hover:bg-[#128C7E] px-1.5 py-1 rounded transition whitespace-nowrap"
+    >
+      <MessageCircle className="w-3 h-3" /> Hatırlat
+    </button>
+  );
+};
+
 export const beyazYakaOnerileriHesapla = (personeller, qrKayitlari, tarihStr, atananIsSeti = null) => {
   const sonuc = {};
   (personeller || []).forEach(person => {
@@ -10405,6 +10462,17 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                           >
                             <Edit className="w-3 h-3" />
                           </button>
+                          {/* YENİ (kullanıcı talebi): WhatsApp QR hatırlatma butonu.
+                              Giriş basılmadıysa giriş hatırlatması gösterilir.
+                              Çıkış hücresinde ise YALNIZCA giriş yapılmışsa gösterilir;
+                              hiç gelmemiş kişiye ikinci (çıkış) mesajı atılmasın diye. */}
+                          {(tip === 'giris' || grup?.giris) && (
+                            <QrHatirlatButonu
+                              kisi={personnelList.find(pp => String(pp.id) === String(grup?.personnelId))}
+                              tip={tip}
+                              tarihStr={grup?.dateStr}
+                            />
+                          )}
                         </div>
                       );
                     }
