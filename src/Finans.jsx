@@ -5282,6 +5282,155 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     );
   };
 
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): DEFTER DENETİM PANELİ — "Bakiyem neden tutmuyor?"
+  // ==========================================================================
+  // Banka/kasa bakiyesi ile uygulama arasında fark çıktığında farkın KAYNAĞINI
+  // veride bulmak için. Kod değil veri denetler; hiçbir rakamı değiştirmez.
+  // Kontroller:
+  //   1) MÜKERRER KAYIT  : Aynı iş/kapora kaynağından (tahsilatKaynakId,
+  //                        kaporaKaynakId, kaynakId) birden fazla canlı kayıt.
+  //                        (İş sonlandırma iki cihazdan aynı anda tetiklenirse
+  //                        oluşabilir.) Fazla kopyalar "izli sil" ile kapatılır.
+  //   2) BENZER KAYIT    : Aynı tarih + tür + tutar + açıklama — elle çift giriş.
+  //   3) GİZLİ AMA DAHİL : Bakiyeye katılan fakat listede görünmeyen kayıtlar.
+  //   4) DEVİR ÖNCESİ    : 1 Eylül 2026 öncesi — listede görünür, bakiyeye GİRMEZ.
+  //   5) SİLİNENLER      : İzli silinmiş kayıtlar — görünür, bakiyeye GİRMEZ.
+  //   6) SON 48 SAAT     : Son iki günde eklenen/silinen/düzenlenen her şey —
+  //                        "dünden beri ne değişti?" sorusunun cevabı.
+  // ==========================================================================
+  export const DefterDenetimPaneli = ({ defterAd, islemler = [], gorunenIds, hesabaKatilir, devirTarihi, canliDonemde, onYumusakSil, onKapat }) => {
+    const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const trh = (t) => (t || '').split('-').reverse().join('.');
+    const tut = (i) => parseFloat(i.tutar) || 0;
+    const isaret = (i) => (i.tip === 'giris' ? 1 : -1);
+    const canli = islemler.filter(i => !i.silindi);
+
+    // 1) Mükerrer kaynak
+    const kaynakGruplari = {};
+    canli.forEach(i => {
+      const k = i.tahsilatKaynakId || i.kaporaKaynakId || i.kaynakId;
+      if (!k) return;
+      (kaynakGruplari[k] = kaynakGruplari[k] || []).push(i);
+    });
+    const mukerrerler = Object.values(kaynakGruplari).filter(g => g.length > 1)
+      .map(g => [...g].sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''))));
+    const mukerrerFazla = mukerrerler.reduce((t, g) => t + g.slice(1).reduce((x, i) => x + isaret(i) * tut(i), 0), 0);
+
+    // 2) Benzer kayıt (kaynak kimliği olmayanlar dahil)
+    const benzerGruplari = {};
+    canli.forEach(i => {
+      const k = `${i.tarih}|${i.tip}|${tut(i)}|${(i.aciklama || '').trim().toLocaleLowerCase('tr-TR')}`;
+      (benzerGruplari[k] = benzerGruplari[k] || []).push(i);
+    });
+    const mukerrerIdSeti = new Set(mukerrerler.flat().map(i => i.id));
+    const benzerler = Object.values(benzerGruplari).filter(g => g.length > 1 && !g.every(i => mukerrerIdSeti.has(i.id)));
+
+    // 3) Gizli ama bakiyeye dahil
+    const gizliDahil = islemler.filter(i => hesabaKatilir(i) && gorunenIds && !gorunenIds.has(i.id));
+    const gizliNet = gizliDahil.reduce((t, i) => t + isaret(i) * tut(i), 0);
+
+    // 4) Devir öncesi
+    const devirOncesi = canliDonemde ? canli.filter(i => (i.tarih || '') < devirTarihi) : [];
+    const devirNet = devirOncesi.reduce((t, i) => t + isaret(i) * tut(i), 0);
+
+    // 5) Silinenler
+    const silinenler = islemler.filter(i => i.silindi);
+    const silinenNet = silinenler.reduce((t, i) => t + isaret(i) * tut(i), 0);
+
+    // 6) Son 48 saat
+    const esik = Date.now() - 48 * 60 * 60 * 1000;
+    const zaman = (x) => { const d = new Date(x || 0); return isNaN(d) ? 0 : d.getTime(); };
+    const sonHareketler = islemler
+      .filter(i => [i.createdAt, i.silinmeTarihi, i.duzenlemeTarihi, i.guncellemeTarihi].some(z => zaman(z) >= esik))
+      .sort((a, b) => Math.max(zaman(b.createdAt), zaman(b.silinmeTarihi), zaman(b.duzenlemeTarihi)) - Math.max(zaman(a.createdAt), zaman(a.silinmeTarihi), zaman(a.duzenlemeTarihi)));
+
+    // Bakiye özeti
+    const giris = islemler.filter(i => i.tip === 'giris' && hesabaKatilir(i)).reduce((t, i) => t + tut(i), 0);
+    const cikis = islemler.filter(i => i.tip === 'cikis' && hesabaKatilir(i)).reduce((t, i) => t + tut(i), 0);
+
+    const Satir = ({ i, ek }) => (
+      <div className={`flex items-center gap-2 text-[11px] font-bold p-1.5 rounded-lg ${i.silindi ? 'bg-neutral-100 text-neutral-400 line-through' : 'bg-white'}`}>
+        <span className="text-neutral-500 shrink-0">{trh(i.tarih)}</span>
+        <span className={`shrink-0 text-[9px] font-black px-1.5 py-0.5 rounded-full ${i.tip === 'giris' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>{i.tip === 'giris' ? 'GELİR' : 'GİDER'}</span>
+        <span className="flex-1 min-w-0 truncate">{i.aciklama || i.kategori || '—'}{i.kaynak ? <span className="text-neutral-400"> • {i.kaynak}</span> : null}</span>
+        <span className={`shrink-0 tabular-nums font-black ${i.tip === 'giris' ? 'text-emerald-700' : 'text-red-700'}`}>₺{paraFmt(tut(i))}</span>
+        {ek}
+      </div>
+    );
+    // Tailwind sınıfları dinamik üretilemez (JIT tarayamaz) — sabit harita kullanılır
+    const RENK = {
+      red:     { kutu: 'border-red-300 bg-red-50',       rozet: 'bg-red-600 text-white' },
+      amber:   { kutu: 'border-amber-300 bg-amber-50',   rozet: 'bg-amber-600 text-white' },
+      purple:  { kutu: 'border-purple-300 bg-purple-50', rozet: 'bg-purple-600 text-white' },
+      sky:     { kutu: 'border-sky-300 bg-sky-50',       rozet: 'bg-sky-600 text-white' },
+      emerald: { kutu: 'border-emerald-300 bg-emerald-50', rozet: 'bg-emerald-600 text-white' },
+      neutral: { kutu: 'border-neutral-300 bg-neutral-100', rozet: 'bg-neutral-600 text-white' },
+    };
+    const Bolum = ({ baslik, aciklama, adet, net, renk = 'neutral', children }) => (
+      <div className={`rounded-xl border p-3 ${adet > 0 ? RENK[renk].kutu : 'border-neutral-200 bg-white'}`}>
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <div>
+            <p className="text-xs font-black text-black">{baslik} <span className={`ml-1 text-[10px] font-black px-1.5 py-0.5 rounded-full ${adet > 0 ? RENK[renk].rozet : 'bg-neutral-200 text-neutral-600'}`}>{adet}</span></p>
+            <p className="text-[10px] font-bold text-neutral-500">{aciklama}</p>
+          </div>
+          {net !== undefined && adet > 0 && <span className={`text-sm font-black tabular-nums ${net >= 0 ? 'text-emerald-700' : 'text-red-700'}`}>{net >= 0 ? '+' : '−'}₺{paraFmt(Math.abs(net))}</span>}
+        </div>
+        {adet > 0 && <div className="mt-2 space-y-1">{children}</div>}
+      </div>
+    );
+
+    return (
+      <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-4 space-y-3 animate-in fade-in">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="font-black text-black flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-amber-600" /> Defter Denetimi — {defterAd}</h3>
+            <p className="text-[11px] font-bold text-neutral-600 mt-0.5">Bu panel hiçbir rakamı değiştirmez; yalnızca bakiyenin nasıl oluştuğunu ve şüpheli kayıtları gösterir.</p>
+          </div>
+          <button type="button" onClick={onKapat} className="p-1.5 hover:bg-amber-200 rounded-lg"><X className="w-4 h-4" /></button>
+        </div>
+
+        {/* BAKİYE FORMÜLÜ */}
+        <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="bg-white rounded-xl p-2 border border-emerald-200"><p className="text-[9px] font-black uppercase text-emerald-600">Dahil Gelir</p><p className="font-black text-emerald-700 tabular-nums">₺{paraFmt(giris)}</p></div>
+          <div className="bg-white rounded-xl p-2 border border-red-200"><p className="text-[9px] font-black uppercase text-red-600">Dahil Gider</p><p className="font-black text-red-700 tabular-nums">₺{paraFmt(cikis)}</p></div>
+          <div className="bg-neutral-900 text-white rounded-xl p-2"><p className="text-[9px] font-black uppercase text-white/60">Bakiye</p><p className="font-black tabular-nums">₺{paraFmt(giris - cikis)}</p></div>
+        </div>
+
+        <Bolum baslik="Mükerrer Kayıtlar" aciklama="Aynı işten/kaporadan birden fazla canlı kayıt. İlk kayıt asıl, sonrakiler fazla — 'izli sil' ile kapatın." adet={mukerrerler.length} net={mukerrerFazla} renk="red">
+          {mukerrerler.map((g, gi) => (
+            <div key={gi} className="rounded-lg border border-red-200 bg-white p-1.5 space-y-1">
+              {g.map((i, ix) => <Satir key={i.id} i={i} ek={ix > 0 && onYumusakSil ? (
+                <button type="button" onClick={() => onYumusakSil(i.id)} className="shrink-0 px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black rounded-md flex items-center gap-1"><Trash2 className="w-3 h-3" /> Mükerreri İzli Sil</button>
+              ) : <span className="shrink-0 text-[9px] font-black text-emerald-700">ASIL</span>} />)}
+            </div>
+          ))}
+        </Bolum>
+
+        <Bolum baslik="Benzer Kayıtlar" aciklama="Aynı tarih, tür, tutar ve açıklama — elle çift girilmiş olabilir. Kontrol edip gerekirse birini silin." adet={benzerler.length} renk="amber">
+          {benzerler.map((g, gi) => <div key={gi} className="rounded-lg border border-amber-200 bg-white p-1.5 space-y-1">{g.map(i => <Satir key={i.id} i={i} />)}</div>)}
+        </Bolum>
+
+        <Bolum baslik="Bakiyeye Dahil Ama Listede Görünmeyen" aciklama="Bu kayıtlar bakiyeyi etkiler fakat işlem akışında gizlidir (filtre / otomatik maaş vb.)." adet={gizliDahil.length} net={gizliNet} renk="purple">
+          {gizliDahil.map(i => <Satir key={i.id} i={i} />)}
+        </Bolum>
+
+        <Bolum baslik={`Devir Öncesi (${trh(devirTarihi)} öncesi)`} aciklama="Listede görünür ama bakiyeye GİRMEZ (canlı dönem kuralı). Banka ekstresiyle karşılaştırırken bunları sayma." adet={devirOncesi.length} net={devirNet} renk="sky">
+          {devirOncesi.slice(0, 30).map(i => <Satir key={i.id} i={i} />)}
+          {devirOncesi.length > 30 && <p className="text-[10px] font-bold text-neutral-500">… ve {devirOncesi.length - 30} kayıt daha</p>}
+        </Bolum>
+
+        <Bolum baslik="Silinen Kayıtlar" aciklama="İzli silinmiş; görünür ama bakiyeye GİRMEZ." adet={silinenler.length} net={silinenNet} renk="neutral">
+          {silinenler.map(i => <Satir key={i.id} i={i} />)}
+        </Bolum>
+
+        <Bolum baslik="Son 48 Saatte Değişenler" aciklama="Dünden beri eklenen, silinen veya düzenlenen kayıtlar — farkın nerede doğduğunu buradan izleyin." adet={sonHareketler.length} renk="emerald">
+          {sonHareketler.map(i => <Satir key={i.id} i={i} ek={<span className="shrink-0 text-[9px] font-bold text-neutral-400">{i.silindi ? `silindi ${new Date(i.silinmeTarihi).toLocaleString('tr-TR')}` : i.createdAt ? `eklendi ${new Date(i.createdAt).toLocaleString('tr-TR')}` : 'düzenlendi'}{i.by ? ` • ${i.by}` : ''}</span>} />)}
+        </Bolum>
+      </div>
+    );
+  };
+
   export const FinansDefterView = ({ currentUser, addSystemLog, onViewCari, onViewVehicle, onViewPersonnel, jobs = [], vehicles = [], personnelList = [] }) => {
     // Varsayılan işlem kategorileri (giderler + gelirler bir arada)
     // DEĞİŞİKLİK: Eski sabit kategori listesi KALDIRILDI. Kategoriler artık
@@ -5408,6 +5557,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [tahsilKaydediliyor, setTahsilKaydediliyor] = useState(false);
     const [alacakAyi, setAlacakAyi] = useState(bugunStr().slice(0, 7));
     const [mevcutBorclularAcik, setMevcutBorclularAcik] = useState(false);
+    // YENİ (kullanıcı talebi): Defter Denetim paneli açık/kapalı
+    const [denetimAcik, setDenetimAcik] = useState(false);
     // YENİ (kullanıcı talebi): "Tüm Zamanları Göster" — ay filtresi kapatılır,
     // tüm bekleyen tahsilatlar tek listede (blok bazlı, en yeniden en eskiye) görünür.
     // DEĞİŞTİ: Varsayılan artık TÜM ZAMANLAR. Borçlu defteri açıldığında hiçbir
@@ -9248,6 +9399,10 @@ silinmeTarihi: new Date().toISOString()`}</pre>
           <div className="flex items-center justify-between gap-2 mb-2">
             <button onClick={() => setSeciliDefterId(null)} className="flex items-center gap-1 text-white/80 hover:text-white font-bold text-xs sm:text-sm transition"><ChevronLeft className="w-4 h-4" /> Defterler</button>
             <div className="flex items-center gap-1.5">
+              {/* YENİ (kullanıcı talebi): Bakiye farkı araştırma — Denetim paneli */}
+              {!['Ödemeler', 'Kredi', 'Borçlu'].includes(seciliDefter.tur) && (
+                <button onClick={() => setDenetimAcik(v => !v)} className={`px-2 py-1.5 rounded-lg transition text-[10px] font-black flex items-center gap-1 ${denetimAcik ? 'bg-amber-400 text-black' : 'bg-white/10 hover:bg-white/20'}`} title="Mükerrer / gizli / silinen kayıtları denetle"><ShieldCheck className="w-3.5 h-3.5" /> Denetim</button>
+              )}
               <button onClick={() => { setDefterForm({ ad: seciliDefter.ad, tur: seciliDefter.tur, not: seciliDefter.not || '', blok: defterBlogu(seciliDefter), kredi: { ...bosKrediForm, ...(seciliDefter.kredi || {}) } }); setEditingDefterId(seciliDefter.id); setShowDefterForm(true); }}
                 className="p-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition" title="Defteri Düzenle"><Edit className="w-3.5 h-3.5" /></button>
               <button onClick={() => setDeleteDefterId(seciliDefter.id)} className="p-1.5 bg-white/10 hover:bg-red-500/60 rounded-lg transition" title="Defteri Sil"><X className="w-3.5 h-3.5" /></button>
@@ -10596,6 +10751,27 @@ silinmeTarihi: new Date().toISOString()`}</pre>
             modülünden oluşur. Kayıtlar Firestore'da aynen durur; ciro ve
             bakiye hesapları etkilenmez, yalnızca görünüm kaldırıldı. */}
         {seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi' && seciliDefter.tur !== 'Borçlu' && (<>
+        {/* YENİ (kullanıcı talebi): DEFTER DENETİM PANELİ — bakiye farkının kaynağını bulmak için */}
+        {denetimAcik && (
+          <DefterDenetimPaneli
+            defterAd={seciliDefter.ad}
+            islemler={defterIslemleri(seciliDefterId)}
+            gorunenIds={new Set(dIslemler.map(i => i.id))}
+            hesabaKatilir={hesabaKatilir}
+            devirTarihi={SISTEM_DEVIR_TARIHI}
+            canliDonemde={canliDonemde}
+            onKapat={() => setDenetimAcik(false)}
+            onYumusakSil={async (id) => {
+              if (!window.confirm('Bu mükerrer kayıt izli olarak silinsin mi? (Satır görünür kalır, bakiyeden düşer)')) return;
+              try {
+                await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', id), {
+                  silindi: true, silinmeTarihi: new Date().toISOString(), silen: currentUser?.fullName || 'Sistem', silmeNedeni: 'Denetim: mükerrer kayıt',
+                });
+                addSystemLog?.('Defter İşlemi Silindi', `${seciliDefter?.ad}: denetimde tespit edilen mükerrer kayıt izli silindi.`);
+              } catch (e) { alert('Silinemedi: ' + e.message); }
+            }}
+          />
+        )}
         {/* KALDIRILDI (kullanıcı talebi): AY ÖZETİ ŞERİDİ — aşağıdaki blok
             false ile kapatıldı; geri istenirse false -> true yapılır. */}
         {false && (() => { return null; })()}
