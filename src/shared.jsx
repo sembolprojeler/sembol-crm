@@ -1868,7 +1868,17 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
           if (aS !== bS) return aS - bS;
           return (a.ad || '').localeCompare((b.ad || ''), 'tr-TR');
         });
-      const defter = uygun[0];
+      // ====================================================================
+      // DEĞİŞTİ (kullanıcı talebi): "KAPORA HANGİ HESABA?" SEÇİMİ ÖNCELİKLİ
+      // İş formunda kapora için hesap seçildiyse (job.depositDefterId) kapora
+      // O deftere yazılır; seçilmediyse eski kural (Sembol bloğu Banka).
+      // Böylece nakit / POS / başka banka alınan kapora yanlış hesaba düşmez.
+      // ====================================================================
+      const tumDefterler = defterSnap.docs.map(d => ({ ...d.data(), id: d.id }));
+      const secilenDefter = job?.depositDefterId ? tumDefterler.find(d => d.id === job.depositDefterId) : null;
+      const defter = secilenDefter || uygun[0];
+      // Ödeme yöntemi etiketi defter türünden türetilir (dekont eşleştirme ve raporlar için)
+      const kaporaYontemi = defter?.tur === 'Nakit' ? 'Nakit' : defter?.tur === 'Kredi Kartı' ? 'Kredi Kartı' : 'Banka / Havale';
 
       if (!defter) {
         addSystemLog?.('Kapora Defter Kaydı Atlandı',
@@ -1883,7 +1893,7 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
         aciklama: teslimKodu ? `Teslim kodu: ${teslimKodu}` : '',
         kategori: 'Kapora',
         etiketler: ['Kapora', job.type].filter(Boolean),
-        odemeYontemi: 'Havale/EFT',
+        odemeYontemi: kaporaYontemi, // DEĞİŞTİ: seçilen hesabın türüne göre
         // Kaporanın alındığı gün = işin kaydedildiği gün
         tarih: (job.createdAt || new Date().toISOString()).split('T')[0],
         defterId: defter.id,
