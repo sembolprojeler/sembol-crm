@@ -6146,6 +6146,20 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [defterler, setDefterler] = useState([]);
     const [islemler, setIslemler] = useState([]);
     const [seciliDefterId, setSeciliDefterId] = useState(null);
+    // ======================================================================
+    // DEĞİŞTİ (kullanıcı talebi): DENETİM, DEKONT YÜKLENMEDEN GÖRÜNMEZ.
+    // İlk eşleştirme/denetim ancak seçili defter için en az bir aylık dekont
+    // yüklendikten sonra başlar. Aşağıdaki abonelik yalnızca "var mı?" bilgisini
+    // tutar (bayrak), satırları okumaz — okuma maliyeti düşüktür.
+    // ======================================================================
+    const [defterDekontVar, setDefterDekontVar] = useState(false);
+    useEffect(() => {
+      setDefterDekontVar(false);
+      if (!seciliDefterId) return;
+      const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'dekontlar'), where('defterId', '==', seciliDefterId));
+      const unsub = onSnapshot(q, (snap) => setDefterDekontVar(!snap.empty), () => setDefterDekontVar(false));
+      return () => unsub();
+    }, [seciliDefterId]);
     const [arama, setArama] = useState('');
 
     // Defter oluşturma/düzenleme penceresi
@@ -10092,7 +10106,8 @@ silinmeTarihi: new Date().toISOString()`}</pre>
               {!['Ödemeler', 'Kredi', 'Borçlu'].includes(seciliDefter.tur) && (
                 <button onClick={() => setDekontAcik(v => !v)} className={`px-2 py-1.5 rounded-lg transition text-[10px] font-black flex items-center gap-1 ${dekontAcik ? 'bg-sky-400 text-black' : 'bg-white/10 hover:bg-white/20'}`} title="Banka dekontunu yükleyip sistem kayıtlarıyla eşleştir"><ClipboardCheck className="w-3.5 h-3.5" /> Dekont Eşleştir</button>
               )}
-              {!['Ödemeler', 'Kredi', 'Borçlu'].includes(seciliDefter.tur) && (
+              {/* DEĞİŞTİ: Denetim düğmesi ancak bu defter için dekont yüklendiyse görünür */}
+              {!['Ödemeler', 'Kredi', 'Borçlu'].includes(seciliDefter.tur) && defterDekontVar && (
                 <button onClick={() => setDenetimAcik(v => !v)} className={`px-2 py-1.5 rounded-lg transition text-[10px] font-black flex items-center gap-1 ${denetimAcik ? 'bg-amber-400 text-black' : 'bg-white/10 hover:bg-white/20'}`} title="Mükerrer / gizli / silinen kayıtları denetle"><ShieldCheck className="w-3.5 h-3.5" /> Denetim</button>
               )}
               <button onClick={() => { setDefterForm({ ad: seciliDefter.ad, tur: seciliDefter.tur, not: seciliDefter.not || '', blok: defterBlogu(seciliDefter), kredi: { ...bosKrediForm, ...(seciliDefter.kredi || {}) } }); setEditingDefterId(seciliDefter.id); setShowDefterForm(true); }}
@@ -11500,7 +11515,8 @@ silinmeTarihi: new Date().toISOString()`}</pre>
           />
         )}
         {/* YENİ (kullanıcı talebi): DEFTER DENETİM PANELİ — bakiye farkının kaynağını bulmak için */}
-        {denetimAcik && (
+        {/* DEĞİŞTİ (kullanıcı talebi): dekont yüklenmeden denetim/eşleştirme HİÇ çalışmaz ve görünmez */}
+        {denetimAcik && defterDekontVar && (
           <DefterDenetimPaneli
             defterAd={seciliDefter.ad}
             islemler={defterIslemleri(seciliDefterId)}
