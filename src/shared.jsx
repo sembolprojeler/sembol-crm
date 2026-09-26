@@ -11,7 +11,7 @@ import { initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 // DEĞİŞİKLİK: getDocs, updateDoc ve deleteDoc eklendi — defter kayıtlarını
 // okuyup güncellemek ve geri alınan kalemleri silmek için gerekli.
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, onSnapshot, doc, query, orderBy, limit, where, getDocs, updateDoc, deleteDoc } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, addDoc, onSnapshot, doc, query, orderBy, limit, where, getDocs, updateDoc, deleteDoc, setDoc } from "firebase/firestore";
   // GERÇEK FIREBASE PROJE AYARLARI (sembol-operasyon-merkezi)
   // NOT: apiKey gizli bir sır değildir (Firebase güvenliği Firestore Security
   // Rules ve Auth ile sağlanır), bu yüzden client tarafında bulunması normaldir.
@@ -1903,9 +1903,13 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
         addSystemLog?.('Kapora Defter Kaydı Güncellendi',
           `${defter.ad}: ${job.customerName} kaporası ₺${tutar.toLocaleString('tr-TR')} olarak güncellendi.`);
       } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+        // HATA DÜZELTMESİ (mükerrer yarış durumu): kapora da işten türetilen
+        // sabit kimlikle yazılır (kapora_<isId>) — iki cihaz aynı anda kaydetse
+        // de tek belge oluşur. Eski rastgele kimlikli kayıtlar sorguyla bulunup
+        // güncellenmeye devam eder.
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', `kapora_${job.id}`), {
           ...kayit, createdAt: new Date().toISOString()
-        });
+        }, { merge: true });
         addSystemLog?.('Kapora Defter Kaydı (Oto)',
           `${defter.ad}: ${job.customerName} kaporası ₺${tutar.toLocaleString('tr-TR')} giriş yazıldı.`);
       }
@@ -2005,9 +2009,18 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
         addSystemLog?.('Defter Geliri Güncellendi',
           `${defter.ad}: ${job.customerName} işi güncellendi, tutar ₺${tutar.toLocaleString('tr-TR')} (${odemeYontemi}).`);
       } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+        // ====================================================================
+        // HATA DÜZELTMESİ (mükerrer yarış durumu): Eskiden "önce sorgula, yoksa
+        // ekle" yapılıyordu. İş iki cihazdan (mavi yaka telefonu + ofis) aynı
+        // anda kapatılınca ikisi de "kayıt yok" görüp addDoc ile İKİ (bazen 8)
+        // kayıt yazabiliyordu (TQDEB4 ×8 örneği). Artık belge kimliği işten
+        // türetilir (tahsilat_<isId>) ve setDoc(merge) kullanılır: kaç cihaz
+        // yazarsa yazsın TEK belge oluşur. Eski rastgele kimlikli kayıtlar
+        // yukarıdaki sorgu ile bulunup güncellenmeye devam eder.
+        // ====================================================================
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', `tahsilat_${job.id}`), {
           ...kayit, createdAt: new Date().toISOString()
-        });
+        }, { merge: true });
         addSystemLog?.('Defter Geliri (Oto)',
           `${defter.ad}: ${job.customerName}${plaka ? ` (${plaka})` : ''} işinden ₺${tutar.toLocaleString('tr-TR')} giriş yapıldı (${odemeYontemi}).`);
       }
