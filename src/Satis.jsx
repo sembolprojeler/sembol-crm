@@ -3148,6 +3148,17 @@ const TEKLIF_ALANLARI = [
   // tahmini alım/nakliye ücreti — uzun ad önce denenir ki "Toplam Ödenecek"
   // yakalanmadan önce doğru eşleşsin.
   'Eşyaların Alınacağı Yer', 'Tahmini Alım/Nakliye Ücreti',
+  // HATA DÜZELTMESİ (Ali'nin bildirimi: "2 teklif geldi ikisinde de fiyat
+  // yok"): submit-lead.js içindeki ortakKuyruk() fonksiyonu Evden Eve
+  // Nakliyat / Parça Eşya / Ofis / Eşya Depolama / Asansör Kiralama
+  // sihirbazlarının HEPSİNDE sonMesaj'ın en sonuna "Sistem fiyat tahmini:
+  // X - Y TL" satırını ekliyordu, ama bu etiket aşağıdaki listede hiç
+  // TANIMLI DEĞİLDİ. Ayrıştırıcı (teklifOzetiAyristir) yalnızca bu listedeki
+  // adları alan sınırı sayar; tanınmayan "Sistem fiyat tahmini:" bir sınır
+  // oluşturmadığından metin bir önceki alanın (Tarih) değerine yapışık kalıp
+  // görünmez oluyordu — DepoEvim'in "Aylık Fiyat" / "Toplam Ödenecek" gibi
+  // KENDİ etiketleri zaten listede olduğu için o sihirbazda bu sorun yoktu.
+  'Sistem fiyat tahmini',
 ];
 
 // YENİ: Teklif detayı satırlarına dönüşümlü etiket renkleri — her bölüm farklı
@@ -3160,7 +3171,10 @@ const TEKLIF_SATIR_RENKLERI = [
   { etiket: 'bg-teal-100 text-teal-800',     nokta: 'bg-teal-500' },
   { etiket: 'bg-indigo-100 text-indigo-800', nokta: 'bg-indigo-500' },
 ];
-const TEKLIF_PARA_ALANLARI = ['Aylık Fiyat', 'Toplam Ödenecek (peşin)', 'Toplam Ödenecek', 'Bütçe', 'Tahmini Alım/Nakliye Ücreti'];
+// HATA DÜZELTMESİ: "Sistem fiyat tahmini" eklendi — Evden Eve/Parça Eşya/Ofis/
+// Eşya Depolama/Asansör Kiralama tekliflerinin fiyat satırı da artık DepoEvim
+// tekliflerindeki gibi yeşil vurgulu gösteriliyor (bkz. TEKLIF_ALANLARI notu).
+const TEKLIF_PARA_ALANLARI = ['Aylık Fiyat', 'Toplam Ödenecek (peşin)', 'Toplam Ödenecek', 'Bütçe', 'Tahmini Alım/Nakliye Ücreti', 'Sistem fiyat tahmini'];
 
 // YENİ (kullanıcı talebi): Bazı alanların EKRANDA görünen adı değiştirilir.
 // Ham metindeki anahtar (sihirbazın gönderdiği ad) AYNEN kalır — ayrıştırma
