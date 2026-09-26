@@ -95,6 +95,22 @@ import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
     type, formData, setFormData, handleInputChange, handleProvinceChange,
     handleDepoChange, toggleDepoDirection, handleAddJob, editingJobId, handleSwapAddresses
   }) => {
+    // YENİ (kullanıcı talebi): Kapora için seçilebilecek hesaplar (Kredi/Ödemeler/Borçlu
+    // plan defterleri hariç). Form açılınca bir kez okunur; okuma maliyeti düşüktür.
+    const [kaporaHesaplari, setKaporaHesaplari] = useState([]);
+    useEffect(() => {
+      let iptal = false;
+      (async () => {
+        try {
+          const snap = await getDocs(collection(db, 'artifacts', appId, 'public', 'data', 'defterler'));
+          if (iptal) return;
+          setKaporaHesaplari(snap.docs.map(d => ({ ...d.data(), id: d.id }))
+            .filter(d => ['Banka', 'Nakit', 'Kredi Kartı'].includes(d.tur))
+            .sort((a, b) => (a.blok === 'Sembol Nakliyat' ? 0 : 1) - (b.blok === 'Sembol Nakliyat' ? 0 : 1) || (a.ad || '').localeCompare((b.ad || ''), 'tr-TR')));
+        } catch (e) { console.error('Kapora hesapları okunamadı:', e); }
+      })();
+      return () => { iptal = true; };
+    }, []);
     // YENİ: İsim / telefon boş bırakılırsa gösterilecek uyarı penceresi state'i
     const [showValidationModal, setShowValidationModal] = useState(false);
     // YENİ: Teslim Durumu açılır penceresinin açık/kapalı durumu
@@ -288,6 +304,22 @@ import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
                   <input type="number" name="deposit" value={formData.deposit} onChange={handleInputChange} className={`${inputCls} font-bold text-green-600`} />
                 </div>
               </div>
+              {/* ==============================================================
+                  YENİ (kullanıcı talebi): KAPORA HANGİ HESABA YAZILSIN?
+                  Kapora girildiyse hesap seçilir; kayıt o deftere gelir olarak
+                  düşer (shared.defterKaporaKaydet bu alanı okur). Seçilmezse
+                  eski kural: Sembol Nakliyat bloğundaki Banka defteri.
+                  ============================================================== */}
+              {parseFloat(formData.deposit) > 0 && (
+                <div>
+                  <label className={labelCls}>Kapora Hangi Hesaba Yazılsın? *</label>
+                  <select name="depositDefterId" value={formData.depositDefterId || ''} onChange={handleInputChange} className={`${inputCls} bg-white`}>
+                    <option value="">Varsayılan — Sembol Nakliyat banka hesabı</option>
+                    {kaporaHesaplari.map(d => <option key={d.id} value={d.id}>{d.ad} — {d.tur}</option>)}
+                  </select>
+                  <p className="text-[10px] font-bold text-neutral-400 mt-1">Nakit alındıysa KASA, POS ile alındıysa POS defterini seçin; kapora seçtiğiniz hesapta gelir olarak görünür.</p>
+                </div>
+              )}
               {/* SATIR 2: Sözleşme Detayı + Operasyon Notları (mobilde de yan yana) */}
               <div className="grid grid-cols-2 gap-3 md:gap-4">
                 <div>
