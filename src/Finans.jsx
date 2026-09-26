@@ -5584,6 +5584,13 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [elleAra, setElleAra] = useState('');
     const [genisAralik, setGenisAralik] = useState(false); // sistem tarafında komşu ayları da göster
     const [grupNot, setGrupNot] = useState('');
+    // YENİ (kullanıcı talebi): HATALI satırdan açılan MANUEL EŞLEŞTİR penceresi
+    const [manuelModal, setManuelModal] = useState(null);   // { banka } | null
+    const [manuelSec, setManuelSec] = useState([]);         // seçili sistem kaydı id'leri
+    const [manuelAra, setManuelAra] = useState('');
+    const [manuelYon, setManuelYon] = useState('giris');
+    const [manuelGenis, setManuelGenis] = useState(false);
+    const [manuelNot, setManuelNot] = useState('');
 
     const dekontRef = (a = ay) => doc(db, 'artifacts', appId, 'public', 'data', 'dekontlar', dekontDocId(defter.id, a));
     const hafizaRef = (a = ay) => doc(db, 'artifacts', appId, 'public', 'data', 'dekontEslesmeleri', dekontDocId(defter.id, a));
@@ -5695,7 +5702,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const kod = dkKodNorm(i.teslimKodu || kodMetin || job?.deliveryCode || '');
       const adMetni = [i.musteriAdi, i.cariAd, job?.customerName, (i.aciklama || '').replace(/teslim\s*kodu\s*:?\s*[A-Za-z0-9]+/i, '')].filter(Boolean).join(' ');
       const kaporaMi = /kapora/i.test(i.kaynak || '') || /kapora/i.test(i.kategori || '') || !!i.kaporaKaynakId;
-      return { ...i, _kod: kod, _adMetni: adMetni, _tutar: parseFloat(i.tutar) || 0, _kapora: kaporaMi };
+      // YENİ: şirket hesapları arası transfer (virman) kaydı mı?
+      const virmanMi = i.isVirman === true || /virman/i.test(i.kategori || '') || /virman/i.test(i.odemeYontemi || '') || /^transfer\s*[→←]/i.test(i.aciklama || '');
+      return { ...i, _kod: kod, _adMetni: adMetni, _tutar: parseFloat(i.tutar) || 0, _kapora: kaporaMi, _virman: virmanMi };
     }), [islemler, jobHarita]);
 
     // ---------------- EŞLEŞTİRME MOTORU
@@ -5737,6 +5746,21 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       });
       const aday = (b, gunTol) => sistem.filter(i => !kullanilanS.has(i.id) && i.tip === b.yon && Math.abs(i._tutar - b.tutar) < 0.011 && dkGunFarki(i.tarih, b.tarih) <= gunTol)
         .sort((x, y) => dkGunFarki(x.tarih, b.tarih) - dkGunFarki(y.tarih, b.tarih));
+      // ======================================================================
+      // YENİ (kullanıcı talebi): VİRMAN / ŞİRKET HESAPLARI ARASI TRANSFER
+      // Dekontta gönderen/alıcı "SEMBOL NAKLİYAT …" ya da "Mustafa Beşinci"
+      // ise bu bir iç transferdir. Sistemde aynı gün (±1 gün toleranslı),
+      // aynı yön ve aynı tutardaki VİRMAN kaydıyla (isVirman) eşleştirilir.
+      // Kuruş farkına tolerans: dekont 11.674,23 / sistem 11.674,00 gibi
+      // (≤ ₺1) → yine eşleşir, kartta FARK rozeti görünür.
+      // ======================================================================
+      const virmanAday = (b, gunTol, tol) => sistem.filter(i => !kullanilanS.has(i.id) && i._virman && i.tip === b.yon && Math.abs(i._tutar - b.tutar) <= tol && dkGunFarki(i.tarih, b.tarih) <= gunTol)
+        .sort((x, y) => (Math.abs(x._tutar - b.tutar) - Math.abs(y._tutar - b.tutar)) || (dkGunFarki(x.tarih, b.tarih) - dkGunFarki(y.tarih, b.tarih)));
+      bankalar.forEach(b => {
+        if (bitti.has(b.id) || !b.icTransfer) return;
+        const sRow = virmanAday(b, 0, 0.011)[0] || virmanAday(b, 0, 1.0)[0] || virmanAday(b, 1, 0.011)[0] || virmanAday(b, 1, 1.0)[0];
+        if (sRow) ekle('virman', [b], [sRow], Math.abs(sRow._tutar - b.tutar) > 0.011 ? { aciklamaEk: 'Kuruş farkı var — sistem kaydını dekonttaki tutara düzeltebilirsiniz' } : {});
+      });
       // 1) TESLİM KODU 1:1
       bankalar.forEach(b => {
         if (bitti.has(b.id) || !b.kodAdaylari.length) return;
@@ -5791,7 +5815,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const bosBanka = bankalar.filter(b => { const e = eslesmeler.find(x => x.bankalar.some(y => y.id === b.id)); return !e || ['yok', 'oneri', 'kaldirildi'].includes(e.tip); });
       // Elle mod için: eşleşmemiş sistem kayıtları (ay, istenirse komşu aylar)
       const bosSistem = sistemSatirlari.filter(i => !kullanilanS.has(i.id) && i.tarih >= gunEk(ayBas, genisAralik ? -35 : -3) && i.tarih <= gunEk(ayBit, genisAralik ? 35 : 3));
-      return { eslesmeler, sistemFazla, bosBanka, bosSistem, adet: { grup: say('grup'), elle: say('elle'), kayitli: say('kayitli'), kod: say('kod'), kodToplam: say('kodToplam'), ad: say('ad'), oneri: say('oneri'), yok: say('yok') + say('kaldirildi'), fazla: sistemFazla.length }, bankaNet, sistemNet, yokNet, fazlaNet, grupFark };
+      return { eslesmeler, sistemFazla, bosBanka, bosSistem, adet: { grup: say('grup'), elle: say('elle'), kayitli: say('kayitli'), virman: say('virman'), kod: say('kod'), kodToplam: say('kodToplam'), ad: say('ad'), oneri: say('oneri'), yok: say('yok') + say('kaldirildi'), fazla: sistemFazla.length }, bankaNet, sistemNet, yokNet, fazlaNet, grupFark };
     }, [dekont, hafiza, sistemSatirlari, ay, genisAralik]);
 
     // ---------------- HAFIZA İŞLEMLERİ
@@ -5802,28 +5826,35 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       return hafizaYaz({ [`kaldirilan.${b.id}`]: true, [`elleEslesme.${b.id}`]: deleteField() });
     };
     const kaldirmayiGeriAl = (e) => hafizaYaz({ [`kaldirilan.${e.bankalar[0].id}`]: deleteField() });
-    const grupOlustur = async () => {
-      if (!sonuc) return;
-      const bl = sonuc.bosBanka.filter(b => secBanka.includes(b.id)), sl = sonuc.bosSistem.filter(i => secSistem.includes(i.id));
-      if (!bl.length || !sl.length) { alert('Sol taraftan en az bir dekont hareketi, sağ taraftan en az bir sistem kaydı seçin.'); return; }
+    // Ortak: dekont hareket(ler)i ↔ sistem kayıt(lar)ı grubunu HAFIZAYA yazar.
+    // Grup, kalıcı dekont kimliklerine bağlıdır → dekont yeniden yüklense de aynı
+    // hareket aynı kayda eşleşmeye devam eder.
+    const grupKaydet = async (bl, sl, not) => {
       const bT = bl.reduce((t, b) => t + b.tutar, 0), sT = sl.reduce((t, i) => t + i._tutar, 0), fark = bT - sT;
       const yonKarisik = new Set([...bl.map(b => b.yon), ...sl.map(i => i.tip)]).size > 1;
       let mesaj = `Dekont toplamı: ₺${paraFmt(bT)}\nSistem toplamı: ₺${paraFmt(sT)}\nFark: ₺${paraFmt(fark)}\n\n`;
       if (yonKarisik) mesaj += 'DİKKAT: Gelir ve gider karışık seçildi!\n\n';
       mesaj += Math.abs(fark) < 0.011 ? 'Tutarlar birebir tutuyor. Eşleştirilsin mi?' : `UYARI: Tutarlar SIFIRLANMIYOR (fark ₺${paraFmt(Math.abs(fark))}). Kısmi ödeme / komisyon farkı gibi bir sebebi varsa yine de eşleştirebilirsiniz. Eşleştirilsin mi?`;
-      if (!window.confirm(mesaj)) return;
+      if (!window.confirm(mesaj)) return false;
       const gid = `g_${Date.now().toString(36)}_${dkHash(bl.map(b => b.id).join('|'))}`;
-      await hafizaYaz({ [`gruplar.${gid}`]: { bankaIds: bl.map(b => b.id), sistemIds: sl.map(i => i.id), bankaToplam: bT, sistemToplam: sT, fark, not: grupNot.trim(), onaylayan: currentUser?.fullName || '', zaman: new Date().toISOString() } });
+      // Bu dekont hareketleri daha önce "kaldırılmış" işaretlendiyse işareti de temizle
+      const temizle = {}; bl.forEach(b => { temizle[`kaldirilan.${b.id}`] = deleteField(); temizle[`elleEslesme.${b.id}`] = deleteField(); });
+      await hafizaYaz({ ...temizle, [`gruplar.${gid}`]: { bankaIds: bl.map(b => b.id), sistemIds: sl.map(i => i.id), bankaToplam: bT, sistemToplam: sT, fark, not: (not || '').trim(), onaylayan: currentUser?.fullName || '', zaman: new Date().toISOString() } });
       addSystemLog?.('Dekont Elle Eşleştirme', `${defter.ad} • ${ayBaslikDk(ay)}: ${bl.length} dekont hareketi ↔ ${sl.length} sistem kaydı (fark ₺${paraFmt(fark)}).`);
-      setSecBanka([]); setSecSistem([]); setGrupNot('');
+      return true;
     };
-
+    const grupOlustur = async () => {
+      if (!sonuc) return;
+      const bl = sonuc.bosBanka.filter(b => secBanka.includes(b.id)), sl = sonuc.bosSistem.filter(i => secSistem.includes(i.id));
+      if (!bl.length || !sl.length) { alert('Sol taraftan en az bir dekont hareketi, sağ taraftan en az bir sistem kaydı seçin.'); return; }
+      if (await grupKaydet(bl, sl, grupNot)) { setSecBanka([]); setSecSistem([]); setGrupNot(''); }
+    };
     // ---------------- KAYDET: sistem kayıtlarına dekontNo / grup yaz
     const eslesmeleriKaydet = async () => {
       if (!sonuc) return;
       const yazilacak = [];
       sonuc.eslesmeler.forEach(e => {
-        if (!['kod', 'ad', 'elle', 'kodToplam', 'grup'].includes(e.tip)) return;
+        if (!['kod', 'ad', 'elle', 'kodToplam', 'grup', 'virman'].includes(e.tip)) return;
         e.sistemler.forEach(i => {
           const hedefNo = e.bankalar.map(b => b.dekontNo).join(' | ');
           if (i.dekontNo !== hedefNo) yazilacak.push({ i, veri: { dekontNo: hedefNo, dekontTarihi: e.bankalar[0]?.tarih || '', dekontEslesme: e.tip, dekontGrupId: e.grupId || '', dekontAy: ay, dekontEslestiren: currentUser?.fullName || '', dekontEslesmeZamani: new Date().toISOString() } });
@@ -5840,10 +5871,20 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       finally { setKaydediliyor(false); }
     };
 
+    // YENİ: HATALI satırdan manuel eşleştirme penceresi
+    const manuelAc = (b) => { setManuelModal({ banka: b }); setManuelSec([]); setManuelAra(''); setManuelYon(b.yon); setManuelGenis(false); setManuelNot(''); };
+    const manuelKaydet = async () => {
+      if (!manuelModal || !sonuc) return;
+      const sl = sonuc.bosSistem.filter(i => manuelSec.includes(i.id));
+      if (!sl.length) { alert('En az bir sistem kaydı seçin.'); return; }
+      if (await grupKaydet([manuelModal.banka], sl, manuelNot)) setManuelModal(null);
+    };
+
     const TIP = {
       grup:      { ad: 'Elle Grup',          stil: 'bg-emerald-800 text-white' },
       elle:      { ad: 'Elle Onaylandı',     stil: 'bg-emerald-700 text-white' },
       kayitli:   { ad: 'Kayıtlı Eşleşme',    stil: 'bg-neutral-800 text-white' },
+      virman:    { ad: 'Virman • Şirket Hesapları', stil: 'bg-teal-700 text-white' },
       kod:       { ad: 'Teslim Kodu ile',    stil: 'bg-blue-600 text-white' },
       kodToplam: { ad: 'Kod • Kapora+Kalan', stil: 'bg-indigo-600 text-white' },
       ad:        { ad: 'Ad Soyad ile',       stil: 'bg-emerald-600 text-white' },
@@ -5851,7 +5892,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       yok:       { ad: 'HATALI • sistemde yok', stil: 'bg-red-600 text-white' },
       kaldirildi:{ ad: 'KALDIRILDI • eşleşmemiş', stil: 'bg-red-500 text-white' },
     };
-    const eslesikTipler = ['grup', 'elle', 'kayitli', 'kod', 'kodToplam', 'ad'];
+    const eslesikTipler = ['grup', 'elle', 'kayitli', 'virman', 'kod', 'kodToplam', 'ad'];
     const gorunen = (sonuc?.eslesmeler || []).filter(e => filtre === 'Tümü' ? true : filtre === 'Eşleşti' ? eslesikTipler.includes(e.tip) : filtre === 'Öneri' ? e.tip === 'oneri' : filtre === 'Gruplar' ? e.tip === 'grup' : ['yok', 'kaldirildi'].includes(e.tip));
     const son12 = Array.from({ length: 12 }, (_, i) => ayKaydirDk(buAyDk(), -i)).reverse();
     const ayDurum = (a) => ayListesi.find(d => d.ay === a);
@@ -5870,6 +5911,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         {onSec && <input type="checkbox" readOnly checked={!!secili} className="w-3.5 h-3.5 accent-emerald-600" />}
         <span className="text-neutral-500 shrink-0">{trh(i.tarih)}</span>
         {i._kapora && <span className="shrink-0 text-[8px] font-black bg-amber-100 text-amber-800 px-1 rounded">KAPORA</span>}
+        {i._virman && <span className="shrink-0 text-[8px] font-black bg-teal-100 text-teal-800 px-1 rounded">VİRMAN</span>}
         <span className="flex-1 min-w-0 truncate">{i.musteriAdi ? `${i.musteriAdi} — ` : ''}{i.aciklama || i.kategori || '—'}{i._kod ? <span className="ml-1 text-[9px] font-black bg-blue-100 text-blue-800 px-1 rounded">{i._kod}</span> : null}<span className="text-neutral-400"> • {i.kaynak || i.kategori || ''}</span></span>
         <span className={`shrink-0 tabular-nums font-black ${i.tip === 'giris' ? 'text-emerald-700' : 'text-red-700'}`}>₺{paraFmt(i._tutar)}</span>
       </div>
@@ -5888,7 +5930,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         <div className="flex items-start justify-between gap-2">
           <div>
             <h3 className="font-black text-black flex items-center gap-2"><ClipboardCheck className="w-5 h-5 text-sky-600" /> Dekont Eşleştir — {defter?.ad}</h3>
-            <p className="text-[11px] font-bold text-neutral-600 mt-0.5">Sıra: <b>teslim kodu</b> → <b>kod toplamı (kapora + kalan)</b> → <b>ad soyad</b> → <b>aynı gün aynı tutar önerisi</b> → hatalı. Elle modda istediğiniz hareketleri gruplayabilirsiniz; eşleşme hafızası dekont değişse de korunur.</p>
+            <p className="text-[11px] font-bold text-neutral-600 mt-0.5">Sıra: <b>virman (şirket hesapları arası)</b> → <b>teslim kodu</b> → <b>kod toplamı (kapora + kalan)</b> → <b>ad soyad</b> → <b>aynı gün aynı tutar önerisi</b> → hatalı. Elle modda istediğiniz hareketleri gruplayabilirsiniz; eşleşme hafızası dekont değişse de korunur.</p>
           </div>
           <button type="button" onClick={onKapat} className="p-1.5 hover:bg-sky-200 rounded-lg"><X className="w-4 h-4" /></button>
         </div>
@@ -5948,9 +5990,10 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         {sonuc && (
           <>
             {/* ÖZET */}
-            <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
+            <div className="grid grid-cols-3 md:grid-cols-9 gap-2">
               {[
-                { e: 'Eşleşti', v: sonuc.adet.grup + sonuc.adet.elle + sonuc.adet.kayitli + sonuc.adet.kod + sonuc.adet.kodToplam + sonuc.adet.ad, s: 'bg-emerald-600 text-white' },
+                { e: 'Eşleşti', v: sonuc.adet.grup + sonuc.adet.elle + sonuc.adet.kayitli + sonuc.adet.virman + sonuc.adet.kod + sonuc.adet.kodToplam + sonuc.adet.ad, s: 'bg-emerald-600 text-white' },
+                { e: 'Virman', v: sonuc.adet.virman, s: 'bg-teal-100 text-teal-800' },
                 { e: 'Kod ile', v: sonuc.adet.kod, s: 'bg-blue-100 text-blue-800' },
                 { e: 'Kapora+Kalan', v: sonuc.adet.kodToplam, s: 'bg-indigo-100 text-indigo-800' },
                 { e: 'Ad ile', v: sonuc.adet.ad, s: 'bg-emerald-100 text-emerald-800' },
@@ -6033,6 +6076,10 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                       {(e.kayipBanka > 0 || e.kayipSistem > 0) && <span className="text-[9px] font-black bg-neutral-200 text-neutral-700 px-1.5 py-0.5 rounded-full">Grubun {e.kayipBanka + e.kayipSistem} üyesi bu dekontta/listede yok</span>}
                       <span className="ml-auto flex items-center gap-1">
                         {e.tip === 'oneri' && <button type="button" onClick={() => oneriOnayla(e)} className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-black rounded-lg">Eşleştir</button>}
+                        {/* YENİ (kullanıcı talebi): sistemde yok / kaldırıldı / öneri satırlarından pencereyle manuel eşleştirme */}
+                        {['yok', 'kaldirildi', 'oneri'].includes(e.tip) && (
+                          <button type="button" onClick={() => manuelAc(e.bankalar[0])} className="px-2.5 py-1 bg-sky-600 hover:bg-sky-700 text-white text-[10px] font-black rounded-lg flex items-center gap-1"><ArrowRightLeft className="w-3 h-3" /> {e.tip === 'oneri' ? 'Başka Kayıt Seç' : 'Manuel Eşleştir'}</button>
+                        )}
                         {eslesikTipler.includes(e.tip) && e.tip !== 'kayitli' && <button type="button" onClick={() => eslesmeKaldir(e)} className="px-2 py-1 bg-white border border-neutral-300 hover:bg-neutral-100 text-neutral-700 text-[10px] font-black rounded-lg">{e.tip === 'grup' ? 'Grubu Çöz' : 'Kaldır'}</button>}
                         {e.tip === 'kaldirildi' && <button type="button" onClick={() => kaldirmayiGeriAl(e)} className="px-2 py-1 bg-white border border-neutral-300 text-neutral-700 text-[10px] font-black rounded-lg">Geri Al</button>}
                       </span>
@@ -6063,6 +6110,61 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
             )}
           </>
         )}
+
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): MANUEL EŞLEŞTİR PENCERESİ
+            "HATALI • sistemde yok" hareket için açılır; dekontla eşleşmemiş
+            sistem ödemeleri listelenir, bir/birkaçı seçilip kaydedilir. Kayıt
+            eşleşme HAFIZASINA gider (kalıcı dekont kimliğiyle) → aynı ay için
+            dekont yeniden yüklense de bu hareket hep aynı kayda eşleşir.
+            ================================================================== */}
+        {manuelModal && sonuc && (() => {
+          const b = manuelModal.banka;
+          const araN = dkNorm(manuelAra);
+          const liste = sonuc.bosSistem.filter(i => i.tip === manuelYon && (!araN || dkNorm(`${i.musteriAdi || ''} ${i.aciklama || ''} ${i.kategori || ''} ${i.kaynak || ''}`).includes(araN) || String(i._tutar).includes(araN)))
+            .sort((x, y) => (Math.abs(x._tutar - b.tutar) - Math.abs(y._tutar - b.tutar)) || dkGunFarki(x.tarih, b.tarih) - dkGunFarki(y.tarih, b.tarih)); // tutarı en yakın olan üstte
+          const secT = liste.filter(i => manuelSec.includes(i.id)).reduce((t, i) => t + i._tutar, 0);
+          const fark = b.tutar - secT;
+          return (
+            <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3" onClick={() => setManuelModal(null)}>
+              <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl">
+                <div className="bg-sky-700 text-white p-3 rounded-t-2xl flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-black text-sm flex items-center gap-2"><ArrowRightLeft className="w-4 h-4" /> Manuel Eşleştir</p>
+                    <p className="text-[11px] font-bold text-white/80 mt-0.5 break-words">{trh(b.tarih)} • {b.aciklama}</p>
+                    <p className={`text-sm font-black mt-0.5 ${b.yon === 'giris' ? 'text-emerald-300' : 'text-red-300'}`}>{b.yon === 'giris' ? 'Gelen' : 'Giden'} ₺{paraFmt(b.tutar)}</p>
+                  </div>
+                  <button type="button" onClick={() => setManuelModal(null)} className="p-1 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
+                </div>
+                <div className="p-3 space-y-2 border-b border-neutral-200">
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {[['giris', 'Gelirler'], ['cikis', 'Giderler']].map(([y, ad]) => <button key={y} type="button" onClick={() => { setManuelYon(y); setManuelSec([]); }} className={`px-3 py-1.5 text-[11px] font-black rounded-lg ${manuelYon === y ? (y === 'giris' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white') : 'bg-neutral-100 text-neutral-700'}`}>{ad}</button>)}
+                    <label className="flex items-center gap-1 text-[10px] font-black text-neutral-600 ml-1"><input type="checkbox" checked={manuelGenis} onChange={e => { setManuelGenis(e.target.checked); setGenisAralik(e.target.checked); }} className="accent-black" /> Komşu ayları da göster</label>
+                    <div className="relative flex-1 min-w-[160px]"><Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-neutral-400" /><input value={manuelAra} onChange={e => setManuelAra(e.target.value)} placeholder="Ara: ad, açıklama, tutar" className="w-full pl-7 pr-2 py-1.5 border border-neutral-300 rounded-lg text-[11px] font-bold" /></div>
+                  </div>
+                  <p className="text-[10px] font-bold text-neutral-500">Dekontla eşleşmemiş sistem ödemeleri — tutarı en yakın olan üstte. Birden çok seçebilirsiniz (kapora + kalan gibi).</p>
+                </div>
+                <div className="flex-1 overflow-y-auto p-3 space-y-1">
+                  {liste.map(i => <SistemSatir key={i.id} i={i} secili={manuelSec.includes(i.id)} onSec={() => toggle(manuelSec, setManuelSec, i.id)} />)}
+                  {liste.length === 0 && <div className="text-center text-xs font-bold text-neutral-400 py-8">Eşleşmemiş {manuelYon === 'giris' ? 'gelir' : 'gider'} kaydı yok. Diğer sekmeye bakın ya da "Komşu ayları da göster"i açın.</div>}
+                </div>
+                <div className={`p-3 border-t-2 rounded-b-2xl space-y-2 ${manuelSec.length === 0 ? 'border-neutral-200 bg-neutral-50' : Math.abs(fark) < 0.011 ? 'border-emerald-400 bg-emerald-50' : 'border-amber-400 bg-amber-50'}`}>
+                  <div className="grid grid-cols-3 gap-2 text-center">
+                    <div><p className="text-[9px] font-black uppercase text-sky-700">Dekont</p><p className="font-black tabular-nums">₺{paraFmt(b.tutar)}</p></div>
+                    <div><p className="text-[9px] font-black uppercase text-emerald-700">Seçili sistem ({manuelSec.length})</p><p className="font-black tabular-nums">₺{paraFmt(secT)}</p></div>
+                    <div><p className="text-[9px] font-black uppercase text-neutral-600">Fark</p><p className={`font-black tabular-nums ${Math.abs(fark) < 0.011 ? 'text-emerald-700' : 'text-amber-800'}`}>₺{paraFmt(fark)}{manuelSec.length > 0 && (Math.abs(fark) < 0.011 ? ' ✓' : ' ⚠')}</p></div>
+                  </div>
+                  {manuelSec.length > 0 && Math.abs(fark) > 0.011 && <p className="text-[10px] font-black text-amber-800 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Tutarlar sıfırlanmıyor (fark ₺{paraFmt(Math.abs(fark))}). Kaydet'e basınca tekrar uyarılacaksınız.</p>}
+                  <div className="flex gap-2">
+                    <input value={manuelNot} onChange={e => setManuelNot(e.target.value)} placeholder="Not (isteğe bağlı)" className="flex-1 px-2 py-2 border border-neutral-300 rounded-lg text-[11px] font-bold" />
+                    <button type="button" onClick={() => setManuelModal(null)} className="px-3 py-2 bg-white border border-neutral-300 text-neutral-700 text-xs font-black rounded-xl">Vazgeç</button>
+                    <button type="button" onClick={manuelKaydet} disabled={!manuelSec.length} className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl disabled:opacity-40 flex items-center gap-1"><Save className="w-4 h-4" /> Kaydet — bu hareket bu kayda ait</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   };
