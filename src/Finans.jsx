@@ -10703,7 +10703,53 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                   tutar. Defter listesi kartındaki desenin aynısıdır.
                   Diğer defter türlerinde eski bakiye gösterimi AYNEN korunur.
                   ============================================================== */}
-              {seciliDefter.tur === 'Borçlu' ? (() => {
+              {/* ==============================================================
+                  DEĞİŞTİ (kullanıcı talebi): KREDİ defterinde başlıktaki rakam
+                  artık giriş−çıkış bakiyesi DEĞİL, TÜM KREDİLERİN ÖDENECEK
+                  TOPLAM KALAN BORCUDUR ve KIRMIZI gösterilir. Rakam, defter
+                  listesindeki "Kalan borç" ile aynı kaynaktan (krediDefterBilgi)
+                  gelir — ikisi hep tutar.
+                  ============================================================== */}
+              {/* ==============================================================
+                  DEĞİŞTİ (kullanıcı talebi): ÖDEMELER defterinde başlıktaki rakam
+                  giriş−çıkış bakiyesi DEĞİL, BU AY KALAN ÖDEMELERDİR (maaş, icra
+                  ve avans satırları dahil). Defter listesindeki "Bu Ay Kalan"
+                  kartıyla AYNI hesap — ikisi hep tutar. İlerleme çubuğu bu ay
+                  ödenen oranını gösterir; gecikmiş varsa rakam kırmızıya döner.
+                  ============================================================== */}
+              {seciliDefter.tur === 'Ödemeler' ? (() => {
+                const od = odemeDefterBilgi(seciliDefter);
+                const ekSatirlar = [...maasSatirlari, ...icraSatirlari, ...avansSatirlari];
+                const ekToplam = ekSatirlar.reduce((t, x) => t + (parseFloat(x.tutar) || 0), 0);
+                const ekOdenen = ekSatirlar.filter(x => x.odendi).reduce((t, x) => t + (parseFloat(x.tutar) || 0), 0);
+                const buAyToplam = od.buAyToplam + ekToplam;
+                const buAyOdenen = od.buAyOdenen + ekOdenen;
+                const buAyKalan = od.buAyBekleyen + (ekToplam - ekOdenen);
+                const yuzdeOd = buAyToplam > 0 ? Math.round((buAyOdenen / buAyToplam) * 100) : 0;
+                return (
+                  <>
+                    <div className={`text-xl sm:text-2xl font-black tabular-nums leading-tight ${od.gecikmisAdet > 0 ? 'text-red-400' : 'text-orange-300'}`}>₺{paraFmt(buAyKalan)}</div>
+                    <div className="text-[9px] sm:text-[10px] font-black uppercase text-white/70 leading-tight">{buAyKalan > 0.01 ? 'Bu Ay Kalan' : 'Bu Ayın Ödemeleri Tamam ✓'}</div>
+                    {buAyToplam > 0 && (
+                      <div className="h-1.5 bg-white/15 rounded-full overflow-hidden mt-1 w-32 ml-auto">
+                        <div className="h-full bg-orange-400" style={{ width: `${yuzdeOd}%` }}></div>
+                      </div>
+                    )}
+                  </>
+                );
+              })() : seciliDefter.tur === 'Kredi' ? (() => {
+                const kd = krediDefterBilgi(seciliDefter);
+                return (
+                  <>
+                    <div className="text-xl sm:text-2xl font-black tabular-nums leading-tight text-red-400">₺{paraFmt(kd.toplamBorc)}</div>
+                    <div className="text-[9px] sm:text-[10px] font-black uppercase text-white/70 leading-tight">
+                      {kd.kalemSayisi === 0 ? 'Kredi Eklenmemiş'
+                        : kd.toplamBorc > 0 ? `Toplam Kalan Kredi Borcu • ${kd.kalemSayisi} kredi`
+                        : 'Tüm Krediler Kapandı'}
+                    </div>
+                  </>
+                );
+              })() : seciliDefter.tur === 'Borçlu' ? (() => {
                 const al = alacakDefterBilgi(seciliDefter);
                 return (
                   <>
