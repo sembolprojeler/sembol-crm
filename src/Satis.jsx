@@ -3263,6 +3263,61 @@ const telefonGecerliMi = (v) => telefonRakam(v).length >= 10 && !(v || '').inclu
 // yazılmamış eski kayıtlar da (varsayılan "Yeni") doğru sayılsın.
 //   aktif: false verilirse (kullanıcı giriş yapmadıysa) hiç abone olunmaz.
 // ============================================================================
+// ============================================================================
+// HATA DÜZELTMESİ (kullanıcı bildirimi): Satış menüsündeki rozet 45, listedeki
+// "Yeni" ise 17 gösteriyordu. Sebep: rozet HAM kayıtları sayıyordu; liste ise
+// spam isimli kayıtları ve aynı ad+telefondan gelen mükerrerleri gizliyor
+// (mukerrerleriGizle). Rozet artık listeyle AYNI temizliği uygular.
+// Aşağıdaki üç yardımcı, MusteriHavuzuView içindekilerin birebir kopyasıdır
+// (bileşen içinde tanımlı oldukları için hook'tan erişilemiyordu).
+// ============================================================================
+const adAnahtariRozet = (ad) => (ad || '')
+  .replace(/İ/g, 'i').replace(/I/g, 'i').replace(/ı/g, 'i')
+  .replace(/Ş/g, 's').replace(/ş/g, 's').replace(/Ğ/g, 'g').replace(/ğ/g, 'g')
+  .replace(/Ç/g, 'c').replace(/ç/g, 'c').replace(/Ö/g, 'o').replace(/ö/g, 'o')
+  .replace(/Ü/g, 'u').replace(/ü/g, 'u')
+  .toLowerCase().replace(/\s+/g, ' ').trim();
+
+// ŞÜPHELİ / SPAM İSİM TESPİTİ — sadece AÇIKÇA sahte olanları eler; gerçek
+// isimleri (tek/çift kelime, yabancı, aksanlı) korur. Kararsız kalınan
+// hiçbir isim elenmez; amaç gerçek talebi asla kaçırmamaktır.
+const supheliIsimRozet = (ad) => {
+  const ham = (ad || '').trim();
+  const norm = adAnahtariRozet(ham);
+  if (!norm) return true;                                   // boş
+  // (a) 2'den az HARF içeriyorsa (".", "E", "1", "--") → spam
+  const harfler = norm.replace(/[^a-z]/g, '');
+  if (harfler.length < 2) return true;
+  // (b) Hiç sesli harf yoksa (klavye ezmesi "sk", "bcd") → spam
+  if (!/[aeıioöuü]/.test(ham.toLocaleLowerCase('tr')) && !/[aeiou]/.test(norm)) return true;
+  // (c) Tek karakterin tekrarı ("aaaa", "xxxx", "....") → spam
+  if (/^(.)\1+$/.test(norm.replace(/\s/g, ''))) return true;
+  // (d) Bilinen test/şirket kelimeleri (tam kelime eşleşmesi) → spam
+  const karaListe = ['test','deneme','asd','asdf','asdasd','sdf','dsa','sda','qwe','qwer','qwerty','zxc','zxcv','aaa','xxx','sss','abc','ncnc','asdfg','fiyat','random','spam','depoevim','depo evim','sembol','sembol nakliyat'];
+  const kelimeler = norm.split(' ');
+  if (karaListe.includes(norm) || kelimeler.every(k => karaListe.includes(k))) return true;
+  // (e) Herhangi bir kelime 3+ ARDIŞIK sessiz harfle BAŞLIYORSA → spam.
+  //     Türkçede (ve neredeyse tüm dillerde) kelime 3 sessizle başlamaz;
+  //     "Smsöal" (Sms...) gibi ezmeleri yakalar, gerçek isimleri etkilemez.
+  const sessiz = '[bcçdfgğhjklmnprsştvyzqwx]';
+  if (kelimeler.some(k => new RegExp(`^${sessiz}{3,}`, 'i').test(k))) return true;
+  return false;
+};
+
+const mukerrerleriGizleRozet = (liste) => {
+  const gorulen = new Set();
+  return liste.filter(k => {
+    // (1) Şüpheli/spam isimli kayıtlar gizlenir
+    if (supheliIsimRozet(k.musteriAdi)) return false;
+    // (2) Aynı ad + telefondan yalnızca en yenisi kalır
+    if (!telefonGecerliMi(k.iletisim)) return true;            // Numarasız kayıt eşleştirilmez
+    const anahtar = `${adAnahtariRozet(k.musteriAdi)}|${telefonRakam(k.iletisim)}`;
+    if (gorulen.has(anahtar)) return false;                    // Daha yenisi zaten listede
+    gorulen.add(anahtar);
+    return true;
+  });
+};
+
 export const useHizliTeklifYeniSayilari = (aktif = true) => {
   const [sayilar, setSayilar] = useState({ sembol: 0, depoevim: 0 });
   useEffect(() => {
@@ -3270,8 +3325,10 @@ export const useHizliTeklifYeniSayilari = (aktif = true) => {
     const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari'), where('kanal', '==', 'web'));
     const unsub = onSnapshot(q, snap => {
       let sembol = 0, depoevim = 0;
-      snap.docs.forEach(d => {
-        const k = d.data();
+      // DEĞİŞTİ: listeyle aynı sıra (en yeni önce) ve aynı temizlik (spam + mükerrer)
+      const liste = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      liste.sort((x, y) => (y.createdAt || '').localeCompare(x.createdAt || ''));
+      mukerrerleriGizleRozet(liste).forEach(k => {
         if ((k.durum || 'Yeni') !== 'Yeni') return;   // Durumu değişen teklif sayılmaz
         if (hizliTeklifSitesi(k) === 'depoevim') depoevim++; else sembol++;
       });
