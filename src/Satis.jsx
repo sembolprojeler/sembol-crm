@@ -4336,7 +4336,13 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 space-y-2">
         <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-0.5">
           <span className="text-[10px] font-black text-neutral-400 uppercase shrink-0">Durum:</span>
-          {['Tümü', ...DURUMLAR.map(d => d.id)].map(d => {
+          {/* DEĞİŞTİ (kullanıcı talebi): Durum filtresinde yalnızca "Müşteriyle
+              Görüşme Durumu" penceresindeki seçenekler (aynı sıra ve etiketlerle)
+              + Tümü ve Yeni (henüz görüşülmemiş kayıtlar) gösterilir. Diğer
+              durumlar (örn. "Görüşme Sağlandı") çubuktan kaldırıldı; DURUMLAR
+              listesi ve kayıtlar aynen duruyor, yalnızca çubuk daraltıldı. */}
+          {['Tümü', 'Yeni', ...GORUSME_DURUMU_SECENEKLERI.map(x => x.id)].map(d => {
+            const etiket = GORUSME_DURUMU_SECENEKLERI.find(x => x.id === d)?.etiket || d;
             const secili = durumFiltre === d;
             const renk = d === 'Tümü'
               ? (secili ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400')
@@ -4344,7 +4350,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             return (
               <button key={d} type="button" onClick={() => setDurumFiltre(d)}
                 className={`px-2 py-1 rounded-lg text-[10px] font-black border transition shrink-0 ${renk} ${secili && d !== 'Tümü' ? 'ring-2 ring-neutral-900 ring-offset-1' : ''} ${!secili && d !== 'Tümü' ? 'opacity-80 hover:opacity-100' : ''}`}>
-                {d} <span className="opacity-60">({durumSayaclari[d]})</span>
+                {etiket} <span className="opacity-60">({durumSayaclari[d] ?? 0})</span>
               </button>
             );
           })}
