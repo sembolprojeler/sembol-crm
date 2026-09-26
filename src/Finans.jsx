@@ -7877,8 +7877,20 @@ const nakitYuvarla = (tutar) => {
       const adet = Math.max(1, parseInt(kalem.taksitSayisi) || 1);
       const taksitTutar = Math.round((toplam / adet) * 100) / 100;
       // Bu kaleme yapılan tahsilat mahsupları (borçlu defterindeki çıkışlar)
+      // ======================================================================
+      // HATA DÜZELTMESİ (kullanıcı bildirimi): Hesaptaki tahsilat GİRİŞİ
+      // silindiğinde (örn. Ziad Zoubair ₺25.600) borçlu defterindeki eşi olan
+      // mahsup ÇIKIŞI canlı kaldığı için borç hâlâ "KISMİ • ₺25.600 alındı"
+      // görünüyordu. Tahsilatın iki bacağı aynı odemeId'yi taşır; hesap
+      // tarafındaki giriş SİLİNMİŞSE mahsup da yok sayılır → borç eski
+      // tutarına (₺32.000) döner, kısmi ödeme yapılmamış gibi görünür.
+      // ======================================================================
+      const silinenTahsilatOdemeIds = new Set(islemler
+        .filter(i => i.silindi && i.tip === 'giris' && i.tahsilatKaydi && i.odemeId && i.alacakKalemId === kalem.id)
+        .map(i => i.odemeId));
       const tahsilatlar = defterIslemleri(defter?.id)
-        .filter(i => !i.silindi && i.tip === 'cikis' && i.alacakMahsup && i.alacakKalemId === kalem.id);
+        .filter(i => !i.silindi && i.tip === 'cikis' && i.alacakMahsup && i.alacakKalemId === kalem.id)
+        .filter(i => !(i.odemeId && silinenTahsilatOdemeIds.has(i.odemeId)));
       const taksitTahsil = {}; const taksitSonTarih = {};
       tahsilatlar.forEach(i => {
         const n = parseInt(i.taksitNo); if (isNaN(n)) return;
@@ -8990,6 +9002,24 @@ const nakitYuvarla = (tutar) => {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', deleteIslemId), {
         silindi: true, silinmeTarihi: new Date().toISOString(), silen: currentUser?.fullName || 'Sistem',
       });
+      // ====================================================================
+      // YENİ (kullanıcı bildirimi): ALACAK TAHSİLATI SİLİNİNCE EŞİ DE SİLİNİR
+      // Tahsilat iki bacaklıdır (hesaba GİRİŞ + borçlu defterine mahsup ÇIKIŞI,
+      // ortak odemeId). Biri silinince diğeri de izli silinir; böylece borçlu
+      // kaydı eski tutarına döner (örn. Ziad Zoubair tekrar ₺32.000).
+      // ====================================================================
+      try {
+        const silinen = islemler.find(i => i.id === deleteIslemId);
+        if (silinen?.odemeId && silinen?.alacakKalemId && (silinen.tahsilatKaydi || silinen.alacakMahsup)) {
+          const esler = islemler.filter(i => i.id !== silinen.id && !i.silindi && i.odemeId === silinen.odemeId && i.alacakKalemId === silinen.alacakKalemId);
+          for (const es of esler) {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', es.id), {
+              silindi: true, silinmeTarihi: new Date().toISOString(), silen: currentUser?.fullName || 'Sistem', silmeNedeni: 'Eş tahsilat kaydı silindi',
+            });
+          }
+          if (esler.length) addSystemLog?.('Alacak Tahsilatı Geri Alındı', `${silinen.aciklama || 'Tahsilat'} silindi; borçlu kaydı eski tutarına döndü.`);
+        }
+      } catch (e) { console.error('Eş tahsilat kaydı silinemedi:', e); }
       addSystemLog?.('Defter İşlemi Silindi', `${seciliDefter?.ad} defterinden bir kayıt silindi (izli silme — satırda görünür).`);
       setDeleteIslemId(null);
     };
