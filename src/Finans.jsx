@@ -5299,7 +5299,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
   //   6) SON 48 SAAT     : Son iki günde eklenen/silinen/düzenlenen her şey —
   //                        "dünden beri ne değişti?" sorusunun cevabı.
   // ==========================================================================
-  export const DefterDenetimPaneli = ({ defterAd, islemler = [], dekontSatirlari = [], gorunenIds, hesabaKatilir, devirTarihi, canliDonemde, onYumusakSil, onKapat }) => {
+  export const DefterDenetimPaneli = ({ defterAd, islemler = [], tumIslemler = [], jobs = [], dekontSatirlari = [], gorunenIds, hesabaKatilir, devirTarihi, canliDonemde, onYumusakSil, onKapat }) => {
     const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const trh = (t) => (t || '').split('-').reverse().join('.');
     const tut = (i) => parseFloat(i.tutar) || 0;
@@ -5420,6 +5420,33 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const silinenNetAy = silinenlerAy.reduce((t, i) => t + isaret(i) * tut(i), 0);
     const girisAy = islemler.filter(i => i.tip === 'giris' && hesabaKatilir(i) && ayda(i)).reduce((t, i) => t + tut(i), 0);
     const cikisAy = islemler.filter(i => i.tip === 'cikis' && hesabaKatilir(i) && ayda(i)).reduce((t, i) => t + tut(i), 0);
+    // ======================================================================
+    // YENİ (kod incelemesi): TUTARLILIK KONTROLLERİ — "kendi kendine hata"
+    // Bakiyeyi bankadan uzaklaştırabilecek, kodun otomatik ürettiği durumlar:
+    //  A) TEK BACAKLI VİRMAN  : transferin diğer bacağı yok/silinmiş → hayalet
+    //  B) TEK BACAKLI TAHSİLAT: hesap girişi ile borçlu mahsubu birbirini tutmuyor
+    //  C) OTOMATİK KAPORA     : iş kaydı açılırken kapora BANKAYA yazılır —
+    //     müşteri henüz ödemediyse / nakit ya da başka hesaba ödediyse bakiye
+    //     şişer. Dekont varsa bankada karşılığı olmayanlar işaretlenir.
+    //  D) YANLIŞ DEFTER       : bu defterde olup ödeme yöntemi Nakit / Kredi
+    //     Kartı olan kayıtlar (banka defterine düşmemeliydi)
+    // ======================================================================
+    const canliAy = canli.filter(i => hesabaKatilir(i) && ayda(i));
+    const tekBacakVirman = canliAy.filter(i => i.isVirman && i.virmanId && !tumIslemler.some(x => x.id !== i.id && !x.silindi && x.virmanId === i.virmanId));
+    const tekBacakVirmanNet = tekBacakVirman.reduce((t, i) => t + isaret(i) * tut(i), 0);
+    const tekBacakTahsilat = canliAy.filter(i => i.odemeId && (i.tahsilatKaydi || i.alacakMahsup) && !tumIslemler.some(x => x.id !== i.id && !x.silindi && x.odemeId === i.odemeId));
+    const tekBacakTahsilatNet = tekBacakTahsilat.reduce((t, i) => t + isaret(i) * tut(i), 0);
+    const jobMap = new Map((jobs || []).map(j => [j.id, j]));
+    const otoKaporalar = canliAy.filter(i => i.kaporaKaynakId && /oto/i.test(i.kaynak || '')).map(i => {
+      const job = jobMap.get(i.kaporaKaynakId);
+      const kod = dkKod(i.teslimKodu || job?.deliveryCode || (i.aciklama || '').match(/teslim\s*kodu\s*:?\s*([A-Za-z0-9]{4,10})/i)?.[1] || '');
+      const dekonttaVar = dekontSatirlari.length ? dekontSatirlari.some(b => b.yon === 'giris' && Math.abs((b.tutar || 0) - tut(i)) < 0.011 && ((kod && (b.kodAdaylari || []).includes(kod)) || gunFark(b.tarih, i.tarih) <= 7)) : null;
+      return { i, job, dekonttaVar, isDurum: job?.status || '—' };
+    });
+    const supheliKaporalar = otoKaporalar.filter(k => k.dekonttaVar === false);
+    const supheliKaporaNet = supheliKaporalar.reduce((t, k) => t + tut(k.i), 0);
+    const yanlisDefter = canliAy.filter(i => /nakit|kredi kart/i.test(i.odemeYontemi || '') && !i.isVirman && !i.tahsilatKaydi);
+    const yanlisDefterNet = yanlisDefter.reduce((t, i) => t + isaret(i) * tut(i), 0);
 
     const Satir = ({ i, ek }) => (
       <div className={`flex items-center gap-2 text-[11px] font-bold p-1.5 rounded-lg ${i.silindi ? 'bg-neutral-100 text-neutral-400 line-through' : 'bg-white'}`}>
@@ -5480,6 +5507,20 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           <div className="bg-white rounded-xl p-2 border border-red-200"><p className="text-[9px] font-black uppercase text-red-600">Dahil Gider • {ayBaslik}</p><p className="font-black text-red-700 tabular-nums">₺{paraFmt(cikisAy)}</p></div>
           <div className="bg-neutral-900 text-white rounded-xl p-2"><p className="text-[9px] font-black uppercase text-white/60">Bakiye (tüm zamanlar)</p><p className="font-black tabular-nums">₺{paraFmt(giris - cikis)}</p></div>
         </div>
+
+        {/* YENİ (kod incelemesi): TUTARLILIK KONTROLLERİ */}
+        <Bolum baslik="Tek Bacaklı Transfer (Virman)" aciklama="Transferin karşı defterdeki bacağı yok ya da silinmiş — bu kayıt hayalettir, bakiyeyi tek yönlü kaydırır. Silin ya da karşı bacağı yeniden girin." adet={tekBacakVirman.length} net={tekBacakVirmanNet} renk="red">
+          {tekBacakVirman.map(i => <Satir key={i.id} i={i} ek={onYumusakSil ? <button type="button" onClick={() => onYumusakSil(i.id)} className="shrink-0 px-2 py-0.5 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black rounded-md flex items-center gap-1"><Trash2 className="w-3 h-3" /> İzli Sil</button> : null} />)}
+        </Bolum>
+        <Bolum baslik="Tek Bacaklı Tahsilat" aciklama="Alacak tahsilatının hesap girişi ile borçlu mahsubu birbirini tutmuyor (biri silinmiş). Borç tutarı ya da bakiye yanlış olabilir." adet={tekBacakTahsilat.length} net={tekBacakTahsilatNet} renk="amber">
+          {tekBacakTahsilat.map(i => <Satir key={i.id} i={i} />)}
+        </Bolum>
+        <Bolum baslik={`Otomatik Kapora — ${dekontSatirlari.length ? 'dekontta karşılığı olmayanlar' : 'dekont yüklenince kontrol edilir'}`} aciklama="İş kaydı açılırken girilen kapora otomatik olarak BANKAYA gelir yazılır. Müşteri kaporayı henüz ödemediyse, nakit ya da başka hesaba ödediyse bakiye şişer. Buradakiler dekontta bulunamadı: silin ya da doğru deftere taşıyın." adet={supheliKaporalar.length} net={supheliKaporaNet} renk="purple">
+          {supheliKaporalar.map(k => <Satir key={k.i.id} i={k.i} ek={<span className="shrink-0 text-[9px] font-black text-neutral-500">{k.job ? `iş: ${k.job.customerName || ''} • ${k.isDurum}` : 'iş bulunamadı'}</span>} />)}
+        </Bolum>
+        <Bolum baslik="Yanlış Defter Şüphesi" aciklama="Ödeme yöntemi Nakit / Kredi Kartı olduğu halde bu banka defterinde duran kayıtlar — KASA ya da POS defterine ait olmalı." adet={yanlisDefter.length} net={yanlisDefterNet} renk="sky">
+          {yanlisDefter.map(i => <Satir key={i.id} i={i} />)}
+        </Bolum>
 
         <Bolum baslik="Mükerrer Kayıtlar" aciklama="Yalnızca dekont yüklenmiş aylar ve bakiyeye dahil kayıtlar taranır: dekontta o hareket kaç kez varsa o kadar kayıt meşru, fazlası mükerrer. Kaporalar ve devir öncesi kayıtlar taranmaz." adet={mukerrerlerAy.length} net={mukerrerFazlaAy} renk="red">
           {mukerrerlerAy.map((g, gi) => (
@@ -9010,6 +9051,22 @@ const nakitYuvarla = (tutar) => {
       // ====================================================================
       try {
         const silinen = islemler.find(i => i.id === deleteIslemId);
+        // ==================================================================
+        // HATA DÜZELTMESİ (kod incelemesi): VİRMAN TEK BACAKLI KALMASIN
+        // Transfer iki kayıttır (kaynak ÇIKIŞ + hedef GİRİŞ, ortak virmanId).
+        // Açıklama "biri silinirse diğeri de silinebilir" diyordu ama kod
+        // bunu yapmıyordu: bir bacağı silince diğeri hayalet olarak kalıp
+        // o defterin bakiyesini tek yönlü kaydırıyordu. Artık ikisi birlikte.
+        // ==================================================================
+        if (silinen?.isVirman && silinen?.virmanId) {
+          const esler = islemler.filter(i => i.id !== silinen.id && !i.silindi && i.virmanId === silinen.virmanId);
+          for (const es of esler) {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', es.id), {
+              silindi: true, silinmeTarihi: new Date().toISOString(), silen: currentUser?.fullName || 'Sistem', silmeNedeni: 'Transferin diğer bacağı silindi',
+            });
+          }
+          if (esler.length) addSystemLog?.('Virman Geri Alındı', `${silinen.aciklama || 'Transfer'} silindi; karşı defterdeki bacağı da izli silindi.`);
+        }
         if (silinen?.odemeId && silinen?.alacakKalemId && (silinen.tahsilatKaydi || silinen.alacakMahsup)) {
           const esler = islemler.filter(i => i.id !== silinen.id && !i.silindi && i.odemeId === silinen.odemeId && i.alacakKalemId === silinen.alacakKalemId);
           for (const es of esler) {
@@ -12031,6 +12088,8 @@ silinmeTarihi: new Date().toISOString()`}</pre>
           <DefterDenetimPaneli
             defterAd={seciliDefter.ad}
             dekontSatirlari={defterDekontSatirlari}
+            tumIslemler={islemler}
+            jobs={jobs}
             islemler={defterIslemleri(seciliDefterId)}
             gorunenIds={new Set(dIslemler.map(i => i.id))}
             hesabaKatilir={hesabaKatilir}
