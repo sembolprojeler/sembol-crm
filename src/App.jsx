@@ -78,7 +78,7 @@ import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListVie
 // YENİ (kullanıcı talebi): QR SİTE TAKİP — asansör afişi QR reklam modülü
 //   • QrSiteTakipView : yönetim ekranı (Saha Portföy'deki butondan açılır) — Satis.jsx içinde
 //   • QrSiteLanding   : sakinin QR okutunca gördüğü, giriş gerektirmeyen sayfa
-import { QrSiteTakipView, QrSiteLanding } from './Satis.jsx';
+import { QrSiteTakipView, QrSiteLanding, QrTakipYonlendirme } from './Satis.jsx';
 import { MaterialListView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView } from './OperasyonAracMalzeme.jsx';
 import { AddInfoView, ComplaintsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, SahaRaporlamasiView, SirketIletisimView } from './OperasyonInsanKaynaklari.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
@@ -7094,7 +7094,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // çalıştığından erken dönüş güvenlidir. Personel girişi yapılmış olsa bile
     // ?qr= varsa bu sayfa öncelikli olur (önizleme için kullanışlı).
     // ========================================================================
-    const qrSiteParam = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('qr') : null;
+    // YENİ (kullanıcı talebi): QR TAKİP YÖNLENDİRMESİ — "?qrt=<kampanyaId>&s=<site>"
+    // Kamyon/bilbord/dergi QR'ı buraya düşer: okutma sayılır, aynı anda sitedeki
+    // teklif formuna (UTM + kampanya koduyla) yönlendirilir. Giriş gerekmez.
+    const qrtParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+    if (qrtParams?.get('qrt')) {
+      return <QrTakipYonlendirme kampanyaId={qrtParams.get('qrt')} siteIpucu={qrtParams.get('s') || 'sembolevdeneve'} firebaseUser={firebaseUser} />;
+    }
+    const qrSiteParam = qrtParams ? qrtParams.get('qr') : null;
     if (qrSiteParam) {
       return <QrSiteLanding siteId={qrSiteParam} firebaseUser={firebaseUser} />;
     }
