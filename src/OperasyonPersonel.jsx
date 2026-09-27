@@ -8676,6 +8676,50 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr, atanan
 };
 
 // O güne ait QR mesai kayıtlarını çeker (Mesai/Devamsızlık ekranı için)
+// ============================================================================
+// YENİ (kullanıcı talebi): BUGÜN QR BASMAYAN PERSONEL SAYISI — MENÜ ROZETİ
+// ----------------------------------------------------------------------------
+// "Puantaj/Mesai Takip" menüsünün yanında yanıp sönen sayı. Sayılan kişi:
+//   • Mesai takibine dahil (mesaiTakibeDahil) aktif personel,
+//   • BUGÜN puantajında izin/rapor kodu YOK (Hİ, Yİ, Bİ, Üİ, R, İB, ÜR hariç),
+//   • ve şunlardan biri:
+//       - 09:30'dan sonra hâlâ GİRİŞ QR'ı yok (ya da puantajda D yazılmış), veya
+//       - 19:00'dan sonra girişi var ama ÇIKIŞ QR'ı yok.
+// Veri: bugünün QR kayıtları (dateStr == bugün) + bu ayın puantaj belgesi —
+// iki küçük canlı dinleyici. Saat eşikleri dakikada bir yeniden değerlendirilir.
+// ============================================================================
+export const useBugunQrEksikSayisi = (personnelList = [], aktif = true) => {
+  const [qr, setQr] = useState([]);
+  const [puantaj, setPuantaj] = useState({});
+  const [dakika, setDakika] = useState(() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); });
+  const bugunYmd = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  useEffect(() => {
+    if (!aktif) return;
+    const u1 = onSnapshot(query(mesaiKayitlarColRef(), where('dateStr', '==', bugunYmd), limit(500)), snap => setQr(snap.docs.map(d => d.data())), () => setQr([]));
+    const d = new Date();
+    const u2 = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${d.getFullYear()}_${d.getMonth() + 1}`), snap => setPuantaj(snap.exists() ? (snap.data().records || {}) : {}), () => setPuantaj({}));
+    const t = setInterval(() => { const n = new Date(); setDakika(n.getHours() * 60 + n.getMinutes()); }, 60000);
+    return () => { u1(); u2(); clearInterval(t); };
+  }, [aktif, bugunYmd]);
+  return useMemo(() => {
+    if (!aktif) return 0;
+    const gun = new Date().getDate();
+    const IZIN_KODLARI = ['Hİ', 'Yİ', 'Bİ', 'Üİ', 'R', 'İB', 'ÜR', 'Rİ'];
+    const GIRIS_ESIGI = 9 * 60 + 30, CIKIS_ESIGI = 19 * 60;
+    return (personnelList || []).filter(p => mesaiTakibeDahil(p)).filter(p => {
+      const kayit = puantaj?.[p.id]?.[gun];
+      const kod = typeof kayit === 'object' && kayit !== null ? kayit.status : (kayit || '');
+      if (IZIN_KODLARI.includes(kod)) return false;              // haftalık izin / izin / rapor → sayılmaz
+      const giris = qr.some(k => String(k.personnelId) === String(p.id) && k.type === 'giris');
+      const cikis = qr.some(k => String(k.personnelId) === String(p.id) && k.type === 'cikis');
+      if (kod === 'D') return true;                               // devamsızlık düşmüş
+      if (!giris && dakika >= GIRIS_ESIGI) return true;           // giriş basmadı
+      if (giris && !cikis && dakika >= CIKIS_ESIGI) return true;  // çıkış basmadı
+      return false;
+    }).length;
+  }, [personnelList, qr, puantaj, dakika, aktif]);
+};
+
 export const gunlukQrKayitlariGetir = async (tarihStr) => {
   // OKUMA OPTİMİZASYONU: tek seferlik okuma için getDocs + gün filtresi + limit.
   // (Önceden onSnapshot ile dinleyici kurulup hemen kapatılıyordu.)
