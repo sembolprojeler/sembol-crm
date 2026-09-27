@@ -3324,3 +3324,131 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
       </div>
     );
   };
+
+// ############################################################################
+// YENİ (kullanıcı talebi): ŞİRKET İLETİŞİMİ SAYFASI
+// ----------------------------------------------------------------------------
+// Sol menüdeki "Şirket İletişimi" artık açılır liste değil, SABİT bir menü
+// öğesidir; tıklanınca bu tam sayfa açılır. İki sekme:
+//   1) Şirket Hatları  → companyContacts (yönetim penceresinden düzenlenen liste)
+//   2) Personel Hatları → aktif personelin ŞİRKET telefonları (şahsi numara
+//      gösterilmez — QR Site Takip'teki kuralla aynı)
+// Her kartta: Ara, WhatsApp, Numarayı Kopyala. Arama kutusu ad, unvan ve
+// numarada arar; unvana göre gruplanır. "Listeyi Düzenle" mevcut yönetim
+// penceresini açar (ekle / sırala / düzenle / sil orada).
+// ############################################################################
+const iletisimTelNormalize = (ham) => {
+  let tel = String(ham || '').replace(/\D/g, '');
+  if (!tel) return '';
+  if (tel.startsWith('0')) tel = '90' + tel.substring(1);
+  else if (!tel.startsWith('90')) tel = '90' + tel;
+  return tel;
+};
+
+// Tek bir iletişim kartı (ayrı bileşen — modülerlik kuralı)
+export const IletisimKarti = ({ ad, unvan, telefon, etiket, renk = 'emerald' }) => {
+  const [kopyalandi, setKopyalandi] = useState(false);
+  const tel = iletisimTelNormalize(telefon);
+  const kopyala = async () => {
+    try { await navigator.clipboard.writeText(telefon || ''); setKopyalandi(true); setTimeout(() => setKopyalandi(false), 1500); }
+    catch { window.prompt('Numarayı kopyalayın:', telefon || ''); }
+  };
+  const bas = String(ad || '?').trim().charAt(0).toLocaleUpperCase('tr-TR');
+  const RENK = { emerald: 'bg-emerald-600', blue: 'bg-blue-600' };
+  return (
+    <div className="bg-white border border-neutral-200 hover:border-emerald-400 rounded-2xl p-3 flex items-center gap-3 transition shadow-sm">
+      <span className={`w-11 h-11 rounded-xl ${RENK[renk] || RENK.emerald} text-white font-black text-lg flex items-center justify-center shrink-0`}>{bas}</span>
+      <div className="min-w-0 flex-1">
+        <p className="font-black text-black text-sm truncate">{ad}</p>
+        <p className="text-[11px] font-bold text-neutral-500 truncate">{unvan || '—'}{etiket ? <span className="ml-1 text-[9px] font-black bg-neutral-100 text-neutral-600 px-1.5 py-0.5 rounded-full">{etiket}</span> : null}</p>
+        <p className="text-xs font-black text-emerald-700 tabular-nums">{telefon || 'Numara yok'}</p>
+      </div>
+      {tel && (
+        <div className="flex items-center gap-1 shrink-0">
+          <a href={`tel:+${tel}`} title="Ara" className="p-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl"><Phone className="w-4 h-4" /></a>
+          <a href={`https://wa.me/${tel}`} target="_blank" rel="noreferrer" title="WhatsApp" className="p-2 bg-[#25D366] hover:bg-[#128C7E] text-white rounded-xl"><MessageCircle className="w-4 h-4" /></a>
+          <button type="button" onClick={kopyala} title="Numarayı kopyala" className="p-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-xl">
+            {kopyalandi ? <Check className="w-4 h-4 text-emerald-600" /> : <FileText className="w-4 h-4" />}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export const SirketIletisimView = ({ companyContacts = [], personnelList = [], canManageContacts = false, onYonet }) => {
+  const [sekme, setSekme] = useState('sirket'); // 'sirket' | 'personel'
+  const [ara, setAra] = useState('');
+  const norm = (x) => String(x || '').toLocaleLowerCase('tr-TR');
+  const a = norm(ara).trim();
+  const eslesir = (...alanlar) => !a || alanlar.some(x => norm(x).includes(a) || String(x || '').replace(/\D/g, '').includes(a.replace(/\D/g, '') || '#'));
+
+  const sirket = companyContacts.filter(c => eslesir(c.name, c.position, c.phone));
+  // Personel hatları: aktif personel + şirket telefonu olanlar (şahsi numara ASLA gösterilmez)
+  const personel = personnelList
+    .filter(p => p.employmentStatus !== 'Pasif' && String(p.companyPhone || '').trim())
+    .filter(p => eslesir(p.fullName, p.position, p.companyPhone))
+    .sort((x, y) => String(x.position || '').localeCompare(String(y.position || ''), 'tr-TR') || String(x.fullName || '').localeCompare(String(y.fullName || ''), 'tr-TR'));
+  // Unvana göre gruplama (personel sekmesi)
+  const gruplar = personel.reduce((m, p) => { const k = p.position || 'Diğer'; (m[k] = m[k] || []).push(p); return m; }, {});
+
+  return (
+    <div className="space-y-4 animate-in fade-in">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <span className="w-12 h-12 rounded-2xl bg-emerald-700 text-white flex items-center justify-center shadow-lg shrink-0"><Phone className="w-6 h-6" /></span>
+          <div>
+            <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Rehber</p>
+            <h2 className="text-2xl font-black text-black leading-tight">Şirket İletişimi</h2>
+          </div>
+        </div>
+        {canManageContacts && onYonet && (
+          <button type="button" onClick={onYonet} className="px-4 py-2.5 bg-black hover:bg-neutral-800 text-white font-black rounded-xl text-sm flex items-center gap-2 shadow-lg">
+            <Edit className="w-4 h-4" /> Listeyi Düzenle
+          </button>
+        )}
+      </div>
+
+      {/* Sekmeler + arama */}
+      <div className="bg-white border border-neutral-200 rounded-2xl p-3 flex flex-col md:flex-row gap-2 md:items-center">
+        <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
+          <button type="button" onClick={() => setSekme('sirket')} className={`px-4 py-2 rounded-lg text-xs font-black transition ${sekme === 'sirket' ? 'bg-emerald-600 text-white shadow' : 'text-neutral-600 hover:bg-white'}`}>Şirket Hatları ({companyContacts.length})</button>
+          <button type="button" onClick={() => setSekme('personel')} className={`px-4 py-2 rounded-lg text-xs font-black transition ${sekme === 'personel' ? 'bg-blue-600 text-white shadow' : 'text-neutral-600 hover:bg-white'}`}>Personel Hatları ({personnelList.filter(p => p.employmentStatus !== 'Pasif' && String(p.companyPhone || '').trim()).length})</button>
+        </div>
+        <div className="relative flex-1">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+          <input value={ara} onChange={e => setAra(e.target.value)} placeholder="Ad, unvan veya numara ara…" className="w-full pl-9 pr-3 py-2.5 border border-neutral-300 rounded-xl text-sm font-bold focus:border-emerald-500 outline-none" />
+        </div>
+      </div>
+
+      {sekme === 'sirket' ? (
+        sirket.length ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+            {sirket.map(c => <IletisimKarti key={c.id} ad={c.name} unvan={c.position} telefon={c.phone} />)}
+          </div>
+        ) : (
+          <div className="bg-white border border-dashed border-neutral-300 rounded-2xl p-8 text-center text-sm font-bold text-neutral-400">
+            {companyContacts.length ? 'Aramanızla eşleşen kayıt yok.' : 'Kayıtlı şirket hattı yok.'}{canManageContacts && onYonet && !companyContacts.length ? ' "Listeyi Düzenle" ile ekleyebilirsiniz.' : ''}
+          </div>
+        )
+      ) : (
+        personel.length ? (
+          <div className="space-y-3">
+            {Object.entries(gruplar).map(([unvan, liste]) => (
+              <div key={unvan}>
+                <p className="text-[10px] font-black uppercase tracking-wider text-blue-700 mb-1.5 flex items-center gap-1.5"><Users className="w-3.5 h-3.5" /> {unvan} <span className="text-neutral-400">({liste.length})</span></p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {liste.map(p => <IletisimKarti key={p.id} ad={p.fullName} unvan={p.position} telefon={p.companyPhone} etiket={p.collarType || ''} renk="blue" />)}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="bg-white border border-dashed border-neutral-300 rounded-2xl p-8 text-center text-sm font-bold text-neutral-400">
+            Şirket telefonu tanımlı personel yok. Personel Listesi → Düzenle → "Şirket Telefonu" alanından ekleyebilirsiniz.
+          </div>
+        )
+      )}
+    </div>
+  );
+};
