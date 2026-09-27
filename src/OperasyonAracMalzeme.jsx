@@ -807,6 +807,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
     // --- YENİ: Kayıt düzenleme modu için state ---
     const [editingRecordInfo, setEditingRecordInfo] = useState(null); // { vehicleId, recordId } | null
 
+    // ======================================================================
+    // YENİ (kullanıcı talebi): ARAÇ İŞLEMİ → HATIRLATMALAR TAKVİMİ
+    // "Gelecek İşlem Tarihi" girilen her rapor/bakım (Araç Muayenesi, sigorta,
+    // K3, periyodik bakım...) Hatırlatmalar takvimine o tarihte bir GÖREV
+    // olarak yazılır (konu: Araç). Kimlik araç + işlem türünden türetilir
+    // (arac_<aracId>_<tür>): aynı işlem yeniden girilince yeni kopya açılmaz,
+    // mevcut hatırlatma yeni tarihe taşınır. Tarih değiştiyse "tamamlandı"
+    // sıfırlanır. Menü ışıkları 10 gün kala yanar (App.jsx), tarih geçip
+    // tamamlanmazsa takvimde o gün "yapılmadı" olarak işaretli kalır.
+    // ======================================================================
+    const aracHatirlatmaSenkron = async (vehicle, rec) => {
+      if (!vehicle || !rec?.nextDate) return;
+      try {
+        const turAnahtar = String(rec.type || 'islem').toLocaleLowerCase('tr-TR')
+          .replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c').replace(/[^a-z0-9]+/g, '_');
+        const hid = `arac_${vehicle.id}_${turAnahtar}`.replace(/[^A-Za-z0-9_]/g, '_');
+        const ref = doc(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar', hid);
+        const snap = await getDoc(ref);
+        const onceki = snap.exists() ? snap.data() : null;
+        const tarihDegisti = !onceki || onceki.tarih !== rec.nextDate;
+        await setDoc(ref, {
+          tarih: rec.nextDate, saat: onceki?.saat || '', tur: 'gorev', konu: 'Araç',
+          ilgili: vehicle.plate || '',
+          aciklama: `${vehicle.plate} — ${rec.type} zamanı. Son işlem: ${rec.date || '-'}${rec.km ? ` (${rec.km} km)` : ''}${rec.nextKm ? ` • Sonraki KM: ${rec.nextKm}` : ''}${rec.notes ? ` • ${rec.notes}` : ''}`,
+          belgeler: onceki?.belgeler || [],
+          kaynak: 'aracRapor', aracId: vehicle.id, aracPlaka: vehicle.plate || '', islemTuru: rec.type || '',
+          ...(tarihDegisti ? { tamamlandi: false, tamamlayan: null, tamamlanmaTarihi: null } : {}),
+          ekleyen: onceki?.ekleyen || 'Otomatik (Araç Rapor)', createdAt: onceki?.createdAt || new Date().toISOString(),
+          guncellemeTarihi: new Date().toISOString(),
+        }, { merge: true });
+      } catch (err) { console.error('Araç hatırlatması yazılamadı:', err); }
+    };
+
     const handleSubmit = (e) => {
       e.preventDefault();
       if (!selectedVehicle) return;
@@ -829,6 +862,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
         });
 
         addSystemLog('Araç Bakım Düzenlendi', `${selectedVehicle.plate} aracının ${recordForm.type} kaydı güncellendi.`);
+        aracHatirlatmaSenkron(selectedVehicle, recordForm); // YENİ: takvime yaz/güncelle
         setEditingRecordInfo(null);
         setRecordForm({
           type: 'Periyodik Bakım',
@@ -862,6 +896,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
       });
 
       addSystemLog('Araç Bakım Eklendi', `${selectedVehicle.plate} aracına ${recordForm.type} kaydı girildi.`);
+      aracHatirlatmaSenkron(selectedVehicle, recordForm); // YENİ: takvime yaz/güncelle
       
       setRecordForm({
         type: 'Periyodik Bakım',
@@ -915,12 +950,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
     // --- Kritik Durum Hesaplama ---
     const todayStr = new Date().toISOString().split('T')[0];
     const criticalAlerts = [];
+    // DEĞİŞTİ (kullanıcı talebi): 10 gün kala uyarı; aynı türde yalnızca en son kayıt
+    const _k10 = new Date(); _k10.setDate(_k10.getDate() + 10);
+    const on10Str = `${_k10.getFullYear()}-${String(_k10.getMonth() + 1).padStart(2, '0')}-${String(_k10.getDate()).padStart(2, '0')}`;
     vehicles.forEach(v => {
       if (v.maintenanceRecords) {
-        v.maintenanceRecords.forEach(r => {
+        const sonKayitlar = {};
+        v.maintenanceRecords.forEach(r => { const t = r.type || '-'; if (!sonKayitlar[t] || String(r.date || '') >= String(sonKayitlar[t].date || '')) sonKayitlar[t] = r; });
+        Object.values(sonKayitlar).forEach(r => {
            let isCritical = false;
            let reason = '';
-           if (r.nextDate && r.nextDate <= todayStr) { isCritical = true; reason = 'Tarihi Geçti/Yaklaştı'; }
+           if (r.nextDate && r.nextDate < todayStr) { isCritical = true; reason = 'Tarihi Geçti'; }
+           else if (r.nextDate && r.nextDate <= on10Str) { isCritical = true; reason = `Yaklaşıyor (${Math.max(0, Math.round((new Date(r.nextDate + 'T00:00:00') - new Date(todayStr + 'T00:00:00')) / 86400000))} gün kaldı)`; }
            if (r.nextKm && v.km && parseInt(v.km) >= parseInt(r.nextKm)) { isCritical = true; reason = 'KM Sınırı Aşıldı'; }
            if (isCritical) criticalAlerts.push({ vehicle: v.plate, type: r.type, reason, nextDate: r.nextDate, nextKm: r.nextKm });
         });
