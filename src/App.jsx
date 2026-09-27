@@ -74,7 +74,7 @@ import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJ
   useEkspertizBekleyenSayilari,
   // YENİ: Zil rozetine eklenecek — BANA atanmış, henüz yapılmamış keşif sayısı
   useBanaAtananEkspertizSayisi } from './OperasyonIsler.jsx';
-import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir } from './OperasyonPersonel.jsx';
+import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir, useBugunQrEksikSayisi } from './OperasyonPersonel.jsx';
 // YENİ (kullanıcı talebi): QR SİTE TAKİP — asansör afişi QR reklam modülü
 //   • QrSiteTakipView : yönetim ekranı (Saha Portföy'deki butondan açılır) — Satis.jsx içinde
 //   • QrSiteLanding   : sakinin QR okutunca gördüğü, giriş gerektirmeyen sayfa
@@ -3959,9 +3959,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       const unsub = onSnapshot(qHatirlatma, (snap) => {
         const bugunTarih = new Date();
         const bugunStr = `${bugunTarih.getFullYear()}-${String(bugunTarih.getMonth() + 1).padStart(2, '0')}-${String(bugunTarih.getDate()).padStart(2, '0')}`;
+        // YENİ (kullanıcı talebi): ARAÇ işlemleri (muayene, sigorta, bakım…)
+        // 10 GÜN KALA ışığı yakar; diğer hatırlatmalar eskisi gibi gününde.
+        const on10 = new Date(bugunTarih.getFullYear(), bugunTarih.getMonth(), bugunTarih.getDate() + 10);
+        const on10Str = `${on10.getFullYear()}-${String(on10.getMonth() + 1).padStart(2, '0')}-${String(on10.getDate()).padStart(2, '0')}`;
         const sayi = snap.docs.filter(d => {
           const k = d.data();
-          return !k.tamamlandi && k.tarih && k.tarih <= bugunStr;
+          if (k.tamamlandi || !k.tarih) return false;
+          return k.tarih <= bugunStr || (k.kaynak === 'aracRapor' && k.tarih <= on10Str);
         }).length;
         setHatirlatmaBildirim(sayi);
 
@@ -4490,6 +4495,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [materials, setMaterials] = useState([]);
     const materialSeedRunning = React.useRef(false);
     const [personnelList, setPersonnelList] = useState([]);
+    // YENİ (kullanıcı talebi): Bugün giriş/çıkış QR'ı eksik personel sayısı —
+    // "Puantaj/Mesai Takip" menü rozeti ve İK başlığı toplamı için.
+    // personnelList tanımının hemen ALTINDA (TDZ olmasın) ve erken return'lerden
+    // ÖNCE çağrılır (React hook kuralı).
+    const qrEksikSayisi = useBugunQrEksikSayisi(personnelList, !!isAuthenticated);
     const [allPersonnelActions, setAllPersonnelActions] = useState([]);
     const [allMesaiRecords, setAllMesaiRecords] = useState([]);
     const [positions, setPositions] = useState([]);
@@ -7284,11 +7294,22 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const totalUnreadCount = unreadNotifCount;
 
     let dueMaintenanceCount = 0;
+    // ======================================================================
+    // DEĞİŞTİ (kullanıcı talebi): 10 GÜN KALA UYAR
+    // • Tarihli işlemler (muayene, sigorta, bakım…) artık tarihe 10 gün kala
+    //   Operasyon ve "Araç Rapor & Bakım" rozetlerini yakar.
+    // • Aynı araçta aynı işlem türünden yalnızca EN SON kayıt değerlendirilir;
+    //   yenisi girilmiş eski kayıtlar artık yanlışlıkla sayılmaz.
+    // ======================================================================
+    const _on10 = new Date(); _on10.setDate(_on10.getDate() + 10);
+    const on10StrApp = `${_on10.getFullYear()}-${String(_on10.getMonth() + 1).padStart(2, '0')}-${String(_on10.getDate()).padStart(2, '0')}`;
     vehicles.forEach(v => {
         if (v.maintenanceRecords && Array.isArray(v.maintenanceRecords)) {
-            v.maintenanceRecords.forEach(r => {
+            const sonKayitlar = {};
+            v.maintenanceRecords.forEach(r => { const t = r.type || '-'; if (!sonKayitlar[t] || String(r.date || '') >= String(sonKayitlar[t].date || '')) sonKayitlar[t] = r; });
+            Object.values(sonKayitlar).forEach(r => {
                 let isDue = false;
-                if (r.nextDate && r.nextDate <= todayStrApp) {
+                if (r.nextDate && r.nextDate <= on10StrApp) {
                     isDue = true;
                 }
                 if (r.nextKm && v.km && parseInt(v.km) >= parseInt(r.nextKm)) {
@@ -7323,7 +7344,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // beyaz zemin+siyah yazı ile kırmızı zemin+beyaz yazı arasında yanıp söner.
     // ========================================================================
     const okunmamisSikayetSayisi = complaints.filter(c => !c.read).length;
-    const insanKaynaklariToplamBildirim = okunmamisSikayetSayisi;
+    // DEĞİŞTİ (kullanıcı talebi): İK başlığı = alt menülerin toplamı
+    // (okunmamış şikayet + bugün QR basmayan personel)
+    const insanKaynaklariToplamBildirim = okunmamisSikayetSayisi + (qrEksikSayisi || 0);
 
 
 
@@ -8134,6 +8157,16 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       {/* DEĞİŞTİ: Sayfa artık Puantaj + Mesai Takip + İş Onaylama
                           Tahtası'nı birlikte barındırdığı için adı güncellendi. */}
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'puantajTahtasi' ? 'bg-white' : 'bg-green-500'}`}></div> Puantaj/Mesai Takip
+                      {/* YENİ (kullanıcı talebi): bugün QR basmayan (izinli olmayan) personel sayısı — yanıp söner */}
+                      {qrEksikSayisi > 0 && (
+                        <span className="ml-auto flex items-center gap-1.5 shrink-0" title="Bugün giriş/çıkış QR'ı eksik personel">
+                          <span className="relative flex w-2 h-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full w-2 h-2 bg-red-500"></span>
+                          </span>
+                          <span className="menu-rozet-yansonen text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm border border-red-300">{qrEksikSayisi}</span>
+                        </span>
+                      )}
                     </button>
 
                     {/* 2) Saha Raporlaması — şeflerin saha denetimleri */}
