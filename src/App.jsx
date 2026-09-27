@@ -80,7 +80,7 @@ import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListVie
 //   • QrSiteLanding   : sakinin QR okutunca gördüğü, giriş gerektirmeyen sayfa
 import { QrSiteTakipView, QrSiteLanding } from './Satis.jsx';
 import { MaterialListView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView } from './OperasyonAracMalzeme.jsx';
-import { AddInfoView, ComplaintsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, SahaRaporlamasiView } from './OperasyonInsanKaynaklari.jsx';
+import { AddInfoView, ComplaintsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, SahaRaporlamasiView, SirketIletisimView } from './OperasyonInsanKaynaklari.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
 // NOT: Mesai Takip modülü artık ayrı bir dosya değil; kullanıcı isteğiyle
 // Operasyon Bölümü'nün parçası olarak OperasyonPersonel.jsx içine taşındı
@@ -8413,34 +8413,28 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
           </nav>
 
+          {/* ================================================================
+              DEĞİŞTİ (kullanıcı talebi): ŞİRKET İLETİŞİMİ artık açılır liste
+              DEĞİL, sabit bir menü öğesi. Tıklanınca "Şirket İletişimi" sayfası
+              açılır (activeTab 'sirketIletisim'); rehber, arama, Ara/WhatsApp ve
+              personel şirket hatları orada. Düzenle simgesi yönetim penceresini
+              açmaya devam eder. Eski açılır liste kodu kaldırıldı; companyContacts
+              verisi ve yönetim penceresi aynen duruyor.
+              ================================================================ */}
           <div className="px-4 pb-4">
-            <div className="bg-emerald-900/30 border border-emerald-800/50 rounded-xl p-3 flex flex-col gap-2 shadow-inner">
-               <div className="flex items-center justify-between border-b border-emerald-800/50 pb-2">
-                  <button onClick={() => setIsContactsOpen(!isContactsOpen)} className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-black uppercase tracking-wider hover:text-white transition flex-1 text-left">
-                    <Phone className="w-3.5 h-3.5"/> Şirket İletişimi {isContactsOpen ? <ChevronUp className="w-3 h-3 ml-1" /> : <ChevronDown className="w-3 h-3 ml-1" />}
-                  </button>
-                  {/* YENİ: Tek düzenleme butonu — ekleme, sıralama, düzenleme ve silme
-                      işlemlerinin tamamı açılan yönetim penceresinden yapılır. */}
-                  {canManageContacts && (
-                    <button onClick={() => setShowContactsManageModal(true)} title="İletişim Listesini Düzenle"
-                      className="hover:text-white transition bg-emerald-800/50 hover:bg-emerald-700/50 p-1.5 rounded-lg flex items-center justify-center text-emerald-400 shrink-0">
-                      <Edit className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-               </div>
-               
-               {isContactsOpen && (
-                 <div className="space-y-1 mt-1 max-h-40 overflow-y-auto custom-scrollbar">
-                    {/* Liste artık sade: sadece isim, unvan ve telefon. Tıklayınca arama başlar. */}
-                    {companyContacts.map((c) => (
-                       <a key={c.id} href={`tel:${c.phone}`} className="flex flex-col hover:bg-emerald-800/30 p-1.5 rounded transition w-full">
-                          <span className="text-white text-xs font-bold truncate">{c.name}</span>
-                          <span className="text-emerald-200/70 text-[9px] truncate mt-0.5">{c.position} - {c.phone}</span>
-                       </a>
-                    ))}
-                    {companyContacts.length === 0 && <p className="text-[10px] text-emerald-200/50 italic py-1 px-1.5">Kayıtlı numara yok.</p>}
-                 </div>
-               )}
+            <div className={`rounded-xl flex items-center gap-2 border transition ${activeTab === 'sirketIletisim' ? 'bg-emerald-600 border-emerald-500 shadow-md' : 'bg-emerald-900/30 border-emerald-800/50 hover:border-emerald-600'}`}>
+              <button onClick={() => { setActiveTab('sirketIletisim'); setIsSidebarOpen(false); }}
+                className={`flex-1 min-w-0 py-3 px-3 flex items-center gap-2 text-[11px] font-black uppercase tracking-wider text-left transition ${activeTab === 'sirketIletisim' ? 'text-white' : 'text-emerald-400 hover:text-white'}`}>
+                <Phone className="w-4 h-4 shrink-0" />
+                <span className="truncate">Şirket İletişimi</span>
+                <span className={`ml-auto text-[10px] font-black px-2 py-0.5 rounded-full ${activeTab === 'sirketIletisim' ? 'bg-white/20 text-white' : 'bg-emerald-800/60 text-emerald-200'}`}>{companyContacts.length}</span>
+              </button>
+              {canManageContacts && (
+                <button onClick={() => setShowContactsManageModal(true)} title="İletişim Listesini Düzenle"
+                  className="mr-2 hover:text-white transition bg-emerald-800/50 hover:bg-emerald-700/50 p-1.5 rounded-lg flex items-center justify-center text-emerald-400 shrink-0">
+                  <Edit className="w-3.5 h-3.5" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -8905,6 +8899,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {/* YENİ: İK > Mesai Takip sayfası (QR + konum doğrulamalı giriş/çıkış) */}
             {activeTab === 'mesaiTakip' && showPersonnel && <MesaiTakipView personnelList={personnelList} currentUser={currentUser} jobs={jobs} onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
+            {/* YENİ (kullanıcı talebi): ŞİRKET İLETİŞİMİ SAYFASI — herkese açık rehber */}
+            {activeTab === 'sirketIletisim' && (
+              <SirketIletisimView companyContacts={companyContacts} personnelList={personnelList} canManageContacts={canManageContacts} onYonet={() => setShowContactsManageModal(true)} />
+            )}
             {/* YENİ: Şirket Evrakları sayfası */}
             {activeTab === 'sirketEvraklari' && showPersonnel && <SirketEvraklariView db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
             {/* YENİ: Dava Dosyaları (Şirket Dosyaları > Hukuk Takip Merkezi) sayfası — İK veya davaDosyalari yetkisiyle erişilir */}
