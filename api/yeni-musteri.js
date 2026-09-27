@@ -84,6 +84,32 @@ function getDb() {
   return getFirestore();
 }
 
+// ============================================================================
+// YENİ (Sembol CRM QR TAKİP): QR / UTM izi — submit-lead.js ile AYNI mantık.
+// Ziyaretçi QR'dan gelip WhatsApp/telefon butonuna bastıysa tıklama kaydı da
+// kampanyaya bağlanır (havuzda "34 NAR 385 QR (QR)" olarak görünür).
+// ============================================================================
+function normalizeKod(v) {
+  return String(v || '').toLocaleUpperCase('tr-TR')
+    .replace(/İ/g, 'I').replace(/Ş/g, 'S').replace(/Ğ/g, 'G').replace(/Ü/g, 'U').replace(/Ö/g, 'O').replace(/Ç/g, 'C')
+    .replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+}
+function paramsFromUrl(url) {
+  try { const u = new URL(String(url)); return Object.fromEntries(u.searchParams.entries()); } catch { return {}; }
+}
+function qrIziniCoz(body, req) {
+  body = body || {};
+  const iz = (body.qrIzi && typeof body.qrIzi === 'object') ? body.qrIzi : {};
+  const sayfaUrl = iz.sayfaUrl || body.sayfaUrl || body.pageUrl || body.href || (req && req.headers && req.headers.referer) || '';
+  const p = paramsFromUrl(sayfaUrl);
+  const utmSource = iz.utmSource || body.utm_source || p.utm_source || '';
+  const utmMedium = iz.utmMedium || body.utm_medium || p.utm_medium || '';
+  const utmCampaign = iz.utmCampaign || body.utm_campaign || body.kampanya || p.utm_campaign || '';
+  const qrKodu = normalizeKod(iz.qr || body.qr || body.qrKodu || p.qr || (String(utmSource).toLowerCase() === 'qr' ? utmCampaign : ''));
+  if (!qrKodu && !utmCampaign) return null;
+  return { qrKodu: qrKodu || normalizeKod(utmCampaign), utmSource: String(utmSource), utmMedium: String(utmMedium), utmCampaign: String(utmCampaign), sayfaUrl: String(sayfaUrl).slice(0, 500), qrIziZamani: iz.zaman || new Date().toISOString() };
+}
+
 // Site → hizmetTipi eşlemesi. "Belirsiz" artık CRM'de yok, bu yüzden her
 // site için en mantıklı sabit değeri seçiyoruz (formun tam detayı zaten yok,
 // ama en azından hangi iş koluna ait olduğu bellidir).
@@ -133,7 +159,9 @@ export default async function handler(req, res) {
     const suAnkiTarih = new Date().toISOString();
     const kanalTipi = (crmData.islem || '').includes('WhatsApp') ? 'whatsapp' : 'telefon';
     const kaynakBilgi = KAYNAK_ETIKETLERI[crmData.kaynak];
-    const musteriAdi = kaynakBilgi ? kaynakBilgi.ad : 'Organik Ziyaretçi';
+    // YENİ (QR TAKİP): QR izi varsa ziyaretçi "QR Ziyaretçisi" olarak açılır
+    const qrIzi = qrIziniCoz(crmData, req);
+    const musteriAdi = kaynakBilgi ? kaynakBilgi.ad : (qrIzi ? `QR Ziyaretçisi (${qrIzi.qrKodu})` : 'Organik Ziyaretçi');
 
     const db = getDb();
     const ref = db
@@ -150,10 +178,12 @@ export default async function handler(req, res) {
       hesapId: site,
       hizmetTipi,
       durum: 'Yeni',
-      sonMesaj: `${siteEtiket} sitesinden ${kaynakBilgi ? kaynakBilgi.reklamMetni : ''}tıklama geldi`,
+      sonMesaj: `${siteEtiket} sitesinden ${kaynakBilgi ? kaynakBilgi.reklamMetni : (qrIzi ? `QR (${qrIzi.qrKodu}) üzerinden ` : '')}tıklama geldi`,
       // submit-lead.js ile AYNI alan adı — Satis.jsx artık Ads/Organik
       // sayımını metin eşleştirme yerine doğrudan bu alandan yapıyor.
-      reklamKaynagi: kaynakBilgi ? crmData.kaynak : 'organik',
+      reklamKaynagi: kaynakBilgi ? crmData.kaynak : (qrIzi ? 'qr' : 'organik'),
+      // YENİ (QR TAKİP): iz alanları — Satis.jsx qrKodu ile kampanyaya bağlar
+      ...(qrIzi ? { qrKodu: qrIzi.qrKodu, utmSource: qrIzi.utmSource, utmMedium: qrIzi.utmMedium, utmCampaign: qrIzi.utmCampaign, sayfaUrl: qrIzi.sayfaUrl, qrIziZamani: qrIzi.qrIziZamani } : {}),
       // Bu alan sayesinde Satis.jsx (istenirse) gerçek isim/telefon verilmiş
       // kayıtlarla salt tıklama bildirimlerini ayırt edebilir; iletisim alanına
       // güvenmek zorunda kalmaz.

@@ -105,6 +105,48 @@ function getDb() {
   return getFirestore();
 }
 
+// ============================================================================
+// YENİ (Sembol CRM QR TAKİP): QR / UTM İZİNİ YAKALA
+// ----------------------------------------------------------------------------
+// Kamyon, bilbord, dergi QR'ları siteyi "?utm_source=qr&utm_campaign=<KOD>&qr=<KOD>"
+// adresiyle açar. Bu iz form kaydına yazılmazsa CRM formu "Organik" görür.
+// Aşağıdaki fonksiyon izi HANGİ BİÇİMDE gelirse gelsin bulur:
+//   • body.qrIzi          → site header'ına eklenen sembol-qr-takip.js'in
+//                            gönderdiği nesne { utmSource, utmMedium, utmCampaign, qr, sayfaUrl }
+//   • body.utm_campaign / utmCampaign / qr / kampanya (wizard doğrudan gönderirse)
+//   • body.sayfaUrl / pageUrl / landingUrl / href (sayfa adresinin içinden)
+//   • Referer başlığı (tarayıcı sorgu dizisini gönderdiyse)
+// Bulunan iz kayda ŞU alanlarla yazılır (Satis.jsx bunları tanır):
+//   qrKodu, utmSource, utmMedium, utmCampaign, sayfaUrl, reklamKaynagi:'qr'
+// ============================================================================
+function normalizeKod(v) {
+  return String(v || '').toLocaleUpperCase('tr-TR')
+    .replace(/İ/g, 'I').replace(/Ş/g, 'S').replace(/Ğ/g, 'G').replace(/Ü/g, 'U').replace(/Ö/g, 'O').replace(/Ç/g, 'C')
+    .replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
+}
+function paramsFromUrl(url) {
+  try { const u = new URL(String(url)); return Object.fromEntries(u.searchParams.entries()); } catch { return {}; }
+}
+export function qrIziniCoz(body, req) {
+  body = body || {};
+  const iz = (body.qrIzi && typeof body.qrIzi === 'object') ? body.qrIzi : {};
+  // Sayfa adresi: gövdedeki alanlar → Referer başlığı
+  const sayfaUrl = iz.sayfaUrl || body.sayfaUrl || body.pageUrl || body.landingUrl || body.href || (req && req.headers && req.headers.referer) || '';
+  const urlParams = paramsFromUrl(sayfaUrl);
+  const utmSource = iz.utmSource || body.utm_source || body.utmSource || urlParams.utm_source || '';
+  const utmMedium = iz.utmMedium || body.utm_medium || body.utmMedium || urlParams.utm_medium || '';
+  const utmCampaign = iz.utmCampaign || body.utm_campaign || body.utmCampaign || body.kampanya || urlParams.utm_campaign || '';
+  const qrHam = iz.qr || body.qr || body.qrKodu || urlParams.qr || (String(utmSource).toLowerCase() === 'qr' ? utmCampaign : '');
+  const qrKodu = normalizeKod(qrHam);
+  if (!qrKodu && !utmCampaign) return null;
+  return {
+    qrKodu: qrKodu || normalizeKod(utmCampaign),
+    utmSource: String(utmSource || ''), utmMedium: String(utmMedium || ''), utmCampaign: String(utmCampaign || ''),
+    sayfaUrl: String(sayfaUrl || '').slice(0, 500),
+    qrIziZamani: iz.zaman || new Date().toISOString(),
+  };
+}
+
 function fmtTL(n) {
   try { return Number(n).toLocaleString('tr-TR'); } catch { return String(n); }
 }
@@ -528,6 +570,20 @@ export default async function handler(req, res) {
       updatedAt: nowIso,
     };
 
+    // YENİ (QR TAKİP): QR/UTM izi varsa kayda yaz. Reklam kaynağı organikse
+    // 'qr' olarak işaretlenir (Google/Meta reklamıysa o etiket korunur; QR izi
+    // yine de ayrı alanlarda durur — CRM kampanyayı qrKodu ile bağlar).
+    const qrIzi = qrIziniCoz(body, req);
+    if (qrIzi) {
+      kayit.qrKodu = qrIzi.qrKodu;
+      kayit.utmSource = qrIzi.utmSource;
+      kayit.utmMedium = qrIzi.utmMedium;
+      kayit.utmCampaign = qrIzi.utmCampaign;
+      kayit.sayfaUrl = qrIzi.sayfaUrl;
+      kayit.qrIziZamani = qrIzi.qrIziZamani;
+      if (kayit.reklamKaynagi === 'organik' && String(qrIzi.utmSource).toLowerCase() === 'qr') kayit.reklamKaynagi = 'qr';
+    }
+
     if (!existingSnap.exists) {
       // İlk kayıt — Müşteri Havuzu'nun beklediği satış-hattı alanlarını burada açıyoruz.
       // depoevimSiparis İSTİSNA: bu bir "olası müşteri" değil, ödemesi zaten
@@ -540,7 +596,7 @@ export default async function handler(req, res) {
         tarih: nowIso, kullanici: wizardType === 'depoevimSiparis' ? 'WooCommerce' : 'Web Sihirbazı',
         islem: wizardType === 'depoevimSiparis'
           ? `WooCommerce üzerinden ödemesi tamamlanmış yeni sipariş (#${body.siparisNo || '-'})`
-          : `Web sitesinden yeni teklif talebi alındı (${WIZARD_ETIKET[wizardType] || 'Web Formu'})`,
+          : `Web sitesinden yeni teklif talebi alındı (${WIZARD_ETIKET[wizardType] || 'Web Formu'})${qrIzi ? ` — QR: ${qrIzi.qrKodu}` : ''}`,
       }];
       kayit.createdAt = nowIso;
     } else if (body.status === 'completed' || body.status === 'callback_requested') {
