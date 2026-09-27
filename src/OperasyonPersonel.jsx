@@ -8689,35 +8689,60 @@ export const mesaiOnerileriHesapla = (personeller, qrKayitlari, tarihStr, atanan
 // iki küçük canlı dinleyici. Saat eşikleri dakikada bir yeniden değerlendirilir.
 // ============================================================================
 export const useBugunQrEksikSayisi = (personnelList = [], aktif = true) => {
+  // DEĞİŞTİ (kullanıcı bildirimi): Mesai Takip'te "HAFTALIK İZİN" görünen kişiler
+  // rozete SAYILMAZ. Haftalık izin çoğu zaman puantaja yazılmamış bir ÖNERİDİR
+  // (haftanın ilk gelinmeyen günü); bu yüzden yalnızca kayıtlı "Hİ" koduna bakmak
+  // yetmiyordu. Artık Mesai Takip ekranıyla AYNI kural motoru (haftalikMesaiKarari)
+  // haftanın tüm günleriyle çalıştırılır: sonuç Hİ ise sayılmaz, D ise sayılır.
   const [qr, setQr] = useState([]);
-  const [puantaj, setPuantaj] = useState({});
+  const [puantaj, setPuantaj] = useState({});      // { 'YYYY_M': records }
   const [dakika, setDakika] = useState(() => { const d = new Date(); return d.getHours() * 60 + d.getMinutes(); });
-  const bugunYmd = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const bugunYmd = ymd(new Date());
+  const pazartesi = haftaninPazartesisi(bugunYmd);
   useEffect(() => {
     if (!aktif) return;
-    const u1 = onSnapshot(query(mesaiKayitlarColRef(), where('dateStr', '==', bugunYmd), limit(500)), snap => setQr(snap.docs.map(d => d.data())), () => setQr([]));
-    const d = new Date();
-    const u2 = onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'mesai', `${d.getFullYear()}_${d.getMonth() + 1}`), snap => setPuantaj(snap.exists() ? (snap.data().records || {}) : {}), () => setPuantaj({}));
+    // Haftanın QR kayıtları (Pazartesi → bugün) — tek alan üzerinde aralık sorgusu
+    const u1 = onSnapshot(query(mesaiKayitlarColRef(), where('dateStr', '>=', pazartesi), where('dateStr', '<=', bugunYmd), limit(2000)),
+      snap => setQr(snap.docs.map(d => d.data())), () => setQr([]));
+    // Hafta iki aya yayılabilir → gerekli puantaj belgeleri
+    // DÜZELTME: Beyaz yaka puantajı ayrı ("beyaz_" önekli) belgede tutulur — ikisi de dinlenir
+    const aylar = [...new Set([pazartesi, bugunYmd].flatMap(t => { const [y, m] = t.split('-').map(Number); return [mesaiDokumanAnahtari('Mavi Yaka', y, m), mesaiDokumanAnahtari('Beyaz Yaka', y, m)]; }))];
+    const unsubs = aylar.map(key => onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'mesai', key),
+      snap => setPuantaj(prev => ({ ...prev, [key]: snap.exists() ? (snap.data().records || {}) : {} })), () => {}));
     const t = setInterval(() => { const n = new Date(); setDakika(n.getHours() * 60 + n.getMinutes()); }, 60000);
-    return () => { u1(); u2(); clearInterval(t); };
-  }, [aktif, bugunYmd]);
+    return () => { u1(); unsubs.forEach(u => u()); clearInterval(t); };
+  }, [aktif, bugunYmd, pazartesi]);
   return useMemo(() => {
     if (!aktif) return 0;
-    const gun = new Date().getDate();
-    const IZIN_KODLARI = ['Hİ', 'Yİ', 'Bİ', 'Üİ', 'R', 'İB', 'ÜR', 'Rİ'];
     const GIRIS_ESIGI = 9 * 60 + 30, CIKIS_ESIGI = 19 * 60;
+    const gunler = haftaGunleriListesi(bugunYmd).filter(t => t <= bugunYmd);
+    // Kişinin yakasına göre doğru puantaj belgesinden, Mesai Takip ile aynı çözümleyiciyle (mesaiHucresiCoz)
+    const kodAl = (p, t) => {
+      const [y, m, g] = t.split('-').map(Number);
+      const ham = puantaj?.[mesaiDokumanAnahtari(mesaiYakaTipi(p), y, m)]?.[p.id]?.[g];
+      const kayit = mesaiHucresiCoz(p, t, ham);
+      return typeof kayit === 'object' && kayit !== null ? (kayit.status || '') : (kayit || '');
+    };
     return (personnelList || []).filter(p => mesaiTakibeDahil(p)).filter(p => {
-      const kayit = puantaj?.[p.id]?.[gun];
-      const kod = typeof kayit === 'object' && kayit !== null ? kayit.status : (kayit || '');
-      if (IZIN_KODLARI.includes(kod)) return false;              // haftalık izin / izin / rapor → sayılmaz
-      const giris = qr.some(k => String(k.personnelId) === String(p.id) && k.type === 'giris');
-      const cikis = qr.some(k => String(k.personnelId) === String(p.id) && k.type === 'cikis');
-      if (kod === 'D') return true;                               // devamsızlık düşmüş
-      if (!giris && dakika >= GIRIS_ESIGI) return true;           // giriş basmadı
-      if (giris && !cikis && dakika >= CIKIS_ESIGI) return true;  // çıkış basmadı
+      const pid = String(p.id);
+      const q = (t, tip) => qr.some(k => String(k.personnelId) === pid && k.dateStr === t && k.type === tip);
+      const mevcutKod = kodAl(p, bugunYmd);
+      if (MESAI_IZIN_KODLARI.includes(mevcutKod) || mevcutKod === 'Hİ') return false; // kayıtlı izin / haftalık izin
+      const giris = q(bugunYmd, 'giris'), cikis = q(bugunYmd, 'cikis');
+      if (mevcutKod === 'D') return true;                               // devamsızlık kayıtlı
+      if (!giris && !cikis) {
+        if (dakika < GIRIS_ESIGI) return false;                         // 09:30'a kadar bekle
+        // Mesai Takip ekranıyla aynı karar: haftanın ilk gelinmeyen günü → Hİ (sayılmaz)
+        const haftaGunleri = gunler.map(t => ({ tarihStr: t, girisVarMi: q(t, 'giris'), cikisVarMi: q(t, 'cikis'), kod: kodAl(p, t) }));
+        const karar = haftalikMesaiKarari({ tarihStr: bugunYmd, girisVarMi: false, cikisVarMi: false, mevcutKod, haftaGunleri });
+        if (karar?.status === 'Hİ') return false;
+        return true;                                                    // D (ya da karar yok ama basmamış)
+      }
+      if (giris && !cikis && dakika >= CIKIS_ESIGI) return true;        // çıkış basmadı
       return false;
     }).length;
-  }, [personnelList, qr, puantaj, dakika, aktif]);
+  }, [personnelList, qr, puantaj, dakika, aktif, bugunYmd]);
 };
 
 export const gunlukQrKayitlariGetir = async (tarihStr) => {
@@ -10512,7 +10537,9 @@ export const MesaiTakipView = ({ personnelList = [], currentUser, jobs = [], onV
                               Giriş basılmadıysa giriş hatırlatması gösterilir.
                               Çıkış hücresinde ise YALNIZCA giriş yapılmışsa gösterilir;
                               hiç gelmemiş kişiye ikinci (çıkış) mesajı atılmasın diye. */}
-                          {(tip === 'giris' || grup?.giris) && (
+                          {/* DEĞİŞTİ (kullanıcı bildirimi): O gün HAFTALIK İZİN (kayıtlı ya da
+                              öneri) olan kişiye QR hatırlatması gösterilmez. */}
+                          {(tip === 'giris' || grup?.giris) && (puantajDurumu(grup)?.status || oneriDurumu(grup)?.status) !== 'Hİ' && (
                             <QrHatirlatButonu
                               kisi={personnelList.find(pp => String(pp.id) === String(grup?.personnelId))}
                               tip={tip}
