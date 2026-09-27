@@ -7397,18 +7397,16 @@ export const qrHedefUrlUret = (hedefUrl, kampanya) => {
   } catch { return hedefUrl; }
 };
 
-// DEĞİŞTİ (kullanıcı bildirimi — "form Organik geldi, takip koptu"):
-// QR doğrudan siteye gidince site utm_campaign'i CRM'e aktarmadığı için iz
-// kayboluyordu. Çözüm: QR, CRM'in ANLIK geçiş noktasından geçer — bekleme
-// ekranı YOK, hedef adres (UTM'li) QR'ın içinde taşınır (u parametresi), sayfa
-// açılır açılmaz siteye geçilir (~0,5 sn); okutma arka planda kaydedilir.
-// Böylece site hiçbir şey aktarmasa bile okutma sayılır ve form, zaman
-// eşleştirmesiyle (okutmadan sonraki 45 dk) QR'a bağlanır.
-export const qrTakipBaglantisi = (kampanya) => {
-  const hedef = qrHedefUrlUret(kampanya?.hedefUrl || QR_TAKIP_SITE_BILGI[kampanya?.site]?.varsayilanUrl || QR_TAKIP_SITE_BILGI.sembolevdeneve.varsayilanUrl, kampanya || {});
-  if (typeof window === 'undefined' || !kampanya?.id) return hedef;
-  return `${window.location.origin}${window.location.pathname}?qrt=${kampanya.id}&s=${kampanya.site || 'sembolevdeneve'}&u=${encodeURIComponent(hedef)}`;
-};
+// DEĞİŞTİ (kullanıcı bildirimi — "QR üretilemedi"):
+// Geçiş noktası bağlantısı hedef adresi de içerdiği için ~290 karaktere
+// çıkıyordu; dahili QR üreteci en fazla ~210 karakter (sürüm 10) destekliyor.
+// Site tarafına sembol-qr-takip.js + api/qr-tarama.js kurulduğu için artık
+// geçiş noktasına GEREK YOK: QR doğrudan sitenin teklif sayfasını açar
+// (~140 karakter), okutmayı ve form izini site betiği CRM'e aktarır.
+// Daha önce basılmış "?qrt=" bağlantılı QR'lar App.jsx'teki rota sayesinde
+// çalışmaya devam eder.
+export const qrTakipBaglantisi = (kampanya) => qrHedefUrlUret(
+  kampanya?.hedefUrl || QR_TAKIP_SITE_BILGI[kampanya?.site]?.varsayilanUrl || QR_TAKIP_SITE_BILGI.sembolevdeneve.varsayilanUrl, kampanya || {});
 const qrKampanyaKoleksiyonu = () => collection(db, 'artifacts', appId, 'public', 'data', 'qrKampanyalari');
 const qrTaramaKoleksiyonu = () => collection(db, 'artifacts', appId, 'public', 'data', 'qrTaramalari');
 const qrKampanyaRef = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'qrKampanyalari', id);
