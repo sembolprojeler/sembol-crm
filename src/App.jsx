@@ -7677,7 +7677,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 onClick={() => { setActiveTab('dashboard'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-black transition flex justify-start items-center gap-3 rounded-xl bg-gradient-to-r from-white via-neutral-100 to-neutral-300 text-black shadow-lg shadow-neutral-300/40 hover:scale-[1.02] ${activeTab === 'dashboard' ? 'ring-2 ring-black/70' : ''}`}
               >
-                <Calendar className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Anasayfa</span>
+                <Calendar className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap truncate" title="Anasayfa">Anasayfa</span>
               </button>
             )}
             
@@ -7721,8 +7721,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 onClick={() => { setActiveTab('profileSettings'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
                 className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-[#8B5E34] via-[#B98A55] to-[#5C3B1E] text-white shadow-lg shadow-[#5C3B1E]/40 hover:scale-[1.02] ${activeTab === 'profileSettings' ? 'ring-2 ring-white/70' : ''}`}
               >
-                <div className="flex items-center gap-3">
-                  <User className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Profilim</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  <User className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap truncate" title="Profilim">Profilim</span>
                 </div>
                 {/* YENİ: "Özel Görevlerim" artık Profilim sayfasının içinde; yeni/bitmemiş
                     görev varsa burada yanıp sönen ışık ve sayı rozeti gösterilir. */}
@@ -7730,23 +7730,22 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     Görev kişiye atandıysa yetki ayarından bağımsız olarak uyarı görünür;
                     tek koşul bitmemiş görev sayısının 0'dan büyük olmasıdır. Böylece tüm
                     görevler "completed" olduğunda unreadTasksCount 0'a düşer ve ışık söner. */}
+                {/* DEĞİŞTİ (kullanıcı talebi — menü hizası): tüm başlıklarda aynı düzen —
+                    TEK yanıp sönen ışık + sayı, sabit genişlikli sağ kutuda, sonda ok yeri.
+                    (Eskiden görev sayısı kadar nokta basılıyordu; genişlik değiştiği için
+                    rozetler başlıktan başlığa kayıyordu.) */}
+                <div className="flex items-center justify-end gap-1.5 shrink-0 w-[92px]">
                 {unreadTasksCount > 0 && (
                   <span className="flex items-center gap-1.5 shrink-0">
-                    {/* GÖREV SAYISI KADAR IŞIK: her bitmemiş görev için bir yanıp sönen nokta
-                        basılır. Sol menü dar olduğu için en fazla 4 nokta gösterilir; gerçek
-                        sayı zaten yanındaki rozette yazar. animationDelay ile noktalar sırayla
-                        yanar, hepsi aynı anda değil (daha okunaklı bir uyarı efekti). */}
-                    <span className="flex items-center gap-1">
-                      {Array.from({ length: Math.min(unreadTasksCount, 4) }).map((_, i) => (
-                        <span key={i} className="relative flex w-2.5 h-2.5">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" style={{ animationDelay: `${i * 250}ms` }}></span>
-                          <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-500"></span>
-                        </span>
-                      ))}
+                    <span className="relative flex w-2.5 h-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-500"></span>
                     </span>
-                    <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{unreadTasksCount}</span>
+                    <span className="menu-rozet-yansonen text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm border border-red-300">{unreadTasksCount}</span>
                   </span>
                 )}
+                <span className="w-4 shrink-0" aria-hidden="true"></span>
+                </div>
               </button>
             )}
 
@@ -7773,9 +7772,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     : 'bg-gradient-to-r from-red-950 via-red-900 to-red-800 text-white shadow-lg shadow-red-900/40 hover:scale-[1.02]'
               }`}
             >
-              <div className="flex items-center gap-3">
-                <CalendarDays className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Hatırlatmalar</span>
+              <div className="flex items-center gap-3 min-w-0">
+                <CalendarDays className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap truncate" title="Hatırlatmalar">Hatırlatmalar</span>
               </div>
+              {/* DEĞİŞTİ (kullanıcı talebi): sağ blok diğer başlıklarla aynı sabit genişlikte;
+                  ok simgesi olmadığı için sonda w-4 boşluk bırakılır → ışık/rozet aynı hizada */}
+              <div className="flex items-center justify-end gap-1.5 shrink-0 w-[92px]">
               {hatirlatmaBildirim > 0 && (
                 <span className="flex items-center gap-1.5 shrink-0">
                   <span className="relative flex w-2.5 h-2.5">
@@ -7787,6 +7789,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   <span className="menu-rozet-yansonen text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm border border-red-300">{hatirlatmaBildirim}</span>
                 </span>
               )}
+              <span className="w-4 shrink-0" aria-hidden="true"></span>
+              </div>
             </button>
             )}
 
@@ -7813,11 +7817,20 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     {/* DEĞİŞİKLİK: Sol menü etiketi "Bana Atanan Görevler" -> "Bana Atanan İşler".
                         Sadece görünen yazı değişti; activeTab anahtarı ('myAssignedJobs') ve
                         yönlendirme mantığı aynı kaldı, hiçbir rota bozulmadı. */}
-                    <ClipboardList className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Bana Atanan İşler</span>
+                    <ClipboardList className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap truncate" title="Bana Atanan İşler">Bana Atanan</span>
                   </div>
+                  <div className="flex items-center justify-end gap-1.5 shrink-0 w-[92px]">
                   {unreadJobCount > 0 && (
-                    <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{unreadJobCount}</span>
+                    <span className="flex items-center gap-1.5 shrink-0">
+                      <span className="relative flex w-2.5 h-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-500"></span>
+                      </span>
+                      <span className="menu-rozet-yansonen text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm border border-red-300">{unreadJobCount}</span>
+                    </span>
                   )}
+                  <span className="w-4 shrink-0" aria-hidden="true"></span>
+                  </div>
                 </button>
             )}
 
@@ -7829,8 +7842,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   onClick={() => { setIsFinanceSubMenuOpen(!isFinanceSubMenuOpen); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-sky-500 to-blue-700 text-white shadow-lg shadow-blue-600/30 hover:scale-[1.02]`}
                 >
-                  <div className="flex items-center gap-3">
-                    <Wallet className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Finans</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Wallet className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap truncate" title="Finans">Finans</span>
                   </div>
                   {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -7905,10 +7918,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   onClick={() => { setIsAddJobSubMenuOpen(!isAddJobSubMenuOpen); setIsJobSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-yellow-400 to-yellow-600 text-white shadow-lg shadow-yellow-500/30 hover:scale-[1.02]`}
                 >
-                  <div className="flex items-center gap-3">
-                    <PlusCircle className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Satış</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <PlusCircle className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap truncate" title="Satış">Satış</span>
                   </div>
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center justify-end gap-1.5 shrink-0 w-[92px]">
                     {/* YENİ: Yeni teklif rozetleri — kırmızı Sembol, mavi Depoevim; sayı 0 ise gizli */}
                     {showSatisMusteriHavuzu && hizliTeklifYeni.sembol > 0 && (
                       <span title={`Sembol Nakliyat: ${hizliTeklifYeni.sembol} yeni teklif`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-red-600/40 animate-pulse">{hizliTeklifYeni.sembol}</span>
@@ -7978,10 +7991,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   onClick={() => { setIsOperasyonSubMenuOpen(!isOperasyonSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); }}
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-white shadow-lg shadow-red-600/30 hover:scale-[1.02]`}
                 >
-                  <div className="flex items-center gap-3">
-                    <Activity className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap">Operasyon</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Activity className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap truncate" title="Operasyon">Operasyon</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-end gap-1.5 shrink-0 w-[92px]">
                     {/* YENİ: Rozet artık alt menülerdeki TÜM bildirimlerin TOPLAMINI
                         gösterir (Hasarlı İşler + Görev Tahtası + Araç Bakım) ve
                         beyaz zemin+siyah yazı ile kırmızı zemin+beyaz yazı arasında
@@ -8065,7 +8078,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'taskList' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className="flex items-center gap-3">
-                        <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'taskList' ? 'bg-white' : 'bg-orange-500'}`}></div> <span className="whitespace-nowrap">Görev Tahtası</span>
+                        <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'taskList' ? 'bg-white' : 'bg-orange-500'}`}></div> <span className="whitespace-nowrap truncate" title="Görev Tahtası">Görev Tahtası</span>
                       </div>
                       {generalTodoTasksCount > 0 && (
                         <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{generalTodoTasksCount}</span>
@@ -8082,7 +8095,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-between items-center rounded-xl ${activeTab === 'vehicleMaintenance' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className="flex items-center gap-3">
-                        <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'vehicleMaintenance' ? 'bg-white' : 'bg-orange-500'}`}></div> <span className="whitespace-nowrap">Araç Rapor & Bakım</span>
+                        <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'vehicleMaintenance' ? 'bg-white' : 'bg-orange-500'}`}></div> <span className="whitespace-nowrap truncate" title="Araç Rapor & Bakım">Araç Rapor & Bakım</span>
                       </div>
                       {dueMaintenanceCount > 0 && (
                         <span className="bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm animate-pulse">{dueMaintenanceCount}</span>
@@ -8110,10 +8123,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   onClick={() => { setIsPersonnelSubMenuOpen(!isPersonnelSubMenuOpen); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); }}
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-green-500 via-green-600 to-emerald-800 text-white shadow-lg shadow-green-700/40 hover:scale-[1.02]`}
                 >
-                  <div className="flex items-center gap-3">
-                    <Briefcase className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">İnsan Kaynakları</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Briefcase className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap truncate" title="İnsan Kaynakları">İnsan Kayn.</span>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center justify-end gap-1.5 shrink-0 w-[92px]">
                     {/* YENİ: Alt menülerdeki bildirimlerin TOPLAMI. Hatırlatmalar ve
                         Operasyon başlıklarıyla aynı görsel dil: yanıp sönen ışık +
                         beyaz/siyah ↔ kırmızı/beyaz geçişli rozet. Menü açıkken gizlenir
@@ -8229,8 +8242,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   onClick={() => { setIsJobSubMenuOpen(!isJobSubMenuOpen); setIsCustomerSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-amber-700 via-amber-800 to-amber-950 text-white shadow-lg shadow-amber-900/40 hover:scale-[1.02]`}
                 >
-                  <div className="flex items-center gap-3">
-                    <Users className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Müşteri Portföyü</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Users className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap truncate" title="Müşteri Portföyü">Müşteri Portf.</span>
                   </div>
                   {isJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -8271,8 +8284,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   onClick={() => { setIsSirketDosyalariSubMenuOpen(!isSirketDosyalariSubMenuOpen); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsFinanceSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsTodoSubMenuOpen(false); setIsAddJobSubMenuOpen(false); setIsOperasyonSubMenuOpen(false); }}
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-purple-500 via-purple-700 to-fuchsia-950 text-white shadow-lg shadow-purple-700/40 hover:scale-[1.02]`}
                 >
-                  <div className="flex items-center gap-3">
-                    <Scale className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Şirket Dosyaları</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Scale className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap truncate" title="Şirket Dosyaları">Şirket Dosy.</span>
                   </div>
                   {isSirketDosyalariSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
@@ -8317,8 +8330,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   onClick={() => { setIsSystemFilesSubMenuOpen(!isSystemFilesSubMenuOpen); setIsAuthSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
                   className={`w-full py-3 px-4 text-sm font-black transition flex justify-between items-center rounded-xl bg-gradient-to-r from-red-500 via-red-600 to-red-800 text-white shadow-lg shadow-red-700/30 hover:scale-[1.02]`}
                 >
-                  <div className="flex items-center gap-3">
-                    <FileText className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap">Sistem Dosyaları</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FileText className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap truncate" title="Sistem Dosyaları">Sistem Dosy.</span>
                   </div>
                   {isSystemFilesSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                 </button>
