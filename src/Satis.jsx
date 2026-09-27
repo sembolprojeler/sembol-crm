@@ -7397,14 +7397,18 @@ export const qrHedefUrlUret = (hedefUrl, kampanya) => {
   } catch { return hedefUrl; }
 };
 
-// DEĞİŞTİ (kullanıcı talebi): QR artık CRM'in yönlendirme sayfasına DEĞİL,
-// doğrudan sitenin teklif sayfasına gider. Kampanya izi URL'de taşınır
-// (utm_source=qr&utm_campaign=<KOD>&qr=<KOD>); site bu izi CRM'e aktarır ve
-// kayıt kampanyaya bağlanır. Eski "?qrt=" bağlantılı basılı QR'lar için
-// App.jsx'teki yönlendirme rotası geriye uyumluluk adına duruyor.
-export const qrTakipBaglantisi = (kampanya) => qrHedefUrlUret(
-  kampanya?.hedefUrl || QR_TAKIP_SITE_BILGI[kampanya?.site]?.varsayilanUrl || QR_TAKIP_SITE_BILGI.sembolevdeneve.varsayilanUrl, kampanya || {});
-// Hedef URL'ye UTM + kampanya kodu ekler (mevcut sorgu parametreleri korunur)
+// DEĞİŞTİ (kullanıcı bildirimi — "form Organik geldi, takip koptu"):
+// QR doğrudan siteye gidince site utm_campaign'i CRM'e aktarmadığı için iz
+// kayboluyordu. Çözüm: QR, CRM'in ANLIK geçiş noktasından geçer — bekleme
+// ekranı YOK, hedef adres (UTM'li) QR'ın içinde taşınır (u parametresi), sayfa
+// açılır açılmaz siteye geçilir (~0,5 sn); okutma arka planda kaydedilir.
+// Böylece site hiçbir şey aktarmasa bile okutma sayılır ve form, zaman
+// eşleştirmesiyle (okutmadan sonraki 45 dk) QR'a bağlanır.
+export const qrTakipBaglantisi = (kampanya) => {
+  const hedef = qrHedefUrlUret(kampanya?.hedefUrl || QR_TAKIP_SITE_BILGI[kampanya?.site]?.varsayilanUrl || QR_TAKIP_SITE_BILGI.sembolevdeneve.varsayilanUrl, kampanya || {});
+  if (typeof window === 'undefined' || !kampanya?.id) return hedef;
+  return `${window.location.origin}${window.location.pathname}?qrt=${kampanya.id}&s=${kampanya.site || 'sembolevdeneve'}&u=${encodeURIComponent(hedef)}`;
+};
 const qrKampanyaKoleksiyonu = () => collection(db, 'artifacts', appId, 'public', 'data', 'qrKampanyalari');
 const qrTaramaKoleksiyonu = () => collection(db, 'artifacts', appId, 'public', 'data', 'qrTaramalari');
 const qrKampanyaRef = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'qrKampanyalari', id);
@@ -7488,76 +7492,38 @@ export const useQrOtomatikEslestirme = (kayitlar = [], kampanyalar = [], taramal
 
 // ---------------------------------------------------------------- HERKESE AÇIK YÖNLENDİRME
 // App.jsx "?qrt=<id>" görünce bunu çizer: tarama yazılır, hedefe yönlendirilir.
-export const QrTakipYonlendirme = ({ kampanyaId, siteIpucu, firebaseUser, logoUrl = '' }) => {
-  // DEĞİŞTİ (kullanıcı talebi): Yönlendirme sayfası artık "beklerken özel hisset"
-  // ekranı — şirket logosu, teşekkür mesajı, "size özel teklif" vurgusu ve
-  // büyük bir "Sayfa açılmadıysa buraya dokunun" düğmesi. Yönlendirme hızına
-  // DOKUNULMADI: tarama yazılır yazılmaz (≈1 sn) siteye geçilir; en geç 4 sn.
-  const [hedefUrlState, setHedefUrlState] = useState('');
-  const [logoHata, setLogoHata] = useState(false);
+export const QrTakipYonlendirme = ({ kampanyaId, siteIpucu, firebaseUser, logoUrl = '', hedefParam = '' }) => {
+  // DEĞİŞTİ (kullanıcı talebi): ANLIK GEÇİŞ — bekleme ekranı yok.
+  //  • Hedef adres QR bağlantısındaki "u" parametresinden okunur → Firestore
+  //    beklenmeden yönlendirme hazır.
+  //  • Okutma kaydı arka planda yazılır; yazma 900 ms'de bitmezse yine gidilir.
+  //  • Anonim oturum (firebaseUser) 900 ms içinde gelmezse de gidilir.
   const yonlendirildi = useRef(false);
-  // DEĞİŞTİ (kullanıcı talebi): sayfa EN AZ 2 saniye görünür; tarama daha erken
-  // yazılsa bile 2 sn dolmadan yönlendirilmez (üst sınır yine 4 sn emniyet).
-  const baslangic = useRef(Date.now());
-  const MIN_BEKLEME_MS = 2000;
-  const git = (url) => {
-    if (yonlendirildi.current) return;
-    yonlendirildi.current = true;
-    const kalan = Math.max(0, MIN_BEKLEME_MS - (Date.now() - baslangic.current));
-    setTimeout(() => window.location.replace(url), kalan);
-  };
   const r = QR_TAKIP_SITE_BILGI[siteIpucu] || QR_TAKIP_SITE_BILGI.sembolevdeneve;
-  const varsayilan = r.varsayilanUrl;
+  const hedef = (() => { try { const u = decodeURIComponent(hedefParam || ''); return /^https?:\/\//i.test(u) ? u : r.varsayilanUrl; } catch { return r.varsayilanUrl; } })();
+  const git = () => { if (yonlendirildi.current) return; yonlendirildi.current = true; window.location.replace(hedef); };
   useEffect(() => {
-    const emniyet = setTimeout(() => git(hedefUrlState || varsayilan), 4000); // Firebase gecikse bile müşteri beklemesin
-    if (!firebaseUser || !kampanyaId) return () => clearTimeout(emniyet);
+    const azami = setTimeout(git, 900); // her koşulda en geç 0,9 sn
+    if (!firebaseUser || !kampanyaId) return () => clearTimeout(azami);
     (async () => {
       try {
-        const snap = await getDoc(qrKampanyaRef(kampanyaId));
-        if (!snap.exists()) { git(varsayilan); return; }
-        const kmp = { id: snap.id, ...snap.data() };
-        const hedef = qrHedefUrlUret(kmp.hedefUrl || QR_TAKIP_SITE_BILGI[kmp.site]?.varsayilanUrl || varsayilan, kmp);
-        setHedefUrlState(hedef);
-        if (kmp.aktif === false) { git(hedef); return; }
         const ua = navigator.userAgent || '';
         const cihaz = /Android|iPhone|iPad|Mobile/i.test(ua) ? 'mobil' : 'masaüstü';
-        Promise.allSettled([
-          addDoc(qrTaramaKoleksiyonu(), { kampanyaId: kmp.id, kampanyaAd: kmp.ad, site: kmp.site, zaman: new Date().toISOString(), gun: gunYmdQr(), cihaz, referer: document.referrer || '' }),
-          updateDoc(qrKampanyaRef(kmp.id), { taramaSayisi: increment(1), sonTarama: new Date().toISOString() }),
-        ]).finally(() => git(hedef));
-        setTimeout(() => git(hedef), 1500);
-      } catch { git(varsayilan); }
+        await Promise.allSettled([
+          addDoc(qrTaramaKoleksiyonu(), { kampanyaId, site: siteIpucu, zaman: new Date().toISOString(), gun: gunYmdQr(), cihaz, referer: document.referrer || '' }),
+          updateDoc(qrKampanyaRef(kampanyaId), { taramaSayisi: increment(1), sonTarama: new Date().toISOString() }),
+        ]);
+      } catch { /* sessiz */ }
+      git();
     })();
-    return () => clearTimeout(emniyet);
+    return () => clearTimeout(azami);
   }, [kampanyaId, siteIpucu, firebaseUser]);
-
-  const depoevimMi = siteIpucu === 'depoevim';
-  const vurgu = depoevimMi ? 'text-blue-300' : 'text-red-400';
-  const arka = depoevimMi ? 'radial-gradient(ellipse at top, #0b1a3a 0%, #000 60%)' : 'radial-gradient(ellipse at top, #2a0a0a 0%, #000 60%)';
-  const logoKaynak = logoUrl || 'https://www.sembolevdeneve.com/wp-content/uploads/2026/07/favicon.webp';
+  // Neredeyse hiç görünmeyen, sade ekran (yalnızca ~0,5 sn)
   return (
-    <div className="min-h-screen text-white flex flex-col items-center justify-center p-6 text-center" style={{ background: arka }}>
-      {/* DEĞİŞTİ (kullanıcı talebi): SADE EKRAN — yalnızca logo, teşekkür, ana mesaj,
-          "Formunuz açılıyor…" ve büyük yedek düğme. Yazılar büyütüldü ve ortalandı. */}
-      <div className="w-full max-w-lg flex flex-col items-center justify-center text-center">
-        <div className="mb-8">
-          {!logoHata && !depoevimMi
-            ? <img src={logoKaynak} alt="Sembol Nakliyat" onError={() => setLogoHata(true)} className="max-h-28 max-w-[320px] object-contain drop-shadow-[0_0_28px_rgba(220,38,38,0.35)]" />
-            : <h1 className={`text-4xl font-black tracking-wide ${vurgu}`}>{r.ad}</h1>}
-        </div>
-
-        <p className="text-sm md:text-base font-black uppercase tracking-[0.3em] text-white/60">QR okuttuğunuz için teşekkürler</p>
-        <h2 className="text-3xl md:text-4xl font-black mt-4 leading-tight">
-          Size özel, ayrıcalıklı<br /><span className={vurgu}>teklif sayfasına</span><br />yönlendiriliyorsunuz
-        </h2>
-
-        <p className="text-base font-bold text-white/70 mt-8 flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> Formunuz açılıyor…</p>
-
-        <a href={hedefUrlState || varsayilan}
-          className={`mt-6 w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 shadow-xl transition ${depoevimMi ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30' : 'bg-red-600 hover:bg-red-700 shadow-red-600/30'}`}>
-          Sayfa açılmadıysa buraya dokunun <ExternalLink className="w-5 h-5" />
-        </a>
-      </div>
+    <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center p-6 text-center">
+      {logoUrl && siteIpucu !== 'depoevim' ? <img src={logoUrl} alt="" className="max-h-16 object-contain opacity-90" /> : <p className="text-lg font-black">{r.ad}</p>}
+      <p className="text-xs font-bold text-white/50 mt-3 flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Açılıyor…</p>
+      <a href={hedef} className="mt-6 text-[11px] font-black text-white/60 underline">Açılmadıysa buraya dokunun</a>
     </div>
   );
 };
@@ -7664,20 +7630,20 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
   const siteTaramalari = useMemo(() => taramalar.filter(t => t.site === site), [taramalar, site]);
 
   // Kampanya istatistikleri
-  // DEĞİŞTİ (kullanıcı talebi): yönlendirme sayfası kalktığı için "okutma" artık
-  // sitenin CRM'e aktardığı, kampanya izi taşıyan kayıtlardan sayılır:
-  //   • Her kayıt (ziyaret bildirimi ya da form) = 1 okutma
-  //   • Telefonu olan / gerçek adlı kayıt = 1 form
-  // Eski "?qrt=" QR'larından gelen taramalar (qrTaramalari) da toplama eklenir.
+  // OKUTMA = anlık geçiş noktasından kaydedilen taramalar (qrTaramalari).
+  // Site kampanya izini CRM'e aktarırsa o kayıtlar da okutmaya eklenir
+  // (aynı ziyaret iki kez sayılmasın diye yalnızca kampanyaya bağlı olanlar).
+  // FORM = telefonu olan / gerçek adlı, kampanyaya bağlı kayıtlar.
   const formMu = (k) => telefonGecerliMi(k.iletisim) || (k.musteriAdi && !String(k.musteriAdi).includes('Ziyaretçi'));
   const ist = useMemo(() => {
     const m = {};
     kampanyalar.forEach(c => { m[c.id] = { bugun: 0, buAy: 0, tumu: 0, form: 0, formBuAy: 0, isAldik: 0, mobil: 0 }; });
     siteTaramalari.forEach(t => { const i = m[t.kampanyaId]; if (!i) return; i.tumu++; if (t.gun === bugun) i.bugun++; if ((t.gun || '').startsWith(buAy)) i.buAy++; if (t.cihaz === 'mobil') i.mobil++; });
+    // DEĞİŞTİ: okutma yalnızca tarama kayıtlarından sayılır (site betiği + geçiş noktası);
+    // havuz kayıtları sadece FORM / İŞ sayaçlarına girer — çift sayım olmaz.
     siteKayitlari.forEach(k => {
       const i = m[k.qrKampanyaId]; if (!i) return;
       const g = gunAnahtari(k.createdAt || '');
-      i.tumu++; if (g === bugun) i.bugun++; if (g.slice(0, 7) === buAy) i.buAy++;
       if (formMu(k)) { i.form++; if (g.slice(0, 7) === buAy) i.formBuAy++; if (k.durum === 'İşi Aldık') i.isAldik++; }
     });
     return m;
@@ -7695,7 +7661,7 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
   // Son 14 gün tarama grafiği (seçili kampanya)
   const gunlukSeri = useMemo(() => {
     const seri = []; for (let i = 13; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); const g = gunYmdQr(d);
-      seri.push({ gun: g, adet: siteTaramalari.filter(t => t.kampanyaId === seciliId && t.gun === g).length + siteKayitlari.filter(k => k.qrKampanyaId === seciliId && gunAnahtari(k.createdAt || '') === g).length }); }
+      seri.push({ gun: g, adet: siteTaramalari.filter(t => t.kampanyaId === seciliId && t.gun === g).length }); }
     return seri;
   }, [siteTaramalari, siteKayitlari, seciliId]);
   const maxAdet = Math.max(1, ...gunlukSeri.map(x => x.adet));
@@ -7754,8 +7720,8 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
           <p className="font-black mb-1">Nasıl çalışır?</p>
           <ol className="list-decimal ml-5 space-y-0.5">
             <li>"Yeni QR Oluştur" — adını (örn. <b>34 NAR 385 QR</b>), nereye basılacağını ve yönlendirme adresini girin.</li>
-            <li>Oluşan QR'ı PNG/SVG indirip kamyon kasasına, bilborda, dergiye basın. Her QR, sitenin teklif sayfasını kendi kampanya iziyle açar.</li>
-            <li>Müşteri okutunca doğrudan site açılır; adresteki kampanya kodu (utm_campaign / qr) siteden CRM'e aktarılır — kayıt bu QR'a bağlanır.</li>
+            <li>Oluşan QR'ı PNG/SVG indirip kamyon kasasına, bilborda, dergiye basın. Her QR'ın kendi izi vardır.</li>
+            <li>Müşteri okutunca yarım saniyelik görünmez bir geçişle site açılır (okutma sayılır); form gelince 45 dk içindeki okutmayla eşleşip bu QR'a bağlanır.</li>
             <li>Form tamamlanınca Müşteri Havuzu'na "Organik" değil, <b>QR adıyla</b> düşer; burada kaç okutma → kaç form → kaç iş görürsünüz.</li>
           </ol>
         </div>
@@ -7803,14 +7769,14 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
                 <div className="flex-1 min-w-0">
                   <h3 className="font-black text-lg leading-tight">{secili.ad}</h3>
                   <p className="text-xs font-bold text-white/70 mt-1">{secili.tur} • kod <span className="font-mono">{secili.kod}</span></p>
-                  <p className="text-[11px] font-bold text-white/60 mt-2 break-all">QR adresi: {qrTakipBaglantisi(secili)}</p>
+                  <p className="text-[11px] font-bold text-white/60 mt-2 break-all">Site adresi: {qrHedefUrlUret(secili.hedefUrl || r.varsayilanUrl, secili)}</p>
                   {secili.notlar && <p className="text-[11px] font-bold text-white/60 mt-1 italic">{secili.notlar}</p>}
                   <p className="text-[10px] font-bold text-white/50 mt-2">Oluşturma: {trhS(secili.olusturmaTarihi)} • Son okutma: {secili.sonTarama ? trhS(secili.sonTarama) : '—'}</p>
                 </div>
               </div>
               {/* 14 GÜNLÜK GRAFİK */}
               <div className="p-4 border-b border-neutral-200">
-                <p className="text-[10px] font-black uppercase text-neutral-500 mb-2">Son 14 gün — QR'dan gelen ziyaret + form</p>
+                <p className="text-[10px] font-black uppercase text-neutral-500 mb-2">Son 14 gün okutma</p>
                 <div className="flex items-end gap-1 h-20">
                   {gunlukSeri.map(x => (
                     <div key={x.gun} className="flex-1 flex flex-col items-center gap-1" title={`${x.gun}: ${x.adet}`}>
