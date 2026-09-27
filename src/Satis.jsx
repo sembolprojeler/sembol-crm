@@ -7491,7 +7491,16 @@ export const QrTakipYonlendirme = ({ kampanyaId, siteIpucu, firebaseUser, logoUr
   const [hedefUrlState, setHedefUrlState] = useState('');
   const [logoHata, setLogoHata] = useState(false);
   const yonlendirildi = useRef(false);
-  const git = (url) => { if (yonlendirildi.current) return; yonlendirildi.current = true; window.location.replace(url); };
+  // DEĞİŞTİ (kullanıcı talebi): sayfa EN AZ 2 saniye görünür; tarama daha erken
+  // yazılsa bile 2 sn dolmadan yönlendirilmez (üst sınır yine 4 sn emniyet).
+  const baslangic = useRef(Date.now());
+  const MIN_BEKLEME_MS = 2000;
+  const git = (url) => {
+    if (yonlendirildi.current) return;
+    yonlendirildi.current = true;
+    const kalan = Math.max(0, MIN_BEKLEME_MS - (Date.now() - baslangic.current));
+    setTimeout(() => window.location.replace(url), kalan);
+  };
   const r = QR_TAKIP_SITE_BILGI[siteIpucu] || QR_TAKIP_SITE_BILGI.sembolevdeneve;
   const varsayilan = r.varsayilanUrl;
   useEffect(() => {
@@ -7523,44 +7532,27 @@ export const QrTakipYonlendirme = ({ kampanyaId, siteIpucu, firebaseUser, logoUr
   const logoKaynak = logoUrl || 'https://www.sembolevdeneve.com/wp-content/uploads/2026/07/favicon.webp';
   return (
     <div className="min-h-screen text-white flex flex-col items-center justify-center p-6 text-center" style={{ background: arka }}>
-      {/* LOGO — CRM'deki şirket logosu; yüklenemezse marka adı */}
-      <div className="mb-5">
-        {!logoHata && !depoevimMi
-          ? <img src={logoKaynak} alt="Sembol Nakliyat" onError={() => setLogoHata(true)} className="max-h-24 max-w-[280px] object-contain drop-shadow-[0_0_24px_rgba(220,38,38,0.35)]" />
-          : <h1 className={`text-3xl font-black tracking-wide ${vurgu}`}>{r.ad}</h1>}
+      {/* DEĞİŞTİ (kullanıcı talebi): SADE EKRAN — yalnızca logo, teşekkür, ana mesaj,
+          "Formunuz açılıyor…" ve büyük yedek düğme. Yazılar büyütüldü ve ortalandı. */}
+      <div className="w-full max-w-lg flex flex-col items-center justify-center text-center">
+        <div className="mb-8">
+          {!logoHata && !depoevimMi
+            ? <img src={logoKaynak} alt="Sembol Nakliyat" onError={() => setLogoHata(true)} className="max-h-28 max-w-[320px] object-contain drop-shadow-[0_0_28px_rgba(220,38,38,0.35)]" />
+            : <h1 className={`text-4xl font-black tracking-wide ${vurgu}`}>{r.ad}</h1>}
+        </div>
+
+        <p className="text-sm md:text-base font-black uppercase tracking-[0.3em] text-white/60">QR okuttuğunuz için teşekkürler</p>
+        <h2 className="text-3xl md:text-4xl font-black mt-4 leading-tight">
+          Size özel, ayrıcalıklı<br /><span className={vurgu}>teklif sayfasına</span><br />yönlendiriliyorsunuz
+        </h2>
+
+        <p className="text-base font-bold text-white/70 mt-8 flex items-center justify-center gap-2"><Loader2 className="w-5 h-5 animate-spin" /> Formunuz açılıyor…</p>
+
+        <a href={hedefUrlState || varsayilan}
+          className={`mt-6 w-full py-4 rounded-2xl font-black text-base flex items-center justify-center gap-2 shadow-xl transition ${depoevimMi ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30' : 'bg-red-600 hover:bg-red-700 shadow-red-600/30'}`}>
+          Sayfa açılmadıysa buraya dokunun <ExternalLink className="w-5 h-5" />
+        </a>
       </div>
-
-      <p className="text-[11px] font-black uppercase tracking-[0.3em] text-white/50">QR okuttuğunuz için teşekkürler</p>
-      <h2 className="text-2xl md:text-3xl font-black mt-2 leading-tight">Size özel, ayrıcalıklı<br /><span className={vurgu}>teklif sayfasına</span> yönlendiriliyorsunuz</h2>
-      <p className="text-sm font-bold text-white/70 mt-3 max-w-md leading-relaxed">
-        Bu QR yalnızca sizin için hazırlandı. Açılan formu doldurduğunuzda talebiniz
-        <b className="text-white"> öncelikli</b> olarak müşteri temsilcimize düşer ve fiyatınız
-        <b className="text-white"> size özel</b> hesaplanır — standart liste fiyatı değil.
-      </p>
-
-      {/* Beklerken avantaj: ne kazanacağı */}
-      <div className="grid grid-cols-2 gap-2 mt-5 w-full max-w-sm">
-        {[
-          ['⚡', 'Hızlı dönüş', 'Formunuz anında temsilcinize ulaşır'],
-          ['🏷️', 'Özel fiyat', 'QR müşterilerine ayrıcalıklı teklif'],
-          ['🛡️', 'Sigortalı taşıma', 'Eşyanız güvence altında'],
-          ['📦', 'Ücretsiz keşif', 'Adresinize gelip fiyatı netleştiriyoruz'],
-        ].map(([ik, b, a]) => (
-          <div key={b} className="bg-white/5 border border-white/10 rounded-xl p-2.5 text-left">
-            <p className="text-sm font-black">{ik} {b}</p>
-            <p className="text-[10px] font-bold text-white/60 mt-0.5">{a}</p>
-          </div>
-        ))}
-      </div>
-
-      <p className="text-xs font-bold text-white/60 mt-5 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Formunuz açılıyor…</p>
-
-      {/* BELİRGİN YEDEK DÜĞME */}
-      <a href={hedefUrlState || varsayilan}
-        className={`mt-4 w-full max-w-sm py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-xl transition ${depoevimMi ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30' : 'bg-red-600 hover:bg-red-700 shadow-red-600/30'}`}>
-        Sayfa açılmadıysa buraya dokunun <ExternalLink className="w-4 h-4" />
-      </a>
-      <p className="text-[10px] font-bold text-white/30 mt-6 tracking-widest uppercase">{depoevimMi ? 'Depoevim • Eşya Depolama' : 'Lüks yaşamın taşınma güvencesi'}</p>
     </div>
   );
 };
