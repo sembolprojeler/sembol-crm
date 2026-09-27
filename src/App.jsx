@@ -7099,7 +7099,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // teklif formuna (UTM + kampanya koduyla) yönlendirilir. Giriş gerekmez.
     const qrtParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
     if (qrtParams?.get('qrt')) {
-      return <QrTakipYonlendirme kampanyaId={qrtParams.get('qrt')} siteIpucu={qrtParams.get('s') || 'sembolevdeneve'} firebaseUser={firebaseUser} logoUrl={appBranding?.logoUrl || ''} />;
+      return <QrTakipYonlendirme kampanyaId={qrtParams.get('qrt')} siteIpucu={qrtParams.get('s') || 'sembolevdeneve'} firebaseUser={firebaseUser} logoUrl={appBranding?.logoUrl || ''} hedefParam={qrtParams.get('u') || ''} />;
     }
     const qrSiteParam = qrtParams ? qrtParams.get('qr') : null;
     if (qrSiteParam) {
