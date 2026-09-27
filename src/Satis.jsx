@@ -4143,7 +4143,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   };
   const reklamKaynagiEtiket = (k) => {
     // YENİ (kullanıcı talebi): QR'dan gelen form "Organik" değil, QR adıyla görünür
-    if (k.qrKampanyaId && k.qrKampanyaAd) return { ad: `${k.qrKampanyaAd}${k.qrEslesme === 'zaman' ? ' (olası)' : ''}`, renk: 'bg-amber-100 text-amber-800 border border-amber-300' };
+    // DEĞİŞTİ (kullanıcı talebi): "(olası)" yazılmaz — QR'dan gelen form "34 NAR 385 (QR)" gibi görünür
+    if (k.qrKampanyaId && k.qrKampanyaAd) return { ad: `${k.qrKampanyaAd} (QR)`, renk: 'bg-amber-100 text-amber-800 border border-amber-300' };
     if (reklamKaynagiEsit(k, 'google_ads')) return REKLAM_KAYNAGI_ETIKETLERI.google_ads;
     if (reklamKaynagiEsit(k, 'facebook_ads')) return REKLAM_KAYNAGI_ETIKETLERI.facebook_ads;
     if (reklamKaynagiEsit(k, 'instagram_ads')) return REKLAM_KAYNAGI_ETIKETLERI.instagram_ads;
@@ -7384,11 +7385,6 @@ export const qrKampanyaKodu = (ad) => String(ad || '').toLocaleUpperCase('tr-TR'
   .replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
 const qrKodNormalize = (x) => qrKampanyaKodu(x);
 
-// Takip bağlantısı (QR'ın içine bu yazılır)
-export const qrTakipBaglantisi = (kampanyaId, site) => {
-  if (typeof window === 'undefined') return `?qrt=${kampanyaId}&s=${site}`;
-  return `${window.location.origin}${window.location.pathname}?qrt=${kampanyaId}&s=${site}`;
-};
 // Hedef URL'ye UTM + kampanya kodu ekler (mevcut sorgu parametreleri korunur)
 export const qrHedefUrlUret = (hedefUrl, kampanya) => {
   try {
@@ -7400,6 +7396,15 @@ export const qrHedefUrlUret = (hedefUrl, kampanya) => {
     return u.toString();
   } catch { return hedefUrl; }
 };
+
+// DEĞİŞTİ (kullanıcı talebi): QR artık CRM'in yönlendirme sayfasına DEĞİL,
+// doğrudan sitenin teklif sayfasına gider. Kampanya izi URL'de taşınır
+// (utm_source=qr&utm_campaign=<KOD>&qr=<KOD>); site bu izi CRM'e aktarır ve
+// kayıt kampanyaya bağlanır. Eski "?qrt=" bağlantılı basılı QR'lar için
+// App.jsx'teki yönlendirme rotası geriye uyumluluk adına duruyor.
+export const qrTakipBaglantisi = (kampanya) => qrHedefUrlUret(
+  kampanya?.hedefUrl || QR_TAKIP_SITE_BILGI[kampanya?.site]?.varsayilanUrl || QR_TAKIP_SITE_BILGI.sembolevdeneve.varsayilanUrl, kampanya || {});
+// Hedef URL'ye UTM + kampanya kodu ekler (mevcut sorgu parametreleri korunur)
 const qrKampanyaKoleksiyonu = () => collection(db, 'artifacts', appId, 'public', 'data', 'qrKampanyalari');
 const qrTaramaKoleksiyonu = () => collection(db, 'artifacts', appId, 'public', 'data', 'qrTaramalari');
 const qrKampanyaRef = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'qrKampanyalari', id);
@@ -7594,9 +7599,9 @@ export const QrKampanyaFormu = ({ acik, site, baslangic, onKapat, onKaydet }) =>
             </select>
           </div>
           <div>
-            <label className="text-[10px] font-black uppercase text-neutral-500">Yönlendirme Adresi * <span className="normal-case font-bold text-neutral-400">(QR okutulunca açılacak sayfa)</span></label>
+            <label className="text-[10px] font-black uppercase text-neutral-500">Site Adresi * <span className="normal-case font-bold text-neutral-400">(QR okutulunca doğrudan açılacak sayfa)</span></label>
             <input value={form.hedefUrl} onChange={e => g('hedefUrl', e.target.value)} className="w-full p-2.5 border border-neutral-300 rounded-xl text-sm font-bold font-mono focus:border-black outline-none" />
-            <p className="text-[10px] font-bold text-neutral-400 mt-1">Müşteri şu adrese gider: <span className="break-all font-mono">{form.hedefUrl ? qrHedefUrlUret(form.hedefUrl, { ...form, kod }) : '—'}</span></p>
+            <p className="text-[10px] font-bold text-neutral-400 mt-1">QR'ın içindeki adres: <span className="break-all font-mono">{form.hedefUrl ? qrHedefUrlUret(form.hedefUrl, { ...form, kod }) : '—'}</span></p>
           </div>
           <div>
             <label className="text-[10px] font-black uppercase text-neutral-500">Notlar (asıldığı tarih, konum, kaç adet basıldı…)</label>
@@ -7621,7 +7626,7 @@ export const QrKampanyaFormu = ({ acik, site, baslangic, onKapat, onKaydet }) =>
 // ---------------------------------------------------------------- QR KOD PANELİ (indir / kopyala)
 export const QrTakipKodPaneli = ({ kampanya, boyut = 150 }) => {
   const [kopyalandi, setKopyalandi] = useState(false);
-  const baglanti = qrTakipBaglantisi(kampanya.id, kampanya.site);
+  const baglanti = qrTakipBaglantisi(kampanya); // doğrudan site adresi + kampanya izi
   const dosya = `QR_${qrKampanyaKodu(kampanya.ad) || 'kampanya'}`;
   const indir = (png) => {
     const svg = qrSvgUret(baglanti, 4); if (!svg) return;
@@ -7638,7 +7643,7 @@ export const QrTakipKodPaneli = ({ kampanya, boyut = 150 }) => {
       <div className="flex flex-wrap justify-center gap-1.5">
         <button type="button" onClick={() => indir(true)} className="px-2.5 py-1.5 bg-black hover:bg-neutral-800 text-white text-[10px] font-black rounded-lg flex items-center gap-1"><Download className="w-3 h-3" /> PNG (2048px)</button>
         <button type="button" onClick={() => indir(false)} className="px-2.5 py-1.5 bg-neutral-700 hover:bg-neutral-900 text-white text-[10px] font-black rounded-lg flex items-center gap-1"><Download className="w-3 h-3" /> SVG (baskı)</button>
-        <button type="button" onClick={kopyala} className="px-2.5 py-1.5 bg-white border border-neutral-300 hover:bg-neutral-50 text-neutral-700 text-[10px] font-black rounded-lg flex items-center gap-1">{kopyalandi ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />} {kopyalandi ? 'Kopyalandı' : 'Takip Bağlantısı'}</button>
+        <button type="button" onClick={kopyala} className="px-2.5 py-1.5 bg-white border border-neutral-300 hover:bg-neutral-50 text-neutral-700 text-[10px] font-black rounded-lg flex items-center gap-1">{kopyalandi ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />} {kopyalandi ? 'Kopyalandı' : 'Bağlantıyı Kopyala'}</button>
         <a href={baglanti} target="_blank" rel="noreferrer" className="px-2.5 py-1.5 bg-white border border-neutral-300 hover:bg-neutral-50 text-neutral-700 text-[10px] font-black rounded-lg flex items-center gap-1"><ExternalLink className="w-3 h-3" /> Test Et</a>
       </div>
       <p className="text-[9px] font-bold text-neutral-400 text-center max-w-[220px] break-all">{baglanti}</p>
@@ -7659,36 +7664,41 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
   const siteTaramalari = useMemo(() => taramalar.filter(t => t.site === site), [taramalar, site]);
 
   // Kampanya istatistikleri
+  // DEĞİŞTİ (kullanıcı talebi): yönlendirme sayfası kalktığı için "okutma" artık
+  // sitenin CRM'e aktardığı, kampanya izi taşıyan kayıtlardan sayılır:
+  //   • Her kayıt (ziyaret bildirimi ya da form) = 1 okutma
+  //   • Telefonu olan / gerçek adlı kayıt = 1 form
+  // Eski "?qrt=" QR'larından gelen taramalar (qrTaramalari) da toplama eklenir.
+  const formMu = (k) => telefonGecerliMi(k.iletisim) || (k.musteriAdi && !String(k.musteriAdi).includes('Ziyaretçi'));
   const ist = useMemo(() => {
     const m = {};
-    kampanyalar.forEach(c => { m[c.id] = { bugun: 0, buAy: 0, tumu: c.taramaSayisi || 0, form: 0, formBuAy: 0, isAldik: 0, mobil: 0 }; });
-    siteTaramalari.forEach(t => { const i = m[t.kampanyaId]; if (!i) return; if (t.gun === bugun) i.bugun++; if ((t.gun || '').startsWith(buAy)) i.buAy++; if (t.cihaz === 'mobil') i.mobil++; });
-    siteKayitlari.forEach(k => { const i = m[k.qrKampanyaId]; if (!i) return; i.form++; if ((k.createdAt || '').slice(0, 7) === buAy) i.formBuAy++; if (k.durum === 'İşi Aldık') i.isAldik++; });
+    kampanyalar.forEach(c => { m[c.id] = { bugun: 0, buAy: 0, tumu: 0, form: 0, formBuAy: 0, isAldik: 0, mobil: 0 }; });
+    siteTaramalari.forEach(t => { const i = m[t.kampanyaId]; if (!i) return; i.tumu++; if (t.gun === bugun) i.bugun++; if ((t.gun || '').startsWith(buAy)) i.buAy++; if (t.cihaz === 'mobil') i.mobil++; });
+    siteKayitlari.forEach(k => {
+      const i = m[k.qrKampanyaId]; if (!i) return;
+      const g = gunAnahtari(k.createdAt || '');
+      i.tumu++; if (g === bugun) i.bugun++; if (g.slice(0, 7) === buAy) i.buAy++;
+      if (formMu(k)) { i.form++; if (g.slice(0, 7) === buAy) i.formBuAy++; if (k.durum === 'İşi Aldık') i.isAldik++; }
+    });
     return m;
   }, [kampanyalar, siteTaramalari, siteKayitlari, bugun, buAy]);
   const toplam = useMemo(() => ({
-    tarama: kampanyalar.reduce((t, c) => t + (c.taramaSayisi || 0), 0),
-    taramaBugun: siteTaramalari.filter(t => t.gun === bugun).length,
-    form: siteKayitlari.filter(k => k.qrKampanyaId).length,
-    isAldik: siteKayitlari.filter(k => k.qrKampanyaId && k.durum === 'İşi Aldık').length,
-    bagsiz: siteKayitlari.filter(k => !k.qrKampanyaId && !['google_ads', 'facebook_ads', 'instagram_ads'].includes(k.reklamKaynagi)).length,
-  }), [kampanyalar, siteTaramalari, siteKayitlari, bugun]);
+    tarama: Object.values(ist).reduce((t, i) => t + (i.tumu || 0), 0),
+    taramaBugun: Object.values(ist).reduce((t, i) => t + (i.bugun || 0), 0),
+    form: siteKayitlari.filter(k => k.qrKampanyaId && formMu(k)).length,
+    isAldik: siteKayitlari.filter(k => k.qrKampanyaId && formMu(k) && k.durum === 'İşi Aldık').length,
+  }), [ist, siteKayitlari]);
 
   const gorunen = kampanyalar.filter(c => { const a = ara.trim().toLocaleLowerCase('tr-TR'); return !a || [c.ad, c.tur, c.kod, c.notlar].some(x => String(x || '').toLocaleLowerCase('tr-TR').includes(a)); });
   const secili = kampanyalar.find(c => c.id === seciliId) || null;
-  const seciliFormlar = useMemo(() => siteKayitlari.filter(k => k.qrKampanyaId === seciliId).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))), [siteKayitlari, seciliId]);
+  const seciliFormlar = useMemo(() => siteKayitlari.filter(k => k.qrKampanyaId === seciliId && formMu(k)).sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || ''))), [siteKayitlari, seciliId]);
   // Son 14 gün tarama grafiği (seçili kampanya)
   const gunlukSeri = useMemo(() => {
-    const seri = []; for (let i = 13; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); const g = gunYmdQr(d); seri.push({ gun: g, adet: siteTaramalari.filter(t => t.kampanyaId === seciliId && t.gun === g).length }); }
+    const seri = []; for (let i = 13; i >= 0; i--) { const d = new Date(); d.setDate(d.getDate() - i); const g = gunYmdQr(d);
+      seri.push({ gun: g, adet: siteTaramalari.filter(t => t.kampanyaId === seciliId && t.gun === g).length + siteKayitlari.filter(k => k.qrKampanyaId === seciliId && gunAnahtari(k.createdAt || '') === g).length }); }
     return seri;
-  }, [siteTaramalari, seciliId]);
+  }, [siteTaramalari, siteKayitlari, seciliId]);
   const maxAdet = Math.max(1, ...gunlukSeri.map(x => x.adet));
-  // Bağlanmamış organik formlar (son 14 gün) — elle eşleştirme
-  const bagsizFormlar = useMemo(() => {
-    const esik = Date.now() - 14 * 86400000;
-    return siteKayitlari.filter(k => !k.qrKampanyaId && !k.qrEslesmeYok && !['google_ads', 'facebook_ads', 'instagram_ads'].includes(k.reklamKaynagi) && new Date(k.createdAt || 0).getTime() >= esik)
-      .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-  }, [siteKayitlari]);
 
   // ---- İşlemler
   const kaydet = async (form) => {
@@ -7710,7 +7720,8 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
       else await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari', kayit.id), { qrKampanyaId: c.id, qrKampanyaAd: c.ad, qrEslesme: 'elle', qrEslesmeYok: null, qrEslesmeZamani: new Date().toISOString(), qrEslestiren: currentUser?.fullName || '' });
     } catch (e) { alert('Güncellenemedi: ' + e.message); }
   };
-  const ESLESME = { utm: { ad: 'UTM • kesin', s: 'bg-emerald-100 text-emerald-800' }, zaman: { ad: 'Zaman • olası', s: 'bg-amber-100 text-amber-800' }, elle: { ad: 'Elle bağlandı', s: 'bg-blue-100 text-blue-800' } };
+  // DEĞİŞTİ (kullanıcı talebi): tüm otomatik eşleşmeler tek etiket — "QR ile geldi"
+  const ESLESME = { utm: { ad: 'QR ile geldi', s: 'bg-emerald-100 text-emerald-800' }, zaman: { ad: 'QR ile geldi', s: 'bg-emerald-100 text-emerald-800' }, elle: { ad: 'QR ile geldi', s: 'bg-emerald-100 text-emerald-800' } };
   const trhS = (iso) => { const d = new Date(iso || 0); return isNaN(d) ? '—' : d.toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); };
 
   return (
@@ -7743,8 +7754,8 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
           <p className="font-black mb-1">Nasıl çalışır?</p>
           <ol className="list-decimal ml-5 space-y-0.5">
             <li>"Yeni QR Oluştur" — adını (örn. <b>34 NAR 385 QR</b>), nereye basılacağını ve yönlendirme adresini girin.</li>
-            <li>Oluşan QR'ı PNG/SVG indirip kamyon kasasına, bilborda, dergiye basın. Her QR'ın kendi takip bağlantısı vardır.</li>
-            <li>Müşteri okutunca önce buradan geçer (okutma sayılır), aynı anda sitedeki teklif formuna gider — form kampanya koduyla işaretlenir.</li>
+            <li>Oluşan QR'ı PNG/SVG indirip kamyon kasasına, bilborda, dergiye basın. Her QR, sitenin teklif sayfasını kendi kampanya iziyle açar.</li>
+            <li>Müşteri okutunca doğrudan site açılır; adresteki kampanya kodu (utm_campaign / qr) siteden CRM'e aktarılır — kayıt bu QR'a bağlanır.</li>
             <li>Form tamamlanınca Müşteri Havuzu'na "Organik" değil, <b>QR adıyla</b> düşer; burada kaç okutma → kaç form → kaç iş görürsünüz.</li>
           </ol>
         </div>
@@ -7792,14 +7803,14 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
                 <div className="flex-1 min-w-0">
                   <h3 className="font-black text-lg leading-tight">{secili.ad}</h3>
                   <p className="text-xs font-bold text-white/70 mt-1">{secili.tur} • kod <span className="font-mono">{secili.kod}</span></p>
-                  <p className="text-[11px] font-bold text-white/60 mt-2 break-all">Yönlendirme: {qrHedefUrlUret(secili.hedefUrl || r.varsayilanUrl, secili)}</p>
+                  <p className="text-[11px] font-bold text-white/60 mt-2 break-all">QR adresi: {qrTakipBaglantisi(secili)}</p>
                   {secili.notlar && <p className="text-[11px] font-bold text-white/60 mt-1 italic">{secili.notlar}</p>}
-                  <p className="text-[10px] font-bold text-white/50 mt-2">Oluşturma: {trhS(secili.olusturmaTarihi)} • Son okutma: {secili.sonTarama ? trhS(secili.sonTarama) : '—'} • Mobil okutma: {ist[secili.id]?.mobil || 0}</p>
+                  <p className="text-[10px] font-bold text-white/50 mt-2">Oluşturma: {trhS(secili.olusturmaTarihi)} • Son okutma: {secili.sonTarama ? trhS(secili.sonTarama) : '—'}</p>
                 </div>
               </div>
               {/* 14 GÜNLÜK GRAFİK */}
               <div className="p-4 border-b border-neutral-200">
-                <p className="text-[10px] font-black uppercase text-neutral-500 mb-2">Son 14 gün okutma</p>
+                <p className="text-[10px] font-black uppercase text-neutral-500 mb-2">Son 14 gün — QR'dan gelen ziyaret + form</p>
                 <div className="flex items-end gap-1 h-20">
                   {gunlukSeri.map(x => (
                     <div key={x.gun} className="flex-1 flex flex-col items-center gap-1" title={`${x.gun}: ${x.adet}`}>
@@ -7833,27 +7844,8 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
             </div>
           )}
 
-          {/* BAĞLANMAMIŞ ORGANİK FORMLAR — elle eşleştirme */}
-          <div className="bg-white rounded-2xl border border-amber-200 p-4">
-            <h4 className="font-black text-black text-sm flex items-center gap-2"><Sparkles className="w-4 h-4 text-amber-600" /> Bağlanmamış organik formlar (son 14 gün) <span className="text-xs font-bold text-neutral-400">({bagsizFormlar.length})</span></h4>
-            <p className="text-[10px] font-bold text-neutral-500 mt-0.5 mb-2">Site formu kampanya kodunu aktarmadıysa ya da aynı dakikada birden çok QR okutulduysa form buraya düşer. Hangi QR'dan geldiğini biliyorsanız seçin; kayıt havuzda o QR adıyla etiketlenir.</p>
-            {bagsizFormlar.length === 0 ? <p className="text-xs font-bold text-neutral-400">Bekleyen form yok.</p> : (
-              <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-                {bagsizFormlar.map(k => (
-                  <div key={k.id} className="flex items-center gap-2 p-2 rounded-xl border border-neutral-200 text-xs">
-                    <span className="text-neutral-500 shrink-0">{trhS(k.createdAt)}</span>
-                    <span className="font-black text-black truncate">{k.musteriAdi || k.iletisim || '—'}</span>
-                    <span className="text-neutral-500 shrink-0 hidden sm:inline">{k.iletisim || ''}</span>
-                    <select defaultValue="" onChange={ev => ev.target.value && formuBagla(k, ev.target.value)} className="ml-auto text-[10px] font-black border border-neutral-300 rounded-lg px-1 py-1 bg-white shrink-0">
-                      <option value="">QR seç…</option>
-                      {kampanyalar.map(c => <option key={c.id} value={c.id}>{c.ad}</option>)}
-                      <option value="__yok__">QR'dan gelmedi (listeden kaldır)</option>
-                    </select>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* KALDIRILDI (kullanıcı talebi): "Bağlanmamış organik formlar" — QR ile form doldurulunca
+              eşleşme otomatik yapıldığı için elle bağlama bölümü gerekmiyor. */}
         </div>
       </div>
 
