@@ -6428,6 +6428,49 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
     ilgili: '', aciklama: '', belgeler: [], tamamlandi: false,
     // YENİ: Görev türünde, görevin atandığı personel (bildirim bu kişiye gider)
     atananPersonelId: '', atananPersonelAdi: '',
+    // YENİ (kullanıcı talebi): TEKRARLAMA — varsayılan "yok"
+    //   tekrar: 'yok' | 'gunluk' | 'haftalik' | 'aylik' | 'yillik'
+    //   tekrarSayisi: '' = süresiz (her zaman), sayı = toplam kaç kez
+    tekrar: 'yok', tekrarSayisi: '',
+  };
+  // ------------------------------------------------------------------------
+  // YENİ (kullanıcı talebi): TEKRARLAYAN HATIRLATMA
+  // Tekrarlı bir hatırlatma TAMAMLANDIĞINDA bir sonraki tarih için otomatik
+  // olarak yeni (açık) hatırlatma oluşturulur. Sayı verildiyse o kadar kez
+  // tekrarlanır ("3/12" gibi sıra tutulur); boşsa süresiz devam eder.
+  // Aynı kayıt tamamlandı ↔ geri al yapılsa bile ikinci kopya açılmaz
+  // (sonrakiOlusturuldu bayrağı).
+  // ------------------------------------------------------------------------
+  const TEKRAR_SECENEKLERI_H = [
+    { id: 'yok', ad: 'Tekrar yok' }, { id: 'gunluk', ad: 'Her gün' }, { id: 'haftalik', ad: 'Her hafta' },
+    { id: 'aylik', ad: 'Her ay' }, { id: 'yillik', ad: 'Her yıl' },
+  ];
+  const sonrakiTarih = (tarih, tekrar) => {
+    const [y, m, g] = String(tarih || '').split('-').map(Number);
+    if (!y || !m || !g) return null;
+    let d;
+    if (tekrar === 'gunluk') d = new Date(y, m - 1, g + 1);
+    else if (tekrar === 'haftalik') d = new Date(y, m - 1, g + 7);
+    else if (tekrar === 'aylik') { const sonGun = new Date(y, m + 1, 0).getDate(); d = new Date(y, m, Math.min(g, sonGun)); } // 31 Ocak → 28/29 Şubat
+    else if (tekrar === 'yillik') { const sonGun = new Date(y + 1, m, 0).getDate(); d = new Date(y + 1, m - 1, Math.min(g, sonGun)); }
+    else return null;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const sonrakiniOlustur = async (kayit, kayitId) => {
+    const tekrar = kayit?.tekrar || 'yok';
+    if (tekrar === 'yok' || kayit?.sonrakiOlusturuldu) return;
+    const toplam = parseInt(kayit.tekrarSayisi) || 0;          // 0 = süresiz
+    const sira = parseInt(kayit.tekrarSira) || 1;               // bu kayıt kaçıncı
+    if (toplam > 0 && sira >= toplam) return;                   // son tekrar tamamlandı
+    const yeniTarih = sonrakiTarih(kayit.tarih, tekrar);
+    if (!yeniTarih) return;
+    const { id, tamamlandi, tamamlayan, tamamlanmaTarihi, sonrakiOlusturuldu, guncelleyen, guncellemeTarihi, createdAt, ...kopya } = kayit;
+    await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar'), {
+      ...kopya, tarih: yeniTarih, tamamlandi: false, tekrarSira: sira + 1,
+      tekrarAnaId: kayit.tekrarAnaId || kayitId, ekleyen: 'Otomatik (tekrar)', createdAt: new Date().toISOString(),
+    });
+    await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'hatirlatmalar', kayitId), { sonrakiOlusturuldu: true });
+    addSystemLog?.('Hatırlatma Tekrarlandı', `${kayit.konu}: ${String(kayit.aciklama || '').slice(0, 50)} → ${yeniTarih}${toplam ? ` (${sira + 1}/${toplam})` : ''}`);
   };
   const [form, setForm] = useState(bosForm);
 
@@ -6509,6 +6552,7 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
           ...form, guncelleyen: currentUser?.fullName || 'Sistem', guncellemeTarihi: new Date().toISOString(),
         });
         addSystemLog?.('Hatırlatma Güncellendi', `${form.tarih} — ${form.konu}: ${form.aciklama.slice(0, 60)}`);
+        if (form.tamamlandi) { try { await sonrakiniOlustur(form, duzenlenenId); } catch (e) { console.error(e); } }
       } else {
         // DEĞİŞTİ: Dönen referans saklanıyor — bildirime hatirlatmaId yazmak
         // için kayıt kimliği gerekiyor (Bildirim Merkezi'nden "Tamamlandı"
@@ -6517,6 +6561,7 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
           ...form, ekleyen: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString(),
         });
         yeniHatirlatmaId = yeniRef.id;
+        if (form.tamamlandi) { try { await sonrakiniOlustur(form, yeniRef.id); } catch (e) { console.error(e); } }
         addSystemLog?.('Hatırlatma Eklendi', `${form.tarih} — ${form.tur === 'gorev' ? 'Görev' : 'Not'} / ${form.konu}: ${form.aciklama.slice(0, 60)}`);
       }
 
@@ -6562,6 +6607,8 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
       tamamlayan: !kayit.tamamlandi ? (currentUser?.fullName || 'Sistem') : null,
       tamamlanmaTarihi: !kayit.tamamlandi ? new Date().toISOString() : null,
     });
+    // YENİ: tekrarlı hatırlatma tamamlandıysa bir sonrakini aç
+    if (!kayit.tamamlandi) { try { await sonrakiniOlustur(kayit, kayit.id); } catch (e) { console.error('Tekrar oluşturulamadı:', e); } }
     // ========================================================================
     // YENİ: BAĞLI BİLDİRİMLERİ SENKRONLA
     // ========================================================================
@@ -6764,6 +6811,12 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
                         {/* Konu rozeti */}
                         <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border flex items-center gap-1 ${konu.renk}`}><KonuIkon className="w-3 h-3" /> {k.konu}</span>
                         {k.saat && <span className="text-[10px] font-black text-neutral-500 flex items-center gap-0.5"><Clock className="w-3 h-3" /> {k.saat}</span>}
+                        {/* YENİ: tekrar rozeti */}
+                        {k.tekrar && k.tekrar !== 'yok' && (
+                          <span className="text-[9px] font-black bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded-full">
+                            🔁 {TEKRAR_SECENEKLERI_H.find(t => t.id === k.tekrar)?.ad}{parseInt(k.tekrarSayisi) ? ` • ${parseInt(k.tekrarSira) || 1}/${parseInt(k.tekrarSayisi)}` : ''}
+                          </span>
+                        )}
                         {gecikmis && <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-red-600 text-white uppercase">Gecikti</span>}
                       </div>
                       <p className={`text-sm font-bold ${k.tamamlandi ? 'text-neutral-500 line-through' : 'text-black'}`}>{k.aciklama}</p>
@@ -7003,6 +7056,34 @@ export const HatirlatmalarView = ({ jobs = [], personnelList = [], vehicles = []
                         <button type="button" onClick={() => setForm(f => ({ ...f, belgeler: f.belgeler.filter((_, x) => x !== i) }))} className="text-neutral-400 hover:text-red-600"><X className="w-3 h-3" /></button>
                       </span>
                     ))}
+                  </div>
+                )}
+              </div>
+              {/* ==========================================================
+                  YENİ (kullanıcı talebi): TEKRARLA — varsayılan "Tekrar yok"
+                  ========================================================== */}
+              <div>
+                <label className="text-[10px] font-black uppercase text-neutral-500 tracking-wider block mb-1.5">Tekrarla</label>
+                <div className="grid grid-cols-5 gap-1 bg-neutral-100 p-1 rounded-xl">
+                  {TEKRAR_SECENEKLERI_H.map(t => (
+                    <button key={t.id} type="button" onClick={() => setForm(f => ({ ...f, tekrar: t.id, tekrarSayisi: t.id === 'yok' ? '' : f.tekrarSayisi }))}
+                      className={`py-2 rounded-lg text-[11px] font-black transition ${(form.tekrar || 'yok') === t.id ? 'bg-red-600 text-white shadow' : 'text-neutral-600 hover:bg-white'}`}>
+                      {t.ad}
+                    </button>
+                  ))}
+                </div>
+                {(form.tekrar || 'yok') !== 'yok' && (
+                  <div className="mt-2 flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-bold text-neutral-600">Kaç kez?</span>
+                    <input type="number" min="2" value={form.tekrarSayisi} onChange={e => setForm(f => ({ ...f, tekrarSayisi: e.target.value }))}
+                      placeholder="Süresiz" className="w-24 p-2 border border-neutral-300 rounded-lg text-sm font-bold text-center" />
+                    <button type="button" onClick={() => setForm(f => ({ ...f, tekrarSayisi: '' }))}
+                      className={`px-3 py-2 rounded-lg text-[11px] font-black ${!form.tekrarSayisi ? 'bg-black text-white' : 'bg-neutral-100 text-neutral-600'}`}>Her zaman</button>
+                    <p className="w-full text-[10px] font-bold text-neutral-400">
+                      Tamamlandı işaretlenince {TEKRAR_SECENEKLERI_H.find(t => t.id === form.tekrar)?.ad.toLocaleLowerCase('tr-TR')} için yenisi otomatik açılır
+                      {form.tekrarSayisi ? ` — toplam ${form.tekrarSayisi} kez.` : ' — süresiz.'}
+                      {sonrakiTarih(form.tarih, form.tekrar) ? ` Sonraki: ${sonrakiTarih(form.tarih, form.tekrar).split('-').reverse().join('.')}` : ''}
+                    </p>
                   </div>
                 )}
               </div>
