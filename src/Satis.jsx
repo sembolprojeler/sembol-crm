@@ -7586,6 +7586,21 @@ export const useQrOtomatikEslestirme = (kayitlar = [], kampanyalar = [], taramal
     const t = setTimeout(async () => {
       const kodHarita = new Map(kampanyalar.map(c => [c.kod || qrKampanyaKodu(c.ad), c]));
       for (const k of kayitlar) {
+        // YENİ (kullanıcı bildirimi, 2026-09): ESKİ KOD TEMİZLİĞİ — yenilenmemiş bir
+        // CRM sekmesi / eski sürüm hâlâ "45 dk zaman tahmini" ile Direkt/Google
+        // formlarını QR'a bağlıyor. Formda kesin QR izi (qrKodu) yoksa bu tahmini
+        // bağ kaldırılır ve qrEslesmeYok işaretlenir — eski kod da bu işarete
+        // uyduğu için kaydı tekrar bağlamaz.
+        if (!QR_ZAMAN_ESLESMESI_AKTIF && k.id && k.kanal === 'web' && k.qrKampanyaId && k.qrEslesme === 'zaman' && !k.qrKodu && !yazilan.current.has(k.id)) {
+          yazilan.current.add(k.id);
+          try {
+            await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari', k.id), {
+              qrKampanyaId: null, qrKampanyaAd: null, qrEslesme: null, qrEslesmeYok: true,
+              ...(k.reklamKaynagi === 'qr' ? { reklamKaynagi: k.oncekiReklamKaynagi || 'direkt_giris' } : {}),
+            });
+          } catch (e) { yazilan.current.delete(k.id); console.warn('Tahmini QR bağı kaldırılamadı:', e); }
+          continue;
+        }
         if (k.kanal !== 'web' || k.qrKampanyaId || k.qrEslesmeYok || !k.id) continue;
         // DEĞİŞTİ: yalnızca reklam değil, Google/Facebook/Instagram ORGANİK girişler de
         // bu ziyaretin KESİN kaynağıdır — QR'a bağlanmaz. QR'dan gelen ziyaretçi
