@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp, Banknote, UserMinus, Settings, FileText, Copy, ClipboardCheck, Upload, Save } from 'lucide-react';
+import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp, Banknote, UserMinus, Settings, FileText, Copy, ClipboardCheck, Upload, Save, Check } from 'lucide-react'; // DÜZELTME: Check ikonu eklendi (Ekstre Yükle)
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc, query, where, deleteField } from 'firebase/firestore';
 // DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
 // Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
@@ -15347,7 +15347,9 @@ export const KartEkstreYukleModal = ({ defter, kategoriler = [], kurallar = {}, 
   const kaydet = async () => {
     if (!kalemler.length) return;
     if (!tarih) { alert('Deftere yazılacak tarihi seçin.'); return; }
-    const ekstreId = `${defter.id}_${(meta?.banka || 'kart').toLowerCase()}_${meta?.kesimTarihi || tarih}`.replace(/[^A-Za-z0-9_-]/g, '_');
+    // DEĞİŞTİ (kullanıcı talebi): birden fazla ekstre — kimlik defter + banka + kart son 4 hane + kesim tarihi.
+    // Farklı ay, farklı kart ya da farklı banka → ayrı gider kaydı; AYNI ekstre yeniden yüklenirse üzerine yazılır.
+    const ekstreId = `${defter.id}_${(meta?.banka || 'kart').toLowerCase()}_${(meta?.kartNo || '').slice(-4) || 'x'}_${meta?.kesimTarihi || tarih}`.replace(/[^A-Za-z0-9_-]/g, '_');
     const harcamaToplami = meta?.harcamaToplami && Math.abs(meta.harcamaToplami - toplam) < 1 ? meta.harcamaToplami : toplam;
     if (meta?.harcamaToplami && Math.abs(meta.harcamaToplami - toplam) >= 1 && !window.confirm(`Okunan satırların toplamı (₺${paraFmt(toplam)}) ekstredeki HARCAMA TOPLAMI'ndan (₺${paraFmt(meta.harcamaToplami)}) farklı. Yine de kaydedilsin mi?`)) return;
     setKaydediliyor(true);
