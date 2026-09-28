@@ -2950,6 +2950,36 @@ const KANALLAR = [
 // gösteriyor (aşağıda).
 const SITE_ETIKETLERI = { depoevim: 'DepoEvim', sembolevdeneve: 'Sembol Nakliyat Sitesi' };
 
+// YENİ (kullanıcı talebi): Özet kutularındaki platform logoları — lucide-react
+// 1.x marka ikonlarını kaldırdığı için sade satır içi SVG.
+const GoogleLogo = ({ className = 'w-6 h-6' }) => (
+  <svg viewBox="0 0 48 48" className={className} aria-hidden="true">
+    <path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.9z" />
+    <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
+    <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z" />
+    <path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z" />
+  </svg>
+);
+const FacebookLogo = ({ className = 'w-6 h-6' }) => (
+  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+    <circle cx="12" cy="12" r="12" fill="#1877F2" />
+    <path fill="#fff" d="M15.1 12.5l.4-2.9h-2.8V7.8c0-.8.4-1.6 1.6-1.6h1.3V3.8s-1.1-.2-2.2-.2c-2.3 0-3.8 1.4-3.8 3.9v2.2H7.1v2.9h2.5V20h3.1v-7.5h2.4z" />
+  </svg>
+);
+const InstagramLogo = ({ className = 'w-6 h-6' }) => (
+  <svg viewBox="0 0 24 24" className={className} aria-hidden="true">
+    <defs>
+      <linearGradient id="igGrad" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stopColor="#FEDA75" /><stop offset=".35" stopColor="#FA7E1E" /><stop offset=".6" stopColor="#D62976" /><stop offset="1" stopColor="#4F5BD5" />
+      </linearGradient>
+    </defs>
+    <rect width="24" height="24" rx="6" fill="url(#igGrad)" />
+    <rect x="5.5" y="5.5" width="13" height="13" rx="4" fill="none" stroke="#fff" strokeWidth="1.8" />
+    <circle cx="12" cy="12" r="3.2" fill="none" stroke="#fff" strokeWidth="1.8" />
+    <circle cx="16.2" cy="7.8" r="1" fill="#fff" />
+  </svg>
+);
+
 // Takip durumları — sıralama satış hunisine göredir
 const DURUMLAR = [
   { id: 'Yeni',              renk: 'bg-neutral-100 text-neutral-700 border-neutral-300' },
@@ -4219,23 +4249,33 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     buAy: aktifKanalBuAy.filter(kosul).length,
     tumu: aktifKanalTumu.filter(kosul).length,
   });
-  const OZET_KUTULARI = [
-    { etiket: '🟢 Google Ads', renk: 'text-green-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'google_ads')) },
-    { etiket: '🔵 Facebook Ads', renk: 'text-sky-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'facebook_ads')) },
-    { etiket: '🟣 Instagram Ads', renk: 'text-pink-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'instagram_ads')) },
-    // DEĞİŞTİ: QR'dan gelenler ayrı kutuda; aşağıdaki diğer kutuların hiçbiri
-    // QR eşleşmesi olan kayıtları içermez.
-    { etiket: '🟠 QR Takip', renk: 'text-amber-400', sayilar: kaynakSayilari(k => !!k.qrKampanyaId || reklamKaynagiEsit(k, 'qr')) },
-    { etiket: '🟡 Google Anasayfa', renk: 'text-yellow-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'google_anasayfa')) },
-    { etiket: '🟧 Google Altsayfa', renk: 'text-orange-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'google_altsayfa')) },
-    // YENİ (2026-09): eskiden Facebook/Instagram organik trafik ayrı
-    // gösterilmiyordu — hepsi "Direkt Giriş" ya da "Eski Kayıt" kovasına
-    // düşüyordu. Artık site-tiklama-takip scriptleri bunu ayrıca tespit ediyor.
-    { etiket: '🔷 Facebook Organik', renk: 'text-indigo-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'facebook_organik')) },
-    { etiket: '🌸 Instagram Organik', renk: 'text-rose-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'instagram_organik')) },
-    { etiket: '⚪ Direkt Giriş', renk: 'text-neutral-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'direkt_giris')) },
-    { etiket: '🟪 Diğer Site', renk: 'text-purple-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'diger_site')) },
-    { etiket: '⚫ Eski Kayıt', renk: 'text-neutral-500', sayilar: kaynakSayilari(k => reklamKaynagiEskiKayit(k)) },
+  // DEĞİŞTİ (kullanıcı talebi): Özet kutuları PLATFORMA GÖRE GRUPLANDI — her
+  // grup tek bir kart: solda platform logosu, sağda alt kategori hücreleri
+  // (ör. Google → Ads | Anasayfa | Altsayfa). Sayım koşulları eskisiyle aynı;
+  // QR eşleşmesi olan kayıtlar yalnızca QR grubunda sayılır.
+  const qrDegil = (deger) => (k) => !k.qrKampanyaId && reklamKaynagiEsit(k, deger);
+  const OZET_GRUPLARI = [
+    { ad: 'Google', logo: <GoogleLogo />, kenar: 'border-yellow-400/40', hucreler: [
+      { ad: 'Ads', renk: 'text-green-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'google_ads')) },
+      { ad: 'Ana Sayfa', renk: 'text-yellow-400', sayilar: kaynakSayilari(qrDegil('google_anasayfa')) },
+      { ad: 'Alt Sayfa', renk: 'text-orange-400', sayilar: kaynakSayilari(qrDegil('google_altsayfa')) },
+    ] },
+    { ad: 'Facebook', logo: <FacebookLogo />, kenar: 'border-sky-400/40', hucreler: [
+      { ad: 'Ads', renk: 'text-sky-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'facebook_ads')) },
+      { ad: 'Organik', renk: 'text-indigo-300', sayilar: kaynakSayilari(qrDegil('facebook_organik')) },
+    ] },
+    { ad: 'Instagram', logo: <InstagramLogo />, kenar: 'border-pink-400/40', hucreler: [
+      { ad: 'Ads', renk: 'text-pink-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'instagram_ads')) },
+      { ad: 'Organik', renk: 'text-rose-300', sayilar: kaynakSayilari(qrDegil('instagram_organik')) },
+    ] },
+    { ad: 'QR', logo: <QrCode className="w-6 h-6 text-amber-400" />, kenar: 'border-amber-400/40', hucreler: [
+      { ad: 'QR Takip', renk: 'text-amber-400', sayilar: kaynakSayilari(k => !!k.qrKampanyaId || reklamKaynagiEsit(k, 'qr')) },
+    ] },
+    { ad: 'Diğer', logo: <Globe className="w-6 h-6 text-neutral-300" />, kenar: 'border-white/20', hucreler: [
+      { ad: 'Direkt Giriş', renk: 'text-neutral-300', sayilar: kaynakSayilari(qrDegil('direkt_giris')) },
+      { ad: 'Diğer Site', renk: 'text-purple-400', sayilar: kaynakSayilari(qrDegil('diger_site')) },
+      { ad: 'Eski Kayıt', renk: 'text-neutral-500', sayilar: kaynakSayilari(k => reklamKaynagiEskiKayit(k)) },
+    ] },
   ];
 
   // ================================================================ RENDER ===
@@ -4283,14 +4323,24 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
 
         {/* SEÇİLİ KANALA (VE SEÇİLİ ŞİRKETE) GÖRE ÖZET KUTULARI — Bugün / Bu Ay / Tüm Zamanlar */}
         <div className="flex gap-2 flex-wrap">
-          {OZET_KUTULARI.map(kutu => (
-            <div key={kutu.etiket} className="bg-white/10 border border-white/20 px-3 py-1.5 rounded-xl backdrop-blur-sm">
-              <p className={`text-[9px] font-black uppercase ${kutu.renk}`}>{kutu.etiket} · {kanal.ad}</p>
-              <div className="flex gap-3 mt-0.5">
-                {[['Bugün', kutu.sayilar.bugun], ['Bu Ay', kutu.sayilar.buAy], ['Tüm Zamanlar', kutu.sayilar.tumu]].map(([ad, sayi]) => (
-                  <div key={ad}>
-                    <p className="text-base font-black text-white leading-tight">{sayi}</p>
-                    <p className="text-[8px] font-bold text-neutral-400 uppercase">{ad}</p>
+          {OZET_GRUPLARI.map(grup => (
+            <div key={grup.ad} className={`bg-white/10 border ${grup.kenar} rounded-xl backdrop-blur-sm flex items-stretch max-w-full`}>
+              <div className="flex flex-col items-center justify-center gap-1 px-3 py-1.5 border-r border-white/15 shrink-0" title={`${grup.ad} · ${kanal.ad}`}>
+                {grup.logo}
+                <p className="text-[8px] font-black uppercase text-neutral-300">{grup.ad}</p>
+              </div>
+              <div className="flex flex-wrap divide-x divide-white/10">
+                {grup.hucreler.map(h => (
+                  <div key={h.ad} className="px-3 py-1.5">
+                    <p className={`text-[9px] font-black uppercase ${h.renk}`}>{h.ad}</p>
+                    <div className="flex gap-3 mt-0.5">
+                      {[['Bugün', h.sayilar.bugun], ['Bu Ay', h.sayilar.buAy], ['Tümü', h.sayilar.tumu]].map(([ad, sayi]) => (
+                        <div key={ad}>
+                          <p className="text-base font-black text-white leading-tight">{sayi}</p>
+                          <p className="text-[8px] font-bold text-neutral-400 uppercase">{ad}</p>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
