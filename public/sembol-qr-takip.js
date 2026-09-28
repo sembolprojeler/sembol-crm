@@ -1,45 +1,57 @@
 /* ============================================================================
-   SEMBOL CRM — QR TAKİP SİTE BETİĞİ  (sembol-qr-takip.js)  — SÜRÜM 2
+   SEMBOL CRM — QR TAKİP SİTE BETİĞİ  (sembol-qr-takip.js)  — SÜRÜM 3
    ----------------------------------------------------------------------------
    NEREYE: Her iki WordPress sitesinin (sembolevdeneve.com ve depoevim.com)
-   <head> bölümüne, sihirbaz ve tıklama betiklerinden ÖNCE, EN ÜSTE:
-     <script src="https://sembol-crm.vercel.app/sembol-qr-takip.js"></script>
-   (CRM'den yüklenirse sonraki düzeltmeler siteye dokunmadan yayına çıkar.
-   İstenirse eskisi gibi /wp-content/uploads/ altına kopyalanabilir.)
+   <head> bölümüne, sihirbaz ve tıklama betiklerinden ÖNCE, EN ÜSTE
+   (GeneratePress Elements → Hook → wp_head, öncelik 1, Entire Site):
+     <script src="https://sembol-crm.vercel.app/sembol-qr-takip.js" data-no-optimize="1"></script>
+   DİKKAT: Code Snippets'e PHP snippet olarak YAPIŞTIRILMAZ (PHP bu JS'i
+   çalıştıramaz, snippet etkinleşmez).
 
    NE YAPAR (sihirbaz kodlarına DOKUNMADAN):
    1) Sayfa "?qr=<KOD>" veya "utm_source=qr&utm_campaign=<KOD>" ile açıldıysa
-      izi 30 gün boyunca hatırlar (localStorage).
+      izi hatırlar (localStorage, en fazla 30 gün).
    2) İlk görüntülemede CRM'e BİR KEZ "okutma" bildirir (api/qr-tarama.js).
    3) Siteden CRM API'sine giden HER isteğin (fetch, XMLHttpRequest/jQuery,
       sendBeacon) JSON gövdesine "qrIzi" nesnesini ekler.
 
-   SÜRÜM 2 DÜZELTMELERİ (QR'dan gelen form "Organik" görünüyordu):
-   • Okutma bildirimi sendBeacon + "application/json" Blob ile gidiyordu.
-     Chrome bu türü sendBeacon'da REDDEDİYOR → okutma hiç kaydedilmiyordu
-     (sayaç artmıyor, sunucu formu cihaz izinden de bağlayamıyordu). Artık
-     "text/plain" gövdeli keepalive fetch kullanılıyor (ön-istek gerektirmez).
-   • Sihirbaz XMLHttpRequest / jQuery.ajax ile gönderiyorsa iz eklenmiyordu —
-     artık XHR da yakalanıyor.
-   • fetch'e Request nesnesi / URL nesnesi verilirse ya da CRM farklı bir
-     alan adından (özel domain) çağrılırsa iz eklenmiyordu — düzeltildi.
+   SÜRÜM 3 DÜZELTMESİ (kullanıcı bildirimi: "direkt girişleri ve Google
+   girişlerini bile QR sayıyor"):
+   • Eskiden QR izi 30 gün boyunca KOŞULSUZ saklanıyordu. QR'ı bir kez okutan
+     telefon, sonraki günlerde siteye Google'dan ya da adres çubuğuna yazarak
+     gelse bile her formu/tıklamayı QR'a bağlıyordu.
+   • Artık siteye YENİ bir girişte (önceki sayfa sitenin kendisi değilse)
+     adreste QR kodu YOKSA eski QR izi SİLİNİR — ziyaretçi bu sefer başka
+     yoldan (Google, Facebook, direkt, başka site, reklam) gelmiş demektir.
+     Site İÇİNDE sayfadan sayfaya geçerken iz korunur (QR → ana sayfa →
+     teklif formu akışı bozulmaz). Bu, sihirbazların kendi kaynak mantığıyla
+     (son giriş kaynağı geçerlidir) birebir aynı kural.
    ============================================================================ */
 (function () {
   'use strict';
   if (window.__sembolQrTakip) return; // iki kez eklendiyse ikinciyi yok say
-  window.__sembolQrTakip = 2;
+  window.__sembolQrTakip = 3;
 
   var CRM = 'https://sembol-crm.vercel.app';
   var ANAHTAR = 'sembol_qr_izi';
   var GUN_MS = 24 * 60 * 60 * 1000;
   var SAKLAMA_GUN = 30;
   var site = /depoevim\.com$/i.test(location.hostname) ? 'depoevim' : 'sembolevdeneve';
+  var KENDI_ALAN = site === 'depoevim' ? 'depoevim.com' : 'sembolevdeneve.com';
 
   function oku() { try { var v = JSON.parse(localStorage.getItem(ANAHTAR) || 'null'); if (v && v.zamanMs && Date.now() - v.zamanMs < SAKLAMA_GUN * GUN_MS) return v; } catch (e) {} return null; }
   function yaz(v) { try { localStorage.setItem(ANAHTAR, JSON.stringify(v)); } catch (e) {} }
+  function sil() { try { localStorage.removeItem(ANAHTAR); } catch (e) {} }
+
+  // Önceki sayfa bu sitenin kendisi mi? (site içi gezinme)
+  function siteIciGezinmeMi() {
+    var ref = '';
+    try { ref = document.referrer || ''; } catch (e) { ref = ''; }
+    if (!ref) return false; // adres çubuğu / yer imi / uygulama / kamera → yeni giriş
+    try { var h = new URL(ref).hostname.toLowerCase(); return h === KENDI_ALAN || h.slice(-(KENDI_ALAN.length + 1)) === '.' + KENDI_ALAN; } catch (e) { return false; }
+  }
 
   // CRM API'si mi? Varsayılan Vercel adresi + "/api/submit-lead", "/api/yeni-musteri"
-  // gibi uçlar (CRM özel bir alan adına taşınsa da yakalansın diye).
   function urlMetni(url) { try { if (url && typeof url === 'object') return String(url.url || url.href || url); return String(url || ''); } catch (e) { return ''; } }
   function crmMi(url) {
     var u = urlMetni(url);
@@ -54,7 +66,7 @@
     try { if (navigator.sendBeacon) navigator.sendBeacon(CRM + '/api/qr-tarama', govde); } catch (e) {}
   }
 
-  // 1) Adresteki izi yakala
+  // 1) Adresteki izi yakala — ya da yeni, QR'sız bir girişte eski izi sil
   try {
     var p = new URLSearchParams(location.search);
     var qr = p.get('qr') || ((p.get('utm_source') || '').toLowerCase() === 'qr' ? p.get('utm_campaign') : '');
@@ -65,6 +77,9 @@
       // 2) Okutmayı bir kez bildir (aynı kod için 10 dk içinde tekrar bildirme)
       var yeniOkutma = !onceki || onceki.qr !== iz.qr || (Date.now() - onceki.zamanMs) > 10 * 60 * 1000;
       if (yeniOkutma) okutmaBildir(JSON.stringify({ kod: iz.qr, site: site, sayfaUrl: location.href }));
+    } else if (!siteIciGezinmeMi()) {
+      // YENİ (Sürüm 3): QR'sız yeni giriş → bu ziyaret QR'dan gelmedi.
+      sil();
     }
   } catch (e) {}
 

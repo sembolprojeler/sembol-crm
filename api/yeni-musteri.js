@@ -186,8 +186,13 @@ export default async function handler(req, res) {
     // YENİ (QR TAKİP): QR izi varsa ziyaretçi "QR Ziyaretçisi" olarak açılır —
     // ödemeli bir reklam tıklaması DEĞİLSE QR izi kazanır (direkt/organik/google
     // anasayfa-altsayfa/diğer site gibi "zayıf" kategorilerin üzerine yazar).
+    // DÜZELTME (2026-09, submit-lead.js ile AYNI kural): QR izi yalnızca bu
+    // ziyaretin kaynağı QR ile uyumluysa ('direkt_giris' / 'diger_site' ya da
+    // bilinmiyor) kazanır — Google/Facebook/Instagram'dan (reklam ya da organik)
+    // gelen ziyaretçi, telefonunda eski bir QR izi kalmış olsa bile QR sayılmaz.
     const qrIzi = qrIziniCoz(crmData, req);
-    const qrKazaniyorMu = !!qrIzi && !kaynakOdemeliReklamMi;
+    const qrIleUyumluMu = !kaynakGecerliMi || ['direkt_giris', 'diger_site'].includes(crmData.kaynak);
+    const qrKazaniyorMu = !!qrIzi && String(qrIzi.utmSource).toLowerCase() === 'qr' && qrIleUyumluMu;
     const musteriAdi = qrKazaniyorMu ? `QR Ziyaretçisi (${qrIzi.qrKodu})` : (kaynakBilgi ? kaynakBilgi.ad : 'Direkt Giriş Ziyaretçisi');
 
     const db = getDb();
@@ -216,7 +221,7 @@ export default async function handler(req, res) {
       inisSayfasi: String(crmData.inisSayfasi || '').trim(),
       digerSiteAdi: String(crmData.digerSiteAdi || '').trim(),
       // YENİ (QR TAKİP): iz alanları — Satis.jsx qrKodu ile kampanyaya bağlar
-      ...(qrIzi ? { qrKodu: qrIzi.qrKodu, utmSource: qrIzi.utmSource, utmMedium: qrIzi.utmMedium, utmCampaign: qrIzi.utmCampaign, sayfaUrl: qrIzi.sayfaUrl, qrIziZamani: qrIzi.qrIziZamani } : {}),
+      ...(qrKazaniyorMu ? { oncekiReklamKaynagi: kaynakGecerliMi ? crmData.kaynak : 'direkt_giris', qrKodu: qrIzi.qrKodu, utmSource: qrIzi.utmSource, utmMedium: qrIzi.utmMedium, utmCampaign: qrIzi.utmCampaign, sayfaUrl: qrIzi.sayfaUrl, qrIziZamani: qrIzi.qrIziZamani } : {}),
       // Bu alan sayesinde Satis.jsx (istenirse) gerçek isim/telefon verilmiş
       // kayıtlarla salt tıklama bildirimlerini ayırt edebilir; iletisim alanına
       // güvenmek zorunda kalmaz.

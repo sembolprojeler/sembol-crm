@@ -4225,7 +4225,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     if (reklamKaynagiEsit(k, 'diger_site')) return REKLAM_KAYNAGI_ETIKETLERI.diger_site;
     // DÜZELTME: QR'dan geldiği kesin ama henüz bir kampanyaya bağlanamamış kayıt
     // (ör. kampanya sonradan silinmiş/kodu değişmiş) "Organik" DEĞİL, QR görünür.
-    if (reklamKaynagiEsit(k, 'qr')) return { ad: `QR${k.qrKodu ? ` (${k.qrKodu})` : ''}`, renk: 'bg-amber-50 text-amber-700 border border-amber-200' };
+    if (!k.qrEslesmeYok && reklamKaynagiEsit(k, 'qr')) return { ad: `QR${k.qrKodu ? ` (${k.qrKodu})` : ''}`, renk: 'bg-amber-50 text-amber-700 border border-amber-200' };
     // HATA DÜZELTMESİ DEĞİL, BİLİNÇLİ AYRIM: reklamKaynagi alanı hiç yok ya da
     // bu yeni ayrıştırılmış kategorilerden ÖNCE (site-tiklama-takip scriptleri
     // güncellenmeden önce) oluşmuş bir kayıt. Bunu yanlışlıkla "Direkt Giriş"
@@ -4269,7 +4269,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
       { ad: 'Organik', renk: 'text-rose-300', sayilar: kaynakSayilari(qrDegil('instagram_organik')) },
     ] },
     { ad: 'QR', logo: <QrCode className="w-6 h-6 text-amber-400" />, kenar: 'border-amber-400/40', hucreler: [
-      { ad: 'QR Takip', renk: 'text-amber-400', sayilar: kaynakSayilari(k => !!k.qrKampanyaId || reklamKaynagiEsit(k, 'qr')) },
+      { ad: 'QR Takip', renk: 'text-amber-400', sayilar: kaynakSayilari(k => !!k.qrKampanyaId || (!k.qrEslesmeYok && reklamKaynagiEsit(k, 'qr'))) },
     ] },
     { ad: 'Diğer', logo: <Globe className="w-6 h-6 text-neutral-300" />, kenar: 'border-white/20', hucreler: [
       { ad: 'Direkt Giriş', renk: 'text-neutral-300', sayilar: kaynakSayilari(qrDegil('direkt_giris')) },
@@ -7501,6 +7501,11 @@ export const QR_TAKIP_SITE_BILGI = {
   depoevim: { ad: 'Depoevim', varsayilanUrl: 'https://www.depoevim.com/fiyat-teklifi-al/', renk: 'blue' },
 };
 const QR_ESLESME_PENCERE_DK = 45; // tarama → form arası azami süre (zaman eşleşmesi)
+// KAPATILDI (kullanıcı bildirimi, 2026-09): "okutmadan sonraki 45 dk içinde gelen form
+// o QR'dandır" TAHMİNİ, QR'ı test için okutan kişinin (ya da aynı saatte gelen
+// başka bir müşterinin) Direkt/Google girişlerini de QR sayıyordu. Artık yalnızca
+// kesin iz (formdaki qrKodu / UTM) eşleşir.
+const QR_ZAMAN_ESLESMESI_AKTIF = false;
 
 // "34 NAR 385 QR" → "34_NAR_385_QR" (utm_campaign ve eşleşme anahtarı)
 export const qrKampanyaKodu = (ad) => String(ad || '').toLocaleUpperCase('tr-TR')
@@ -7582,14 +7587,18 @@ export const useQrOtomatikEslestirme = (kayitlar = [], kampanyalar = [], taramal
       const kodHarita = new Map(kampanyalar.map(c => [c.kod || qrKampanyaKodu(c.ad), c]));
       for (const k of kayitlar) {
         if (k.kanal !== 'web' || k.qrKampanyaId || k.qrEslesmeYok || !k.id) continue;
-        if (['google_ads', 'facebook_ads', 'instagram_ads'].includes(k.reklamKaynagi)) continue;
+        // DEĞİŞTİ: yalnızca reklam değil, Google/Facebook/Instagram ORGANİK girişler de
+        // bu ziyaretin KESİN kaynağıdır — QR'a bağlanmaz. QR'dan gelen ziyaretçi
+        // formda 'qr', 'direkt_giris' (kameradan açılır, önceki sayfa yok) ya da
+        // 'diger_site' (eski ?qrt= geçiş bağlantısı) olarak görünür.
+        if (k.reklamKaynagi && !['qr', 'direkt_giris', 'diger_site', 'organik'].includes(k.reklamKaynagi)) continue;
         if (yazilan.current.has(k.id)) continue;
         let secilen = null, tip = '';
         // 1) UTM
         const kod = kayittanKampanyaKodu(k);
         if (kod && kodHarita.has(kod)) { secilen = kodHarita.get(kod); tip = 'utm'; }
-        // 2) ZAMAN
-        if (!secilen && k.createdAt) {
+        // 2) ZAMAN — KAPALI (bkz. QR_ZAMAN_ESLESMESI_AKTIF)
+        if (QR_ZAMAN_ESLESMESI_AKTIF && !secilen && k.createdAt) {
           const formZ = new Date(k.createdAt).getTime();
           if (!isNaN(formZ)) {
             // DÜZELTME: okutma, formun doldurulduğu GERÇEK siteye (hesapId) yazılıyor —
@@ -7806,7 +7815,13 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
   const formuBagla = async (kayit, kampanyaId) => {
     const c = kampanyalar.find(x => x.id === kampanyaId);
     try {
-      if (!c) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari', kayit.id), { qrKampanyaId: null, qrKampanyaAd: null, qrEslesme: null, qrEslesmeYok: kampanyaId === '__yok__' ? true : null });
+      // DEĞİŞTİ: "Bağı kaldır (QR değil)" kalıcıdır (qrEslesmeYok) — otomatik eşleştirme
+      // kaydı tekrar bağlamaz. Kayıt sunucuda 'qr' olarak işaretlendiyse, QR'dan ÖNCEKİ
+      // asıl kaynağa (submit-lead.js oncekiReklamKaynagi'ne yazar) geri döner.
+      if (!c) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari', kayit.id), {
+        qrKampanyaId: null, qrKampanyaAd: null, qrEslesme: null, qrEslesmeYok: kampanyaId === '__yok__' ? true : null,
+        ...(kampanyaId === '__yok__' && kayit.reklamKaynagi === 'qr' ? { reklamKaynagi: kayit.oncekiReklamKaynagi || 'direkt_giris', qrKodu: null } : {}),
+      });
       else await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari', kayit.id), { qrKampanyaId: c.id, qrKampanyaAd: c.ad, qrEslesme: 'elle', qrEslesmeYok: null, qrEslesmeZamani: new Date().toISOString(), qrEslestiren: currentUser?.fullName || '' });
     } catch (e) { alert('Güncellenemedi: ' + e.message); }
   };
@@ -7924,7 +7939,7 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
                         <span className="ml-auto text-[10px] font-black text-neutral-600 shrink-0">{k.durum || 'Yeni'}</span>
                         <select value={k.qrKampanyaId || ''} onChange={ev => formuBagla(k, ev.target.value)} className="text-[10px] font-black border border-neutral-300 rounded-lg px-1 py-1 bg-white shrink-0" title="Başka QR'a taşı / bağı kaldır">
                           {kampanyalar.map(c => <option key={c.id} value={c.id}>{c.ad}</option>)}
-                          <option value="">Bağı kaldır</option>
+                          <option value="__yok__">Bağı kaldır (QR değil)</option>
                         </select>
                       </div>
                     ); })}
