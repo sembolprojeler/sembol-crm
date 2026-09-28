@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp, Banknote, UserMinus, Settings, FileText, Copy, ClipboardCheck, Upload, Save, Check } from 'lucide-react'; // DÜZELTME: Check ikonu eklendi (Ekstre Yükle)
+import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp, Banknote, UserMinus, Settings, FileText, Copy, ClipboardCheck, Upload, Save, Check, Eye } from 'lucide-react'; // DÜZELTME: Check (Ekstre Yükle) ve Eye (kategori detay) ikonları eklendi
 import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc, query, where, deleteField } from 'firebase/firestore';
 // DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
 // Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
@@ -5011,6 +5011,10 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     // --- 5) Kategori dağılımı (gider ve gelir ayrı) ---
     const kategoriDagilimi = (tip) => {
       const harita = {};
+      // YENİ (kullanıcı talebi): her kategorinin İŞLEM LİSTESİ de tutulur — raporda
+      // göz simgesiyle açılan pencerede tek tek gösterilir.
+      const detay = {};
+      const detayEkle = (ad, x) => { (detay[ad] = detay[ad] || []).push(x); };
       gecerli.filter(i => i.tip === tip).forEach(i => {
         // YENİ (kullanıcı talebi): KART EKSTRESİ — tek kalem gider, raporda
         // ekstredeki kategori dağılımına (Reklam, Vergi, Araç…) AÇILIR.
@@ -5020,6 +5024,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           Object.entries(i.kategoriDagilimi).forEach(([kat, tutar]) => {
             const ad = !kat || kat.toLocaleLowerCase('tr-TR') === 'diğer' ? 'Kategorisiz / Diğer' : kat;
             harita[ad] = (harita[ad] || 0) + (parseFloat(tutar) || 0);
+            detayEkle(ad, { id: `${i.id}_${kat}`, tarih: i.tarih, aciklama: `${i.aciklama || 'Kart ekstresi'} — ${kat} payı`, tutar: parseFloat(tutar) || 0, defterAd: defterMap[i.defterId]?.ad || '', ekstre: true, ekstreId: i.ekstreId, ekstreKategori: kat });
           });
           return;
         }
@@ -5027,10 +5032,11 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         // Kategorisiz / Diğer ayrı toplanır — "nereye gitti bilinmiyor" görünür olsun
         const ad = !ham || ham.toLocaleLowerCase('tr-TR') === 'diğer' ? 'Kategorisiz / Diğer' : ham;
         harita[ad] = (harita[ad] || 0) + parseFloat(i.tutar);
+        detayEkle(ad, { id: i.id, tarih: i.tarih, aciklama: i.aciklama || i.musteriAdi || i.kategori || '—', musteriAdi: i.musteriAdi || '', tutar: parseFloat(i.tutar) || 0, defterAd: defterMap[i.defterId]?.ad || '', kaynak: i.kaynak || '', etiketler: i.etiketler || [], plaka: i.plaka || '', teslimKodu: i.teslimKodu || '' });
       });
       const toplam = Object.values(harita).reduce((a, b) => a + b, 0);
       return Object.entries(harita)
-        .map(([ad, tutar]) => ({ ad, tutar, oran: toplam > 0 ? (tutar / toplam) * 100 : 0, kategorisiz: ad === 'Kategorisiz / Diğer' }))
+        .map(([ad, tutar]) => ({ ad, tutar, oran: toplam > 0 ? (tutar / toplam) * 100 : 0, kategorisiz: ad === 'Kategorisiz / Diğer', islemler: (detay[ad] || []).sort((x, y) => String(y.tarih).localeCompare(String(x.tarih))) }))
         .sort((a, b) => b.tutar - a.tutar);
     };
     const giderKategorileri = kategoriDagilimi('cikis');
@@ -5133,10 +5139,77 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
   };
 
   // ==========================================================================
+  // YENİ (kullanıcı talebi): KATEGORİ DETAY PENCERESİ
+  // Raporda bir kategorinin göz simgesine basınca açılır: o kategorideki
+  // gelir ya da gider işlemleri tarih, açıklama, defter ve tutarıyla listelenir.
+  // Arama, defter filtresi ve sıralama (tarih / tutar) vardır. Kart ekstresi
+  // kalemleri "EKSTRE" rozetiyle, ilgili kategori payı olarak görünür.
+  // ==========================================================================
+  const KategoriDetayPenceresi = ({ detay, paraFmt, onKapat }) => {
+    const [ara, setAra] = useState('');
+    const [defterF, setDefterF] = useState('Tümü');
+    const [sirala, setSirala] = useState('tarih');
+    const trh = (t) => (t || '').split('-').reverse().join('.');
+    const defterler = ['Tümü', ...new Set(detay.islemler.map(x => x.defterAd).filter(Boolean))];
+    const a = ara.trim().toLocaleLowerCase('tr-TR');
+    const liste = detay.islemler
+      .filter(x => (defterF === 'Tümü' || x.defterAd === defterF) && (!a || [x.aciklama, x.musteriAdi, x.defterAd, x.plaka, x.teslimKodu, ...(x.etiketler || [])].some(v => String(v || '').toLocaleLowerCase('tr-TR').includes(a)) || String(x.tutar).includes(a)))
+      .sort((x, y) => sirala === 'tutar' ? y.tutar - x.tutar : String(y.tarih).localeCompare(String(x.tarih)));
+    const toplam = liste.reduce((t, x) => t + x.tutar, 0);
+    const gider = detay.tip === 'Gider';
+    return (
+      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-3" onClick={onKapat}>
+        <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl">
+          <div className={`${gider ? 'bg-red-700' : 'bg-emerald-700'} text-white p-4 rounded-t-2xl flex items-start justify-between gap-2`}>
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-widest text-white/70">{detay.tip} Kategorisi</p>
+              <h3 className="font-black text-lg leading-tight truncate">{detay.ad}</h3>
+              <p className="text-xs font-bold text-white/80 mt-0.5">{detay.islemler.length} işlem • Toplam ₺{paraFmt(detay.tutar)}</p>
+            </div>
+            <button type="button" onClick={onKapat} className="p-1.5 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
+          </div>
+          <div className="p-3 border-b border-neutral-200 flex flex-col sm:flex-row gap-2">
+            <div className="relative flex-1"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" /><input value={ara} onChange={e => setAra(e.target.value)} placeholder="Açıklama, müşteri, plaka, tutar ara…" className="w-full pl-9 pr-3 py-2 border border-neutral-300 rounded-xl text-sm font-bold" /></div>
+            <select value={defterF} onChange={e => setDefterF(e.target.value)} className="px-3 py-2 border border-neutral-300 rounded-xl text-xs font-black bg-white">{defterler.map(d => <option key={d}>{d}</option>)}</select>
+            <div className="flex gap-1 bg-neutral-100 p-1 rounded-xl">
+              {[['tarih', 'Tarih'], ['tutar', 'Tutar']].map(([k, e]) => <button key={k} type="button" onClick={() => setSirala(k)} className={`px-3 py-1.5 rounded-lg text-[11px] font-black ${sirala === k ? 'bg-black text-white' : 'text-neutral-600'}`}>{e}</button>)}
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
+            {liste.map(x => (
+              <div key={x.id} className="flex items-center gap-2 p-2.5 rounded-xl border border-neutral-200 text-xs">
+                <span className="text-neutral-500 font-bold shrink-0 w-[70px]">{trh(x.tarih)}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="font-black text-black truncate" title={x.aciklama}>{x.aciklama}</div>
+                  <div className="text-[10px] font-bold text-neutral-400 truncate flex items-center gap-1.5 flex-wrap">
+                    {x.ekstre && <span className="text-[9px] font-black bg-amber-400 text-black px-1.5 py-0.5 rounded">EKSTRE</span>}
+                    {x.defterAd && <span>{x.defterAd}</span>}
+                    {x.musteriAdi && <span>• {x.musteriAdi}</span>}
+                    {x.plaka && <span>• {x.plaka}</span>}
+                    {x.kaynak && x.kaynak !== 'Manuel' && <span>• {x.kaynak}</span>}
+                  </div>
+                </div>
+                <span className={`font-black tabular-nums shrink-0 ${gider ? 'text-red-700' : 'text-emerald-700'}`}>{gider ? '−' : '+'}₺{paraFmt(x.tutar)}</span>
+              </div>
+            ))}
+            {liste.length === 0 && <div className="text-center text-xs font-bold text-neutral-400 py-8">Eşleşen işlem yok.</div>}
+          </div>
+          <div className="p-3 border-t border-neutral-200 flex items-center justify-between text-xs font-black">
+            <span className="text-neutral-500">{liste.length} işlem gösteriliyor</span>
+            <span className={gider ? 'text-red-700' : 'text-emerald-700'}>Toplam ₺{paraFmt(toplam)}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ==========================================================================
   // YENİ: FİNANSAL RAPORLAMA SAYFASI (ekran)
   // ==========================================================================
   const FinansRaporlamaView = ({ rapor, onKapat }) => {
     const [seciliAy, setSeciliAy] = useState('tumu');
+    // YENİ (kullanıcı talebi): göz simgesiyle açılan kategori detay penceresi
+    const [kategoriDetay, setKategoriDetay] = useState(null); // { ad, tip, islemler, tutar }
     const r = rapor;
     const goster = seciliAy === 'tumu' ? null : r.aylik.find(a => a.ay === seciliAy);
     // Ay seçildiyse o ayın rakamları, yoksa dönem toplamı
@@ -5264,9 +5337,17 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                 <div className="space-y-2">
                   {blok.l.map(k => (
                     <div key={k.ad}>
-                      <div className="flex items-center justify-between text-[11px] font-bold">
-                        <span className={k.kategorisiz ? 'text-amber-700' : 'text-neutral-700'}>{k.kategorisiz && '⚠ '}{k.ad}</span>
-                        <span className="tabular-nums">₺{paraFmt(k.tutar)} <span className="text-neutral-400">• %{k.oran.toFixed(1)}</span></span>
+                      <div className="flex items-center justify-between text-[11px] font-bold gap-2">
+                        <span className={`flex items-center gap-1.5 min-w-0 ${k.kategorisiz ? 'text-amber-700' : 'text-neutral-700'}`}>
+                          {/* YENİ (kullanıcı talebi): GÖZ — kategorinin işlemlerini aç */}
+                          <button type="button" onClick={() => setKategoriDetay({ ad: k.ad, tip: blok.c === 'bg-red-400' ? 'Gider' : 'Gelir', islemler: k.islemler || [], tutar: k.tutar })}
+                            className="p-1 rounded-md bg-neutral-100 hover:bg-neutral-900 hover:text-white text-neutral-600 transition shrink-0" title={`${k.ad} — işlemleri gör`}>
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <span className="truncate">{k.kategorisiz && '⚠ '}{k.ad}</span>
+                          <span className="text-[9px] font-black text-neutral-400 shrink-0">({(k.islemler || []).length})</span>
+                        </span>
+                        <span className="tabular-nums shrink-0">₺{paraFmt(k.tutar)} <span className="text-neutral-400">• %{k.oran.toFixed(1)}</span></span>
                       </div>
                       <div className="h-2 bg-neutral-100 rounded mt-1"><div className={`h-2 rounded ${k.kategorisiz ? 'bg-amber-400' : blok.c}`} style={{ width: `${k.oran}%` }}></div></div>
                     </div>
@@ -5276,6 +5357,11 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
             </div>
           ))}
         </div>
+
+        {/* YENİ (kullanıcı talebi): KATEGORİ DETAY PENCERESİ */}
+        {kategoriDetay && (
+          <KategoriDetayPenceresi detay={kategoriDetay} paraFmt={paraFmt} onKapat={() => setKategoriDetay(null)} />
+        )}
 
         {/* Kredi özeti */}
         {r.kredi.adet > 0 && (
