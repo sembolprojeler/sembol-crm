@@ -3148,6 +3148,17 @@ const TEKLIF_ALANLARI = [
   // tahmini alım/nakliye ücreti — uzun ad önce denenir ki "Toplam Ödenecek"
   // yakalanmadan önce doğru eşleşsin.
   'Eşyaların Alınacağı Yer', 'Tahmini Alım/Nakliye Ücreti',
+  // HATA DÜZELTMESİ (Ali'nin bildirimi: "2 teklif geldi ikisinde de fiyat
+  // yok"): submit-lead.js içindeki ortakKuyruk() fonksiyonu Evden Eve
+  // Nakliyat / Parça Eşya / Ofis / Eşya Depolama / Asansör Kiralama
+  // sihirbazlarının HEPSİNDE sonMesaj'ın en sonuna "Sistem fiyat tahmini:
+  // X - Y TL" satırını ekliyordu, ama bu etiket aşağıdaki listede hiç
+  // TANIMLI DEĞİLDİ. Ayrıştırıcı (teklifOzetiAyristir) yalnızca bu listedeki
+  // adları alan sınırı sayar; tanınmayan "Sistem fiyat tahmini:" bir sınır
+  // oluşturmadığından metin bir önceki alanın (Tarih) değerine yapışık kalıp
+  // görünmez oluyordu — DepoEvim'in "Aylık Fiyat" / "Toplam Ödenecek" gibi
+  // KENDİ etiketleri zaten listede olduğu için o sihirbazda bu sorun yoktu.
+  'Sistem fiyat tahmini',
 ];
 
 // YENİ: Teklif detayı satırlarına dönüşümlü etiket renkleri — her bölüm farklı
@@ -3160,7 +3171,10 @@ const TEKLIF_SATIR_RENKLERI = [
   { etiket: 'bg-teal-100 text-teal-800',     nokta: 'bg-teal-500' },
   { etiket: 'bg-indigo-100 text-indigo-800', nokta: 'bg-indigo-500' },
 ];
-const TEKLIF_PARA_ALANLARI = ['Aylık Fiyat', 'Toplam Ödenecek (peşin)', 'Toplam Ödenecek', 'Bütçe', 'Tahmini Alım/Nakliye Ücreti'];
+// HATA DÜZELTMESİ: "Sistem fiyat tahmini" eklendi — Evden Eve/Parça Eşya/Ofis/
+// Eşya Depolama/Asansör Kiralama tekliflerinin fiyat satırı da artık DepoEvim
+// tekliflerindeki gibi yeşil vurgulu gösteriliyor (bkz. TEKLIF_ALANLARI notu).
+const TEKLIF_PARA_ALANLARI = ['Aylık Fiyat', 'Toplam Ödenecek (peşin)', 'Toplam Ödenecek', 'Bütçe', 'Tahmini Alım/Nakliye Ücreti', 'Sistem fiyat tahmini'];
 
 // YENİ (kullanıcı talebi): Bazı alanların EKRANDA görünen adı değiştirilir.
 // Ham metindeki anahtar (sihirbazın gönderdiği ad) AYNEN kalır — ayrıştırma
@@ -3526,7 +3540,12 @@ const HizliTekliflerTablosu = ({
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5 text-[10px] font-bold text-neutral-500 flex-wrap">
                               <Clock className="w-3 h-3" /> {sadeceSaat(k.createdAt)}
-                              <span className={`px-1.5 py-0.5 rounded ${kaynakEtiket.renk}`}>{kaynakEtiket.ad}</span>
+                              {/* YENİ: "Diğer Site" ise hangi site olduğu rozetin içinde, "İniş
+                                  sayfası" bilgisi ise fare üzerine gelince (title) görünüyor —
+                                  Ali'nin "google aramasında hangi sayfaya düştü" talebi. */}
+                              <span className={`px-1.5 py-0.5 rounded ${kaynakEtiket.renk}`} title={k.inisSayfasi ? `İniş sayfası: ${k.inisSayfasi}` : undefined}>
+                                {kaynakEtiket.ad}{(k.reklamKaynagi === 'diger_site' && k.digerSiteAdi) ? ` (${k.digerSiteAdi})` : ''}
+                              </span>
                               <span className="text-neutral-400">{hesapAdi(k.hesapId)}</span>
                             </div>
                             {k.sonMesaj && (
@@ -4135,21 +4154,61 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     : (deger === 'google_ads' && (k.sonMesaj?.includes('Google reklam') || k.musteriAdi?.includes('Google Ads')));
   const reklamKaynagiAds = (k) => reklamKaynagiEsit(k, 'google_ads') || reklamKaynagiEsit(k, 'facebook_ads') || reklamKaynagiEsit(k, 'instagram_ads');
   // Satır rozetinde ve özet kutularında gösterilecek etiket + renk — platforma
-  // göre ayrı ayrı, tanınmıyorsa "Organik".
+  // göre ayrı ayrı. Ali'nin talebi üzerine eskiden tek "Organik" kovası olan
+  // kısım artık 6 alt kategoriye ayrılıyor: Facebook Organik / Instagram
+  // Organik / Google Anasayfa / Google Altsayfa / Direkt Giriş / Diğer Site
+  // (site-tiklama-takip-*.txt + wizard'ların document.referrer +
+  // location.pathname'den hesapladığı değer — bkz. reklamKaynagi alanı).
+  // GÜNCELLEME (2026-09): facebook_organik/instagram_organik eklendi, "direkt"
+  // anahtarı "direkt_giris" olarak yeniden adlandırıldı (submit-lead.js /
+  // yeni-musteri.js / wizard'lardaki isimlendirmeyle BİREBİR aynı olsun diye).
+  // Google organik aramada ARANAN KELİME teknik olarak hiçbir zaman bilinemez
+  // (Google 2011'den beri bunu paylaşmıyor) — bu yüzden ayrım "hangi sayfaya
+  // düşüldü"ne göre, "ne arandı"na göre DEĞİL.
   const REKLAM_KAYNAGI_ETIKETLERI = {
     google_ads: { ad: 'Google Ads', renk: 'bg-green-100 text-green-700' },
     facebook_ads: { ad: 'Facebook Ads', renk: 'bg-blue-100 text-blue-700' },
+    facebook_organik: { ad: 'Facebook Organik', renk: 'bg-indigo-100 text-indigo-700' },
     instagram_ads: { ad: 'Instagram Ads', renk: 'bg-pink-100 text-pink-700' },
+    instagram_organik: { ad: 'Instagram Organik', renk: 'bg-rose-100 text-rose-700' },
+    google_anasayfa: { ad: 'Google Anasayfa', renk: 'bg-yellow-100 text-yellow-700' },
+    google_altsayfa: { ad: 'Google Altsayfa', renk: 'bg-orange-100 text-orange-700' },
+    direkt_giris: { ad: 'Direkt Giriş', renk: 'bg-neutral-100 text-neutral-600' },
+    diger_site: { ad: 'Diğer Site', renk: 'bg-purple-100 text-purple-700' },
   };
   const reklamKaynagiEtiket = (k) => {
     // YENİ (kullanıcı talebi): QR'dan gelen form "Organik" değil, QR adıyla görünür
     // DEĞİŞTİ (kullanıcı talebi): "(olası)" yazılmaz — QR'dan gelen form "34 NAR 385 (QR)" gibi görünür
+    // NOT: QR eşleşmesi, bu kaydın reklamKaynagi'sinden (organik/direkt/google
+    // anasayfa vb.) BAĞIMSIZ ayrıca hesaplanan bir alan — bu yüzden en üstte,
+    // ödemeli reklam kontrolünden bile ÖNCE gösteriliyor (bir kayıt normalde
+    // hem QR hem de Google Ads olamaz, ama QR eşleşmesi varsa asıl kaynak odur).
     if (k.qrKampanyaId && k.qrKampanyaAd) return { ad: `${k.qrKampanyaAd} (QR)`, renk: 'bg-amber-100 text-amber-800 border border-amber-300' };
     if (reklamKaynagiEsit(k, 'google_ads')) return REKLAM_KAYNAGI_ETIKETLERI.google_ads;
     if (reklamKaynagiEsit(k, 'facebook_ads')) return REKLAM_KAYNAGI_ETIKETLERI.facebook_ads;
+    if (reklamKaynagiEsit(k, 'facebook_organik')) return REKLAM_KAYNAGI_ETIKETLERI.facebook_organik;
     if (reklamKaynagiEsit(k, 'instagram_ads')) return REKLAM_KAYNAGI_ETIKETLERI.instagram_ads;
-    return { ad: 'Organik', renk: 'bg-neutral-100 text-neutral-600' };
+    if (reklamKaynagiEsit(k, 'instagram_organik')) return REKLAM_KAYNAGI_ETIKETLERI.instagram_organik;
+    if (reklamKaynagiEsit(k, 'google_anasayfa')) return REKLAM_KAYNAGI_ETIKETLERI.google_anasayfa;
+    if (reklamKaynagiEsit(k, 'google_altsayfa')) return REKLAM_KAYNAGI_ETIKETLERI.google_altsayfa;
+    if (reklamKaynagiEsit(k, 'direkt_giris')) return REKLAM_KAYNAGI_ETIKETLERI.direkt_giris;
+    if (reklamKaynagiEsit(k, 'diger_site')) return REKLAM_KAYNAGI_ETIKETLERI.diger_site;
+    // HATA DÜZELTMESİ DEĞİL, BİLİNÇLİ AYRIM: reklamKaynagi alanı hiç yok ya da
+    // bu yeni ayrıştırılmış kategorilerden ÖNCE (site-tiklama-takip scriptleri
+    // güncellenmeden önce) oluşmuş bir kayıt. Bunu yanlışlıkla "Direkt Giriş"
+    // sayıp yeni, kesin verilerle karıştırmamak için ayrı, nötr bir etiket.
+    return { ad: 'Organik (Eski Kayıt)', renk: 'bg-neutral-100 text-neutral-500' };
   };
+  // "Organik (Eski Kayıt)" kovasına düşen kayıt mı? (Reklam değil, QR eşleşmesi
+  // yok, VE yeni kategorilerden hiçbirine de uymuyor.)
+  const reklamKaynagiEskiKayit = (k) => !reklamKaynagiAds(k)
+    && !k.qrKampanyaId
+    && !reklamKaynagiEsit(k, 'facebook_organik')
+    && !reklamKaynagiEsit(k, 'instagram_organik')
+    && !reklamKaynagiEsit(k, 'google_anasayfa')
+    && !reklamKaynagiEsit(k, 'google_altsayfa')
+    && !reklamKaynagiEsit(k, 'direkt_giris')
+    && !reklamKaynagiEsit(k, 'diger_site');
   // Her kaynak için { bugun, buAy, tumu } sayıları
   const kaynakSayilari = (kosul) => ({
     bugun: aktifKanalBugun.filter(kosul).length,
@@ -4160,9 +4219,19 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     { etiket: '🟢 Google Ads', renk: 'text-green-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'google_ads')) },
     { etiket: '🔵 Facebook Ads', renk: 'text-sky-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'facebook_ads')) },
     { etiket: '🟣 Instagram Ads', renk: 'text-pink-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'instagram_ads')) },
-    // DEĞİŞTİ: QR'dan gelenler ayrı kutuda; Organik artık QR'ları içermez
+    // DEĞİŞTİ: QR'dan gelenler ayrı kutuda; aşağıdaki diğer kutuların hiçbiri
+    // QR eşleşmesi olan kayıtları içermez.
     { etiket: '🟠 QR Takip', renk: 'text-amber-400', sayilar: kaynakSayilari(k => !!k.qrKampanyaId) },
-    { etiket: '⚪ Organik', renk: 'text-neutral-400', sayilar: kaynakSayilari(k => !reklamKaynagiAds(k) && !k.qrKampanyaId) },
+    { etiket: '🟡 Google Anasayfa', renk: 'text-yellow-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'google_anasayfa')) },
+    { etiket: '🟧 Google Altsayfa', renk: 'text-orange-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'google_altsayfa')) },
+    // YENİ (2026-09): eskiden Facebook/Instagram organik trafik ayrı
+    // gösterilmiyordu — hepsi "Direkt Giriş" ya da "Eski Kayıt" kovasına
+    // düşüyordu. Artık site-tiklama-takip scriptleri bunu ayrıca tespit ediyor.
+    { etiket: '🔷 Facebook Organik', renk: 'text-indigo-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'facebook_organik')) },
+    { etiket: '🌸 Instagram Organik', renk: 'text-rose-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'instagram_organik')) },
+    { etiket: '⚪ Direkt Giriş', renk: 'text-neutral-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'direkt_giris')) },
+    { etiket: '🟪 Diğer Site', renk: 'text-purple-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'diger_site')) },
+    { etiket: '⚫ Eski Kayıt', renk: 'text-neutral-500', sayilar: kaynakSayilari(k => reklamKaynagiEskiKayit(k)) },
   ];
 
   // ================================================================ RENDER ===

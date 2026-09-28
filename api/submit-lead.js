@@ -208,10 +208,19 @@ const KANAL_BY_WIZARD = {
 
 // Wizard'ların "reklamKaynagi" alanında gönderebileceği geçerli değerler —
 // Satis.jsx (Müşteri Havuzu) bu değerlere göre Google Ads / Facebook Ads /
-// Instagram Ads / Organik ayrımını yapıyor. Bu listede olmayan (ör. eski
-// wizard sürümünden hiç gelmeyen ya da bozuk bir) değer güvenli şekilde
-// 'organik' sayılır.
-const REKLAM_KAYNAGI_DEGERLERI = ['google_ads', 'facebook_ads', 'instagram_ads'];
+// Facebook Organik / Instagram Ads / Instagram Organik / Google Anasayfa /
+// Google Altsayfa / Direkt Giriş / Diğer Site ayrımını yapıyor. GÜNCELLEME
+// (Ali'nin talebi, 2026-09): "organik" tek kovası tamamen kaldırıldı, 9
+// kategoriye bölündü — facebook_organik ve instagram_organik yeni eklendi,
+// "direkt" ise "direkt_giris" olarak yeniden adlandırıldı (wizard'lardaki ve
+// site-geneli tıklama takibindeki isimlendirmeyle BİREBİR aynı olsun diye).
+// Bu listede olmayan (ör. çok eski wizard sürümünden hiç gelmeyen ya da
+// bozuk bir) değer artık güvenli şekilde 'direkt_giris' sayılır.
+const REKLAM_KAYNAGI_DEGERLERI = ['google_ads', 'facebook_ads', 'facebook_organik', 'instagram_ads', 'instagram_organik', 'google_anasayfa', 'google_altsayfa', 'direkt_giris', 'diger_site'];
+// Bu dördü "ödemeli reklam" sayılır — QR eşleşmesi bunların ÜZERİNE YAZMAZ
+// (aşağıdaki qrIzi bloğuna bakın), ama diğer tüm (organik/direkt/google
+// anasayfa-altsayfa/diğer site) kategorilerin üzerine QR izi kazanır.
+const PAID_ADS_DEGERLERI = ['google_ads', 'facebook_ads', 'instagram_ads'];
 
 // Satış ekibinin "Hesap" sütununda göreceği site etiketi — yeni-musteri.js'te
 // (tıklama bildirimleri) kullanılan "depoevim"/"sembolevdeneve" değerleriyle
@@ -539,11 +548,19 @@ export default async function handler(req, res) {
       wizardKaynagi: body.source || '',
       // Ziyaretçi Google reklamından mı (gclid/utm_source=google&utm_medium=cpc),
       // Meta (Facebook/Instagram) reklamından mı (fbclid/utm_source=facebook
-      // veya instagram) yoksa organik mi geldi — wizard sayfa yüklenirken
-      // URL'den okuyup gönderiyor (bkz. wizard dosyasındaki REKLAM_KAYNAGI).
+      // veya instagram), organik Google/Facebook/Instagram'dan mı yoksa direkt
+      // mi geldi — wizard sayfa yüklenirken URL'den/referrer'dan okuyup
+      // gönderiyor (bkz. wizard dosyasındaki REKLAM_KAYNAGI / snwKaynakOkuTam).
       // Eski wizard sürümleri bu alanı hiç göndermez, o yüzden varsayılan
-      // 'organik'; tanınmayan bir değer de güvenli şekilde 'organik' sayılır.
-      reklamKaynagi: REKLAM_KAYNAGI_DEGERLERI.includes(body.reklamKaynagi) ? body.reklamKaynagi : 'organik',
+      // 'direkt_giris'; tanınmayan bir değer de güvenli şekilde 'direkt_giris'
+      // sayılır (eskiden bu iki durumda da 'organik' kovasına düşerdi).
+      reklamKaynagi: REKLAM_KAYNAGI_DEGERLERI.includes(body.reklamKaynagi) ? body.reklamKaynagi : 'direkt_giris',
+      // "google_anasayfa"/"google_altsayfa"/"diger_site" kategorilerinde HANGİ
+      // sayfaya düşüldüğü ve (varsa) HANGİ dış sitenin yönlendirdiği — wizard
+      // bunu document.referrer + location.pathname'den hesaplayıp gönderiyor.
+      // Boşsa CRM tarafında hiç gösterilmez.
+      inisSayfasi: String(body.inisSayfasi || '').trim(),
+      digerSiteAdi: String(body.digerSiteAdi || '').trim(),
 
       // Wizard'ın kendi akış durumu (partial/completed/callback_requested).
       // DİKKAT: CRM'in satış-hattı durumu olan "durum" alanıyla KARIŞTIRILMAMALI —
@@ -570,9 +587,15 @@ export default async function handler(req, res) {
       updatedAt: nowIso,
     };
 
-    // YENİ (QR TAKİP): QR/UTM izi varsa kayda yaz. Reklam kaynağı organikse
-    // 'qr' olarak işaretlenir (Google/Meta reklamıysa o etiket korunur; QR izi
-    // yine de ayrı alanlarda durur — CRM kampanyayı qrKodu ile bağlar).
+    // YENİ (QR TAKİP): QR/UTM izi varsa kayda yaz. Reklam kaynağı ödemeli bir
+    // reklam DEĞİLSE (google_ads/facebook_ads/instagram_ads) 'qr' olarak
+    // işaretlenir — Google/Meta reklamıysa o etiket korunur. DÜZELTME: eskiden
+    // sadece tam olarak 'organik' değerinin üzerine yazılıyordu; artık
+    // google_anasayfa/google_altsayfa/facebook_organik/instagram_organik/
+    // direkt_giris/diger_site kategorilerinin de üzerine yazar, aksi halde
+    // QR'dan gelip "Google Anasayfa" ya da "Direkt Giriş" sayılan ziyaretçiler
+    // yanlışlıkla QR kampanyasına bağlanmazdı.
+    // QR izi yine de ayrı alanlarda durur — CRM kampanyayı qrKodu ile bağlar.
     const qrIzi = qrIziniCoz(body, req);
     if (qrIzi) {
       kayit.qrKodu = qrIzi.qrKodu;
@@ -581,7 +604,7 @@ export default async function handler(req, res) {
       kayit.utmCampaign = qrIzi.utmCampaign;
       kayit.sayfaUrl = qrIzi.sayfaUrl;
       kayit.qrIziZamani = qrIzi.qrIziZamani;
-      if (kayit.reklamKaynagi === 'organik' && String(qrIzi.utmSource).toLowerCase() === 'qr') kayit.reklamKaynagi = 'qr';
+      if (!PAID_ADS_DEGERLERI.includes(kayit.reklamKaynagi) && String(qrIzi.utmSource).toLowerCase() === 'qr') kayit.reklamKaynagi = 'qr';
     }
 
     if (!existingSnap.exists) {

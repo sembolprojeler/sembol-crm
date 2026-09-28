@@ -39,7 +39,9 @@
 //     kaynak: string    — "google_ads" ise "Google Ads Ziyaretçisi",
 //                         "facebook_ads" ise "Facebook Ads Ziyaretçisi",
 //                         "instagram_ads" ise "Instagram Ads Ziyaretçisi",
-//                         aksi halde "Organik Ziyaretçi"
+//                         "facebook_organik"/"instagram_organik"/
+//                         "google_anasayfa"/"google_altsayfa"/"diger_site"
+//                         kendi etiketiyle, aksi halde "Direkt Giriş Ziyaretçisi"
 //     site:   string    — "depoevim" | "sembolevdeneve" (hangi site)
 //   }
 // Yanıt sözleşmesi de AYNEN korundu: { success: true, message } veya
@@ -118,14 +120,34 @@ const HIZMET_TIPI_BY_SITE = {
   sembolevdeneve: 'Nakliye',
 };
 
-// "kaynak" (ziyaretciKaynagi()'nin site-tiklama-takip script'inden gönderdiği
-// değer) → satış ekibinin göreceği isim + sonMesaj'a eklenecek kısa ifade.
-// submit-lead.js'teki REKLAM_KAYNAGI_DEGERLERI ile AYNI değerler kullanılır.
+// "kaynak" (site-tiklama-takip-*.txt'teki snwKaynakOkuTam()/kaynakOku()'nun
+// gönderdiği değer) → satış ekibinin göreceği isim + sonMesaj'a eklenecek
+// kısa ifade. submit-lead.js'teki REKLAM_KAYNAGI_DEGERLERI ile AYNI değerler
+// kullanılır. GÜNCELLEME (Ali'nin talebi, 2026-09): "organik" tek kovası
+// tamamen kaldırıldı, 9 kategoriye bölündü — facebook_organik ve
+// instagram_organik yeni eklendi, "direkt" ise "direkt_giris" olarak yeniden
+// adlandırıldı (wizard'lardaki ve submit-lead.js'teki isimlendirmeyle
+// BİREBİR aynı olsun diye).
 const KAYNAK_ETIKETLERI = {
   google_ads: { ad: 'Google Ads Ziyaretçisi', reklamMetni: 'Google reklamlarından ' },
   facebook_ads: { ad: 'Facebook Ads Ziyaretçisi', reklamMetni: 'Facebook reklamlarından ' },
+  facebook_organik: { ad: 'Facebook Organik Ziyaretçisi', reklamMetni: 'Facebook\'tan organik olarak ' },
   instagram_ads: { ad: 'Instagram Ads Ziyaretçisi', reklamMetni: 'Instagram reklamlarından ' },
+  instagram_organik: { ad: 'Instagram Organik Ziyaretçisi', reklamMetni: 'Instagram\'dan organik olarak ' },
+  google_anasayfa: { ad: 'Google Anasayfa Ziyaretçisi', reklamMetni: 'Google\'da aratıp ana sayfaya düşerek ' },
+  google_altsayfa: { ad: 'Google Altsayfa Ziyaretçisi', reklamMetni: 'Google\'da aratıp bir alt sayfaya düşerek ' },
+  direkt_giris: { ad: 'Direkt Giriş Ziyaretçisi', reklamMetni: 'adres çubuğuna doğrudan yazarak ' },
+  diger_site: { ad: 'Diğer Site Ziyaretçisi', reklamMetni: 'başka bir siteden yönlendirilerek ' },
 };
+
+// yeni-musteri.js ve submit-lead.js'in KABUL ETTİĞİ tüm geçerli değerler —
+// submit-lead.js'teki REKLAM_KAYNAGI_DEGERLERI ile BİREBİR aynı olmalı.
+const REKLAM_KAYNAGI_DEGERLERI = ['google_ads', 'facebook_ads', 'facebook_organik', 'instagram_ads', 'instagram_organik', 'google_anasayfa', 'google_altsayfa', 'direkt_giris', 'diger_site'];
+// QR eşleşmesi bunların ÜZERİNE YAZMAZ (bkz. aşağıdaki musteriAdi/reklamKaynagi
+// hesaplaması) — genuine bir ödemeli reklam tıklamasıysa QR izi bulunsa bile
+// reklam etiketi korunur; diğer tüm (organik/direkt/google anasayfa-altsayfa/
+// diğer site) kategorilerin üzerine QR izi kazanır.
+const PAID_ADS_DEGERLERI = ['google_ads', 'facebook_ads', 'instagram_ads'];
 
 // Site → satış ekibinin göreceği okunaklı etiket.
 const SITE_ETIKET = {
@@ -158,10 +180,15 @@ export default async function handler(req, res) {
 
     const suAnkiTarih = new Date().toISOString();
     const kanalTipi = (crmData.islem || '').includes('WhatsApp') ? 'whatsapp' : 'telefon';
-    const kaynakBilgi = KAYNAK_ETIKETLERI[crmData.kaynak];
-    // YENİ (QR TAKİP): QR izi varsa ziyaretçi "QR Ziyaretçisi" olarak açılır
+    const kaynakGecerliMi = REKLAM_KAYNAGI_DEGERLERI.includes(crmData.kaynak);
+    const kaynakBilgi = kaynakGecerliMi ? KAYNAK_ETIKETLERI[crmData.kaynak] : undefined;
+    const kaynakOdemeliReklamMi = kaynakGecerliMi && PAID_ADS_DEGERLERI.includes(crmData.kaynak);
+    // YENİ (QR TAKİP): QR izi varsa ziyaretçi "QR Ziyaretçisi" olarak açılır —
+    // ödemeli bir reklam tıklaması DEĞİLSE QR izi kazanır (direkt/organik/google
+    // anasayfa-altsayfa/diğer site gibi "zayıf" kategorilerin üzerine yazar).
     const qrIzi = qrIziniCoz(crmData, req);
-    const musteriAdi = kaynakBilgi ? kaynakBilgi.ad : (qrIzi ? `QR Ziyaretçisi (${qrIzi.qrKodu})` : 'Organik Ziyaretçi');
+    const qrKazaniyorMu = !!qrIzi && !kaynakOdemeliReklamMi;
+    const musteriAdi = qrKazaniyorMu ? `QR Ziyaretçisi (${qrIzi.qrKodu})` : (kaynakBilgi ? kaynakBilgi.ad : 'Direkt Giriş Ziyaretçisi');
 
     const db = getDb();
     const ref = db
@@ -178,10 +205,16 @@ export default async function handler(req, res) {
       hesapId: site,
       hizmetTipi,
       durum: 'Yeni',
-      sonMesaj: `${siteEtiket} sitesinden ${kaynakBilgi ? kaynakBilgi.reklamMetni : (qrIzi ? `QR (${qrIzi.qrKodu}) üzerinden ` : '')}tıklama geldi`,
+      sonMesaj: `${siteEtiket} sitesinden ${qrKazaniyorMu ? `QR (${qrIzi.qrKodu}) üzerinden ` : (kaynakBilgi ? kaynakBilgi.reklamMetni : '')}tıklama geldi`,
       // submit-lead.js ile AYNI alan adı — Satis.jsx artık Ads/Organik
       // sayımını metin eşleştirme yerine doğrudan bu alandan yapıyor.
-      reklamKaynagi: kaynakBilgi ? crmData.kaynak : (qrIzi ? 'qr' : 'organik'),
+      reklamKaynagi: qrKazaniyorMu ? 'qr' : (kaynakGecerliMi ? crmData.kaynak : 'direkt_giris'),
+      // "google_anasayfa"/"google_altsayfa"/"diger_site" kategorilerinde hangi
+      // sayfaya düşüldüğü ve (varsa) hangi dış sitenin yönlendirdiği —
+      // site-tiklama-takip-*.txt bunu document.referrer + location.pathname'den
+      // hesaplayıp gönderiyor. Boşsa CRM tarafında hiç gösterilmez.
+      inisSayfasi: String(crmData.inisSayfasi || '').trim(),
+      digerSiteAdi: String(crmData.digerSiteAdi || '').trim(),
       // YENİ (QR TAKİP): iz alanları — Satis.jsx qrKodu ile kampanyaya bağlar
       ...(qrIzi ? { qrKodu: qrIzi.qrKodu, utmSource: qrIzi.utmSource, utmMedium: qrIzi.utmMedium, utmCampaign: qrIzi.utmCampaign, sayfaUrl: qrIzi.sayfaUrl, qrIziZamani: qrIzi.qrIziZamani } : {}),
       // Bu alan sayesinde Satis.jsx (istenirse) gerçek isim/telefon verilmiş
