@@ -5012,6 +5012,17 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const kategoriDagilimi = (tip) => {
       const harita = {};
       gecerli.filter(i => i.tip === tip).forEach(i => {
+        // YENİ (kullanıcı talebi): KART EKSTRESİ — tek kalem gider, raporda
+        // ekstredeki kategori dağılımına (Reklam, Vergi, Araç…) AÇILIR.
+        // Böylece "para nereye gidiyor?" sorusunda kart harcamaları da kategori
+        // kategori görünür; toplam tutar değişmez (dağılımın toplamı = kalem).
+        if (i.kartEkstresi && i.kategoriDagilimi && typeof i.kategoriDagilimi === 'object') {
+          Object.entries(i.kategoriDagilimi).forEach(([kat, tutar]) => {
+            const ad = !kat || kat.toLocaleLowerCase('tr-TR') === 'diğer' ? 'Kategorisiz / Diğer' : kat;
+            harita[ad] = (harita[ad] || 0) + (parseFloat(tutar) || 0);
+          });
+          return;
+        }
         const ham = (i.kategori || '').trim();
         // Kategorisiz / Diğer ayrı toplanır — "nereye gitti bilinmiyor" görünür olsun
         const ad = !ham || ham.toLocaleLowerCase('tr-TR') === 'diğer' ? 'Kategorisiz / Diğer' : ham;
@@ -6713,6 +6724,10 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [mevcutBorclularAcik, setMevcutBorclularAcik] = useState(false);
     // YENİ (kullanıcı talebi): Defter Denetim paneli açık/kapalı
     const [denetimAcik, setDenetimAcik] = useState(false);
+    // YENİ (kullanıcı talebi): Kredi kartı ekstresi — yükleme penceresi, görüntüleme penceresi, öğrenilen kurallar
+    const [ekstreYukleAcik, setEkstreYukleAcik] = useState(false);
+    const [ekstreGorIslem, setEkstreGorIslem] = useState(null);
+    const { kurallar: ekstreKurallari, ogren: ekstreOgren } = useEkstreOgrenme(true);
     // YENİ (kullanıcı talebi): Dekont Eşleştir paneli açık/kapalı
     const [dekontAcik, setDekontAcik] = useState(false);
     // YENİ (kullanıcı talebi): "Tüm Zamanları Göster" — ay filtresi kapatılır,
@@ -10670,6 +10685,10 @@ silinmeTarihi: new Date().toISOString()`}</pre>
             <button onClick={() => setSeciliDefterId(null)} className="flex items-center gap-1 text-white/80 hover:text-white font-bold text-xs sm:text-sm transition"><ChevronLeft className="w-4 h-4" /> Defterler</button>
             <div className="flex items-center gap-1.5">
               {/* YENİ (kullanıcı talebi): Bakiye farkı araştırma — Denetim paneli */}
+              {/* YENİ (kullanıcı talebi): KREDİ KARTI EKSTRESİ YÜKLE — yalnızca masaüstünde görünür (hidden md:flex) */}
+              {!['Ödemeler', 'Kredi', 'Borçlu'].includes(seciliDefter.tur) && (
+                <button onClick={() => setEkstreYukleAcik(true)} className="hidden md:flex px-2 py-1.5 rounded-lg transition text-[10px] font-black items-center gap-1 bg-amber-400 text-black hover:bg-amber-300" title="Kredi kartı ekstresini (PDF) yükle: tek kalem gider + kategori dağılımı"><CreditCard className="w-3.5 h-3.5" /> Ekstre Yükle</button>
+              )}
               {/* YENİ (kullanıcı talebi): Banka dekontu ile sistem kayıtlarını eşleştir */}
               {!['Ödemeler', 'Kredi', 'Borçlu'].includes(seciliDefter.tur) && (
                 <button onClick={() => setDekontAcik(v => !v)} className={`px-2 py-1.5 rounded-lg transition text-[10px] font-black flex items-center gap-1 ${dekontAcik ? 'bg-sky-400 text-black' : 'bg-white/10 hover:bg-white/20'}`} title="Banka dekontunu yükleyip sistem kayıtlarıyla eşleştir"><ClipboardCheck className="w-3.5 h-3.5" /> Dekont Eşleştir</button>
@@ -12117,6 +12136,15 @@ silinmeTarihi: new Date().toISOString()`}</pre>
             modülünden oluşur. Kayıtlar Firestore'da aynen durur; ciro ve
             bakiye hesapları etkilenmez, yalnızca görünüm kaldırıldı. */}
         {seciliDefter.tur !== 'Ödemeler' && seciliDefter.tur !== 'Kredi' && seciliDefter.tur !== 'Borçlu' && (<>
+        {/* YENİ (kullanıcı talebi): KREDİ KARTI EKSTRESİ pencereleri */}
+        {ekstreYukleAcik && (
+          <KartEkstreYukleModal defter={seciliDefter} kategoriler={kategoriSecenekleri} kurallar={ekstreKurallari}
+            onOgren={(anahtar, kategori) => ekstreOgren(anahtar, kategori, currentUser?.fullName)} currentUser={currentUser} addSystemLog={addSystemLog} onKapat={() => setEkstreYukleAcik(false)} />
+        )}
+        {ekstreGorIslem && (
+          <KartEkstreGorModal islem={ekstreGorIslem} kategoriler={kategoriSecenekleri} kurallar={ekstreKurallari}
+            onOgren={(anahtar, kategori) => ekstreOgren(anahtar, kategori, currentUser?.fullName)} currentUser={currentUser} onKapat={() => setEkstreGorIslem(null)} />
+        )}
         {/* YENİ (kullanıcı talebi): DEKONT EŞLEŞTİR PANELİ — banka ekstresi ↔ sistem */}
         {dekontAcik && (
           <DekontEslestirPaneli
@@ -12435,6 +12463,12 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                         tıklanabilir olsaydı aynı bilgi iki yerde çıkardı. */}
                     {(i.etiketler || []).map(e => <span key={e} className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">#{e}</span>)}
                     {i.kaynak && i.kaynak !== 'Manuel' && <span className="text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-50 text-purple-600 border border-purple-100">{i.kaynak}</span>}
+                    {/* YENİ (kullanıcı talebi): kart ekstresi kaydı — kalem sayısı ve "Ekstreyi Gör" */}
+                    {i.kartEkstresi && (
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setEkstreGorIslem(i); }} className="text-[9px] sm:text-[10px] font-black px-2 py-0.5 rounded bg-amber-400 text-black hover:bg-amber-300 flex items-center gap-1" title="Ekstredeki harcamaları tek tek gör">
+                        <CreditCard className="w-3 h-3" /> EKSTRE • {i.kalemSayisi || 0} kalem — Ekstreyi Gör
+                      </button>
+                    )}
                   </div>
                   {/* DEĞİŞİKLİK: Müşteri adı artık AÇIKLAMA METNİNİN İÇİNDE değil.
                       Açıklama düz metin basılır; müşteri ve araç altta ayrı ROZET
@@ -15069,3 +15103,366 @@ silinmeTarihi: new Date().toISOString()`}</pre>
       </div>
     );
   };
+
+// ############################################################################
+// ############################################################################
+// YENİ BÖLÜM (kullanıcı talebi): KREDİ KARTI EKSTRESİ YÜKLE
+// ----------------------------------------------------------------------------
+// AMAÇ: Kredi kartı ödemesi eskiden deftere TEK kalem gider olarak giriliyor,
+// paranın nereye harcandığı görünmüyordu. Artık banka ekstresi (PDF) yüklenir;
+//   • Deftere yine TEK kalem gider yazılır ("Albaraka Kredi Kartı — Eylül 2026",
+//     tutar = ekstredeki HARCAMA TOPLAMI) → bakiye mantığı DEĞİŞMEZ.
+//   • Ekstredeki her harcama satırı ayrı bir belgede tutulur, her satır mevcut
+//     kategorilerle otomatik etiketlenir (Reklam, Vergi, Araç, Fatura, Ofis…);
+//     eşleşmeyen "Diğer" olur.
+//   • ÖĞRENME: bir satırın kategorisini elle değiştirince o işyeri (anahtar)
+//     için kural kaydedilir; sonraki ay aynı işyeri o kategoriyle gelir.
+//   • Gider kaydının üzerinde kategori dağılımı (kategoriDagilimi) tutulur;
+//     Analiz & İstatistik raporu bu dağılımı açarak "para nereye gidiyor?"
+//     sorusuna kart harcamalarını da kategori kategori yansıtır.
+//   • "Ekstreyi Gör" ile satırlar tek tek görülür, kategoriler düzenlenir.
+//   • PDF tarayıcıda okunur (pdf.js CDN'den yüklenir), sunucuya gönderilmez.
+//   • Düğme yalnızca MASAÜSTÜNDE görünür (hidden md:flex).
+//
+// VERİ: artifacts/{appId}/public/data/
+//   • kartEkstreleri/{ekstreId}      → { defterId, banka, kesimTarihi, sonOdeme,
+//                                       harcamaToplami, kalemler:[...], ... }
+//   • settings/kartEkstreKurallari   → { kurallar: { "<işyeri anahtarı>": "Kategori" } }
+//   • defterIslemleri (tek gider)    → { kartEkstresi:true, ekstreId, kategoriDagilimi }
+// ############################################################################
+const EKSTRE_PDFJS_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+const EKSTRE_PDFJS_WORKER = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+const ekstrePdfJsYukle = () => new Promise((res, rej) => {
+  if (window.pdfjsLib) return res(window.pdfjsLib);
+  const sc = document.createElement('script'); sc.src = EKSTRE_PDFJS_CDN; sc.async = true;
+  sc.onload = () => { if (!window.pdfjsLib) return rej(new Error('pdf.js yüklenemedi')); window.pdfjsLib.GlobalWorkerOptions.workerSrc = EKSTRE_PDFJS_WORKER; res(window.pdfjsLib); };
+  sc.onerror = () => rej(new Error('pdf.js yüklenemedi'));
+  document.head.appendChild(sc);
+});
+
+// ---------------------------------------------------------------- AYRIŞTIRICI
+const EK_AYLAR = { ocak: 1, şubat: 2, subat: 2, mart: 3, nisan: 4, mayıs: 5, mayis: 5, haziran: 6, temmuz: 7, ağustos: 8, agustos: 8, eylül: 9, eylul: 9, ekim: 10, kasım: 11, kasim: 11, aralık: 12, aralik: 12 };
+const ekTarihMi = (s) => { const m = String(s).trim().match(/^(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]+)\s+(\d{4})$/); if (!m) return null; const ay = EK_AYLAR[m[2].toLocaleLowerCase('tr-TR')]; return ay ? `${m[3]}-${String(ay).padStart(2, '0')}-${m[1].padStart(2, '0')}` : null; };
+const ekTutarMi = (s) => /^[+-]?\d{1,3}(\.\d{3})*,\d{2}$/.test(String(s).trim());
+const ekTutarSayi = (s) => parseFloat(String(s).replace(/\./g, '').replace(',', '.'));
+const ekTaksitMi = (s) => /^\d+\/\d/.test(String(s).trim());
+
+// pdf.js metin öğelerinden satırlar (y ±2 gruplama) → kalemler + meta.
+// Albaraka ekstresi 180° döndürülmüş koordinatla gelebilir; okuma yönü başlık
+// satırı ile işlem satırlarının konumundan otomatik bulunur.
+export const kartEkstresiAyristir = (sayfalar) => {
+  const kalemler = []; const meta = {};
+  let kartSahibi = '';
+  for (const sayfa of sayfalar) {
+    const satirlar = sayfa.satirlar;
+    const baslik = satirlar.find(s => s.parcalar.some(p => /İşlem Tarihi/i.test(p.s)));
+    const islemler = satirlar.filter(s => s.parcalar.some(p => ekTarihMi(p.s)));
+    const sira = [...satirlar];
+    if (baslik && islemler.length) { const medyan = islemler[Math.floor(islemler.length / 2)].y; sira.sort((a, b) => (medyan > baslik.y) ? a.y - b.y : b.y - a.y); }
+    else sira.sort((a, b) => b.y - a.y);
+    let son = null;
+    for (const s of sira) {
+      const metin = s.parcalar.map(p => p.s).join(' ');
+      let m;
+      if (!/Bir Sonraki/i.test(metin) && (m = metin.match(/Hesap Kesim Tarihi\s*:?\s*(\d{1,2} \S+ \d{4})/))) meta.kesimTarihi = ekTarihMi(m[1]);
+      if (!/Bir Sonraki/i.test(metin) && (m = metin.match(/Son Ödeme Tarihi\s*:?\s*(\d{1,2} \S+ \d{4})/))) meta.sonOdeme = ekTarihMi(m[1]);
+      if ((m = metin.match(/Dönem Borcu \(TL\)\s*:?\s*([\d.]+,\d{2})/))) meta.donemBorcu = ekTutarSayi(m[1]);
+      if ((m = metin.match(/Kart Numarası\s*:?\s*(\S+)/))) meta.kartNo = m[1];
+      if ((m = metin.match(/Devir Bakiyesi\s*([\d.]+,\d{2})|([\d.]+,\d{2})\s*Devir Bakiyesi/))) meta.devirBakiye = ekTutarSayi(m[1] || m[2]);
+      if (/albaraka/i.test(metin) && !meta.banka) meta.banka = 'Albaraka';
+      if (/HARCAMALARI$/.test(metin.trim())) { kartSahibi = metin.replace(/HARCAMALARI$/, '').replace(/^\S+\*+\d+\s*/, '').trim(); continue; }
+      if (/HARCAMA TOPLAMI/.test(metin)) { const t = s.parcalar.map(p => p.s).filter(ekTutarMi).map(ekTutarSayi); if (t.length) meta.harcamaToplami = Math.max(meta.harcamaToplami || 0, ...t); son = null; continue; }
+      const tarihP = s.parcalar.find(p => ekTarihMi(p.s));
+      if (tarihP) {
+        const tarih = ekTarihMi(tarihP.s);
+        const tutarP = s.parcalar.filter(p => ekTutarMi(p.s) && !ekTaksitMi(p.s));
+        const tutarStr = tutarP.length ? tutarP[0].s.trim() : null;
+        if (tutarStr && tutarStr.startsWith('+')) { son = null; continue; } // ödeme satırı → harcama değil
+        const ters = tutarP.length ? tarihP.x > tutarP[0].x : tarihP.x > (s.parcalar.find(p => p !== tarihP)?.x ?? 0);
+        const parcalar = [...s.parcalar].sort((a, b) => ters ? b.x - a.x : a.x - b.x);
+        const aciklama = parcalar.filter(p => p !== tarihP && !ekTutarMi(p.s) && !ekTaksitMi(p.s) && !/^\d+$/.test(p.s.trim())).map(p => p.s.trim()).join(' ').replace(/\s+/g, ' ').trim();
+        const taksit = s.parcalar.find(p => ekTaksitMi(p.s))?.s || '';
+        son = { tarih, aciklama, tutar: tutarStr ? ekTutarSayi(tutarStr) : null, taksit, kartSahibi, notlar: [] };
+        kalemler.push(son);
+      } else if (son) {
+        if (son.tutar == null) { const tp = s.parcalar.find(p => ekTutarMi(p.s) && !ekTaksitMi(p.s)); if (tp) { son.tutar = ekTutarSayi(tp.s); const kalan = s.parcalar.filter(p => p !== tp && !/^\d+$/.test(p.s.trim())).map(p => p.s.trim()).join(' ').trim(); if (kalan && !/USD Karşılığı|Orijinal İşlem/i.test(kalan)) son.aciklama = (son.aciklama + ' ' + kalan).trim(); continue; } }
+        if (/USD Karşılığı|Orijinal İşlem Tutarı|TAKSİTİ/i.test(metin)) son.notlar.push(metin.trim());
+        else if (!/^\d/.test(metin.trim()) && metin.trim().length < 60 && !/Tutar\(TL\)|Açıklama/.test(metin)) son.aciklama = (son.aciklama + ' ' + metin.trim()).trim();
+        else son = null;
+      }
+    }
+  }
+  return { kalemler: kalemler.filter(k => k.tutar != null && k.tutar > 0), meta };
+};
+
+// PDF dosyası → sayfalar (pdf.js) → ayrıştır
+export const kartEkstresiPdfOku = async (dosya) => {
+  const pdfjs = await ekstrePdfJsYukle();
+  const veri = new Uint8Array(await dosya.arrayBuffer());
+  const belge = await pdfjs.getDocument({ data: veri }).promise;
+  const sayfalar = [];
+  for (let p = 1; p <= belge.numPages; p++) {
+    const sayfa = await belge.getPage(p); const tc = await sayfa.getTextContent();
+    const ogeler = tc.items.filter(i => i.str && i.str.trim()).map(i => ({ s: i.str, x: i.transform[4], y: Math.round(i.transform[5]) }));
+    const gruplar = [];
+    for (const o of ogeler) { const g = gruplar.find(g => Math.abs(g.y - o.y) <= 2); if (g) g.parcalar.push(o); else gruplar.push({ y: o.y, parcalar: [o] }); }
+    sayfalar.push({ satirlar: gruplar });
+  }
+  return kartEkstresiAyristir(sayfalar);
+};
+
+// ---------------------------------------------------------------- KATEGORİ MOTORU
+// İşyeri anahtarı: şehir/ülke kodları, plaka, reklam hesap no'ları temizlenir → ilk 3 sözcük
+export const ekstreIsyeriAnahtari = (aciklama) => {
+  let a = String(aciklama || '').toLocaleUpperCase('tr-TR').replace(/İ/g, 'I').replace(/Ş/g, 'S').replace(/Ğ/g, 'G').replace(/Ü/g, 'U').replace(/Ö/g, 'O').replace(/Ç/g, 'C');
+  a = a.replace(/\b(ISTANBUL|ADANA|ANKARA|IZMIR|BURSA|KOCAELI|DUBLIN|CORK|IRIR|TR|TU|TRIR|CAUS|NYUS|DEUS|SAGGART|WILMINGTON|BROOKLYN|COVINA|TGIRNE|SAN FRANCISCO|LONDON|GBGB|USUS)\b/g, ' ');
+  a = a.replace(/\b\d{2}[A-Z]{2,3}\d{2,4}\b/g, ' ');
+  a = a.replace(/\*[A-Z0-9]{6,}\b/g, '*');
+  a = a.replace(/GOOGLE\*ADS\d+/g, 'GOOGLE*ADS');
+  a = a.replace(/\d{3}\*{3}\d{4}/g, '');
+  a = a.replace(/[^A-Z0-9*\/. ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return a.split(' ').filter(t => !/^\d+$/.test(t)).slice(0, 3).join(' ');
+};
+// Varsayılan kurallar — CRM'deki mevcut kategori adlarıyla (Reklam, Vergi, Araç, Fatura, Muhasebe, Ofis, Malzeme, Yemek, Avukat, Asansör Kiralama)
+export const EKSTRE_VARSAYILAN_KURALLAR = [
+  [/GOOGLE\*ADS|FACEBK|FB\.ME|META PLATFORMS|SAHIBINDEN|INSTAGRAM|TIKTOK|LINKEDIN/, 'Reklam'],
+  [/TASIT V\.|TASIT VERGI|NAKIL VASITALARI|VERGI DAIRESI|V\.D\.|VERASET|HARCLA|\bSGK\b|\bGIB\b|BELEDIYE/, 'Vergi'],
+  [/\bHGS\b|\bOGS\b|YAKIT|PETROL|OPET|SHELL|\bBP\b|TOTAL|AYTEMIZ|LASTIK|OTO |SIGORTA|MUAYENE|TUVTURK|OTOPARK|ISPARK/, 'Araç'],
+  [/S\/SET|MODOGLU|ENERJI|ELEKTRIK|ISKI|IGDAS|DOGALGAZ|TURKCELL|VODAFONE|TURK TELEKOM|SUPERONLINE|FATURA|\bSU\b/, 'Fatura'],
+  [/PARASUT|MUHASEBE|MALI MUSAVIR|NOTER/, 'Muhasebe'],
+  [/GOOGLE\*WORKSPACE|GOOGLE\*CLOUD|APPLE\.COM|ADOBE|VERCEL|ANTHROPIC|OPENAI|FIGENSOFT|USEFIXIE|SER ACQUISITION|MICROSOFT|CANVA|ZOOM|NOTION|OFIS|OFFICE|KIRTASIYE|ATOM 1|TEKNOSA|MEDIAMARKT|VATAN BILG/, 'Ofis'],
+  [/HEPSIBURADA|TRENDYOL|AMAZON|\bN11\b|ANPA|GROSS|MIGROS|CARREFOUR|\bBIM\b|A101|\bSOK\b|UCUZLUK|PAZARI|CARSI|MARKET|KOCTAS|BAUHAUS|IKEA|METRO/, 'Malzeme'],
+  [/RESTAURANT|RESTORAN|LOKANTA|KEBAP|YEMEK|CAFE|KAHVE|STARBUCKS|BURGER|PIZZA|DONER|BOREK|SIMIT|YEMEKSEPETI|GETIR|TRENDYOL YEMEK/, 'Yemek'],
+  [/AVUKAT|HUKUK|\bICRA\b|BARO/, 'Avukat'],
+  [/ASANSOR/, 'Asansör Kiralama'],
+];
+export const ekstreKategorile = (aciklama, ogrenilen = {}) => {
+  const anahtar = ekstreIsyeriAnahtari(aciklama);
+  if (anahtar && ogrenilen[anahtar]) return { kategori: ogrenilen[anahtar], kaynak: 'ogrenilen', anahtar };
+  const A = String(aciklama || '').toLocaleUpperCase('tr-TR').replace(/İ/g, 'I').replace(/Ş/g, 'S').replace(/Ğ/g, 'G').replace(/Ü/g, 'U').replace(/Ö/g, 'O').replace(/Ç/g, 'C');
+  for (const [re, kat] of EKSTRE_VARSAYILAN_KURALLAR) if (re.test(A)) return { kategori: kat, kaynak: 'kural', anahtar };
+  return { kategori: 'Diğer', kaynak: 'yok', anahtar };
+};
+const ekstreDagilimHesapla = (kalemler) => kalemler.reduce((m, k) => { const c = k.kategori || 'Diğer'; m[c] = Math.round(((m[c] || 0) + (parseFloat(k.tutar) || 0)) * 100) / 100; return m; }, {});
+const ekstreKuralRef = () => doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'kartEkstreKurallari');
+const ekstreRef = (id) => doc(db, 'artifacts', appId, 'public', 'data', 'kartEkstreleri', id);
+const ekstreAyEtiketi = (t) => { const [y, m] = String(t || '').split('-').map(Number); const A = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık']; return m ? `${A[m - 1]} ${y}` : ''; };
+
+// Öğrenilen kurallar (canlı)
+export const useEkstreOgrenme = (aktif = true) => {
+  const [kurallar, setKurallar] = useState({});
+  useEffect(() => {
+    if (!aktif) return;
+    const unsub = onSnapshot(ekstreKuralRef(), snap => setKurallar(snap.exists() ? (snap.data().kurallar || {}) : {}), () => setKurallar({}));
+    return () => unsub();
+  }, [aktif]);
+  const ogren = async (anahtar, kategori, kullanici) => {
+    if (!anahtar) return;
+    try { await setDoc(ekstreKuralRef(), { kurallar: { [anahtar]: kategori }, guncelleme: new Date().toISOString(), guncelleyen: kullanici || '' }, { merge: true }); }
+    catch (e) { console.error('Kural kaydedilemedi:', e); }
+  };
+  return { kurallar, ogren };
+};
+
+// ---------------------------------------------------------------- KALEM LİSTESİ (ortak)
+const EkstreKalemListesi = ({ kalemler, kategoriler, onKategori, salt = false }) => {
+  const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const trh = (t) => (t || '').split('-').reverse().join('.');
+  const [ara, setAra] = useState('');
+  const [katFiltre, setKatFiltre] = useState('Tümü');
+  const dag = ekstreDagilimHesapla(kalemler);
+  const toplam = kalemler.reduce((t, k) => t + (parseFloat(k.tutar) || 0), 0);
+  const a = ara.trim().toLocaleLowerCase('tr-TR');
+  const gorunen = kalemler.map((k, i) => ({ ...k, _i: i })).filter(k => (katFiltre === 'Tümü' || (k.kategori || 'Diğer') === katFiltre) && (!a || (k.aciklama || '').toLocaleLowerCase('tr-TR').includes(a) || String(k.tutar).includes(a)));
+  const KAT_RENK = ['bg-red-500', 'bg-blue-500', 'bg-emerald-500', 'bg-amber-500', 'bg-purple-500', 'bg-pink-500', 'bg-cyan-500', 'bg-orange-500', 'bg-lime-500', 'bg-indigo-500'];
+  const katListe = Object.entries(dag).sort((x, y) => y[1] - x[1]);
+  return (
+    <div className="space-y-3">
+      {/* KATEGORİ DAĞILIMI */}
+      <div className="bg-neutral-50 border border-neutral-200 rounded-xl p-3">
+        <div className="flex h-3 rounded-full overflow-hidden mb-2">
+          {katListe.map(([k, v], i) => <div key={k} className={KAT_RENK[i % KAT_RENK.length]} style={{ width: `${toplam ? (v / toplam) * 100 : 0}%` }} title={`${k}: ₺${paraFmt(v)}`}></div>)}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <button type="button" onClick={() => setKatFiltre('Tümü')} className={`px-2 py-1 rounded-lg text-[10px] font-black ${katFiltre === 'Tümü' ? 'bg-black text-white' : 'bg-white border border-neutral-300 text-neutral-700'}`}>Tümü • ₺{paraFmt(toplam)}</button>
+          {katListe.map(([k, v], i) => (
+            <button key={k} type="button" onClick={() => setKatFiltre(katFiltre === k ? 'Tümü' : k)} className={`px-2 py-1 rounded-lg text-[10px] font-black flex items-center gap-1 ${katFiltre === k ? 'bg-black text-white' : 'bg-white border border-neutral-300 text-neutral-700'}`}>
+              <span className={`w-2 h-2 rounded-full ${KAT_RENK[i % KAT_RENK.length]}`}></span>{k} • ₺{paraFmt(v)} <span className="opacity-60">%{toplam ? Math.round((v / toplam) * 100) : 0}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="relative"><Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" /><input value={ara} onChange={e => setAra(e.target.value)} placeholder="Harcama ara…" className="w-full pl-9 pr-3 py-2 border border-neutral-300 rounded-xl text-sm font-bold" /></div>
+      <div className="space-y-1 max-h-[52vh] overflow-y-auto pr-1">
+        {gorunen.map(k => (
+          <div key={k._i} className={`flex items-center gap-2 p-2 rounded-xl border text-xs ${(k.kategori || 'Diğer') === 'Diğer' ? 'border-amber-300 bg-amber-50/50' : 'border-neutral-200 bg-white'}`}>
+            <span className="text-neutral-500 shrink-0 w-16">{trh(k.tarih)}</span>
+            <div className="flex-1 min-w-0">
+              <div className="font-black text-black truncate" title={k.aciklama}>{k.aciklama}</div>
+              <div className="text-[10px] font-bold text-neutral-400 truncate">{[k.kartSahibi, k.taksit ? `taksit ${k.taksit}` : '', ...(k.notlar || [])].filter(Boolean).join(' • ')}{k.kaynak === 'ogrenilen' ? ' • öğrenilmiş kural' : k.kaynak === 'yok' ? ' • eşleşmedi' : ''}</div>
+            </div>
+            <span className="font-black tabular-nums text-red-700 shrink-0">₺{paraFmt(k.tutar)}</span>
+            {salt ? <span className="text-[10px] font-black bg-neutral-100 px-2 py-1 rounded-lg shrink-0">{k.kategori || 'Diğer'}</span> : (
+              <select value={k.kategori || 'Diğer'} onChange={e => onKategori(k._i, e.target.value)} className={`text-[10px] font-black border rounded-lg px-1.5 py-1 bg-white shrink-0 ${(k.kategori || 'Diğer') === 'Diğer' ? 'border-amber-400 text-amber-800' : 'border-neutral-300'}`} title="Kategori değiştir — bu işyeri için öğrenilir">
+                {[...new Set([...(kategoriler || []), 'Diğer', k.kategori].filter(Boolean))].map(c => <option key={c}>{c}</option>)}
+              </select>
+            )}
+          </div>
+        ))}
+        {gorunen.length === 0 && <div className="text-center text-xs font-bold text-neutral-400 py-6">Kayıt yok.</div>}
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- EKSTRE YÜKLE PENCERESİ
+export const KartEkstreYukleModal = ({ defter, kategoriler = [], kurallar = {}, onOgren, currentUser, addSystemLog, onKapat }) => {
+  const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const [okunuyor, setOkunuyor] = useState(false);
+  const [hata, setHata] = useState('');
+  const [dosyaAdi, setDosyaAdi] = useState('');
+  const [meta, setMeta] = useState(null);
+  const [kalemler, setKalemler] = useState([]);
+  const [tarih, setTarih] = useState('');
+  const [kaydediliyor, setKaydediliyor] = useState(false);
+  const toplam = kalemler.reduce((t, k) => t + (parseFloat(k.tutar) || 0), 0);
+
+  const dosyaSec = async (e) => {
+    const f = e.target.files?.[0]; if (!f) return;
+    setHata(''); setOkunuyor(true); setDosyaAdi(f.name); setKalemler([]); setMeta(null);
+    try {
+      const { kalemler: k, meta: m } = await kartEkstresiPdfOku(f);
+      if (!k.length) throw new Error('Ekstrede harcama satırı bulunamadı. Bankanın PDF ekstresini (metin içeren) yüklediğinizden emin olun.');
+      setKalemler(k.map(x => ({ ...x, ...ekstreKategorile(x.aciklama, kurallar) })));
+      setMeta(m); setTarih(m.kesimTarihi || new Date().toISOString().slice(0, 10));
+    } catch (err) { setHata(err.message || 'PDF okunamadı.'); }
+    finally { setOkunuyor(false); e.target.value = ''; }
+  };
+  const kategoriDegistir = (i, kategori) => {
+    setKalemler(prev => prev.map((k, ix) => ix === i ? { ...k, kategori, kaynak: 'elle' } : k));
+    // ÖĞRENME: aynı işyeri anahtarına sahip diğer satırlar da bu ekstrede güncellenir + kural kaydedilir
+    const anahtar = kalemler[i]?.anahtar;
+    if (anahtar) { setKalemler(prev => prev.map(k => k.anahtar === anahtar ? { ...k, kategori, kaynak: 'ogrenilen' } : k)); onOgren?.(anahtar, kategori); }
+  };
+  const kaydet = async () => {
+    if (!kalemler.length) return;
+    if (!tarih) { alert('Deftere yazılacak tarihi seçin.'); return; }
+    const ekstreId = `${defter.id}_${(meta?.banka || 'kart').toLowerCase()}_${meta?.kesimTarihi || tarih}`.replace(/[^A-Za-z0-9_-]/g, '_');
+    const harcamaToplami = meta?.harcamaToplami && Math.abs(meta.harcamaToplami - toplam) < 1 ? meta.harcamaToplami : toplam;
+    if (meta?.harcamaToplami && Math.abs(meta.harcamaToplami - toplam) >= 1 && !window.confirm(`Okunan satırların toplamı (₺${paraFmt(toplam)}) ekstredeki HARCAMA TOPLAMI'ndan (₺${paraFmt(meta.harcamaToplami)}) farklı. Yine de kaydedilsin mi?`)) return;
+    setKaydediliyor(true);
+    try {
+      const dagilim = ekstreDagilimHesapla(kalemler);
+      const baslik = `${meta?.banka || 'Kredi'} Kredi Kartı Ekstresi — ${ekstreAyEtiketi(meta?.kesimTarihi || tarih)}${meta?.kartNo ? ` (${meta.kartNo.slice(-4)})` : ''}`;
+      // 1) Ekstre belgesi (satırlar) — aynı dönem yeniden yüklenirse üzerine yazılır
+      await setDoc(ekstreRef(ekstreId), {
+        defterId: defter.id, defterAd: defter.ad, banka: meta?.banka || '', kartNo: meta?.kartNo || '', kesimTarihi: meta?.kesimTarihi || '', sonOdeme: meta?.sonOdeme || '',
+        donemBorcu: meta?.donemBorcu ?? null, devirBakiye: meta?.devirBakiye ?? null, harcamaToplami, kalemSayisi: kalemler.length, kategoriDagilimi: dagilim,
+        kalemler: kalemler.map(k => ({ tarih: k.tarih, aciklama: k.aciklama, tutar: k.tutar, taksit: k.taksit || '', kartSahibi: k.kartSahibi || '', notlar: k.notlar || [], kategori: k.kategori || 'Diğer', anahtar: k.anahtar || '', kaynak: k.kaynak || '' })),
+        dosyaAdi, yuklemeTarihi: new Date().toISOString(), yukleyen: currentUser?.fullName || '',
+      });
+      // 2) Deftere TEK gider — sabit kimlik (aynı ekstre iki kez yüklenirse ikinci kayıt oluşmaz)
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', `ekstre_${ekstreId}`), {
+        defterId: defter.id, tip: 'cikis', tutar: harcamaToplami, tarih, kategori: 'Kredi Kartı', etiketler: ['Kredi Kartı Ekstresi'],
+        aciklama: baslik, odemeYontemi: 'Kredi Kartı', kaynak: 'Kart Ekstresi', kartEkstresi: true, ekstreId, kategoriDagilimi: dagilim, kalemSayisi: kalemler.length,
+        createdAt: new Date().toISOString(), by: currentUser?.fullName || 'Sistem',
+      }, { merge: true });
+      addSystemLog?.('Kart Ekstresi Yüklendi', `${defter.ad}: ${baslik} — ${kalemler.length} harcama, ₺${paraFmt(harcamaToplami)} tek kalem gider yazıldı.`);
+      onKapat();
+    } catch (err) { alert('Kaydedilemedi: ' + err.message); }
+    finally { setKaydediliyor(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onKapat}>
+      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl">
+        <div className="bg-black text-white p-4 rounded-t-2xl flex items-center justify-between">
+          <div>
+            <h3 className="font-black flex items-center gap-2"><CreditCard className="w-5 h-5 text-amber-400" /> Kredi Kartı Ekstresi Yükle</h3>
+            <p className="text-[11px] font-bold text-white/60 mt-0.5">{defter?.ad} • Deftere tek kalem gider yazılır, harcamalar kategori kategori saklanır.</p>
+          </div>
+          <button type="button" onClick={onKapat} className="p-1.5 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-4 space-y-3 overflow-y-auto">
+          <label className="flex items-center gap-3 bg-amber-50 border-2 border-dashed border-amber-300 hover:border-amber-500 rounded-xl p-3 cursor-pointer">
+            <Upload className="w-5 h-5 text-amber-600 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-black text-black">{okunuyor ? 'PDF okunuyor…' : dosyaAdi || 'Ekstre PDF dosyasını seç (Albaraka "Kredi Kartı Ekstreniz")'}</div>
+              <div className="text-[10px] font-bold text-neutral-500">Dosya tarayıcıda okunur, sunucuya gönderilmez. Ödeme satırları (+) harcama sayılmaz.</div>
+            </div>
+            <input type="file" accept="application/pdf,.pdf" className="hidden" onChange={dosyaSec} disabled={okunuyor} />
+          </label>
+          {hata && <p className="text-xs font-black text-red-700 bg-red-50 border border-red-200 rounded-xl p-2.5 flex items-center gap-2"><AlertTriangle className="w-4 h-4" /> {hata}</p>}
+          {meta && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-center">
+                {[['Banka', meta.banka || '—'], ['Hesap Kesim', (meta.kesimTarihi || '').split('-').reverse().join('.')], ['Son Ödeme', (meta.sonOdeme || '').split('-').reverse().join('.')], ['Harcama (okunan)', `₺${paraFmt(toplam)}`], ['Ekstre Toplamı', meta.harcamaToplami != null ? `₺${paraFmt(meta.harcamaToplami)}` : '—']]
+                  .map(([e, v]) => <div key={e} className={`rounded-xl p-2 border ${e === 'Harcama (okunan)' ? 'bg-red-50 border-red-200' : 'bg-neutral-50 border-neutral-200'}`}><p className="text-[9px] font-black uppercase text-neutral-500">{e}</p><p className="text-sm font-black tabular-nums">{v}</p></div>)}
+              </div>
+              {meta.harcamaToplami != null && Math.abs(meta.harcamaToplami - toplam) >= 1 && <p className="text-[11px] font-black text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-2"><AlertTriangle className="w-3.5 h-3.5 inline" /> Okunan toplam ile ekstre toplamı arasında ₺{paraFmt(Math.abs(meta.harcamaToplami - toplam))} fark var — bazı satırlar okunamamış olabilir, listeyi kontrol edin.</p>}
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                <label className="text-[10px] font-black uppercase text-neutral-500 shrink-0">Deftere yazılacak tarih</label>
+                <input type="date" value={tarih} onChange={e => setTarih(e.target.value)} className="p-2 border border-neutral-300 rounded-xl text-sm font-bold bg-white" />
+                <span className="text-[10px] font-bold text-neutral-400">Varsayılan: hesap kesim tarihi. Tek kalem gider olarak "{meta.banka || 'Kredi'} Kredi Kartı Ekstresi — {ekstreAyEtiketi(meta.kesimTarihi || tarih)}" yazılır.</span>
+              </div>
+              <p className="text-[11px] font-bold text-neutral-600">Kategoriler otomatik atandı; <b>Diğer</b> kalanları sarı görünür. Bir satırın kategorisini değiştirdiğinizde o işyeri için kural öğrenilir ve bir sonraki ekstrede otomatik uygulanır.</p>
+              <EkstreKalemListesi kalemler={kalemler} kategoriler={kategoriler} onKategori={kategoriDegistir} />
+            </>
+          )}
+        </div>
+        <div className="p-4 border-t border-neutral-200 flex items-center justify-between gap-2">
+          <p className="text-[11px] font-bold text-neutral-500">{kalemler.length ? `${kalemler.length} harcama • ${kalemler.filter(k => (k.kategori || 'Diğer') === 'Diğer').length} tanesi "Diğer"` : ''}</p>
+          <div className="flex gap-2">
+            <button type="button" onClick={onKapat} className="px-4 py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-700 font-black rounded-xl text-sm">Vazgeç</button>
+            <button type="button" onClick={kaydet} disabled={!kalemler.length || kaydediliyor} className="px-5 py-2 bg-red-600 hover:bg-red-700 text-white font-black rounded-xl text-sm flex items-center gap-2 disabled:opacity-50">
+              {kaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />} Deftere Gider Olarak Yaz (₺{paraFmt(toplam)})
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ---------------------------------------------------------------- EKSTREYİ GÖR PENCERESİ
+export const KartEkstreGorModal = ({ islem, kategoriler = [], kurallar = {}, onOgren, currentUser, onKapat }) => {
+  const paraFmt = (n) => (n || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const [ekstre, setEkstre] = useState(undefined);
+  useEffect(() => {
+    if (!islem?.ekstreId) { setEkstre(null); return; }
+    const unsub = onSnapshot(ekstreRef(islem.ekstreId), snap => setEkstre(snap.exists() ? { id: snap.id, ...snap.data() } : null), () => setEkstre(null));
+    return () => unsub();
+  }, [islem?.ekstreId]);
+  const kategoriDegistir = async (i, kategori) => {
+    if (!ekstre) return;
+    const anahtar = ekstre.kalemler[i]?.anahtar;
+    const yeni = ekstre.kalemler.map((k, ix) => (ix === i || (anahtar && k.anahtar === anahtar)) ? { ...k, kategori, kaynak: ix === i ? 'elle' : 'ogrenilen' } : k);
+    const dagilim = ekstreDagilimHesapla(yeni);
+    try {
+      await updateDoc(ekstreRef(ekstre.id), { kalemler: yeni, kategoriDagilimi: dagilim, guncelleme: new Date().toISOString(), guncelleyen: currentUser?.fullName || '' });
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', islem.id), { kategoriDagilimi: dagilim });
+      if (anahtar) onOgren?.(anahtar, kategori);
+    } catch (e) { alert('Güncellenemedi: ' + e.message); }
+  };
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={onKapat}>
+      <div onClick={e => e.stopPropagation()} className="bg-white rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl">
+        <div className="bg-black text-white p-4 rounded-t-2xl flex items-center justify-between">
+          <div className="min-w-0">
+            <h3 className="font-black flex items-center gap-2"><CreditCard className="w-5 h-5 text-amber-400" /> {islem?.aciklama}</h3>
+            {ekstre && <p className="text-[11px] font-bold text-white/60 mt-0.5">Hesap kesim {(ekstre.kesimTarihi || '').split('-').reverse().join('.')} • Son ödeme {(ekstre.sonOdeme || '').split('-').reverse().join('.')} • {ekstre.kalemSayisi} harcama • Toplam ₺{paraFmt(ekstre.harcamaToplami)}{ekstre.donemBorcu ? ` • Dönem borcu ₺${paraFmt(ekstre.donemBorcu)}` : ''}</p>}
+          </div>
+          <button type="button" onClick={onKapat} className="p-1.5 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="p-4 overflow-y-auto">
+          {ekstre === undefined && <div className="text-center py-8"><Loader2 className="w-6 h-6 animate-spin mx-auto text-neutral-400" /></div>}
+          {ekstre === null && <div className="text-center text-sm font-bold text-neutral-400 py-8">Ekstre satırları bulunamadı (belge silinmiş olabilir).</div>}
+          {ekstre && <>
+            <p className="text-[11px] font-bold text-neutral-600 mb-2">Kategori değiştirince hem bu ekstre hem rapor dağılımı güncellenir; işyeri için kural öğrenilir.</p>
+            <EkstreKalemListesi kalemler={ekstre.kalemler || []} kategoriler={kategoriler} onKategori={kategoriDegistir} />
+          </>}
+        </div>
+      </div>
+    </div>
+  );
+};
