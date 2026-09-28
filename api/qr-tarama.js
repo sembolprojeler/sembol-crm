@@ -14,6 +14,7 @@
 // ============================================================================
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { createHash } from 'node:crypto';
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGIN || 'https://www.sembolevdeneve.com,https://www.depoevim.com')
   .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
@@ -41,6 +42,17 @@ function normalizeKod(v) {
     .replace(/İ/g, 'I').replace(/Ş/g, 'S').replace(/Ğ/g, 'G').replace(/Ü/g, 'U').replace(/Ö/g, 'O').replace(/Ç/g, 'C')
     .replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40);
 }
+// Okutan cihazın parmak izi (IP + tarayıcı, SHA-256 özeti — ham IP saklanmaz).
+// submit-lead.js AYNI hesabı yapıp formu bu okutmaya bağlar: tarayıcılar başka
+// alan adına giden isteklerde Referer'ın sorgu dizisini göndermediği için
+// formda UTM izi çoğu zaman kaybolur; parmak izi bu durumda da kamyonu bulur.
+// DİKKAT: submit-lead.js'teki parmakIziHesapla ile BİREBİR aynı kalmalı.
+function parmakIziHesapla(req) {
+  const h = (req && req.headers) || {};
+  const ip = String(h['x-forwarded-for'] || h['x-real-ip'] || '').split(',')[0].trim();
+  if (!ip) return '';
+  return createHash('sha256').update(`${ip}|${String(h['user-agent'] || '')}`).digest('hex').slice(0, 32);
+}
 function bugunYmd() { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 
 export default async function handler(req, res) {
@@ -66,7 +78,7 @@ export default async function handler(req, res) {
     const cihaz = /Android|iPhone|iPad|Mobile/i.test(ua) ? 'mobil' : 'masaüstü';
     const zaman = new Date().toISOString();
     await Promise.all([
-      veri.collection('qrTaramalari').add({ kampanyaId: kmp.id, kampanyaAd: kmp.data().ad || '', site, zaman, gun: bugunYmd(), cihaz, referer: String(body.sayfaUrl || req.headers.referer || '').slice(0, 500), kaynak: 'site' }),
+      veri.collection('qrTaramalari').add({ kampanyaId: kmp.id, kampanyaAd: kmp.data().ad || '', site, zaman, gun: bugunYmd(), cihaz, referer: String(body.sayfaUrl || req.headers.referer || '').slice(0, 500), kaynak: 'site', parmakIzi: parmakIziHesapla(req) }),
       kmp.ref.update({ taramaSayisi: FieldValue.increment(1), sonTarama: zaman }),
     ]);
     res.status(200).json({ ok: true, bulundu: true });

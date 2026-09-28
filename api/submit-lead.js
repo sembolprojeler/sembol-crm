@@ -68,6 +68,7 @@
 
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { createHash } from 'node:crypto';
 
 // Birden fazla site bu endpoint'e istek atabiliyor (sembolevdeneve.com ve
 // depoevim.com) — ALLOWED_ORIGINS ortam değişkenine virgülle ayrılmış liste
@@ -145,6 +146,50 @@ export function qrIziniCoz(body, req) {
     sayfaUrl: String(sayfaUrl || '').slice(0, 500),
     qrIziZamani: iz.zaman || new Date().toISOString(),
   };
+}
+
+// ============================================================================
+// DÜZELTME (canlıda QR formu "Organik" görünüyordu, kamyon bilgisi gelmiyordu):
+// Eşleştirme eskiden SADECE CRM ekranında (Satis.jsx → useQrOtomatikEslestirme)
+// yapılıyordu ve iki yolu da kırılgandı:
+//   • UTM: wizard qrIzi göndermezse Referer'a bakılıyordu; ama tarayıcılar
+//     başka alan adına giden istekte Referer'ı SORGU DİZİSİ OLMADAN
+//     ("https://www.sembolevdeneve.com/") gönderir → qrKodu hiç yazılmıyordu.
+//   • Zaman: 45 dk içinde başka bir QR daha okutulduysa eşleşme yapılmıyordu.
+// Artık kampanya burada, kayıt yazılırken bulunur ve qrKampanyaId/qrKampanyaAd
+// doğrudan kayda yazılır:
+//   1) qrKodu varsa → qrKampanyalari'nda kod (+site) ile
+//   2) yoksa → aynı cihazın (parmak izi) son 45 dk'daki okutması ile
+// ============================================================================
+const QR_ESLESME_PENCERE_DK = 45; // Satis.jsx'teki değerle aynı
+
+// DİKKAT: qr-tarama.js'teki parmakIziHesapla ile BİREBİR aynı kalmalı.
+function parmakIziHesapla(req) {
+  const h = (req && req.headers) || {};
+  const ip = String(h['x-forwarded-for'] || h['x-real-ip'] || '').split(',')[0].trim();
+  if (!ip) return '';
+  return createHash('sha256').update(`${ip}|${String(h['user-agent'] || '')}`).digest('hex').slice(0, 32);
+}
+
+async function qrKampanyasiniBul(veri, { qrKodu, site, parmakIzi, formZamani }) {
+  if (qrKodu) {
+    let snap = await veri.collection('qrKampanyalari').where('kod', '==', qrKodu).where('site', '==', site).limit(1).get();
+    // QR yanlış siteye yönlendirilmiş olabilir (ör. Depoevim QR'ı → Sembol sayfası)
+    if (snap.empty) snap = await veri.collection('qrKampanyalari').where('kod', '==', qrKodu).limit(1).get();
+    if (!snap.empty) return { id: snap.docs[0].id, ad: snap.docs[0].data().ad || qrKodu, tip: 'utm' };
+  }
+  if (parmakIzi) {
+    // Yalnızca tek alanlı eşitlik sorgusu → ek Firestore dizini gerekmez; zaman
+    // penceresi bellekte süzülür.
+    const snap = await veri.collection('qrTaramalari').where('parmakIzi', '==', parmakIzi).limit(20).get();
+    const formZ = new Date(formZamani).getTime();
+    const adaylar = snap.docs.map(d => d.data())
+      .filter(t => t.kampanyaId && t.site === site)
+      .filter(t => { const z = new Date(t.zaman).getTime(); return z <= formZ + 60000 && formZ - z <= QR_ESLESME_PENCERE_DK * 60000; })
+      .sort((a, b) => String(b.zaman).localeCompare(String(a.zaman)));
+    if (adaylar.length) return { id: adaylar[0].kampanyaId, ad: adaylar[0].kampanyaAd || '', tip: 'cihaz' };
+  }
+  return null;
 }
 
 function fmtTL(n) {
@@ -607,6 +652,34 @@ export default async function handler(req, res) {
       if (!PAID_ADS_DEGERLERI.includes(kayit.reklamKaynagi) && String(qrIzi.utmSource).toLowerCase() === 'qr') kayit.reklamKaynagi = 'qr';
     }
 
+    // DÜZELTME: Wizard her ara kayıtta reklamKaynagi'yi yeniden gönderiyor;
+    // ikinci adımda URL'deki ?qr= artık yoksa 'direkt_giris' gelip ilk
+    // kayıttaki 'qr' değerini eziyordu. Önceden 'qr' işaretlenmişse koru.
+    const onceki = existingSnap.exists ? (existingSnap.data() || {}) : {};
+    if (onceki.reklamKaynagi === 'qr' && !PAID_ADS_DEGERLERI.includes(kayit.reklamKaynagi)) kayit.reklamKaynagi = 'qr';
+
+    // DÜZELTME: QR kampanyasını (kamyon/bilbord) SUNUCUDA bağla — bkz.
+    // qrKampanyasiniBul. Satış ekibinin elle yaptığı bağlama / "QR değil"
+    // işareti (qrEslesmeYok) ve ödemeli reklamlar korunur.
+    if (!onceki.qrKampanyaId && !onceki.qrEslesmeYok && !PAID_ADS_DEGERLERI.includes(kayit.reklamKaynagi)) {
+      try {
+        const kampanya = await qrKampanyasiniBul(
+          db.collection('artifacts').doc(FIRESTORE_APP_ID).collection('public').doc('data'),
+          { qrKodu: kayit.qrKodu || onceki.qrKodu || '', site: kayit.hesapId, parmakIzi: parmakIziHesapla(req), formZamani: onceki.createdAt || nowIso },
+        );
+        if (kampanya) {
+          kayit.qrKampanyaId = kampanya.id;
+          kayit.qrKampanyaAd = kampanya.ad;
+          kayit.qrEslesme = kampanya.tip;
+          kayit.qrEslesmeZamani = nowIso;
+          kayit.reklamKaynagi = 'qr';
+        }
+      } catch (e) {
+        // Eşleştirme hatası formu ASLA düşürmemeli — CRM tarafı yedek olarak dener.
+        console.warn('[submit-lead] QR kampanya eşleştirme hatası:', e);
+      }
+    }
+
     if (!existingSnap.exists) {
       // İlk kayıt — Müşteri Havuzu'nun beklediği satış-hattı alanlarını burada açıyoruz.
       // depoevimSiparis İSTİSNA: bu bir "olası müşteri" değil, ödemesi zaten
@@ -619,13 +692,12 @@ export default async function handler(req, res) {
         tarih: nowIso, kullanici: wizardType === 'depoevimSiparis' ? 'WooCommerce' : 'Web Sihirbazı',
         islem: wizardType === 'depoevimSiparis'
           ? `WooCommerce üzerinden ödemesi tamamlanmış yeni sipariş (#${body.siparisNo || '-'})`
-          : `Web sitesinden yeni teklif talebi alındı (${WIZARD_ETIKET[wizardType] || 'Web Formu'})${qrIzi ? ` — QR: ${qrIzi.qrKodu}` : ''}`,
+          : `Web sitesinden yeni teklif talebi alındı (${WIZARD_ETIKET[wizardType] || 'Web Formu'})${kayit.qrKampanyaAd ? ` — QR: ${kayit.qrKampanyaAd}` : (qrIzi ? ` — QR: ${qrIzi.qrKodu}` : '')}`,
       }];
       kayit.createdAt = nowIso;
     } else if (body.status === 'completed' || body.status === 'callback_requested') {
       // Sadece anlamlı kilometre taşlarında hareket geçmişine bir satır ekliyoruz;
       // her debounce'lu ara-kayıtta hareketler listesini şişirmiyoruz.
-      const onceki = existingSnap.data() || {};
       const not = body.status === 'completed'
         ? 'Müşteri formu tamamladı'
         : 'Müşteri "Beni Siz Arayın" talebinde bulundu';

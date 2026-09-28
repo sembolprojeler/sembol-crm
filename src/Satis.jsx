@@ -4193,6 +4193,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     if (reklamKaynagiEsit(k, 'google_altsayfa')) return REKLAM_KAYNAGI_ETIKETLERI.google_altsayfa;
     if (reklamKaynagiEsit(k, 'direkt_giris')) return REKLAM_KAYNAGI_ETIKETLERI.direkt_giris;
     if (reklamKaynagiEsit(k, 'diger_site')) return REKLAM_KAYNAGI_ETIKETLERI.diger_site;
+    // DÜZELTME: QR'dan geldiği kesin ama henüz bir kampanyaya bağlanamamış kayıt
+    // (ör. kampanya sonradan silinmiş/kodu değişmiş) "Organik" DEĞİL, QR görünür.
+    if (reklamKaynagiEsit(k, 'qr')) return { ad: `QR${k.qrKodu ? ` (${k.qrKodu})` : ''}`, renk: 'bg-amber-50 text-amber-700 border border-amber-200' };
     // HATA DÜZELTMESİ DEĞİL, BİLİNÇLİ AYRIM: reklamKaynagi alanı hiç yok ya da
     // bu yeni ayrıştırılmış kategorilerden ÖNCE (site-tiklama-takip scriptleri
     // güncellenmeden önce) oluşmuş bir kayıt. Bunu yanlışlıkla "Direkt Giriş"
@@ -4203,6 +4206,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // yok, VE yeni kategorilerden hiçbirine de uymuyor.)
   const reklamKaynagiEskiKayit = (k) => !reklamKaynagiAds(k)
     && !k.qrKampanyaId
+    && !reklamKaynagiEsit(k, 'qr')
     && !reklamKaynagiEsit(k, 'facebook_organik')
     && !reklamKaynagiEsit(k, 'instagram_organik')
     && !reklamKaynagiEsit(k, 'google_anasayfa')
@@ -4221,7 +4225,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     { etiket: '🟣 Instagram Ads', renk: 'text-pink-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'instagram_ads')) },
     // DEĞİŞTİ: QR'dan gelenler ayrı kutuda; aşağıdaki diğer kutuların hiçbiri
     // QR eşleşmesi olan kayıtları içermez.
-    { etiket: '🟠 QR Takip', renk: 'text-amber-400', sayilar: kaynakSayilari(k => !!k.qrKampanyaId) },
+    { etiket: '🟠 QR Takip', renk: 'text-amber-400', sayilar: kaynakSayilari(k => !!k.qrKampanyaId || reklamKaynagiEsit(k, 'qr')) },
     { etiket: '🟡 Google Anasayfa', renk: 'text-yellow-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'google_anasayfa')) },
     { etiket: '🟧 Google Altsayfa', renk: 'text-orange-400', sayilar: kaynakSayilari(k => !k.qrKampanyaId && reklamKaynagiEsit(k, 'google_altsayfa')) },
     // YENİ (2026-09): eskiden Facebook/Instagram organik trafik ayrı
@@ -7538,7 +7542,10 @@ export const useQrOtomatikEslestirme = (kayitlar = [], kampanyalar = [], taramal
         if (!secilen && k.createdAt) {
           const formZ = new Date(k.createdAt).getTime();
           if (!isNaN(formZ)) {
-            const kayitSite = (k.hizmetTipi === 'Depo') ? 'depoevim' : (k.hizmetTipi === 'Nakliye' || k.hizmetTipi === 'Asansör') ? 'sembolevdeneve' : (k.hesapId === 'depoevim' ? 'depoevim' : 'sembolevdeneve');
+            // DÜZELTME: okutma, formun doldurulduğu GERÇEK siteye (hesapId) yazılıyor —
+            // sembolevdeneve'deki depolama formu (hizmetTipi 'Depo') depoevim'de aranıp eşleşmiyordu.
+            const kayitSite = (k.hesapId === 'depoevim' || k.hesapId === 'sembolevdeneve') ? k.hesapId
+              : (k.hizmetTipi === 'Depo') ? 'depoevim' : 'sembolevdeneve';
             const pencere = taramalar.filter(tr => tr.site === kayitSite && (() => { const z = new Date(tr.zaman).getTime(); return z <= formZ && formZ - z <= QR_ESLESME_PENCERE_DK * 60000; })());
             const ids = [...new Set(pencere.map(tr => tr.kampanyaId))];
             if (ids.length === 1) { secilen = kampanyalar.find(c => c.id === ids[0]) || null; tip = 'zaman'; }
