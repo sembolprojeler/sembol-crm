@@ -186,13 +186,12 @@ export default async function handler(req, res) {
     // YENİ (QR TAKİP): QR izi varsa ziyaretçi "QR Ziyaretçisi" olarak açılır —
     // ödemeli bir reklam tıklaması DEĞİLSE QR izi kazanır (direkt/organik/google
     // anasayfa-altsayfa/diğer site gibi "zayıf" kategorilerin üzerine yazar).
-    // DÜZELTME (2026-09, submit-lead.js ile AYNI kural): QR izi yalnızca bu
-    // ziyaretin kaynağı QR ile uyumluysa ('direkt_giris' / 'diger_site' ya da
-    // bilinmiyor) kazanır — Google/Facebook/Instagram'dan (reklam ya da organik)
-    // gelen ziyaretçi, telefonunda eski bir QR izi kalmış olsa bile QR sayılmaz.
+    // QR kararı tarayıcıda verilir (sembol-qr-takip.js sürüm 3 — QR'sız her yeni
+    // girişte iz silinir), submit-lead.js ile AYNI kural: iz geldiyse ve ödemeli
+    // reklam değilse QR kazanır. (Google Lens ile okutulan QR'da önceki sayfa
+    // google.com görünür; bu yüzden kaynağa bakılarak QR elenmez.)
     const qrIzi = qrIziniCoz(crmData, req);
-    const qrIleUyumluMu = !kaynakGecerliMi || ['direkt_giris', 'diger_site'].includes(crmData.kaynak);
-    const qrKazaniyorMu = !!qrIzi && String(qrIzi.utmSource).toLowerCase() === 'qr' && qrIleUyumluMu;
+    const qrKazaniyorMu = !!qrIzi && String(qrIzi.utmSource).toLowerCase() === 'qr' && !kaynakOdemeliReklamMi;
     const musteriAdi = qrKazaniyorMu ? `QR Ziyaretçisi (${qrIzi.qrKodu})` : (kaynakBilgi ? kaynakBilgi.ad : 'Direkt Giriş Ziyaretçisi');
 
     const db = getDb();

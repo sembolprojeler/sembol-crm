@@ -596,19 +596,17 @@ export default async function handler(req, res) {
     // QR'dan gelip "Google Anasayfa" ya da "Direkt Giriş" sayılan ziyaretçiler
     // yanlışlıkla QR kampanyasına bağlanmazdı.
     // QR izi yine de ayrı alanlarda durur — CRM kampanyayı qrKodu ile bağlar.
-    // DÜZELTME (kullanıcı bildirimi, 2026-09: "direkt girişleri ve Google
-    // girişlerini bile QR sayıyor"): QR izi artık YALNIZCA bu ziyaretin kendi
-    // kaynağı QR ile uyumluysa kazanır. QR'dan gelen ziyaretçiyi sihirbaz
-    // 'direkt_giris' (kameradan açılır, önceki sayfa yok) ya da 'diger_site'
-    // (eski ?qrt= geçiş bağlantısı) olarak görür. Sihirbaz bu ziyareti kesin
-    // olarak Google/Facebook/Instagram (reklam ya da organik) diye tespit
-    // ettiyse, tarayıcıda günler önceki bir QR okutmasından kalmış iz o kaynağın
-    // üzerine YAZMAZ ve qrKodu kayda yazılmaz (yazılsaydı CRM kaydı yine de
-    // otomatik olarak QR kampanyasına bağlardı).
-    const QR_ILE_UYUMLU_KAYNAKLAR = ['direkt_giris', 'diger_site'];
+    // QR kararı TARAYICIDA verilir (sembol-qr-takip.js sürüm 3): QR izi yalnızca
+    // bu ziyaret QR'lı bir adresle başladıysa vardır — siteye QR'sız her yeni
+    // girişte (Google, direkt, sosyal medya, reklam) iz silinir. Bu yüzden iz
+    // geldiyse ziyaret QR'dandır ve sihirbazın hesapladığı kaynağın üzerine yazar.
+    // DİKKAT: sihirbazın kaynağına bakılarak QR ELENMEZ — telefon kamerası QR'ı
+    // Google Lens / Google uygulaması üzerinden açınca önceki sayfa google.com
+    // görünür ve sihirbaz ziyareti "Google Anasayfa/Altsayfa" sayar; QR yine de
+    // doğru kaynaktır. Yalnızca ödemeli reklam etiketi korunur.
     const qrIzi = qrIziniCoz(body, req);
     const qrGercekMi = !!qrIzi && String(qrIzi.utmSource).toLowerCase() === 'qr';
-    if (qrGercekMi && QR_ILE_UYUMLU_KAYNAKLAR.includes(kayit.reklamKaynagi)) {
+    if (qrGercekMi && !PAID_ADS_DEGERLERI.includes(kayit.reklamKaynagi)) {
       kayit.qrKodu = qrIzi.qrKodu;
       kayit.utmSource = qrIzi.utmSource;
       kayit.utmMedium = qrIzi.utmMedium;
