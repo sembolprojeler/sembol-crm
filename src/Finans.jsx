@@ -4949,6 +4949,20 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
   // ÇIKTILAR: aylık seri, kategori dağılımı, firma dağılımı, kârlılık
   // oranları, kredi özeti ve kural tabanlı "Finans Asistanı" yorumları.
   // ==========================================================================
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): KÂR PAYI GİDER DEĞİLDİR
+  // "Kâr Payı" kategorisindeki çıkışlar ortaklara yapılan kâr dağıtımıdır.
+  // Kasadan para çıktığı için defterde çıkış olarak kalır (bakiye doğru),
+  // ama işletmenin GİDERİ değildir: raporda gider toplamına, net kâra, kâr
+  // marjına, gider oranına ve gider kategori dağılımına GİRMEZ. Ayrı olarak
+  // "Ortaklara Dağıtılan Kâr" ve "Dağıtım Sonrası Kalan" diye gösterilir.
+  // ==========================================================================
+  const karPayiMi = (i) => {
+    if (!i || i.tip !== 'cikis') return false;
+    const k = String(i.kategori || '').toLocaleUpperCase('tr-TR').replace(/Â/g, 'A').replace(/\s+/g, ' ').trim();
+    return k === 'KAR PAYI' || k === 'KAR DAGITIMI' || k === 'KAR DAĞITIMI' || k === 'KÂR PAYI';
+  };
+
   const finansRaporHesapla = ({ defterler = [], islemler = [], ciroyaGirer, krediBilgi, krediKalemleri }) => {
     const AYLAR = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
     const ayEtiket = (k) => { const [y, m] = k.split('-'); return `${AYLAR[parseInt(m) - 1]} ${y}`; };
@@ -4969,7 +4983,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const RAPOR_BASLANGIC_SINIRI = '2026-09';
 
     // --- 1) Geçerli işlemler (ciro kuralı + işletme defteri + tarih sınırı) ---
-    const gecerli = (islemler || []).filter(i => {
+    const gecerliTum = (islemler || []).filter(i => {
       const d = defterMap[i.defterId];
       if (!isletmeDefteriMi(d)) return false;
       if (typeof ciroyaGirer === 'function' && !ciroyaGirer(i)) return false;
@@ -4978,9 +4992,12 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const tutar = parseFloat(i.tutar) || 0;
       return tutar > 0 && (i.tip === 'giris' || i.tip === 'cikis');
     });
+    // YENİ: Kâr payı dağıtımları gider hesaplarından ayrılır (yukarıdaki açıklama)
+    const karDagitimlari = gecerliTum.filter(karPayiMi);
+    const gecerli = gecerliTum.filter(i => !karPayiMi(i));
 
     // --- 2) Başlangıç ayı: Eylül 2026 sınırı içinde verideki en erken ay ---
-    const ayAnahtarlari = [...new Set(gecerli.map(i => i.tarih.slice(0, 7)))].sort();
+    const ayAnahtarlari = [...new Set(gecerliTum.map(i => i.tarih.slice(0, 7)))].sort();
     const baslangicAy = ayAnahtarlari[0] || null;
 
     // --- 3) Aylık seri ---
@@ -4995,7 +5012,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         const b = blokBul(defterMap[i.defterId]);
         firma[b][i.tip === 'giris' ? 'gelir' : 'gider'] += parseFloat(i.tutar);
       });
-      return { ay: ak, etiket: ayEtiket(ak), gelir, gider, kar,
+      const karPayi = karDagitimlari.filter(i => i.tarih.startsWith(ak)).reduce((t, i) => t + parseFloat(i.tutar), 0);
+      return { ay: ak, etiket: ayEtiket(ak), gelir, gider, kar, karPayi, dagitimSonrasi: kar - karPayi,
                karMarji: gelir > 0 ? (kar / gelir) * 100 : 0,
                giderOrani: gelir > 0 ? (gider / gelir) * 100 : 0,
                islemSayisi: ayIslemleri.length, firma };
@@ -5005,6 +5023,10 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const toplamGelir = aylik.reduce((t, a) => t + a.gelir, 0);
     const toplamGider = aylik.reduce((t, a) => t + a.gider, 0);
     const netKar = toplamGelir - toplamGider;
+    // YENİ: ortaklara dağıtılan kâr ve dağıtım sonrası işletmede kalan
+    const toplamKarPayi = karDagitimlari.reduce((t, i) => t + (parseFloat(i.tutar) || 0), 0);
+    const dagitimSonrasiKalan = netKar - toplamKarPayi;
+    const karPayiIslemleri = karDagitimlari.map(i => ({ id: i.id, tarih: i.tarih, aciklama: i.aciklama || 'Kâr payı', tutar: parseFloat(i.tutar) || 0, defterAd: defterMap[i.defterId]?.ad || '', etiketler: i.etiketler || [] })).sort((x, y) => String(y.tarih).localeCompare(String(x.tarih)));
     const karMarji = toplamGelir > 0 ? (netKar / toplamGelir) * 100 : 0;
     const giderOrani = toplamGelir > 0 ? (toplamGider / toplamGelir) * 100 : 0;
 
@@ -5134,8 +5156,18 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       if (aylik.length < 3) ekle('bilgi', `Rapor ${aylik.length} aylık veriye dayanıyor`, 'Mevsimsel eğilim ve güvenilir büyüme oranı için en az 3 ay gerekir. Şimdilik oranları yön göstergesi olarak okuyun.');
     }
 
+    // YENİ: kâr dağıtımı yorumu
+    if (toplamKarPayi > 0) {
+      const oran = netKar > 0 ? (toplamKarPayi / netKar) * 100 : 0;
+      ekle(dagitimSonrasiKalan >= 0 ? 'bilgi' : 'uyari',
+        `Ortaklara ₺${paraFmt(toplamKarPayi)} kâr dağıtıldı${netKar > 0 ? ` (net kârın %${oran.toFixed(0)}'i)` : ''}`,
+        dagitimSonrasiKalan >= 0
+          ? `Kâr payı gider sayılmadı; işletmede kalan kâr ₺${paraFmt(dagitimSonrasiKalan)}. Yatırım ve nakit güvenliği için bir kısmını işletmede tutmak faydalıdır.`
+          : `Dağıtılan tutar dönem net kârını ₺${paraFmt(Math.abs(dagitimSonrasiKalan))} aşıyor — dağıtım geçmiş dönem birikiminden ya da kredi/nakitten karşılanıyor olabilir.`);
+    }
     return { baslangicAy, baslangicEtiket: baslangicAy ? ayEtiket(baslangicAy) : null, aylik, toplamGelir, toplamGider, netKar, karMarji, giderOrani,
-             giderKategorileri, gelirKategorileri, kategorisizGider, firmalar, kredi, buyume, yorumlar, islemSayisi: gecerli.length };
+             giderKategorileri, gelirKategorileri, kategorisizGider, firmalar, kredi, buyume, yorumlar, islemSayisi: gecerli.length,
+             toplamKarPayi, dagitimSonrasiKalan, karPayiIslemleri };
   };
 
   // ==========================================================================
@@ -5226,7 +5258,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       <style>@page{size:A4 portrait;margin:13mm 12mm}body{font-family:-apple-system,Arial,sans-serif;color:#111;margin:0;font-size:11px}h1{font-size:17px;margin:0 0 2px}h2{font-size:12.5px;margin:14px 0 6px;border-bottom:2px solid #059669;padding-bottom:3px;color:#065f46}.meta{font-size:10px;color:#555}.kutular{display:flex;gap:6px;margin:8px 0}.k{flex:1;border:1px solid #999;border-radius:4px;padding:6px 8px}.k span{display:block;font-size:8.5px;text-transform:uppercase;color:#555}.k b{font-size:13px}table{width:100%;border-collapse:collapse;margin-top:4px}th{background:#eee;border:1px solid #777;padding:4px 5px;font-size:9.5px;text-transform:uppercase}td{border:1px solid #999;padding:4px 5px}td.r{text-align:right;white-space:nowrap}.y{border:1px solid #999;border-left:4px solid #059669;border-radius:4px;padding:6px 8px;margin:5px 0;font-size:10.5px}.y b{display:block;margin-bottom:2px}tr{page-break-inside:avoid}</style></head><body>
       <h1>Finansal Rapor — Sembol Nakliyat &amp; Depoevim</h1>
       <div class="meta">Dönem: ${esc(r.baslangicEtiket || '-')} → bugün &nbsp;•&nbsp; ${r.islemSayisi} işlem &nbsp;•&nbsp; Kredi/Ödemeler/Borçlu defterleri hariç &nbsp;•&nbsp; Rapor tarihi: ${tarih}</div>
-      <div class="kutular"><div class="k"><span>Toplam Gelir</span><b>₺${paraFmt(r.toplamGelir)}</b></div><div class="k"><span>Toplam Gider</span><b>₺${paraFmt(r.toplamGider)}</b></div><div class="k"><span>Net Kâr</span><b>₺${paraFmt(r.netKar)}</b></div><div class="k"><span>Kâr Marjı</span><b>%${r.karMarji.toFixed(1)}</b></div><div class="k"><span>Gider Oranı</span><b>%${r.giderOrani.toFixed(1)}</b></div></div>
+      <div class="kutular"><div class="k"><span>Toplam Gelir</span><b>₺${paraFmt(r.toplamGelir)}</b></div><div class="k"><span>Toplam Gider</span><b>₺${paraFmt(r.toplamGider)}</b></div><div class="k"><span>Net Kâr</span><b>₺${paraFmt(r.netKar)}</b></div><div class="k"><span>Kâr Marjı</span><b>%${r.karMarji.toFixed(1)}</b></div><div class="k"><span>Gider Oranı</span><b>%${r.giderOrani.toFixed(1)}</b></div>${r.toplamKarPayi > 0 ? `<div class="k"><span>Ortaklara Dağıtılan Kâr</span><b>₺${paraFmt(r.toplamKarPayi)}</b></div><div class="k"><span>Dağıtım Sonrası Kalan</span><b>₺${paraFmt(r.dagitimSonrasiKalan)}</b></div>` : ''}</div>${r.toplamKarPayi > 0 ? '<p style="font-size:11px;color:#666">Kâr payı (ortak dağıtımı) gider sayılmamıştır.</p>' : ''}
       <h2>Aylık Gelir / Gider</h2><table><thead><tr><th style="text-align:left">Ay</th><th>Gelir</th><th>Gider</th><th>Net Kâr</th><th>Marj</th><th>Sembol Gelir</th><th>Depoevim Gelir</th></tr></thead><tbody>
       ${r.aylik.map(a => `<tr><td>${esc(a.etiket)}</td><td class="r">₺${paraFmt(a.gelir)}</td><td class="r">₺${paraFmt(a.gider)}</td><td class="r">₺${paraFmt(a.kar)}</td><td class="r">%${a.karMarji.toFixed(1)}</td><td class="r">₺${paraFmt(a.firma['Sembol Nakliyat'].gelir)}</td><td class="r">₺${paraFmt(a.firma['Depoevim'].gelir)}</td></tr>`).join('')}</tbody></table>
       <h2>Firma Bazlı Kârlılık</h2><table><thead><tr><th style="text-align:left">Firma</th><th>Gelir</th><th>Gider</th><th>Kâr</th><th>Marj</th><th>Gelir Payı</th></tr></thead><tbody>
@@ -5262,20 +5294,27 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         </div>
 
         {/* Özet kutuları */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <div className={`grid grid-cols-2 gap-2 ${r.toplamKarPayi > 0 ? 'md:grid-cols-4 xl:grid-cols-7' : 'md:grid-cols-5'}`}>
           {[
             { ad: 'Gelir', deger: `₺${paraFmt(K.gelir)}`, renk: 'text-emerald-700 bg-emerald-50 border-emerald-200' },
             { ad: 'Gider', deger: `₺${paraFmt(K.gider)}`, renk: 'text-red-700 bg-red-50 border-red-200' },
             { ad: 'Net Kâr', deger: `₺${paraFmt(K.kar)}`, renk: K.kar >= 0 ? 'text-emerald-800 bg-emerald-100 border-emerald-300' : 'text-red-800 bg-red-100 border-red-300' },
             { ad: 'Kâr Marjı', deger: `%${K.karMarji.toFixed(1)}`, renk: 'text-sky-800 bg-sky-50 border-sky-200' },
             { ad: 'Gider Oranı', deger: `%${K.giderOrani.toFixed(1)}`, renk: 'text-amber-800 bg-amber-50 border-amber-200' },
+            // YENİ (kullanıcı talebi): kâr payı gider değil — ayrı gösterilir
+            ...((goster ? goster.karPayi : r.toplamKarPayi) > 0 ? [
+              { ad: 'Ortaklara Dağıtılan Kâr', deger: `₺${paraFmt(goster ? goster.karPayi : r.toplamKarPayi)}`, renk: 'text-violet-800 bg-violet-50 border-violet-200', tikla: true },
+              { ad: 'Dağıtım Sonrası Kalan', deger: `₺${paraFmt(goster ? goster.dagitimSonrasi : r.dagitimSonrasiKalan)}`, renk: (goster ? goster.dagitimSonrasi : r.dagitimSonrasiKalan) >= 0 ? 'text-emerald-800 bg-white border-emerald-300' : 'text-red-800 bg-white border-red-300' },
+            ] : []),
           ].map(k => (
-            <div key={k.ad} className={`rounded-xl border p-3 ${k.renk}`}>
-              <p className="text-[9px] font-black uppercase tracking-wide opacity-70">{k.ad}</p>
+            <div key={k.ad} className={`rounded-xl border p-3 ${k.renk} ${k.tikla ? 'cursor-pointer hover:shadow-md' : ''}`}
+              onClick={k.tikla ? () => setKategoriDetay({ ad: 'Kâr Payı — Ortaklara Dağıtım', tip: 'Gider', islemler: goster ? r.karPayiIslemleri.filter(x => (x.tarih || '').startsWith(goster.ay)) : r.karPayiIslemleri, tutar: goster ? goster.karPayi : r.toplamKarPayi }) : undefined}>
+              <p className="text-[9px] font-black uppercase tracking-wide opacity-70 flex items-center gap-1">{k.ad}{k.tikla && <Eye className="w-3 h-3" />}</p>
               <p className="text-base md:text-lg font-black mt-0.5 tabular-nums">{k.deger}</p>
             </div>
           ))}
         </div>
+        {r.toplamKarPayi > 0 && <p className="text-[10px] font-bold text-neutral-500 -mt-2">Kâr payı (ortak dağıtımı) gider sayılmaz: Gider, Net Kâr, Kâr Marjı ve Gider Oranı kâr payı hariç hesaplanır. Kasadan çıktığı için defter bakiyesinde çıkış olarak durur.</p>}
 
         {/* Finans Asistanı */}
         <div className="bg-white rounded-2xl border border-neutral-200 p-4">
