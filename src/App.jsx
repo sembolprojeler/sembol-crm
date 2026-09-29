@@ -4163,7 +4163,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // ======================================================================
     // GENİŞLETİLDİ: Ekspertiz Takvimi'nden gelen kayıtlar yedek telefon ve keşif
     // adresini de gönderebilir (opsiyonel); adres "AL" (alış) adresine yazılır.
-    const havuzdanKayitAc = ({ hizmetTipi, musteriAdi, telefon, yedekTelefon = '', adres = '' }) => {
+    // YENİ (kullanıcı talebi): ekAlanlar — Telefon Teklifleri'nden gelen hazır form
+    // alanları (il/ilçe, kat, taşıma şekli, daire tipi, eşya durumu, depo, tarih,
+    // fiyat...). Varsayılanların ÜZERİNE yazılır; gönderilmezse davranış aynıdır.
+    const havuzdanKayitAc = ({ hizmetTipi, musteriAdi, telefon, yedekTelefon = '', adres = '', ekAlanlar = {} }) => {
       const tip = hizmetTipi === 'Depo' ? 'Depo' : (hizmetTipi === 'Asansör' ? 'Asansör' : 'Nakliye');
       const ortak = {
         ...formData, isSpecial: false, customerType: 'Bireysel', tcNo: '', taxNo: '',
@@ -4175,13 +4178,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       setRecordType(tip);
       if (tip === 'Depo') {
         setActiveTab('addDepo');
-        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: alAdresi, toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', selectedDepo: '', depoDirection: 'toDepo' });
+        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: 'Giriş Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: 'Depoevim Tesisleri', fromDistance: '0', fromDistanceUnit: 'Metre', fromAddress: alAdresi, toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', selectedDepo: '', depoDirection: 'toDepo', ...ekAlanlar });
       } else if (tip === 'Asansör') {
         setActiveTab('addAsansor');
-        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: alAdresi, toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '' });
+        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendi İşimiz', fromTransportMethod: 'Dış Cephe Asansörü', fromRoomCount: 'Yükleme Kurulum', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: alAdresi, toProvince: '', toDistrict: '', toFloor: '', toPacking: '', toTransportMethod: '', toRoomCount: '', toDistance: '', toDistanceUnit: '', toAddress: '', ...ekAlanlar });
       } else {
         setActiveTab('addNakliye');
-        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: alAdresi, toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '' });
+        setFormData({ ...ortak, fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: alAdresi, toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', ...ekAlanlar });
       }
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
@@ -8767,6 +8770,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {/* YENİ: MÜŞTERİ HAVUZU EKRANI — kendi alt yetkisiyle görünür */}
             {activeTab === 'musteriHavuzu' && showSatisMusteriHavuzu &&
               <MusteriHavuzuView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} setViewingImage={setViewingImage}
+                /* YENİ (kullanıcı talebi): müşteri geçmişi eşleştirmesi — bellekteki iş kayıtları (ek okuma yok) */
+                jobs={jobs}
                 /* YENİ: Teklife Bak penceresindeki "Kayıt Aç" butonu için */
                 onKayitAc={showSatisMusteriKayit ? havuzdanKayitAc : null} />}
 
