@@ -8461,6 +8461,8 @@ const TT_YANASMA = [
   { id: '0',   ad: 'Evet, binaya yanaşıyor' },
   { id: '50',  ad: 'Yanaşmıyor · yaklaşık 50 m' },
   { id: '100', ad: 'Yanaşmıyor · yaklaşık 100 m' },
+  { id: '150', ad: 'Yanaşmıyor · yaklaşık 150 m' },   // YENİ (kullanıcı talebi)
+  { id: '200', ad: 'Yanaşmıyor · yaklaşık 200 m' },   // YENİ (kullanıcı talebi)
 ];
 // Küçük eşya paketleme — kayıt ekranındaki "Eşya Durumu" ile eşlenir
 const TT_TOPLAMA = [
@@ -8503,26 +8505,28 @@ const TT_KDV = 0.20;
 const FL_SEHIR_ICI_EVE = {
   taban:        { '1+0': 18000, '1+1': 25000, '2+1': 30000, '3+1': 35000, '4+1': 42000 },
   toplama:      { '1+0': 3000,  '1+1': 5000,  '2+1': 8000,  '3+1': 10000, '4+1': 15000 },
-  merdiven:     { 3: 2000, 4: 4000, 5: 6000 },
-  disCephe:     { Anadolu: 3000, Avrupa: 5000 },           // Avrupa: tek taraf kurulum
-  avrupaEkstra: { '1+0': 4500, '1+1': 5500, '2+1': 6500, '3+1': 11000 },
-  yurume:       { 50: 3500, 100: 6500 },
+  // YENİ (kullanıcı talebi): 6-7. kat, 9-13 kat dış cephe, 4+1 Avrupa ekstra, 150-200 m yürüme
+  // eklendi. PDF'te olmayan tutarlar TAHMİNİDİR (aynı artış adımıyla) — Fiyat Tablosu'ndan düzeltin.
+  merdiven:     { 3: 2000, 4: 4000, 5: 6000, 6: 8000, 7: 10000 },
+  disCephe:     { Anadolu: 3000, Avrupa: 5000, Anadolu913: 4500, Avrupa913: 7500 },   // Avrupa: tek taraf kurulum
+  avrupaEkstra: { '1+0': 4500, '1+1': 5500, '2+1': 6500, '3+1': 11000, '4+1': 11000 },
+  yurume:       { 50: 3500, 100: 6500, 150: 9500, 200: 12500 },
 };
 // Şehir içi evden depoya (depo müşterisine özel)
 const FL_SEHIR_ICI_DEPO = {
   taban:        { '1+0': 14000, '1+1': 18000, '2+1': 25000, '3+1': 30000, '4+1': 35000 },
   toplama:      { '1+0': 2000,  '1+1': 4000,  '2+1': 6000,  '3+1': 8000,  '4+1': 10000 },
-  merdiven:     { 3: 1000, 4: 3000, 5: 5000 },
-  disCephe:     { Anadolu: 3000, Avrupa: 4500 },
-  avrupaEkstra: { '1+0': 4000, '1+1': 5000, '2+1': 6000, '3+1': 10000 },
-  yurume:       { 50: 3000, 100: 6000 },
+  merdiven:     { 3: 1000, 4: 3000, 5: 5000, 6: 7000, 7: 9000 },
+  disCephe:     { Anadolu: 3000, Avrupa: 4500, Anadolu913: 4500, Avrupa913: 7000 },
+  avrupaEkstra: { '1+0': 4000, '1+1': 5000, '2+1': 6000, '3+1': 10000, '4+1': 10000 },
+  yurume:       { 50: 3000, 100: 6000, 150: 9000, 200: 12000 },
 };
 // Şehirler arası ekler (iki listede de aynı)
 const FL_SEHIRLER_ARASI_EK = {
   toplama:  { '1+0': 3500, '1+1': 5500, '2+1': 9000, '3+1': 11000, '4+1': 16500 },
-  merdiven: { 3: 2500, 4: 4500, 5: 6500 },
-  disCephe: { Anadolu: 3500, Avrupa: 5000 },
-  yurume:   { 50: 4000, 100: 7000 },
+  merdiven: { 3: 2500, 4: 4500, 5: 6500, 6: 8500, 7: 10500 },
+  disCephe: { Anadolu: 3500, Avrupa: 5000, Anadolu913: 5500, Avrupa913: 7500 },
+  yurume:   { 50: 4000, 100: 7000, 150: 10000, 200: 13000 },
 };
 // 81 il — Pendik operasyon merkezi çıkışlı [1+1, 2+1, 3+1, 4+1]
 // (Trakya / Avrupa ötesi illerde %15 geçiş farkı dahildir)
@@ -8603,7 +8607,11 @@ const TT_DEPO_KIRA = (() => {
   DEPO_LOCATIONS.forEach(d => { liste[d.name] = { ...genel }; });
   return liste;
 })();
+// YENİ (kullanıcı talebi): açılış fiyatı oranı (taban + %X) — Fiyat Tablosu'ndan
+// değiştirilebilir, Sembol ve DepoEvim için ayrı. Varsayılan %25.
+const TT_FIYAT_GENEL = { acilisOraniEve: 25, acilisOraniDepo: 25 };
 const ttFiyatTablolari = () => ({
+  genel: TT_FIYAT_GENEL,
   sehirIciEve: FL_SEHIR_ICI_EVE, sehirIciDepo: FL_SEHIR_ICI_DEPO,
   sehirlerArasiEkEve: FL_SEHIRLER_ARASI_EK, sehirlerArasiEkDepo: FL_SEHIRLER_ARASI_EK_DEPO,
   ilEve: FL_IL_EVDEN_EVE, ilDepo: FL_IL_EVDEN_DEPOYA, depoKira: TT_DEPO_KIRA,
@@ -8854,12 +8862,13 @@ const ttFiyatHesapla = (fHam) => {
     adresler.forEach(a => {
       const kat = ttKatNo(a.kat);
       if (a.tasima === 'Merdiven' && kat >= 3) {
-        kalemler.push({ ad: `${a.rol}: ${kat}. kat merdiven taşıma`, tutar: L.merdiven[Math.min(kat, 5)] });
-        if (kat > 5) uyarilar.push(`${a.rol} adresi ${kat}. kat ve asansörsüz — dış cephe asansörü önerin.`);
+        kalemler.push({ ad: `${a.rol}: ${kat}. kat merdiven taşıma`, tutar: ttMerdivenTutari(L.merdiven, kat) });
+        if (kat > 7) uyarilar.push(`${a.rol} adresi ${kat}. kat ve asansörsüz — 7. kat tutarı alındı, dış cephe asansörü önerin.`);
       }
       if (a.tasima === 'Dış Cephe Asansörü') {
-        kalemler.push({ ad: `${a.rol}: dış cephe asansörü (${ttYaka(a.il)})`, tutar: L.disCephe[ttYaka(a.il)] });
-        if (kat > 9) uyarilar.push(`${a.rol}: liste 2-9 kat içindir; ${kat}. kat için uygunluğu teyit edin.`);
+        const yaka = ttAvrupaMi(a.il, a.ilce) ? 'Avrupa' : 'Anadolu';
+        kalemler.push({ ad: `${a.rol}: dış cephe asansörü (${ttDisCepheEtiket(yaka, kat)})`, tutar: ttDisCepheTutari(L.disCephe, yaka, kat) });
+        if (kat > 13) uyarilar.push(`${a.rol}: liste 13. kata kadardır; ${kat}. kat için uygunluğu teyit edin.`);
       }
       if (L.yurume[a.mesafe]) kalemler.push({ ad: `${a.rol}: yürüme mesafesi (~${a.mesafe} m)`, tutar: L.yurume[a.mesafe] });
     });
@@ -8891,10 +8900,14 @@ const ttFiyatHesapla = (fHam) => {
   if (f.toplama === 'Firma') kalemler.push({ ad: `${odaK} toplama hizmeti`, tutar: E.toplama[odaK] });
   adresler.forEach(a => {
     const kat = ttKatNo(a.kat);
-    if (a.tasima === 'Merdiven' && kat >= 3) kalemler.push({ ad: `${a.rol}: ${kat}. kat merdiven`, tutar: E.merdiven[Math.min(kat, 5)] });
+    if (a.tasima === 'Merdiven' && kat >= 3) {
+      kalemler.push({ ad: `${a.rol}: ${kat}. kat merdiven`, tutar: ttMerdivenTutari(E.merdiven, kat) });
+      if (kat > 7) uyarilar.push(`${a.rol} adresi ${kat}. kat ve asansörsüz — 7. kat tutarı alındı.`);
+    }
     if (a.tasima === 'Dış Cephe Asansörü') {
-      const yakaOrani = ttIstanbulMu(a.il) ? ttYaka(a.il) : 'Avrupa';
-      kalemler.push({ ad: `${a.rol}: dış cephe asansörü${ttIstanbulMu(a.il) ? ` (${ttYaka(a.il)})` : ` (${a.il})`}`, tutar: E.disCephe[yakaOrani] });
+      const yakaOrani = ttIstanbulMu(a.il) ? (ttAvrupaMi(a.il, a.ilce) ? 'Avrupa' : 'Anadolu') : 'Avrupa';
+      kalemler.push({ ad: `${a.rol}: dış cephe asansörü${ttIstanbulMu(a.il) ? ` (${ttDisCepheEtiket(yakaOrani, kat)})` : ` (${a.il}${kat >= 10 ? ', 9-13 kat' : ''})`}`, tutar: ttDisCepheTutari(E.disCephe, yakaOrani, kat) });
+      if (kat > 13) uyarilar.push(`${a.rol}: liste 13. kata kadardır; ${kat}. kat için uygunluğu teyit edin.`);
       if (!ttIstanbulMu(a.il)) uyarilar.push(`${a.il} için dış cephe asansörü yerelde kiralanır; tutarı teyit edin.`);
     }
     if (E.yurume[a.mesafe]) kalemler.push({ ad: `${a.rol}: yürüme mesafesi (~${a.mesafe} m)`, tutar: E.yurume[a.mesafe] });
@@ -8913,19 +8926,32 @@ const ttFiyatHesapla = (fHam) => {
 // Satışçı müşteriye AÇILIŞ fiyatıyla (taban + %25) başlar; pazarlıkta
 // tabana kadar iskonto yapabilir. Tutarlar 500 ₺'ye yuvarlanır.
 // ============================================================================
-const TT_ACILIS_ORANI = 0.25;
+// DEĞİŞTİ (kullanıcı talebi): oran sabit değil — Fiyat Tablosu'ndaki ayardan okunur
+const ttAcilisYuzde = (hizmetTipi = 'Nakliye') => {
+  const v = Number(hizmetTipi === 'Nakliye' ? TT_FIYAT_GENEL.acilisOraniEve : TT_FIYAT_GENEL.acilisOraniDepo);
+  return Number.isFinite(v) && v >= 0 ? v : 25;
+};
 const ttYuvarla500 = (n) => Math.round((Number(n) || 0) / 500) * 500;
-const ttAcilisFiyati = (taban) => (taban ? Math.ceil((taban * (1 + TT_ACILIS_ORANI)) / 500) * 500 : 0);
+const ttAcilisFiyati = (taban, hizmetTipi = 'Nakliye') => (taban ? Math.ceil((taban * (1 + ttAcilisYuzde(hizmetTipi) / 100)) / 500) * 500 : 0);
 // Açılış fiyatından iskonto kademeleri (tabanın altına inmez)
-const ttIskontoKademeleri = (taban) => {
+const ttIskontoKademeleri = (taban, hizmetTipi = 'Nakliye') => {
   if (!taban) return [];
-  const acilis = ttAcilisFiyati(taban);
+  const acilis = ttAcilisFiyati(taban, hizmetTipi);
   return [
-    { ad: 'Açılış fiyatı', not: `+%${Math.round(TT_ACILIS_ORANI * 100)}`, tutar: acilis },
+    { ad: 'Açılış fiyatı', not: `+%${ttAcilisYuzde(hizmetTipi)}`, tutar: acilis },
     ...[5, 10, 15].map(y => ({ ad: `%${y} iskonto`, not: 'açılıştan', tutar: Math.max(taban, ttYuvarla500(acilis * (1 - y / 100))) })),
     { ad: 'Taban fiyat', not: 'en son', tutar: taban },
-  ].filter((k, i, a) => a.findIndex(x => x.tutar === k.tutar) === i);
+  ]
+    // Tabana eşit iskonto kademesi gösterilmez (o tutar "Taban fiyat" olarak kalır), mükerrerler ayıklanır
+    .filter(k => k.ad === 'Taban fiyat' || k.tutar > taban || k.ad === 'Açılış fiyatı')
+    .filter((k, i, a) => a.findIndex(x => x.tutar === k.tutar) === i);
 };
+
+// YENİ (kullanıcı talebi): merdiven 7. kata kadar (üstü 7. kat tutarı + uyarı)
+const ttMerdivenTutari = (tablo, kat) => tablo[Math.min(kat, 7)] ?? tablo[5];
+// YENİ (kullanıcı talebi): dış cephe asansörü 2-9 kat / 10-13 kat kademesi
+const ttDisCepheTutari = (tablo, yaka, kat) => (kat >= 10 ? (tablo[`${yaka}913`] ?? tablo[yaka]) : tablo[yaka]);
+const ttDisCepheEtiket = (yaka, kat) => `${yaka}${kat >= 10 ? ', 9-13 kat' : ''}`;
 
 // Adres kısa metni: İstanbul'da yalnızca ilçe ("Pendik"), diğer illerde "Çankaya, Ankara"
 const ttAdresKisa = (il, ilce) => (ilce ? (ttIstanbulMu(il) ? ilce : `${ilce}, ${il}`) : (il || ''));
@@ -9078,7 +9104,7 @@ const ttWhatsappSablonlariHam = (tHam, gonderen = '') => {
   const selam = ad ? `Merhaba ${ad},` : 'Merhabalar,';
   const ben = gonderen ? ` ben ${gonderen.split(' ')[0]}` : '';
   const hesap = ttFiyatHesapla(t);
-  const fiyat = ttFiyatSayi(t.verilenFiyat) || ttAcilisFiyati(hesap.nakliyeToplam);   // DEĞİŞTİ: yoksa açılış fiyatı
+  const fiyat = ttFiyatSayi(t.verilenFiyat) || ttAcilisFiyati(hesap.nakliyeToplam, t.hizmetTipi);   // DEĞİŞTİ: yoksa açılış fiyatı
   const tarih = t.tasinmaTarihi ? ttTrTarih(t.tasinmaTarihi) : (t.tasinmaNotu || '');
   const odaAd = TT_ODA_SECENEKLERI.find(o => o.id === t.odaSayisi)?.ad || t.odaSayisi;
 
@@ -9317,11 +9343,11 @@ const TTFiyatPaneli = ({ form }) => {
           </div>
           {h.nakliyeToplam > 0 && (<>
             <div className="flex items-end justify-between gap-2">
-              <span className="text-[10px] font-bold uppercase text-neutral-400">Açılış fiyatı (+%{Math.round(TT_ACILIS_ORANI * 100)})</span>
-              <span className="text-lg font-black text-emerald-300 leading-none">{ttTl(ttAcilisFiyati(h.nakliyeToplam))}</span>
+              <span className="text-[10px] font-bold uppercase text-neutral-400">Açılış fiyatı (+%{ttAcilisYuzde(form.hizmetTipi)})</span>
+              <span className="text-lg font-black text-emerald-300 leading-none">{ttTl(ttAcilisFiyati(h.nakliyeToplam, form.hizmetTipi))}</span>
             </div>
             <p className="text-[10px] font-bold text-neutral-300 bg-white/5 rounded-lg px-2 py-1">
-              💬 Fiyat aralığı: <b className="text-white">{ttTl(h.nakliyeToplam)} – {ttTl(ttAcilisFiyati(h.nakliyeToplam))}</b>. Açılışta +%{Math.round(TT_ACILIS_ORANI * 100)} fiyatla başlayın; pazarlıkta tabana kadar iskonto yapabilirsiniz.
+              💬 Fiyat aralığı: <b className="text-white">{ttTl(h.nakliyeToplam)} – {ttTl(ttAcilisFiyati(h.nakliyeToplam, form.hizmetTipi))}</b>. Açılışta +%{ttAcilisYuzde(form.hizmetTipi)} fiyatla başlayın; pazarlıkta tabana kadar iskonto yapabilirsiniz.
             </p>
           </>)}
         </div>
@@ -9791,8 +9817,8 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
         sistemFiyati: hesap.nakliyeToplam || 0,
         depoAylik: hesap.depo?.aylik || '',
         // DEĞİŞTİ (kullanıcı talebi): fiyat yazılmadıysa AÇILIŞ fiyatı (taban + %25) söylenmiş kabul edilir
-        verilenFiyat: form.verilenFiyat || (nakliyeVar && hesap.nakliyeToplam ? String(ttAcilisFiyati(hesap.nakliyeToplam)) : ''),
-        acilisFiyati: nakliyeVar && hesap.nakliyeToplam ? ttAcilisFiyati(hesap.nakliyeToplam) : 0,
+        verilenFiyat: form.verilenFiyat || (nakliyeVar && hesap.nakliyeToplam ? String(ttAcilisFiyati(hesap.nakliyeToplam, form.hizmetTipi)) : ''),
+        acilisFiyati: nakliyeVar && hesap.nakliyeToplam ? ttAcilisFiyati(hesap.nakliyeToplam, form.hizmetTipi) : 0,
       });
     } catch (e) { setHata('Kaydedilemedi: ' + (e?.message || 'bilinmeyen hata')); setKaydediliyor(false); }
   };
@@ -10011,8 +10037,8 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
                   <p className="text-[10px] font-bold text-neutral-400">{hesap.liste}</p>
                 </div>
                 <div className="rounded-2xl bg-emerald-700 text-white p-3">
-                  <p className="text-[10px] font-black uppercase text-emerald-100">Açılış fiyatı (+%{Math.round(TT_ACILIS_ORANI * 100)}) · müşteriye ilk söylenecek</p>
-                  <p className="text-2xl font-black">{hesap.nakliyeToplam ? ttTl(ttAcilisFiyati(hesap.nakliyeToplam)) : '—'}</p>
+                  <p className="text-[10px] font-black uppercase text-emerald-100">Açılış fiyatı (+%{ttAcilisYuzde(form.hizmetTipi)}) · müşteriye ilk söylenecek</p>
+                  <p className="text-2xl font-black">{hesap.nakliyeToplam ? ttTl(ttAcilisFiyati(hesap.nakliyeToplam, form.hizmetTipi)) : '—'}</p>
                   <p className="text-[10px] font-bold text-emerald-100">Pazarlıkta tabana kadar iskonto yapabilirsiniz</p>
                 </div>
               </div>
@@ -10020,7 +10046,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
                 <div>
                   <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">İskonto seçenekleri — tıklayınca söylenen fiyata yazılır</p>
                   <div className="flex flex-wrap gap-1.5">
-                    {ttIskontoKademeleri(hesap.nakliyeToplam).map(k => {
+                    {ttIskontoKademeleri(hesap.nakliyeToplam, form.hizmetTipi).map(k => {
                       const secili = ttFiyatSayi(form.verilenFiyat) === k.tutar;
                       return (
                         <button key={k.ad} type="button" onClick={() => d('verilenFiyat')(String(k.tutar))}
@@ -10036,7 +10062,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
               <label className="block">
                 <span className="block text-[10px] font-black uppercase text-neutral-500 mb-1">Müşteriye söylenen fiyat (₺)</span>
                 <input value={form.verilenFiyat} onChange={e => d('verilenFiyat')(e.target.value)} inputMode="numeric"
-                  placeholder={hesap.nakliyeToplam ? `Boş bırakılırsa açılış fiyatı ${ttTl(ttAcilisFiyati(hesap.nakliyeToplam))}` : 'Örn. 32000'}
+                  placeholder={hesap.nakliyeToplam ? `Boş bırakılırsa açılış fiyatı ${ttTl(ttAcilisFiyati(hesap.nakliyeToplam, form.hizmetTipi))}` : 'Örn. 32000'}
                   className={`w-full px-3 py-3 rounded-xl border-2 border-neutral-300 text-base font-black outline-none focus:ring-2 ${S.halka}`} />
                 {/* Tabanın altı uyarısı */}
                 {hesap.nakliyeToplam > 0 && ttFiyatSayi(form.verilenFiyat) > 0 && ttFiyatSayi(form.verilenFiyat) < hesap.nakliyeToplam && (
@@ -10958,26 +10984,42 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
 //  fiyatlar sistem fiyatı hesaplamasında HEMEN kullanılır.
 // ############################################################################
 const TT_FT_ODALAR = ['1+0', '1+1', '2+1', '3+1', '4+1'];
+// Dış cephe asansörü kademeleri (YENİ: 9-13 kat için Anadolu ve Avrupa seçenekleri)
+const TT_FT_DIS_CEPHE = [
+  { etiket: 'Anadolu Yakası (2-9 Kat)', anahtar: 'Anadolu' },
+  { etiket: 'Avrupa Yakası (2-9 Kat · Tek Taraf Kurulum)', anahtar: 'Avrupa' },
+  { etiket: 'Anadolu Yakası (9-13 Kat)', anahtar: 'Anadolu913' },
+  { etiket: 'Avrupa Yakası (9-13 Kat · Tek Taraf Kurulum)', anahtar: 'Avrupa913' },
+];
+// PDF'te olmayan (tahmini) kalemler — düzeltilene kadar "tahmini" etiketi gösterilir
+const TT_FT_TAHMINI = (yol) => {
+  const [, grup, anahtar] = yol;
+  return (grup === 'merdiven' && ['6', '7'].includes(String(anahtar)))
+    || (grup === 'yurume' && ['150', '200'].includes(String(anahtar)))
+    || (grup === 'disCephe' && String(anahtar).endsWith('913'))
+    || (grup === 'avrupaEkstra' && anahtar === '4+1');
+};
 // Şehir içi liste bölümleri (PDF sırası)
 const ttSehirIciBolumleri = (a) => [
   { baslik: 'NAKLİYE TABAN FİYATI (ANADOLU YAKASI)', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Nakliye`, yol: [a, 'taban', o] })) },
   { baslik: 'TOPLAMA HİZMETİ MALİYETİ', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Toplama`, yol: [a, 'toplama', o] })) },
-  { baslik: 'MERDİVEN MALİYETİ (ASANSÖR YOKSA)', satirlar: [3, 4, 5].map(k => ({ etiket: `${k}. Kat Merdiven Taşıma`, yol: [a, 'merdiven', String(k)] })) },
-  { baslik: 'DIŞ CEPHE ASANSÖR MALİYETİ', satirlar: [{ etiket: 'Anadolu Yakası (2-9 Kat)', yol: [a, 'disCephe', 'Anadolu'] }, { etiket: 'Avrupa Yakası (Tek Taraf Kurulum)', yol: [a, 'disCephe', 'Avrupa'] }] },
-  { baslik: 'AVRUPA YAKASI EKSTRA MALİYET (YAKAYA EKLENİR)', satirlar: ['1+0', '1+1', '2+1', '3+1'].map(o => ({ etiket: `${o} Nakliye Ekstra`, yol: [a, 'avrupaEkstra', o] })) },
-  { baslik: 'YÜRÜME MESAFESİ MALİYETİ (ARAÇ YANAŞAMAZSA)', satirlar: [50, 100].map(m => ({ etiket: `${m} Adım / Metre`, yol: [a, 'yurume', String(m)] })) },
+  // DEĞİŞTİ (kullanıcı talebi): 7. kata kadar, 9-13 kat dış cephe, 4+1 Avrupa ekstra, 150-200 m
+  { baslik: 'MERDİVEN MALİYETİ (ASANSÖR YOKSA)', satirlar: [3, 4, 5, 6, 7].map(k => ({ etiket: `${k}. Kat Merdiven Taşıma`, yol: [a, 'merdiven', String(k)] })) },
+  { baslik: 'DIŞ CEPHE ASANSÖR MALİYETİ', satirlar: TT_FT_DIS_CEPHE.map(x => ({ ...x, yol: [a, 'disCephe', x.anahtar] })) },
+  { baslik: 'AVRUPA YAKASI EKSTRA MALİYET (YAKAYA EKLENİR)', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Nakliye Ekstra`, yol: [a, 'avrupaEkstra', o] })) },
+  { baslik: 'YÜRÜME MESAFESİ MALİYETİ (ARAÇ YANAŞAMAZSA)', satirlar: [50, 100, 150, 200].map(m => ({ etiket: `${m} Adım / Metre`, yol: [a, 'yurume', String(m)] })) },
 ];
 // Şehirler arası ek maliyetler
 const ttSehirlerArasiEkBolumleri = (a) => [
   { baslik: 'TOPLAMA HİZMETİ (İSTENİRSE)', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Toplama`, yol: [a, 'toplama', o] })) },
-  { baslik: 'MERDİVEN (ASANSÖR YOKSA)', satirlar: [3, 4, 5].map(k => ({ etiket: `${k}. Kat Merdiven`, yol: [a, 'merdiven', String(k)] })) },
-  { baslik: 'DIŞ CEPHE ASANSÖRÜ', satirlar: [{ etiket: 'Anadolu Yakası (2-9 Kat)', yol: [a, 'disCephe', 'Anadolu'] }, { etiket: 'Avrupa Yakası (Tek Taraf Kurulum)', yol: [a, 'disCephe', 'Avrupa'] }] },
-  { baslik: 'YÜRÜME MESAFESİ (ARAÇ YANAŞAMAZSA)', satirlar: [50, 100].map(m => ({ etiket: `${m} Adım / Metre`, yol: [a, 'yurume', String(m)] })) },
+  { baslik: 'MERDİVEN (ASANSÖR YOKSA)', satirlar: [3, 4, 5, 6, 7].map(k => ({ etiket: `${k}. Kat Merdiven`, yol: [a, 'merdiven', String(k)] })) },
+  { baslik: 'DIŞ CEPHE ASANSÖRÜ', satirlar: TT_FT_DIS_CEPHE.map(x => ({ ...x, yol: [a, 'disCephe', x.anahtar] })) },
+  { baslik: 'YÜRÜME MESAFESİ (ARAÇ YANAŞAMAZSA)', satirlar: [50, 100, 150, 200].map(m => ({ etiket: `${m} Adım / Metre`, yol: [a, 'yurume', String(m)] })) },
 ];
 const TT_FT_SEKMELER = [
-  { id: 'sembol', ad: 'Evden Eve Nakliyat', marka: 'SEMBOL', alt: 'Evden eve taşıma fiyatları', Ikon: Truck, sehirIci: 'sehirIciEve', ek: 'sehirlerArasiEkEve', il: 'ilEve',
+  { id: 'sembol', ad: 'Evden Eve Nakliyat', marka: 'SEMBOL', alt: 'Evden eve taşıma fiyatları', Ikon: Truck, sehirIci: 'sehirIciEve', ek: 'sehirlerArasiEkEve', il: 'ilEve', oran: 'acilisOraniEve', hizmet: 'Nakliye',
     secili: 'bg-red-600 text-white border-red-600', pasif: 'bg-white text-red-700 border-red-200 hover:border-red-400', baslikCls: 'bg-red-600' },
-  { id: 'depo', ad: 'Eşya Depolama Nakliyesi', marka: 'DEPOEVİM', alt: 'Evden depoya nakliye fiyatları', Ikon: Package, sehirIci: 'sehirIciDepo', ek: 'sehirlerArasiEkDepo', il: 'ilDepo',
+  { id: 'depo', ad: 'Eşya Depolama Nakliyesi', marka: 'DEPOEVİM', alt: 'Evden depoya nakliye fiyatları', Ikon: Package, sehirIci: 'sehirIciDepo', ek: 'sehirlerArasiEkDepo', il: 'ilDepo', oran: 'acilisOraniDepo', hizmet: 'Depo',
     secili: 'bg-blue-600 text-white border-blue-600', pasif: 'bg-white text-blue-700 border-blue-200 hover:border-blue-400', baslikCls: 'bg-blue-600' },
   { id: 'kira', ad: 'Kiralık Depo', marka: 'DEPOEVİM', alt: 'Şube bazlı aylık depo kirası', Ikon: Wallet,
     secili: 'bg-sky-600 text-white border-sky-600', pasif: 'bg-white text-sky-700 border-sky-200 hover:border-sky-400', baslikCls: 'bg-sky-600' },
@@ -11006,7 +11048,10 @@ const TTFiyatBolumu = ({ bolum, veri, duzenle, onDegis, renk }) => (
       const d = ttYolAl(veri, st.yol);
       return (
         <div key={st.etiket} className={`flex items-center justify-between gap-2 px-3 py-2 ${i % 2 ? 'bg-neutral-50' : 'bg-white'}`}>
-          <span className="text-xs font-bold text-neutral-700">{st.etiket}</span>
+          <span className="text-xs font-bold text-neutral-700 flex items-center gap-1.5 flex-wrap">{st.etiket}
+            {/* YENİ: PDF'te olmayan ve henüz değiştirilmemiş tutar */}
+            {TT_FT_TAHMINI(st.yol) && d === ttYolAl(TT_FIYAT_VARSAYILAN, st.yol) && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">tahmini — kontrol edin</span>}
+          </span>
           <TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => onDegis(st.yol, v)} degisti={d !== ttYolAl(TT_FIYAT_VARSAYILAN, st.yol)} />
         </div>
       );
@@ -11108,6 +11153,34 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
 
         {/* İÇERİK */}
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-5">
+          {/* YENİ (kullanıcı talebi): AÇILIŞ FİYATI ORANI — taban fiyata eklenecek pazarlık payı.
+              Müşteriye ilk söylenecek fiyat = taban × (1 + oran). Müdür değiştirebilir (ör. %10). */}
+          {sekme !== 'kira' && (() => {
+            const yol = ['genel', aktifSekme.oran];
+            const oran = Number(ttYolAl(veri, yol));
+            const ornekTaban = Number(ttYolAl(veri, [aktifSekme.sehirIci, 'taban', '2+1'])) || 0;
+            const ornekAcilis = ornekTaban ? Math.ceil((ornekTaban * (1 + (Number.isFinite(oran) ? oran : 0) / 100)) / 500) * 500 : 0;
+            return (
+              <div className="mb-4 rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-3 flex flex-col md:flex-row md:items-center gap-3">
+                <div className="flex-1 min-w-0">
+                  <p className="text-[11px] font-black uppercase text-emerald-900">Açılış Fiyatı Oranı — pazarlık payı ({aktifSekme.marka})</p>
+                  <p className="text-[11px] font-bold text-emerald-800">Sistemin hesapladığı fiyat <b>taban</b> fiyattır. Satışçı müşteriye taban + bu oranla açılış yapar, pazarlıkta tabana kadar iskonto yapabilir.
+                    {ornekTaban ? ` Örnek: 2+1 şehir içi taban ${ttTl(ornekTaban)} → açılış ${ttTl(ornekAcilis)}.` : ''}</p>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-xs font-black text-emerald-900">Taban +</span>
+                  {duzenle ? (
+                    <span className="flex items-center gap-1">
+                      <span className="text-lg font-black text-emerald-800">%</span>
+                      <input value={Number.isFinite(oran) ? oran : ''} inputMode="numeric"
+                        onChange={e => { const r = e.target.value.replace(/\D/g, '').slice(0, 3); degis(yol, r === '' ? '' : Math.min(100, Number(r))); }}
+                        className={`w-20 px-2 py-1.5 rounded-lg border-2 text-right text-lg font-black outline-none focus:ring-2 focus:ring-yellow-400 ${oran !== ttYolAl(TT_FIYAT_VARSAYILAN, yol) ? 'border-yellow-400 bg-yellow-50' : 'border-emerald-300 bg-white'}`} />
+                    </span>
+                  ) : <span className="text-2xl font-black text-emerald-700">%{Number.isFinite(oran) ? oran : 25}</span>}
+                </div>
+              </div>
+            );
+          })()}
           {sekme !== 'kira' && kapsam === 'sehirIci' && (
             <div className="space-y-3">
               <p className="text-[11px] font-bold text-neutral-500">Nakliye taban fiyatları Anadolu Yakası çıkışlıdır; Avrupa Yakası için ekstra maliyet eklenir. Ek hizmetler taban fiyata ilave edilir.{sekme === 'depo' ? ' Depolama süresi ücreti ayrıca hesaplanır.' : ''}</p>
