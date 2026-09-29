@@ -8632,8 +8632,10 @@ const ttTakipDurumu = (t) => {
 // YENİ (kullanıcı talebi): görüşmenin kaynağı — havuzdan mı geldi, elle mi girildi?
 const TT_KAYNAKLAR = [
   // DEĞİŞTİ (kullanıcı talebi): "Manuel Görüşmeler" → "Telefon Görüşmeleri"
-  { id: 'manuel', ad: 'Telefon Görüşmeleri',      rozet: 'MANUEL',       stil: 'bg-neutral-800 text-white',  pasif: 'bg-white text-neutral-700 border-neutral-300' },
-  { id: 'havuz',  ad: 'Hızlı Teklif Görüşmeleri', rozet: 'HIZLI TEKLİF', stil: 'bg-orange-500 text-white',   pasif: 'bg-white text-orange-700 border-orange-200' },
+  // DEĞİŞTİ (kullanıcı talebi): rozet "MANUEL" → "GELEN ARAMALAR"; Telefon Görüşmesi yeşili, beyaz yazı
+  { id: 'manuel', ad: 'Telefon Görüşmeleri',      rozet: 'GELEN ARAMALAR', stil: 'bg-emerald-600 text-white', pasif: 'bg-white text-emerald-700 border-emerald-200' },
+  // DEĞİŞTİ (kullanıcı talebi): "Hızlı Teklif Görüşmeleri" → "Hızlı Teklif Havuzu"
+  { id: 'havuz',  ad: 'Hızlı Teklif Havuzu',      rozet: 'HIZLI TEKLİF', stil: 'bg-orange-500 text-white',   pasif: 'bg-white text-orange-700 border-orange-200' },
 ];
 const ttKaynakTuru = (t) => (t.havuzKayitId ? 'havuz' : 'manuel');
 const ttKaynakBul = (t) => TT_KAYNAKLAR.find(k => k.id === ttKaynakTuru(t));
@@ -8679,6 +8681,25 @@ const ttKatNo = (kat) => {
 };
 const ttIstanbulMu = (il) => (il || '').startsWith('İstanbul');
 const ttYaka = (il) => ((il || '').includes('Avrupa') ? 'Avrupa' : 'Anadolu');
+// YENİ (kullanıcı talebi): adres Avrupa Yakası mı? İl "İstanbul (Avrupa)" ise ya da
+// İstanbul seçili olup ilçe Avrupa yakası ilçelerinden biriyse (ör. Bağcılar) → evet.
+const ttAvrupaMi = (il, ilce) => (il || '').includes('Avrupa')
+  || (ttIstanbulMu(il) && !!ilce && (TURKEY_LOCATIONS['İstanbul (Avrupa)'] || []).includes(ilce));
+// Fiyatı etkileyen TÜM adreslerde (depo şubesi dahil) Avrupa Yakası var mı?
+//  Nakliye: yükleme + boşaltma · Depo: eşyaların alınacağı adres + seçilen şube
+//  Depodan Çıkış: çıkış şubesi + teslim adresi
+const ttAvrupaAdresVarMi = (f) => {
+  const sube = DEPO_LOCATIONS.find(d => d.name === f.sube);
+  const adresler = f.hizmetTipi === 'Nakliye' ? [[f.yukIl, f.yukIlce], [f.bosIl, f.bosIlce]]
+    : f.hizmetTipi === 'Depo' ? [[f.yukIl, f.yukIlce], sube ? [sube.province, sube.district] : null]
+    : [[f.bosIl, f.bosIlce], sube ? [sube.province, sube.district] : null];
+  return adresler.filter(Boolean).some(([il, ilce]) => ttAvrupaMi(il, ilce));
+};
+// Avrupa Yakası ekstra kalemini ekler (4+1 ve üzeri için 3+1 tutarı kullanılır)
+const ttAvrupaEkstraEkle = (L, odaK, kalemler, uyarilar) => {
+  kalemler.push({ ad: 'Avrupa Yakası ekstra', tutar: L.avrupaEkstra[odaK] ?? L.avrupaEkstra['3+1'] });
+  if (!L.avrupaEkstra[odaK]) uyarilar.push('Listede 4+1 Avrupa ekstrası yok; 3+1 tutarı eklendi.');
+};
 // Daire tipinden fiyat tablosu anahtarı: Villa → 4+1, Parça Eşya → 1+0, Ofis → 3+1 (+uyarı)
 const ttOdaAnahtari = (oda) => (['1+0', '1+1', '2+1', '3+1', '4+1'].includes(oda) ? oda
   : oda === 'Villa' ? '4+1' : oda === 'Parça Eşya' ? '1+0' : oda === 'Ofis' ? '3+1' : '');
@@ -8744,11 +8765,9 @@ const ttFiyatHesapla = (fHam) => {
     const L = depoListesi ? FL_SEHIR_ICI_DEPO : FL_SEHIR_ICI_EVE;
     const liste = depoListesi ? 'Şehir İçi Evden Depoya' : 'Şehir İçi Evden Eve';
     kalemler.push({ ad: `${odaK} nakliye taban fiyatı (Anadolu)`, tutar: L.taban[odaK] });
-    // Avrupa Yakası ekstra: ilgili adreslerden biri Avrupa ise BİR kez eklenir
-    if (adresler.some(a => ttYaka(a.il) === 'Avrupa')) {
-      kalemler.push({ ad: 'Avrupa Yakası ekstra', tutar: L.avrupaEkstra[odaK] ?? L.avrupaEkstra['3+1'] });
-      if (!L.avrupaEkstra[odaK]) uyarilar.push('Listede 4+1 Avrupa ekstrası yok; 3+1 tutarı eklendi.');
-    }
+    // Avrupa Yakası ekstra: adreslerden biri (depo şubesi dahil) Avrupa ise BİR kez eklenir
+    // DEĞİŞTİ (kullanıcı talebi): il + ilçe + şube kontrolü (ttAvrupaAdresVarMi)
+    if (ttAvrupaAdresVarMi(f)) ttAvrupaEkstraEkle(L, odaK, kalemler, uyarilar);
     if (f.toplama === 'Firma') kalemler.push({ ad: `${odaK} toplama hizmeti`, tutar: L.toplama[odaK] });
     adresler.forEach(a => {
       const kat = ttKatNo(a.kat);
@@ -8783,6 +8802,9 @@ const ttFiyatHesapla = (fHam) => {
   const secilen = adaylar.sort((a, b) => b.fiyat - a.fiyat)[0];
   kalemler.push({ ad: `${secilen.il} · ${odaK === '1+0' ? '1+1 (1+0 için)' : odaK} nakliye`, tutar: secilen.fiyat });
   if (adaylar.length > 1) uyarilar.push(`İki adres de İstanbul dışında (${disIller.join(' → ')}); liste Pendik çıkışlıdır, uzak il baz alındı — Mehmet Bey'e danışın.`);
+  // YENİ (kullanıcı talebi): şehirler arası işte de İstanbul tarafındaki adres Avrupa
+  // Yakası ise (ya da depo şubesi Avrupa'daysa) Avrupa ekstrası eklenir
+  if (ttAvrupaAdresVarMi(f)) ttAvrupaEkstraEkle(depoListesi ? FL_SEHIR_ICI_DEPO : FL_SEHIR_ICI_EVE, odaK, kalemler, uyarilar);
   const E = FL_SEHIRLER_ARASI_EK;
   if (f.toplama === 'Firma') kalemler.push({ ad: `${odaK} toplama hizmeti`, tutar: E.toplama[odaK] });
   adresler.forEach(a => {
