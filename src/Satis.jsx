@@ -8494,10 +8494,13 @@ const TelefonTeklifFormu = ({ site, baslangic = null, onKaydet, onKapat }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-start md:items-center justify-center p-2 md:p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-6xl my-2 animate-in fade-in zoom-in-95">
-        {/* BAŞLIK */}
-        <div className="flex items-center justify-between gap-2 px-4 md:px-5 py-3 border-b border-neutral-200">
+    // DEĞİŞTİ (kullanıcı talebi): Pencere artık EKRANA SIĞAR. Kart ekran yüksekliğiyle
+    // sınırlı (100dvh — mobil tarayıcı çubukları dahil doğru ölçü); başlık ve Kaydet
+    // çubuğu sabit kalır, yalnızca ortadaki form alanı kayar. Mobilde tam ekran açılır.
+    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-3 md:p-4">
+      <div className="bg-white sm:rounded-3xl shadow-2xl w-full max-w-6xl h-[100dvh] sm:h-auto sm:max-h-[calc(100dvh-1.5rem)] md:max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
+        {/* BAŞLIK — sabit (kaymaz) */}
+        <div className="shrink-0 flex items-center justify-between gap-2 px-4 md:px-5 py-3 border-b border-neutral-200">
           <div>
             <h3 className="text-base md:text-lg font-black text-neutral-900 flex items-center gap-2"><Phone className="w-5 h-5" /> {baslangic ? 'Telefon Teklifini Düzenle' : 'Yeni Telefon Görüşmesi'}</h3>
             <p className="text-[11px] text-neutral-500 font-semibold">{site === 'depoevim' ? 'DepoEvim' : 'Sembol Nakliyat'} · Görüşme sırasında soldaki alanları doldurun</p>
@@ -8505,7 +8508,8 @@ const TelefonTeklifFormu = ({ site, baslangic = null, onKaydet, onKapat }) => {
           <button type="button" onClick={onKapat} className="w-9 h-9 rounded-xl bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center"><X className="w-5 h-5" /></button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 p-3 md:p-5">
+        {/* GÖVDE — kalan yüksekliği doldurur ve kendi içinde kayar (min-h-0 şart: flex içinde taşmayı engeller) */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain grid grid-cols-1 lg:grid-cols-[1fr_300px] xl:grid-cols-[1fr_320px] gap-4 p-3 md:p-5 items-start">
           {/* ------------------------------------------------ SOL: FORM --- */}
           <div className="space-y-3 min-w-0">
             {/* 1) MÜŞTERİ */}
@@ -8633,7 +8637,8 @@ const TelefonTeklifFormu = ({ site, baslangic = null, onKaydet, onKapat }) => {
           </div>
 
           {/* ------------------------------------- SAĞ: GÖRÜŞME REHBERİ --- */}
-          <aside className="space-y-3 lg:sticky lg:top-4 self-start">
+          {/* Rehber geniş ekranda form kaydırılırken yerinde durur; uzunsa kendi içinde kayar */}
+          <aside className="space-y-3 lg:sticky lg:top-0 self-start lg:max-h-[calc(100dvh-11rem)] lg:overflow-y-auto lg:pr-1">
             <button type="button" onClick={() => setRehberAcik(a => !a)}
               className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-neutral-100 text-xs font-black text-neutral-700 lg:hidden">
               Görüşme Rehberi {rehberAcik ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -8643,7 +8648,8 @@ const TelefonTeklifFormu = ({ site, baslangic = null, onKaydet, onKapat }) => {
         </div>
 
         {/* ALT BAR — kaydet */}
-        <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 px-4 md:px-5 py-3 border-t border-neutral-200 bg-neutral-50 rounded-b-3xl">
+        {/* ALT ÇUBUK — sabit; Kaydet her zaman görünür */}
+        <div className="shrink-0 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 px-4 md:px-5 py-3 border-t border-neutral-200 bg-neutral-50">
           <p className="text-xs font-bold text-red-600">{hata}</p>
           <div className="flex gap-2">
             <button type="button" onClick={onKapat} className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-white border border-neutral-200 text-sm font-black text-neutral-700 hover:bg-neutral-100">Vazgeç</button>
@@ -8876,10 +8882,11 @@ const TelefonTeklifDetay = ({ t, onKapat, onDurum, onSurec, onNotEkle, onDuzenle
   const notGonder = async () => { if (!not.trim()) return; await onNotEkle(not.trim()); setNot(''); };
 
   return (
-    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-start md:items-center justify-center p-2 md:p-4 overflow-y-auto" onClick={onKapat}>
-      <div className="bg-white rounded-3xl shadow-2xl w-full max-w-4xl my-2 animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
-        {/* Başlık */}
-        <div className="flex items-start justify-between gap-2 px-4 md:px-5 py-3 border-b border-neutral-200">
+    // DEĞİŞTİ (kullanıcı talebi): Detay penceresi de ekrana sığar — başlık sabit, içerik kayar
+    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-3 md:p-4" onClick={onKapat}>
+      <div className="bg-white sm:rounded-3xl shadow-2xl w-full max-w-4xl h-[100dvh] sm:h-auto sm:max-h-[calc(100dvh-1.5rem)] md:max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
+        {/* Başlık — sabit */}
+        <div className="shrink-0 flex items-start justify-between gap-2 px-4 md:px-5 py-3 border-b border-neutral-200">
           <div className="min-w-0">
             <h3 className="text-lg font-black text-neutral-900 truncate">{t.musteriAdi || 'İsimsiz'}</h3>
             <p className="text-xs font-bold text-neutral-500">{t.telefon} · {t.hizmetTipi} · {guzergah(t)}</p>
@@ -8890,7 +8897,7 @@ const TelefonTeklifDetay = ({ t, onKapat, onDurum, onSurec, onNotEkle, onDuzenle
           </div>
         </div>
 
-        <div className="p-4 md:p-5 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-5 space-y-4">
           {/* Durum düğmeleri — sonradan istenildiği kadar değiştirilebilir */}
           <div>
             <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Görüşme Durumu</p>
