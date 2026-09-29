@@ -10,7 +10,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   // Eskiden IBAN bu dosyada sabit yazılıydı ve panelden değiştirilemiyordu.
   aktifBankaBilgiMetni,
   // YENİ: IBAN Paylaş penceresi için varsayılan hesap nesnesi ve IBAN biçimleyici.
-  aktifBankaHesabi, ibanBicimle } from './shared.jsx';
+  aktifBankaHesabi, ibanBicimle,
+  // YENİ (kullanıcı talebi): Tahmini Malzeme Durumu tablosu
+  MALZEME_STANDART, MALZEME_HIZMETLER, MALZEME_ODALAR, MALZEME_PAKETLER, malzemeTahminVarsayilan, malzemeTahminBilgisi,
+  malzemeTahminTablosuAyarla, malzemeTahminBelgesi, malzemeIhtiyaclari, anaIsleriFiltrele } from './shared.jsx';
 
 
   export const AddMaterialView = ({ onAdd, onCancel }) => {
@@ -144,8 +147,219 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
     );
   };
 
-  export const MaterialListView = ({ materials, onDelete, onUpdateStock, onAdd, systemLogs = [] }) => {
+
+  // ##########################################################################
+  //  YENİ (kullanıcı talebi): TAHMİNİ MALZEME DURUMU PENCERESİ
+  // --------------------------------------------------------------------------
+  //  Malzeme Listesi'nde "Stok Değiştir"in solundaki butonla açılır.
+  //  • Üç iş türü ayrı: Evden Eve Nakliyat · Eşya Depolama (depoya giriş) · Depo Çıkışı
+  //  • Her türde Toplu (müşteri topladı) / Toplamalı (firma toplar) varyasyonu
+  //  • Satırlar: 1+0, 1+1, 2+1, 3+1, 4+1, 5+1 ve üzeri
+  //  • Sütunlar: Malzeme Listesi'ndeki TÜM malzemeler — yeni eklenen malzeme
+  //    otomatik sütun olur (başlangıç değeri 0)
+  //  • Stok kontrolü: planlanan (henüz düşülmemiş) işlerin toplam ihtiyacı ↔ stok
+  //  • Yalnızca MÜDÜR rütbesi / Firma Sahibi düzenler; diğerleri görüntüler
+  //  • Kaydedilince yeni / atanmamış işlerin tahmini ve iş bitiminde stoktan
+  //    düşülen miktar bu tablodan gelir.
+  // ##########################################################################
+  const tahminMudurMu = (u) => u?.rank === 'Müdür' || (u?.position || '').includes('Firma Sahibi') || u?.fullName === 'Sistem Yöneticisi';
+  const tahminSayiGoster = (v) => (Math.round((Number(v) || 0) * 100) / 100).toLocaleString('tr-TR', { maximumFractionDigits: 2 });
+
+  export const TahminiMalzemePenceresi = ({ materials = [], currentUser, jobs = [], addSystemLog, onKapat }) => {
+    const duzenleyebilir = tahminMudurMu(currentUser);
+    const bilgi = malzemeTahminBilgisi();
+    const kayitliTablo = bilgi.tablo || malzemeTahminVarsayilan();
+    const [hizmet, setHizmet] = useState('Nakliye');
+    const [paket, setPaket] = useState('toplu');
+    const [duzenle, setDuzenle] = useState(false);
+    const [taslak, setTaslak] = useState(() => JSON.parse(JSON.stringify(kayitliTablo)));
+    const [kaydediliyor, setKaydediliyor] = useState(false);
+    const [mesaj, setMesaj] = useState('');
+    const tablo = duzenle ? taslak : kayitliTablo;
+
+    // Sütunlar: standart malzemeler (listedeki karşılığıyla) + listedeki diğer tüm malzemeler
+    const norm = (x) => (x || '').toLocaleLowerCase('tr-TR');
+    const sutunlar = useMemo(() => {
+      const st = MALZEME_STANDART.map(x => ({ ...x, malzeme: materials.find(m => norm(m.name).includes(x.eslesme)), ek: false }));
+      const digerleri = materials.filter(m => !MALZEME_STANDART.some(x => norm(m.name).includes(x.eslesme)))
+        .map(m => ({ anahtar: m.id, ad: m.name, malzeme: m, ek: true }));
+      return [...st, ...digerleri];
+    }, [materials]);
+    const gorunenSutunlar = sutunlar.filter(c => !(c.sadeceDepo && hizmet === 'Nakliye'));
+    const hucreYolu = (oda, c) => (c.ek ? [hizmet, oda, paket, 'ek', c.anahtar] : [hizmet, oda, paket, c.anahtar]);
+    const yolAl = (o, yol) => yol.reduce((x, k) => (x == null ? x : x[k]), o);
+    const degis = (yol, v) => setTaslak(t => {
+      const kopya = JSON.parse(JSON.stringify(t));
+      let x = kopya;
+      yol.slice(0, -1).forEach(k => { if (x[k] == null) x[k] = {}; x = x[k]; });
+      x[yol[yol.length - 1]] = v;
+      return kopya;
+    });
+
+    // ---- STOK KONTROLÜ: planlanan (düşülmemiş) işlerin toplam ihtiyacı ----
+    const bugun = new Date().toISOString().slice(0, 10);
+    const stokKontrolu = useMemo(() => {
+      // Önce küçük alt küme süzülür, sonra araç kopyası / devam günü ayıklanır (performans)
+      const planli = anaIsleriFiltrele(jobs.filter(j => j.type !== 'Asansör' && !j.materialsDeducted
+        && j.status !== 'completed' && j.status !== 'cancelled' && (j.date || '') >= bugun));
+      const ihtiyac = new Map();
+      planli.forEach(j => {
+        const est = j.assignedMaterials || calculateMaterials(j.fromRoomCount, j.fromPacking, j.type, j);
+        malzemeIhtiyaclari(est, materials, j.customMaterials, j.type).forEach(({ malzeme, miktar }) => {
+          ihtiyac.set(malzeme.id, (ihtiyac.get(malzeme.id) || 0) + miktar);
+        });
+      });
+      const satirlar = materials.map(m => {
+        const stok = parseFloat(m.stock) || 0;
+        const gerek = Math.round((ihtiyac.get(m.id) || 0) * 100) / 100;
+        return { m, stok, gerek, kalan: Math.round((stok - gerek) * 100) / 100 };
+      });
+      return { isSayisi: planli.length, satirlar, eksikler: satirlar.filter(x => x.kalan < 0) };
+    }, [jobs, materials, bilgi.tarih]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const duzenlemeyiAc = () => { setTaslak(JSON.parse(JSON.stringify(kayitliTablo))); setDuzenle(true); setMesaj(''); };
+    const varsayilanaDon = () => { setTaslak(malzemeTahminVarsayilan()); setMesaj('Sistemin eski formül değerleri yüklendi — kalıcı olması için Kaydet\'e basın.'); };
+    const kaydet = async () => {
+      setKaydediliyor(true); setMesaj('');
+      try {
+        // Ek malzemelerin adları da saklanır (malzeme listesi yüklenmeyen ekranlarda ad göstermek için)
+        const adlar = {};
+        materials.filter(m => !MALZEME_STANDART.some(x => norm(m.name).includes(x.eslesme))).forEach(m => { adlar[m.id] = { name: m.name, unit: m.unit || '' }; });
+        // Boş kutular 0, yazım aşamasındaki "1." gibi metinler sayıya çevrilir
+        const veri = { tablo: JSON.parse(JSON.stringify(taslak, (k, v) => (v === '' ? 0 : (typeof v === 'string' && /^[\d.]+$/.test(v) ? Number(v) || 0 : v)))), adlar, guncelleyen: currentUser?.fullName || 'Sistem', tarih: new Date().toISOString() };
+        await setDoc(malzemeTahminBelgesi(), veri);
+        malzemeTahminTablosuAyarla(veri);   // Beklemeden uygula
+        addSystemLog?.('Tahmin Tablosu Güncellendi', `Tahmini malzeme tablosu ${veri.guncelleyen} tarafından güncellendi. Yeni işler bu tabloya göre hesaplanacak.`);
+        setDuzenle(false); setMesaj('Kaydedildi — bundan sonraki işlerin malzeme tahmini ve stoktan düşme bu tabloya göre yapılacak.');
+      } catch (e) { console.error(e); setMesaj('Kaydedilemedi: ' + (e?.message || '')); }
+      finally { setKaydediliyor(false); }
+    };
+
+    const hizmetRenk = { Nakliye: 'bg-red-600 border-red-600', Depo: 'bg-blue-600 border-blue-600', DepoCikis: 'bg-violet-600 border-violet-600' };
+
+    return (
+      <div className="fixed inset-0 z-[9990] bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-3 md:p-4" onClick={onKapat}>
+        <div className="bg-neutral-50 sm:rounded-3xl shadow-2xl w-full max-w-7xl h-[100dvh] sm:h-[calc(100dvh-1.5rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
+          {/* BAŞLIK */}
+          <div className="shrink-0 bg-neutral-900 text-white px-4 md:px-5 py-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
+            <div className="min-w-0">
+              <h3 className="text-lg font-black flex items-center gap-2"><ClipboardList className="w-5 h-5 text-amber-400" /> Tahmini Malzeme Durumu</h3>
+              <p className="text-[11px] font-bold text-neutral-400">
+                Yeni işlerin malzeme tahmini ve iş bitiminde stoktan düşülen miktar bu tablodan gelir.
+                {bilgi.guncelleyen ? ` Son güncelleme: ${bilgi.guncelleyen} · ${new Date(bilgi.tarih).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}` : ' Henüz kaydedilmedi — sistem eski formülle çalışıyor.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {duzenleyebilir && !duzenle && <button type="button" onClick={duzenlemeyiAc} className="px-3 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-neutral-900 text-xs font-black flex items-center gap-1.5"><Edit className="w-4 h-4" /> Tabloyu Düzenle</button>}
+              {!duzenleyebilir && <span className="px-3 py-2 rounded-xl bg-white/10 text-[11px] font-bold text-neutral-300 flex items-center gap-1.5"><Eye className="w-4 h-4" /> Görüntüleme — düzenleme yalnızca müdürde</span>}
+              {duzenle && (<>
+                <button type="button" onClick={varsayilanaDon} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-black flex items-center gap-1.5"><RefreshCw className="w-4 h-4" /> Varsayılana Dön</button>
+                <button type="button" onClick={() => { setDuzenle(false); setMesaj(''); }} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-black">Vazgeç</button>
+                <button type="button" onClick={kaydet} disabled={kaydediliyor} className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-black flex items-center gap-1.5 disabled:opacity-60">
+                  {kaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Tabloyu Kaydet
+                </button>
+              </>)}
+              <button type="button" onClick={onKapat} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center"><X className="w-5 h-5" /></button>
+            </div>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-5 space-y-4">
+            {mesaj && <p className="text-[11px] font-black text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">{mesaj}</p>}
+
+            {/* STOK KONTROLÜ */}
+            <div className={`rounded-2xl border-2 p-3 ${stokKontrolu.eksikler.length ? 'border-red-300 bg-red-50' : 'border-emerald-300 bg-emerald-50'}`}>
+              <p className={`text-[11px] font-black uppercase flex items-center gap-1.5 mb-2 ${stokKontrolu.eksikler.length ? 'text-red-800' : 'text-emerald-800'}`}>
+                {stokKontrolu.eksikler.length ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+                Stok Kontrolü — planlanan {stokKontrolu.isSayisi} iş (bugün ve sonrası, malzemesi henüz düşülmemiş)
+                {stokKontrolu.eksikler.length > 0 && ` · ${stokKontrolu.eksikler.length} malzeme YETERSİZ`}
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+                {stokKontrolu.satirlar.map(({ m, stok, gerek, kalan }) => (
+                  <div key={m.id} className={`rounded-xl border px-2.5 py-2 bg-white ${kalan < 0 ? 'border-red-300' : 'border-neutral-200'}`}>
+                    <p className="text-[11px] font-black text-neutral-800 truncate">{m.name}</p>
+                    <p className="text-[10px] font-bold text-neutral-500">Stok {tahminSayiGoster(stok)} · Gerekli {tahminSayiGoster(gerek)} {m.unit}</p>
+                    <p className={`text-xs font-black ${kalan < 0 ? 'text-red-700' : 'text-emerald-700'}`}>{kalan < 0 ? `Eksik: ${tahminSayiGoster(-kalan)}` : `Kalan: ${tahminSayiGoster(kalan)}`} {m.unit}</p>
+                  </div>
+                ))}
+                {materials.length === 0 && <p className="text-xs font-bold text-neutral-500">Malzeme Listesi boş.</p>}
+              </div>
+            </div>
+
+            {/* İŞ TÜRÜ + TOPLAMA VARYASYONU */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {MALZEME_HIZMETLER.map(h => (
+                <button key={h.id} type="button" onClick={() => setHizmet(h.id)}
+                  className={`px-3 py-2.5 rounded-2xl border-2 text-left transition ${hizmet === h.id ? `${hizmetRenk[h.id]} text-white shadow-lg` : 'bg-white text-neutral-700 border-neutral-200 hover:border-neutral-400'}`}>
+                  <span className="block text-sm font-black">{h.ad}</span>
+                  <span className={`block text-[10px] font-bold ${hizmet === h.id ? 'text-white/80' : 'text-neutral-500'}`}>{h.alt}</span>
+                </button>
+              ))}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {MALZEME_PAKETLER.map(pk => (
+                <button key={pk.id} type="button" onClick={() => setPaket(pk.id)}
+                  className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition ${paket === pk.id ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'}`}>
+                  {pk.ad} <span className="opacity-70 font-bold">· {pk.alt}</span>
+                </button>
+              ))}
+            </div>
+            {duzenle && <p className="text-[11px] font-black text-amber-800 bg-amber-100 border border-amber-300 rounded-xl px-3 py-2">Düzenleme modu: her ev tipi için kullanılacak miktarları yazın. Diğer iş türü / toplama sekmelerine geçerek hepsini ayarlayıp tek seferde kaydedebilirsiniz.</p>}
+
+            {/* TABLO */}
+            <div className="rounded-2xl border border-neutral-200 bg-white overflow-x-auto">
+              <table className="w-full text-xs" style={{ minWidth: `${180 + gorunenSutunlar.length * 110}px` }}>
+                <thead className="bg-neutral-900 text-white">
+                  <tr>
+                    <th className="text-left px-3 py-2.5 font-black sticky left-0 bg-neutral-900">Ev Tipi</th>
+                    {gorunenSutunlar.map(c => (
+                      <th key={c.anahtar} className="text-right px-3 py-2.5 font-black">
+                        {c.malzeme?.name || c.ad}
+                        <span className="block text-[9px] font-bold text-neutral-400">{c.malzeme ? `${c.malzeme.unit} · stok ${tahminSayiGoster(c.malzeme.stock)}` : 'listede yok — düşülmez'}</span>
+                        {c.ek && <span className="inline-block mt-0.5 text-[8px] font-black px-1 rounded bg-emerald-500 text-white">EK MALZEME</span>}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {MALZEME_ODALAR.map((o, i) => (
+                    <tr key={o.id} className={i % 2 ? 'bg-neutral-50' : 'bg-white'}>
+                      <td className={`px-3 py-2 font-black text-neutral-800 sticky left-0 ${i % 2 ? 'bg-neutral-50' : 'bg-white'}`}>{o.ad}</td>
+                      {gorunenSutunlar.map(c => {
+                        const yol = hucreYolu(o.id, c);
+                        const d = yolAl(tablo, yol) ?? 0;
+                        const yetersiz = c.malzeme && (Number(d) || 0) > (parseFloat(c.malzeme.stock) || 0);
+                        return (
+                          <td key={c.anahtar} className="px-3 py-2 text-right">
+                            {duzenle ? (
+                              <input value={d} inputMode="decimal"
+                                onChange={e => { const r = e.target.value.replace(',', '.').replace(/[^\d.]/g, ''); degis(yol, r === '' ? '' : (r.endsWith('.') ? r : Number(r))); }}
+                                className="w-20 px-2 py-1 rounded-lg border border-neutral-300 text-right text-sm font-black outline-none focus:ring-2 focus:ring-amber-400" />
+                            ) : (
+                              <span className={`text-sm font-black ${Number(d) > 0 ? 'text-neutral-900' : 'text-neutral-300'}`}>{tahminSayiGoster(d)}</span>
+                            )}
+                            {yetersiz && <span className="block text-[9px] font-black text-red-600">stok yetmez</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[10px] font-bold text-neutral-500">
+              Malzeme Listesi'ne eklenen her yeni malzeme bu tabloya otomatik sütun olarak eklenir (başlangıç 0). Ekip Kurma Tahtası'nda elle değiştirilen işlerin miktarı korunur; tablo değişikliği yeni ve henüz düzenlenmemiş işlere uygulanır.
+              Depo işlerinde oda sayısı depoya giren eşyadan, depo çıkışında teslim adresinden okunur.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  export const MaterialListView = ({ materials, onDelete, onUpdateStock, onAdd, systemLogs = [], currentUser = null, jobs = [], addSystemLog = null }) => {
     const [showAddModal, setShowAddModal] = useState(false);
+    // YENİ (kullanıcı talebi): Tahmini Malzeme Durumu penceresi
+    const [showTahminModal, setShowTahminModal] = useState(false);
     const [showUpdateModal, setShowUpdateModal] = useState(false);
     // YENİ: "Tüm Hareketleri Gör" modalı için state
     const [showAllLogsModal, setShowAllLogsModal] = useState(false);
@@ -247,12 +461,20 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
 
     return (
       <div className="flex flex-col gap-6 animate-in fade-in">
+        {showTahminModal && <TahminiMalzemePenceresi materials={materials} currentUser={currentUser} jobs={jobs} addSystemLog={addSystemLog} onKapat={() => setShowTahminModal(false)} />}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 relative">
           <div className="flex flex-col sm:flex-row justify-between sm:items-center mb-6 border-b border-neutral-200 pb-4 gap-4">
             <h2 className="text-xl font-bold text-black flex items-center gap-2">
               <Package className="w-6 h-6 text-red-600" /> Mevcut Malzemeler ve Stok Durumu
             </h2>
-            <div className="flex gap-2 w-full sm:w-auto">
+            <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+              {/* YENİ (kullanıcı talebi): Stok Değiştir'in solunda — herkes görür, müdür düzenler */}
+              <button
+                onClick={() => setShowTahminModal(true)}
+                className="bg-amber-500 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-amber-600 transition shadow-lg w-full sm:w-auto justify-center"
+              >
+                <ClipboardList className="w-5 h-5" /> Tahmini Malzeme Durumu
+              </button>
               <button 
                 onClick={() => setShowUpdateModal(true)}
                 className="bg-blue-600 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-blue-700 transition shadow-lg w-full sm:w-auto justify-center"
