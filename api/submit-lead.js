@@ -267,6 +267,8 @@ const ELEVATOR_LABEL = {
   var: 'Binada asansör var', yok: 'Asansör yok / merdiven',
   merdiven: 'Merdivenden', bina_asansoru: 'Bina asansörü', dis_cephe: 'Dış cephe asansörü kurulması isteniyor',
 };
+// Sembol Eşya Depolama "Küçük eşyaları kim koliyecek?" sorusu
+const TOPLAMA_LABEL = { kendim: 'Kendim toplayacağım', firma: 'Firma toplasın' };
 const PAKETLEME_LABEL = {
   hayir: 'Kendim paketleyeceğim', kismi: 'Kısmi paketleme', firma: 'Firma paketlesin',
 };
@@ -316,9 +318,15 @@ function tarihTemizle(v) {
 // (DepoEvim sihirbazının kendi özetindeki gibi: "tarih · tercih · not").
 // "bosIse": hiçbir tarih bilgisi yoksa yazılacak değer.
 function tarihMetni(p, tarih, bosIse = '-') {
-  const tercih = [tarihTemizle(p.tarihTercihi), tarihTemizle(p.tarihNotu)].filter(Boolean).join(' · ');
+  const tc = tarihTemizle(p.tarihTercihi);
+  const tercih = [tc, tarihTemizle(p.tarihNotu)].filter(Boolean).join(' · ');
   if (p.dateFlexible) return tercih || 'Esnek';
-  return [tarihTemizle(tarih), tercih].filter(Boolean).join(' · ') || bosIse;
+  // DÜZELTME: Sembol Eşya Depolama sihirbazı tarih seçilmemişse hızlı seçimi
+  // (ya da "esnek") tarih alanına da koyuyor — aynı değer iki kez yazılmaz.
+  let t = tarihTemizle(tarih);
+  if (t === tc) t = '';
+  if (t.toLocaleLowerCase('tr-TR') === 'esnek') return tercih || 'Esnek';
+  return [t, tercih].filter(Boolean).join(' · ') || bosIse;
 }
 
 function ortakKuyruk(satirlar, p) {
@@ -392,7 +400,8 @@ function buildSonMesajDepolama(p) {
   if (p.fromElevator) satirlar.push(`Asansör: ${ELEVATOR_LABEL[p.fromElevator] || p.fromElevator}`);
   if (p.sureKiralama) satirlar.push(`Kiralama Süresi: ${SURE_KIRALAMA_LABEL[p.sureKiralama] || p.sureKiralama}`);
   if (p.alimTeslim) satirlar.push(`Alım/Teslim: ${ALIM_TESLIM_LABEL[p.alimTeslim] || p.alimTeslim}`);
-  if (p.paketleme) satirlar.push(`Kutulama: ${PAKETLEME_LABEL[p.paketleme] || p.paketleme}`);
+  // DEĞİŞTİ (kullanıcı talebi): "Kutulama" → "Toplama"; sihirbaz artık kendim | firma gönderiyor
+  if (p.paketleme) satirlar.push(`Toplama: ${TOPLAMA_LABEL[p.paketleme] || PAKETLEME_LABEL[p.paketleme] || p.paketleme}`);
   if (p.kirilacak === 'evet') satirlar.push('Kırılacak / hassas eşya var');
   if (p.ambalaj === 'evet') satirlar.push('Ambalaj malzemesi firma tarafından temin edilecek');
   if (Array.isArray(p.specialItems) && p.specialItems.length && !(p.specialItems.length === 1 && p.specialItems[0] === 'yok')) {
@@ -488,6 +497,29 @@ function buildSonMesaj(wizardType, p) {
   const builder = SON_MESAJ_BUILDERS[wizardType] || buildSonMesajEvdenEve;
   const govde = builder(p).join('\n');
   return `[${wizardBasligi(wizardType, p)}]\n${govde}`;
+}
+
+// YENİ (kullanıcı talebi): Teklif Detayı kartının satır satır gösterdiği ham
+// alanlar. Her kayıtta TÜM anahtarlar yazılır (gelmeyen = ''), çünkü kayıt
+// merge:true ile güncelleniyor — müşteri sonradan boşalttığı bir seçimin eski
+// değeri ara kayıtlardan kalmasın. Eski kayıtlarda bu alan yoktur; kart onları
+// eskisi gibi sonMesaj metninden gösterir.
+const TEKLIF_ALANLARI_BY_WIZARD = {
+  depolama: ['homeSize', 'fromCity', 'fromDistrict', 'fromFloor', 'fromElevator', 'sureKiralama', 'alimTeslim',
+    'paketleme', 'fromYurume', 'moveDate', 'tarihTercihi', 'tarihNotu', 'dateFlexible',
+    'fiyatAylik', 'fiyatToplam', 'nakliyeMin', 'nakliyeMax', 'nakliyeEk', 'priceMin', 'priceMax', 'fiyatVersiyonu'],
+  depoevimDepolama: ['depoBoyutu', 'kiralamaSuresi', 'sube', 'teslimSekli', 'pickupCity', 'pickupDistrict', 'pickupFloor',
+    'pickupElevator', 'paketleme', 'pickupYurume', 'baslangicTarihi', 'tarihTercihi', 'tarihNotu',
+    'fiyatAylik', 'fiyatToplam', 'nakliyeMin', 'nakliyeMax', 'nakliyeEk', 'priceMin', 'priceMax', 'fiyatVersiyonu'],
+};
+function teklifAlanlariAl(wizardType, body) {
+  const o = { tur: wizardType };
+  TEKLIF_ALANLARI_BY_WIZARD[wizardType].forEach(function (k) {
+    const v = body[k];
+    if (typeof v === 'number' || typeof v === 'boolean') o[k] = v;
+    else o[k] = v == null ? '' : String(v).slice(0, 300);
+  });
+  return o;
 }
 
 // Her form türünün güzergah/lokasyon bilgisini tek tip bir "guzergah" nesnesine
@@ -604,6 +636,9 @@ export default async function handler(req, res) {
       tasinmaTarihi: body.moveDate || body.baslangicTarihi || '',
       tarihEsnek: !!body.dateFlexible,
       ozelEsyalar: Array.isArray(body.specialItems) ? body.specialItems : [],
+      // YENİ (kullanıcı talebi): depolama sihirbazlarının ham alanları — Teklif
+      // Detayı kartı bu kayıtlarda satırları buradan üretir (src/teklifDetay.js).
+      ...(TEKLIF_ALANLARI_BY_WIZARD[wizardType] ? { teklifAlanlari: teklifAlanlariAl(wizardType, body) } : {}),
 
       updatedAt: nowIso,
     };

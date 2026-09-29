@@ -9,6 +9,8 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
   anaIsleriFiltrele, isToplamGun, isToplamArac } from './shared.jsx';
 // YENİ: QR Site Takip bölümü dahili QR üretecini OperasyonPersonel.jsx'ten alır (CDN gerektirmez)
 import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
+// YENİ (kullanıcı talebi): depolama tekliflerinin Teklif Detayı satırları (siteden gelen ham alanlardan)
+import { teklifDetayiAlanlardan } from './teklifDetay.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
 import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari } from './fiyatSema.js';
 
@@ -5150,7 +5152,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   hiç alan bulunamazsa ham metin gösterilir — veri kaybolmaz.
                   ============================================================== */}
               {detayKayit.sonMesaj && (() => {
-                const teklif = teklifOzetiAyristir(detayKayit.sonMesaj);
+                // DEĞİŞTİ (kullanıcı talebi): Sembol Eşya Depolama ve DepoEvim kayıtlarında
+                // satırlar siteden gelen alanlardan (teklifAlanlari) üretilir; bu alanları
+                // olmayan eski kayıtlar eskisi gibi metinden ayrıştırılır. "Kutulama" → "Toplama".
+                const metinden = teklifOzetiAyristir(detayKayit.sonMesaj.replace(/Kutulama:/g, 'Toplama:'));
+                const teklif = teklifDetayiAlanlardan(detayKayit, metinden.baslik) || metinden;
                 return (
                   <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
                     <div className="px-3 py-2 bg-neutral-100 border-b border-neutral-200 flex items-center justify-between gap-2">
@@ -5174,7 +5180,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                       <div className="p-3">
                         <div className="border border-neutral-200 rounded-xl overflow-hidden">
                           {teklif.satirlar.map((satir, i) => {
-                            const para = TEKLIF_PARA_ALANLARI.includes(satir.etiket);
+                            const para = satir.para ?? TEKLIF_PARA_ALANLARI.includes(satir.etiket);
                             const renk = TEKLIF_SATIR_RENKLERI[i % TEKLIF_SATIR_RENKLERI.length];
                             return (
                               <div key={i} className={`flex items-center gap-2.5 px-2.5 py-2 ${i % 2 === 1 ? 'bg-neutral-50' : 'bg-white'} ${i > 0 ? 'border-t border-neutral-100' : ''}`}>
