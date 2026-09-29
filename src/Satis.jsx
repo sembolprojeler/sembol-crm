@@ -4405,7 +4405,14 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // (Tümü (20), Yeni (0) ...) seçilen döneme göre hesaplanır.
   // DEĞİŞTİ: Hızlı Teklifler'de mükerrer kayıtlar gizlenir (sayaçlar da tekilleşir).
   // DEĞİŞTİ (kullanıcı talebi): site ayrımı yok; görünürlük + sahiplik filtresi uygulanır
+  // DÜZELTME (kullanıcı talebi): Hızlı Teklifler "yeni" sayısı sol menüdeki Satış rozetiyle
+  // AYNI kuralla hesaplanır. Rozet önce TÜM web taleplerinde mükerrerleri ayıklar (aynı ad +
+  // telefon → yalnızca en yeni talep), SONRA alınmamış "Yeni"leri sayar. Havuz ise önce
+  // alınanları çıkarıp sonra ayıklıyordu; bu yüzden müşterinin yeni talebi bir satışçıya
+  // geçmişse ESKİ talebi havuzda "yeni" kalıyordu (rozet 13, havuz 31). Artık ikisi aynı.
+  const webTekilIdler = useMemo(() => new Set(mukerrerleriGizle(kayitlar.filter(k => k.kanal === 'web')).map(k => k.id)), [kayitlar]); // eslint-disable-line react-hooks/exhaustive-deps
   const kanalKayitlariHam = gorunurKayitlar.filter(k => k.kanal === aktifKanal && sahipUyar(k) && zamanUyar(k, zamanFiltre)
+    && (aktifKanal !== 'web' || webTekilIdler.has(k.id))
     // YENİ (kullanıcı talebi): Hızlı Teklifler'de yalnızca kimsenin almadığı talepler
     && (aktifKanal !== 'web' || alinanlariGoster || !havuzdanAlindiMi(k)));
   const kanalKayitlari = aktifKanal === 'web' ? mukerrerleriGizle(kanalKayitlariHam) : kanalKayitlariHam;
@@ -4661,8 +4668,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         const sekmeSec = (id) => { setTelefonTeklifAcik(false); setAktifKanal(id); setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setHesapFiltre('Tümü'); setArama(''); setYeniKayitAcik(false); setHesapYonetimAcik(false); };
         const webKanal = KANALLAR.find(k => k.id === 'web');
         // DEĞİŞTİ (kullanıcı talebi): iki sitenin talepleri birlikte; "yeni" rozetleri ayrı renkte
-        const webKayitlari = gorunurKayitlar.filter(x => x.kanal === 'web' && !havuzdanAlindiMi(x)); // YENİ: yalnızca havuzdakiler
-        const webYeniler = mukerrerleriGizle(webKayitlari).filter(x => (x.durum || 'Yeni') === 'Yeni');
+        const webKayitlari = gorunurKayitlar.filter(x => x.kanal === 'web' && !havuzdanAlindiMi(x) && webTekilIdler.has(x.id)); // YENİ: yalnızca havuzdakiler (mükerrersiz)
+        // DÜZELTME: rozetle aynı — mükerrer ayıklaması tüm web taleplerinde yapılır
+        const webYeniler = webKayitlari.filter(x => webTekilIdler.has(x.id) && (x.durum || 'Yeni') === 'Yeni');
         const webYeniSembol = webYeniler.filter(x => kayitSitesi(x) !== 'depoevim').length;
         const webYeniDepo = webYeniler.length - webYeniSembol;
         const webAktif = aktifKanal === 'web' && !telefonTeklifAcik;
