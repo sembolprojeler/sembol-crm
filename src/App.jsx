@@ -4098,6 +4098,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       } catch (e) { return 'dashboard'; }
     }); 
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    // YENİ (kullanıcı talebi): SATIŞ PERSONELİ "+" KISAYOLU — Yeni Telefon Görüşmesi
+    //   gorusmeSecimAcik: "Evden Eve / Depo" seçim penceresi açık mı?
+    //   hizliGorusme: { hizmet, no } → Müşteri Havuzu'na iletilir, sihirbaz açılır
+    const [gorusmeSecimAcik, setGorusmeSecimAcik] = useState(false);
+    const [hizliGorusme, setHizliGorusme] = useState(null);
     const [globalSearchQuery, setGlobalSearchQuery] = useState('');
     const [isSubMenuOpen, setIsSubMenuOpen] = useState(false);
     const [isAddJobSubMenuOpen, setIsAddJobSubMenuOpen] = useState(false);
@@ -7601,6 +7606,22 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       kılavuza gerektiğinde sol menüden ulaşılabilir.
                     • DİĞER PERSONEL        -> eskisi gibi İŞ KILAVUZU simgesi.
                     ========================================================== */}
+                {/* ==========================================================
+                    YENİ (kullanıcı talebi): YENİ TELEFON GÖRÜŞMESİ KISAYOLU
+                    YALNIZCA satış personelinde görünür (ve Müşteri Havuzu
+                    yetkisi varsa). Yanıp sönen "+" butonuna basılınca
+                    "Evden Eve Görüşmesi / Depo Görüşmesi" seçimi açılır;
+                    seçim doğrudan soru akışlı görüşme penceresini açar.
+                    ========================================================== */}
+                {(currentUser?.position || '').includes('Satış') && showSatisMusteriHavuzu && (
+                  <button
+                    onClick={() => setGorusmeSecimAcik(true)}
+                    className="relative p-2 rounded-xl transition shrink-0 gorusme-kisayol-yanson text-white"
+                    title="Yeni telefon görüşmesi — Evden Eve / Depo"
+                  >
+                    <Plus className="w-5 h-5" strokeWidth={3} />
+                  </button>
+                )}
                 {(currentUser?.position === 'Firma Sahibi' || currentUser?.rank === 'Müdür') ? (
                   <button
                     onClick={() => { setActiveTab('finansDefter'); setIsSidebarOpen(false); setIsSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsAuthSubMenuOpen(false); setIsSystemFilesSubMenuOpen(false); setIsFinanceSubMenuOpen(true); }}
@@ -8767,11 +8788,51 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'myComplaint' && showMyComplaint && <MyComplaintSubmitView currentUser={currentUser} db={db} appId={appId} addSystemLog={addSystemLog} />}
             {activeTab === 'addInfo' && showAddInfo && <AddInfoView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} onBack={() => setActiveTab('notifications')} />}
             
+            {/* ================================================================
+                YENİ (kullanıcı talebi): "+" KISAYOLU SEÇİM PENCERESİ
+                Telefon Teklifleri sayfasındaki "Evden Eve Görüşmesi" ve "Depo
+                Görüşmesi" butonlarının kısayoludur. Seçim yapılınca Müşteri
+                Havuzu açılır ve ilgili soru akışlı görüşme penceresi başlar.
+                ================================================================ */}
+            {gorusmeSecimAcik && (
+              <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setGorusmeSecimAcik(false)}>
+                <div className="bg-neutral-900 rounded-3xl shadow-2xl w-full max-w-md p-5 space-y-4 animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-white text-lg font-black flex items-center gap-2"><Phone className="w-5 h-5 text-emerald-400" /> Yeni Telefon Görüşmesi</h3>
+                      <p className="text-neutral-400 text-xs font-bold mt-0.5">Müşteri hangi hizmet için arıyor?</p>
+                    </div>
+                    <button type="button" onClick={() => setGorusmeSecimAcik(false)} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center shrink-0"><X className="w-5 h-5" /></button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {[
+                      { hizmet: 'Nakliye', ad: 'Evden Eve Görüşmesi', alt: 'Sembol Nakliyat · 7 soru', cls: 'bg-red-600 hover:bg-red-700 shadow-red-600/40', Ikon: Truck },
+                      { hizmet: 'Depo', ad: 'Depo Görüşmesi', alt: 'DepoEvim · 5 soru', cls: 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/40', Ikon: Package },
+                    ].map(sec => (
+                      <button key={sec.hizmet} type="button"
+                        onClick={() => {
+                          // Havuz açılır; "no" her tıklamada farklı olduğu için aynı seçim tekrar yapılabilir
+                          setHizliGorusme({ hizmet: sec.hizmet, no: Date.now() });
+                          setGorusmeSecimAcik(false); setIsSidebarOpen(false);
+                          setActiveTab('musteriHavuzu');
+                        }}
+                        className={`px-4 py-4 rounded-2xl text-white font-black shadow-lg transition flex flex-col items-center gap-1.5 ${sec.cls}`}>
+                        <span className="flex items-center gap-2 text-base"><PlusCircle className="w-5 h-5" /> {sec.ad}</span>
+                        <span className="flex items-center gap-1 text-[11px] font-bold text-white/80"><sec.Ikon className="w-3.5 h-3.5" /> {sec.alt}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* YENİ: MÜŞTERİ HAVUZU EKRANI — kendi alt yetkisiyle görünür */}
             {activeTab === 'musteriHavuzu' && showSatisMusteriHavuzu &&
               <MusteriHavuzuView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} setViewingImage={setViewingImage}
                 /* YENİ (kullanıcı talebi): müşteri geçmişi eşleştirmesi — bellekteki iş kayıtları (ek okuma yok) */
                 jobs={jobs}
+                /* YENİ (kullanıcı talebi): "+" kısayolundan gelen görüşme isteği — kullanılınca temizlenir */
+                hizliGorusme={hizliGorusme} onHizliGorusmeKullanildi={() => setHizliGorusme(null)}
                 /* YENİ: Teklife Bak penceresindeki "Kayıt Aç" butonu için */
                 onKayitAc={showSatisMusteriKayit ? havuzdanKayitAc : null} />}
 
@@ -11020,6 +11081,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           .defter-kisayol-yanson {
             animation: defterKisayolYanson 1.6s ease-in-out infinite;
           }
+          /* YENİ (kullanıcı talebi): satış personeli "+" görüşme kısayolu — kırmızı/mavi arası yanıp söner */
+          @keyframes gorusmeKisayolYanson {
+            0%, 100% { background-color: #dc2626; box-shadow: 0 0 0 0 rgba(220,38,38,0.55); transform: scale(1); }
+            50%      { background-color: #2563eb; box-shadow: 0 0 0 7px rgba(37,99,235,0.15); transform: scale(1.10); }
+          }
+          .gorusme-kisayol-yanson { animation: gorusmeKisayolYanson 1.6s ease-in-out infinite; }
+          @media (prefers-reduced-motion: reduce) { .gorusme-kisayol-yanson { animation: none; background-color: #dc2626; } }
           /* Hareket azaltma tercihi açık kullanıcılarda animasyon durur,
              simge sabit yeşil kalır (erişilebilirlik). */
           @media (prefers-reduced-motion: reduce) {
