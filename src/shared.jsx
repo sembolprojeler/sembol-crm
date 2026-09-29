@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FileText, CheckCircle, Camera, Upload, Copy, FolderOpen, X } from 'lucide-react';
   // --- FIREBASE BAĞLANTISI (CANLI / PRODUCTION MODU) ---
   // NOT: Önceki önizleme sürümünde burada bellek içi (in-memory) sahte bir
@@ -1453,7 +1453,10 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
     };
 
     // jobType: 'Depo' ise sonuca depoPatpati eklenir (diğer iş tiplerinde eklenmez)
-    export const calculateMaterials = (roomCount, packingType, jobType) => {
+    // DEĞİŞTİ (kullanıcı talebi): Bu ESKİ FORMÜL aynen korunmuştur; adı değişti.
+    // Müdür "Tahmini Malzeme Durumu" tablosunu kaydedene kadar sistem birebir bu
+    // formülle çalışır. Tablo ayrıca bu formülden üretilen değerlerle başlar.
+    const eskiMalzemeFormulu = (roomCount, packingType, jobType) => {
     let multiplier = 1;
     if (roomCount === '1+0' || roomCount === 'Parça Eşya' || roomCount === 'Depoevim Tesisleri') multiplier = 0.5;
     else if (roomCount === '1+1') multiplier = 1;
@@ -1497,6 +1500,147 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
     }
 
     return est;
+  };
+
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): TAHMİNİ MALZEME TABLOSU
+  // --------------------------------------------------------------------------
+  // Malzeme Listesi > "Tahmini Malzeme Durumu" penceresinden müdür düzenler.
+  // Yapı: tablo[hizmet][oda][paket] = { strec, bant, poset, kagit, koli,
+  //        depoPatpati, ek: { <malzemeId>: miktar } }
+  //   hizmet: Nakliye | Depo (depoya giriş) | DepoCikis (depodan çıkış)
+  //   oda   : 1+0 | 1+1 | 2+1 | 3+1 | 4+1 | 5+1 (5+1 ve üzeri / Villa / Ofis)
+  //   paket : toplu (müşteri topladı) | toplama (firma toplar)
+  //   ek    : Malzeme Listesi'ne sonradan eklenen malzemeler (id ile)
+  // Firestore: artifacts/{appId}/public/data/settings/malzemeTahmini
+  // Kaydedildikten sonra atanmamış / yeni işlerin tahmini ve iş bitiminde
+  // stoktan düşülen miktar bu tablodan gelir. Ekip Kurma Tahtası'nda elle
+  // değiştirilmiş (assignedMaterials) işler olduğu gibi kalır.
+  // ==========================================================================
+  export const MALZEME_STANDART = [
+    { anahtar: 'strec', ad: 'Streç', eslesme: 'streç' },
+    { anahtar: 'bant', ad: 'Bant', eslesme: 'bant' },
+    { anahtar: 'poset', ad: 'Poşet', eslesme: 'poşet' },
+    { anahtar: 'kagit', ad: 'Kağıt', eslesme: 'kağıt' },
+    { anahtar: 'koli', ad: 'Koli', eslesme: 'koli' },
+    { anahtar: 'depoPatpati', ad: 'Depo Patpatı', eslesme: 'patpat', sadeceDepo: true },
+  ];
+  export const MALZEME_HIZMETLER = [
+    { id: 'Nakliye', ad: 'Evden Eve Nakliyat', alt: 'Ev → ev taşıma' },
+    { id: 'Depo', ad: 'Eşya Depolama', alt: 'Evden depoya giriş' },
+    { id: 'DepoCikis', ad: 'Depo Çıkışı', alt: 'Depodan yeni adrese' },
+  ];
+  export const MALZEME_ODALAR = [
+    { id: '1+0', ad: '1+0' }, { id: '1+1', ad: '1+1' }, { id: '2+1', ad: '2+1' },
+    { id: '3+1', ad: '3+1' }, { id: '4+1', ad: '4+1' }, { id: '5+1', ad: '5+1 ve üzeri / Villa / Ofis' },
+  ];
+  export const MALZEME_PAKETLER = [
+    { id: 'toplu', ad: 'Toplu Eşya', alt: 'Müşteri kendisi topladı' },
+    { id: 'toplama', ad: 'Toplamalı', alt: 'Firma toplar (kolileme)' },
+  ];
+  // Kayıttaki daire tipini tablo satırına çevirir
+  export const malzemeOdaAnahtari = (oda) => {
+    if (['1+0', '1+1', '2+1', '3+1', '4+1'].includes(oda)) return oda;
+    if (!oda || oda === 'Parça Eşya' || oda === 'Depoevim Tesisleri') return '1+0';
+    return '5+1';   // 5+1, Villa, Ofis
+  };
+  // İşin hizmet türü: depo işinde yön (depoya giriş / depodan çıkış) ayrılır
+  export const malzemeHizmetTuru = (jobType, job) => (jobType === 'Depo' ? (job?.depoDirection === 'fromDepo' ? 'DepoCikis' : 'Depo') : 'Nakliye');
+  export const malzemeToplamaMi = (packingType, job) => packingType === 'Toplama Yapılacak' || packingType === 'Kendi İşimiz'
+    || (Array.isArray(job?.esyaDurumu) && job.esyaDurumu.includes('Toplama Yapılacaktır'));
+  // Malzeme Listesi'ndeki bir kalemin tablo anahtarı (standart ise sabit anahtar, değilse ek:id)
+  export const malzemeTabloAnahtari = (malzeme) => {
+    const ad = (malzeme?.name || '').toLocaleLowerCase('tr-TR');
+    const st = MALZEME_STANDART.find(x => ad.includes(x.eslesme));
+    return st ? st.anahtar : `ek:${malzeme.id}`;
+  };
+  // Varsayılan tablo — ESKİ FORMÜLDEN üretilir (kayıttan önceki davranışla birebir aynı)
+  export const malzemeTahminVarsayilan = () => {
+    const ornekOda = { '1+0': '1+0', '1+1': '1+1', '2+1': '2+1', '3+1': '3+1', '4+1': '4+1', '5+1': 'Villa' };
+    const tablo = {};
+    MALZEME_HIZMETLER.forEach(h => {
+      tablo[h.id] = {};
+      MALZEME_ODALAR.forEach(o => {
+        tablo[h.id][o.id] = {};
+        MALZEME_PAKETLER.forEach(pk => {
+          const est = eskiMalzemeFormulu(ornekOda[o.id], pk.id === 'toplama' ? 'Toplama Yapılacak' : 'Kendisi Topladı', h.id === 'Nakliye' ? 'Nakliye' : 'Depo');
+          // Depo çıkışında eşya depodan çıkar → patpat varsayılanı 0 (gerekirse tablodan girilir)
+          if (h.id === 'DepoCikis') est.depoPatpati = 0;
+          tablo[h.id][o.id][pk.id] = { ...est, ek: {} };
+        });
+      });
+    });
+    return tablo;
+  };
+  // Canlı tablo önbelleği (Firestore'dan gelir)
+  const _malzemeTahmin = { tablo: null, guncelleyen: '', tarih: '', adlar: {} };
+  export const malzemeTahminBilgisi = () => ({ ..._malzemeTahmin });
+  export const malzemeTahminTablosuAyarla = (veri) => {
+    _malzemeTahmin.tablo = veri?.tablo || null;
+    _malzemeTahmin.guncelleyen = veri?.guncelleyen || '';
+    _malzemeTahmin.tarih = veri?.tarih || '';
+    _malzemeTahmin.adlar = veri?.adlar || {};   // ek malzeme id → { name, unit } (listelerde ad göstermek için)
+  };
+  // Ek malzemenin adı + birimi ("Battaniye (Adet)")
+  export const malzemeEkAdi = (id) => { const a = _malzemeTahmin.adlar?.[id]; return a ? `${a.name}` : 'Ek malzeme'; };
+  export const malzemeTahminBelgesi = () => doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'malzemeTahmini');
+  // Uygulamanın en üstünde (App.jsx) bir kez çağrılır; tablo değişince ekranlar yenilenir
+  export const useMalzemeTahminTablosu = () => {
+    const [surum, setSurum] = useState(0);
+    useEffect(() => {
+      const unsub = onSnapshot(malzemeTahminBelgesi(), snap => {
+        malzemeTahminTablosuAyarla(snap.exists() ? snap.data() : null);
+        setSurum(v => v + 1);
+      }, err => console.error('Tahmini malzeme tablosu okunamadı:', err));
+      return () => unsub();
+    }, []);
+    return surum;
+  };
+
+  // YENİ calculateMaterials — imza geriye uyumlu (4. parametre "job" opsiyonel).
+  // Tablo kayıtlıysa tablodaki değer, değilse ESKİ FORMÜL kullanılır.
+  // job verilirse depo çıkışı (depoDirection: fromDepo) ayrı hesaplanır ve
+  // oda sayısı teslim adresinden (toRoomCount) okunur.
+  export const calculateMaterials = (roomCount, packingType, jobType, job = null) => {
+    const tablo = _malzemeTahmin.tablo;
+    if (tablo) {
+      const hizmet = malzemeHizmetTuru(jobType, job);
+      let oda = roomCount;
+      if (hizmet === 'DepoCikis' && job && (!oda || oda === 'Depoevim Tesisleri')) oda = job.toRoomCount || oda;
+      const hucre = tablo?.[hizmet]?.[malzemeOdaAnahtari(oda)]?.[malzemeToplamaMi(packingType, job) ? 'toplama' : 'toplu'];
+      if (hucre) {
+        const sayi = (v) => Number(v) || 0;
+        const est = { strec: sayi(hucre.strec), bant: sayi(hucre.bant), poset: sayi(hucre.poset), kagit: sayi(hucre.kagit), koli: sayi(hucre.koli) };
+        if (jobType === 'Depo') est.depoPatpati = sayi(hucre.depoPatpati);
+        const ek = {};
+        Object.entries(hucre.ek || {}).forEach(([id, v]) => { if (sayi(v) > 0) ek[id] = sayi(v); });
+        if (Object.keys(ek).length) est.ekMalzemeler = ek;   // Sonradan eklenen malzemeler
+        return est;
+      }
+    }
+    return eskiMalzemeFormulu(roomCount, packingType, jobType);
+  };
+
+  // YENİ: Bir tahmini (standart + ek malzemeler + işe eklenen ekstra malzemeler)
+  // Malzeme Listesi kalemlerine göre toplar → [{ malzeme, miktar }]
+  // Stoktan düşme ve stok kontrolü aynı hesabı kullanır.
+  export const malzemeIhtiyaclari = (est, materials = [], customMaterials = [], jobType = '') => {
+    const norm = (x) => (x || '').toLocaleLowerCase('tr-TR');
+    const toplam = new Map();
+    const ekle = (m, miktar) => { if (!m || !(miktar > 0)) return; const x = toplam.get(m.id); if (x) x.miktar += miktar; else toplam.set(m.id, { malzeme: m, miktar }); };
+    MALZEME_STANDART.forEach(st => {
+      if (st.sadeceDepo && jobType !== 'Depo') return;
+      const m = materials.find(mm => norm(mm.name).includes(st.eslesme));
+      ekle(m, Number(est?.[st.anahtar]) || 0);
+    });
+    Object.entries(est?.ekMalzemeler || {}).forEach(([id, v]) => ekle(materials.find(mm => mm.id === id), Number(v) || 0));
+    (customMaterials || []).forEach(cm => {
+      // Önce birebir ad, sonra kapsama eşleşmesi (eski kodla aynı mantık)
+      const m = materials.find(mm => norm(mm.name) === norm(cm.name))
+        || materials.find(mm => norm(cm.name).includes(norm(mm.name)) || norm(mm.name).includes(norm(cm.name)));
+      ekle(m, parseFloat(cm.amount) || 0);
+    });
+    return Array.from(toplam.values()).map(x => ({ ...x, miktar: Math.round(x.miktar * 100) / 100 }));
   };
 
   // --- SÖZLEŞME PDF OLUŞTURUCU ---
