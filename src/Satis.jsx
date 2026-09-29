@@ -4669,19 +4669,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             {/* ---- YENİ (kullanıcı talebi): TELEFON TEKLİFLERİ — Hızlı Tekliflerin üstünde ----
                 Tıklayınca telefonda görüşülen müşterilerin manuel girildiği sayfa açılır. */}
             <TelefonTeklifleriButonu teklifler={gorunurTelefonTeklifleri} aktif={telefonTeklifAcik} onClick={() => setTelefonTeklifAcik(true)} tamYetki={tamYetki} />
-            {/* YENİ: eski talep aktarımı — yalnızca yöneticiye ilerleme / hata bilgisi */}
-            {tamYetki && (() => {
-              const bekleyen = kayitlar.filter(tasimaAdayi).length;
-              if (!bekleyen && !tasimaBilgi.hata) return null;
-              return (
-                <div className={`rounded-xl px-3 py-2 text-[11px] font-black flex items-center gap-2 flex-wrap border ${tasimaBilgi.hata ? 'bg-red-50 text-red-800 border-red-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'}`}>
-                  {tasimaBilgi.hata ? <AlertTriangle className="w-4 h-4" /> : <Loader2 className="w-4 h-4 animate-spin" />}
-                  <span>Eski havuz talepleri temsilcilerin Telefon Görüşmesi alanına aktarılıyor — {bekleyen} kaldı{tasimaBilgi.yapilan ? `, ${tasimaBilgi.yapilan} aktarıldı` : ''}.</span>
-                  {tasimaBilgi.hata > 0 && <span className="font-bold">{tasimaBilgi.hata} talep aktarılamadı: {tasimaBilgi.sonHata.slice(0, 120)}</span>}
-                  <button type="button" onClick={tasimayiTekrarDene} className="ml-auto px-2.5 py-1 rounded-lg bg-white border border-current">Eski Talepleri Aktar</button>
-                </div>
-              );
-            })()}
+            {/* KALDIRILDI (kullanıcı talebi): "Eski havuz talepleri aktarılıyor" çubuğu.
+                Aktarım arka planda sessizce, otomatik yapılır; hata olursa yalnızca
+                tarayıcı konsoluna yazılır ve bir sonraki açılışta yeniden denenir. */}
 
             {/* ---- HIZLI TEKLİFLER ---- */}
             {/* DEĞİŞTİ: Hızlı Teklifler butonu ~%20 küçültüldü */}
@@ -8639,7 +8629,8 @@ const ttTakipDurumu = (t) => {
 
 // YENİ (kullanıcı talebi): görüşmenin kaynağı — havuzdan mı geldi, elle mi girildi?
 const TT_KAYNAKLAR = [
-  { id: 'manuel', ad: 'Manuel Görüşmeler',        rozet: 'MANUEL',       stil: 'bg-neutral-800 text-white',  pasif: 'bg-white text-neutral-700 border-neutral-300' },
+  // DEĞİŞTİ (kullanıcı talebi): "Manuel Görüşmeler" → "Telefon Görüşmeleri"
+  { id: 'manuel', ad: 'Telefon Görüşmeleri',      rozet: 'MANUEL',       stil: 'bg-neutral-800 text-white',  pasif: 'bg-white text-neutral-700 border-neutral-300' },
   { id: 'havuz',  ad: 'Hızlı Teklif Görüşmeleri', rozet: 'HIZLI TEKLİF', stil: 'bg-orange-500 text-white',   pasif: 'bg-white text-orange-700 border-orange-200' },
 ];
 const ttKaynakTuru = (t) => (t.havuzKayitId ? 'havuz' : 'manuel');
@@ -10052,7 +10043,8 @@ const useTelefonTeklifleri = (aktif = true) => {
 
 // Görünürlük (kullanıcı talebi): her satışçı KENDİ görüşmelerini görür,
 // yöneticiler (Firma Sahibi / Yönetici / Müdür / düzenleme yetkili) HEPSİNİ görür.
-const ttGorunurMu = (t, kullanici, tamYetki) => tamYetki || !ttSahibi(t) || ttSahibi(t) === kullanici;
+// DEĞİŞTİ (kullanıcı talebi): satışçı YALNIZCA kendi görüşmelerini görür; sahipsiz kayıtlar yalnızca yöneticide
+const ttGorunurMu = (t, kullanici, tamYetki) => tamYetki || ttSahibi(t) === kullanici;
 
 // Özet sayaçları
 const ttOzet = (list) => {
@@ -10385,7 +10377,10 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
   const [durumFiltre, setDurumFiltre] = useState('Tümü');
   const [takipFiltre, setTakipFiltre] = useState('Tümü');
   const [ayFiltre, setAyFiltre] = useState('Tümü');
-  const [sahipFiltre, setSahipFiltre] = useState('Tümü');   // Yalnızca yöneticilerde görünür
+  // DEĞİŞTİ (kullanıcı talebi): yöneticide de ekran KİŞİYE ÖZEL açılır ('__ben' = kendi ekranı).
+  // Yönetici bir satışçı seçince o satışçının Telefon Görüşmesi ekranını birebir görür.
+  // Değerler: '__ben' | satışçı adı | 'Tümü' (tüm satışçılar) | '__yok' (atanmamış)
+  const [sahipFiltre, setSahipFiltre] = useState(tamYetki ? '__ben' : 'Tümü');
   const [kaynakFiltre, setKaynakFiltre] = useState('Tümü'); // YENİ: Manuel / Hızlı Teklif görüşmeleri
 
   const kullanici = currentUser?.fullName || 'Sistem';
@@ -10401,9 +10396,14 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
 
   // Görünür kayıtlar (kendi / tümü) → filtreler bunun üzerine uygulanır
   const gorunur = useMemo(() => teklifler.filter(t => ttGorunurMu(t, kullanici, tamYetki)), [teklifler, kullanici, tamYetki]);
+  // YENİ: yöneticinin şu an kimin ekranına baktığı (satışçıda filtre uygulanmaz)
+  const ekranSahibi = sahipFiltre === '__ben' ? kullanici : sahipFiltre;
+  const ekranUyar = (t) => !tamYetki || sahipFiltre === 'Tümü'
+    || (sahipFiltre === '__yok' ? !ttSahibi(t) : ttSahibi(t) === ekranSahibi);
+  const baskasininEkrani = tamYetki && sahipFiltre !== '__ben';
   const hizmetli = useMemo(() => gorunur.filter(t => hizmetFiltre === 'Tümü' || (t.hizmetTipi || 'Nakliye') === hizmetFiltre)
     .filter(t => kaynakFiltre === 'Tümü' || ttKaynakTuru(t) === kaynakFiltre)
-    .filter(t => sahipFiltre === 'Tümü' || (sahipFiltre === '__yok' ? !ttSahibi(t) : ttSahibi(t) === sahipFiltre)), [gorunur, hizmetFiltre, kaynakFiltre, sahipFiltre]);
+    .filter(t => ekranUyar(t)), [gorunur, hizmetFiltre, kaynakFiltre, sahipFiltre]); // eslint-disable-line react-hooks/exhaustive-deps
   const ozet = useMemo(() => ttOzet(hizmetli), [hizmetli]);
   const aylar = useMemo(() => [...new Set(gorunur.map(t => (t.iletisimTarihi || '').slice(0, 7)).filter(Boolean))].sort().reverse(), [gorunur]);
   const ayAdi = (ym) => new Date(`${ym}-01T00:00:00`).toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
@@ -10431,6 +10431,13 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
   }, [hizmetli, arama, durumFiltre, ayFiltre, takipFiltre]);
 
   const detay = teklifler.find(t => t.id === detayId) || null;
+  // YENİ (kullanıcı talebi): ekranda ilk 50 görüşme; "Devamını Gör" her tıklamada 50 daha açar.
+  // Filtre / arama / ekran seçimi değişince sınır yeniden 50 olur.
+  const TT_SAYFA = 50;
+  const [gosterimSiniri, setGosterimSiniri] = useState(TT_SAYFA);
+  useEffect(() => { setGosterimSiniri(TT_SAYFA); }, [arama, hizmetFiltre, durumFiltre, takipFiltre, ayFiltre, sahipFiltre, kaynakFiltre]);
+  const gorunenListe = liste.slice(0, gosterimSiniri);
+  const kalanSayi = Math.max(0, liste.length - gorunenListe.length);
   const gecmisOf = (t) => musteriGecmisiBul(gecmisIndeksi, t.telefon, t.id);
   const durumSayisi = (id) => id === 'Tümü' ? hizmetli.length : hizmetli.filter(t => (t.durum || 'Yeni') === id).length;
 
@@ -10535,9 +10542,14 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
             {onGeri && <button type="button" onClick={onGeri} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center shrink-0" title="Müşteri Havuzu'na dön"><ChevronLeft className="w-5 h-5" /></button>}
             <div>
               <h2 className="text-lg md:text-xl font-black flex items-center gap-2"><PhoneCall className="w-5 h-5 text-emerald-400" /> Telefon Görüşmesi
-                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500 text-white flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> KİŞİYE ÖZEL ALAN</span></h2>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-500 text-white flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> KİŞİYE ÖZEL ALAN</span>
+                {baskasininEkrani && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-yellow-400 text-neutral-900 flex items-center gap-1"><Eye className="w-3 h-3" /> {sahipFiltre === 'Tümü' ? 'TÜM EKRANLAR' : sahipFiltre === '__yok' ? 'ATANMAMIŞLAR' : `${ekranSahibi.toLocaleUpperCase('tr-TR')} EKRANI`}</span>}</h2>
               <p className="text-neutral-300 text-[11px] md:text-xs mt-0.5">
-                {tamYetki ? 'Yönetici görünümü — tüm satışçıların görüşmeleri' : `${kullanici} — yalnızca sizin görüşmeleriniz`}
+                {!tamYetki ? `${kullanici} — yalnızca sizin görüşmeleriniz`
+                  : sahipFiltre === '__ben' ? `${kullanici} — kendi ekranınız (başka satışçının ekranı için aşağıdan seçin)`
+                  : sahipFiltre === 'Tümü' ? 'Yönetici görünümü — tüm satışçıların görüşmeleri'
+                  : sahipFiltre === '__yok' ? 'Yönetici görünümü — kimseye atanmamış görüşmeler'
+                  : `Yönetici görünümü — ${ekranSahibi} adlı satışçının ekranı`}
               </p>
             </div>
           </div>
@@ -10574,6 +10586,28 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
         </div>
       </div>
 
+      {/* YENİ (kullanıcı talebi): YÖNETİCİ — KİMİN EKRANINI GÖRMEK İSTİYORSUNUZ?
+          Satışçı seçilince liste, sayaçlar ve filtreler o satışçının kendi
+          ekranında gördüğüyle birebir aynı olur. Varsayılan: kendi ekranınız. */}
+      {tamYetki && (
+        <div className="bg-yellow-50 border-2 border-yellow-300 rounded-2xl p-3">
+          <p className="text-[11px] font-black uppercase text-yellow-900 flex items-center gap-1.5 mb-2"><Eye className="w-4 h-4" /> Kimin Telefon Görüşmesi ekranını görmek istiyorsunuz?</p>
+          <div className="flex flex-wrap gap-1.5">
+            {[
+              { id: '__ben', ad: 'Benim Ekranım', sayi: gorunur.filter(t => ttSahibi(t) === kullanici).length, Ikon: ShieldCheck },
+              ...sahipler.filter(ad => ad !== kullanici).map(ad => ({ id: ad, ad, sayi: gorunur.filter(t => ttSahibi(t) === ad).length, Ikon: User })),
+              { id: 'Tümü', ad: 'Tüm Satışçılar', sayi: gorunur.length, Ikon: Users },
+              { id: '__yok', ad: 'Atanmamış', sayi: gorunur.filter(t => !ttSahibi(t)).length, Ikon: HelpCircle },
+            ].map(sec => (
+              <button key={sec.id} type="button" onClick={() => { setSahipFiltre(sec.id); setDetayId(null); }}
+                className={`px-3 py-2 rounded-xl text-xs font-black border-2 transition flex items-center gap-1.5 ${sahipFiltre === sec.id ? 'bg-neutral-900 text-white border-neutral-900 shadow-lg' : 'bg-white text-neutral-700 border-yellow-200 hover:border-neutral-400'}`}>
+                <sec.Ikon className="w-3.5 h-3.5" /> {sec.ad} <span className={`px-1.5 rounded-full text-[10px] ${sahipFiltre === sec.id ? 'bg-white/20' : 'bg-yellow-100'}`}>{sec.sayi}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* FİLTRELER */}
       <div className="bg-white rounded-2xl border border-neutral-200 p-3 space-y-2">
         {/* YENİ (kullanıcı talebi): KAYNAK — elle girilen görüşmeler / Hızlı Teklif Havuzu'ndan gelenler */}
@@ -10607,13 +10641,6 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
             <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Ad, telefon (0'lı/0'sız), ilçe, açıklama veya satışçı ara…"
               className="w-full pl-9 pr-3 py-2 rounded-xl border border-neutral-200 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-neutral-900/20" />
           </div>
-          {tamYetki && (
-            <select value={sahipFiltre} onChange={e => setSahipFiltre(e.target.value)} className="px-3 py-2 rounded-xl border border-neutral-200 text-sm font-black bg-white">
-              <option value="Tümü">Tüm Satışçılar</option>
-              <option value="__yok">Atanmamış</option>
-              {sahipler.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-          )}
           <select value={ayFiltre} onChange={e => setAyFiltre(e.target.value)} className="px-3 py-2 rounded-xl border border-neutral-200 text-sm font-black bg-white">
             <option value="Tümü">Tüm Aylar</option>
             {aylar.map(a => <option key={a} value={a}>{ayAdi(a)}</option>)}
@@ -10648,10 +10675,20 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
             <PhoneCall className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
             <p className="text-sm font-black text-neutral-500">{gorunur.length ? 'Filtreye uyan görüşme yok.' : 'Henüz telefon görüşmesi eklenmedi.'}</p>
           </div>
-        ) : liste.map(t => (
+        ) : gorunenListe.map(t => (
           <TelefonTeklifSatiri key={t.id} tHam={t} gecmis={gecmisOf(t)} sahibiGoster={tamYetki}
             onAc={() => setDetayId(t.id)} onDurum={(y) => durumDegistir(t, y)} onWhatsapp={() => setWaKayit({ t, sablon: 'ozet' })} />
         ))}
+        {/* YENİ: 50'den fazlası için devamını gör */}
+        {kalanSayi > 0 && (
+          <div className="p-3 border-t border-neutral-200 bg-neutral-50 flex flex-col sm:flex-row items-center justify-center gap-2 rounded-b-2xl">
+            <span className="text-[11px] font-bold text-neutral-500">{gorunenListe.length} / {liste.length} görüşme gösteriliyor</span>
+            <button type="button" onClick={() => setGosterimSiniri(x => x + TT_SAYFA)}
+              className="px-4 py-2 bg-neutral-900 hover:bg-neutral-700 text-white rounded-xl text-xs font-black inline-flex items-center gap-1.5 transition">
+              <ChevronDown className="w-4 h-4" /> 50'den Fazlasını Gör ({Math.min(TT_SAYFA, kalanSayi)} görüşme daha)
+            </button>
+          </div>
+        )}
       </div>
 
       {/* PENCERELER */}
