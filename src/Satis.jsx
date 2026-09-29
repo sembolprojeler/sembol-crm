@@ -3432,6 +3432,7 @@ export const useHizliTeklifYeniSayilari = (aktif = true) => {
       liste.sort((x, y) => (y.createdAt || '').localeCompare(x.createdAt || ''));
       mukerrerleriGizleRozet(liste).forEach(k => {
         if ((k.durum || 'Yeni') !== 'Yeni') return;   // Durumu değişen teklif sayılmaz
+        if (k.atanan || k.telefonTeklifId) return;     // YENİ: satışçı aldıysa artık havuzda değil
         if (hizliTeklifSitesi(k) === 'depoevim') depoevim++; else sembol++;
       });
       setSayilar({ sembol, depoevim });
@@ -3874,6 +3875,10 @@ const HizliTekliflerTablosu = ({
   );
 };
 
+// YENİ (kullanıcı talebi): Havuzdaki "Tüm Hesaplar / Tüm Satışçılar / Ara / Senkronize Et /
+// Hesaplar / Yeni Kayıt" satırı şimdilik gizli. Geri açmak için true yapın.
+const HAVUZ_ARAC_CUBUGU_GORUNUR = false;
+
 export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLog, setViewingImage,
   // YENİ (kullanıcı talebi): "Teklife Bak" penceresindeki "Kayıt Aç" butonu.
   // App.jsx'ten gelir; hizmet tipine göre doğru kayıt sekmesini açar ve
@@ -3909,6 +3914,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [transferKayit, setTransferKayit] = useState(null);
   // YENİ (kullanıcı talebi): Havuz kaydından "Görüşme Formu" açılırken ön doldurma verisi
   const [telefonOnDoldur, setTelefonOnDoldur] = useState(null);
+  // YENİ (kullanıcı talebi): Hızlı Teklifler artık HAVUZ mantığında — yalnızca kimsenin
+  // almadığı talepler listelenir. Bu anahtar açılırsa alınmış olanlar da gösterilir.
+  const [alinanlariGoster, setAlinanlariGoster] = useState(false);
+  const [aktariliyor, setAktariliyor] = useState(false);   // Telefon Teklifleri'ne aktarım sürüyor
   // ======================================================================
   // YENİ (kullanıcı talebi): QR TAKİP — site seçicinin altındaki düğme ile
   // açılan sayfa. Kampanyalar ve taramalar burada dinlenir ki Havuz
@@ -4039,6 +4048,39 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     const degisiklik = canli.atanan ? {} : { atanan: kullaniciAdi };
     await hareketliGuncelle(canli, degisiklik, `${metin}${degisiklik.atanan ? ` • ${kullaniciAdi} adlı satışçıya atandı` : ''}`);
   };
+
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): HAVUZDAN TELEFON TEKLİFLERİ'NE AKTAR
+  // --------------------------------------------------------------------------
+  // "Kaydet" veya "Fiyat Hesapla"ya basıldığı an talep satışçının KENDİ
+  // Telefon Teklifleri sayfasına geçer:
+  //   • Web formundaki cevaplarla dolu bir telefon teklifi oluşturulur
+  //     (daha önce oluşturulduysa aynısı kullanılır — mükerrer olmaz),
+  //   • havuz kaydı satışçıya atanır ve telefonTeklifId ile bağlanır,
+  //   • böylece talep Hızlı Teklifler havuzundan düşer.
+  // bekleyenNot: detay penceresinde yazılıp eklenmemiş not (kaybolmasın diye)
+  // ==========================================================================
+  const havuzuTelefonaAktar = async (kayit, bekleyenNot = '') => {
+    const canli = kayitlar.find(x => x.id === kayit.id) || kayit;
+    const notlar = bekleyenNot
+      ? [...(canli.notlar || []), { tarih: new Date().toISOString(), kullanici: kullaniciAdi, metin: bekleyenNot }]
+      : (canli.notlar || []);
+    let teklif = canli.telefonTeklifId ? telefonTeklifleri.find(t => t.id === canli.telefonTeklifId) : null;
+    if (!teklif) {
+      const veri = ttHavuzdanTeklifVerisi({ ...canli, notlar }, kullaniciAdi);
+      const ref = await addDoc(ttKoleksiyon(), veri);
+      teklif = { id: ref.id, ...veri };
+      addSystemLog?.('Müşteri Havuzu', `${canli.musteriAdi || canli.iletisim} Telefon Teklifleri'ne aktarıldı (${teklif.atanan}).`);
+    }
+    const degisiklik = { telefonTeklifId: teklif.id };
+    if (!canli.atanan) degisiklik.atanan = kullaniciAdi;
+    if (bekleyenNot) degisiklik.notlar = notlar;
+    await hareketliGuncelle(canli, degisiklik,
+      `Telefon Teklifleri'ne aktarıldı${degisiklik.atanan ? ` • ${kullaniciAdi} adlı satışçıya atandı` : ''}${bekleyenNot ? ` • Not: "${bekleyenNot.slice(0, 60)}"` : ''}`);
+    return teklif;
+  };
+  // Havuzdan alınmış mı? (satışçıya atanmış ya da telefon teklifine dönüşmüş)
+  const havuzdanAlindiMi = (k) => !!(k.atanan || k.telefonTeklifId);
 
   const handleNotEkle = async (kayit) => {
     if (!notMetni.trim()) return;
@@ -4248,7 +4290,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // (Tümü (20), Yeni (0) ...) seçilen döneme göre hesaplanır.
   // DEĞİŞTİ: Hızlı Teklifler'de mükerrer kayıtlar gizlenir (sayaçlar da tekilleşir).
   // DEĞİŞTİ (kullanıcı talebi): site ayrımı yok; görünürlük + sahiplik filtresi uygulanır
-  const kanalKayitlariHam = gorunurKayitlar.filter(k => k.kanal === aktifKanal && sahipUyar(k) && zamanUyar(k, zamanFiltre));
+  const kanalKayitlariHam = gorunurKayitlar.filter(k => k.kanal === aktifKanal && sahipUyar(k) && zamanUyar(k, zamanFiltre)
+    // YENİ (kullanıcı talebi): Hızlı Teklifler'de yalnızca kimsenin almadığı talepler
+    && (aktifKanal !== 'web' || alinanlariGoster || !havuzdanAlindiMi(k)));
   const kanalKayitlari = aktifKanal === 'web' ? mukerrerleriGizle(kanalKayitlariHam) : kanalKayitlariHam;
   const filtreli = kanalKayitlari.filter(k => {
     if (durumFiltre !== 'Tümü' && (k.durum || 'Yeni') !== durumFiltre) return false;
@@ -4508,7 +4552,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         const sekmeSec = (id) => { setAktifKanal(id); setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setHesapFiltre('Tümü'); setArama(''); setYeniKayitAcik(false); setHesapYonetimAcik(false); };
         const webKanal = KANALLAR.find(k => k.id === 'web');
         // DEĞİŞTİ (kullanıcı talebi): iki sitenin talepleri birlikte; "yeni" rozetleri ayrı renkte
-        const webKayitlari = gorunurKayitlar.filter(x => x.kanal === 'web');
+        const webKayitlari = gorunurKayitlar.filter(x => x.kanal === 'web' && !havuzdanAlindiMi(x)); // YENİ: yalnızca havuzdakiler
         const webYeniler = mukerrerleriGizle(webKayitlari).filter(x => (x.durum || 'Yeni') === 'Yeni');
         const webYeniSembol = webYeniler.filter(x => kayitSitesi(x) !== 'depoevim').length;
         const webYeniDepo = webYeniler.length - webYeniSembol;
@@ -4566,7 +4610,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         );
       })()}
 
-      {/* ARAÇ ÇUBUĞU: hesap filtresi + arama + aksiyonlar */}
+      {/* ARAÇ ÇUBUĞU: hesap filtresi + arama + aksiyonlar
+          GİZLENDİ (kullanıcı talebi): "şu an işimiz yok". Kod duruyor; tekrar
+          göstermek için HAVUZ_ARAC_CUBUGU_GORUNUR değerini true yapmak yeterli. */}
+      {HAVUZ_ARAC_CUBUGU_GORUNUR && (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex flex-col lg:flex-row gap-2 lg:items-center">
         <select value={hesapFiltre} onChange={e => setHesapFiltre(e.target.value)} className="px-3 py-2 text-xs font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none">
           <option value="Tümü">Tüm Hesaplar ({kanalHesaplari.length})</option>
@@ -4598,6 +4645,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           </button>
         </div>
       </div>
+      )}
       {senkronDurum && senkronDurum !== 'yukleniyor' && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold rounded-xl px-3 py-2">{senkronDurum}</div>
       )}
@@ -4691,6 +4739,13 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               {z}
             </button>
           ))}
+          {/* YENİ: havuz dışına çıkmış (satışçıya geçmiş) talepleri de listele */}
+          {aktifKanal === 'web' && (
+            <button type="button" onClick={() => setAlinanlariGoster(v => !v)}
+              className={`ml-auto px-2.5 py-1 rounded-lg text-[11px] font-black border transition flex items-center gap-1 ${alinanlariGoster ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+              <Eye className="w-3 h-3" /> {alinanlariGoster ? 'Alınanlar gösteriliyor' : 'Alınanları da göster'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -4907,20 +4962,13 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               {/* YENİ (kullanıcı talebi): MÜŞTERİ GEÇMİŞİ — telefon numarasıyla eşleşen
                   eski işler, havuz talepleri ve telefon görüşmeleri */}
               {(() => { const g = havuzGecmisi(detayKayit); return g ? <MusteriGecmisiKutusu gecmis={g} ad={detayKayit.musteriAdi} /> : null; })()}
-              {/* YENİ (kullanıcı talebi): TELEFON GÖRÜŞME FORMU — bu talep için soru akışlı
-                  formu açar (ad, telefon ve hizmet dolu gelir); kaydedilince talebe işlenir */}
-              <button type="button"
-                onClick={() => {
-                  const ad = (duzenleMusteriAdi || detayKayit.musteriAdi || '').trim();
-                  const tel = (duzenleIletisim || detayKayit.iletisim || '').trim();
-                  setTelefonOnDoldur({ ...ttBosForm(detayKayit.hizmetTipi === 'Depo' ? 'Depo' : 'Nakliye'), musteriAdi: ad, telefon: telefonGecerliMi(tel) ? tel : '', havuzKayitId: detayKayit.id,
-                    aciklama: detayKayit.sonMesaj ? `Havuz talebi: ${detayKayit.sonMesaj.slice(0, 400)}` : '' });
-                  setDetayKayit(null); setDetayFotoGoster(null); setNotMetni(''); setBaslikDuzenle(false);
-                  setTelefonTeklifAcik(true);
-                }}
-                className="w-full py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition">
-                <PhoneCall className="w-4 h-4" /> Telefon Görüşme Formunu Aç (soru akışı + sistem fiyatı)
-              </button>
+              {/* TAŞINDI (kullanıcı talebi): "Telefon Görüşme Formu" artık alt çubuktaki
+                  "Fiyat Hesapla" butonu (eski "Kayıt Aç"ın yerinde). */}
+              {detayKayit.telefonTeklifId && (
+                <p className="text-[11px] font-black text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2 flex items-center gap-1.5">
+                  <PhoneCall className="w-3.5 h-3.5" /> Bu talep Telefon Teklifleri'ne aktarıldı ({detayKayit.atanan || '—'}).
+                </p>
+              )}
               
               {/* Müşteri Eşleştirme / Bilgi Güncelleme Alanı */}
               {/* KALDIRILDI (kullanıcı talebi): "Müşteri Bilgilerini Eşleştir" kartı →
@@ -5126,62 +5174,54 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   ================================================================ */}
               <div className="flex gap-2">
                 <button onClick={() => { setNotMetni(''); setBaslikDuzenle(false); setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false); setDetayNotDuzenle(null); setDetayNotSil(null); }}
-                  className="basis-1/4 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-500 font-black rounded-xl text-sm transition">Vazgeç</button>
-                <button onClick={async () => {
-                    // (1) Yazılmamış not + satışçı ataması tek yazmada (mevcut mantık)
+                  className="basis-1/5 py-2.5 bg-neutral-100 hover:bg-neutral-200 text-neutral-500 font-black rounded-xl text-sm transition">Vazgeç</button>
+                <button disabled={aktariliyor} onClick={async () => {
+                    // DEĞİŞTİ (kullanıcı talebi): KAYDET = talebi al ve Telefon Teklifleri'ne aktar.
+                    // Yazılmamış not da eklenir; ardından "görüşme durumu" sorusu açılır.
                     if (detayKayit) {
-                      const bekleyenNot = notMetni.trim();
-                      const guncelle = {};
-                      let logMetni = '';
-                      if (bekleyenNot) {
-                        const not = { tarih: new Date().toISOString(), kullanici: kullaniciAdi, metin: bekleyenNot };
-                        guncelle.notlar = [...(detayKayit.notlar || []), not];
-                        logMetni = `Not eklendi: "${bekleyenNot.slice(0, 60)}"`;
-                      }
-                      // DEĞİŞTİ (kullanıcı talebi): Kaydet yalnızca KİMSEYE ATANMAMIŞ talebi
-                      // alır. Başkasının talebi (yalnızca yöneticiler görebilir) Kaydet ile
-                      // devralınmaz — el değiştirmek için "Transfer Et" kullanılır.
-                      if (kullaniciAdi && !detayKayit.atanan) {
-                        guncelle.atanan = kullaniciAdi;
-                        const atamaLog = `Kayıt ${kullaniciAdi} adlı satışçıya atandı (Kaydet ile)`;
-                        logMetni = logMetni ? `${logMetni} • ${atamaLog}` : atamaLog;
-                      }
-                      if (Object.keys(guncelle).length > 0) {
-                        await hareketliGuncelle(detayKayit, guncelle, logMetni);
-                      }
-                      setNotMetni('');
-                      // (2) YENİ: durum sorusu için kaydı sakla — pencere kapanınca soru açılır
-                      setGorusmeDurumuKayit({ ...detayKayit, ...guncelle });
+                      setAktariliyor(true);
+                      try {
+                        const teklif = await havuzuTelefonaAktar(detayKayit, notMetni.trim());
+                        setNotMetni('');
+                        setGorusmeDurumuKayit({ ...detayKayit, telefonTeklifId: teklif.id, _teklif: teklif });
+                      } catch (e) { console.error('Aktarım hatası:', e); alert('Telefon Teklifleri\'ne aktarılamadı: ' + (e?.message || '')); }
+                      finally { setAktariliyor(false); }
                     }
                     setBaslikDuzenle(false);
                     setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false); setDetayNotDuzenle(null); setDetayNotSil(null);
                   }}
-                  className="basis-1/2 py-2.5 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl text-sm transition shadow-lg shadow-green-600/30 flex items-center justify-center gap-2">
-                  <Save className="w-4 h-4" /> Kaydet
+                  className="basis-2/5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-black rounded-xl text-sm transition shadow-lg shadow-green-600/30 flex items-center justify-center gap-2 disabled:opacity-60">
+                  {aktariliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Kaydet
                 </button>
-                {onKayitAc ? (() => {
-                  const tip = detayKayit.hizmetTipi || 'Nakliye';
-                  const tipBilgi = HIZMET_TIPLERI.find(t => t.id === tip) || HIZMET_TIPLERI[0];
-                  const renk = tip === 'Depo' ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30'
-                    : tip === 'Asansör' ? 'bg-green-700 hover:bg-green-800 shadow-green-700/30'
-                    : 'bg-red-600 hover:bg-red-700 shadow-red-600/30';
+                {/* DEĞİŞTİ (kullanıcı talebi): "Kayıt Aç" → "FİYAT HESAPLA".
+                    Tıklandığı AN talep satışçının Telefon Teklifleri sayfasına geçer ve
+                    soru akışlı görüşme formu açılır: Nakliye → Evden Eve penceresi,
+                    Depo → DepoEvim penceresi. (Kayıt ekranına geçiş artık telefon
+                    teklifinin detayındaki "Kayıt Aç" ile yapılır.) */}
+                {(() => {
+                  const depoMu = (detayKayit.hizmetTipi || 'Nakliye') === 'Depo';
                   return (
-                    <button type="button" title={`${tip} kaydı aç — müşteri bilgileri otomatik dolar`}
-                      onClick={() => {
-                        const ad = (duzenleMusteriAdi || detayKayit.musteriAdi || '').trim();
-                        const tel = (duzenleIletisim || detayKayit.iletisim || '').trim();
-                        onKayitAc({ hizmetTipi: tip, musteriAdi: ad, telefon: telefonGecerliMi(tel) ? tel : '' });
-                        setNotMetni(''); setBaslikDuzenle(false);
-                        setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false);
+                    <button type="button" disabled={aktariliyor} title="Talebi Telefon Teklifleri'ne al ve soru akışlı görüşmeyi başlat"
+                      onClick={async () => {
+                        setAktariliyor(true);
+                        try {
+                          const teklif = await havuzuTelefonaAktar(detayKayit, notMetni.trim());
+                          setNotMetni(''); setBaslikDuzenle(false);
+                          setDetayKayit(null); setDetayFotoGoster(null); setSablonlarAcik(false);
+                          setTelefonOnDoldur(teklif);          // Sihirbaz bu kayıtla açılır
+                          setTelefonTeklifAcik(true);
+                        } catch (e) { console.error('Aktarım hatası:', e); alert('Telefon Teklifleri\'ne aktarılamadı: ' + (e?.message || '')); }
+                        finally { setAktariliyor(false); }
                       }}
-                      className={`basis-1/4 py-2.5 rounded-xl text-white text-sm font-black transition shadow-lg flex items-center justify-center gap-1.5 ${renk}`}>
-                      <tipBilgi.Ikon className="w-4 h-4" /> Kayıt Aç
+                      className={`basis-2/5 py-2.5 rounded-xl text-white text-sm font-black transition shadow-lg flex items-center justify-center gap-1.5 disabled:opacity-60 ${depoMu ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30' : 'bg-red-600 hover:bg-red-700 shadow-red-600/30'}`}>
+                      <PhoneCall className="w-4 h-4" />
+                      <span className="leading-tight text-left">Fiyat Hesapla<span className="block text-[9px] font-bold opacity-80">Telefon görüşmesi · {depoMu ? 'DepoEvim' : 'Evden Eve'}</span></span>
                     </button>
                   );
-                })() : <span className="basis-1/4" />}
+                })()}
               </div>
               <p className="text-[10px] font-bold text-neutral-400 text-center mt-1.5">
-                Atanmamış talepte Kaydet'e basan kullanıcı ({kullaniciAdi}) bu işin satışçısı olur ve talep artık yalnızca ona (ve yöneticilere) görünür. Başka personele devretmek için <span className="font-black text-neutral-500">Transfer Et</span> kullanın.
+                <b className="text-neutral-500">Kaydet</b> veya <b className="text-neutral-500">Fiyat Hesapla</b>'ya basıldığında talep {kullaniciAdi} adına alınır, havuzdan çıkar ve <b className="text-neutral-500">Telefon Teklifleri</b> sayfanıza geçer. Başka personele devretmek için <span className="font-black text-neutral-500">Transfer Et</span> kullanın.
               </p>
             </div>
           </div>
@@ -5223,7 +5263,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         <div className="fixed inset-0 bg-black/70 z-[9999] flex items-center justify-center p-4 animate-in fade-in" onClick={() => setGorusmeDurumuKayit(null)}>
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
             <div className="bg-neutral-900 text-white p-4">
-              <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Kaydedildi ✓</p>
+              <p className="text-[10px] font-black text-neutral-400 uppercase tracking-widest">Kaydedildi ✓ · Telefon Teklifleri'ne aktarıldı</p>
               <h3 className="font-black text-base mt-0.5">Müşteriyle Görüşme Durumu Nedir?</h3>
               <p className="text-[11px] font-bold text-neutral-300 mt-1 truncate">{gorusmeDurumuKayit.musteriAdi || 'İsimsiz'} • {gorusmeDurumuKayit.iletisim}</p>
             </div>
@@ -5238,6 +5278,13 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                       // hareketler dizisinde korunur; eski kopya üzerine yazılmaz.
                       const canli = kayitlar.find(x => x.id === gorusmeDurumuKayit.id) || gorusmeDurumuKayit;
                       await handleDurumDegistir(canli, sec.id);
+                      // YENİ: aktarılan telefon teklifinin durumu da aynı yapılır
+                      const tId = gorusmeDurumuKayit.telefonTeklifId;
+                      const teklif = tId && (telefonTeklifleri.find(t => t.id === tId) || gorusmeDurumuKayit._teklif);
+                      if (teklif && teklif.durum !== sec.id) {
+                        await updateDoc(ttBelge(tId), { durum: sec.id, updatedAt: new Date().toISOString(),
+                          hareketler: [...(teklif.hareketler || []), { tarih: new Date().toISOString(), kullanici: kullaniciAdi, islem: `Durum "${teklif.durum || 'Yeni'}" → "${sec.id}" (havuzdan)` }] });
+                      }
                     }
                     finally { setGorusmeDurumuKaydediliyor(false); setGorusmeDurumuKayit(null); }
                   }}
@@ -8769,8 +8816,7 @@ const ttWhatsappSablonlari = (tHam, gonderen = '') => {
         metin: `${selam} Sembol Nakliyat'tan${ben}. Taşımanız için en doğru fiyatı verebilmemiz adına eşya videonuzu bekliyoruz. Müsait olduğunuzda gönderirseniz hemen dönüş yaparım. İyi günler.` },
       { id: 'sorular', ad: '7 Soru (Keşif Mesajı)',
         metin: `Merhabalar, tüm detayları öğrenebilir miyiz?\n1. Eviniz kaç odalıdır?\n2. Nereden nereye nakliye olacaktır?\n3. Oturduğunuz ev ve yeni taşınacak ev kaçıncı kattadır?\n4. Bina içi asansör durumu nedir?\n5. Küçük eşyaları (kırılacak, kıyafet vb.) kendiniz mi toplayacaksınız?\n6. Kamyon iki adreste de binaya yanaşabiliyor mu?\n7. Ne zaman taşınmayı düşünüyorsunuz?\n\nOrtalama bir fiyat verebiliriz. Daha net fiyat için eşyanın fotoğraf ya da videosunu gönderirseniz seviniriz.` },
-      { id: 'yazili', ad: 'Yazılı Teklif ("Düşüneyim" diyene)',
-        metin: `${selam} Sembol Nakliyat'tan${ben}. Konuştuğumuz taşıma için teklifimizi yazılı iletiyorum, elinizde olsun:\n\n${satirlar}\n💰 Fiyat: ${ttTl(fiyat)}\n\n✅ Dahil: sigortalı taşıma, kadrolu profesyonel ekip, mobilya söküm-montajı, özel ambalaj, kapalı kasa araç.\nℹ️ Klima söküm-montajı, duvar montajı ve elektrik işleri hizmet kapsamı dışındadır.\n\nAklınıza takılan bir şey olursa buradan yazabilirsiniz. Müsaadenizle yarın kısaca arayacağım.` },
+      // KALDIRILDI (kullanıcı talebi): "Yazılı Teklif" şablonu
       { id: 'kapora', ad: 'Kayıt & Kapora Bilgisi',
         metin: `${selam} Taşıma tarihinizi kesinleştirmek için iş bedelinin %10'u kapora olarak alınmaktadır; kalan tutar iş bitiminde ödenir. Kapora sonrası sözleşmeniz PDF olarak buradan gönderilecek; sözleşmedeki teslim kodunu teslimatta ekibimize iletmeniz yeterli. Taşımaya 72 saatten fazla varsa kapora hariç ücretsiz iptal/erteleme yapılabilir. Teşekkür ederiz.` },
     ];
@@ -9077,10 +9123,12 @@ const TTGorusmeRehberi = ({ hizmetTipi }) => {
 // ============================================================================
 // WHATSAPP MESAJ PENCERESİ — şablon seç, düzenle, WhatsApp'ta aç / kopyala
 // ============================================================================
-const TTWhatsappPenceresi = ({ t, gonderen, onKapat, onGonderildi }) => {
+const TTWhatsappPenceresi = ({ t, gonderen, baslangicSablon = null, onKapat, onGonderildi }) => {
   const sablonlar = useMemo(() => ttWhatsappSablonlari(t, gonderen), [t, gonderen]);
-  const [seciliId, setSeciliId] = useState(sablonlar[0]?.id);
-  const [metin, setMetin] = useState(sablonlar[0]?.metin || '');
+  // YENİ: hızlı butondan gelindiyse o şablon seçili açılır
+  const ilk = sablonlar.find(x => x.id === baslangicSablon) || sablonlar[0];
+  const [seciliId, setSeciliId] = useState(ilk?.id);
+  const [metin, setMetin] = useState(ilk?.metin || '');
   const [kopyalandi, setKopyalandi] = useState(false);
   const sec = (s) => { setSeciliId(s.id); setMetin(s.metin); };
   const numara = ttWaNumara(t.telefon);
@@ -9135,6 +9183,35 @@ const TTWhatsappPenceresi = ({ t, gonderen, onKapat, onGonderildi }) => {
             <Send className="w-4 h-4" /> WhatsApp'ta Aç
           </button>
         </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// YENİ (kullanıcı talebi): MÜŞTERİ BİLGİLENDİRME — HIZLI WHATSAPP BUTONLARI
+// ----------------------------------------------------------------------------
+// Sihirbazın sağ panelinde ve teklif detayında sürekli açık durur. Her buton
+// ilgili şablonu seçili olarak WhatsApp penceresini açar (göndermeden önce
+// metin düzenlenebilir). Ara butonu da buradadır.
+// ============================================================================
+const TTWhatsappHizli = ({ t, onSec }) => {
+  const sablonlar = ttWhatsappSablonlari(t);
+  const telVar = ttTelGecerli(t.telefon);
+  return (
+    <div className="bg-white border-2 border-green-200 rounded-2xl p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-black uppercase text-green-800 flex items-center gap-1.5"><MessageCircle className="w-4 h-4" /> Müşteri Bilgilendirme</p>
+        {telVar && <a href={`tel:0${ttTelAnahtar(t.telefon)}`} className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black flex items-center gap-1"><Phone className="w-3 h-3" /> Ara</a>}
+      </div>
+      {!telVar && <p className="text-[10px] font-bold text-amber-700">Mesaj göndermek için geçerli bir telefon numarası girin.</p>}
+      <div className="grid grid-cols-1 gap-1.5">
+        {sablonlar.map(sb => (
+          <button key={sb.id} type="button" onClick={() => onSec(sb.id)} disabled={!telVar}
+            className="w-full text-left px-3 py-2 rounded-xl bg-green-50 hover:bg-green-100 border border-green-200 text-green-900 text-xs font-black flex items-center gap-2 transition disabled:opacity-40">
+            <Send className="w-3.5 h-3.5 shrink-0" /> <span className="flex-1">{sb.ad}</span> <ChevronRight className="w-3.5 h-3.5 opacity-50" />
+          </button>
+        ))}
       </div>
     </div>
   );
@@ -9268,7 +9345,87 @@ const ttAdimTamam = (f, id) => {
   }
 };
 
-const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', gecmisIndeksi = null, gonderen = '', onKaydet, onKapat }) => {
+// ============================================================================
+// YENİ (kullanıcı talebi): HIZLI TEKLİF → TELEFON TEKLİFİ DÖNÜŞÜMÜ
+// ----------------------------------------------------------------------------
+// Web sihirbazının özet metni (teklifOzetiAyristir) okunur ve cevaplar
+// sihirbaz alanlarına EN İYİ TAHMİNLE yazılır: oda / depo boyutu, kiralama
+// süresi, şube, teslim şekli, il/ilçe, kat, asansör, paketleme, tarih.
+// Eşleşmeyen bilgi boş kalır; satışçı telefonda tamamlar. Ham metin de
+// açıklamaya eklenir — hiçbir bilgi kaybolmaz.
+// ============================================================================
+const ttKucuk = (v) => String(v || '').toLocaleLowerCase('tr-TR');
+const ttIlIlceAyristir = (metin) => {
+  const [ilHam = '', ilceHam = ''] = String(metin || '').split('/').map(x => x.trim());
+  let il = '';
+  if (ttKucuk(ilHam).includes('istanbul')) il = TURKEY_LOCATIONS['İstanbul (Avrupa)']?.some(x => ttKucuk(x) === ttKucuk(ilceHam)) ? 'İstanbul (Avrupa)' : 'İstanbul (Anadolu)';
+  else il = PROVINCES.find(x => ttKucuk(x) === ttKucuk(ilHam)) || '';
+  const ilce = il ? (ttIlceler(il).find(x => ttKucuk(x) === ttKucuk(ilceHam)) || '') : '';
+  return { il, ilce };
+};
+const ttTarihAyristir = (metin) => {
+  const m = String(metin || '').match(/(\d{1,2})[./](\d{1,2})[./](\d{4})/) || String(metin || '').match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return { tasinmaTarihi: '', tasinmaNotu: metin ? String(metin).slice(0, 40) : '' };
+  const [y, a, g] = m[1].length === 4 ? [m[1], m[2], m[3]] : [m[3], m[2], m[1]];
+  return { tasinmaTarihi: `${y}-${String(a).padStart(2, '0')}-${String(g).padStart(2, '0')}`, tasinmaNotu: '' };
+};
+const ttKatMetni = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? (n <= 0 ? 'Giriş Kat' : `${n}. Kat`) : ''; };
+const ttTasimaMetni = (v) => { const k = ttKucuk(v); return !k ? '' : k.includes('dış') || k.includes('dis cephe') ? 'Dış Cephe Asansörü' : k.includes('merdiven') ? 'Merdiven' : k.includes('asansör') || k.includes('asansor') ? 'Bina Asansörü' : ''; };
+const ttHavuzdanForm = (k) => {
+  const hizmet = k.hizmetTipi === 'Depo' ? 'Depo' : 'Nakliye';
+  const tel = ttTelGecerli(k.iletisim) ? k.iletisim : '';
+  const ad = (k.musteriAdi || '').includes('Ziyaretçi') ? '' : (k.musteriAdi || '');
+  const f = { ...ttBosForm(hizmet), musteriAdi: ad, telefon: tel, havuzKayitId: k.id, kaynak: k.kanal === 'web' ? 'Hızlı Teklif' : 'Müşteri Havuzu' };
+  if (!k.sonMesaj) return f;
+  const tk = teklifOzetiAyristir(k.sonMesaj);
+  const al = (etiket) => tk.satirlar.find(x => ttKucuk(x.etiket) === ttKucuk(etiket))?.deger || '';
+  const odaBul = (m) => { const e = String(m || '').match(/(\d)\s*\+\s*(\d)/); return e ? `${e[1]}+${e[2]}` : ''; };
+  if (hizmet === 'Depo') {
+    const boyut = al('Depo Boyutu');
+    const m3 = parseInt((boyut.match(/(\d+)\s*m/) || [])[1], 10);
+    f.depoBoyutu = ({ 10: '1+0', 15: '1+1', 22: '2+1', 30: '3+1' })[m3] || odaBul(boyut) || (m3 > 30 ? 'Özel' : '');
+    const sure = ttKucuk(al('Kiralama Süresi'));
+    f.kiralamaSuresi = /yıllık|12/.test(sure) ? '12' : /6/.test(sure) ? '6' : '1';
+    const sube = ttKucuk(al('Şube'));
+    f.sube = DEPO_LOCATIONS.find(d => sube && sube.includes(ttKucuk(d.district)))?.name || 'Farketmez';
+    const teslim = ttKucuk(al('Teslim Şekli'));
+    f.nakliyeIstiyor = /anahtar|firma|alım/.test(teslim) ? 'Firma' : /kendi/.test(teslim) ? 'Kendisi' : '';
+    const yer = ttIlIlceAyristir(al('Eşyaların Alınacağı Yer') || al('Adres'));
+    if (yer.il) { f.yukIl = yer.il; f.yukIlce = yer.ilce; }
+    Object.assign(f, ttTarihAyristir(al('Başlangıç Tarihi') || al('Tarih')));
+  } else {
+    const tip = al('Tip');
+    f.odaSayisi = ttKucuk(tip).includes('villa') ? 'Villa' : ttKucuk(tip).includes('ofis') ? 'Ofis' : (TT_ODA_SECENEKLERI.find(o => o.id === odaBul(tip))?.id || '');
+    const [nereden, nereye] = (tk.ozet || '').split('→').map(x => x.trim());
+    const y = ttIlIlceAyristir(nereden), b = ttIlIlceAyristir(nereye);
+    if (y.il) { f.yukIl = y.il; f.yukIlce = y.ilce; }
+    if (b.il) { f.bosIl = b.il; f.bosIlce = b.ilce; }
+    const [katY, katB] = al('Kat').split('→').map(x => x.trim());
+    f.yukKat = ttKatMetni(katY); f.bosKat = ttKatMetni(katB);
+    f.yukTasima = ttTasimaMetni(al('Çıkış asansör')); f.bosTasima = ttTasimaMetni(al('Varış asansör'));
+    const pk = ttKucuk(al('Paketleme'));
+    f.toplama = /firma|biz|profesyonel/.test(pk) ? 'Firma' : /kendi/.test(pk) ? 'Müşteri' : '';
+    Object.assign(f, ttTarihAyristir(al('Tarih')));
+  }
+  f.aciklama = `Web teklifi: ${k.sonMesaj.slice(0, 500)}`;
+  return f;
+};
+// Firestore'a yazılacak telefon teklifi (sahibi: talebin satışçısı, yoksa aktaran kişi)
+const ttHavuzdanTeklifVerisi = (k, kullanici) => {
+  const f = ttHavuzdanForm(k);
+  const h = ttFiyatHesapla(f);
+  const sahip = k.atanan || kullanici;
+  const simdi = new Date().toISOString();
+  return {
+    ...f, site: ttSiteOf(f.hizmetTipi), sistemFiyati: h.nakliyeToplam || 0, depoAylik: h.depo?.aylik || '',
+    verilenFiyat: '', durum: TT_DURUMLAR.some(d => d.id === k.durum) ? k.durum : 'Yeni',
+    notlar: k.notlar || [], surecAdimlari: {}, olusturan: kullanici, atanan: sahip, createdAt: simdi,
+    hareketler: [{ tarih: simdi, kullanici, islem: `Müşteri Havuzu'ndan aktarıldı (${f.kaynak})` }],
+  };
+};
+
+const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', gecmisIndeksi = null, gonderen = '', onKaydet, onKapat, onWhatsappKaydi = null }) => {
+  const [waSablon, setWaSablon] = useState(null);          // YENİ: açık WhatsApp şablonu
   const [form, setForm] = useState(() => ({ ...ttBosForm(varsayilanHizmet), ...(baslangic ? ttNormalize(baslangic) : {}), surum: 2 }));
   const [adimIdx, setAdimIdx] = useState(0);
   const [panel, setPanel] = useState('fiyat');            // Sağ panel sekmesi: fiyat | gecmis | rehber
@@ -9603,7 +9760,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           <div className="min-w-0 flex items-center gap-3">
             <hz.Ikon className="w-6 h-6 shrink-0" />
             <div className="min-w-0">
-              <h3 className="text-base md:text-lg font-black truncate">{baslangic?.id ? 'Görüşmeyi Düzenle' : 'Yeni Telefon Görüşmesi'} — {hz.ad}</h3>
+              <h3 className="text-base md:text-lg font-black truncate">{baslangic?.id ? (baslangic.kaynak && !baslangic.updatedAt ? `${baslangic.kaynak} → Telefon Görüşmesi` : 'Görüşmeyi Düzenle') : 'Yeni Telefon Görüşmesi'} — {hz.ad}</h3>
               <p className="text-[11px] font-bold text-white/80 truncate">{form.musteriAdi || 'Müşteri'}{form.telefon ? ` · ${ttTelGoster(form.telefon)}` : ''}</p>
             </div>
           </div>
@@ -9663,6 +9820,8 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
               {panel === 'gecmis' && (gecmis ? <MusteriGecmisiKutusu gecmis={gecmis} ad={form.musteriAdi} />
                 : <p className="text-xs font-bold text-neutral-400 text-center py-6">{ttTelGecerli(form.telefon) ? 'Bu numarayla eşleşen geçmiş kayıt yok — yeni müşteri.' : 'Telefon girilince geçmiş kontrol edilir.'}</p>)}
               {panel === 'rehber' && <TTGorusmeRehberi hizmetTipi={form.hizmetTipi} />}
+              {/* YENİ (kullanıcı talebi): panelin altı boş kalmasın — hazır WhatsApp mesajları */}
+              <TTWhatsappHizli t={form} onSec={setWaSablon} />
             </div>
           </aside>
         </div>
@@ -9683,6 +9842,10 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           </button>
         </div>
       </div>
+      {waSablon && (
+        <TTWhatsappPenceresi t={form} gonderen={gonderen} baslangicSablon={waSablon} onKapat={() => setWaSablon(null)}
+          onGonderildi={(ad) => onWhatsappKaydi?.(ad)} />
+      )}
     </div>
   );
 };
@@ -9854,6 +10017,7 @@ const TTBilgi = ({ e, v }) => (
 );
 
 const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, onNotEkle, onDuzenle, onKayitAc, onWhatsapp, onTransfer, onHizmetAktar, onSil }) => {
+  // onWhatsapp(sablonId?) — şablon verilirse pencere o şablonla açılır
   const t = ttNormalize(tHam);
   const [not, setNot] = useState('');
   const hz = ttHizmetBul(t.hizmetTipi);
@@ -9881,7 +10045,7 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
           {/* Hızlı aksiyonlar */}
           <div className="flex flex-wrap gap-1.5 mt-2.5">
             {ttTelGecerli(t.telefon) && <a href={`tel:0${ttTelAnahtar(t.telefon)}`} className="px-3 py-1.5 rounded-xl bg-white text-blue-700 text-xs font-black flex items-center gap-1.5 shadow"><Phone className="w-3.5 h-3.5" /> Ara</a>}
-            {ttTelGecerli(t.telefon) && <button type="button" onClick={onWhatsapp} className="px-3 py-1.5 rounded-xl bg-green-500 hover:bg-green-400 text-white text-xs font-black flex items-center gap-1.5 shadow"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp Mesajı</button>}
+            {ttTelGecerli(t.telefon) && <button type="button" onClick={() => onWhatsapp()} className="px-3 py-1.5 rounded-xl bg-green-500 hover:bg-green-400 text-white text-xs font-black flex items-center gap-1.5 shadow"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp Mesajı</button>}
             {onKayitAc && <button type="button" onClick={onKayitAc} className="px-3 py-1.5 rounded-xl bg-neutral-900 hover:bg-black text-white text-xs font-black flex items-center gap-1.5 shadow"><UserPlus className="w-3.5 h-3.5" /> Kayıt Aç</button>}
             <button type="button" onClick={onDuzenle} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5"><Edit className="w-3.5 h-3.5" /> Soruları Düzenle</button>
             <button type="button" onClick={onTransfer} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" /> Personele Transfer</button>
@@ -9932,8 +10096,11 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
               <TTBilgi e="Tekrar Arama" v={ttTrTarih(t.takipTarihi)} />
               {t.aciklama && <div className="col-span-2 md:col-span-3"><p className="text-[9px] font-black uppercase text-neutral-400">Açıklama</p><p className="text-xs font-semibold text-neutral-800 whitespace-pre-wrap">{t.aciklama}</p></div>}
             </div>
-            {/* Güncel sistem hesabı (cevaplara göre yeniden hesaplanır) */}
-            <TTFiyatPaneli form={t} />
+            {/* Güncel sistem hesabı + (YENİ) her zaman açık WhatsApp bilgilendirme butonları */}
+            <div className="space-y-3">
+              <TTFiyatPaneli form={t} />
+              <TTWhatsappHizli t={t} onSec={(id) => onWhatsapp(id)} />
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -10005,7 +10172,7 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
   acilisFormu = null, onAcilisFormuKullanildi, onHavuzKaydinaIsle, onGeri }) => {
   const [form, setForm] = useState(null);             // { baslangic, hizmet } — açık sihirbaz
   const [detayId, setDetayId] = useState(null);
-  const [waKayit, setWaKayit] = useState(null);        // WhatsApp penceresi açık kayıt
+  const [waKayit, setWaKayit] = useState(null);        // { t, sablon } — WhatsApp penceresi
   const [transferKayit, setTransferKayit] = useState(null);
   const [silinecek, setSilinecek] = useState(null);
   const [arama, setArama] = useState('');
@@ -10066,10 +10233,12 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
   const kaydet = async (veri) => {
     // Formdan yalnızca FORM alanları yazılır; notlar/süreç/geçmiş eski kopyayla ezilmez
     const { id: _id, notlar: _n, hareketler: _h, surecAdimlari: _s, createdAt: _c, olusturan: _o, atanan: _a, kayitAcildi: _k, ...alanlar } = veri;
-    const duzenlenen = form?.baslangic?.id ? teklifler.find(x => x.id === form.baslangic.id) : null;
+    // Havuzdan aktarılan kayıt henüz listeye düşmemiş olabilir → açılış verisi kullanılır
+    const duzenlenen = form?.baslangic?.id ? (teklifler.find(x => x.id === form.baslangic.id) || form.baslangic) : null;
     if (duzenlenen) {
       await guncelle(duzenlenen, alanlar, 'Görüşme cevapları güncellendi');
       addSystemLog?.('Telefon Teklifleri', `${alanlar.musteriAdi || alanlar.telefon} güncellendi.`);
+      setDetayId(duzenlenen.id);   // Kaydedince detay (WhatsApp butonlarıyla) açık gelir
     } else {
       const ref = await addDoc(ttKoleksiyon(), {
         ...alanlar, notlar: [], surecAdimlari: {}, olusturan: kullanici, atanan: kullanici,
@@ -10253,26 +10422,27 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
           </div>
         ) : liste.map(t => (
           <TelefonTeklifSatiri key={t.id} tHam={t} gecmis={gecmisOf(t)} sahibiGoster={tamYetki}
-            onAc={() => setDetayId(t.id)} onDurum={(y) => durumDegistir(t, y)} onWhatsapp={() => setWaKayit(t)} />
+            onAc={() => setDetayId(t.id)} onDurum={(y) => durumDegistir(t, y)} onWhatsapp={() => setWaKayit({ t, sablon: 'ozet' })} />
         ))}
       </div>
 
       {/* PENCERELER */}
       {form && (
         <TelefonTeklifFormu key={form.baslangic?.id || form.hizmet} baslangic={form.baslangic} varsayilanHizmet={form.hizmet}
-          gecmisIndeksi={gecmisIndeksi} gonderen={kullanici} onKaydet={kaydet} onKapat={() => setForm(null)} />
+          gecmisIndeksi={gecmisIndeksi} gonderen={kullanici} onKaydet={kaydet} onKapat={() => setForm(null)}
+          onWhatsappKaydi={(ad) => { const id = form.baslangic?.id; const c = id && (teklifler.find(x => x.id === id) || form.baslangic); if (c) guncelle(c, {}, `WhatsApp mesajı açıldı: ${ad}`); }} />
       )}
       {detay && !form && (
         <TelefonTeklifDetay tHam={detay} gecmis={gecmisOf(detay)} yetkili={yetkiliMi(detay)} onKapat={() => setDetayId(null)}
           onDurum={(y) => durumDegistir(detay, y)} onSurec={(a, v) => surecIsaretle(detay, a, v)} onNotEkle={(m) => notEkle(detay, m)}
           onDuzenle={() => setForm({ baslangic: detay, hizmet: detay.hizmetTipi })}
           onKayitAc={onKayitAc ? () => kayitAc(detay) : null}
-          onWhatsapp={() => setWaKayit(detay)} onTransfer={() => setTransferKayit(detay)}
+          onWhatsapp={(sablon) => setWaKayit({ t: detay, sablon: sablon || null })} onTransfer={() => setTransferKayit(detay)}
           onHizmetAktar={(h) => hizmetAktar(detay, h)} onSil={() => setSilinecek(detay)} />
       )}
       {waKayit && (
-        <TTWhatsappPenceresi t={waKayit} gonderen={kullanici} onKapat={() => setWaKayit(null)}
-          onGonderildi={(ad) => { guncelle(waKayit, {}, `WhatsApp mesajı açıldı: ${ad}`); }} />
+        <TTWhatsappPenceresi t={waKayit.t} gonderen={kullanici} baslangicSablon={waKayit.sablon} onKapat={() => setWaKayit(null)}
+          onGonderildi={(ad) => { guncelle(waKayit.t, {}, `WhatsApp mesajı açıldı: ${ad}`); }} />
       )}
       {transferKayit && (
         <PersonelTransferPenceresi baslik={transferKayit.musteriAdi || ttTelGoster(transferKayit.telefon)} mevcut={ttSahibi(transferKayit)}
