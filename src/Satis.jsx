@@ -3462,6 +3462,7 @@ const HizliTekliflerTablosu = ({
   kayitlar, siteSecimi, hesapAdi, durumRenk, satiscilar, reklamKaynagiEtiket,
   onDurumDegistir, onAta, onNotEkle, onNotGuncelle, onNotSil, onDetay, onSil,
   silebilir = false,   // YENİ: yalnızca yetkili kullanıcıda "Sil" butonu çizilir
+  gecmisBul = null,    // YENİ (kullanıcı talebi): (kayıt) => müşteri geçmişi | null — satırda "↺ Geçmiş" rozeti
 }) => {
   // ==========================================================================
   // DEĞİŞTİ (kullanıcı talebi): NOTLAR ARTIK PENCEREDE YÖNETİLİR
@@ -3503,10 +3504,17 @@ const HizliTekliflerTablosu = ({
   };
 
   // Şirkete göre vurgu renkleri (Tailwind dinamik sınıf üretmediği için açık yazılır)
+  // DEĞİŞTİ (kullanıcı talebi): siteSecimi === 'tumu' iken iki şirketin talepleri
+  // birlikte listelenir → gün ayracı nötr renkte, her SATIR kendi şirketinin
+  // rengini alır (Sembol kırmızı, Depoevim mavi).
+  const tumSiteler = siteSecimi === 'tumu';
   const sembolMu = siteSecimi !== 'depoevim';
-  const vurgu = sembolMu
+  const vurgu = tumSiteler
+    ? { avatar: 'bg-neutral-800', cizgi: 'bg-neutral-800', ayracArka: 'bg-neutral-100 border-neutral-200', ayracYazi: 'text-neutral-800', rozet: 'bg-neutral-900 text-white' }
+    : sembolMu
     ? { avatar: 'bg-red-600', cizgi: 'bg-red-600', ayracArka: 'bg-red-50 border-red-200', ayracYazi: 'text-red-800', rozet: 'bg-red-600 text-white' }
     : { avatar: 'bg-blue-600', cizgi: 'bg-blue-600', ayracArka: 'bg-blue-50 border-blue-200', ayracYazi: 'text-blue-800', rozet: 'bg-blue-600 text-white' };
+  const satirSembolMu = (k) => (tumSiteler ? hizliTeklifSitesi(k) !== 'depoevim' : sembolMu);
 
   // Kayıtlar zaten createdAt'e göre yeniden eskiye sıralı gelir; gün değiştiğinde
   // araya ayraç satırı eklenir. Ayraçta o günün toplam ve "Yeni" sayısı yazar.
@@ -3613,18 +3621,29 @@ const HizliTekliflerTablosu = ({
                   const telefonVar = telefonGecerliMi(k.iletisim);
                   const kaynakEtiket = reklamKaynagiEtiket(k);
                   return (
-                    <tr key={k.id} className={`border-b border-neutral-100 transition ${yeni ? `bg-yellow-50/40 hover:bg-yellow-50 hizli-yeni-cerceve ${sembolMu ? 'hizli-yeni-kirmizi' : 'hizli-yeni-mavi'}` : 'hover:bg-neutral-50'}`}>
+                    <tr key={k.id} className={`border-b border-neutral-100 transition ${yeni ? `bg-yellow-50/40 hover:bg-yellow-50 hizli-yeni-cerceve ${satirSembolMu(k) ? 'hizli-yeni-kirmizi' : 'hizli-yeni-mavi'}` : 'hover:bg-neutral-50'}`}>
 
                       {/* MÜŞTERİ + TEKLİF ÖZETİ */}
                       <td className="p-3 align-top">
                         <div className="flex items-start gap-2.5">
-                          <span className={`w-8 h-8 rounded-full ${vurgu.avatar} text-white flex items-center justify-center text-[11px] font-black shrink-0`}>
+                          <span className={`w-8 h-8 rounded-full ${satirSembolMu(k) ? 'bg-red-600' : 'bg-blue-600'} text-white flex items-center justify-center text-[11px] font-black shrink-0`}>
                             {(k.musteriAdi || k.iletisim || '?').charAt(0).toUpperCase()}
                           </span>
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-black text-black text-[13px] truncate">{k.musteriAdi || 'İsimsiz'}</span>
                               {yeni && <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-yellow-400 text-black">YENİ</span>}
+                              {/* YENİ: hangi şirket — tek havuzda ayrım için */}
+                              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${satirSembolMu(k) ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-blue-50 text-blue-700 border border-blue-200'}`}>{satirSembolMu(k) ? 'SEMBOL' : 'DEPOEVİM'}</span>
+                              {/* YENİ (kullanıcı talebi): telefonla eşleşen geçmiş kayıt varsa */}
+                              {gecmisBul && (() => {
+                                const g = gecmisBul(k);
+                                if (!g) return null;
+                                const tasindi = g.isler.some(j => j.status === 'completed');
+                                return <span title={`${g.isler.length} iş · ${g.havuz.length} havuz · ${g.telefon.length} telefon`}
+                                  className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${tasindi ? 'bg-green-100 text-green-800 border-green-300' : 'bg-amber-100 text-amber-800 border-amber-300'}`}>
+                                  ↺ {tasindi ? 'Eski müşteri' : 'Geçmiş'} {g.toplam}</span>;
+                              })()}
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5 text-[10px] font-bold text-neutral-500 flex-wrap">
                               <Clock className="w-3 h-3" /> {sadeceSaat(k.createdAt)}
@@ -3859,7 +3878,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // YENİ (kullanıcı talebi): "Teklife Bak" penceresindeki "Kayıt Aç" butonu.
   // App.jsx'ten gelir; hizmet tipine göre doğru kayıt sekmesini açar ve
   // müşteri ad/telefonunu forma doldurur. Yetkisi yoksa null gelir → buton çizilmez.
-  onKayitAc = null }) => {
+  onKayitAc = null,
+  // YENİ (kullanıcı talebi): Müşteri geçmişi eşleştirmesi için App.jsx'teki iş
+  // kayıtları. Bellekteki liste kullanılır — ek Firestore okuması yapılmaz.
+  jobs = [] }) => {
   // ---------------------------------------------------------------- STATE ---
   // DEĞİŞTİ (kullanıcı talebi): Havuz açılınca ilk sekme artık "Hızlı Teklifler" ('web')
   const [aktifKanal, setAktifKanal] = useState('web');
@@ -3874,7 +3896,19 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // depoevim'den gelen kayıtlarda hesapId==='depoevim' işaretli olduğu için,
   // geri kalan HER ŞEY (gerçek telefon/whatsapp hesapları, Instagram, Gmail,
   // eski web kayıtları) otomatik olarak "sembolevdeneve" sayılır.
-  const [siteSecimi, setSiteSecimi] = useState('sembolevdeneve');
+  // DEĞİŞTİ (kullanıcı talebi): SAĞ ÜSTTEKİ "SEMBOL / DEPOEVİM" AYRIMI KALDIRILDI.
+  // Tüm talepler tek havuzda görünür; ayrım içeride Hizmet filtresi (Nakliye /
+  // Depo / Asansör) ve satır renkleriyle yapılır. Sabit 'tumu' değeri, bu
+  // değişkeni kullanan alt bileşenlere (HizliTekliflerTablosu) aynen iletilir.
+  const siteSecimi = 'tumu';
+  // YENİ: QR Takip artık her site için ayrı düğmeyle açılır — hangi site açık?
+  const [qrTakipSite, setQrTakipSite] = useState('sembolevdeneve');
+  // YENİ (kullanıcı talebi): Sahiplik filtresi — 'Tümü' | '__ben' | '__yok' | satışçı adı
+  const [sahipFiltre, setSahipFiltre] = useState('Tümü');
+  // YENİ (kullanıcı talebi): Personel transfer penceresi açık olan kayıt
+  const [transferKayit, setTransferKayit] = useState(null);
+  // YENİ (kullanıcı talebi): Havuz kaydından "Görüşme Formu" açılırken ön doldurma verisi
+  const [telefonOnDoldur, setTelefonOnDoldur] = useState(null);
   // ======================================================================
   // YENİ (kullanıcı talebi): QR TAKİP — site seçicinin altındaki düğme ile
   // açılan sayfa. Kampanyalar ve taramalar burada dinlenir ki Havuz
@@ -3924,6 +3958,22 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const renk = KANAL_RENK[kanal.renk];
   const kullaniciAdi = currentUser?.fullName || 'Sistem';
 
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): KİM NEYİ GÖRÜR?
+  // --------------------------------------------------------------------------
+  //  • Kimseye atanmamış (YENİ) talepler → HERKES görür.
+  //  • Bir satışçı talebi aldıysa (Kaydet ile atanan = o kişi) → yalnızca
+  //    o satışçı ve tam yetkililer görür.
+  //  • Tam yetki (Firma Sahibi / Yönetici / Müdür / düzenleme yetkisi —
+  //    "Sil" yetkisiyle aynı kural) → her şeyi görür.
+  // NOT: Bu bir arayüz kuralıdır; kalıcı güvenlik için Firestore kurallarında
+  // da benzer kısıt tanımlanmalıdır.
+  // ==========================================================================
+  const tamYetki = havuzKaydiSilebilirMi(currentUser);
+  const gorunurMu = (k) => tamYetki || !k.atanan || k.atanan === kullaniciAdi;
+  const sahipUyar = (k) => sahipFiltre === 'Tümü'
+    || (sahipFiltre === '__ben' ? k.atanan === kullaniciAdi : sahipFiltre === '__yok' ? !k.atanan : k.atanan === sahipFiltre);
+
   // ------------------------------------------------------- CANLI VERİLER ---
   useEffect(() => {
     const unsub1 = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'havuzKayitlari'), snap => {
@@ -3936,6 +3986,17 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     });
     return () => { unsub1(); unsub2(); };
   }, []);
+
+  // YENİ: Bu kullanıcının görebildiği havuz kayıtları — liste, sayaç ve istatistikler buradan hesaplanır
+  const gorunurKayitlar = useMemo(() => kayitlar.filter(gorunurMu), [kayitlar, tamYetki, kullaniciAdi]); // eslint-disable-line react-hooks/exhaustive-deps
+  // YENİ: Telefon teklifleri — satışçı kendi görüşmelerini, yönetici hepsini görür
+  const gorunurTelefonTeklifleri = useMemo(() => telefonTeklifleri.filter(t => ttGorunurMu(t, kullaniciAdi, tamYetki)), [telefonTeklifleri, kullaniciAdi, tamYetki]);
+  // YENİ (kullanıcı talebi): MÜŞTERİ GEÇMİŞİ — telefon numarasıyla (0'lı/0'sız,
+  // boşluklu yazımlar aynı sayılır) iş kayıtları + havuz + telefon teklifleri
+  // eşleştirilir. Görünürlükten bağımsız TÜM kayıtlar taranır ki "bu müşteriyle
+  // daha önce konuşuldu" bilgisi kaçmasın.
+  const gecmisIndeksi = useMemo(() => musteriGecmisiIndeksle(jobs, kayitlar, telefonTeklifleri), [jobs, kayitlar, telefonTeklifleri]);
+  const havuzGecmisi = (k) => musteriGecmisiBul(gecmisIndeksi, k.iletisim, k.id);
 
   // ------------------------------------------------------- YARDIMCILAR ---
   const hareketliGuncelle = async (kayit, degisiklik, islemMetni) => {
@@ -3955,6 +4016,28 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
 
   const handleAta = async (kayit, isim) => {
     await hareketliGuncelle(kayit, { atanan: isim }, isim ? `Kayıt ${isim} adlı satışçıya atandı` : 'Atama kaldırıldı');
+  };
+
+  // YENİ (kullanıcı talebi): PERSONEL TRANSFERİ — "ben ilgilendim, devam
+  // edemeyeceğim" durumunda kayıt başka satışçıya devredilir; o artık görür.
+  const handleTransfer = async (kayit, yeniSahip, transferNotu) => {
+    const canli = kayitlar.find(x => x.id === kayit.id) || kayit;
+    const degisiklik = { atanan: yeniSahip };
+    if (transferNotu) degisiklik.notlar = [...(canli.notlar || []), { tarih: new Date().toISOString(), kullanici: kullaniciAdi, metin: `[Transfer notu → ${yeniSahip}] ${transferNotu}` }];
+    await hareketliGuncelle(canli, degisiklik, `Transfer: ${canli.atanan || 'Atanmadı'} → ${yeniSahip}`);
+    addSystemLog?.('Müşteri Havuzu', `${canli.musteriAdi || canli.iletisim} ${yeniSahip} adlı personele transfer edildi.`);
+    setTransferKayit(null);
+    // Başkasına devreden satışçı kaydı artık göremez → pencere kapanır
+    if (!tamYetki && yeniSahip !== kullaniciAdi) setDetayKayit(null);
+  };
+
+  // YENİ: Havuz talebinden açılan telefon görüşme formu kaydedilince talebe işlenir;
+  // talep kimseye atanmamışsa formu dolduran satışçıya atanır.
+  const havuzKaydinaIsle = async (kayitId, metin) => {
+    const canli = kayitlar.find(x => x.id === kayitId);
+    if (!canli) return;
+    const degisiklik = canli.atanan ? {} : { atanan: kullaniciAdi };
+    await hareketliGuncelle(canli, degisiklik, `${metin}${degisiklik.atanan ? ` • ${kullaniciAdi} adlı satışçıya atandı` : ''}`);
   };
 
   const handleNotEkle = async (kayit) => {
@@ -4164,7 +4247,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // DEĞİŞTİ: zaman filtresi en başta uygulanır; böylece durum sayaçları da
   // (Tümü (20), Yeni (0) ...) seçilen döneme göre hesaplanır.
   // DEĞİŞTİ: Hızlı Teklifler'de mükerrer kayıtlar gizlenir (sayaçlar da tekilleşir).
-  const kanalKayitlariHam = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi && zamanUyar(k, zamanFiltre));
+  // DEĞİŞTİ (kullanıcı talebi): site ayrımı yok; görünürlük + sahiplik filtresi uygulanır
+  const kanalKayitlariHam = gorunurKayitlar.filter(k => k.kanal === aktifKanal && sahipUyar(k) && zamanUyar(k, zamanFiltre));
   const kanalKayitlari = aktifKanal === 'web' ? mukerrerleriGizle(kanalKayitlariHam) : kanalKayitlariHam;
   const filtreli = kanalKayitlari.filter(k => {
     if (durumFiltre !== 'Tümü' && (k.durum || 'Yeni') !== durumFiltre) return false;
@@ -4228,7 +4312,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // DEĞİŞTİ (kullanıcı talebi): özet kutuları artık sadece "Bugün" değil,
   // "Bu Ay" ve "Tüm Zamanlar" sayılarını da gösteriyor. Ay karşılaştırması da
   // aynı gunAnahtari() (yerel/Türkiye günü) anahtarının "YYYY-AA" kısmıyla yapılır.
-  const aktifKanalTumu = kayitlar.filter(k => k.kanal === aktifKanal && kayitSitesi(k) === siteSecimi);
+  const aktifKanalTumu = gorunurKayitlar.filter(k => k.kanal === aktifKanal); // DEĞİŞTİ: tüm siteler, görünür kayıtlar
   const bugunAnahtari = gunAnahtari(new Date().toISOString());
   const buAyAnahtari = bugunAnahtari.slice(0, 7);
   const aktifKanalBugun = aktifKanalTumu.filter(k => k.createdAt && gunAnahtari(k.createdAt) === bugunAnahtari);
@@ -4348,13 +4432,16 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // YENİ (kullanıcı talebi): Telefon Teklifleri sayfası — seçili site için, havuzun yerine
   if (telefonTeklifAcik) {
     return (
-      <TelefonTeklifleriView site={siteSecimi} teklifler={telefonTeklifleri} currentUser={currentUser}
-        addSystemLog={addSystemLog} onKayitAc={onKayitAc} onGeri={() => setTelefonTeklifAcik(false)} />
+      <TelefonTeklifleriView teklifler={telefonTeklifleri} currentUser={currentUser} tamYetki={tamYetki}
+        satiscilar={satiscilar.map(p => p.fullName)} gecmisIndeksi={gecmisIndeksi}
+        addSystemLog={addSystemLog} onKayitAc={onKayitAc}
+        acilisFormu={telefonOnDoldur} onAcilisFormuKullanildi={() => setTelefonOnDoldur(null)}
+        onHavuzKaydinaIsle={havuzKaydinaIsle} onGeri={() => setTelefonTeklifAcik(false)} />
     );
   }
   if (qrTakipAcik) {
     return (
-      <QrTakipView site={siteSecimi} kayitlar={kayitlar} kampanyalar={siteSecimi === 'depoevim' ? qrKampanyalariDepoevim : qrKampanyalariSembol}
+      <QrTakipView site={qrTakipSite} kayitlar={kayitlar} kampanyalar={qrTakipSite === 'depoevim' ? qrKampanyalariDepoevim : qrKampanyalariSembol}
         taramalar={qrTaramalari} currentUser={currentUser} addSystemLog={addSystemLog} onGeri={() => setQrTakipAcik(false)} />
     );
   }
@@ -4367,29 +4454,28 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         <div className="flex flex-col md:flex-row justify-between md:items-center gap-3">
           <div>
             <h2 className="text-lg md:text-xl font-black flex items-center gap-2"><Users className="w-5 h-5 text-yellow-400" /> Müşteri Havuzu</h2>
-            <p className="text-neutral-300 text-[11px] md:text-xs mt-0.5">Şirketi arayan ve mesaj atan tüm müşteri adayları tek havuzda.</p>
+            <p className="text-neutral-300 text-[11px] md:text-xs mt-0.5">Sembol Nakliyat ve DepoEvim'e gelen tüm talepler tek havuzda.</p>
+            {/* YENİ: kullanıcının görünüm kapsamı */}
+            <span className={`inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-black ${tamYetki ? 'bg-yellow-400 text-neutral-900' : 'bg-white/10 text-neutral-200'}`}>
+              <Eye className="w-3 h-3" /> {tamYetki ? 'Yönetici görünümü — tüm talepler' : 'Yeni talepler + size atananlar'}
+            </span>
           </div>
 
-          {/* YENİ: HANGİ ŞİRKETİN VERİSİNİ GÖRÜYORUZ — aşağıdaki her şey buna göre değişir */}
-          {/* DEĞİŞTİ: site düğmeleri + altında QR Takip düğmesi (dikey kap) */}
+          {/* KALDIRILDI (kullanıcı talebi): SEMBOL / DEPOEVİM site düğmeleri. Artık tüm
+              talepler tek havuzda; QR Takip her site için ayrı düğmeyle açılır. */}
           <div className="flex flex-col items-end gap-2">
-          <div className="flex gap-2">
-            <button type="button" onClick={() => { setSiteSecimi('sembolevdeneve'); if (aktifKanal === 'iyzico') setAktifKanal('telefon'); }}
-              className={`px-5 py-2 rounded-xl text-xs font-black tracking-wide transition ${siteSecimi === 'sembolevdeneve' ? 'bg-red-600 text-white shadow-lg shadow-red-600/30 scale-105' : 'bg-white/10 text-red-200 hover:bg-white/20'}`}>
-              SEMBOL
-            </button>
-            <button type="button" onClick={() => setSiteSecimi('depoevim')}
-              className={`px-5 py-2 rounded-xl text-xs font-black tracking-wide transition ${siteSecimi === 'depoevim' ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30 scale-105' : 'bg-white/10 text-blue-200 hover:bg-white/20'}`}>
-              DEPOEVİM
-            </button>
+          <div className="flex flex-wrap justify-end gap-2">
+            {[
+              { site: 'sembolevdeneve', ad: 'Sembol', liste: qrKampanyalariSembol, cls: 'bg-red-600/20 text-red-100 border-red-500/50 hover:bg-red-600/40' },
+              { site: 'depoevim', ad: 'Depoevim', liste: qrKampanyalariDepoevim, cls: 'bg-blue-600/20 text-blue-100 border-blue-500/50 hover:bg-blue-600/40' },
+            ].map(q => (
+              <button key={q.site} type="button" onClick={() => { setQrTakipSite(q.site); setQrTakipAcik(true); }}
+                className={`px-3 py-2 rounded-xl text-xs font-black tracking-wide transition flex items-center gap-1.5 border ${q.cls}`}>
+                <QrCode className="w-4 h-4" /> QR Takip — {q.ad}
+                {q.liste.length > 0 && <span className="ml-0.5 text-[10px] font-black bg-white/20 px-1.5 py-0.5 rounded-full">{q.liste.length} QR</span>}
+              </button>
+            ))}
           </div>
-          {/* YENİ (kullanıcı talebi): QR TAKİP — site düğmelerinin hemen altında,
-              seçili site için reklam QR'larının okutma/form takibi */}
-          <button type="button" onClick={() => setQrTakipAcik(true)}
-            className={`px-4 py-2 rounded-xl text-xs font-black tracking-wide transition flex items-center gap-2 ${siteSecimi === 'depoevim' ? 'bg-blue-600/20 text-blue-100 border border-blue-500/50 hover:bg-blue-600/40' : 'bg-red-600/20 text-red-100 border border-red-500/50 hover:bg-red-600/40'}`}>
-            <QrCode className="w-4 h-4" /> QR Takip — {siteSecimi === 'depoevim' ? 'Depoevim' : 'Sembol'}
-            {(siteSecimi === 'depoevim' ? qrKampanyalariDepoevim : qrKampanyalariSembol).length > 0 && <span className="ml-1 text-[10px] font-black bg-white/20 px-1.5 py-0.5 rounded-full">{(siteSecimi === 'depoevim' ? qrKampanyalariDepoevim : qrKampanyalariSembol).length} QR</span>}
-          </button>
           {/* YENİ (kullanıcı talebi): İSTATİSTİKLERİ GÖR — kaynak özet panelini açar/kapatır */}
           <button type="button" onClick={() => setIstatistikAcik(a => !a)} aria-expanded={istatistikAcik}
             className={`px-4 py-2 rounded-xl text-xs font-black tracking-wide transition flex items-center gap-2 border ${istatistikAcik ? 'bg-yellow-400 text-neutral-900 border-yellow-400' : 'bg-white/10 text-yellow-100 border-yellow-400/40 hover:bg-white/20'}`}>
@@ -4421,15 +4507,17 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
       {(() => {
         const sekmeSec = (id) => { setAktifKanal(id); setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setHesapFiltre('Tümü'); setArama(''); setYeniKayitAcik(false); setHesapYonetimAcik(false); };
         const webKanal = KANALLAR.find(k => k.id === 'web');
-        const webKayitlari = kayitlar.filter(x => x.kanal === 'web' && kayitSitesi(x) === siteSecimi);
-        const webYeni = webKayitlari.filter(x => (x.durum || 'Yeni') === 'Yeni').length;
+        // DEĞİŞTİ (kullanıcı talebi): iki sitenin talepleri birlikte; "yeni" rozetleri ayrı renkte
+        const webKayitlari = gorunurKayitlar.filter(x => x.kanal === 'web');
+        const webYeniler = mukerrerleriGizle(webKayitlari).filter(x => (x.durum || 'Yeni') === 'Yeni');
+        const webYeniSembol = webYeniler.filter(x => kayitSitesi(x) !== 'depoevim').length;
+        const webYeniDepo = webYeniler.length - webYeniSembol;
         const webAktif = aktifKanal === 'web';
-        const siteRenk = siteSecimi === 'depoevim' ? 'bg-blue-600' : 'bg-red-600';
         return (
           <div className="space-y-2">
             {/* ---- YENİ (kullanıcı talebi): TELEFON TEKLİFLERİ — Hızlı Tekliflerin üstünde ----
                 Tıklayınca telefonda görüşülen müşterilerin manuel girildiği sayfa açılır. */}
-            <TelefonTeklifleriButonu site={siteSecimi} teklifler={telefonTeklifleri} onClick={() => setTelefonTeklifAcik(true)} />
+            <TelefonTeklifleriButonu teklifler={gorunurTelefonTeklifleri} onClick={() => setTelefonTeklifAcik(true)} />
 
             {/* ---- HIZLI TEKLİFLER ---- */}
             {/* DEĞİŞTİ: Hızlı Teklifler butonu ~%20 küçültüldü */}
@@ -4441,12 +4529,15 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               <span className="text-left flex-1 min-w-0">
                 <span className="block text-sm font-black leading-tight">{webKanal.ad}</span>
                 <span className={`block text-[10px] font-bold mt-0.5 ${webAktif ? 'text-white/80' : 'text-orange-600'}`}>
-                  {siteSecimi === 'depoevim' ? 'depoevim.com' : 'sembolevdeneve.com'} sihirbazından gelen teklif talepleri — gün gün listelenir
+                  sembolevdeneve.com + depoevim.com sihirbazlarından gelen teklif talepleri — gün gün listelenir
                 </span>
               </span>
               {/* Yeni teklif rozeti — durum "Yeni" olan kayıt varsa yanıp söner */}
-              {webYeni > 0 && (
-                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full text-white animate-pulse ${siteRenk}`}>{webYeni} yeni</span>
+              {webYeniSembol > 0 && (
+                <span className="text-[11px] font-black px-2 py-0.5 rounded-full text-white animate-pulse bg-red-600" title="Sembol Nakliyat">{webYeniSembol} yeni</span>
+              )}
+              {webYeniDepo > 0 && (
+                <span className="text-[11px] font-black px-2 py-0.5 rounded-full text-white animate-pulse bg-blue-600" title="DepoEvim">{webYeniDepo} yeni</span>
               )}
               <span className={`text-xs font-black px-2 py-0.5 rounded-full ${webAktif ? 'bg-white/25' : 'bg-orange-50'}`}>{webKayitlari.length}</span>
             </button>
@@ -4456,9 +4547,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             <div className="bg-white rounded-2xl border border-neutral-200 px-2.5 py-2">
               <p className="text-[10px] font-black text-neutral-500 mb-1.5 flex items-center gap-1"><Users className="w-3 h-3" /> Diğer</p>
               <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-8 gap-1.5">
-                {KANALLAR.filter(k => k.id !== 'web' && (k.id !== 'iyzico' || siteSecimi === 'depoevim')).map(k => {
+                {KANALLAR.filter(k => k.id !== 'web').map(k => {
                   const r = KANAL_RENK[k.renk];
-                  const sayi = kayitlar.filter(x => x.kanal === k.id && kayitSitesi(x) === siteSecimi).length;
+                  const sayi = gorunurKayitlar.filter(x => x.kanal === k.id).length;
                   const aktif = aktifKanal === k.id;
                   return (
                     <button key={k.id} type="button" onClick={() => sekmeSec(k.id)} title={k.ad}
@@ -4480,6 +4571,13 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         <select value={hesapFiltre} onChange={e => setHesapFiltre(e.target.value)} className="px-3 py-2 text-xs font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none">
           <option value="Tümü">Tüm Hesaplar ({kanalHesaplari.length})</option>
           {kanalHesaplari.map(h => <option key={h.id} value={h.id}>{h.etiket}</option>)}
+        </select>
+        {/* YENİ (kullanıcı talebi): SAHİPLİK — yeni talepler / bana atananlar / (yönetici) satışçı bazında */}
+        <select value={sahipFiltre} onChange={e => setSahipFiltre(e.target.value)} className="px-3 py-2 text-xs font-bold bg-neutral-50 border border-neutral-200 rounded-xl outline-none">
+          <option value="Tümü">{tamYetki ? 'Tüm Satışçılar' : 'Yeni + Bana Atananlar'}</option>
+          <option value="__ben">Bana Atananlar</option>
+          <option value="__yok">Atanmamış (Yeni Talepler)</option>
+          {tamYetki && satiscilar.map(p => <option key={p.id} value={p.fullName}>{p.fullName}</option>)}
         </select>
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
@@ -4623,6 +4721,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           }}
           onSil={(id) => setSilinecekId(id)}
           silebilir={silebilir}
+          gecmisBul={havuzGecmisi}
         />
       ) : (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-x-auto">
@@ -4768,8 +4867,15 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   {(() => {
                     const canli = kayitlar.find(x => x.id === detayKayit.id) || detayKayit;
                     return (
-                      <span className={`inline-flex items-center gap-1 mt-1.5 px-2 py-0.5 rounded-full text-[10px] font-black ${canli.atanan ? 'bg-white/25 text-white' : 'bg-black/20 text-white/70'}`}>
-                        <User className="w-3 h-3" /> Satışçı: {canli.atanan || 'Atanmadı'}
+                      <span className="inline-flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black ${canli.atanan ? 'bg-white/25 text-white' : 'bg-black/20 text-white/70'}`}>
+                          <User className="w-3 h-3" /> Satışçı: {canli.atanan || 'Atanmadı'}
+                        </span>
+                        {/* YENİ (kullanıcı talebi): başka personele devret */}
+                        <button type="button" onClick={() => setTransferKayit(canli)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-white text-neutral-900 hover:bg-neutral-100 transition shadow-sm">
+                          <RefreshCw className="w-3 h-3" /> Transfer Et
+                        </button>
                       </span>
                     );
                   })()}
@@ -4798,6 +4904,23 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             </div>
             
             <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-neutral-50">
+              {/* YENİ (kullanıcı talebi): MÜŞTERİ GEÇMİŞİ — telefon numarasıyla eşleşen
+                  eski işler, havuz talepleri ve telefon görüşmeleri */}
+              {(() => { const g = havuzGecmisi(detayKayit); return g ? <MusteriGecmisiKutusu gecmis={g} ad={detayKayit.musteriAdi} /> : null; })()}
+              {/* YENİ (kullanıcı talebi): TELEFON GÖRÜŞME FORMU — bu talep için soru akışlı
+                  formu açar (ad, telefon ve hizmet dolu gelir); kaydedilince talebe işlenir */}
+              <button type="button"
+                onClick={() => {
+                  const ad = (duzenleMusteriAdi || detayKayit.musteriAdi || '').trim();
+                  const tel = (duzenleIletisim || detayKayit.iletisim || '').trim();
+                  setTelefonOnDoldur({ ...ttBosForm(detayKayit.hizmetTipi === 'Depo' ? 'Depo' : 'Nakliye'), musteriAdi: ad, telefon: telefonGecerliMi(tel) ? tel : '', havuzKayitId: detayKayit.id,
+                    aciklama: detayKayit.sonMesaj ? `Havuz talebi: ${detayKayit.sonMesaj.slice(0, 400)}` : '' });
+                  setDetayKayit(null); setDetayFotoGoster(null); setNotMetni(''); setBaslikDuzenle(false);
+                  setTelefonTeklifAcik(true);
+                }}
+                className="w-full py-2.5 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-black flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/30 transition">
+                <PhoneCall className="w-4 h-4" /> Telefon Görüşme Formunu Aç (soru akışı + sistem fiyatı)
+              </button>
               
               {/* Müşteri Eşleştirme / Bilgi Güncelleme Alanı */}
               {/* KALDIRILDI (kullanıcı talebi): "Müşteri Bilgilerini Eşleştir" kartı →
@@ -4961,14 +5084,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                     </button>
                   ))}
                 </div>
-                {/* YENİ: Hizmet tipi hangi şirkette listeleneceğini belirler.
-                    Kayıt bulunduğumuz sekmeden farklı şirkete düşüyorsa uyarılır. */}
-                {kayitSitesi(detayKayit) !== siteSecimi && (
-                  <p className="mt-2 text-[10px] font-black text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 flex items-center gap-1.5">
-                    <ArrowUpRight className="w-3 h-3 shrink-0" />
-                    Bu hizmet tipiyle kayıt <span className="underline">{kayitSitesi(detayKayit) === 'depoevim' ? 'DEPOEVİM' : 'SEMBOL'}</span> sekmesinde listelenir.
-                  </p>
-                )}
+                {/* DEĞİŞTİ (kullanıcı talebi): site sekmesi kalmadığı için uyarı yerine bilgi */}
+                <p className="mt-2 text-[10px] font-bold text-neutral-500">
+                  Hizmet tipi, talebin hangi şirkete ait olduğunu belirler: Depo → <b className="text-blue-700">DEPOEVİM</b>, Nakliye / Asansör → <b className="text-red-700">SEMBOL</b>.
+                </p>
               </div>
 
               {/* Hareket geçmişi */}
@@ -5019,11 +5138,12 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                         guncelle.notlar = [...(detayKayit.notlar || []), not];
                         logMetni = `Not eklendi: "${bekleyenNot.slice(0, 60)}"`;
                       }
-                      if (kullaniciAdi && detayKayit.atanan !== kullaniciAdi) {
+                      // DEĞİŞTİ (kullanıcı talebi): Kaydet yalnızca KİMSEYE ATANMAMIŞ talebi
+                      // alır. Başkasının talebi (yalnızca yöneticiler görebilir) Kaydet ile
+                      // devralınmaz — el değiştirmek için "Transfer Et" kullanılır.
+                      if (kullaniciAdi && !detayKayit.atanan) {
                         guncelle.atanan = kullaniciAdi;
-                        const atamaLog = detayKayit.atanan
-                          ? `Satışçı değişti: ${detayKayit.atanan} → ${kullaniciAdi} (Kaydet ile devraldı)`
-                          : `Kayıt ${kullaniciAdi} adlı satışçıya atandı (Kaydet ile)`;
+                        const atamaLog = `Kayıt ${kullaniciAdi} adlı satışçıya atandı (Kaydet ile)`;
                         logMetni = logMetni ? `${logMetni} • ${atamaLog}` : atamaLog;
                       }
                       if (Object.keys(guncelle).length > 0) {
@@ -5061,7 +5181,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 })() : <span className="basis-1/4" />}
               </div>
               <p className="text-[10px] font-bold text-neutral-400 text-center mt-1.5">
-                Kaydet'e basan kullanıcı ({kullaniciAdi}) bu işin satışçısı olur; daha sonra başka biri Kaydet'e basarsa satışçı <span className="font-black text-neutral-500">en son basan kişi</span> olarak güncellenir.
+                Atanmamış talepte Kaydet'e basan kullanıcı ({kullaniciAdi}) bu işin satışçısı olur ve talep artık yalnızca ona (ve yöneticilere) görünür. Başka personele devretmek için <span className="font-black text-neutral-500">Transfer Et</span> kullanın.
               </p>
             </div>
           </div>
@@ -5137,6 +5257,13 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             </div>
           </div>
         </div>
+      )}
+
+      {/* YENİ (kullanıcı talebi): PERSONEL TRANSFER PENCERESİ */}
+      {transferKayit && (
+        <PersonelTransferPenceresi baslik={transferKayit.musteriAdi || transferKayit.iletisim} mevcut={transferKayit.atanan}
+          secenekler={[...new Set([...satiscilar.map(p => p.fullName), ...(tamYetki ? [kullaniciAdi] : [])])]}
+          onKapat={() => setTransferKayit(null)} onTransfer={(ad, not) => handleTransfer(transferKayit, ad, not)} />
       )}
 
       {/* SİLME ONAYI */}
@@ -8039,36 +8166,37 @@ export const QrTakipView = ({ site, kayitlar = [], kampanyalar = [], taramalar =
 
 // ############################################################################
 // ############################################################################
-//  YENİ (kullanıcı talebi): TELEFON TEKLİFLERİ MODÜLÜ
+//  YENİ (kullanıcı talebi): TELEFON TEKLİFLERİ MODÜLÜ — SÜRÜM 2
 // ----------------------------------------------------------------------------
-//  Müşteri Havuzu'nda Hızlı Teklifler'in ÜSTÜNDEKİ bölüm. Ayrı dosya yerine
-//  Satis.jsx içinde tutulur. Bölümler:
-//    1) Sabitler, fiyat tabloları ve yardımcılar (Excel'den)
-//    2) Form bileşenleri (TelefonTeklifFormu, FiyatOnerisiKutusu, GorusmeRehberi)
-//    3) Sayfa bileşenleri (useTelefonTeklifleri, TelefonTeklifleriButonu,
-//       TelefonTeklifSatiri, TelefonTeklifDetay, TelefonTeklifleriView)
-//  NOT: Satis.jsx'te zaten bulunan bugunStr / tl isimleriyle çakışmasın diye bu
+//  Müşteri Havuzu'nda Hızlı Teklifler'in ÜSTÜNDEKİ bölüm. Bu sürümde:
+//    • Soru soru ilerleyen görüşme sihirbazı: Evden Eve 7 soru, DepoEvim
+//      5 soru (+ nakliye isterse nakliye soruları açılır), Depodan Çıkış.
+//    • Sorular KAYIT EKRANIYLA AYNI değerleri kullanır (Daire Tipi, Kat,
+//      Taşıma Şekli, Eşya Durumu, İl/İlçe) → "Kayıt Aç" ile form dolu açılır.
+//    • Eylül 2026 PDF fiyat listelerinden TEK bir sistem fiyatı hesaplanır.
+//    • Her satışçı KENDİ görüşmelerini görür; yöneticiler hepsini görür.
+//    • Personel transferi, Sembol ↔ DepoEvim aktarımı, WhatsApp hazır
+//      mesajları, telefon numarasıyla müşteri geçmişi uyarısı.
+//  Bölümler: (1) Sabitler & fiyatlar  (2) Hesaplama & yardımcılar
+//            (3) Ortak bileşenler      (4) Sihirbaz form
+//            (5) Liste / detay / sayfa
+//  NOT: Satis.jsx'te zaten bulunan bugunStr / tl ile çakışmasın diye bu
 //  modüldekiler ttBugunStr / ttTl olarak adlandırıldı.
 // ############################################################################
 // ############################################################################
 
-// ============================================================================
-// TELEFON TEKLİFLERİ — SABİTLER, FİYAT TABLOLARI VE YARDIMCI FONKSİYONLAR
-// ----------------------------------------------------------------------------
-// Bu dosya React içermez (saf JavaScript). "Ağustos Çalışma Planı" Excel'indeki
-// Fiyatlar, Süreç ve Soru & Cevap sayfaları buraya taşındı. Fiyat değişince
-// SADECE bu dosyadaki tablolar güncellenir; ekranlar otomatik yeni fiyatı kullanır.
-// ============================================================================
-
-// Firestore koleksiyon adı: artifacts/{appId}/public/data/telefonTeklifleri
-// NOT: Mevcut "havuzKayitlari" koleksiyonuna HİÇ dokunulmaz; ayrı koleksiyon
-// sayesinde Hızlı Teklifler ve kaynak istatistikleri etkilenmez.
+// Firestore: artifacts/{appId}/public/data/telefonTeklifleri
+// (havuzKayitlari'na dokunulmaz; Hızlı Teklif istatistikleri etkilenmez)
 const TELEFON_TEKLIF_KOLEKSIYONU = 'telefonTeklifleri';
+const ttKoleksiyon = () => collection(db, 'artifacts', appId, 'public', 'data', TELEFON_TEKLIF_KOLEKSIYONU);
+const ttBelge = (id) => doc(db, 'artifacts', appId, 'public', 'data', TELEFON_TEKLIF_KOLEKSIYONU, id);
 
-// ---------------------------------------------------------------- DURUMLAR ---
-// Hızlı Teklifler'deki görüşme durumlarıyla BİREBİR aynı id'ler kullanılır
-// (raporlarda iki bölüm yan yana kıyaslanabilsin diye). Durum sonradan
-// istenildiği kadar değiştirilebilir; her değişiklik hareket geçmişine yazılır.
+// ============================================================================
+// (1) SABİTLER
+// ============================================================================
+
+// Görüşme durumları — Hızlı Teklifler ile BİREBİR aynı id'ler (raporlar uyumlu).
+// Durum sonradan istenildiği kadar değiştirilebilir; her değişiklik geçmişe yazılır.
 const TT_DURUMLAR = [
   { id: 'Yeni',            etiket: 'Yeni',                     rozet: 'bg-neutral-100 text-neutral-700 border-neutral-300', nokta: 'bg-neutral-400' },
   { id: 'Dönüş Bekliyor',  etiket: 'Dönüş Bekliyoruz',         rozet: 'bg-amber-50 text-amber-700 border-amber-300',       nokta: 'bg-amber-500' },
@@ -8079,381 +8207,933 @@ const TT_DURUMLAR = [
   { id: 'Reddedildi',      etiket: 'Reddedildi',               rozet: 'bg-red-50 text-red-700 border-red-300',             nokta: 'bg-red-600' },
 ];
 const ttDurumBul = (id) => TT_DURUMLAR.find(d => d.id === id) || TT_DURUMLAR[0];
-// Kapanmış durumlar: bunlarda takip (tekrar arama) tarihi "gecikti" sayılmaz
-const TT_KAPALI_DURUMLAR = ['İşi Aldık', 'Reddedildi'];
+const TT_KAPALI_DURUMLAR = ['İşi Aldık', 'Reddedildi']; // Bunlarda takip "gecikti" sayılmaz
 
-// ------------------------------------------------------- FORM SEÇENEKLERİ ---
-// Excel sütunlarının açılır/seçmeli karşılıkları
-const TT_HIZMET_TIPLERI = ['Depo', 'Depodan Çıkış', 'Nakliye'];
-const TT_TASIMA_SEKILLERI = ['Sembol ile', 'Kendi Nakliyesi'];     // Süreç sayfası: "Sembol Nakliyat ile / Kendi Nakliyesi ile"
-const TT_ODA_SAYILARI = ['1+0', '1+1', '2+1', '3+1', '4+1', '5+1'];
-const TT_ASANSOR = ['Var', 'Yok', 'Yük Asansörü Var'];
-const TT_YURUME = ['Yok', '50 metre', '100 metre'];
-const TT_PAKETLEME = ['Biz Yapacağız', 'Müşteri Yapacak'];         // Süreç: "Toplama hizmeti isteniyor mu?"
-const TT_VIDEO = ['Paylaşmadı', 'Bekleniyor', 'Alındı', 'Keşif Yapıldı'];
-const TT_KATLAR = ['Giriş', 'Bahçe', ...Array.from({ length: 30 }, (_, i) => String(i + 1))];
+// Hizmetler — renkler canlı ve belirgin (kullanıcı talebi: "çok soluk").
+// Tailwind dinamik sınıf üretmediği için tüm sınıflar açık yazılır.
+const TT_HIZMETLER = [
+  { id: 'Nakliye', ad: 'Evden Eve Nakliyat', alt: 'Sembol Nakliyat · şehir içi / şehirler arası', marka: 'SEMBOL', site: 'sembolevdeneve', Ikon: Truck,
+    stil: { secili: 'bg-red-600 text-white border-red-600 shadow-lg shadow-red-600/30', pasif: 'bg-white text-red-700 border-red-200 hover:border-red-500 hover:bg-red-50',
+      rozet: 'bg-red-600 text-white', acik: 'bg-red-50 text-red-800 border-red-200', dugme: 'bg-red-600 hover:bg-red-700 shadow-red-600/30', serit: 'bg-red-600', yazi: 'text-red-700', halka: 'focus:ring-red-500' } },
+  { id: 'Depo', ad: 'Eşya Depolama', alt: 'DepoEvim · eşyanın depoya girişi', marka: 'DEPOEVİM', site: 'depoevim', Ikon: Package,
+    stil: { secili: 'bg-blue-600 text-white border-blue-600 shadow-lg shadow-blue-600/30', pasif: 'bg-white text-blue-700 border-blue-200 hover:border-blue-500 hover:bg-blue-50',
+      rozet: 'bg-blue-600 text-white', acik: 'bg-blue-50 text-blue-800 border-blue-200', dugme: 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30', serit: 'bg-blue-600', yazi: 'text-blue-700', halka: 'focus:ring-blue-500' } },
+  { id: 'Depodan Çıkış', ad: 'Depodan Çıkış', alt: 'DepoEvim · depodan yeni adrese teslim', marka: 'DEPOEVİM', site: 'depoevim', Ikon: ArrowUpRight,
+    stil: { secili: 'bg-violet-600 text-white border-violet-600 shadow-lg shadow-violet-600/30', pasif: 'bg-white text-violet-700 border-violet-200 hover:border-violet-500 hover:bg-violet-50',
+      rozet: 'bg-violet-600 text-white', acik: 'bg-violet-50 text-violet-800 border-violet-200', dugme: 'bg-violet-600 hover:bg-violet-700 shadow-violet-600/30', serit: 'bg-violet-600', yazi: 'text-violet-700', halka: 'focus:ring-violet-500' } },
+];
+const ttHizmetBul = (id) => TT_HIZMETLER.find(h => h.id === id) || TT_HIZMETLER[0];
 
-// Depo tipleri — "Soru & Cevap" sayfasındaki ölçüler + "Süreç" sayfasındaki aylık ücretler
-const TT_DEPO_TIPLERI = [
-  { id: '1+0', ad: '1+0 · 10 m³', olcu: 'G:2 D:1.7 Y:3 m', aylik: 4500 },
-  { id: '1+1', ad: '1+1 · 15 m³', olcu: 'G:2 D:2.5 Y:3 m', aylik: 6000 },
-  { id: '2+1', ad: '2+1 · 22 m³', olcu: 'G:2 D:3.6 Y:3 m', aylik: 7500 },
-  { id: '3+1', ad: '3+1 · 30 m³', olcu: 'G:2 D:5 Y:3 m',   aylik: 9000 },
-  { id: 'ozel', ad: 'Özel Ölçü (40 m³+)', olcu: 'Uzun süreli ihtiyaca göre', aylik: null },
+// İl listesi: sık aranan iller EN ÜSTTE (kullanıcı talebi), kalanlar alfabetik.
+// Değerler kayıt ekranındaki PROVINCES ile aynıdır ("İstanbul (Anadolu)" vb.).
+const TT_ONCELIKLI_ILLER = ['İstanbul (Anadolu)', 'İstanbul (Avrupa)', 'Kocaeli', 'Bursa', 'İzmir', 'Ankara'];
+const TT_DIGER_ILLER = PROVINCES.filter(il => !TT_ONCELIKLI_ILLER.includes(il));
+const ttIlceler = (il) => TURKEY_LOCATIONS[il] || [];
+
+// Daire tipi — kayıt ekranındaki "Daire Tipi" değerleriyle aynı (Depoevim Tesisleri hariç)
+const TT_ODA_SECENEKLERI = [
+  { id: '1+0', ad: '1+0' }, { id: '1+1', ad: '1+1' }, { id: '2+1', ad: '2+1' }, { id: '3+1', ad: '3+1' }, { id: '4+1', ad: '4+1' },
+  { id: 'Villa', ad: '5+1 ve üzeri / Villa / Müstakil' }, { id: 'Ofis', ad: 'Kurumsal Ofis Taşıma' }, { id: 'Parça Eşya', ad: 'Parça Eşya' },
 ];
 
-// --------------------------------------------- FİYAT TABLOLARI (EXCEL'DEN) ---
-// 1) İSTANBUL İÇİ DEPOLAMA NAKLİYESİ ("Depolama Nakliye Fiyatları" — Yeni Fiyat)
-const DEPO_NAKLIYE_ANADOLU = { '1+0': 14000, '1+1': 18000, '2+1': 25000, '3+1': 30000, '4+1': 35000 };
-const DEPO_TOPLAMA         = { '1+0': 2000,  '1+1': 4000,  '2+1': 6000,  '3+1': 8000,  '4+1': 10000 };
-const DEPO_AVRUPA_EKSTRA   = { '1+0': 4000,  '1+1': 5000,  '2+1': 6000,  '3+1': 10000 };  // 4+1 tabloda yok → 3+1 kullanılır
-const DEPO_MERDIVEN        = { 3: 1000, 4: 3000, 5: 5000 };                               // 5. kat ve üstü = 5.000
-const DEPO_DIS_CEPHE       = { Anadolu: 3000, Avrupa: 4500 };
-const DEPO_YURUME          = { '50 metre': 3000, '100 metre': 6000 };
+// Taşıma şekli — kayıt ekranındaki "Taşıma Şekli" değerleri; metinler web sihirbazındaki gibi
+const TT_TASIMA = [
+  { id: 'Merdiven',           ad: 'Merdivenden taşınacak',          alt: 'Bina asansörü yok / kullanılmayacak' },
+  { id: 'Bina Asansörü',      ad: 'Bina asansörü ile',              alt: 'Eşyalar bina asansörüne sığıyor' },
+  { id: 'Dış Cephe Asansörü', ad: 'Dış cephe asansörü kurulsun',    alt: 'Pencere / balkon yola bakmalı' },
+];
+// Kamyon yanaşma — kayıt ekranındaki "Yükleme Mesafesi" (metre) alanına yazılır
+const TT_YANASMA = [
+  { id: '0',   ad: 'Evet, binaya yanaşıyor' },
+  { id: '50',  ad: 'Yanaşmıyor · yaklaşık 50 m' },
+  { id: '100', ad: 'Yanaşmıyor · yaklaşık 100 m' },
+];
+// Küçük eşya paketleme — kayıt ekranındaki "Eşya Durumu" ile eşlenir
+const TT_TOPLAMA = [
+  { id: 'Müşteri', ad: 'Kendim paketleyeceğim', alt: 'Küçük eşyalar taşıma günü kolili hazır olur' },
+  { id: 'Firma',   ad: 'Firma tüm eşyaları paketlesin', alt: 'Toplama hizmeti ekstra ücretlidir' },
+];
+const TT_VIDEO = ['Paylaşmadı', 'Bekleniyor', 'Alındı', 'Keşif Yapıldı'];
+const TT_ESYA_CINSI = [
+  { id: 'Ev Eşyası', ad: 'Ev eşyası', alt: 'Müşterilerin %70-80\'i' },
+  { id: 'İş Yeri Eşyası', ad: 'İş yeri eşyası', alt: 'Arşiv, stok, ofis — Mehmet Bey\'e aktarılır' },
+];
+const TT_NAKLIYE_TERCIHI = [
+  { id: 'Kendisi', ad: 'Eşyalarımı kendim getiririm', alt: 'Nakliye soruları sorulmaz' },
+  { id: 'Firma',   ad: 'Firma adresimden alsın (Anahtar Teslim)', alt: 'Sigortalı taşıma, kendi ekibimiz, kalıcı ambalaj' },
+];
 
-// 2) İL BAZLI NAKLİYE (Fiyatlar sayfası K–N sütunları: 1+1 / 2+1 / 3+1)
-const IL_FIYATLARI = {
-  'Adana': [79000, 103000, 122000], 'Adıyaman': [80000, 103000, 122000], 'Afyonkarahisar': [51000, 72000, 84000], 'Ağrı': [103000, 132000, 156000],
-  'Aksaray': [65000, 87000, 104000], 'Amasya': [60000, 80000, 94000], 'Ankara': [55000, 77000, 90000], 'Antalya': [65000, 80000, 100000],
-  'Ardahan': [106000, 135000, 160000], 'Artvin': [80000, 103000, 122000], 'Aydın': [69000, 75000, 93000], 'Balıkesir': [50000, 65000, 85000],
-  'Bartın': [52000, 72000, 86000], 'Batman': [100000, 133000, 155000], 'Bayburt': [88000, 115000, 136000], 'Bilecik': [40000, 60000, 70000],
-  'Bingöl': [98000, 126000, 149000], 'Bitlis': [108000, 138000, 163000], 'Bolu': [40000, 63000, 73000], 'Burdur': [62000, 83000, 99000],
-  'Bursa': [38000, 55000, 66000], 'Çanakkale': [53000, 74000, 89000], 'Çankırı': [55000, 75000, 90000], 'Çorum': [62000, 83000, 99000],
-  'Denizli': [61000, 81000, 97000], 'Diyarbakır': [101000, 129000, 153000], 'Düzce': [41000, 59000, 71000], 'Edirne': [49000, 69000, 84000],
-  'Elazığ': [95000, 120000, 142000], 'Erzincan': [85000, 111000, 131000], 'Erzurum': [93000, 120000, 142000], 'Eskişehir': [40000, 60000, 70000],
-  'Gaziantep': [88000, 114000, 135000], 'Giresun': [77000, 101000, 121000], 'Gümüşhane': [85000, 111000, 131000], 'Hakkâri': [124000, 157000, 185000],
-  'Hatay': [88000, 114000, 135000], 'Iğdır': [67000, 83000, 100000], 'Isparta': [111000, 142000, 167000], 'İstanbul (Şehir İçi)': [15000, 25000, 35000],
-  'İzmir': [60000, 75000, 95000], 'Kahramanmaraş': [81000, 103000, 123000], 'Karabük': [51000, 70000, 84000], 'Karaman': [72000, 95000, 113000],
-  'Kars': [103000, 132000, 156000], 'Kastamonu': [51000, 72000, 84000], 'Kayseri': [71000, 93000, 111000], 'Kilis': [90000, 117000, 138000],
-  'Kırıkkale': [58000, 78000, 93000], 'Kırklareli': [40000, 57000, 70000], 'Kırşehir': [63000, 85000, 101000], 'Kocaeli': [35000, 51000, 62000],
-  'Konya': [65000, 80000, 100000], 'Kütahya': [48000, 66000, 79000], 'Malatya': [88000, 114000, 135000], 'Manisa': [53000, 72000, 86000],
-  'Mardin': [100000, 132000, 156000], 'Mersin': [77000, 101000, 120000], 'Muğla': [70000, 85000, 105000], 'Muş': [100000, 132000, 156000],
-  'Nevşehir': [68000, 94000, 113000], 'Niğde': [72000, 95000, 113000], 'Ordu': [75000, 98000, 117000], 'Osmaniye': [82000, 107000, 127000],
-  'Rize': [90000, 117000, 139000], 'Sakarya': [38000, 55000, 66000], 'Samsun': [70000, 90000, 110000], 'Siirt': [110000, 142000, 170000],
-  'Sinop': [66000, 88000, 104000], 'Sivas': [76000, 100000, 119000], 'Şanlıurfa': [95000, 123000, 145000], 'Şırnak': [116000, 148000, 174000],
-  'Tekirdağ': [41000, 63000, 76000], 'Tokat': [71000, 94000, 112000], 'Trabzon': [83000, 110000, 130000], 'Tunceli': [93000, 120000, 142000],
-  'Uşak': [55000, 75000, 90000], 'Van': [114000, 145000, 171000], 'Yalova': [35000, 51000, 62000], 'Yozgat': [64000, 86000, 102000],
-  'Zonguldak': [48000, 66000, 79000],
+// Depo boyutları — depoevim.com/depo-fiyatlarimiz (Eylül 2026), +%20 KDV
+const TT_DEPO_BOYUTLARI = [
+  { id: '1+0', m3: 10, olcu: '2×1.7×3 m', aylik: 4500, aciklama: 'Birkaç parça / stüdyo eşyası' },
+  { id: '1+1', m3: 15, olcu: '2×2.5×3 m', aylik: 6000, aciklama: '1+1 ev eşyası' },
+  { id: '2+1', m3: 22, olcu: '3×2.5×3 m', aylik: 7500, aciklama: '2+1 ev eşyası, kentsel dönüşüm' },
+  { id: '3+1', m3: 30, olcu: '4×2.5×3 m', aylik: 9000, aciklama: '3+1 ev eşyası' },
+  { id: 'Özel', m3: null, olcu: '40 m³ ve üzeri', aylik: null, aciklama: 'Video ile ölçü belirlenir' },
+];
+// Kiralama süresi — web sihirbazı: 6 ay peşin (1 ay hediye) = 5 öde 1 hediye; 12 ay = 10 öde 2 hediye
+const TT_KIRALAMA = [
+  { id: '1',  ad: '1 Aylık Kiralama',            odenecekAy: 1,  toplamAy: 1 },
+  { id: '6',  ad: '6 Ay Peşin (1 Ay Hediye)',    odenecekAy: 5,  toplamAy: 6 },
+  { id: '12', ad: '12 Ay Peşin (2 Ay Hediye)',   odenecekAy: 10, toplamAy: 12 },
+];
+// Şubeler — kayıt ekranının "Depo" seçimiyle aynı isimler (DEPO_LOCATIONS)
+const TT_SUBELER = [...DEPO_LOCATIONS.map(d => d.name), 'Farketmez'];
+const TT_KDV = 0.20;
+
+// ============================================================================
+// FİYAT LİSTELERİ — "... Fiyat Listesi 2026.pdf" (Güncel • Eylül 2026)
+// Fiyat değişince SADECE bu tablolar güncellenir; tüm ekranlar yeni fiyatı kullanır.
+// ============================================================================
+// Şehir içi evden eve (Anadolu Yakası çıkışlı taban + ekler)
+const FL_SEHIR_ICI_EVE = {
+  taban:        { '1+0': 18000, '1+1': 25000, '2+1': 30000, '3+1': 35000, '4+1': 42000 },
+  toplama:      { '1+0': 3000,  '1+1': 5000,  '2+1': 8000,  '3+1': 10000, '4+1': 15000 },
+  merdiven:     { 3: 2000, 4: 4000, 5: 6000 },
+  disCephe:     { Anadolu: 3000, Avrupa: 5000 },           // Avrupa: tek taraf kurulum
+  avrupaEkstra: { '1+0': 4500, '1+1': 5500, '2+1': 6500, '3+1': 11000 },
+  yurume:       { 50: 3500, 100: 6500 },
+};
+// Şehir içi evden depoya (depo müşterisine özel)
+const FL_SEHIR_ICI_DEPO = {
+  taban:        { '1+0': 14000, '1+1': 18000, '2+1': 25000, '3+1': 30000, '4+1': 35000 },
+  toplama:      { '1+0': 2000,  '1+1': 4000,  '2+1': 6000,  '3+1': 8000,  '4+1': 10000 },
+  merdiven:     { 3: 1000, 4: 3000, 5: 5000 },
+  disCephe:     { Anadolu: 3000, Avrupa: 4500 },
+  avrupaEkstra: { '1+0': 4000, '1+1': 5000, '2+1': 6000, '3+1': 10000 },
+  yurume:       { 50: 3000, 100: 6000 },
+};
+// Şehirler arası ekler (iki listede de aynı)
+const FL_SEHIRLER_ARASI_EK = {
+  toplama:  { '1+0': 3500, '1+1': 5500, '2+1': 9000, '3+1': 11000, '4+1': 16500 },
+  merdiven: { 3: 2500, 4: 4500, 5: 6500 },
+  disCephe: { Anadolu: 3500, Avrupa: 5000 },
+  yurume:   { 50: 4000, 100: 7000 },
+};
+// 81 il — Pendik operasyon merkezi çıkışlı [1+1, 2+1, 3+1, 4+1]
+// (Trakya / Avrupa ötesi illerde %15 geçiş farkı dahildir)
+const FL_IL_EVDEN_EVE = {
+  'Adana': [87000, 113000, 134000, 159000], 'Adıyaman': [102000, 132000, 156000, 185000], 'Afyonkarahisar': [56000, 77000, 92000, 110000],
+  'Aksaray': [72000, 96000, 114000, 136000], 'Amasya': [72000, 96000, 114000, 136000], 'Ankara': [61000, 77000, 99000, 125000],
+  'Antalya': [72000, 88000, 110000, 136000], 'Ardahan': [117000, 148000, 176000, 210000], 'Artvin': [108000, 139000, 164000, 194000],
+  'Aydın': [66000, 82000, 105000, 133000], 'Ağrı': [113000, 145000, 172000, 204000], 'Balıkesir': [55000, 72000, 94000, 120000],
+  'Bartın': [57000, 79000, 95000, 114000], 'Batman': [117000, 148000, 176000, 210000], 'Bayburt': [97000, 125000, 148000, 176000],
+  'Bilecik': [44000, 66000, 77000, 90000], 'Bingöl': [108000, 139000, 164000, 194000], 'Bitlis': [119000, 152000, 179000, 211000],
+  'Bolu': [48000, 68000, 81000, 97000], 'Burdur': [68000, 91000, 109000, 131000], 'Bursa': [42000, 61000, 73000, 87000],
+  'Çanakkale': [58000, 81000, 98000, 118000], 'Çankırı': [61000, 82000, 99000, 119000], 'Çorum': [68000, 91000, 109000, 131000],
+  'Denizli': [67000, 89000, 107000, 129000], 'Diyarbakır': [111000, 142000, 168000, 199000], 'Düzce': [45000, 65000, 78000, 94000],
+  'Edirne': [54000, 76000, 92000, 111000], 'Elazığ': [102000, 132000, 156000, 185000], 'Erzincan': [94000, 122000, 144000, 170000],
+  'Erzurum': [102000, 132000, 156000, 185000], 'Eskişehir': [44000, 66000, 77000, 90000], 'Gaziantep': [97000, 125000, 148000, 176000],
+  'Giresun': [85000, 111000, 132000, 157000], 'Gümüşhane': [94000, 122000, 144000, 170000], 'Hakkari': [136000, 173000, 204000, 241000],
+  'Hatay': [97000, 125000, 148000, 176000], 'Isparta': [68000, 91000, 109000, 131000], 'İzmir': [66000, 82000, 105000, 133000],
+  'Iğdır': [122000, 156000, 184000, 218000], 'Kahramanmaraş': [94000, 122000, 144000, 170000], 'Karabük': [56000, 77000, 92000, 110000],
+  'Karaman': [79000, 105000, 124000, 147000], 'Kars': [113000, 145000, 172000, 204000], 'Kastamonu': [62000, 84000, 100000, 119000],
+  'Kayseri': [78000, 102000, 122000, 146000], 'Kilis': [99000, 129000, 152000, 180000], 'Kocaeli': [38000, 56000, 68000, 82000],
+  'Konya': [72000, 88000, 110000, 136000], 'Kütahya': [53000, 73000, 87000, 104000], 'Kırklareli': [53000, 74000, 89000, 107000],
+  'Kırıkkale': [64000, 86000, 102000, 121000], 'Kırşehir': [69000, 94000, 111000, 131000], 'Malatya': [97000, 125000, 148000, 176000],
+  'Manisa': [58000, 79000, 95000, 114000], 'Mardin': [117000, 148000, 176000, 210000], 'Mersin': [85000, 111000, 132000, 157000],
+  'Muğla': [77000, 94000, 116000, 142000], 'Muş': [113000, 145000, 172000, 204000], 'Nevşehir': [75000, 100000, 119000, 142000],
+  'Niğde': [79000, 105000, 124000, 147000], 'Ordu': [82000, 108000, 129000, 154000], 'Osmaniye': [90000, 118000, 140000, 166000],
+  'Rize': [99000, 129000, 152000, 180000], 'Sakarya': [42000, 61000, 73000, 87000], 'Samsun': [77000, 99000, 121000, 147000],
+  'Siirt': [122000, 156000, 184000, 218000], 'Sinop': [73000, 97000, 114000, 134000], 'Sivas': [84000, 110000, 131000, 156000],
+  'Şanlıurfa': [105000, 135000, 160000, 190000], 'Şırnak': [128000, 163000, 191000, 225000], 'Tekirdağ': [48000, 69000, 84000, 102000],
+  'Tokat': [78000, 103000, 123000, 147000], 'Trabzon': [94000, 121000, 143000, 169000], 'Tunceli': [102000, 132000, 156000, 185000],
+  'Uşak': [61000, 82000, 98000, 117000], 'Van': [125000, 160000, 188000, 222000], 'Yalova': [38000, 56000, 68000, 82000],
+  'Yozgat': [70000, 95000, 112000, 132000], 'Zonguldak': [53000, 73000, 87000, 104000],
+};
+const FL_IL_EVDEN_DEPOYA = {
+  'Adana': [70000, 90000, 107000, 127000], 'Adıyaman': [82000, 106000, 125000, 148000], 'Afyonkarahisar': [45000, 62000, 74000, 88000],
+  'Aksaray': [58000, 77000, 91000, 109000], 'Amasya': [58000, 77000, 91000, 109000], 'Ankara': [49000, 62000, 79000, 100000],
+  'Antalya': [58000, 70000, 88000, 109000], 'Ardahan': [94000, 118000, 141000, 168000], 'Artvin': [86000, 111000, 131000, 155000],
+  'Aydın': [53000, 66000, 84000, 106000], 'Ağrı': [90000, 116000, 138000, 163000], 'Balıkesir': [44000, 58000, 75000, 96000],
+  'Bartın': [46000, 63000, 76000, 91000], 'Batman': [94000, 118000, 141000, 168000], 'Bayburt': [78000, 100000, 118000, 141000],
+  'Bilecik': [35000, 53000, 62000, 72000], 'Bingöl': [86000, 111000, 131000, 155000], 'Bitlis': [95000, 122000, 143000, 169000],
+  'Bolu': [38000, 54000, 65000, 78000], 'Burdur': [54000, 73000, 87000, 105000], 'Bursa': [34000, 49000, 58000, 70000],
+  'Çanakkale': [46000, 65000, 78000, 94000], 'Çankırı': [49000, 66000, 79000, 95000], 'Çorum': [54000, 73000, 87000, 105000],
+  'Denizli': [54000, 71000, 86000, 103000], 'Diyarbakır': [89000, 114000, 134000, 159000], 'Düzce': [36000, 52000, 62000, 75000],
+  'Edirne': [43000, 61000, 74000, 89000], 'Elazığ': [82000, 106000, 125000, 148000], 'Erzincan': [75000, 98000, 115000, 136000],
+  'Erzurum': [82000, 106000, 125000, 148000], 'Eskişehir': [35000, 53000, 62000, 72000], 'Gaziantep': [78000, 100000, 118000, 141000],
+  'Giresun': [68000, 89000, 106000, 126000], 'Gümüşhane': [75000, 98000, 115000, 136000], 'Hakkari': [109000, 138000, 163000, 193000],
+  'Hatay': [78000, 100000, 118000, 141000], 'Isparta': [54000, 73000, 87000, 105000], 'İzmir': [53000, 66000, 84000, 106000],
+  'Iğdır': [98000, 125000, 147000, 174000], 'Kahramanmaraş': [75000, 98000, 115000, 136000], 'Karabük': [45000, 62000, 74000, 88000],
+  'Karaman': [63000, 84000, 99000, 118000], 'Kars': [90000, 116000, 138000, 163000], 'Kastamonu': [50000, 67000, 80000, 95000],
+  'Kayseri': [62000, 82000, 98000, 117000], 'Kilis': [79000, 103000, 122000, 144000], 'Kocaeli': [30000, 45000, 54000, 66000],
+  'Konya': [58000, 70000, 88000, 109000], 'Kütahya': [42000, 58000, 70000, 83000], 'Kırklareli': [42000, 59000, 71000, 86000],
+  'Kırıkkale': [51000, 69000, 82000, 97000], 'Kırşehir': [55000, 75000, 89000, 105000], 'Malatya': [78000, 100000, 118000, 141000],
+  'Manisa': [46000, 63000, 76000, 91000], 'Mardin': [94000, 118000, 141000, 168000], 'Mersin': [68000, 89000, 106000, 126000],
+  'Muğla': [62000, 75000, 93000, 114000], 'Muş': [90000, 116000, 138000, 163000], 'Nevşehir': [60000, 80000, 95000, 114000],
+  'Niğde': [63000, 84000, 99000, 118000], 'Ordu': [66000, 86000, 103000, 123000], 'Osmaniye': [72000, 94000, 112000, 133000],
+  'Rize': [79000, 103000, 122000, 144000], 'Sakarya': [34000, 49000, 58000, 70000], 'Samsun': [62000, 79000, 97000, 118000],
+  'Siirt': [98000, 125000, 147000, 174000], 'Sinop': [58000, 78000, 91000, 107000], 'Sivas': [67000, 88000, 105000, 125000],
+  'Şanlıurfa': [84000, 108000, 128000, 152000], 'Şırnak': [102000, 130000, 153000, 180000], 'Tekirdağ': [38000, 55000, 67000, 82000],
+  'Tokat': [62000, 82000, 98000, 118000], 'Trabzon': [75000, 97000, 114000, 135000], 'Tunceli': [82000, 106000, 125000, 148000],
+  'Uşak': [49000, 66000, 78000, 94000], 'Van': [100000, 128000, 150000, 178000], 'Yalova': [30000, 45000, 54000, 66000],
+  'Yozgat': [56000, 76000, 90000, 106000], 'Zonguldak': [42000, 58000, 70000, 83000],
 };
 
-// 3) İL BAZLI NAKLİYE EKSTRALARI (Fiyatlar sayfası P–Q sütunları)
-const IL_TOPLAMA   = { '1+0': 3000, '1+1': 5000, '2+1': 8000, '3+1': 10000, '4+1': 15000, '5+1': 15000 };
-const IL_MERDIVEN  = { 3: 2000, 4: 4000, 5: 6000 };
-const IL_DIS_CEPHE = { normal: 3000, yuksek: 9000 };   // 1–29. kat / 29+ kat
-const IL_YURUME    = { '50 metre': 3500, '100 metre': 6500 };
-
-// Form'daki "Nereden / Nereye" il listesi: İstanbul iki yaka + diğer iller
-const TT_IL_LISTESI = ['İstanbul (Anadolu)', 'İstanbul (Avrupa)',
-  ...Object.keys(IL_FIYATLARI).filter(il => !il.startsWith('İstanbul'))];
-
-// ---------------------------------------------------- YARDIMCI FONKSİYONLAR ---
-// Yerel saatle bugünün tarihi (YYYY-MM-DD) — date input'larla uyumlu
+// ============================================================================
+// (2) YARDIMCI FONKSİYONLAR
+// ============================================================================
 const ttBugunStr = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-// Bir tarihe gün ekler (YYYY-MM-DD döner) — takip için "+1 gün / +3 gün" düğmeleri
-const gunEkleStr = (tarihStr, gun) => {
+const ttGunEkle = (tarihStr, gun) => {
   const [y, m, g] = (tarihStr || ttBugunStr()).split('-').map(Number);
   const d = new Date(y, m - 1, g + gun);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-// YYYY-MM-DD → "29.09.2026"
-const trTarih = (s) => (s && s.includes('-') ? s.split('-').reverse().join('.') : (s || ''));
-// Para biçimi: 25000 → "25.000 ₺"
-const ttTl = (n) => (n || n === 0) ? `${Number(n).toLocaleString('tr-TR')} ₺` : '—';
+const ttTrTarih = (s) => (s && String(s).includes('-') ? String(s).slice(0, 10).split('-').reverse().join('.') : (s || ''));
+const ttTl = (n) => (n || n === 0) && n !== '' ? `${Math.round(Number(n)).toLocaleString('tr-TR')} ₺` : '—';
 
-// Serbest yazılan fiyat metnini sayıya çevirir (istatistik için).
-// "32000" → 32000 · "32.000 ₺" → 32000 · "27-32.000" → 32000 (aralıkta üst değer)
-const fiyatSayiya = (metin) => {
+// Serbest fiyat metnini sayıya çevirir: "32.000 ₺" → 32000, "27-32.000" → 32000
+const ttFiyatSayi = (metin) => {
   if (metin === null || metin === undefined || metin === '') return 0;
   const parcalar = String(metin).split('-').map(p => Number(p.replace(/[^\d]/g, '')) || 0);
   const enBuyuk = Math.max(...parcalar);
-  // "27-32.000" gibi kısaltmalarda küçük parça binlik kabul edilir
   return parcalar.map(p => (p > 0 && p < 1000 && enBuyuk >= 1000 ? p * 1000 : p)).reduce((a, b) => Math.max(a, b), 0);
 };
 
-// Telefonu WhatsApp (wa.me) biçimine çevirir: 0532... → 90532...
-const waNumara = (tel) => {
-  let p = (tel || '').replace(/\D/g, '');
-  if (p.startsWith('0')) p = '90' + p.substring(1);
-  else if (p && !p.startsWith('90')) p = '90' + p;
-  return p;
+// ----------------------------------------------------------------------------
+// TELEFON ANAHTARI — eşleştirmenin kalbi (kullanıcı talebi)
+// "0532 123 45 67", "05321234567", "5321234567", "+90 532 123 4567",
+// "0090532..." biçimlerinin HEPSİ aynı 10 haneli anahtara dönüşür → "5321234567".
+// ----------------------------------------------------------------------------
+const ttTelAnahtar = (v) => {
+  let r = (v || '').toString().replace(/\D/g, '');           // Boşluk, tire, parantez, + temizlenir
+  if (r.startsWith('0090')) r = r.slice(4);                  // 0090 ülke kodu
+  if (r.length === 12 && r.startsWith('90')) r = r.slice(2); // 90 ülke kodu
+  if (r.length === 11 && r.startsWith('0')) r = r.slice(1);  // Baştaki 0
+  return r.length >= 10 ? r.slice(-10) : '';
+};
+const ttTelGecerli = (v) => ttTelAnahtar(v).length === 10;
+const ttWaNumara = (v) => { const a = ttTelAnahtar(v); return a ? `90${a}` : ''; };
+// Ekranda okunaklı biçim: 0532 123 45 67
+const ttTelGoster = (v) => { const a = ttTelAnahtar(v); return a ? `0${a.slice(0, 3)} ${a.slice(3, 6)} ${a.slice(6, 8)} ${a.slice(8)}` : (v || ''); };
+
+// "3 yıl önce", "2 ay önce", "5 gün sonra" gibi göreli süre
+const ttGoreliSure = (tarih) => {
+  if (!tarih) return '';
+  const t = new Date(String(tarih).length <= 10 ? `${tarih}T12:00:00` : tarih);
+  if (isNaN(t)) return '';
+  const gun = Math.round((Date.now() - t.getTime()) / 86400000);
+  const ek = gun >= 0 ? 'önce' : 'sonra';
+  const g = Math.abs(gun);
+  if (g === 0) return 'bugün';
+  if (g < 31) return `${g} gün ${ek}`;
+  if (g < 365) return `${Math.round(g / 30)} ay ${ek}`;
+  const yil = Math.floor(g / 365); const ay = Math.round((g % 365) / 30);
+  return `${yil} yıl${ay ? ` ${ay} ay` : ''} ${ek}`;
 };
 
-// Takip (tekrar arama) durumunu hesaplar → liste rozetleri ve filtreler için
-// dönüş: 'yok' | 'gecikti' | 'bugun' | 'ileride' | 'kapali'
-const takipDurumu = (t) => {
+// Takip (tekrar arama) durumu → 'yok' | 'gecikti' | 'bugun' | 'ileride' | 'kapali'
+const ttTakipDurumu = (t) => {
   if (TT_KAPALI_DURUMLAR.includes(t.durum)) return 'kapali';
   if (!t.takipTarihi) return 'yok';
-  const bugun = ttBugunStr();
-  if (t.takipTarihi < bugun) return 'gecikti';
-  if (t.takipTarihi === bugun) return 'bugun';
+  const b = ttBugunStr();
+  if (t.takipTarihi < b) return 'gecikti';
+  if (t.takipTarihi === b) return 'bugun';
   return 'ileride';
 };
 
-// ============================================================================
-// FİYAT ÖNERİSİ HESAPLAMA
+// Kaydın sahibi (görünürlük ve transfer için): atanan yoksa oluşturan
+const ttSahibi = (t) => t.atanan || t.olusturan || '';
+const ttSiteOf = (hizmetTipi) => ttHizmetBul(hizmetTipi).site;
+
 // ----------------------------------------------------------------------------
-// Form alanlarına bakarak Excel'deki fiyat tablolarından TAHMİNİ fiyat üretir.
-// Bu yalnızca ÖNERİDİR; müşteriye söylenen fiyat "Verilen Fiyat" alanına
-// elle yazılır (video sonrası net fiyat değişebilir — Süreç sayfası kuralı).
-// Dönüş: { kalemler: [{ ad, tutar }], toplam, depoAylik, uyarilar: [] }
-// ============================================================================
-const ttIstanbulMu = (il) => (il || '').startsWith('İstanbul');
-const katSayisi = (kat) => { const n = parseInt(kat, 10); return Number.isFinite(n) ? n : 0; };
-
-const fiyatOnerisiHesapla = (f) => {
-  const kalemler = [];
-  const uyarilar = [];
-  const oda = f.odaSayisi;
-
-  // Depo aylık ücreti (depo tipi seçildiyse)
-  const depo = TT_DEPO_TIPLERI.find(d => d.id === f.depoTipi);
-  const depoAylik = depo?.aylik || null;
-
-  // Müşteri kendi nakliyesiyle depoya geliyorsa nakliye hesaplanmaz
-  const nakliyeVar = !(f.hizmetTipi === 'Depo' && f.tasimaSekli === 'Kendi Nakliyesi');
-  if (!nakliyeVar) return { kalemler, toplam: 0, depoAylik, uyarilar: ['Müşteri kendi nakliyesiyle getirecek — sadece depo ücreti.'] };
-  if (!oda) return { kalemler, toplam: 0, depoAylik, uyarilar: ['Fiyat önerisi için oda sayısını seçin.'] };
-
-  // Güzergâhın "karşı" ili: Depo → nereden, Depodan Çıkış → nereye,
-  // Nakliye → İstanbul dışındaki taraf (yoksa İstanbul şehir içi)
-  const ilgiliIl = f.hizmetTipi === 'Depo' ? f.neredenIl
-    : f.hizmetTipi === 'Depodan Çıkış' ? f.nereyeIl
-    : (!ttIstanbulMu(f.nereyeIl) ? f.nereyeIl : f.neredenIl);
-  const yaka = (ilgiliIl || '').includes('Avrupa') ? 'Avrupa' : 'Anadolu';
-  const kat = katSayisi(f.daireKat);
-  const asansorYok = f.asansor === 'Yok';
-
-  if (ttIstanbulMu(ilgiliIl) && f.hizmetTipi !== 'Nakliye') {
-    // ---- A) İSTANBUL İÇİ DEPO NAKLİYESİ (Depolama Nakliye Fiyatları) ----
-    const taban = DEPO_NAKLIYE_ANADOLU[oda];
-    if (!taban) uyarilar.push(`${oda} için depo nakliye fiyatı tabloda yok.`);
-    else kalemler.push({ ad: `${oda} depo nakliyesi (Anadolu tabanı)`, tutar: taban });
-    if (yaka === 'Avrupa') {
-      const ek = DEPO_AVRUPA_EKSTRA[oda] ?? DEPO_AVRUPA_EKSTRA['3+1'];
-      kalemler.push({ ad: 'Avrupa Yakası ekstra', tutar: ek });
-    }
-    if (f.paketleme === 'Biz Yapacağız' && DEPO_TOPLAMA[oda]) kalemler.push({ ad: 'Toplama / paketleme hizmeti', tutar: DEPO_TOPLAMA[oda] });
-    if (asansorYok && kat >= 3) kalemler.push({ ad: `${kat}. kat merdiven taşıma`, tutar: DEPO_MERDIVEN[Math.min(kat, 5)] });
-    if (f.disCepheAsansor) kalemler.push({ ad: `Dış cephe asansörü (${yaka})`, tutar: DEPO_DIS_CEPHE[yaka] });
-    if (DEPO_YURUME[f.yurumeMesafesi]) kalemler.push({ ad: `Yürüme mesafesi (${f.yurumeMesafesi})`, tutar: DEPO_YURUME[f.yurumeMesafesi] });
-  } else {
-    // ---- B) İL BAZLI NAKLİYE (şehirlerarası veya Sembol şehir içi) ----
-    const tabloIl = ttIstanbulMu(ilgiliIl) ? 'İstanbul (Şehir İçi)' : ilgiliIl;
-    const satir = IL_FIYATLARI[tabloIl];
-    // Tablo 1+1 / 2+1 / 3+1 sütunlarından oluşur; 1+0 → 1+1, 4+1 ve üstü → 3+1 kullanılır
-    const sutun = { '1+0': 0, '1+1': 0, '2+1': 1, '3+1': 2 }[oda] ?? 2;
-    if (!satir) uyarilar.push(`${tabloIl || 'İl'} için fiyat tabloda yok.`);
-    else {
-      kalemler.push({ ad: `${tabloIl} · ${oda} nakliye`, tutar: satir[sutun] });
-      if (['4+1', '5+1'].includes(oda)) uyarilar.push('Tabloda 4+1 yok; 3+1 fiyatı baz alındı, ekstra hacmi ekleyin.');
-    }
-    if (f.paketleme === 'Biz Yapacağız' && IL_TOPLAMA[oda]) kalemler.push({ ad: 'Toplama hizmeti', tutar: IL_TOPLAMA[oda] });
-    if (asansorYok && kat >= 3) kalemler.push({ ad: `${kat}. kat merdiven`, tutar: IL_MERDIVEN[Math.min(kat, 5)] });
-    if (f.disCepheAsansor) kalemler.push({ ad: `Dış cephe asansörü (${kat > 29 ? '29+ kat' : '1–29. kat'})`, tutar: kat > 29 ? IL_DIS_CEPHE.yuksek : IL_DIS_CEPHE.normal });
-    if (IL_YURUME[f.yurumeMesafesi]) kalemler.push({ ad: `Yürüme mesafesi (${f.yurumeMesafesi})`, tutar: IL_YURUME[f.yurumeMesafesi] });
-  }
-
-  // Uyarılar: Süreç sayfasındaki "yaşanabilecek sorunları önceden fark et" maddeleri
-  if (f.kotFarki) uyarilar.push('Binada kot farkı var — ekip ve süre planına ekleyin.');
-  if (f.ozelBuyukEsya) uyarilar.push('Özel ölçü / büyük eşya var — asansöre sığma durumunu kontrol edin.');
-  if (f.esyaAsansoreSigar === 'Hayır' && !f.disCepheAsansor) uyarilar.push('Eşyalar asansöre sığmıyor — dış cephe asansörü gerekebilir.');
-  if (f.videoDurumu !== 'Alındı' && f.videoDurumu !== 'Keşif Yapıldı') uyarilar.push('Video alınmadan fiyat kesinleşmez — video isteyin.');
-
-  const toplam = kalemler.reduce((t, k) => t + (k.tutar || 0), 0);
-  return { kalemler, toplam, depoAylik, uyarilar };
+// ESKİ KAYIT UYUMU — ilk sürümde (tek form) girilen kayıtlar yeni alanlara
+// çevrilir. Veritabanına yazılmaz; yalnızca ekranda ve hesapta kullanılır.
+// ----------------------------------------------------------------------------
+const ttNormalize = (t) => {
+  if (!t || t.surum === 2) return t;
+  const kat = (v) => (/^\d+$/.test(v || '') ? `${v}. Kat` : (v === 'Giriş' ? 'Giriş Kat' : (v || '')));
+  const tasima = (v) => (v === 'Yok' ? 'Merdiven' : v === 'Var' || v === 'Yük Asansörü Var' ? 'Bina Asansörü' : (v || ''));
+  const mesafe = (v) => (v === '50 metre' ? '50' : v === '100 metre' ? '100' : '0');
+  // Eski formda ilçe serbest metindi; il listesinde birebir varsa ilçe alanına taşınır
+  const ilceBul = (il, metin) => ttIlceler(il).find(x => x.toLocaleLowerCase('tr-TR') === String(metin || '').trim().toLocaleLowerCase('tr-TR')) || '';
+  const yeni = {
+    ...t,
+    yukIl: t.yukIl || t.neredenIl || 'İstanbul (Anadolu)', yukIlce: t.yukIlce || ilceBul(t.neredenIl, t.neredenAdres), yukAdres: t.yukAdres || t.neredenAdres || '',
+    bosIl: t.bosIl || t.nereyeIl || 'İstanbul (Anadolu)', bosIlce: t.bosIlce || ilceBul(t.nereyeIl, t.nereyeAdres), bosAdres: t.bosAdres || t.nereyeAdres || '',
+    toplama: t.toplama || (t.paketleme === 'Biz Yapacağız' ? 'Firma' : t.paketleme === 'Müşteri Yapacak' ? 'Müşteri' : ''),
+    depoBoyutu: t.depoBoyutu || (t.depoTipi === 'ozel' ? 'Özel' : (t.depoTipi || '')),
+    nakliyeIstiyor: t.nakliyeIstiyor || (t.tasimaSekli === 'Kendi Nakliyesi' ? 'Kendisi' : t.hizmetTipi === 'Depo' ? 'Firma' : ''),
+  };
+  // Eski formda kat/asansör tek alandı; hangi adrese ait olduğu hizmete göre belirlenir
+  if (t.hizmetTipi === 'Depodan Çıkış') { yeni.bosKat = t.bosKat || kat(t.daireKat); yeni.bosTasima = t.bosTasima || tasima(t.asansor); yeni.bosMesafe = t.bosMesafe || mesafe(t.yurumeMesafesi); }
+  else { yeni.yukKat = t.yukKat || kat(t.daireKat); yeni.yukTasima = t.yukTasima || tasima(t.asansor); yeni.yukMesafe = t.yukMesafe || mesafe(t.yurumeMesafesi); }
+  return yeni;
 };
 
-// ------------------------------------------------ SÜREÇ ADIMLARI (DEPOEVİM) ---
-// Excel "Süreç" sayfası: Kaparo & Sözleşme + Taşınma Sonrası adımları.
-// Detay penceresinde tik atılarak ilerleme takip edilir.
-const TT_SUREC_ADIMLARI = [
-  { id: 'videoIstendi',   ad: 'Eşya videosu istendi' },
-  { id: 'netFiyat',       ad: 'Video sonrası net fiyat belirlendi' },
-  { id: 'kaparoIban',     ad: '%10 kaparo için IBAN paylaşıldı' },
-  { id: 'kaparoAlindi',   ad: 'Kaparo alındı' },
-  { id: 'crmKayit',       ad: 'CRM programında kayıt açıldı' },
-  { id: 'depoDavet',      ad: 'Müşteri depoya davet edildi' },
-  { id: 'sozlesme',       ad: 'Sözleşme gönderildi / imzalandı' },
-  { id: 'odaNo',          ad: 'Müşteriye oda numarası paylaşıldı' },
-  { id: 'kurallarBilgi',  ad: 'Ödeme, mühür (200 TL+KDV) ve 7 gün önce çıkış bildirimi anlatıldı' },
-];
+// Kat metnini sayıya çevirir: "3. Kat" → 3, "Giriş Kat"/"Bodrum Kat" → 0, "Müstakil / Villa" → 1
+const ttKatNo = (kat) => {
+  if (!kat) return 0;
+  if (String(kat).startsWith('Müstakil')) return 1;
+  const n = parseInt(kat, 10);
+  return Number.isFinite(n) ? n : 0;
+};
+const ttIstanbulMu = (il) => (il || '').startsWith('İstanbul');
+const ttYaka = (il) => ((il || '').includes('Avrupa') ? 'Avrupa' : 'Anadolu');
+// Daire tipinden fiyat tablosu anahtarı: Villa → 4+1, Parça Eşya → 1+0, Ofis → 3+1 (+uyarı)
+const ttOdaAnahtari = (oda) => (['1+0', '1+1', '2+1', '3+1', '4+1'].includes(oda) ? oda
+  : oda === 'Villa' ? '4+1' : oda === 'Parça Eşya' ? '1+0' : oda === 'Ofis' ? '3+1' : '');
+// İl tablosu sütunu: [1+1, 2+1, 3+1, 4+1]; 1+0 için 1+1 sütunu kullanılır
+const TT_IL_SUTUN = { '1+0': 0, '1+1': 0, '2+1': 1, '3+1': 2, '4+1': 3 };
 
-// ------------------------------------------------------ GÖRÜŞME REHBERİ ---
-// Telefonda sorulacak sorular (Süreç sayfası sağ bölüm) — form yanında gösterilir
-const TT_SORULACAKLAR = [
-  'Eviniz kaç odalı? (1+1, 2+1, 3+1…)',
-  'Eşyalar nereden alınacak? (ilçe / mahalle)',
-  'Kaçıncı kattan alınacak? Binada kot farkı var mı?',
-  'Asansör var mı? Yük asansörü var mı? Eşyalar asansöre sığar mı?',
-  'Bina önüne araç yanaşabiliyor mu? Yürüme mesafesi var mı?',
-  'Sitede taşınma saati kısıtlaması var mı?',
-  'Küçük eşyaların kolilemesini kendiniz mi yapacaksınız?',
-  'Özel üretim / büyük ölçü eşya var mı?',
-  'Eşyanın videosunu / fotoğrafını gönderebilir misiniz? (EN ÖNEMLİSİ)',
-];
-
-// Sık sorulan sorular — Excel "Soru & Cevap" sayfası
-const TT_SSS = [
-  { s: 'Hangi sigorta şirketi ile çalışıyorsunuz?', c: 'Neova Sigorta ile tam kapsamlı çalışıyoruz. Poliçeyi sizinle paylaşabiliriz.' },
-  { s: 'Depolarda rutubet problemi var mı?', c: 'Depolarımız zeminde olmadığı için rutubet yaşanmaz; iklimlendirme ve klima sistemiyle önlem alınır.' },
-  { s: 'Depoma benden başka kimse girmesin.', c: '7/24 Safe Point kameralarla izlenir. Her kapının tek kullanımlık mührü var; kepenge kendi kilidinizi de takabilirsiniz.' },
-  { s: 'Böceklenme oluyor mu?', c: 'Novipest firması ile düzenli ilaçlama ve kontrol yapılır.' },
-  { s: 'Depo ölçüleriniz nedir?', c: '1+0 10 m³ (G2 D1.7 Y3) · 1+1 15 m³ (G2 D2.5 Y3) · 2+1 22 m³ (G2 D3.6 Y3) · 3+1 30 m³ (G2 D5 Y3). Uzun süreli ihtiyaca göre özel alan yapılır.' },
-  { s: 'Depo size özel ve kilitli mi?', c: 'Tüm şubeler bize ait; her müşteri ayrı kilitli ve kepenklidir.' },
-  { s: 'Taşıma, paketleme, streçleme dahil mi?', c: 'Evet, dahildir.' },
-  { s: 'Aylık ücret sabit mi, ek ücret çıkar mı?', c: '1 yıl boyunca fiyat sabittir, ek ücret çıkmaz.' },
-  { s: '3-4 ay sonra çıkarsam ceza var mı?', c: 'Süre taahhüdü yok. Çıkmadan 1 hafta (7 gün) önce yazılı bilgi yeterli.' },
-  { s: 'Depoyu önceden görebilir miyim?', c: 'Tabii, rezervasyon oluşturarak. Ziyaret için 2 gün önceden randevu alınır.' },
-  { s: 'Sözleşmeyi önceden gönderir misiniz?', c: 'Tüm konularda anlaşınca taşınma öncesi gönderilir.' },
-  { s: 'Ödeme nasıl yapılır?', c: 'Kiralama döneminden itibaren 5 gün içinde, aylık IBAN ile. 6 aylık uzun dönem ödemeler kredi kartıyla yapılabilir.' },
-];
-
+// Ekiplerimizin çalışacağı adresler (fiyatı etkileyen adresler)
+//  Nakliye → yükleme + boşaltma · Depo (firma alırsa) → yükleme · Depodan Çıkış → boşaltma
+const ttIsAdresleri = (f) => {
+  const yuk = { rol: 'Yükleme', il: f.yukIl, ilce: f.yukIlce, kat: f.yukKat, tasima: f.yukTasima, mesafe: f.yukMesafe };
+  const bos = { rol: 'Boşaltma', il: f.bosIl, ilce: f.bosIlce, kat: f.bosKat, tasima: f.bosTasima, mesafe: f.bosMesafe };
+  if (f.hizmetTipi === 'Nakliye') return [yuk, bos];
+  if (f.hizmetTipi === 'Depo') return f.nakliyeIstiyor === 'Firma' ? [yuk] : [];
+  return [bos];
+};
 
 // ============================================================================
-// TELEFON TEKLİFİ FORMU (Yeni kayıt + Düzenleme)
+// SİSTEM FİYATI HESAPLAMA — tek bir sayı üretir (kullanıcı talebi: aralık değil)
 // ----------------------------------------------------------------------------
-// Excel'deki "İletişim Tarihi · Müşteri · Tarih · Lokasyon 1 · Lokasyon 2 ·
-// Oda · Kat · Asansör · Yürüme · Paketleme · Video · Fiyat · Açıklama"
-// sütunlarının tamamı + "Süreç" sayfasındaki kontrol soruları bu formdadır.
-// Sağda görüşme sırasında okunacak soru listesi ve hazır cevaplar durur.
+// Formül (fiyat şeması): Taban + Toplama (istenirse) + Merdiven (asansör yoksa,
+// adres başına) + Dış cephe asansörü (adres başına) + Avrupa Yakası ekstra
+// (şehir içi, bir kez) + Yürüme mesafesi (araç yanaşamazsa, adres başına).
+// Şehirler arası: 81 il tablosu + şehirler arası ekler.
+// Depo: aylık ücret × ödenecek ay (kampanya) + KDV ayrıca gösterilir.
+// ============================================================================
+const ttFiyatHesapla = (fHam) => {
+  const f = ttNormalize(fHam || {});
+  const kalemler = [];
+  const uyarilar = [];
+  const bilgiler = [];
+  // Nakliyede ev tipi, depoda depo boyutu (kaç+1) fiyatın anahtarıdır; özel ölçü depo → 4+1 baz
+  const odaK = ttOdaAnahtari(f.hizmetTipi === 'Nakliye' ? f.odaSayisi : (f.depoBoyutu === 'Özel' ? '4+1' : f.depoBoyutu));
+
+  // ---- DEPO AYLIK ÜCRETİ (Depo ve Depodan Çıkış) ----
+  let depo = null;
+  if (f.hizmetTipi === 'Depo') {
+    const b = TT_DEPO_BOYUTLARI.find(x => x.id === f.depoBoyutu);
+    const k = TT_KIRALAMA.find(x => x.id === (f.kiralamaSuresi || '1')) || TT_KIRALAMA[0];
+    if (b?.aylik) {
+      const pesin = b.aylik * k.odenecekAy;
+      depo = { boyut: b, kiralama: k, aylik: b.aylik, aylikKdvli: b.aylik * (1 + TT_KDV), pesin, pesinKdvli: pesin * (1 + TT_KDV), hediyeAy: k.toplamAy - k.odenecekAy };
+      if (k.odenecekAy > 1) bilgiler.push('Kredi kartı YALNIZCA bu kampanyalı toplu ödemede geçerlidir; aylık ödemeler IBAN\'a yapılır.');
+    } else if (f.depoBoyutu === 'Özel') uyarilar.push('Özel ölçü depo — video ile hacim belirlenip fiyat verilir.');
+    if (f.esyaCinsi === 'İş Yeri Eşyası') uyarilar.push('İş yeri eşyası: teklif dosyası + KDV gerekir, bilgileri Mehmet Bey\'e aktarın. Her gün giriş-çıkış yapılacak ticari kullanıma depo verilmez.');
+  }
+
+  const adresler = ttIsAdresleri(f);
+  // Müşteri kendi getiriyorsa nakliye yok
+  if (f.hizmetTipi === 'Depo' && f.nakliyeIstiyor !== 'Firma') {
+    if (f.nakliyeIstiyor === 'Kendisi') bilgiler.push('Kendisi getiriyor: nakliye 0 ₺. Çıkışta kalıcı ambalajın (pat pat) iadesi zorunludur — hatırlatın.');
+    return { tur: 'depo', liste: 'Sadece depolama', kalemler, nakliyeToplam: 0, depo, uyarilar, bilgiler };
+  }
+  if (!odaK) {
+    uyarilar.push(f.hizmetTipi === 'Nakliye' ? 'Fiyat için ev tipini (oda sayısı) seçin.' : 'Nakliye fiyatı için depo boyutunu (kaç+1) seçin.');
+    return { tur: 'eksik', liste: '', kalemler, nakliyeToplam: 0, depo, uyarilar, bilgiler };
+  }
+
+  const depoListesi = f.hizmetTipi !== 'Nakliye';
+  const sehirIci = adresler.every(a => ttIstanbulMu(a.il)) && (f.hizmetTipi !== 'Nakliye' || (ttIstanbulMu(f.yukIl) && ttIstanbulMu(f.bosIl)));
+
+  if (sehirIci) {
+    // ---------------- ŞEHİR İÇİ ----------------
+    const L = depoListesi ? FL_SEHIR_ICI_DEPO : FL_SEHIR_ICI_EVE;
+    const liste = depoListesi ? 'Şehir İçi Evden Depoya' : 'Şehir İçi Evden Eve';
+    kalemler.push({ ad: `${odaK} nakliye taban fiyatı (Anadolu)`, tutar: L.taban[odaK] });
+    // Avrupa Yakası ekstra: ilgili adreslerden biri Avrupa ise BİR kez eklenir
+    if (adresler.some(a => ttYaka(a.il) === 'Avrupa')) {
+      kalemler.push({ ad: 'Avrupa Yakası ekstra', tutar: L.avrupaEkstra[odaK] ?? L.avrupaEkstra['3+1'] });
+      if (!L.avrupaEkstra[odaK]) uyarilar.push('Listede 4+1 Avrupa ekstrası yok; 3+1 tutarı eklendi.');
+    }
+    if (f.toplama === 'Firma') kalemler.push({ ad: `${odaK} toplama (paketleme) hizmeti`, tutar: L.toplama[odaK] });
+    adresler.forEach(a => {
+      const kat = ttKatNo(a.kat);
+      if (a.tasima === 'Merdiven' && kat >= 3) {
+        kalemler.push({ ad: `${a.rol}: ${kat}. kat merdiven taşıma`, tutar: L.merdiven[Math.min(kat, 5)] });
+        if (kat > 5) uyarilar.push(`${a.rol} adresi ${kat}. kat ve asansörsüz — dış cephe asansörü önerin.`);
+      }
+      if (a.tasima === 'Dış Cephe Asansörü') {
+        kalemler.push({ ad: `${a.rol}: dış cephe asansörü (${ttYaka(a.il)})`, tutar: L.disCephe[ttYaka(a.il)] });
+        if (kat > 9) uyarilar.push(`${a.rol}: liste 2-9 kat içindir; ${kat}. kat için uygunluğu teyit edin.`);
+      }
+      if (L.yurume[a.mesafe]) kalemler.push({ ad: `${a.rol}: yürüme mesafesi (~${a.mesafe} m)`, tutar: L.yurume[a.mesafe] });
+    });
+    if (f.odaSayisi === 'Villa') uyarilar.push('5+1 / villa: 4+1 fiyatı baz alındı — video ile netleştirin.');
+    if (f.odaSayisi === 'Ofis') uyarilar.push('Kurumsal ofis taşıma: teklif dosyası + KDV ister, Mehmet Bey\'e aktarın.');
+    const toplam = kalemler.reduce((s, k) => s + (k.tutar || 0), 0);
+    if (f.videoDurumu !== 'Alındı' && f.videoDurumu !== 'Keşif Yapıldı') uyarilar.push('Video/fotoğraf gelmeden fiyat kesinleşmez — mutlaka isteyin.');
+    return { tur: 'sehirIci', liste, kalemler, nakliyeToplam: toplam, depo, uyarilar, bilgiler };
+  }
+
+  // ---------------- ŞEHİRLER ARASI ----------------
+  const T = depoListesi ? FL_IL_EVDEN_DEPOYA : FL_IL_EVDEN_EVE;
+  const liste = depoListesi ? 'Şehirler Arası Evden Depoya' : 'Şehirler Arası Evden Eve';
+  const sutun = TT_IL_SUTUN[odaK];
+  // Tablo Pendik çıkışlıdır: İstanbul dışındaki il(ler) baz alınır
+  const disIller = [...new Set([f.hizmetTipi === 'Depodan Çıkış' ? null : f.yukIl, f.hizmetTipi === 'Depo' ? null : f.bosIl].filter(il => il && !ttIstanbulMu(il)))];
+  const adaylar = disIller.map(il => ({ il, fiyat: T[il]?.[sutun] })).filter(x => x.fiyat);
+  if (adaylar.length === 0) {
+    uyarilar.push(`${disIller.join(', ') || 'Seçilen il'} için listede fiyat bulunamadı.`);
+    return { tur: 'eksik', liste, kalemler, nakliyeToplam: 0, depo, uyarilar, bilgiler };
+  }
+  const secilen = adaylar.sort((a, b) => b.fiyat - a.fiyat)[0];
+  kalemler.push({ ad: `${secilen.il} · ${odaK === '1+0' ? '1+1 (1+0 için)' : odaK} nakliye`, tutar: secilen.fiyat });
+  if (adaylar.length > 1) uyarilar.push(`İki adres de İstanbul dışında (${disIller.join(' → ')}); liste Pendik çıkışlıdır, uzak il baz alındı — Mehmet Bey'e danışın.`);
+  const E = FL_SEHIRLER_ARASI_EK;
+  if (f.toplama === 'Firma') kalemler.push({ ad: `${odaK} toplama hizmeti`, tutar: E.toplama[odaK] });
+  adresler.forEach(a => {
+    const kat = ttKatNo(a.kat);
+    if (a.tasima === 'Merdiven' && kat >= 3) kalemler.push({ ad: `${a.rol}: ${kat}. kat merdiven`, tutar: E.merdiven[Math.min(kat, 5)] });
+    if (a.tasima === 'Dış Cephe Asansörü') {
+      const yakaOrani = ttIstanbulMu(a.il) ? ttYaka(a.il) : 'Avrupa';
+      kalemler.push({ ad: `${a.rol}: dış cephe asansörü${ttIstanbulMu(a.il) ? ` (${ttYaka(a.il)})` : ` (${a.il})`}`, tutar: E.disCephe[yakaOrani] });
+      if (!ttIstanbulMu(a.il)) uyarilar.push(`${a.il} için dış cephe asansörü yerelde kiralanır; tutarı teyit edin.`);
+    }
+    if (E.yurume[a.mesafe]) kalemler.push({ ad: `${a.rol}: yürüme mesafesi (~${a.mesafe} m)`, tutar: E.yurume[a.mesafe] });
+  });
+  if (f.odaSayisi === 'Villa') uyarilar.push('5+1 / villa: 4+1 fiyatı baz alındı — video ile netleştirin.');
+  if (f.odaSayisi === 'Ofis') uyarilar.push('Kurumsal ofis taşıma: teklif dosyası + KDV ister, Mehmet Bey\'e aktarın.');
+  bilgiler.push('Pendik çıkışlı ortalama bedel. %10 iskonto için Mehmet Bey\'e danışın. Eşya araca yüklendikten sonra %50 ödeme alınır.');
+  if (f.videoDurumu !== 'Alındı' && f.videoDurumu !== 'Keşif Yapıldı') uyarilar.push('Video/fotoğraf gelmeden fiyat kesinleşmez — mutlaka isteyin.');
+  const toplam = kalemler.reduce((s, k) => s + (k.tutar || 0), 0);
+  return { tur: 'sehirlerArasi', liste, kalemler, nakliyeToplam: toplam, depo, uyarilar, bilgiler };
+};
+
+// Adres kısa metni: İstanbul'da yalnızca ilçe ("Pendik"), diğer illerde "Çankaya, Ankara"
+const ttAdresKisa = (il, ilce) => (ilce ? (ttIstanbulMu(il) ? ilce : `${ilce}, ${il}`) : (il || ''));
+// Kat + taşıma kısa metni: "3. Kat · Merdiven"
+const ttKatTasima = (kat, tasima) => [kat, tasima].filter(Boolean).join(' · ');
+
+// Güzergâh metni — liste ve mesajlarda kullanılır
+const ttGuzergah = (tHam) => {
+  const t = ttNormalize(tHam);
+  if (t.hizmetTipi === 'Depo') return `${ttAdresKisa(t.yukIl, t.yukIlce) || '?'} → Depo${t.sube && t.sube !== 'Farketmez' ? ` (${t.sube.replace(' Depoevim', '')})` : ''}`;
+  if (t.hizmetTipi === 'Depodan Çıkış') return `${t.sube && t.sube !== 'Farketmez' ? t.sube.replace(' Depoevim', '') + ' deposu' : 'Depomuz'} → ${ttAdresKisa(t.bosIl, t.bosIlce) || '?'}`;
+  return `${ttAdresKisa(t.yukIl, t.yukIlce) || '?'} → ${ttAdresKisa(t.bosIl, t.bosIlce) || '?'}`;
+};
+
+// ============================================================================
+// KAYIT EKRANINA AKTARIM — telefon teklifinden kayıt formu alanları üretir.
+// App.jsx'teki havuzdanKayitAc({ ..., ekAlanlar }) bu alanları forma yazar;
+// satışçıya yalnızca son fiyatı ve eksik detayları kontrol etmek kalır.
+// ============================================================================
+const ttKayitVerisi = (tHam) => {
+  const t = ttNormalize(tHam);
+  const firmaToplar = t.toplama === 'Firma';
+  const oda = t.hizmetTipi === 'Nakliye' ? (t.odaSayisi || '1+1') : (t.depoBoyutu && t.depoBoyutu !== 'Özel' ? t.depoBoyutu : (t.odaSayisi || '2+1'));
+  const fiyat = ttFiyatSayi(t.verilenFiyat) || t.sistemFiyati || '';
+  const not = [`📞 Telefon teklifinden aktarıldı (${ttTrTarih(t.iletisimTarihi)} · ${ttSahibi(t) || '—'})`,
+    t.videoDurumu ? `Video: ${t.videoDurumu}` : '', t.aciklama ? `Not: ${t.aciklama}` : ''].filter(Boolean).join('\n');
+  const ortak = {
+    customerName: t.musteriAdi || '', customerPhone: t.telefon || '',
+    // Taşınma tarihi biliniyorsa yazılır; bilinmiyorsa kayıt ekranının varsayılanı kalır
+    ...(t.tasinmaTarihi ? { date: t.tasinmaTarihi } : {}),
+    price: fiyat ? String(fiyat) : '', notes: not,
+    esyaDurumu: firmaToplar ? ['Toplama Yapılacaktır'] : [],
+  };
+  const yukAlan = {
+    fromProvince: t.yukIl || 'İstanbul (Anadolu)', fromDistrict: t.yukIlce || '', fromAddress: t.yukAdres || '',
+    fromFloor: t.yukKat || '1. Kat', fromTransportMethod: t.yukTasima || 'Merdiven', fromRoomCount: oda,
+    fromDistance: t.yukMesafe && t.yukMesafe !== '0' ? t.yukMesafe : '', fromDistanceUnit: 'Metre',
+    fromPacking: firmaToplar ? 'Toplama Yapılacak' : 'Kendisi Topladı',
+  };
+  const bosAlan = {
+    toProvince: t.bosIl || 'İstanbul (Anadolu)', toDistrict: t.bosIlce || '', toAddress: t.bosAdres || '',
+    toFloor: t.bosKat || '1. Kat', toTransportMethod: t.bosTasima || 'Merdiven', toRoomCount: oda,
+    toDistance: t.bosMesafe && t.bosMesafe !== '0' ? t.bosMesafe : '', toDistanceUnit: 'Metre', toPacking: 'Kendisi Topladı',
+  };
+  // Seçilen şubenin adres/kat/taşıma bilgisi (kayıt ekranındaki handleDepoChange ile aynı kural)
+  const depo = DEPO_LOCATIONS.find(d => d.name === t.sube);
+  const depoAlani = (yon) => depo ? {
+    [`${yon}Province`]: depo.province, [`${yon}District`]: depo.district, [`${yon}Address`]: depo.address,
+    [`${yon}Floor`]: depo.floor || 'Giriş Kat', [`${yon}TransportMethod`]: depo.transportMethod || 'Merdiven',
+    [`${yon}Packing`]: 'Kendisi Topladı', [`${yon}RoomCount`]: 'Depoevim Tesisleri', [`${yon}Distance`]: '0', [`${yon}DistanceUnit`]: 'Metre',
+  } : {};
+  if (t.hizmetTipi === 'Depo') {
+    return { hizmetTipi: 'Depo', musteriAdi: t.musteriAdi, telefon: t.telefon,
+      ekAlanlar: { ...ortak, ...yukAlan, depoDirection: 'toDepo', selectedDepo: depo ? depo.name : '', ...depoAlani('to') } };
+  }
+  if (t.hizmetTipi === 'Depodan Çıkış') {
+    return { hizmetTipi: 'Depo', musteriAdi: t.musteriAdi, telefon: t.telefon,
+      ekAlanlar: { ...ortak, ...bosAlan, depoDirection: 'fromDepo', selectedDepo: depo ? depo.name : '', ...depoAlani('from') } };
+  }
+  return { hizmetTipi: 'Nakliye', musteriAdi: t.musteriAdi, telefon: t.telefon, ekAlanlar: { ...ortak, ...yukAlan, ...bosAlan } };
+};
+
+// ============================================================================
+// MÜŞTERİ GEÇMİŞİ İNDEKSİ (kullanıcı talebi)
+// ----------------------------------------------------------------------------
+// Telefon anahtarı → { isler, havuz, telefon }. İş kayıtları (jobs), havuz
+// kayıtları ve telefon teklifleri BELLEKTEKİ listelerden indekslenir — ek
+// Firestore okuması yapılmaz. Hem ana telefon hem yedek telefon indekslenir.
+// ============================================================================
+const musteriGecmisiIndeksle = (isler = [], havuz = [], teklifler = []) => {
+  const m = new Map();
+  const ekle = (anahtar, tur, kayit, tekilAnahtar) => {
+    if (!anahtar) return;
+    let g = m.get(anahtar);
+    if (!g) { g = { isler: [], havuz: [], telefon: [], _tekil: new Set() }; m.set(anahtar, g); }
+    const tk = `${tur}|${tekilAnahtar || kayit.id}`;
+    if (g._tekil.has(tk)) return;           // Aynı iş (ör. 2. araç kopyası) bir kez sayılır
+    g._tekil.add(tk); g[tur].push(kayit);
+  };
+  (isler || []).forEach(j => {
+    if (parseInt(j.gunNo, 10) > 1) return;  // Çok günlü işin devam günleri sayılmaz
+    const tekil = `${j.date || ''}|${j.type || ''}|${(j.customerName || '').trim().toLowerCase()}`;
+    ekle(ttTelAnahtar(j.customerPhone), 'isler', j, tekil);
+    if (j.altPhone) ekle(ttTelAnahtar(j.altPhone), 'isler', j, tekil);
+  });
+  (havuz || []).forEach(k => ekle(ttTelAnahtar(k.iletisim), 'havuz', k));
+  (teklifler || []).forEach(t => ekle(ttTelAnahtar(t.telefon), 'telefon', t));
+  return m;
+};
+// Bir numaranın geçmişi (haricId: kaydın kendisi listelenmesin)
+const musteriGecmisiBul = (indeks, telefon, haricId = null) => {
+  const a = ttTelAnahtar(telefon);
+  const g = a && indeks ? indeks.get(a) : null;
+  if (!g) return null;
+  const tarihSirala = (alan) => (x, y) => String(y[alan] || '').localeCompare(String(x[alan] || ''));
+  const s = {
+    isler: g.isler.filter(x => x.id !== haricId).sort(tarihSirala('date')),
+    havuz: g.havuz.filter(x => x.id !== haricId).sort(tarihSirala('createdAt')),
+    telefon: g.telefon.filter(x => x.id !== haricId).sort(tarihSirala('iletisimTarihi')),
+  };
+  s.toplam = s.isler.length + s.havuz.length + s.telefon.length;
+  return s.toplam ? s : null;
+};
+// İsimleri karşılaştırmak için sade anahtar (büyük/küçük harf ve Türkçe karakter farkı yok sayılır)
+const ttAdAnahtar = (ad) => (ad || '').toLocaleLowerCase('tr-TR')
+  .replace(/ı/g, 'i').replace(/ş/g, 's').replace(/ğ/g, 'g').replace(/ç/g, 'c').replace(/ö/g, 'o').replace(/ü/g, 'u')
+  .replace(/\b(bey|hanım|hanim|hn|bay|bayan)\b/g, '').replace(/[^a-z\s]/g, '').replace(/\s+/g, ' ').trim();
+// İki isim "aynı kişi" sayılır mı? (ilk isimler eşleşiyorsa yeterli)
+const ttAyniIsimMi = (a, b) => {
+  const x = ttAdAnahtar(a), y = ttAdAnahtar(b);
+  if (!x || !y) return true;               // Biri boşsa uyarı üretme
+  return x === y || x.split(' ')[0] === y.split(' ')[0];
+};
+
+// ============================================================================
+// SÜREÇ ADIMLARI — oryantasyon kılavuzlarındaki sıra (asla değişmez)
+// ============================================================================
+const TT_SUREC_NAKLIYE = [
+  { id: 'video',      ad: 'Eşya videosu / fotoğrafı istendi' },
+  { id: 'netFiyat',   ad: 'Video sonrası net fiyat verildi' },
+  { id: 'kayit',      ad: 'Sembol CRM\'de kayıt açıldı (taşımadan 15 gün öncesine kadar)' },
+  { id: 'kapora',     ad: '%10 kapora alındı — tarih kesinleşti' },
+  { id: 'sozlesme',   ad: 'Sözleşme PDF olarak WhatsApp\'tan gönderildi' },
+  { id: 'teslimKodu', ad: 'Teslim / güvenlik kodu anlatıldı' },
+  { id: 'kurallar',   ad: '72 saat iptal kuralı ve yapılmayan hizmetler söylendi' },
+  { id: 'teyit',      ad: 'Taşımadan 1 gün önce teyit araması yapıldı' },
+];
+const TT_SUREC_DEPO = [
+  { id: 'video',      ad: 'Eşya videosu istendi (hacim + nakliye fiyatı için)' },
+  { id: 'davet',      ad: 'Müşteri depoya ziyarete davet edildi' },
+  { id: 'netFiyat',   ad: 'Net fiyat çalışması dönüldü' },
+  { id: 'kayit',      ad: 'Depoevim CRM\'de nakliye kaydı açıldı' },
+  { id: 'kapora',     ad: '%10 kapora alındı — alım tarihi kesinleşti' },
+  { id: 'teyit',      ad: 'Alımdan 1 gün önce teyit araması yapıldı' },
+  { id: 'sozlesme',   ad: 'Eşya depoya konduktan sonra sözleşme yapıldı (oda no + KDV dahil ücret)' },
+  { id: 'kurallar',   ad: 'Aylık ödeme (5 gün, IBAN), mühür (200 ₺+KDV) ve 7 gün önce çıkış bildirimi anlatıldı' },
+];
+const ttSurecAdimlari = (t) => (t.hizmetTipi === 'Nakliye' ? TT_SUREC_NAKLIYE : TT_SUREC_DEPO);
+
+// ============================================================================
+// WHATSAPP HAZIR MESAJLARI (kullanıcı talebi)
+// ----------------------------------------------------------------------------
+// Görüşmede alınan cevaplarla OTOMATİK doldurulur. Metinler oryantasyon
+// kılavuzlarındaki hazır cümlelerden türetildi. Satışçı göndermeden önce
+// metni düzenleyebilir.
+// ============================================================================
+const ttWhatsappSablonlari = (tHam, gonderen = '') => {
+  const t = ttNormalize(tHam);
+  const ad = (t.musteriAdi || '').trim();
+  const selam = ad ? `Merhaba ${ad},` : 'Merhabalar,';
+  const ben = gonderen ? ` ben ${gonderen.split(' ')[0]}` : '';
+  const hesap = ttFiyatHesapla(t);
+  const fiyat = ttFiyatSayi(t.verilenFiyat) || hesap.nakliyeToplam;
+  const tarih = t.tasinmaTarihi ? ttTrTarih(t.tasinmaTarihi) : (t.tasinmaNotu || '');
+  const odaAd = TT_ODA_SECENEKLERI.find(o => o.id === t.odaSayisi)?.ad || t.odaSayisi;
+
+  if (t.hizmetTipi === 'Nakliye') {
+    const satirlar = [
+      odaAd && `• Ev tipi: ${odaAd}`,
+      `• Güzergâh: ${ttGuzergah(t)}`,
+      (t.yukKat || t.yukTasima) && `• Mevcut ev: ${ttKatTasima(t.yukKat, t.yukTasima)}`,
+      (t.bosKat || t.bosTasima) && `• Yeni ev: ${ttKatTasima(t.bosKat, t.bosTasima)}`,
+      t.toplama && `• Küçük eşya paketleme: ${t.toplama === 'Firma' ? 'Firmamız paketleyecek' : 'Sizin tarafınızdan'}`,
+      tarih && `• Taşınma: ${tarih}`,
+    ].filter(Boolean).join('\n');
+    return [
+      { id: 'ozet', ad: 'Görüşme Özeti + Video İste',
+        metin: `${selam} Sembol Nakliyat'tan${ben}. Görüşmemiz için teşekkür ederiz 🙏\n\n📋 Konuştuğumuz bilgiler:\n${satirlar}\n\n💰 Ortalama fiyatımız: ${ttTl(fiyat)} — sigortalı taşıma, profesyonel ekip ve söküm-montaj dahil.\n\n📹 Size net fiyat verebilmemiz için eşyalarınızın kısa bir videosunu veya fotoğraflarını bu numaraya gönderebilir misiniz? Video gelince hemen net fiyatı iletiyorum; taşıma günü fiyat değişmez.\n\nDilerseniz ofisimize de bekleriz. İyi günler dileriz.` },
+      { id: 'video', ad: 'Video Hatırlatma',
+        metin: `${selam} Sembol Nakliyat'tan${ben}. Taşımanız için en doğru fiyatı verebilmemiz adına eşya videonuzu bekliyoruz. Müsait olduğunuzda gönderirseniz hemen dönüş yaparım. İyi günler.` },
+      { id: 'sorular', ad: '7 Soru (Keşif Mesajı)',
+        metin: `Merhabalar, tüm detayları öğrenebilir miyiz?\n1. Eviniz kaç odalıdır?\n2. Nereden nereye nakliye olacaktır?\n3. Oturduğunuz ev ve yeni taşınacak ev kaçıncı kattadır?\n4. Bina içi asansör durumu nedir?\n5. Küçük eşyaları (kırılacak, kıyafet vb.) kendiniz mi toplayacaksınız?\n6. Kamyon iki adreste de binaya yanaşabiliyor mu?\n7. Ne zaman taşınmayı düşünüyorsunuz?\n\nOrtalama bir fiyat verebiliriz. Daha net fiyat için eşyanın fotoğraf ya da videosunu gönderirseniz seviniriz.` },
+      { id: 'yazili', ad: 'Yazılı Teklif ("Düşüneyim" diyene)',
+        metin: `${selam} Sembol Nakliyat'tan${ben}. Konuştuğumuz taşıma için teklifimizi yazılı iletiyorum, elinizde olsun:\n\n${satirlar}\n💰 Fiyat: ${ttTl(fiyat)}\n\n✅ Dahil: sigortalı taşıma, kadrolu profesyonel ekip, mobilya söküm-montajı, özel ambalaj, kapalı kasa araç.\nℹ️ Klima söküm-montajı, duvar montajı ve elektrik işleri hizmet kapsamı dışındadır.\n\nAklınıza takılan bir şey olursa buradan yazabilirsiniz. Müsaadenizle yarın kısaca arayacağım.` },
+      { id: 'kapora', ad: 'Kayıt & Kapora Bilgisi',
+        metin: `${selam} Taşıma tarihinizi kesinleştirmek için iş bedelinin %10'u kapora olarak alınmaktadır; kalan tutar iş bitiminde ödenir. Kapora sonrası sözleşmeniz PDF olarak buradan gönderilecek; sözleşmedeki teslim kodunu teslimatta ekibimize iletmeniz yeterli. Taşımaya 72 saatten fazla varsa kapora hariç ücretsiz iptal/erteleme yapılabilir. Teşekkür ederiz.` },
+    ];
+  }
+
+  // ---- DEPOEVİM (Depo / Depodan Çıkış) ----
+  const b = TT_DEPO_BOYUTLARI.find(x => x.id === t.depoBoyutu);
+  const sube = DEPO_LOCATIONS.find(d => d.name === t.sube);
+  const depoSatiri = b ? `📦 Depo: ${b.id} Depo${b.m3 ? ` (${b.m3} m³)` : ''}${b.aylik ? ` — ${ttTl(b.aylik)} + KDV / ay` : ''}` : '';
+  const kiraSatiri = hesap.depo && hesap.depo.kiralama.odenecekAy > 1
+    ? `🎁 ${hesap.depo.kiralama.ad}: ${ttTl(hesap.depo.pesin)} + KDV (${hesap.depo.kiralama.toplamAy} ay kullanım)` : '';
+  const nakliyeSatiri = t.hizmetTipi === 'Depo'
+    ? (t.nakliyeIstiyor === 'Firma' ? `🚚 Nakliye: ${ttAdresKisa(t.yukIl, t.yukIlce)}${t.yukKat ? `, ${ttKatTasima(t.yukKat, t.yukTasima)}` : ''} → Depo · ${ttTl(fiyat)} (depo müşterisine özel fiyat)`
+      : '🚚 Eşyalarınızı depoya kendiniz getireceksiniz.')
+    : `🚚 Teslim: ${ttGuzergah(t)}${t.bosKat ? `, ${ttKatTasima(t.bosKat, t.bosTasima)}` : ''} · ${ttTl(fiyat)}`;
+  const ozetSatirlari = [depoSatiri, kiraSatiri, t.sube && t.sube !== 'Farketmez' ? `🏢 Şube: ${t.sube}` : '', nakliyeSatiri, tarih ? `📅 Tarih: ${tarih}` : ''].filter(Boolean).join('\n');
+
+  if (t.hizmetTipi === 'Depodan Çıkış') {
+    return [
+      { id: 'ozet', ad: 'Çıkış Teklifi',
+        metin: `${selam} DepoEvim'den${ben}. Eşyalarınızın depodan teslimi için konuştuğumuz bilgiler:\n\n${ozetSatirlari}\n\nÇıkış günü planlaması için en az 7 gün önceden haber vermeniz yeterlidir. Depo ücreti veya birikmiş ödeme varsa teslimden önce kapatılması gerekir. Sorularınız için buradayız.` },
+      { id: 'kapora', ad: 'Kapora & Tarih',
+        metin: `${selam} Teslim tarihinizi kesinleştirmek için iş bedelinin %10'u kapora olarak alınmaktadır; kalan tutar teslimde ödenir. Tarih kesinleşince ekibimiz planlamayı yapacaktır. Teşekkür ederiz.` },
+    ];
+  }
+  return [
+    { id: 'ozet', ad: 'Görüşme Özeti + Video İste',
+      metin: `${selam} DepoEvim'den${ben}. Görüşmemiz için teşekkür ederiz 🙏\n\n${ozetSatirlari}\n\nDepolarımız yüksek katta, rutubetsiz ve 7/24 kameralıdır; her odanın kapısı size özel mühürlenir, eşyalarınız sigortalıdır. Taahhüt zorunluluğu yoktur.\n\n📹 Hangi depomuza sığacağını ve nakliye fiyatını netleştirmek için eşyalarınızın videosunu gönderebilir misiniz? Hemen fiyat çalışması dönerim. Dilerseniz depolarımızı gelip görebilirsiniz.` },
+    { id: 'video', ad: 'Video Hatırlatma',
+      metin: `${selam} DepoEvim'den${ben}. Hem hangi depomuza sığacağını netleştirmek hem nakliye fiyatınızı kesinleştirmek için eşya videonuzu bekliyoruz. Müsait olduğunuzda gönderirseniz hemen fiyat çalışması dönerim. İyi günler.` },
+    { id: 'kampanya', ad: 'Uzun Dönem Kampanya',
+      metin: `${selam} Uzun süreli depolamada kampanyamızı hatırlatmak isterim:\n🎁 5 ay öde → 1 ay hediye (6 ay)\n🎁 10 ay öde → 2 ay hediye (12 ay)\n${b?.aylik ? `\nSizin deponuz için: 6 ay ${ttTl(b.aylik * 5)} + KDV · 12 ay ${ttTl(b.aylik * 10)} + KDV\n` : ''}\nKredi kartı yalnızca bu toplu ödemelerde geçerlidir; aylık ödemeler IBAN'a yapılır. Taahhüt zorunluluğu yoktur.` },
+    { id: 'davet', ad: 'Depo Ziyaret Daveti',
+      metin: `${selam} Depolarımızı dilediğiniz zaman gelip görebilirsiniz${sube ? `:\n📍 ${sube.name} — ${sube.address}, ${sube.district}` : '.'}\nZiyaret için 1-2 gün önceden randevu almanız yeterli. Instagram ve YouTube'daki müşteri memnuniyet videolarımızı da izleyebilirsiniz.` },
+    { id: 'kapora', ad: 'Kayıt & Kapora Bilgisi',
+      metin: `${selam} Alım tarihinizi kesinleştirmek için nakliye bedelinin %10'u kapora olarak alınmaktadır. Depo sözleşmeniz eşyalarınız depoya konduktan sonra yapılır ve oda numaranız paylaşılır. Aylık ücret giriş tarihinden itibaren en geç 5 gün içinde IBAN'a yatırılır. Çıkıştan en az 7 gün önce bilgi vermeniz yeterlidir. Teşekkür ederiz.` },
+  ];
+};
+
+// ============================================================================
+// (3) ORTAK BİLEŞENLER
 // ============================================================================
 
-// Boş form — site'ye göre varsayılan hizmet tipi seçilir
-const bosTelefonTeklifi = (site) => ({
-  musteriAdi: '', telefon: '', iletisimTarihi: ttBugunStr(),
-  hizmetTipi: site === 'depoevim' ? 'Depo' : 'Nakliye',
-  tasimaSekli: 'Sembol ile',
-  tasinmaTarihi: '', tasinmaNotu: '',
-  neredenIl: 'İstanbul (Anadolu)', neredenAdres: '',
-  nereyeIl: 'İstanbul (Anadolu)', nereyeAdres: '',
-  depoTipi: '',
-  odaSayisi: '', daireKat: '', asansor: '', esyaAsansoreSigar: '',
-  kotFarki: false, ozelBuyukEsya: false, disCepheAsansor: false,
-  yurumeMesafesi: 'Yok', siteTasinmaSaatleri: '', paketleme: '',
-  videoDurumu: 'Paylaşmadı',
-  verilenFiyat: '', depoAylikUcret: '',
-  takipTarihi: '', durum: 'Yeni', aciklama: '',
-});
-
-// -------------------------------------------------- KÜÇÜK YAPI TAŞLARI ---
-// Alan başlığı + içerik sarmalayıcısı
-const Alan = ({ etiket, children, className = '' }) => (
-  <label className={`block min-w-0 ${className}`}>
-    <span className="block text-[10px] font-black uppercase tracking-wide text-neutral-500 mb-1">{etiket}</span>
-    {children}
-  </label>
-);
-
-// Ortak input stili (tüm metin/tarih/select alanları)
-const girdi = 'w-full px-3 py-2 rounded-xl border border-neutral-200 bg-white text-sm font-semibold text-neutral-900 focus:outline-none focus:ring-2 focus:ring-neutral-900/20 focus:border-neutral-400';
-
-// Tek seçimli "çip" grubu — Excel'deki Var/Yok gibi kısa cevaplar için tek tık
-const CipSecim = ({ secenekler, deger, onSec, renk = 'bg-neutral-900 text-white border-neutral-900' }) => (
-  <div className="flex flex-wrap gap-1.5">
-    {secenekler.map(s => (
-      <button key={s} type="button" onClick={() => onSec(deger === s ? '' : s)}
-        className={`px-2.5 py-1.5 rounded-lg text-xs font-black border transition ${deger === s ? renk : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'}`}>
-        {s}
-      </button>
-    ))}
-  </div>
-);
-
-// Evet/Hayır anahtarı (kot farkı, büyük eşya, dış cephe asansörü)
-const Anahtar = ({ etiket, acik, onDegis }) => (
-  <button type="button" onClick={() => onDegis(!acik)}
-    className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-xs font-black transition text-left ${acik ? 'bg-amber-50 border-amber-300 text-amber-800' : 'bg-white border-neutral-200 text-neutral-600 hover:border-neutral-400'}`}>
-    <span className={`w-8 h-4 rounded-full relative transition shrink-0 ${acik ? 'bg-amber-500' : 'bg-neutral-300'}`}>
-      <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white transition-all ${acik ? 'left-4' : 'left-0.5'}`} />
+// Büyük seçim kartı — sihirbazdaki tek tıklık cevaplar için
+const TTSecimKarti = ({ secili, onClick, baslik, alt, stil, Ikon = null }) => (
+  <button type="button" onClick={onClick}
+    className={`w-full text-left px-4 py-3 rounded-2xl border-2 transition flex items-center gap-3 ${secili ? stil.secili : `${stil.pasif} text-neutral-800`}`}>
+    {/* Radyo göstergesi (web sihirbazındaki gibi) */}
+    <span className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 ${secili ? 'border-white bg-white/20' : 'border-neutral-300 bg-white'}`}>
+      {secili && <span className="w-2.5 h-2.5 rounded-full bg-white" />}
     </span>
-    {etiket}
+    {Ikon && <Ikon className="w-5 h-5 shrink-0" />}
+    <span className="min-w-0">
+      <span className="block text-sm font-black leading-tight">{baslik}</span>
+      {alt && <span className={`block text-[11px] font-bold mt-0.5 ${secili ? 'text-white/80' : 'text-neutral-500'}`}>{alt}</span>}
+    </span>
   </button>
 );
 
-// Bölüm başlığı (form içinde ikonlu ara başlık)
-const Bolum = ({ Ikon, baslik, children }) => (
-  <section className="bg-neutral-50 border border-neutral-200 rounded-2xl p-3 md:p-4 space-y-3">
-    <h4 className="text-xs font-black uppercase tracking-wide text-neutral-800 flex items-center gap-2">
-      <Ikon className="w-4 h-4 text-neutral-500" /> {baslik}
-    </h4>
-    {children}
-  </section>
-);
-
-// ============================================================================
-// FİYAT ÖNERİSİ KUTUSU — Excel fiyat tablolarından canlı tahmin
-// ============================================================================
-const FiyatOnerisiKutusu = ({ form, onAktar }) => {
-  // Form her değiştiğinde öneri yeniden hesaplanır (hafif hesap, memo yeterli)
-  const oneri = useMemo(() => fiyatOnerisiHesapla(form), [form]);
+// İl + ilçe seçici — iller önceliklidir (İstanbul, Kocaeli, Bursa, İzmir, Ankara)
+const TTIlIlce = ({ il, ilce, adres, onIl, onIlce, onAdres, halka = '' }) => {
+  const ilceler = ttIlceler(il);
+  const secimCls = `w-full px-3 py-2.5 rounded-xl border border-neutral-300 bg-white text-sm font-bold text-neutral-900 outline-none focus:ring-2 ${halka}`;
   return (
-    <div className="bg-neutral-900 text-white rounded-2xl p-3 md:p-4 space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-black uppercase tracking-wide flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-yellow-400" /> Fiyat Önerisi (tahmini)</p>
-        {oneri.toplam > 0 && (
-          <button type="button" onClick={() => onAktar(oneri)}
-            className="px-2.5 py-1 rounded-lg bg-yellow-400 text-neutral-900 text-[11px] font-black hover:bg-yellow-300 transition">
-            Fiyata Aktar
-          </button>
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <select value={il || ''} onChange={e => { onIl(e.target.value); onIlce(''); }} className={secimCls}>
+          <option value="">İl Seçiniz</option>
+          <optgroup label="Sık Kullanılan">{TT_ONCELIKLI_ILLER.map(x => <option key={x} value={x}>{x}</option>)}</optgroup>
+          <optgroup label="Diğer İller">{TT_DIGER_ILLER.map(x => <option key={x} value={x}>{x}</option>)}</optgroup>
+        </select>
+        {ilceler.length > 0 ? (
+          <select value={ilce || ''} onChange={e => onIlce(e.target.value)} className={secimCls}>
+            <option value="">İlçe Seçiniz</option>
+            {ilceler.map(x => <option key={x} value={x}>{x}</option>)}
+          </select>
+        ) : (
+          <input value={ilce || ''} onChange={e => onIlce(e.target.value)} placeholder={il ? 'İlçe yazın' : 'Önce il seçin'} disabled={!il} className={`${secimCls} disabled:bg-neutral-100`} />
         )}
       </div>
-      {/* Kalem kalem döküm */}
-      {oneri.kalemler.length > 0 && (
+      {onAdres && (
+        <input value={adres || ''} onChange={e => onAdres(e.target.value)} placeholder="Mahalle / site / sokak (opsiyonel)"
+          className={`w-full px-3 py-2 rounded-xl border border-neutral-200 bg-white text-xs font-semibold outline-none focus:ring-2 ${halka}`} />
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
+// MÜŞTERİ GEÇMİŞİ KUTUSU (kullanıcı talebi)
+// "3 yıl önce bu müşteriyi taşıdık", "teklif havuzunda var", "telefonla
+// görüşüldü", "bu numara farklı bir isimle kayıtlı" bilgilerini gösterir.
+// ============================================================================
+const ttIsDurumu = (j) => {
+  if (j.status === 'cancelled') return { ad: 'İptal edildi', renk: 'bg-red-100 text-red-700' };
+  if (j.status === 'completed') return { ad: 'Taşındı ✓', renk: 'bg-green-100 text-green-800' };
+  if ((j.date || '') > ttBugunStr()) return { ad: 'Planlı iş', renk: 'bg-sky-100 text-sky-800' };
+  if (j.status === 'in-progress') return { ad: 'Devam ediyor', renk: 'bg-amber-100 text-amber-800' };
+  return { ad: 'Kayıt var', renk: 'bg-neutral-200 text-neutral-700' };
+};
+const MusteriGecmisiKutusu = ({ gecmis, ad = '', kompakt = false }) => {
+  const [acik, setAcik] = useState(!kompakt);
+  if (!gecmis) return null;
+  const tasindi = gecmis.isler.find(j => j.status === 'completed');
+  // Aynı numara, farklı isim uyarısı — tüm kaynaklardaki isimler karşılaştırılır
+  const farkliIsimler = [...new Set([
+    ...gecmis.isler.map(j => j.customerName), ...gecmis.havuz.map(k => k.musteriAdi), ...gecmis.telefon.map(t => t.musteriAdi),
+  ].filter(x => x && ad && !ttAyniIsimMi(x, ad)))];
+  const baslik = tasindi ? `Bu müşteriyi daha önce taşıdık — ${ttGoreliSure(tasindi.date)}`
+    : gecmis.isler.length ? 'Bu numaranın iş kaydı var'
+    : gecmis.telefon.length ? 'Bu müşteriyle daha önce telefonda görüşüldü'
+    : 'Bu müşteri teklif havuzunda var';
+  return (
+    <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 overflow-hidden">
+      <button type="button" onClick={() => setAcik(a => !a)} className="w-full px-3 py-2 flex items-center gap-2 text-left">
+        <History className="w-4 h-4 text-amber-700 shrink-0" />
+        <span className="flex-1 min-w-0">
+          <span className="block text-xs font-black text-amber-900">{baslik}</span>
+          <span className="block text-[10px] font-bold text-amber-700">
+            {gecmis.isler.length} iş kaydı · {gecmis.havuz.length} havuz talebi · {gecmis.telefon.length} telefon görüşmesi
+          </span>
+        </span>
+        <ChevronDown className={`w-4 h-4 text-amber-700 transition-transform ${acik ? 'rotate-180' : ''}`} />
+      </button>
+      {acik && (
+        <div className="px-3 pb-3 space-y-1.5">
+          {farkliIsimler.length > 0 && (
+            <p className="text-[11px] font-black text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5 flex gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> Bu numara farklı isimle de kayıtlı: {farkliIsimler.join(', ')}
+            </p>
+          )}
+          {gecmis.isler.slice(0, 5).map(j => {
+            const d = ttIsDurumu(j);
+            return (
+              <div key={`i-${j.id}`} className="bg-white border border-amber-200 rounded-lg px-2 py-1.5 flex items-center gap-2 text-[11px]">
+                <Truck className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                <span className="flex-1 min-w-0 font-bold text-neutral-800 truncate">
+                  {j.type || 'Nakliye'} · {ttTrTarih(j.date)} ({ttGoreliSure(j.date)}) · {j.customerName}
+                  {parseFloat(j.price) > 0 && <span className="text-neutral-500"> · {ttTl(j.price)}</span>}
+                </span>
+                <span className={`px-1.5 py-0.5 rounded font-black text-[9px] shrink-0 ${d.renk}`}>{d.ad}</span>
+              </div>
+            );
+          })}
+          {gecmis.telefon.slice(0, 4).map(t => (
+            <div key={`t-${t.id}`} className="bg-white border border-amber-200 rounded-lg px-2 py-1.5 flex items-center gap-2 text-[11px]">
+              <PhoneCall className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+              <span className="flex-1 min-w-0 font-bold text-neutral-800 truncate">
+                Telefon: {ttTrTarih(t.iletisimTarihi)} · {t.hizmetTipi} · {t.musteriAdi || 'İsimsiz'}{t.verilenFiyat ? ` · ${t.verilenFiyat} ₺` : ''} · {ttSahibi(t) || '—'}
+              </span>
+              <span className={`px-1.5 py-0.5 rounded font-black text-[9px] border shrink-0 ${ttDurumBul(t.durum).rozet}`}>{ttDurumBul(t.durum).etiket}</span>
+            </div>
+          ))}
+          {gecmis.havuz.slice(0, 4).map(k => (
+            <div key={`h-${k.id}`} className="bg-white border border-amber-200 rounded-lg px-2 py-1.5 flex items-center gap-2 text-[11px]">
+              <Globe className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+              <span className="flex-1 min-w-0 font-bold text-neutral-800 truncate">
+                {(KANALLAR.find(x => x.id === k.kanal)?.ad) || 'Havuz'} · {ttTrTarih(k.createdAt)} · {k.hizmetTipi || 'Nakliye'} · {k.musteriAdi || 'İsimsiz'} · {k.atanan || 'Atanmadı'}
+              </span>
+              <span className="px-1.5 py-0.5 rounded font-black text-[9px] bg-neutral-100 text-neutral-700 shrink-0">{k.durum || 'Yeni'}</span>
+            </div>
+          ))}
+          {gecmis.toplam > 13 && <p className="text-[10px] font-bold text-amber-700">… ve daha fazlası</p>}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
+// CANLI FİYAT PANELİ — form değiştikçe sistem fiyatı yeniden hesaplanır
+// ============================================================================
+const TTFiyatPaneli = ({ form }) => {
+  const h = useMemo(() => ttFiyatHesapla(form), [form]);
+  return (
+    <div className="bg-neutral-900 text-white rounded-2xl p-3.5 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-black uppercase tracking-wide flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-yellow-400" /> Sistem Fiyatı</p>
+        {h.liste && <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-white/10 text-neutral-300">{h.liste}</span>}
+      </div>
+      {h.kalemler.length > 0 && (
         <ul className="space-y-1">
-          {oneri.kalemler.map(k => (
-            <li key={k.ad} className="flex justify-between gap-2 text-[11px] text-neutral-300">
-              <span className="truncate">{k.ad}</span><span className="font-black text-white shrink-0">{ttTl(k.tutar)}</span>
+          {h.kalemler.map((k, i) => (
+            <li key={i} className="flex justify-between gap-2 text-[11px] text-neutral-300">
+              <span className="min-w-0">{k.ad}</span><span className="font-black text-white shrink-0">{ttTl(k.tutar)}</span>
             </li>
           ))}
         </ul>
       )}
-      <div className="flex items-end justify-between gap-2 pt-2 border-t border-white/10">
-        <span className="text-[10px] font-bold uppercase text-neutral-400">Nakliye toplamı</span>
-        <span className="text-xl font-black text-yellow-400 leading-none">{oneri.toplam ? ttTl(oneri.toplam) : '—'}</span>
-      </div>
-      {oneri.depoAylik && (
-        <div className="flex items-end justify-between gap-2">
-          <span className="text-[10px] font-bold uppercase text-neutral-400">Depo aylık</span>
-          <span className="text-sm font-black text-sky-300">{ttTl(oneri.depoAylik)} / ay</span>
+      {(form.hizmetTipi !== 'Depo' || form.nakliyeIstiyor === 'Firma') && (
+        <div className="flex items-end justify-between gap-2 pt-2 border-t border-white/10">
+          <span className="text-[10px] font-bold uppercase text-neutral-400">{form.hizmetTipi === 'Nakliye' ? 'Taşıma fiyatı' : 'Nakliye fiyatı'}</span>
+          <span className="text-2xl font-black text-yellow-400 leading-none">{h.nakliyeToplam ? ttTl(h.nakliyeToplam) : '—'}</span>
         </div>
       )}
-      {/* Uyarılar: eksik bilgi veya dikkat edilecek noktalar */}
-      {oneri.uyarilar.map(u => (
-        <p key={u} className="text-[10px] font-bold text-amber-300 flex gap-1"><AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" /> {u}</p>
+      {/* Depo ücreti: aylık + KDV ve kampanyalı peşin tutar */}
+      {h.depo && (
+        <div className="pt-2 border-t border-white/10 space-y-1">
+          <div className="flex items-end justify-between gap-2">
+            <span className="text-[10px] font-bold uppercase text-neutral-400">{h.depo.boyut.id} depo · aylık</span>
+            <span className="text-lg font-black text-sky-300 leading-none">{ttTl(h.depo.aylik)} <span className="text-[10px] text-neutral-400">+KDV</span></span>
+          </div>
+          <p className="text-[10px] text-neutral-400 text-right">KDV dahil {ttTl(h.depo.aylikKdvli)} / ay</p>
+          {h.depo.kiralama.odenecekAy > 1 && (
+            <p className="text-[11px] font-black text-emerald-300 bg-emerald-500/10 rounded-lg px-2 py-1">
+              🎁 {h.depo.kiralama.ad}: {ttTl(h.depo.pesin)} +KDV ({h.depo.kiralama.odenecekAy} ay öde, {h.depo.kiralama.toplamAy} ay kullan)
+            </p>
+          )}
+        </div>
+      )}
+      {h.uyarilar.map((u, i) => <p key={`u${i}`} className="text-[10px] font-bold text-amber-300 flex gap-1"><AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" /> {u}</p>)}
+      {h.bilgiler.map((u, i) => <p key={`b${i}`} className="text-[10px] font-bold text-sky-200 flex gap-1"><HelpCircle className="w-3 h-3 shrink-0 mt-0.5" /> {u}</p>)}
+    </div>
+  );
+};
+
+// ============================================================================
+// GÖRÜŞME REHBERİ — oryantasyon kılavuzlarından (Sembol / DepoEvim ayrı)
+// ============================================================================
+const TT_REHBER = {
+  Nakliye: {
+    karsilama: '"Sembol Nakliyat, ben [adın], hayırlı günler, nasıl yardımcı olabilirim?"',
+    bolumler: [
+      { baslik: 'Hazır Cümleler', maddeler: [
+        'Fiyat: "Bu taşıma için ortalama fiyatımız [X] TL. Eşyanın videosunu atarsanız fiyatı netleştirebiliriz."',
+        'Toplama: "Toplama hizmetimiz ekstra [X] TL, kendiniz toplarsanız [Y] TL olur."',
+        'Video + kayıt: "Size WhatsApp\'tan yazıyorum, eşyaların videosunu gönderirseniz fiyatta yardımcı oluruz."',
+        'Değer: "Sigortalı taşıma, profesyonel ekip, söküm-montaj dahil [X] TL."',
+        'Ofis: "Dilerseniz ofisimize de bekleriz, yüz yüze görüşelim."',
+      ] },
+      { baslik: 'İtiraz Karşılama', maddeler: [
+        '"Pahalı": Önce kapsamı anlat (sigorta, ekip, söküm-montaj). İndirim gerekiyorsa toplamayı müşteriye bırakarak yap.',
+        '"Daha ucuz aldım": "O fiyata sigorta, söküm-montaj, dış asansör dahil mi?" diye sordur. Rakibi kötüleme.',
+        '"Düşüneyim": Yazılı teklifi WhatsApp\'tan gönder, "yarın kısaca arayayım" diye dönüş iznini SEN al.',
+        '"Kapıda fiyat değişir mi?": "Hayır — videoyu bu yüzden istiyoruz, sözleşmede de yazar."',
+        '"Az eşyam var": "Videonuzu görünce en uygun rakamı veririm."',
+      ] },
+      { baslik: 'Kurallar', maddeler: [
+        'Kayıt taşımadan 15 gün öncesine kadar açılabilir; %10 kapora ile tarih kesinleşir.',
+        '72 saatten fazla varsa kapora hariç ücretsiz iptal; daha az kala %50 cayma bedeli.',
+        'Yapılmaz: klima söküm-montajı, duvar montajı, elektrik işleri. Avize/perde/ankastre sökülür, montajı yapılmaz.',
+        '30 metreyi aşan yanaşma mesafesinde ek işçilik doğar.',
+        'Şehirler arası: eşya araca yüklendikten sonra %50 ödeme alınır.',
+      ] },
+    ],
+  },
+  Depo: {
+    karsilama: '"Depoevim, merhabalar, buyurun."',
+    bolumler: [
+      { baslik: 'Önce Depo Fiyatı (ilk 30 saniye)', maddeler: [
+        'Eşyanın cinsini ve kaç+1 olduğunu öğren → aylık fiyatı HEMEN söyle: "2+1 için aylık 7.500 ₺ + KDV."',
+        'Depoyu öv: yüksek kat, rutubetsiz, 7/24 kameralı, odası mühürlü, sigortalı.',
+        'Nakliyeyi zorlamadan öner: sigortalı taşıma, kendi ekibimiz, kalıcı ambalaj, depo müşterisine özel fiyat.',
+        'Video iste + depoya davet et: "Hangi depoya sığar ve nakliye fiyatı için videoyu gönderin."',
+      ] },
+      { baslik: 'Kampanya (tek indirim aracın)', maddeler: [
+        '5 ay öde → 1 ay hediye · 10 ay öde → 2 ay hediye.',
+        'Kredi kartı YALNIZCA bu toplu ödemelerde geçer; aylık ödeme IBAN\'a yapılır.',
+        'Süresinden önce çıkarsa hediye aylar düşülüp kalan aylar iade edilir. Başka indirim yoktur.',
+      ] },
+      { baslik: 'İtiraz Karşılama', maddeler: [
+        '"Nemlenir mi?": Yüksek kat, rutubet yok, kalıcı ambalaj, kamera — depoyu gezmeye davet et.',
+        '"Sigortalı mı?": Evet; ayrıca oda + mühür + 7/24 kamera.',
+        '"İstediğim zaman alabilir miyim?": Taahhüt yok; 1-2 gün önce randevuyla ziyaret (mühür 200 ₺+KDV).',
+        '"Süre belli değil": Aylık çalışırız, çıkmadan 7 gün önce haber yeterli.',
+        '"Depo uzak": İstanbul içinde nakliye mesafeyle çok değişmez; ev eşyası yılda 1-3 kez ziyaret edilir.',
+      ] },
+      { baslik: 'Kurallar', maddeler: [
+        'Depo fiyatı sadece GİRİŞ nakliyesini kapsar; çıkış ayrı fiyatlanır — bunu müşteri SORARSA net anlat.',
+        'Depo sözleşmesi eşya depoya konduktan SONRA yapılır (oda no + KDV dahil aylık ücret).',
+        'Aylık ücret giriş tarihinden itibaren en geç 5 gün içinde IBAN\'a yatar.',
+        'Depoda gıda bulunamaz; değerli eşya, ziynet, nakit müşteride kalmalı.',
+        'Ticari / her gün giriş-çıkış kullanımına depo verilmez.',
+      ] },
+    ],
+  },
+};
+const TTGorusmeRehberi = ({ hizmetTipi }) => {
+  const r = hizmetTipi === 'Nakliye' ? TT_REHBER.Nakliye : TT_REHBER.Depo;
+  const [acik, setAcik] = useState(0);
+  return (
+    <div className="space-y-2">
+      <div className="bg-white border border-neutral-200 rounded-2xl p-3">
+        <p className="text-[10px] font-black uppercase text-neutral-500">Karşılama</p>
+        <p className="text-xs font-bold text-neutral-800 mt-0.5">{r.karsilama}</p>
+      </div>
+      {r.bolumler.map((b, i) => (
+        <div key={b.baslik} className="bg-white border border-neutral-200 rounded-2xl">
+          <button type="button" onClick={() => setAcik(acik === i ? null : i)} className="w-full px-3 py-2 flex items-center justify-between text-left">
+            <span className="text-[11px] font-black text-neutral-800">{b.baslik}</span>
+            <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${acik === i ? 'rotate-180' : ''}`} />
+          </button>
+          {acik === i && (
+            <ul className="px-3 pb-3 space-y-1.5">
+              {b.maddeler.map(m => <li key={m} className="text-[11px] text-neutral-700 leading-snug flex gap-1.5"><span className="text-neutral-300">•</span><span>{m}</span></li>)}
+            </ul>
+          )}
+        </div>
       ))}
     </div>
   );
 };
 
 // ============================================================================
-// GÖRÜŞME REHBERİ — telefonda sorulacaklar + hazır cevaplar (SSS)
+// WHATSAPP MESAJ PENCERESİ — şablon seç, düzenle, WhatsApp'ta aç / kopyala
 // ============================================================================
-const GorusmeRehberi = () => {
-  const [acikSss, setAcikSss] = useState(null); // Hangi SSS maddesi açık
+const TTWhatsappPenceresi = ({ t, gonderen, onKapat, onGonderildi }) => {
+  const sablonlar = useMemo(() => ttWhatsappSablonlari(t, gonderen), [t, gonderen]);
+  const [seciliId, setSeciliId] = useState(sablonlar[0]?.id);
+  const [metin, setMetin] = useState(sablonlar[0]?.metin || '');
+  const [kopyalandi, setKopyalandi] = useState(false);
+  const sec = (s) => { setSeciliId(s.id); setMetin(s.metin); };
+  const numara = ttWaNumara(t.telefon);
+  const gonder = () => {
+    if (!numara) return;
+    // wa.me bağlantısı hem masaüstü hem mobilde WhatsApp'ı hazır metinle açar
+    window.open(`https://wa.me/${numara}?text=${encodeURIComponent(metin)}`, '_blank', 'noopener,noreferrer');
+    onGonderildi?.(sablonlar.find(s => s.id === seciliId)?.ad || 'Özel mesaj');
+  };
+  const kopyala = async () => {
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(metin);
+      else {
+        // Yedek yöntem: pano izni olmayan tarayıcılarda gizli metin kutusundan kopyalanır
+        const alan = document.createElement('textarea');
+        alan.value = metin; alan.style.position = 'fixed'; alan.style.opacity = '0';
+        document.body.appendChild(alan); alan.select(); document.execCommand('copy'); alan.remove();
+      }
+      setKopyalandi(true); setTimeout(() => setKopyalandi(false), 1500);
+    } catch (e) { console.error('Kopyalanamadı:', e); }
+  };
   return (
-    <div className="space-y-3">
-      <div className="bg-white border border-neutral-200 rounded-2xl p-3">
-        <p className="text-[11px] font-black uppercase text-neutral-800 mb-2 flex items-center gap-1.5"><Phone className="w-3.5 h-3.5" /> Müşteriye Sorulacaklar</p>
-        <p className="text-[11px] text-neutral-500 italic mb-2">"Size doğru hacmi bulabilmek ve fiyat çalışabilmek için bazı bilgilere ihtiyacımız var."</p>
-        <ol className="space-y-1 list-decimal list-inside">
-          {TT_SORULACAKLAR.map(s => <li key={s} className="text-[11px] font-semibold text-neutral-700">{s}</li>)}
-        </ol>
-      </div>
-      <div className="bg-white border border-neutral-200 rounded-2xl p-3">
-        <p className="text-[11px] font-black uppercase text-neutral-800 mb-2 flex items-center gap-1.5"><HelpCircle className="w-3.5 h-3.5" /> Hazır Cevaplar</p>
-        <div className="space-y-1">
-          {TT_SSS.map((m, i) => (
-            <div key={m.s} className="border border-neutral-100 rounded-lg">
-              <button type="button" onClick={() => setAcikSss(acikSss === i ? null : i)}
-                className="w-full flex items-center justify-between gap-2 px-2 py-1.5 text-left text-[11px] font-black text-neutral-700 hover:bg-neutral-50 rounded-lg">
-                {m.s} {acikSss === i ? <ChevronUp className="w-3 h-3 shrink-0" /> : <ChevronDown className="w-3 h-3 shrink-0" />}
+    <div className="fixed inset-0 z-[95] bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-4" onClick={onKapat}>
+      <div className="bg-white sm:rounded-3xl shadow-2xl w-full max-w-2xl h-[100dvh] sm:h-auto sm:max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
+        <div className="shrink-0 bg-green-600 text-white px-4 py-3 flex items-center gap-3">
+          <MessageCircle className="w-6 h-6 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <h3 className="font-black text-base truncate">WhatsApp Mesajı — {t.musteriAdi || 'Müşteri'}</h3>
+            <p className="text-[11px] font-bold text-white/80">{ttTelGoster(t.telefon)} · şablonu seçin, gerekirse düzenleyin</p>
+          </div>
+          <button type="button" onClick={onKapat} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center"><X className="w-5 h-5" /></button>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+          <div className="flex flex-wrap gap-1.5">
+            {sablonlar.map(s => (
+              <button key={s.id} type="button" onClick={() => sec(s)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black border transition ${seciliId === s.id ? 'bg-green-600 text-white border-green-600' : 'bg-white text-green-800 border-green-200 hover:border-green-500'}`}>
+                {s.ad}
               </button>
-              {acikSss === i && <p className="px-2 pb-2 text-[11px] text-neutral-600">{m.c}</p>}
-            </div>
-          ))}
+            ))}
+          </div>
+          <textarea value={metin} onChange={e => setMetin(e.target.value)} rows={14}
+            className="w-full p-3 rounded-2xl border-2 border-green-200 bg-green-50/40 text-sm leading-relaxed outline-none focus:ring-2 focus:ring-green-500 resize-y" />
+          {!numara && <p className="text-xs font-black text-red-600">Telefon numarası geçersiz — mesaj WhatsApp'ta açılamaz, kopyalayıp gönderebilirsiniz.</p>}
+        </div>
+        <div className="shrink-0 px-4 py-3 border-t border-neutral-200 bg-neutral-50 flex gap-2">
+          <button type="button" onClick={kopyala} className="flex-1 py-2.5 rounded-xl bg-white border border-neutral-200 text-sm font-black text-neutral-700 hover:bg-neutral-100 flex items-center justify-center gap-1.5">
+            {kopyalandi ? <><Check className="w-4 h-4 text-green-600" /> Kopyalandı</> : <><Copy className="w-4 h-4" /> Kopyala</>}
+          </button>
+          <button type="button" onClick={gonder} disabled={!numara}
+            className="flex-[2] py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-black flex items-center justify-center gap-1.5 shadow-lg shadow-green-600/30 disabled:opacity-40">
+            <Send className="w-4 h-4" /> WhatsApp'ta Aç
+          </button>
         </div>
       </div>
     </div>
@@ -8461,238 +9141,562 @@ const GorusmeRehberi = () => {
 };
 
 // ============================================================================
-// ANA FORM (modal)
-// Props: site, baslangic (düzenlemede mevcut kayıt), onKaydet(form), onKapat
+// PERSONEL TRANSFER PENCERESİ (kullanıcı talebi) — hem havuz hem telefon
+// kayıtlarında kullanılır. Seçilen satışçı kaydın yeni sahibi olur.
 // ============================================================================
-const TelefonTeklifFormu = ({ site, baslangic = null, onKaydet, onKapat }) => {
-  const [form, setForm] = useState(() => ({ ...bosTelefonTeklifi(site), ...(baslangic || {}) }));
+const PersonelTransferPenceresi = ({ baslik, mevcut, secenekler = [], onTransfer, onKapat }) => {
+  const [secilen, setSecilen] = useState('');
+  const [not, setNot] = useState('');
+  const [bekliyor, setBekliyor] = useState(false);
+  const liste = secenekler.filter(ad => ad && ad !== mevcut);
+  const onayla = async () => {
+    if (!secilen) return;
+    setBekliyor(true);
+    try { await onTransfer(secilen, not.trim()); } finally { setBekliyor(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-[99999] bg-black/60 flex items-center justify-center p-4" onClick={onKapat}>
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+        <div className="bg-neutral-900 text-white p-4">
+          <p className="text-[10px] font-black uppercase tracking-widest text-neutral-400 flex items-center gap-1"><RefreshCw className="w-3 h-3" /> Personel Transferi</p>
+          <h3 className="font-black text-base mt-0.5 truncate">{baslik}</h3>
+          <p className="text-[11px] font-bold text-neutral-300 mt-0.5">Şu an: {mevcut || 'Atanmadı'}</p>
+        </div>
+        <div className="p-3 space-y-2 max-h-[50vh] overflow-y-auto">
+          {liste.length === 0 && <p className="text-xs font-bold text-neutral-400 text-center py-4">Transfer edilebilecek satış personeli yok.</p>}
+          {liste.map(ad => (
+            <button key={ad} type="button" onClick={() => setSecilen(ad)}
+              className={`w-full px-3 py-2.5 rounded-xl text-sm font-black border text-left flex items-center gap-2 transition ${secilen === ad ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200 hover:border-neutral-400'}`}>
+              <User className="w-4 h-4" /> {ad}
+            </button>
+          ))}
+          <textarea value={not} onChange={e => setNot(e.target.value)} rows={2} placeholder="Devredilen kişiye not (opsiyonel) — örn. video bekleniyor, perşembe aranacak"
+            className="w-full p-2.5 border border-neutral-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-neutral-400 resize-none" />
+        </div>
+        <div className="p-3 border-t border-neutral-100 flex gap-2">
+          <button type="button" onClick={onKapat} className="flex-1 py-2.5 rounded-xl bg-neutral-100 text-sm font-black text-neutral-600">Vazgeç</button>
+          <button type="button" onClick={onayla} disabled={!secilen || bekliyor}
+            className="flex-[2] py-2.5 rounded-xl bg-neutral-900 text-white text-sm font-black disabled:opacity-40 flex items-center justify-center gap-1.5">
+            {bekliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />} Transfer Et
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// (4) GÖRÜŞME SİHİRBAZI — soru soru ilerleyen form
+// ============================================================================
+// Boş form. Alan adları kayıt ekranına aktarılacak değerlerle uyumludur.
+const ttBosForm = (hizmetTipi = 'Nakliye') => ({
+  surum: 2, musteriAdi: '', telefon: '', iletisimTarihi: ttBugunStr(), hizmetTipi,
+  odaSayisi: '', esyaCinsi: '',
+  yukIl: 'İstanbul (Anadolu)', yukIlce: '', yukAdres: '', yukKat: '', yukTasima: '', yukMesafe: '',
+  bosIl: 'İstanbul (Anadolu)', bosIlce: '', bosAdres: '', bosKat: '', bosTasima: '', bosMesafe: '',
+  toplama: '', depoBoyutu: '', kiralamaSuresi: '1', sube: 'Farketmez', nakliyeIstiyor: '',
+  tasinmaTarihi: '', tasinmaNotu: '', videoDurumu: 'Paylaşmadı',
+  verilenFiyat: '', takipTarihi: '', durum: 'Yeni', aciklama: '', havuzKayitId: '',
+});
+
+// Hizmete göre soru akışı. Depoda "firma alsın" seçilirse nakliye soruları eklenir.
+const ttAdimListesi = (f) => {
+  const s = [{ id: 'musteri', baslik: 'Müşteri & Hizmet' }];
+  if (f.hizmetTipi === 'Nakliye') {
+    s.push(
+      { id: 'oda',      baslik: 'Eviniz kaç odalı?', soru: true },
+      { id: 'guzergah', baslik: 'Nereden nereye taşınacak?', soru: true },
+      { id: 'kat',      baslik: 'Evler kaçıncı katta?', soru: true },
+      { id: 'asansor',  baslik: 'Bina içi asansör durumu nedir?', soru: true },
+      { id: 'toplama',  baslik: 'Küçük eşyaları kim paketleyecek?', soru: true },
+      { id: 'yanasma',  baslik: 'Kamyon iki adreste de yanaşabiliyor mu?', soru: true },
+      { id: 'tarih',    baslik: 'Ne zaman taşınmayı düşünüyorsunuz?', soru: true },
+    );
+  } else if (f.hizmetTipi === 'Depo') {
+    s.push(
+      { id: 'cins',    baslik: 'Depolanacak eşya nedir?', soru: true },
+      { id: 'boyut',   baslik: 'Kaç artı bir evin eşyası?', soru: true },
+      { id: 'konum',   baslik: 'Eşyalarınız şu an nerede?', soru: true },
+      { id: 'nakliye', baslik: 'Eşyalar depoya nasıl ulaşsın?', soru: true },
+    );
+    // Nakliye soruları yalnızca müşteri nakliyeyi BİZDEN isterse sorulur (kılavuz kuralı)
+    if (f.nakliyeIstiyor === 'Firma') {
+      s.push(
+        { id: 'kat',     baslik: 'Kaçıncı kattan alınacak?', soru: true, ek: true },
+        { id: 'asansor', baslik: 'Binada asansör durumu nedir?', soru: true, ek: true },
+        { id: 'toplama', baslik: 'Küçük eşyaları kim koliyecek?', soru: true, ek: true },
+        { id: 'yanasma', baslik: 'Araç binaya yanaşabiliyor mu?', soru: true, ek: true },
+      );
+    }
+    s.push({ id: 'tarih', baslik: 'Bu işlemi ne zaman düşünüyorsunuz?', soru: true });
+  } else {
+    s.push(
+      { id: 'cikisDepo', baslik: 'Eşyalar hangi depomuzda?', soru: true },
+      { id: 'guzergah',  baslik: 'Nereye teslim edilecek?', soru: true },
+      { id: 'kat',       baslik: 'Yeni ev kaçıncı katta?', soru: true },
+      { id: 'asansor',   baslik: 'Yeni binada asansör durumu?', soru: true },
+      { id: 'yanasma',   baslik: 'Araç binaya yanaşabiliyor mu?', soru: true },
+      { id: 'tarih',     baslik: 'Çıkış ne zaman?', soru: true },
+    );
+  }
+  s.push({ id: 'sonuc', baslik: 'Fiyat, Video & Takip' });
+  return s;
+};
+
+// Bir adımda hangi adreslerin sorulacağı: yük / boş
+const ttAdimRolleri = (f) => (f.hizmetTipi === 'Nakliye' ? ['yuk', 'bos'] : f.hizmetTipi === 'Depo' ? ['yuk'] : ['bos']);
+const TT_ROL_ETIKET = { yuk: { ad: 'Yükleme (mevcut ev)', renk: 'text-green-700', zemin: 'border-green-200 bg-green-50/40' }, bos: { ad: 'Boşaltma (yeni ev)', renk: 'text-red-700', zemin: 'border-red-200 bg-red-50/40' } };
+
+// Adım cevaplandı mı? (sol listede ✓ ve otomatik ilerleme için)
+const ttAdimTamam = (f, id) => {
+  const r = ttAdimRolleri(f);
+  switch (id) {
+    case 'musteri':   return !!(f.musteriAdi.trim() || ttTelGecerli(f.telefon));
+    case 'oda':       return !!f.odaSayisi;
+    case 'guzergah':  return f.hizmetTipi === 'Nakliye' ? !!(f.yukIl && f.bosIl && (f.yukIlce || f.bosIlce)) : !!(f.bosIl && f.bosIlce);
+    case 'konum':     return !!(f.yukIl && f.yukIlce);
+    case 'kat':       return r.every(x => f[`${x}Kat`]);
+    case 'asansor':   return r.every(x => f[`${x}Tasima`]);
+    case 'yanasma':   return r.every(x => f[`${x}Mesafe`] !== '' && f[`${x}Mesafe`] !== undefined);
+    case 'toplama':   return !!f.toplama;
+    case 'tarih':     return !!(f.tasinmaTarihi || f.tasinmaNotu);
+    case 'cins':      return !!f.esyaCinsi;
+    case 'boyut':     return !!f.depoBoyutu;
+    case 'nakliye':   return !!f.nakliyeIstiyor;
+    case 'cikisDepo': return !!(f.sube && f.sube !== 'Farketmez' && f.depoBoyutu);
+    default:          return false;
+  }
+};
+
+const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', gecmisIndeksi = null, gonderen = '', onKaydet, onKapat }) => {
+  const [form, setForm] = useState(() => ({ ...ttBosForm(varsayilanHizmet), ...(baslangic ? ttNormalize(baslangic) : {}), surum: 2 }));
+  const [adimIdx, setAdimIdx] = useState(0);
+  const [panel, setPanel] = useState('fiyat');            // Sağ panel sekmesi: fiyat | gecmis | rehber
   const [kaydediliyor, setKaydediliyor] = useState(false);
   const [hata, setHata] = useState('');
-  const [rehberAcik, setRehberAcik] = useState(true); // Mobilde rehberi gizleyebilmek için
+  const ilerleZamanlayici = useRef(null);
 
-  // Tek alan güncelleyici — tüm inputlar bunu kullanır
-  const d = (alan) => (deger) => setForm(f => ({ ...f, [alan]: deger }));
-  const dInput = (alan) => (e) => d(alan)(e.target.value);
+  const adimlar = ttAdimListesi(form);
+  const adim = adimlar[Math.min(adimIdx, adimlar.length - 1)];
+  const sorular = adimlar.filter(a => a.soru);
+  const soruNo = sorular.findIndex(a => a === adim) + 1;
+  const hz = ttHizmetBul(form.hizmetTipi);
+  const S = hz.stil;
+  const roller = ttAdimRolleri(form);
+  const hesap = useMemo(() => ttFiyatHesapla(form), [form]);
+  const gecmis = useMemo(() => musteriGecmisiBul(gecmisIndeksi, form.telefon, baslangic?.id || null), [gecmisIndeksi, form.telefon, baslangic]);
 
-  const depoMu = form.hizmetTipi === 'Depo';
-  const cikisMi = form.hizmetTipi === 'Depodan Çıkış';
-  const siteRenk = site === 'depoevim' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-red-600 hover:bg-red-700';
+  // Alan güncelleyiciler
+  const d = (alan) => (v) => setForm(f => ({ ...f, [alan]: v }));
+  const git = (i) => { clearTimeout(ilerleZamanlayici.current); setAdimIdx(Math.max(0, Math.min(i, adimlar.length - 1))); };
+  const ileri = () => git(adimIdx + 1);
+  const geri = () => git(adimIdx - 1);
+  // Seç + (adım tamamlandıysa) kısa bir gecikmeyle otomatik sonraki soruya geç — satışçıyı hızlandırır
+  const secIlerle = (alan, v) => {
+    const sonraki = { ...form, [alan]: v };
+    setForm(sonraki);
+    clearTimeout(ilerleZamanlayici.current);
+    if (ttAdimTamam(sonraki, adim.id)) ilerleZamanlayici.current = setTimeout(() => setAdimIdx(i => i + 1), 220);
+  };
+  useEffect(() => () => clearTimeout(ilerleZamanlayici.current), []);
 
-  // Öneriyi "Verilen Fiyat" ve "Depo Aylık" alanlarına aktarır
-  const oneriyiAktar = (oneri) => setForm(f => ({
-    ...f,
-    verilenFiyat: String(oneri.toplam || f.verilenFiyat),
-    depoAylikUcret: oneri.depoAylik ? String(oneri.depoAylik) : f.depoAylikUcret,
+  // Hizmet değişince sube/nakliye tercihi gibi hizmete özel alanlar makul varsayılana döner
+  const hizmetSec = (id) => setForm(f => ({
+    ...f, hizmetTipi: id,
+    sube: id === 'Depodan Çıkış' ? (f.sube === 'Farketmez' ? '' : f.sube) : (f.sube || 'Farketmez'),
   }));
 
   const kaydet = async () => {
-    // Zorunlu alanlar: en az ad veya telefon
-    if (!form.musteriAdi.trim() && !form.telefon.trim()) { setHata('Müşteri adı veya telefon numarasından en az biri gerekli.'); return; }
+    if (!form.musteriAdi.trim() && !ttTelGecerli(form.telefon)) { setHata('Müşteri adı veya geçerli bir telefon numarası girin.'); git(0); return; }
     setHata(''); setKaydediliyor(true);
-    try { await onKaydet(form); }
-    catch (e) { setHata('Kaydedilemedi: ' + (e?.message || 'bilinmeyen hata')); setKaydediliyor(false); }
+    try {
+      const nakliyeVar = form.hizmetTipi !== 'Depo' || form.nakliyeIstiyor === 'Firma';
+      await onKaydet({
+        ...form,
+        musteriAdi: form.musteriAdi.trim(), telefon: form.telefon.trim(),
+        site: ttSiteOf(form.hizmetTipi),
+        sistemFiyati: hesap.nakliyeToplam || 0,
+        depoAylik: hesap.depo?.aylik || '',
+        // Satışçı fiyat yazmadıysa sistem fiyatı müşteriye söylenen fiyat kabul edilir
+        verilenFiyat: form.verilenFiyat || (nakliyeVar && hesap.nakliyeToplam ? String(hesap.nakliyeToplam) : ''),
+      });
+    } catch (e) { setHata('Kaydedilemedi: ' + (e?.message || 'bilinmeyen hata')); setKaydediliyor(false); }
   };
 
-  return (
-    // DEĞİŞTİ (kullanıcı talebi): Pencere artık EKRANA SIĞAR. Kart ekran yüksekliğiyle
-    // sınırlı (100dvh — mobil tarayıcı çubukları dahil doğru ölçü); başlık ve Kaydet
-    // çubuğu sabit kalır, yalnızca ortadaki form alanı kayar. Mobilde tam ekran açılır.
-    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-3 md:p-4">
-      <div className="bg-white sm:rounded-3xl shadow-2xl w-full max-w-6xl h-[100dvh] sm:h-auto sm:max-h-[calc(100dvh-1.5rem)] md:max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
-        {/* BAŞLIK — sabit (kaymaz) */}
-        <div className="shrink-0 flex items-center justify-between gap-2 px-4 md:px-5 py-3 border-b border-neutral-200">
-          <div>
-            <h3 className="text-base md:text-lg font-black text-neutral-900 flex items-center gap-2"><Phone className="w-5 h-5" /> {baslangic ? 'Telefon Teklifini Düzenle' : 'Yeni Telefon Görüşmesi'}</h3>
-            <p className="text-[11px] text-neutral-500 font-semibold">{site === 'depoevim' ? 'DepoEvim' : 'Sembol Nakliyat'} · Görüşme sırasında soldaki alanları doldurun</p>
+  const secimCls = `w-full px-3 py-3 rounded-xl border-2 border-neutral-300 bg-white text-base font-black text-neutral-900 outline-none focus:ring-2 ${S.halka}`;
+
+  // ------------------------------------------------ ADIM İÇERİKLERİ ---
+  // NOT: Bileşen DEĞİL düz fonksiyon — render içinde bileşen tanımlamak her tuşta
+  // alt ağacı yeniden oluşturur ve yazılan kutu odağını kaybeder.
+  const rolKutusu = (rol, children) => (
+    <div key={rol} className={`rounded-2xl border-2 p-3 space-y-2 ${TT_ROL_ETIKET[rol].zemin}`}>
+      <p className={`text-[11px] font-black uppercase ${TT_ROL_ETIKET[rol].renk}`}>
+        {form.hizmetTipi === 'Depo' ? 'Eşyaların alınacağı adres' : form.hizmetTipi === 'Depodan Çıkış' ? 'Teslim adresi' : TT_ROL_ETIKET[rol].ad}
+        {(form[`${rol}Ilce`] || form[`${rol}Il`]) && <span className="normal-case font-bold text-neutral-500"> · {ttAdresKisa(form[`${rol}Il`], form[`${rol}Ilce`])}</span>}
+      </p>
+      {children}
+    </div>
+  );
+  const rollerIzgara = roller.length > 1 ? 'grid grid-cols-1 md:grid-cols-2 gap-3' : 'grid grid-cols-1 gap-3 max-w-xl';
+
+  const adimIcerigi = () => {
+    switch (adim.id) {
+      case 'musteri': return (
+        <div className="space-y-4">
+          {/* Hizmet seçimi — canlı renkli büyük kartlar */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {TT_HIZMETLER.map(h => {
+              const secili = form.hizmetTipi === h.id;
+              return (
+                <button key={h.id} type="button" onClick={() => hizmetSec(h.id)}
+                  className={`p-3 rounded-2xl border-2 text-left transition ${secili ? h.stil.secili : h.stil.pasif}`}>
+                  <span className="flex items-center gap-2">
+                    <h.Ikon className="w-5 h-5" />
+                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${secili ? 'bg-white/20' : h.stil.acik + ' border'}`}>{h.marka}</span>
+                  </span>
+                  <span className="block text-sm font-black mt-1.5">{h.ad}</span>
+                  <span className={`block text-[10px] font-bold ${secili ? 'text-white/80' : 'text-neutral-500'}`}>{h.alt}</span>
+                </button>
+              );
+            })}
           </div>
-          <button type="button" onClick={onKapat} className="w-9 h-9 rounded-xl bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center"><X className="w-5 h-5" /></button>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label className="block">
+              <span className="block text-[10px] font-black uppercase text-neutral-500 mb-1">Müşteri Adı</span>
+              <input autoFocus value={form.musteriAdi} onChange={e => d('musteriAdi')(e.target.value)} placeholder="Örn. Sefa Bey"
+                className={`w-full px-3 py-3 rounded-xl border-2 border-neutral-300 text-base font-bold outline-none focus:ring-2 ${S.halka}`} />
+            </label>
+            <label className="block">
+              <span className="block text-[10px] font-black uppercase text-neutral-500 mb-1">Telefon</span>
+              <input value={form.telefon} onChange={e => d('telefon')(e.target.value)} placeholder="05XX XXX XX XX" inputMode="tel"
+                className={`w-full px-3 py-3 rounded-xl border-2 border-neutral-300 text-base font-bold outline-none focus:ring-2 ${S.halka}`} />
+              {form.telefon && !ttTelGecerli(form.telefon) && <span className="block text-[10px] font-bold text-amber-600 mt-1">Numara 10 hane olmalı (başında 0 olsun/olmasın fark etmez)</span>}
+            </label>
+          </div>
+          <p className="text-[11px] font-bold text-neutral-500 flex items-center gap-1.5">
+            <CalendarDays className="w-3.5 h-3.5" /> Görüşme tarihi otomatik: <b className="text-neutral-800">{ttTrTarih(form.iletisimTarihi)}</b>
+            <input type="date" value={form.iletisimTarihi} onChange={e => d('iletisimTarihi')(e.target.value)} className="ml-1 px-2 py-0.5 rounded-lg border border-neutral-200 text-[11px]" />
+          </p>
+          {/* Numara yazılır yazılmaz geçmiş kontrol edilir */}
+          {gecmis && <MusteriGecmisiKutusu gecmis={gecmis} ad={form.musteriAdi} />}
+        </div>
+      );
+      case 'oda': return (
+        <div className="max-w-md space-y-2">
+          <select value={form.odaSayisi} onChange={e => secIlerle('odaSayisi', e.target.value)} className={secimCls}>
+            <option value="">Ev tipi seçin…</option>
+            {TT_ODA_SECENEKLERI.map(o => <option key={o.id} value={o.id}>{o.ad}</option>)}
+          </select>
+          <p className="text-[11px] font-bold text-neutral-500">Kayıt ekranındaki "Daire Tipi" ile aynıdır.</p>
+        </div>
+      );
+      case 'guzergah': return (
+        <div className={rollerIzgara}>
+          {roller.map(r => rolKutusu(r, <>
+              <TTIlIlce il={form[`${r}Il`]} ilce={form[`${r}Ilce`]} adres={form[`${r}Adres`]} halka={S.halka}
+                onIl={d(`${r}Il`)} onIlce={d(`${r}Ilce`)} onAdres={d(`${r}Adres`)} />
+            </>))}
+        </div>
+      );
+      case 'konum': return (
+        <div className={rollerIzgara}>
+          {rolKutusu('yuk', <>
+            <TTIlIlce il={form.yukIl} ilce={form.yukIlce} adres={form.yukAdres} halka={S.halka} onIl={d('yukIl')} onIlce={d('yukIlce')} onAdres={d('yukAdres')} />
+          </>)}
+        </div>
+      );
+      case 'kat': return (
+        <div className={rollerIzgara}>
+          {roller.map(r => rolKutusu(r, <>
+              <select value={form[`${r}Kat`]} onChange={e => secIlerle(`${r}Kat`, e.target.value)} className={secimCls}>
+                <option value="">Kat seçin…</option>
+                {FLOORS.map(k => <option key={k} value={k}>{k}</option>)}
+              </select>
+            </>))}
+        </div>
+      );
+      case 'asansor': return (
+        <div className={rollerIzgara}>
+          {roller.map(r => rolKutusu(r, <>
+              {TT_TASIMA.map(o => (
+                <TTSecimKarti key={o.id} secili={form[`${r}Tasima`] === o.id} onClick={() => secIlerle(`${r}Tasima`, o.id)} baslik={o.ad} alt={o.alt} stil={S} />
+              ))}
+            </>))}
+        </div>
+      );
+      case 'yanasma': return (
+        <div className={rollerIzgara}>
+          {roller.map(r => rolKutusu(r, <>
+              {TT_YANASMA.map(o => (
+                <TTSecimKarti key={o.id} secili={form[`${r}Mesafe`] === o.id} onClick={() => secIlerle(`${r}Mesafe`, o.id)} baslik={o.ad} stil={S} />
+              ))}
+            </>))}
+        </div>
+      );
+      case 'toplama': return (
+        <div className="max-w-xl space-y-2">
+          {TT_TOPLAMA.map(o => <TTSecimKarti key={o.id} secili={form.toplama === o.id} onClick={() => secIlerle('toplama', o.id)} baslik={o.ad} alt={o.alt} stil={S} />)}
+          <p className="text-[11px] font-bold text-neutral-500">Toplama alınsa bile yeni adreste kolilerin açılıp yerleştirilmesi hizmeti yoktur.</p>
+        </div>
+      );
+      case 'tarih': return (
+        <div className="max-w-xl space-y-3">
+          <input type="date" value={form.tasinmaTarihi} onChange={e => d('tasinmaTarihi')(e.target.value)} className={secimCls} />
+          <div className="flex flex-wrap gap-1.5">
+            {['Bu hafta', 'Hafta sonu', 'Ay başı', 'Ay ortası', 'Ay sonu', '10 gün içinde', 'Belirsiz'].map(n => (
+              <button key={n} type="button" onClick={() => d('tasinmaNotu')(form.tasinmaNotu === n ? '' : n)}
+                className={`px-3 py-2 rounded-xl text-xs font-black border-2 transition ${form.tasinmaNotu === n ? S.secili : S.pasif}`}>{n}</button>
+            ))}
+          </div>
+          <input value={form.tasinmaNotu} onChange={e => d('tasinmaNotu')(e.target.value)} placeholder="Serbest not: örn. 15 Ekim'den sonra, kiracı çıkınca"
+            className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-sm font-semibold outline-none" />
+          {form.hizmetTipi === 'Nakliye' && <p className="text-[11px] font-bold text-neutral-500">Tarih belirsizse de fiyatı bugünden verin ve kaydı alın — tarih netleşince ilk aranan firma siz olursunuz.</p>}
+        </div>
+      );
+      case 'cins': return (
+        <div className="max-w-xl space-y-2">
+          {TT_ESYA_CINSI.map(o => <TTSecimKarti key={o.id} secili={form.esyaCinsi === o.id} onClick={() => secIlerle('esyaCinsi', o.id)} baslik={o.ad} alt={o.alt} stil={S} />)}
+        </div>
+      );
+      case 'boyut': return (
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+            {TT_DEPO_BOYUTLARI.map(b => {
+              const secili = form.depoBoyutu === b.id;
+              return (
+                <button key={b.id} type="button" onClick={() => d('depoBoyutu')(b.id)}
+                  className={`p-3 rounded-2xl border-2 text-left transition ${secili ? S.secili : S.pasif}`}>
+                  <span className="block text-base font-black">{b.id} Depo</span>
+                  <span className={`block text-[10px] font-bold ${secili ? 'text-white/80' : 'text-neutral-500'}`}>{b.m3 ? `${b.m3} m³ · ${b.olcu}` : b.olcu}</span>
+                  {/* Aylık fiyat HEMEN görünür — kılavuz: "ilk 30 saniyede fiyatı söyle" */}
+                  <span className="block text-sm font-black mt-1">{b.aylik ? `${ttTl(b.aylik)} +KDV/ay` : 'Video ile'}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Kiralama Süresi</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              {TT_KIRALAMA.map(k => <TTSecimKarti key={k.id} secili={form.kiralamaSuresi === k.id} onClick={() => d('kiralamaSuresi')(k.id)} baslik={k.ad} alt={k.odenecekAy > 1 ? `${k.odenecekAy} ay öde, ${k.toplamAy} ay kullan · kredi kartı geçer` : 'Taahhüt yok, IBAN ile aylık'} stil={S} />)}
+            </div>
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Şube Tercihi</p>
+            <div className="flex flex-wrap gap-1.5">
+              {TT_SUBELER.map(sb => (
+                <button key={sb} type="button" onClick={() => d('sube')(sb)}
+                  className={`px-3 py-2 rounded-xl text-xs font-black border-2 transition ${form.sube === sb ? S.secili : S.pasif}`}>{sb.replace(' Depoevim', '')}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+      case 'nakliye': return (
+        <div className="max-w-xl space-y-2">
+          {TT_NAKLIYE_TERCIHI.map(o => <TTSecimKarti key={o.id} secili={form.nakliyeIstiyor === o.id} onClick={() => secIlerle('nakliyeIstiyor', o.id)} baslik={o.ad} alt={o.alt} stil={S} />)}
+          <p className="text-[11px] font-bold text-neutral-500">Nakliyeyi zorlamadan önerin. Firma seçilirse kat, asansör, kolileme ve yanaşma soruları açılır.</p>
+        </div>
+      );
+      case 'cikisDepo': return (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-1.5">
+            {DEPO_LOCATIONS.map(sb => (
+              <button key={sb.name} type="button" onClick={() => d('sube')(sb.name)}
+                className={`px-3 py-2 rounded-xl text-xs font-black border-2 transition ${form.sube === sb.name ? S.secili : S.pasif}`}>{sb.name.replace(' Depoevim', '')}</button>
+            ))}
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Depo boyutu (eşya hacmi)</p>
+            <div className="flex flex-wrap gap-1.5">
+              {TT_DEPO_BOYUTLARI.map(b => (
+                <button key={b.id} type="button" onClick={() => secIlerle('depoBoyutu', b.id)}
+                  className={`px-3 py-2 rounded-xl text-xs font-black border-2 transition ${form.depoBoyutu === b.id ? S.secili : S.pasif}`}>{b.id}{b.m3 ? ` · ${b.m3} m³` : ''}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+      case 'sonuc': return (
+        <div className="space-y-4">
+          <div>
+            <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Video Durumu</p>
+            <div className="flex flex-wrap gap-1.5">
+              {TT_VIDEO.map(v => (
+                <button key={v} type="button" onClick={() => d('videoDurumu')(v)}
+                  className={`px-3 py-2 rounded-xl text-xs font-black border-2 transition ${form.videoDurumu === v ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-sky-800 border-sky-200 hover:border-sky-500'}`}>{v}</button>
+              ))}
+            </div>
+          </div>
+          {(form.hizmetTipi !== 'Depo' || form.nakliyeIstiyor === 'Firma') && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+              <div className="rounded-2xl bg-neutral-900 text-white p-3">
+                <p className="text-[10px] font-black uppercase text-neutral-400">Sistemin hesapladığı fiyat</p>
+                <p className="text-2xl font-black text-yellow-400">{hesap.nakliyeToplam ? ttTl(hesap.nakliyeToplam) : '—'}</p>
+                <p className="text-[10px] font-bold text-neutral-400">{hesap.liste}</p>
+              </div>
+              <label className="block">
+                <span className="block text-[10px] font-black uppercase text-neutral-500 mb-1">Müşteriye söylenen fiyat (₺)</span>
+                <input value={form.verilenFiyat} onChange={e => d('verilenFiyat')(e.target.value)} inputMode="numeric"
+                  placeholder={hesap.nakliyeToplam ? `Boş bırakılırsa ${ttTl(hesap.nakliyeToplam)}` : 'Örn. 32000'}
+                  className={`w-full px-3 py-3 rounded-xl border-2 border-neutral-300 text-base font-black outline-none focus:ring-2 ${S.halka}`} />
+              </label>
+            </div>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              {/* Takip opsiyoneldir (kullanıcı talebi) */}
+              <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Takip — tekrar arama (opsiyonel)</p>
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {[['Yarın', 1], ['3 gün sonra', 3], ['1 hafta sonra', 7], ['2 hafta sonra', 14], ['1 ay sonra', 30]].map(([ad, g]) => {
+                  const hedef = ttGunEkle(ttBugunStr(), g);
+                  return (
+                    <button key={ad} type="button" onClick={() => d('takipTarihi')(form.takipTarihi === hedef ? '' : hedef)}
+                      className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border transition ${form.takipTarihi === hedef ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-orange-800 border-orange-200 hover:border-orange-400'}`}>{ad}</button>
+                  );
+                })}
+              </div>
+              <input type="date" value={form.takipTarihi} onChange={e => d('takipTarihi')(e.target.value)} className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-sm font-bold" />
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Görüşme Durumu</p>
+              <div className="flex flex-wrap gap-1.5">
+                {TT_DURUMLAR.map(s => (
+                  <button key={s.id} type="button" onClick={() => d('durum')(s.id)}
+                    className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border flex items-center gap-1.5 transition ${form.durum === s.id ? `${s.rozet} ring-2 ring-neutral-900 ring-offset-1` : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'}`}>
+                    <span className={`w-2 h-2 rounded-full ${s.nokta}`} /> {s.etiket}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+          <textarea value={form.aciklama} onChange={e => d('aciklama')(e.target.value)} rows={3}
+            placeholder="Açıklama — örn. ev büyükleriyle konuşup dönecek, halılar ve dikiş makinesi kıymetli"
+            className="w-full px-3 py-2.5 rounded-xl border border-neutral-200 text-sm font-semibold outline-none focus:ring-2 focus:ring-neutral-900/20" />
+          {/* Cevap özeti — tıklanınca o soruya dönülür */}
+          <div className="rounded-2xl border border-neutral-200 p-3">
+            <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Cevap Özeti</p>
+            <div className="flex flex-wrap gap-1.5">
+              {adimlar.filter(a => a.soru).map(a => {
+                const i = adimlar.indexOf(a);
+                const tamam = ttAdimTamam(form, a.id);
+                return (
+                  <button key={a.id} type="button" onClick={() => git(i)}
+                    className={`px-2 py-1 rounded-lg text-[10px] font-black border ${tamam ? 'bg-green-50 text-green-800 border-green-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
+                    {tamam ? '✓' : '!'} {a.baslik}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+      default: return null;
+    }
+  };
+
+  // ================================================================ RENDER ===
+  return (
+    <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-3 md:p-4">
+      <div className="bg-white sm:rounded-3xl shadow-2xl w-full max-w-7xl h-[100dvh] sm:h-[calc(100dvh-1.5rem)] md:h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
+        {/* BAŞLIK — hizmet rengiyle */}
+        <div className={`shrink-0 px-4 md:px-5 py-3 text-white flex items-center justify-between gap-2 ${S.serit}`}>
+          <div className="min-w-0 flex items-center gap-3">
+            <hz.Ikon className="w-6 h-6 shrink-0" />
+            <div className="min-w-0">
+              <h3 className="text-base md:text-lg font-black truncate">{baslangic?.id ? 'Görüşmeyi Düzenle' : 'Yeni Telefon Görüşmesi'} — {hz.ad}</h3>
+              <p className="text-[11px] font-bold text-white/80 truncate">{form.musteriAdi || 'Müşteri'}{form.telefon ? ` · ${ttTelGoster(form.telefon)}` : ''}</p>
+            </div>
+          </div>
+          <button type="button" onClick={onKapat} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center shrink-0"><X className="w-5 h-5" /></button>
+        </div>
+        {/* İlerleme çubuğu */}
+        <div className="shrink-0 h-1.5 bg-neutral-100"><div className={`h-full transition-all ${S.serit}`} style={{ width: `${Math.round(((adimIdx + 1) / adimlar.length) * 100)}%` }} /></div>
+        {/* Mobil adım çipleri */}
+        <div className="lg:hidden shrink-0 flex gap-1.5 overflow-x-auto px-3 py-2 border-b border-neutral-100">
+          {adimlar.map((a, i) => (
+            <button key={a.id + i} type="button" onClick={() => git(i)}
+              className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-black border ${i === adimIdx ? S.secili : ttAdimTamam(form, a.id) ? 'bg-green-50 text-green-800 border-green-200' : 'bg-white text-neutral-500 border-neutral-200'}`}>
+              {a.soru ? `${sorular.indexOf(a) + 1}.` : ''} {a.id === 'musteri' ? 'Müşteri' : a.id === 'sonuc' ? 'Sonuç' : a.baslik.split(' ').slice(0, 2).join(' ')}
+            </button>
+          ))}
         </div>
 
-        {/* GÖVDE — kalan yüksekliği doldurur ve kendi içinde kayar (min-h-0 şart: flex içinde taşmayı engeller) */}
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain grid grid-cols-1 lg:grid-cols-[1fr_300px] xl:grid-cols-[1fr_320px] gap-4 p-3 md:p-5 items-start">
-          {/* ------------------------------------------------ SOL: FORM --- */}
-          <div className="space-y-3 min-w-0">
-            {/* 1) MÜŞTERİ */}
-            <Bolum Ikon={Phone} baslik="Müşteri & Hizmet">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Alan etiket="Müşteri Adı"><input className={girdi} value={form.musteriAdi} onChange={dInput('musteriAdi')} placeholder="Örn. Sefa Bey" autoFocus /></Alan>
-                <Alan etiket="Telefon"><input className={girdi} value={form.telefon} onChange={dInput('telefon')} placeholder="05XX XXX XX XX" inputMode="tel" /></Alan>
-                <Alan etiket="İletişim Tarihi"><input type="date" className={girdi} value={form.iletisimTarihi} onChange={dInput('iletisimTarihi')} /></Alan>
-              </div>
-              <Alan etiket="Hizmet Tipi"><CipSecim secenekler={TT_HIZMET_TIPLERI} deger={form.hizmetTipi} onSec={v => d('hizmetTipi')(v || form.hizmetTipi)} /></Alan>
-              {depoMu && (
-                <Alan etiket="Depoya Taşıma Şekli"><CipSecim secenekler={TT_TASIMA_SEKILLERI} deger={form.tasimaSekli} onSec={v => d('tasimaSekli')(v || form.tasimaSekli)} /></Alan>
-              )}
-            </Bolum>
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[210px_1fr_320px]">
+          {/* SOL: soru listesi (masaüstü) */}
+          <nav className="hidden lg:block border-r border-neutral-100 overflow-y-auto p-3 space-y-1 bg-neutral-50">
+            {adimlar.map((a, i) => {
+              const tamam = ttAdimTamam(form, a.id);
+              const aktif = i === adimIdx;
+              return (
+                <button key={a.id + i} type="button" onClick={() => git(i)}
+                  className={`w-full text-left px-2.5 py-2 rounded-xl text-[11px] font-black flex items-start gap-2 transition ${aktif ? S.secili : 'text-neutral-600 hover:bg-white'}`}>
+                  <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] shrink-0 ${aktif ? 'bg-white/25' : tamam ? 'bg-green-600 text-white' : 'bg-neutral-200 text-neutral-500'}`}>
+                    {tamam && !aktif ? '✓' : a.soru ? sorular.indexOf(a) + 1 : a.id === 'musteri' ? '•' : '₺'}
+                  </span>
+                  <span className="leading-snug">{a.baslik}{a.ek && <span className={`block text-[9px] ${aktif ? 'text-white/70' : 'text-neutral-400'}`}>nakliye sorusu</span>}</span>
+                </button>
+              );
+            })}
+          </nav>
 
-            {/* 2) TARİH & LOKASYON */}
-            <Bolum Ikon={MapPin} baslik="Tarih & Lokasyon">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Alan etiket="Planlanan Taşınma Tarihi"><input type="date" className={girdi} value={form.tasinmaTarihi} onChange={dInput('tasinmaTarihi')} /></Alan>
-                {/* Excel'deki "Eylül sonu", "Belirsiz", "10 gün içinde" gibi serbest ifadeler */}
-                <Alan etiket="Tarih Notu (kesin değilse)">
-                  <input className={girdi} value={form.tasinmaNotu} onChange={dInput('tasinmaNotu')} placeholder="Eylül sonu / Belirsiz / 10 gün içinde" list="tt-tarih-notlari" />
-                  <datalist id="tt-tarih-notlari">{['Belirsiz', 'Bu hafta', 'Ay başı', 'Ay ortası', 'Ay sonu', '10 gün içinde'].map(x => <option key={x} value={x} />)}</datalist>
-                </Alan>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {/* NEREDEN — Depodan Çıkış'ta "Depomuz" sabit */}
-                <div className="space-y-2 bg-white border border-neutral-200 rounded-xl p-2.5">
-                  <p className="text-[10px] font-black uppercase text-green-700">Lokasyon 1 · Nereden</p>
-                  {cikisMi ? <p className="text-sm font-black text-neutral-800">Depomuzdan</p> : (<>
-                    <select className={girdi} value={form.neredenIl} onChange={dInput('neredenIl')}>{TT_IL_LISTESI.map(il => <option key={il}>{il}</option>)}</select>
-                    <input className={girdi} value={form.neredenAdres} onChange={dInput('neredenAdres')} placeholder="İlçe / mahalle (örn. Maltepe)" />
-                  </>)}
-                </div>
-                {/* NEREYE — Depo'da depo tipi seçilir */}
-                <div className="space-y-2 bg-white border border-neutral-200 rounded-xl p-2.5">
-                  <p className="text-[10px] font-black uppercase text-red-700">Lokasyon 2 · {depoMu ? 'Depo' : 'Nereye'}</p>
-                  {!depoMu && (<>
-                    <select className={girdi} value={form.nereyeIl} onChange={dInput('nereyeIl')}>{TT_IL_LISTESI.map(il => <option key={il}>{il}</option>)}</select>
-                    <input className={girdi} value={form.nereyeAdres} onChange={dInput('nereyeAdres')} placeholder="İlçe / mahalle (örn. Kozyatağı)" />
-                  </>)}
-                  {(depoMu || cikisMi) && (
-                    <select className={girdi} value={form.depoTipi} onChange={dInput('depoTipi')}>
-                      <option value="">Depo tipi seçin…</option>
-                      {TT_DEPO_TIPLERI.map(t => <option key={t.id} value={t.id}>{t.ad} — {t.olcu}{t.aylik ? ` · ${ttTl(t.aylik)}/ay` : ''}</option>)}
-                    </select>
-                  )}
-                </div>
-              </div>
-            </Bolum>
-
-            {/* 3) EV & BİNA */}
-            <Bolum Ikon={Home} baslik="Ev & Bina Durumu">
-              <Alan etiket="Oda Sayısı"><CipSecim secenekler={TT_ODA_SAYILARI} deger={form.odaSayisi} onSec={d('odaSayisi')} /></Alan>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <Alan etiket="Daire Katı">
-                  <select className={girdi} value={form.daireKat} onChange={dInput('daireKat')}>
-                    <option value="">Seçin…</option>
-                    {TT_KATLAR.map(k => <option key={k} value={k}>{/^\d+$/.test(k) ? `${k}. Kat` : k}</option>)}
-                  </select>
-                </Alan>
-                <Alan etiket="Asansör" className="sm:col-span-2"><CipSecim secenekler={TT_ASANSOR} deger={form.asansor} onSec={d('asansor')} /></Alan>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Alan etiket="Eşyalar asansöre sığar mı?"><CipSecim secenekler={['Evet', 'Hayır', 'Bilinmiyor']} deger={form.esyaAsansoreSigar} onSec={d('esyaAsansoreSigar')} /></Alan>
-                <Alan etiket="Yürüme Mesafesi (araç yanaşamazsa)"><CipSecim secenekler={TT_YURUME} deger={form.yurumeMesafesi} onSec={v => d('yurumeMesafesi')(v || 'Yok')} /></Alan>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                <Anahtar etiket="Binada kot farkı var" acik={form.kotFarki} onDegis={d('kotFarki')} />
-                <Anahtar etiket="Özel ölçü / büyük eşya" acik={form.ozelBuyukEsya} onDegis={d('ozelBuyukEsya')} />
-                <Anahtar etiket="Dış cephe asansörü gerekli" acik={form.disCepheAsansor} onDegis={d('disCepheAsansor')} />
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <Alan etiket="Site Taşınma Saatleri"><input className={girdi} value={form.siteTasinmaSaatleri} onChange={dInput('siteTasinmaSaatleri')} placeholder="Örn. 09:00–17:00, hafta sonu yasak" /></Alan>
-                <Alan etiket="Paketleme / Kolileme"><CipSecim secenekler={TT_PAKETLEME} deger={form.paketleme} onSec={d('paketleme')} /></Alan>
-              </div>
-            </Bolum>
-
-            {/* 4) VİDEO & FİYAT */}
-            <Bolum Ikon={Wallet} baslik="Video & Fiyat">
-              <Alan etiket="Video Durumu"><CipSecim secenekler={TT_VIDEO} deger={form.videoDurumu} onSec={v => d('videoDurumu')(v || 'Paylaşmadı')} renk="bg-sky-600 text-white border-sky-600" /></Alan>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="space-y-3">
-                  {/* Serbest metin: "27-32.000" gibi aralık da yazılabilir (Excel alışkanlığı) */}
-                  <Alan etiket="Verilen Fiyat (₺)"><input className={girdi} value={form.verilenFiyat} onChange={dInput('verilenFiyat')} placeholder="Örn. 32000 veya 27-32.000" /></Alan>
-                  {(depoMu || cikisMi) && (
-                    <Alan etiket="Depo Aylık Ücret (₺)"><input className={girdi} value={form.depoAylikUcret} onChange={dInput('depoAylikUcret')} placeholder="Örn. 6000" inputMode="numeric" /></Alan>
-                  )}
-                </div>
-                <FiyatOnerisiKutusu form={form} onAktar={oneriyiAktar} />
-              </div>
-            </Bolum>
-
-            {/* 5) TAKİP & DURUM */}
-            <Bolum Ikon={CalendarDays} baslik="Takip & Durum">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <Alan etiket="Tekrar Arama Tarihi">
-                  <input type="date" className={girdi} value={form.takipTarihi} onChange={dInput('takipTarihi')} />
-                  {/* Hızlı tarih düğmeleri: Excel'deki "20 Eylülde tekrar hatırlat" notlarının yerine */}
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {[['Yarın', 1], ['+3 gün', 3], ['+1 hafta', 7], ['+2 hafta', 14], ['+1 ay', 30]].map(([ad, g]) => (
-                      <button key={ad} type="button" onClick={() => d('takipTarihi')(gunEkleStr(ttBugunStr(), g))}
-                        className="px-2 py-1 rounded-lg bg-white border border-neutral-200 text-[10px] font-black text-neutral-600 hover:border-neutral-400">{ad}</button>
-                    ))}
-                    {form.takipTarihi && <button type="button" onClick={() => d('takipTarihi')('')} className="px-2 py-1 rounded-lg text-[10px] font-black text-red-600 hover:bg-red-50">Temizle</button>}
-                  </div>
-                  {form.takipTarihi && <p className="text-[10px] font-bold text-neutral-500 mt-1">{trTarih(form.takipTarihi)} tarihinde listede "Bugün Aranacak" olarak görünecek.</p>}
-                </Alan>
-                <Alan etiket="Görüşme Durumu">
-                  <div className="flex flex-wrap gap-1.5">
-                    {TT_DURUMLAR.map(s => (
-                      <button key={s.id} type="button" onClick={() => d('durum')(s.id)}
-                        className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border transition flex items-center gap-1.5 ${form.durum === s.id ? `${s.rozet} ring-2 ring-neutral-900 ring-offset-1` : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'}`}>
-                        <span className={`w-2 h-2 rounded-full ${s.nokta}`} /> {s.etiket}
-                      </button>
-                    ))}
-                  </div>
-                </Alan>
-              </div>
-              <Alan etiket="Açıklama">
-                <textarea className={`${girdi} min-h-[80px]`} value={form.aciklama} onChange={dInput('aciklama')}
-                  placeholder="Örn. Ev büyükleri ile konuşup dönüş yapacak. Halılar ve dikiş makinesi kıymetli." />
-              </Alan>
-            </Bolum>
+          {/* ORTA: aktif soru */}
+          <div className="overflow-y-auto overscroll-contain p-4 md:p-6">
+            <div className="max-w-3xl">
+              <p className={`text-[11px] font-black uppercase tracking-wider ${S.yazi}`}>
+                {adim.soru ? `Soru ${soruNo} / ${sorular.length}` : adim.id === 'musteri' ? 'Başlangıç' : 'Son adım'}
+              </p>
+              <h4 className="text-xl md:text-2xl font-black text-neutral-900 mt-0.5 mb-4">{adim.baslik}</h4>
+              {adimIcerigi()}
+            </div>
           </div>
 
-          {/* ------------------------------------- SAĞ: GÖRÜŞME REHBERİ --- */}
-          {/* Rehber geniş ekranda form kaydırılırken yerinde durur; uzunsa kendi içinde kayar */}
-          <aside className="space-y-3 lg:sticky lg:top-0 self-start lg:max-h-[calc(100dvh-11rem)] lg:overflow-y-auto lg:pr-1">
-            <button type="button" onClick={() => setRehberAcik(a => !a)}
-              className="w-full flex items-center justify-between px-3 py-2 rounded-xl bg-neutral-100 text-xs font-black text-neutral-700 lg:hidden">
-              Görüşme Rehberi {rehberAcik ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-            </button>
-            <div className={rehberAcik ? 'block' : 'hidden lg:block'}><GorusmeRehberi /></div>
+          {/* SAĞ: fiyat / geçmiş / rehber */}
+          <aside className="border-t lg:border-t-0 lg:border-l border-neutral-100 flex flex-col min-h-0 bg-neutral-50 max-h-[40vh] lg:max-h-none">
+            <div className="shrink-0 flex gap-1 p-2 border-b border-neutral-100">
+              {[['fiyat', 'Fiyat'], ['gecmis', `Geçmiş${gecmis ? ` (${gecmis.toplam})` : ''}`], ['rehber', 'Rehber']].map(([id, ad]) => (
+                <button key={id} type="button" onClick={() => setPanel(id)}
+                  className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition ${panel === id ? 'bg-neutral-900 text-white' : id === 'gecmis' && gecmis ? 'bg-amber-100 text-amber-800' : 'bg-white text-neutral-600'}`}>{ad}</button>
+              ))}
+            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3">
+              {panel === 'fiyat' && <TTFiyatPaneli form={form} />}
+              {panel === 'gecmis' && (gecmis ? <MusteriGecmisiKutusu gecmis={gecmis} ad={form.musteriAdi} />
+                : <p className="text-xs font-bold text-neutral-400 text-center py-6">{ttTelGecerli(form.telefon) ? 'Bu numarayla eşleşen geçmiş kayıt yok — yeni müşteri.' : 'Telefon girilince geçmiş kontrol edilir.'}</p>)}
+              {panel === 'rehber' && <TTGorusmeRehberi hizmetTipi={form.hizmetTipi} />}
+            </div>
           </aside>
         </div>
 
-        {/* ALT BAR — kaydet */}
-        {/* ALT ÇUBUK — sabit; Kaydet her zaman görünür */}
-        <div className="shrink-0 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 px-4 md:px-5 py-3 border-t border-neutral-200 bg-neutral-50">
-          <p className="text-xs font-bold text-red-600">{hata}</p>
-          <div className="flex gap-2">
-            <button type="button" onClick={onKapat} className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-white border border-neutral-200 text-sm font-black text-neutral-700 hover:bg-neutral-100">Vazgeç</button>
-            <button type="button" onClick={kaydet} disabled={kaydediliyor}
-              className={`flex-1 sm:flex-none px-5 py-2.5 rounded-xl text-white text-sm font-black flex items-center justify-center gap-2 shadow-lg disabled:opacity-60 ${siteRenk}`}>
-              {kaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Kaydet
+        {/* ALT ÇUBUK — Geri · İleri · Kaydet (Kaydet her adımda kullanılabilir) */}
+        <div className="shrink-0 px-3 md:px-5 py-3 border-t border-neutral-200 bg-white flex items-center gap-2">
+          <button type="button" onClick={geri} disabled={adimIdx === 0}
+            className="px-4 py-2.5 rounded-xl bg-neutral-100 text-sm font-black text-neutral-700 disabled:opacity-40 flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> Geri</button>
+          {adimIdx < adimlar.length - 1 && (
+            <button type="button" onClick={ileri} className={`px-5 py-2.5 rounded-xl text-white text-sm font-black flex items-center gap-1 shadow-lg ${S.dugme}`}>
+              {ttAdimTamam(form, adim.id) || adim.id === 'musteri' ? 'Sonraki' : 'Atla'} <ChevronRight className="w-4 h-4" />
             </button>
-          </div>
+          )}
+          <p className="flex-1 text-xs font-bold text-red-600 truncate">{hata}</p>
+          <button type="button" onClick={kaydet} disabled={kaydediliyor}
+            className="px-5 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-black flex items-center gap-1.5 shadow-lg shadow-green-600/30 disabled:opacity-60">
+            {kaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Kaydet
+          </button>
         </div>
       </div>
     </div>
   );
 };
 
-
 // ============================================================================
-// TELEFON TEKLİFLERİ MODÜLÜ
-// ----------------------------------------------------------------------------
-// Müşteri Havuzu'nda "Hızlı Teklifler"in ÜSTÜNDE duran bölüm. Telefonda
-// konuşulan müşteriler burada MANUEL girilir ve takip edilir. Excel'deki aylık
-// "Ağustos / Eylül" sayfalarının yerini alır; üstüne şunlar eklenir:
-//   • Tekrar arama tarihi → "Bugün aranacak" ve "Geciken" uyarıları
-//   • Durum (İşi Aldık / Reddedildi …) — sonradan her zaman değiştirilebilir
-//   • Excel fiyat tablosundan otomatik fiyat önerisi
-//   • DepoEvim süreç kontrol listesi (kaparo, sözleşme, oda no …)
-//   • Not geçmişi + kim ne zaman ne değiştirdi (hareketler)
-//   • Excel'e aktarma (CSV)
+// (5) VERİ HOOK'U, GİRİŞ BUTONU, LİSTE, DETAY VE SAYFA
 // ============================================================================
-
-const koleksiyon = () => collection(db, 'artifacts', appId, 'public', 'data', TELEFON_TEKLIF_KOLEKSIYONU);
-const belge = (id) => doc(db, 'artifacts', appId, 'public', 'data', TELEFON_TEKLIF_KOLEKSIYONU, id);
-
-// ============================================================================
-// VERİ HOOK'U — tüm telefon tekliflerini canlı dinler (tek dinleyici)
-// Müşteri Havuzu bunu bir kez çağırır; hem giriş butonu hem sayfa aynı veriyi kullanır.
-// ============================================================================
+// Tüm telefon tekliflerini canlı dinler (tek dinleyici — Müşteri Havuzu çağırır)
 const useTelefonTeklifleri = (aktif = true) => {
   const [teklifler, setTeklifler] = useState([]);
   useEffect(() => {
     if (!aktif) return undefined;
-    const unsub = onSnapshot(koleksiyon(), snap => {
+    const unsub = onSnapshot(ttKoleksiyon(), snap => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // En yeni görüşme en üstte (iletişim tarihi, sonra oluşturma zamanı)
       list.sort((a, b) => (b.iletisimTarihi || '').localeCompare(a.iletisimTarihi || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
       setTeklifler(list);
     }, err => console.error('Telefon teklifleri okunamadı:', err));
@@ -8701,48 +9705,49 @@ const useTelefonTeklifleri = (aktif = true) => {
   return teklifler;
 };
 
-// Özet sayaçları — hem buton hem sayfa üst şeridi kullanır
-const ozetHesapla = (list) => {
+// Görünürlük (kullanıcı talebi): her satışçı KENDİ görüşmelerini görür,
+// yöneticiler (Firma Sahibi / Yönetici / Müdür / düzenleme yetkili) HEPSİNİ görür.
+const ttGorunurMu = (t, kullanici, tamYetki) => tamYetki || !ttSahibi(t) || ttSahibi(t) === kullanici;
+
+// Özet sayaçları
+const ttOzet = (list) => {
   const ay = ttBugunStr().slice(0, 7);
-  const kapanan = list.filter(t => t.durum === 'İşi Aldık' || t.durum === 'Reddedildi').length;
+  const kapanan = list.filter(t => TT_KAPALI_DURUMLAR.includes(t.durum)).length;
   const alinan = list.filter(t => t.durum === 'İşi Aldık');
   return {
     toplam: list.length,
     buAy: list.filter(t => (t.iletisimTarihi || '').startsWith(ay)).length,
-    bugunAranacak: list.filter(t => takipDurumu(t) === 'bugun').length,
-    geciken: list.filter(t => takipDurumu(t) === 'gecikti').length,
+    bugun: list.filter(t => ttTakipDurumu(t) === 'bugun').length,
+    geciken: list.filter(t => ttTakipDurumu(t) === 'gecikti').length,
     isiAldik: alinan.length,
     donusum: kapanan ? Math.round((alinan.length / kapanan) * 100) : 0,
-    alinanTutar: alinan.reduce((s, t) => s + fiyatSayiya(t.verilenFiyat), 0),
+    alinanTutar: alinan.reduce((s, t) => s + ttFiyatSayi(t.verilenFiyat), 0),
   };
 };
 
-// ============================================================================
-// GİRİŞ BUTONU — Müşteri Havuzu'nda Hızlı Teklifler'in üstünde durur
-// ============================================================================
-const TelefonTeklifleriButonu = ({ site, teklifler, onClick }) => {
-  const siteninki = teklifler.filter(t => t.site === site);
-  const o = ozetHesapla(siteninki);
+// Müşteri Havuzu'nda Hızlı Teklifler'in üstündeki giriş butonu
+const TelefonTeklifleriButonu = ({ teklifler, onClick }) => {
+  const o = ttOzet(teklifler);
+  const nakliye = teklifler.filter(t => t.hizmetTipi === 'Nakliye').length;
   return (
     <button type="button" onClick={onClick}
       className="w-full px-3 py-2.5 rounded-2xl border-2 transition flex items-center gap-2.5 bg-white text-emerald-800 border-emerald-200 hover:border-emerald-400">
       <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-emerald-50"><PhoneCall className="w-5 h-5" /></span>
       <span className="text-left flex-1 min-w-0">
         <span className="block text-sm font-black leading-tight">Telefon Teklifleri</span>
-        <span className="block text-[10px] font-bold mt-0.5 text-emerald-600 truncate">Telefonda görüşülen müşteriler — manuel giriş, fiyat ve takip</span>
+        <span className="block text-[10px] font-bold mt-0.5 text-emerald-600 truncate">Telefonda görüşülen müşteriler — soru akışı, sistem fiyatı, takip</span>
       </span>
-      {/* Takip uyarıları: geciken kırmızı yanıp söner, bugün aranacak turuncu */}
+      <span className="hidden sm:inline text-[10px] font-black px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 shrink-0">{nakliye} Nakliye</span>
+      <span className="hidden sm:inline text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 shrink-0">{teklifler.length - nakliye} Depo</span>
       {o.geciken > 0 && <span className="text-[11px] font-black px-2 py-0.5 rounded-full text-white bg-red-600 animate-pulse shrink-0">{o.geciken} gecikti</span>}
-      {o.bugunAranacak > 0 && <span className="text-[11px] font-black px-2 py-0.5 rounded-full text-white bg-orange-500 shrink-0">{o.bugunAranacak} bugün</span>}
+      {o.bugun > 0 && <span className="text-[11px] font-black px-2 py-0.5 rounded-full text-white bg-orange-500 shrink-0">{o.bugun} bugün</span>}
       <span className="text-xs font-black px-2 py-0.5 rounded-full bg-emerald-50 shrink-0">{o.toplam}</span>
     </button>
   );
 };
 
-// ============================================================================
-// DURUM SEÇİCİ — satırda tıklayınca açılan küçük menü; durum her an değişebilir
-// ============================================================================
-const DurumSecici = ({ durum, onDegis }) => {
+// Satırdaki durum seçici — durum her an değiştirilebilir
+const TTDurumSecici = ({ durum, onDegis }) => {
   const [acik, setAcik] = useState(false);
   const d = ttDurumBul(durum);
   return (
@@ -8754,7 +9759,6 @@ const DurumSecici = ({ durum, onDegis }) => {
       </button>
       {acik && (
         <>
-          {/* Dışarı tıklayınca kapanması için görünmez perde */}
           <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setAcik(false); }} />
           <div className="absolute z-40 mt-1 right-0 w-52 bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5 animate-in fade-in slide-in-from-top-1">
             {TT_DURUMLAR.map(s => (
@@ -8771,134 +9775,127 @@ const DurumSecici = ({ durum, onDegis }) => {
   );
 };
 
-// Takip rozeti — tarih geçtiyse kırmızı, bugünse turuncu, ileride gri
-const TakipRozeti = ({ t }) => {
-  const td = takipDurumu(t);
-  if (td === 'kapali' || td === 'yok') return <span className="text-[10px] font-bold text-neutral-400">—</span>;
+const TTTakipRozeti = ({ t }) => {
+  const td = ttTakipDurumu(t);
+  if (td === 'kapali' || td === 'yok') return null;
   const stil = { gecikti: 'bg-red-600 text-white', bugun: 'bg-orange-500 text-white', ileride: 'bg-neutral-100 text-neutral-700' }[td];
   const metin = { gecikti: 'Gecikti', bugun: 'Bugün ara', ileride: 'Ara' }[td];
-  return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black ${stil}`}>
-      <Clock className="w-3 h-3" /> {metin} · {trTarih(t.takipTarihi).slice(0, 5)}
-    </span>
-  );
+  return <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black ${stil}`}><Clock className="w-3 h-3" /> {metin} · {ttTrTarih(t.takipTarihi).slice(0, 5)}</span>;
 };
 
-// Küçük bilgi çipi (oda, kat, asansör …)
-const Cip = ({ children, vurgu = false }) => (
+const TTCip = ({ children, vurgu = false }) => (
   <span className={`px-1.5 py-0.5 rounded-md text-[10px] font-black border ${vurgu ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-neutral-50 text-neutral-700 border-neutral-200'}`}>{children}</span>
 );
 
-// Güzergâh metni: "Maltepe → Depo 2+1" gibi
-const guzergah = (t) => {
-  const nereden = t.hizmetTipi === 'Depodan Çıkış' ? 'Depomuzdan' : (t.neredenAdres || t.neredenIl || '?');
-  const depoAd = TT_DEPO_TIPLERI.find(x => x.id === t.depoTipi)?.id;
-  const nereye = t.hizmetTipi === 'Depo' ? `Depo${depoAd ? ' ' + (depoAd === 'ozel' ? 'Özel' : depoAd) : ''}` : (t.nereyeAdres || t.nereyeIl || '?');
-  return `${nereden} → ${nereye}`;
+// Satırdaki fiyat metni
+const ttFiyatMetni = (t) => {
+  if (t.verilenFiyat) return /^\d+$/.test(String(t.verilenFiyat)) ? ttTl(t.verilenFiyat) : `${t.verilenFiyat} ₺`;
+  if (t.sistemFiyati) return ttTl(t.sistemFiyati);
+  return t.hizmetTipi === 'Depo' && t.nakliyeIstiyor === 'Kendisi' ? 'Nakliye yok' : '—';
 };
 
-// ============================================================================
-// LİSTE SATIRI
-// ============================================================================
-const TelefonTeklifSatiri = ({ t, onAc, onDurum, onDuzenle, onSil }) => {
-  const telVar = (t.telefon || '').replace(/\D/g, '').length >= 10;
-  const kat = /^\d+$/.test(t.daireKat || '') ? `${t.daireKat}. Kat` : t.daireKat;
+// ---------------------------------------------------------------- SATIR ---
+const TelefonTeklifSatiri = ({ tHam, gecmis, sahibiGoster, onAc, onDurum, onWhatsapp }) => {
+  const t = ttNormalize(tHam);
+  const hz = ttHizmetBul(t.hizmetTipi);
+  const telVar = ttTelGecerli(t.telefon);
+  const r = ttAdimRolleri(t);
   return (
-    <div onClick={onAc}
-      className="grid grid-cols-1 md:grid-cols-[1.3fr_1.6fr_0.8fr_0.9fr_1fr_auto] gap-2 md:gap-3 items-center px-3 py-2.5 border-b border-neutral-100 hover:bg-neutral-50 cursor-pointer">
-      {/* 1) Müşteri + iletişim */}
+    <div onClick={onAc} className="relative grid grid-cols-1 md:grid-cols-[1.3fr_1.7fr_0.9fr_1fr_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 hover:bg-neutral-50 cursor-pointer">
+      {/* Hizmet rengi şeridi — Sembol kırmızı, DepoEvim mavi/mor */}
+      <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${hz.stil.serit}`} />
       <div className="min-w-0">
-        <p className="text-sm font-black text-neutral-900 truncate">{t.musteriAdi || 'İsimsiz'}</p>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <p className="text-sm font-black text-neutral-900 truncate">{t.musteriAdi || 'İsimsiz'}</p>
+          {gecmis && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300" title="Bu numaranın geçmiş kaydı var">↺ Geçmiş {gecmis.toplam}</span>}
+        </div>
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-          <span className="text-[11px] font-bold text-neutral-500">{t.telefon || 'Telefon yok'}</span>
+          <span className="text-[11px] font-bold text-neutral-500">{ttTelGoster(t.telefon) || 'Telefon yok'}</span>
           {telVar && (<>
-            <a href={`tel:${t.telefon}`} onClick={e => e.stopPropagation()} className="p-1 rounded-md bg-green-600 text-white hover:bg-green-700" title="Ara"><Phone className="w-3 h-3" /></a>
-            <a href={`https://wa.me/${waNumara(t.telefon)}`} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()} className="p-1 rounded-md bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100" title="WhatsApp"><MessageCircle className="w-3 h-3" /></a>
+            <a href={`tel:0${ttTelAnahtar(t.telefon)}`} onClick={e => e.stopPropagation()} className="p-1 rounded-md bg-blue-600 text-white hover:bg-blue-700" title="Ara"><Phone className="w-3 h-3" /></a>
+            <button type="button" onClick={e => { e.stopPropagation(); onWhatsapp(); }} className="p-1 rounded-md bg-green-600 text-white hover:bg-green-700" title="WhatsApp hazır mesaj"><MessageCircle className="w-3 h-3" /></button>
           </>)}
         </div>
-        <p className="text-[10px] font-bold text-neutral-400 mt-0.5">{trTarih(t.iletisimTarihi)} · {t.olusturan || ''}</p>
+        <p className="text-[10px] font-bold text-neutral-400 mt-0.5">{ttTrTarih(t.iletisimTarihi)}{sahibiGoster ? ` · ${ttSahibi(t) || 'Atanmadı'}` : ''}</p>
       </div>
-
-      {/* 2) Hizmet + güzergâh + ev bilgileri */}
       <div className="min-w-0">
-        <p className="text-[11px] font-black text-neutral-800 truncate flex items-center gap-1">
-          <MapPin className="w-3 h-3 text-neutral-400 shrink-0" /> <span className="text-neutral-500">{t.hizmetTipi}:</span> {guzergah(t)}
+        <p className="text-[11px] font-black text-neutral-800 truncate flex items-center gap-1.5">
+          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${hz.stil.rozet}`}>{hz.id === 'Nakliye' ? 'EVDEN EVE' : hz.id.toUpperCase()}</span>
+          <MapPin className="w-3 h-3 text-neutral-400 shrink-0" /> {ttGuzergah(t)}
         </p>
         <div className="flex flex-wrap gap-1 mt-1">
-          {t.odaSayisi && <Cip>{t.odaSayisi}</Cip>}
-          {kat && <Cip>{kat}</Cip>}
-          {t.asansor && <Cip vurgu={t.asansor === 'Yok'}>Asansör: {t.asansor}</Cip>}
-          {t.yurumeMesafesi && t.yurumeMesafesi !== 'Yok' && <Cip vurgu>Yürüme {t.yurumeMesafesi}</Cip>}
-          {t.paketleme && <Cip>Paket: {t.paketleme === 'Biz Yapacağız' ? 'Biz' : 'Müşteri'}</Cip>}
-          {t.tasimaSekli === 'Kendi Nakliyesi' && t.hizmetTipi === 'Depo' && <Cip>Kendi nakliyesi</Cip>}
-          {(t.tasinmaTarihi || t.tasinmaNotu) && <Cip><CalendarDays className="w-3 h-3 inline -mt-0.5" /> {t.tasinmaTarihi ? trTarih(t.tasinmaTarihi) : t.tasinmaNotu}</Cip>}
+          {t.hizmetTipi === 'Nakliye' && t.odaSayisi && <TTCip>{t.odaSayisi}</TTCip>}
+          {t.hizmetTipi !== 'Nakliye' && t.depoBoyutu && <TTCip>{t.depoBoyutu} depo</TTCip>}
+          {t.hizmetTipi === 'Depo' && t.kiralamaSuresi && t.kiralamaSuresi !== '1' && <TTCip vurgu>{t.kiralamaSuresi} ay kampanya</TTCip>}
+          {t.hizmetTipi === 'Depo' && t.nakliyeIstiyor === 'Kendisi' && <TTCip>Kendisi getirecek</TTCip>}
+          {r.map(x => t[`${x}Kat`] ? <TTCip key={x} vurgu={t[`${x}Tasima`] === 'Merdiven' && ttKatNo(t[`${x}Kat`]) >= 3}>{t[`${x}Kat`]}{t[`${x}Tasima`] ? ` · ${t[`${x}Tasima`]}` : ''}</TTCip> : null)}
+          {t.toplama === 'Firma' && <TTCip vurgu>Toplama bizde</TTCip>}
+          {(t.tasinmaTarihi || t.tasinmaNotu) && <TTCip><CalendarDays className="w-3 h-3 inline -mt-0.5" /> {t.tasinmaTarihi ? ttTrTarih(t.tasinmaTarihi) : t.tasinmaNotu}</TTCip>}
+          <TTCip><Camera className="w-3 h-3 inline -mt-0.5" /> {t.videoDurumu || 'Paylaşmadı'}</TTCip>
         </div>
       </div>
-
-      {/* 3) Video */}
       <div>
-        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black ${t.videoDurumu === 'Alındı' || t.videoDurumu === 'Keşif Yapıldı' ? 'bg-sky-100 text-sky-800' : 'bg-neutral-100 text-neutral-500'}`}>
-          <Camera className="w-3 h-3" /> {t.videoDurumu || 'Paylaşmadı'}
-        </span>
+        <p className="text-sm font-black text-neutral-900">{ttFiyatMetni(t)}</p>
+        {t.depoAylik ? <p className="text-[10px] font-bold text-sky-700">{ttTl(t.depoAylik)} +KDV/ay</p> : null}
       </div>
-
-      {/* 4) Fiyat */}
-      <div>
-        <p className="text-sm font-black text-neutral-900">{t.verilenFiyat ? (/^\d+$/.test(t.verilenFiyat) ? ttTl(t.verilenFiyat) : `${t.verilenFiyat} ₺`) : '—'}</p>
-        {t.depoAylikUcret && <p className="text-[10px] font-bold text-sky-700">{ttTl(fiyatSayiya(t.depoAylikUcret))}/ay depo</p>}
-      </div>
-
-      {/* 5) Durum + takip */}
       <div className="space-y-1" onClick={e => e.stopPropagation()}>
-        <DurumSecici durum={t.durum || 'Yeni'} onDegis={onDurum} />
-        <TakipRozeti t={t} />
+        <TTDurumSecici durum={t.durum || 'Yeni'} onDegis={onDurum} />
+        <TTTakipRozeti t={t} />
       </div>
-
-      {/* 6) İşlemler */}
-      <div className="flex md:flex-col gap-1 justify-end" onClick={e => e.stopPropagation()}>
-        <button type="button" onClick={onDuzenle} className="p-1.5 rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700" title="Düzenle"><Edit className="w-3.5 h-3.5" /></button>
-        <button type="button" onClick={onSil} className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600" title="Sil"><Trash2 className="w-3.5 h-3.5" /></button>
-      </div>
-
-      {/* Açıklama (tam genişlik, satırın altında) */}
-      {t.aciklama && <p className="md:col-span-6 text-[11px] text-neutral-600 bg-yellow-50 border border-yellow-100 rounded-lg px-2 py-1 line-clamp-2">{t.aciklama}</p>}
+      <ChevronRight className="hidden md:block w-4 h-4 text-neutral-300" />
+      {t.aciklama && <p className="md:col-span-5 text-[11px] text-neutral-600 bg-yellow-50 border border-yellow-100 rounded-lg px-2 py-1 line-clamp-2">{t.aciklama}</p>}
     </div>
   );
 };
 
-// ============================================================================
-// DETAY PENCERESİ — tüm bilgiler + süreç kontrol listesi + notlar + geçmiş
-// ============================================================================
-const Bilgi = ({ e, v }) => (
-  <div className="min-w-0"><p className="text-[9px] font-black uppercase text-neutral-400">{e}</p><p className="text-xs font-black text-neutral-800 truncate">{v || '—'}</p></div>
+// ---------------------------------------------------------------- DETAY ---
+const TTBilgi = ({ e, v }) => (
+  <div className="min-w-0"><p className="text-[9px] font-black uppercase text-neutral-400">{e}</p><p className="text-xs font-black text-neutral-800 break-words">{v || '—'}</p></div>
 );
 
-const TelefonTeklifDetay = ({ t, onKapat, onDurum, onSurec, onNotEkle, onDuzenle, onKayitAc }) => {
+const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, onNotEkle, onDuzenle, onKayitAc, onWhatsapp, onTransfer, onHizmetAktar, onSil }) => {
+  const t = ttNormalize(tHam);
   const [not, setNot] = useState('');
+  const hz = ttHizmetBul(t.hizmetTipi);
+  const hesap = ttFiyatHesapla(t);
+  const adimlar = ttSurecAdimlari(t);
   const surec = t.surecAdimlari || {};
-  const tamam = TT_SUREC_ADIMLARI.filter(a => surec[a.id]).length;
-  const yuzde = Math.round((tamam / TT_SUREC_ADIMLARI.length) * 100);
-  const depoTipi = TT_DEPO_TIPLERI.find(x => x.id === t.depoTipi);
+  const tamam = adimlar.filter(a => surec[a.id]).length;
+  const r = ttAdimRolleri(t);
   const notGonder = async () => { if (!not.trim()) return; await onNotEkle(not.trim()); setNot(''); };
+  const hedefHizmet = t.hizmetTipi === 'Nakliye' ? 'Depo' : 'Nakliye';
 
   return (
-    // DEĞİŞTİ (kullanıcı talebi): Detay penceresi de ekrana sığar — başlık sabit, içerik kayar
     <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-3 md:p-4" onClick={onKapat}>
-      <div className="bg-white sm:rounded-3xl shadow-2xl w-full max-w-4xl h-[100dvh] sm:h-auto sm:max-h-[calc(100dvh-1.5rem)] md:max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
-        {/* Başlık — sabit */}
-        <div className="shrink-0 flex items-start justify-between gap-2 px-4 md:px-5 py-3 border-b border-neutral-200">
-          <div className="min-w-0">
-            <h3 className="text-lg font-black text-neutral-900 truncate">{t.musteriAdi || 'İsimsiz'}</h3>
-            <p className="text-xs font-bold text-neutral-500">{t.telefon} · {t.hizmetTipi} · {guzergah(t)}</p>
+      <div className="bg-white sm:rounded-3xl shadow-2xl w-full max-w-5xl h-[100dvh] sm:h-auto sm:max-h-[calc(100dvh-1.5rem)] md:max-h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
+        {/* Başlık — hizmet rengiyle */}
+        <div className={`shrink-0 px-4 md:px-5 py-3 text-white ${hz.stil.serit}`}>
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-wider text-white/80 flex items-center gap-1.5"><hz.Ikon className="w-3.5 h-3.5" /> {hz.ad} · {hz.marka}</p>
+              <h3 className="text-lg font-black truncate">{t.musteriAdi || 'İsimsiz'} <span className="text-sm font-bold text-white/80">{ttTelGoster(t.telefon)}</span></h3>
+              <p className="text-[11px] font-bold text-white/80 truncate">{ttGuzergah(t)} · Satışçı: {ttSahibi(t) || 'Atanmadı'}</p>
+            </div>
+            <button type="button" onClick={onKapat} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center shrink-0"><X className="w-5 h-5" /></button>
           </div>
-          <div className="flex gap-1.5 shrink-0">
-            <button type="button" onClick={onDuzenle} className="px-3 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-xs font-black flex items-center gap-1"><Edit className="w-3.5 h-3.5" /> Düzenle</button>
-            <button type="button" onClick={onKapat} className="w-9 h-9 rounded-xl bg-neutral-100 hover:bg-neutral-200 flex items-center justify-center"><X className="w-5 h-5" /></button>
+          {/* Hızlı aksiyonlar */}
+          <div className="flex flex-wrap gap-1.5 mt-2.5">
+            {ttTelGecerli(t.telefon) && <a href={`tel:0${ttTelAnahtar(t.telefon)}`} className="px-3 py-1.5 rounded-xl bg-white text-blue-700 text-xs font-black flex items-center gap-1.5 shadow"><Phone className="w-3.5 h-3.5" /> Ara</a>}
+            {ttTelGecerli(t.telefon) && <button type="button" onClick={onWhatsapp} className="px-3 py-1.5 rounded-xl bg-green-500 hover:bg-green-400 text-white text-xs font-black flex items-center gap-1.5 shadow"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp Mesajı</button>}
+            {onKayitAc && <button type="button" onClick={onKayitAc} className="px-3 py-1.5 rounded-xl bg-neutral-900 hover:bg-black text-white text-xs font-black flex items-center gap-1.5 shadow"><UserPlus className="w-3.5 h-3.5" /> Kayıt Aç</button>}
+            <button type="button" onClick={onDuzenle} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5"><Edit className="w-3.5 h-3.5" /> Soruları Düzenle</button>
+            <button type="button" onClick={onTransfer} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" /> Personele Transfer</button>
+            <button type="button" onClick={() => onHizmetAktar(hedefHizmet)} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5">
+              <ArrowUpDown className="w-3.5 h-3.5" /> {hedefHizmet === 'Depo' ? 'DepoEvim\'e Aktar' : 'Sembol\'e Aktar'}
+            </button>
+            {yetkili && <button type="button" onClick={onSil} className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-red-700 text-white text-xs font-black flex items-center gap-1.5 ml-auto"><Trash2 className="w-3.5 h-3.5" /> Sil</button>}
           </div>
         </div>
 
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-5 space-y-4">
-          {/* Durum düğmeleri — sonradan istenildiği kadar değiştirilebilir */}
+          {gecmis && <MusteriGecmisiKutusu gecmis={gecmis} ad={t.musteriAdi} />}
+
+          {/* Durum — sonradan istenildiği kadar değiştirilebilir */}
           <div>
             <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Görüşme Durumu</p>
             <div className="flex flex-wrap gap-1.5">
@@ -8909,71 +9906,66 @@ const TelefonTeklifDetay = ({ t, onKapat, onDurum, onSurec, onNotEkle, onDuzenle
                 </button>
               ))}
             </div>
-            {/* İşi aldıysak CRM'de gerçek kayıt açma kısayolu (App.jsx'teki mevcut akış) */}
-            {t.durum === 'İşi Aldık' && onKayitAc && (
-              <button type="button" onClick={() => onKayitAc({ hizmetTipi: t.hizmetTipi === 'Nakliye' ? 'Nakliye' : 'Depo', musteriAdi: t.musteriAdi || '', telefon: t.telefon || '' })}
-                className="mt-2 px-3 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-black flex items-center gap-1.5 shadow-lg shadow-green-600/30">
-                <UserPlus className="w-4 h-4" /> CRM'de Müşteri Kaydı Aç
-              </button>
-            )}
+            {t.kayitAcildi && <p className="mt-1.5 text-[10px] font-black text-green-700">✓ Kayıt ekranına aktarıldı: {new Date(t.kayitAcildi).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}</p>}
           </div>
 
-          {/* Tüm bilgiler (Excel sütunları) */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 bg-neutral-50 border border-neutral-200 rounded-2xl p-3">
-            <Bilgi e="İletişim Tarihi" v={trTarih(t.iletisimTarihi)} />
-            <Bilgi e="Taşınma Tarihi" v={t.tasinmaTarihi ? trTarih(t.tasinmaTarihi) : t.tasinmaNotu} />
-            <Bilgi e="Oda Sayısı" v={t.odaSayisi} />
-            <Bilgi e="Daire Kat" v={/^\d+$/.test(t.daireKat || '') ? `${t.daireKat}. Kat` : t.daireKat} />
-            <Bilgi e="Asansör" v={t.asansor} />
-            <Bilgi e="Asansöre Sığar mı" v={t.esyaAsansoreSigar} />
-            <Bilgi e="Yürüme Mesafe" v={t.yurumeMesafesi} />
-            <Bilgi e="Paketleme" v={t.paketleme} />
-            <Bilgi e="Video" v={t.videoDurumu} />
-            <Bilgi e="Site Taşınma Saatleri" v={t.siteTasinmaSaatleri} />
-            <Bilgi e="Depo Tipi" v={depoTipi ? depoTipi.ad : ''} />
-            <Bilgi e="Taşıma Şekli" v={t.hizmetTipi === 'Depo' ? t.tasimaSekli : ''} />
-            <Bilgi e="Verilen Fiyat" v={t.verilenFiyat ? `${t.verilenFiyat} ₺` : ''} />
-            <Bilgi e="Depo Aylık" v={t.depoAylikUcret ? `${t.depoAylikUcret} ₺` : ''} />
-            <Bilgi e="Tekrar Arama" v={trTarih(t.takipTarihi)} />
-            <Bilgi e="Dikkat" v={[t.kotFarki && 'Kot farkı', t.ozelBuyukEsya && 'Büyük eşya', t.disCepheAsansor && 'Dış cephe asansörü'].filter(Boolean).join(', ')} />
-            {t.aciklama && <div className="col-span-2 md:col-span-4"><p className="text-[9px] font-black uppercase text-neutral-400">Açıklama</p><p className="text-xs font-semibold text-neutral-800 whitespace-pre-wrap">{t.aciklama}</p></div>}
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+            {/* Cevaplar */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 bg-neutral-50 border border-neutral-200 rounded-2xl p-3 self-start">
+              <TTBilgi e="Görüşme Tarihi" v={ttTrTarih(t.iletisimTarihi)} />
+              <TTBilgi e="Taşınma / İşlem Tarihi" v={[t.tasinmaTarihi && ttTrTarih(t.tasinmaTarihi), t.tasinmaNotu].filter(Boolean).join(' · ')} />
+              {t.hizmetTipi === 'Nakliye' && <TTBilgi e="Ev Tipi" v={TT_ODA_SECENEKLERI.find(o => o.id === t.odaSayisi)?.ad || t.odaSayisi} />}
+              {t.hizmetTipi === 'Depo' && <TTBilgi e="Eşya Cinsi" v={t.esyaCinsi} />}
+              {t.hizmetTipi !== 'Nakliye' && <TTBilgi e="Depo Boyutu" v={t.depoBoyutu ? `${t.depoBoyutu}${TT_DEPO_BOYUTLARI.find(b => b.id === t.depoBoyutu)?.m3 ? ` · ${TT_DEPO_BOYUTLARI.find(b => b.id === t.depoBoyutu).m3} m³` : ''}` : ''} />}
+              {t.hizmetTipi === 'Depo' && <TTBilgi e="Kiralama" v={TT_KIRALAMA.find(k => k.id === t.kiralamaSuresi)?.ad} />}
+              {t.hizmetTipi !== 'Nakliye' && <TTBilgi e="Şube" v={t.sube} />}
+              {t.hizmetTipi === 'Depo' && <TTBilgi e="Nakliye" v={TT_NAKLIYE_TERCIHI.find(n => n.id === t.nakliyeIstiyor)?.ad} />}
+              {r.includes('yuk') || t.hizmetTipi === 'Depo' ? <TTBilgi e={t.hizmetTipi === 'Nakliye' ? 'Yükleme Adresi' : 'Eşyaların Yeri'} v={[ttAdresKisa(t.yukIl, t.yukIlce), t.yukAdres].filter(Boolean).join(' — ')} /> : null}
+              {r.includes('yuk') && <TTBilgi e="Yükleme Kat / Taşıma" v={ttKatTasima(t.yukKat, t.yukTasima)} />}
+              {r.includes('yuk') && <TTBilgi e="Yükleme Yanaşma" v={TT_YANASMA.find(y => y.id === t.yukMesafe)?.ad} />}
+              {r.includes('bos') && <TTBilgi e="Boşaltma Adresi" v={[ttAdresKisa(t.bosIl, t.bosIlce), t.bosAdres].filter(Boolean).join(' — ')} />}
+              {r.includes('bos') && <TTBilgi e="Boşaltma Kat / Taşıma" v={ttKatTasima(t.bosKat, t.bosTasima)} />}
+              {r.includes('bos') && <TTBilgi e="Boşaltma Yanaşma" v={TT_YANASMA.find(y => y.id === t.bosMesafe)?.ad} />}
+              {(t.hizmetTipi === 'Nakliye' || t.nakliyeIstiyor === 'Firma') && <TTBilgi e="Paketleme" v={TT_TOPLAMA.find(x => x.id === t.toplama)?.ad} />}
+              <TTBilgi e="Video" v={t.videoDurumu} />
+              <TTBilgi e="Söylenen Fiyat" v={ttFiyatMetni(t)} />
+              <TTBilgi e="Tekrar Arama" v={ttTrTarih(t.takipTarihi)} />
+              {t.aciklama && <div className="col-span-2 md:col-span-3"><p className="text-[9px] font-black uppercase text-neutral-400">Açıklama</p><p className="text-xs font-semibold text-neutral-800 whitespace-pre-wrap">{t.aciklama}</p></div>}
+            </div>
+            {/* Güncel sistem hesabı (cevaplara göre yeniden hesaplanır) */}
+            <TTFiyatPaneli form={t} />
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Süreç kontrol listesi (Excel "Süreç" sayfası) */}
+            {/* Süreç adımları — kılavuzdaki sıra */}
             <div className="border border-neutral-200 rounded-2xl p-3">
               <div className="flex items-center justify-between mb-2">
                 <p className="text-xs font-black uppercase text-neutral-800 flex items-center gap-1.5"><ClipboardCheck className="w-4 h-4" /> Süreç Adımları</p>
-                <span className="text-[11px] font-black text-neutral-500">{tamam}/{TT_SUREC_ADIMLARI.length}</span>
+                <span className="text-[11px] font-black text-neutral-500">{tamam}/{adimlar.length}</span>
               </div>
-              {/* İlerleme çubuğu */}
-              <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden mb-2"><div className="h-full bg-green-500 transition-all" style={{ width: `${yuzde}%` }} /></div>
-              <div className="space-y-1">
-                {TT_SUREC_ADIMLARI.map(a => (
-                  <label key={a.id} className="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-neutral-50 cursor-pointer">
-                    <input type="checkbox" checked={!!surec[a.id]} onChange={e => onSurec(a, e.target.checked)} className="mt-0.5 accent-green-600" />
-                    <span className={`text-[11px] font-bold ${surec[a.id] ? 'text-neutral-400 line-through' : 'text-neutral-700'}`}>{a.ad}</span>
-                  </label>
-                ))}
-              </div>
+              <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden mb-2"><div className="h-full bg-green-500 transition-all" style={{ width: `${Math.round((tamam / adimlar.length) * 100)}%` }} /></div>
+              {adimlar.map(a => (
+                <label key={a.id} className="flex items-start gap-2 px-2 py-1.5 rounded-lg hover:bg-neutral-50 cursor-pointer">
+                  <input type="checkbox" checked={!!surec[a.id]} onChange={e => onSurec(a, e.target.checked)} className="mt-0.5 accent-green-600" />
+                  <span className={`text-[11px] font-bold ${surec[a.id] ? 'text-neutral-400 line-through' : 'text-neutral-700'}`}>{a.ad}</span>
+                </label>
+              ))}
             </div>
-
-            {/* Notlar + hareket geçmişi */}
+            {/* Notlar + geçmiş */}
             <div className="border border-neutral-200 rounded-2xl p-3 flex flex-col">
               <p className="text-xs font-black uppercase text-neutral-800 flex items-center gap-1.5 mb-2"><History className="w-4 h-4" /> Notlar & Geçmiş</p>
               <div className="flex gap-1.5 mb-2">
                 <input value={not} onChange={e => setNot(e.target.value)} onKeyDown={e => e.key === 'Enter' && notGonder()}
-                  placeholder="Görüşme notu ekle (örn. 15.09'da tekrar aranacak)"
+                  placeholder="Görüşme notu ekle (örn. 15.10'da tekrar aranacak)"
                   className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-neutral-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-neutral-900/20" />
                 <button type="button" onClick={notGonder} className="px-3 rounded-xl bg-neutral-900 text-white hover:bg-neutral-700"><Send className="w-4 h-4" /></button>
               </div>
               <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
-                {/* Notlar ve hareketler tarih sırasıyla birlikte gösterilir */}
                 {[...(t.notlar || []).map(n => ({ ...n, tur: 'not' })), ...(t.hareketler || []).map(h => ({ ...h, tur: 'hareket', metin: h.islem }))]
                   .sort((a, b) => (b.tarih || '').localeCompare(a.tarih || ''))
                   .map((x, i) => (
                     <div key={i} className={`rounded-lg px-2 py-1.5 text-[11px] ${x.tur === 'not' ? 'bg-yellow-50 border border-yellow-100 text-neutral-800 font-semibold' : 'bg-neutral-50 text-neutral-500'}`}>
-                      <p>{x.metin}</p>
+                      <p className="whitespace-pre-wrap">{x.metin}</p>
                       <p className="text-[9px] font-bold text-neutral-400 mt-0.5">{x.kullanici} · {new Date(x.tarih).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}</p>
                     </div>
                   ))}
@@ -8986,130 +9978,172 @@ const TelefonTeklifDetay = ({ t, onKapat, onDurum, onSurec, onNotEkle, onDuzenle
   );
 };
 
-// ============================================================================
-// CSV (EXCEL) DIŞA AKTARMA — Excel Türkçe'de ";" ayırıcı ve BOM ile düzgün açılır
-// ============================================================================
-const csvIndir = (list, site) => {
-  const sutunlar = [
-    ['İletişim Tarihi', t => trTarih(t.iletisimTarihi)], ['Müşteri Adı', t => t.musteriAdi], ['Telefon', t => t.telefon],
-    ['Hizmet', t => t.hizmetTipi], ['Taşınma Tarihi', t => t.tasinmaTarihi ? trTarih(t.tasinmaTarihi) : t.tasinmaNotu],
-    ['Lokasyon 1', t => t.hizmetTipi === 'Depodan Çıkış' ? 'Depomuzdan' : [t.neredenIl, t.neredenAdres].filter(Boolean).join(' / ')],
-    ['Lokasyon 2', t => t.hizmetTipi === 'Depo' ? `Depo ${t.depoTipi || ''}` : [t.nereyeIl, t.nereyeAdres].filter(Boolean).join(' / ')],
-    ['Oda Sayısı', t => t.odaSayisi], ['Daire Kat', t => t.daireKat], ['Asansör', t => t.asansor], ['Yürüme Mesafe', t => t.yurumeMesafesi],
-    ['Paketleme', t => t.paketleme], ['Video Durumu', t => t.videoDurumu], ['Fiyat', t => t.verilenFiyat], ['Depo Aylık', t => t.depoAylikUcret],
-    ['Durum', t => ttDurumBul(t.durum).etiket], ['Tekrar Arama', t => trTarih(t.takipTarihi)], ['Açıklama', t => t.aciklama],
+// CSV (Excel) dışa aktarma — Türkçe Excel için ";" ayırıcı ve BOM
+const ttCsvIndir = (list) => {
+  const S = [
+    ['Görüşme Tarihi', t => ttTrTarih(t.iletisimTarihi)], ['Satışçı', t => ttSahibi(t)], ['Hizmet', t => t.hizmetTipi],
+    ['Müşteri', t => t.musteriAdi], ['Telefon', t => ttTelGoster(t.telefon)],
+    ['Tarih', t => [t.tasinmaTarihi && ttTrTarih(t.tasinmaTarihi), t.tasinmaNotu].filter(Boolean).join(' ')],
+    ['Güzergâh', t => ttGuzergah(t)], ['Ev Tipi / Depo', t => t.hizmetTipi === 'Nakliye' ? t.odaSayisi : t.depoBoyutu],
+    ['Yükleme Kat/Taşıma', t => ttKatTasima(t.yukKat, t.yukTasima)], ['Boşaltma Kat/Taşıma', t => ttKatTasima(t.bosKat, t.bosTasima)],
+    ['Paketleme', t => t.toplama], ['Video', t => t.videoDurumu], ['Sistem Fiyatı', t => t.sistemFiyati], ['Söylenen Fiyat', t => t.verilenFiyat],
+    ['Depo Aylık', t => t.depoAylik], ['Durum', t => ttDurumBul(t.durum).etiket], ['Tekrar Arama', t => ttTrTarih(t.takipTarihi)], ['Açıklama', t => t.aciklama],
   ];
-  const kacis = (v) => `"${String(v ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
-  const satirlar = [sutunlar.map(s => kacis(s[0])).join(';'), ...list.map(t => sutunlar.map(s => kacis(s[1](t))).join(';'))];
+  const k = (v) => `"${String(v ?? '').replace(/"/g, '""').replace(/\r?\n/g, ' ')}"`;
+  const satirlar = [S.map(s => k(s[0])).join(';'), ...list.map(ttNormalize).map(t => S.map(s => k(s[1](t))).join(';'))];
   const blob = new Blob(['\uFEFF' + satirlar.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = `telefon-teklifleri-${site}-${ttBugunStr()}.csv`;
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
+  const a = document.createElement('a'); a.href = url; a.download = `telefon-teklifleri-${ttBugunStr()}.csv`;
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 };
 
-// ============================================================================
-// ANA SAYFA
-// Props: site ('depoevim' | 'sembolevdeneve'), teklifler (hook'tan), currentUser,
-//        addSystemLog, onKayitAc (opsiyonel), onGeri
-// ============================================================================
-const TelefonTeklifleriView = ({ site, teklifler = [], currentUser, addSystemLog, onKayitAc = null, onGeri }) => {
-  const [formAcik, setFormAcik] = useState(false);
-  const [duzenlenen, setDuzenlenen] = useState(null);     // Düzenlenen kayıt (null = yeni)
-  const [detayId, setDetayId] = useState(null);           // Açık detay penceresi
-  const [silinecek, setSilinecek] = useState(null);       // Silme onayı bekleyen kayıt
+// ================================================================ SAYFA ===
+// Props: teklifler (tümü), currentUser, satiscilar (ad listesi), tamYetki,
+//        gecmisIndeksi, onKayitAc, addSystemLog, acilisFormu (havuzdan gelen
+//        ön doldurma), onAcilisFormuKullanildi, onHavuzKaydinaIsle, onGeri
+const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], tamYetki = false, gecmisIndeksi = null, addSystemLog, onKayitAc = null,
+  acilisFormu = null, onAcilisFormuKullanildi, onHavuzKaydinaIsle, onGeri }) => {
+  const [form, setForm] = useState(null);             // { baslangic, hizmet } — açık sihirbaz
+  const [detayId, setDetayId] = useState(null);
+  const [waKayit, setWaKayit] = useState(null);        // WhatsApp penceresi açık kayıt
+  const [transferKayit, setTransferKayit] = useState(null);
+  const [silinecek, setSilinecek] = useState(null);
   const [arama, setArama] = useState('');
+  const [hizmetFiltre, setHizmetFiltre] = useState('Tümü');
   const [durumFiltre, setDurumFiltre] = useState('Tümü');
   const [takipFiltre, setTakipFiltre] = useState('Tümü');
-  const [ayFiltre, setAyFiltre] = useState('Tümü');        // Excel'deki aylık sayfaların karşılığı
+  const [ayFiltre, setAyFiltre] = useState('Tümü');
+  const [sahipFiltre, setSahipFiltre] = useState('Tümü');   // Yalnızca yöneticilerde görünür
 
   const kullanici = currentUser?.fullName || 'Sistem';
-  const siteAd = site === 'depoevim' ? 'DepoEvim' : 'Sembol';
-  const siteRenk = site === 'depoevim' ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30' : 'bg-red-600 hover:bg-red-700 shadow-red-600/30';
 
-  // Sadece seçili şirketin kayıtları
-  const siteninki = useMemo(() => teklifler.filter(t => t.site === site), [teklifler, site]);
-  const ozet = useMemo(() => ozetHesapla(siteninki), [siteninki]);
-  const detay = siteninki.find(t => t.id === detayId) || null; // canlı veri → pencere anında güncellenir
+  // Havuzdaki "Görüşme Formu" butonundan gelindiyse sihirbaz dolu açılır
+  useEffect(() => {
+    if (acilisFormu) { setForm({ baslangic: acilisFormu, hizmet: acilisFormu.hizmetTipi || 'Nakliye' }); onAcilisFormuKullanildi?.(); }
+  }, [acilisFormu]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Kayıtlarda geçen aylar (YYYY-MM) → ay filtresi seçenekleri
-  const aylar = useMemo(() => [...new Set(siteninki.map(t => (t.iletisimTarihi || '').slice(0, 7)).filter(Boolean))].sort().reverse(), [siteninki]);
+  // Görünür kayıtlar (kendi / tümü) → filtreler bunun üzerine uygulanır
+  const gorunur = useMemo(() => teklifler.filter(t => ttGorunurMu(t, kullanici, tamYetki)), [teklifler, kullanici, tamYetki]);
+  const hizmetli = useMemo(() => gorunur.filter(t => hizmetFiltre === 'Tümü' || (t.hizmetTipi || 'Nakliye') === hizmetFiltre)
+    .filter(t => sahipFiltre === 'Tümü' || (sahipFiltre === '__yok' ? !ttSahibi(t) : ttSahibi(t) === sahipFiltre)), [gorunur, hizmetFiltre, sahipFiltre]);
+  const ozet = useMemo(() => ttOzet(hizmetli), [hizmetli]);
+  const aylar = useMemo(() => [...new Set(gorunur.map(t => (t.iletisimTarihi || '').slice(0, 7)).filter(Boolean))].sort().reverse(), [gorunur]);
   const ayAdi = (ym) => new Date(`${ym}-01T00:00:00`).toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
+  const sahipler = useMemo(() => [...new Set([...satiscilar, ...teklifler.map(ttSahibi)].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'tr')), [satiscilar, teklifler]);
 
-  // Filtrelenmiş liste
   const liste = useMemo(() => {
     const q = arama.trim().toLocaleLowerCase('tr-TR');
-    return siteninki.filter(t => {
+    const qTel = ttTelAnahtar(arama) || arama.replace(/\D/g, '');
+    return hizmetli.filter(t => {
       if (durumFiltre !== 'Tümü' && (t.durum || 'Yeni') !== durumFiltre) return false;
       if (ayFiltre !== 'Tümü' && !(t.iletisimTarihi || '').startsWith(ayFiltre)) return false;
-      if (takipFiltre === 'Bugün' && takipDurumu(t) !== 'bugun') return false;
-      if (takipFiltre === 'Geciken' && takipDurumu(t) !== 'gecikti') return false;
-      if (takipFiltre === 'Takipsiz' && takipDurumu(t) !== 'yok') return false;
+      const td = ttTakipDurumu(t);
+      if (takipFiltre === 'Bugün' && td !== 'bugun') return false;
+      if (takipFiltre === 'Geciken' && td !== 'gecikti') return false;
+      if (takipFiltre === 'Takipsiz' && td !== 'yok') return false;
       if (q) {
-        const havuz = [t.musteriAdi, t.telefon, t.neredenAdres, t.nereyeAdres, t.neredenIl, t.nereyeIl, t.aciklama].join(' ').toLocaleLowerCase('tr-TR');
-        if (!havuz.includes(q)) return false;
+        const n = ttNormalize(t);
+        const metin = [n.musteriAdi, n.yukIlce, n.bosIlce, n.yukAdres, n.bosAdres, n.aciklama, ttSahibi(n)].join(' ').toLocaleLowerCase('tr-TR');
+        // Telefon aramasında 0'lı/0'sız/boşluklu yazım fark etmez
+        const telUyar = qTel.length >= 4 && ttTelAnahtar(n.telefon).includes(qTel.replace(/^0/, ''));
+        if (!metin.includes(q) && !telUyar) return false;
       }
       return true;
     });
-  }, [siteninki, arama, durumFiltre, ayFiltre, takipFiltre]);
+  }, [hizmetli, arama, durumFiltre, ayFiltre, takipFiltre]);
 
-  // Durum sayaçları (filtre çiplerinde)
-  const durumSayisi = (id) => id === 'Tümü' ? siteninki.length : siteninki.filter(t => (t.durum || 'Yeni') === id).length;
+  const detay = teklifler.find(t => t.id === detayId) || null;
+  const gecmisOf = (t) => musteriGecmisiBul(gecmisIndeksi, t.telefon, t.id);
+  const durumSayisi = (id) => id === 'Tümü' ? hizmetli.length : hizmetli.filter(t => (t.durum || 'Yeni') === id).length;
 
   // ------------------------------------------------------ FIRESTORE YAZMA ---
-  // Her değişiklik "hareketler" dizisine kim/ne zaman/ne bilgisiyle eklenir
   const hareket = (islem) => ({ tarih: new Date().toISOString(), kullanici, islem });
+  const guncelle = async (t, degisiklik, islem) => {
+    const canli = teklifler.find(x => x.id === t.id) || t; // Güncel geçmiş üzerine yazılır
+    await updateDoc(ttBelge(t.id), { ...degisiklik, updatedAt: new Date().toISOString(), hareketler: [...(canli.hareketler || []), hareket(islem)] });
+  };
 
-  const kaydet = async (form) => {
-    // Formdan yalnızca FORM alanları yazılır; notlar/süreç/geçmiş gibi alanlar
-    // eski kopyayla ezilmesin diye ayıklanır (aynı anda not ekleyen olabilir)
-    const { id: _id, notlar: _n, hareketler: _h, surecAdimlari: _s, createdAt: _c, olusturan: _o, site: _site, ...alanlar } = form;
-    const temiz = { ...alanlar, musteriAdi: (form.musteriAdi || '').trim(), telefon: (form.telefon || '').trim(), updatedAt: new Date().toISOString() };
+  const kaydet = async (veri) => {
+    // Formdan yalnızca FORM alanları yazılır; notlar/süreç/geçmiş eski kopyayla ezilmez
+    const { id: _id, notlar: _n, hareketler: _h, surecAdimlari: _s, createdAt: _c, olusturan: _o, atanan: _a, kayitAcildi: _k, ...alanlar } = veri;
+    const duzenlenen = form?.baslangic?.id ? teklifler.find(x => x.id === form.baslangic.id) : null;
     if (duzenlenen) {
-      await updateDoc(belge(duzenlenen.id), { ...temiz, hareketler: [...(duzenlenen.hareketler || []), hareket('Görüşme bilgileri düzenlendi')] });
-      addSystemLog?.('Telefon Teklifleri', `${temiz.musteriAdi || temiz.telefon} güncellendi.`);
+      await guncelle(duzenlenen, alanlar, 'Görüşme cevapları güncellendi');
+      addSystemLog?.('Telefon Teklifleri', `${alanlar.musteriAdi || alanlar.telefon} güncellendi.`);
     } else {
-      await addDoc(koleksiyon(), {
-        ...temiz, site, notlar: [], surecAdimlari: {}, olusturan: kullanici,
-        createdAt: new Date().toISOString(), hareketler: [hareket('Telefon görüşmesi kaydedildi')],
+      const ref = await addDoc(ttKoleksiyon(), {
+        ...alanlar, notlar: [], surecAdimlari: {}, olusturan: kullanici, atanan: kullanici,
+        createdAt: new Date().toISOString(), hareketler: [hareket(`Telefon görüşmesi kaydedildi (${alanlar.hizmetTipi}${alanlar.sistemFiyati ? `, sistem fiyatı ${ttTl(alanlar.sistemFiyati)}` : ''})`)],
       });
-      addSystemLog?.('Telefon Teklifleri', `${siteAd}: yeni telefon teklifi — ${temiz.musteriAdi || temiz.telefon}`);
+      addSystemLog?.('Telefon Teklifleri', `Yeni telefon teklifi: ${alanlar.musteriAdi || alanlar.telefon} (${alanlar.hizmetTipi})`);
+      // Havuzdaki bir talepten başlatıldıysa o talebe de işlenir
+      if (alanlar.havuzKayitId) onHavuzKaydinaIsle?.(alanlar.havuzKayitId, `Telefon görüşme formu dolduruldu${alanlar.verilenFiyat ? ` — fiyat ${alanlar.verilenFiyat} ₺` : ''}`);
+      setDetayId(ref.id);
     }
-    setFormAcik(false); setDuzenlenen(null);
+    setForm(null);
   };
 
   const durumDegistir = async (t, yeni) => {
     const eski = t.durum || 'Yeni';
     if (eski === yeni) return;
-    await updateDoc(belge(t.id), { durum: yeni, updatedAt: new Date().toISOString(), hareketler: [...(t.hareketler || []), hareket(`Durum "${eski}" → "${yeni}" olarak değiştirildi`)] });
+    await guncelle(t, { durum: yeni }, `Durum "${eski}" → "${yeni}" olarak değiştirildi`);
     addSystemLog?.('Telefon Teklifleri', `${t.musteriAdi || t.telefon}: durum "${yeni}" yapıldı.`);
   };
-
   const surecIsaretle = async (t, adim, deger) => {
-    await updateDoc(belge(t.id), {
-      [`surecAdimlari.${adim.id}`]: deger ? new Date().toISOString() : false, // tamamlanma zamanı saklanır
-      hareketler: [...(t.hareketler || []), hareket(`${deger ? '✓' : '✗'} ${adim.ad}`)],
+    const canli = teklifler.find(x => x.id === t.id) || t;
+    await updateDoc(ttBelge(t.id), {
+      [`surecAdimlari.${adim.id}`]: deger ? new Date().toISOString() : false,
+      hareketler: [...(canli.hareketler || []), hareket(`${deger ? '✓' : '✗'} ${adim.ad}`)],
     });
   };
-
   const notEkle = async (t, metin) => {
-    await updateDoc(belge(t.id), {
-      notlar: [...(t.notlar || []), { tarih: new Date().toISOString(), kullanici, metin }],
-      updatedAt: new Date().toISOString(),
-    });
+    const canli = teklifler.find(x => x.id === t.id) || t;
+    await updateDoc(ttBelge(t.id), { notlar: [...(canli.notlar || []), { tarih: new Date().toISOString(), kullanici, metin }], updatedAt: new Date().toISOString() });
   };
-
+  const transferEt = async (t, yeniSahip, not) => {
+    const eski = ttSahibi(t) || 'Atanmadı';
+    const canli = teklifler.find(x => x.id === t.id) || t;
+    await updateDoc(ttBelge(t.id), {
+      atanan: yeniSahip, updatedAt: new Date().toISOString(),
+      hareketler: [...(canli.hareketler || []), hareket(`Transfer: ${eski} → ${yeniSahip}`)],
+      ...(not ? { notlar: [...(canli.notlar || []), { tarih: new Date().toISOString(), kullanici, metin: `[Transfer notu → ${yeniSahip}] ${not}` }] } : {}),
+    });
+    addSystemLog?.('Telefon Teklifleri', `${t.musteriAdi || t.telefon} ${yeniSahip} adlı personele transfer edildi.`);
+    setTransferKayit(null);
+    if (!tamYetki && yeniSahip !== kullanici) setDetayId(null);  // Artık başkasının kaydı — pencere kapanır
+  };
+  // Sembol ↔ DepoEvim aktarımı: ortak cevaplar (ad, telefon, adres, kat, asansör) korunur
+  const hizmetAktar = async (tHam, hedef) => {
+    const t = ttNormalize(tHam);
+    const ek = hedef === 'Depo'
+      ? { depoBoyutu: t.depoBoyutu || (['1+0', '1+1', '2+1', '3+1'].includes(t.odaSayisi) ? t.odaSayisi : ''), nakliyeIstiyor: 'Firma', sube: t.sube || 'Farketmez', esyaCinsi: t.esyaCinsi || 'Ev Eşyası' }
+      : { odaSayisi: t.odaSayisi || (t.depoBoyutu && t.depoBoyutu !== 'Özel' ? t.depoBoyutu : '') };
+    const yeni = { ...t, hizmetTipi: hedef, ...ek };
+    const h = ttFiyatHesapla(yeni);
+    await guncelle(t, { surum: 2, hizmetTipi: hedef, site: ttSiteOf(hedef), ...ek, yukIl: t.yukIl, yukIlce: t.yukIlce, yukKat: t.yukKat || '', yukTasima: t.yukTasima || '', yukMesafe: t.yukMesafe || '',
+      sistemFiyati: h.nakliyeToplam || 0, depoAylik: h.depo?.aylik || '' },
+      `Hizmet aktarıldı: ${t.hizmetTipi} → ${hedef} (${hedef === 'Nakliye' ? 'Sembol' : 'DepoEvim'})`);
+    addSystemLog?.('Telefon Teklifleri', `${t.musteriAdi || t.telefon}: ${t.hizmetTipi} → ${hedef} aktarıldı.`);
+    // Yeni hizmetin eksik sorularını tamamlamak için sihirbaz açılır
+    setForm({ baslangic: { ...yeni, id: t.id }, hizmet: hedef });
+  };
+  // Kayıt ekranına aktar: form alanları dolu açılır, teklif "İşi Aldık" olur
+  const kayitAc = async (t) => {
+    if (!onKayitAc) return;
+    const veri = ttKayitVerisi(t);
+    await guncelle(t, { kayitAcildi: new Date().toISOString(), ...(t.durum !== 'İşi Aldık' ? { durum: 'İşi Aldık' } : {}) },
+      `Kayıt ekranına aktarıldı (${veri.hizmetTipi})${t.durum !== 'İşi Aldık' ? ' — durum "İşi Aldık"' : ''}`);
+    onKayitAc(veri);
+  };
   const sil = async () => {
     if (!silinecek) return;
-    await deleteDoc(belge(silinecek.id));
+    await deleteDoc(ttBelge(silinecek.id));
     addSystemLog?.('Telefon Teklifleri', `${silinecek.musteriAdi || silinecek.telefon} kaydı silindi.`);
     if (detayId === silinecek.id) setDetayId(null);
     setSilinecek(null);
   };
 
-  const yeniAc = () => { setDuzenlenen(null); setFormAcik(true); };
-  const duzenleAc = (t) => { setDuzenlenen(t); setFormAcik(true); setDetayId(null); };
+  const yetkiliMi = (t) => tamYetki || ttSahibi(t) === kullanici;
 
   // ================================================================ RENDER ===
   return (
@@ -9120,26 +10154,28 @@ const TelefonTeklifleriView = ({ site, teklifler = [], currentUser, addSystemLog
           <div className="flex items-center gap-3">
             <button type="button" onClick={onGeri} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center shrink-0" title="Müşteri Havuzu'na dön"><ChevronLeft className="w-5 h-5" /></button>
             <div>
-              <h2 className="text-lg md:text-xl font-black flex items-center gap-2"><PhoneCall className="w-5 h-5 text-emerald-400" /> Telefon Teklifleri — {siteAd}</h2>
-              <p className="text-neutral-300 text-[11px] md:text-xs mt-0.5">Telefonda görüşülen müşteriler: bilgi, fiyat, takip ve süreç tek yerde.</p>
+              <h2 className="text-lg md:text-xl font-black flex items-center gap-2"><PhoneCall className="w-5 h-5 text-emerald-400" /> Telefon Teklifleri</h2>
+              <p className="text-neutral-300 text-[11px] md:text-xs mt-0.5">
+                {tamYetki ? 'Yönetici görünümü — tüm satışçıların görüşmeleri' : `${kullanici} — yalnızca sizin görüşmeleriniz`}
+              </p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button type="button" onClick={() => csvIndir(liste, site)} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-black flex items-center gap-1.5" title="Filtrelenmiş listeyi Excel'e aktar">
-              <Download className="w-4 h-4" /> Excel'e Aktar
-            </button>
-            <button type="button" onClick={yeniAc} className={`px-4 py-2 rounded-xl text-white text-xs font-black flex items-center gap-1.5 shadow-lg ${siteRenk}`}>
-              <PlusCircle className="w-4 h-4" /> Yeni Görüşme Ekle
-            </button>
+          {/* Yeni görüşme — hizmete göre renkli iki büyük buton */}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => ttCsvIndir(liste)} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-black flex items-center gap-1.5"><Download className="w-4 h-4" /> Excel</button>
+            {TT_HIZMETLER.slice(0, 2).map(h => (
+              <button key={h.id} type="button" onClick={() => setForm({ baslangic: null, hizmet: h.id })}
+                className={`px-4 py-2 rounded-xl text-white text-xs font-black flex items-center gap-1.5 shadow-lg ${h.stil.dugme}`}>
+                <PlusCircle className="w-4 h-4" /> {h.id === 'Nakliye' ? 'Evden Eve Görüşmesi' : 'Depo Görüşmesi'}
+              </button>
+            ))}
           </div>
         </div>
-
-        {/* ÖZET ŞERİDİ — tıklanabilir kısayollar */}
         <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
           {[
             { e: 'Toplam', v: ozet.toplam, r: 'text-white', tik: () => { setTakipFiltre('Tümü'); setDurumFiltre('Tümü'); } },
             { e: 'Bu Ay', v: ozet.buAy, r: 'text-white', tik: () => setAyFiltre(ttBugunStr().slice(0, 7)) },
-            { e: 'Bugün Aranacak', v: ozet.bugunAranacak, r: 'text-orange-400', tik: () => setTakipFiltre('Bugün') },
+            { e: 'Bugün Aranacak', v: ozet.bugun, r: 'text-orange-400', tik: () => setTakipFiltre('Bugün') },
             { e: 'Geciken Takip', v: ozet.geciken, r: 'text-red-400', tik: () => setTakipFiltre('Geciken') },
             { e: 'İşi Aldık', v: ozet.isiAldik, r: 'text-green-400', tik: () => setDurumFiltre('İşi Aldık') },
             { e: 'Dönüşüm', v: `%${ozet.donusum}`, r: 'text-yellow-400', alt: ozet.alinanTutar ? ttTl(ozet.alinanTutar) : '' },
@@ -9155,12 +10191,32 @@ const TelefonTeklifleriView = ({ site, teklifler = [], currentUser, addSystemLog
 
       {/* FİLTRELER */}
       <div className="bg-white rounded-2xl border border-neutral-200 p-3 space-y-2">
+        {/* Hizmet ayrımı — Sembol ve DepoEvim aynı havuzda, buradan ayrılır */}
+        <div className="flex flex-wrap gap-1.5">
+          {['Tümü', ...TT_HIZMETLER.map(h => h.id)].map(id => {
+            const h = id === 'Tümü' ? null : ttHizmetBul(id);
+            const sayi = gorunur.filter(t => id === 'Tümü' || (t.hizmetTipi || 'Nakliye') === id).length;
+            return (
+              <button key={id} type="button" onClick={() => setHizmetFiltre(id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 transition flex items-center gap-1.5 ${hizmetFiltre === id ? (h ? h.stil.secili : 'bg-neutral-900 text-white border-neutral-900') : (h ? h.stil.pasif : 'bg-white text-neutral-600 border-neutral-200')}`}>
+                {h && <h.Ikon className="w-3.5 h-3.5" />} {h ? h.ad : 'Tümü'} <span className="opacity-70">({sayi})</span>
+              </button>
+            );
+          })}
+        </div>
         <div className="flex flex-col md:flex-row gap-2">
           <div className="relative flex-1">
             <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Müşteri adı, telefon, ilçe veya açıklamada ara…"
+            <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Ad, telefon (0'lı/0'sız), ilçe, açıklama veya satışçı ara…"
               className="w-full pl-9 pr-3 py-2 rounded-xl border border-neutral-200 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-neutral-900/20" />
           </div>
+          {tamYetki && (
+            <select value={sahipFiltre} onChange={e => setSahipFiltre(e.target.value)} className="px-3 py-2 rounded-xl border border-neutral-200 text-sm font-black bg-white">
+              <option value="Tümü">Tüm Satışçılar</option>
+              <option value="__yok">Atanmamış</option>
+              {sahipler.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          )}
           <select value={ayFiltre} onChange={e => setAyFiltre(e.target.value)} className="px-3 py-2 rounded-xl border border-neutral-200 text-sm font-black bg-white">
             <option value="Tümü">Tüm Aylar</option>
             {aylar.map(a => <option key={a} value={a}>{ayAdi(a)}</option>)}
@@ -9170,64 +10226,63 @@ const TelefonTeklifleriView = ({ site, teklifler = [], currentUser, addSystemLog
           <span className="text-[10px] font-black text-neutral-500 mr-1">DURUM:</span>
           {['Tümü', ...TT_DURUMLAR.map(d => d.id)].map(id => {
             const d = id === 'Tümü' ? null : ttDurumBul(id);
-            const secili = durumFiltre === id;
             return (
               <button key={id} type="button" onClick={() => setDurumFiltre(id)}
-                className={`px-2 py-1 rounded-lg text-[10px] font-black border transition ${secili ? 'bg-neutral-900 text-white border-neutral-900' : d ? `${d.rozet} opacity-80 hover:opacity-100` : 'bg-white text-neutral-600 border-neutral-200'}`}>
+                className={`px-2 py-1 rounded-lg text-[10px] font-black border transition ${durumFiltre === id ? 'bg-neutral-900 text-white border-neutral-900' : d ? `${d.rozet} opacity-80 hover:opacity-100` : 'bg-white text-neutral-600 border-neutral-200'}`}>
                 {d ? d.etiket : 'Tümü'} ({durumSayisi(id)})
               </button>
             );
           })}
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] font-black text-neutral-500 mr-1">TAKİP:</span>
-          {[['Tümü', 'Tümü'], ['Bugün', `Bugün Aranacak (${ozet.bugunAranacak})`], ['Geciken', `Geciken (${ozet.geciken})`], ['Takipsiz', 'Tarih Girilmemiş']].map(([id, ad]) => (
+          <span className="text-[10px] font-black text-neutral-500 ml-2 mr-1">TAKİP:</span>
+          {[['Tümü', 'Tümü'], ['Bugün', `Bugün (${ozet.bugun})`], ['Geciken', `Geciken (${ozet.geciken})`], ['Takipsiz', 'Tarihsiz']].map(([id, ad]) => (
             <button key={id} type="button" onClick={() => setTakipFiltre(id)}
-              className={`px-2 py-1 rounded-lg text-[10px] font-black border transition ${takipFiltre === id ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'}`}>
-              {ad}
-            </button>
+              className={`px-2 py-1 rounded-lg text-[10px] font-black border transition ${takipFiltre === id ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'}`}>{ad}</button>
           ))}
         </div>
       </div>
 
       {/* LİSTE */}
       <div className="bg-white rounded-2xl border border-neutral-200 overflow-visible">
-        {/* Masaüstü sütun başlıkları */}
-        <div className="hidden md:grid grid-cols-[1.3fr_1.6fr_0.8fr_0.9fr_1fr_auto] gap-3 px-3 py-2.5 bg-neutral-900 text-white text-xs font-black rounded-t-2xl">
-          <span>Müşteri</span><span>Hizmet · Lokasyon · Ev</span><span>Video</span><span>Fiyat</span><span>Durum · Takip</span><span className="w-8" />
+        <div className="hidden md:grid grid-cols-[1.3fr_1.7fr_0.9fr_1fr_auto] gap-3 pl-4 pr-3 py-2.5 bg-neutral-900 text-white text-xs font-black rounded-t-2xl">
+          <span>Müşteri</span><span>Hizmet · Güzergâh · Cevaplar</span><span>Fiyat</span><span>Durum · Takip</span><span className="w-4" />
         </div>
         {liste.length === 0 ? (
           <div className="p-10 text-center">
-            <AlertTriangle className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
-            <p className="text-sm font-black text-neutral-500">{siteninki.length ? 'Filtreye uyan görüşme yok.' : 'Henüz telefon görüşmesi eklenmedi.'}</p>
-            {!siteninki.length && <button type="button" onClick={yeniAc} className={`mt-3 px-4 py-2 rounded-xl text-white text-xs font-black ${siteRenk}`}>İlk görüşmeyi ekle</button>}
+            <PhoneCall className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
+            <p className="text-sm font-black text-neutral-500">{gorunur.length ? 'Filtreye uyan görüşme yok.' : 'Henüz telefon görüşmesi eklenmedi.'}</p>
           </div>
         ) : liste.map(t => (
-          <TelefonTeklifSatiri key={t.id} t={t}
-            onAc={() => setDetayId(t.id)}
-            onDurum={(yeni) => durumDegistir(t, yeni)}
-            onDuzenle={() => duzenleAc(t)}
-            onSil={() => setSilinecek(t)} />
+          <TelefonTeklifSatiri key={t.id} tHam={t} gecmis={gecmisOf(t)} sahibiGoster={tamYetki}
+            onAc={() => setDetayId(t.id)} onDurum={(y) => durumDegistir(t, y)} onWhatsapp={() => setWaKayit(t)} />
         ))}
       </div>
 
       {/* PENCERELER */}
-      {formAcik && (
-        <TelefonTeklifFormu site={site} baslangic={duzenlenen} onKaydet={kaydet} onKapat={() => { setFormAcik(false); setDuzenlenen(null); }} />
+      {form && (
+        <TelefonTeklifFormu key={form.baslangic?.id || form.hizmet} baslangic={form.baslangic} varsayilanHizmet={form.hizmet}
+          gecmisIndeksi={gecmisIndeksi} gonderen={kullanici} onKaydet={kaydet} onKapat={() => setForm(null)} />
       )}
-      {detay && (
-        <TelefonTeklifDetay t={detay} onKapat={() => setDetayId(null)}
-          onDurum={(yeni) => durumDegistir(detay, yeni)}
-          onSurec={(adim, deger) => surecIsaretle(detay, adim, deger)}
-          onNotEkle={(metin) => notEkle(detay, metin)}
-          onDuzenle={() => duzenleAc(detay)}
-          onKayitAc={onKayitAc} />
+      {detay && !form && (
+        <TelefonTeklifDetay tHam={detay} gecmis={gecmisOf(detay)} yetkili={yetkiliMi(detay)} onKapat={() => setDetayId(null)}
+          onDurum={(y) => durumDegistir(detay, y)} onSurec={(a, v) => surecIsaretle(detay, a, v)} onNotEkle={(m) => notEkle(detay, m)}
+          onDuzenle={() => setForm({ baslangic: detay, hizmet: detay.hizmetTipi })}
+          onKayitAc={onKayitAc ? () => kayitAc(detay) : null}
+          onWhatsapp={() => setWaKayit(detay)} onTransfer={() => setTransferKayit(detay)}
+          onHizmetAktar={(h) => hizmetAktar(detay, h)} onSil={() => setSilinecek(detay)} />
+      )}
+      {waKayit && (
+        <TTWhatsappPenceresi t={waKayit} gonderen={kullanici} onKapat={() => setWaKayit(null)}
+          onGonderildi={(ad) => { guncelle(waKayit, {}, `WhatsApp mesajı açıldı: ${ad}`); }} />
+      )}
+      {transferKayit && (
+        <PersonelTransferPenceresi baslik={transferKayit.musteriAdi || ttTelGoster(transferKayit.telefon)} mevcut={ttSahibi(transferKayit)}
+          secenekler={sahipler} onKapat={() => setTransferKayit(null)} onTransfer={(ad, not) => transferEt(transferKayit, ad, not)} />
       )}
       {silinecek && (
-        <div className="fixed inset-0 z-[90] bg-black/60 flex items-center justify-center p-4" onClick={() => setSilinecek(null)}>
+        <div className="fixed inset-0 z-[99999] bg-black/60 flex items-center justify-center p-4" onClick={() => setSilinecek(null)}>
           <div className="bg-white rounded-2xl p-5 max-w-sm w-full space-y-3" onClick={e => e.stopPropagation()}>
             <p className="text-sm font-black text-neutral-900">"{silinecek.musteriAdi || silinecek.telefon}" kaydı silinsin mi?</p>
-            <p className="text-xs text-neutral-500">Bu işlem geri alınamaz. Kaydı saklamak istiyorsanız durumunu "Reddedildi" yapabilirsiniz.</p>
+            <p className="text-xs text-neutral-500">Bu işlem geri alınamaz. Saklamak için durumu "Reddedildi" yapabilirsiniz.</p>
             <div className="flex gap-2 justify-end">
               <button type="button" onClick={() => setSilinecek(null)} className="px-4 py-2 rounded-xl bg-neutral-100 text-xs font-black">Vazgeç</button>
               <button type="button" onClick={sil} className="px-4 py-2 rounded-xl bg-red-600 text-white text-xs font-black">Sil</button>
