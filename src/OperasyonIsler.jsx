@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw , Copy} from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, getDocs, where, orderBy, limit } from 'firebase/firestore';
-import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, normalizePozisyon, belgeListesiNormalize, HasarCozumBelgeleri, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, getIhbarSuresiBilgisi, SayfalamaBar,
+import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, normalizePozisyon, belgeListesiNormalize, HasarCozumBelgeleri, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, malzemeEkAdi, getIhbarSuresiBilgisi, SayfalamaBar,
   // YENİ: Deneme maaşı alanları — süre seçenekleri ve canlı özet metni.
   // Ayrı dosya yerine shared.jsx içinde tutuluyor; Finans.jsx da aynı
   // kaynaktan gecerliMaas'ı okur, böylece tek doğru kaynak vardır.
@@ -296,7 +296,7 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                 <div className="flex items-center gap-1.5 shrink-0"><Package className="w-4 h-4 text-amber-600" /> <b className="text-amber-900">Sistem Malzeme Tahmini:</b></div>
                 <div className="flex gap-3 flex-wrap flex-1">
                   {(() => {
-                    const est = calculateMaterials(job.fromRoomCount, job.fromPacking, job.type);
+                    const est = calculateMaterials(job.fromRoomCount, job.fromPacking, job.type, job); // DEĞİŞTİ: depo çıkışı için iş bilgisi
                     return (
                       <>
                         <span><b>{est.strec}</b> Streç</span>
@@ -306,6 +306,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                         <span><b>{est.koli}</b> Koli</span>
                         {/* Depo patpatı yalnızca depo işlerinde görünür */}
                         {job.type === 'Depo' && est.depoPatpati > 0 && <span className="text-blue-700"><b>{est.depoPatpati}</b> Depo Patpatı</span>}
+                        {/* YENİ: tahmin tablosundaki ek malzemeler */}
+                        {Object.entries(est.ekMalzemeler || {}).map(([id, v]) => <span key={id} className="text-emerald-700"><b>{v}</b> {malzemeEkAdi(id)}</span>)}
                       </>
                     );
                   })()}
@@ -3765,7 +3767,14 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     const licenseWarning = !!(driverPerson && assignedVehicle && assignedVehicle.requiredLicense === 'Büyük Ehliyet' && driverPerson.ehliyet !== 'Büyük Ehliyet');
     const isNakliye = job.type === 'Nakliye' || !job.type;
     const isAsansor = job.type === 'Asansör';
-    const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking, job.type);
+    const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking, job.type, job);
+
+    // YENİ: tahmin tablosundaki ek malzemelerin (+/-) değiştirilmesi
+    const handleEkMalzemeChange = async (id, amount) => {
+        const ek = { ...(est.ekMalzemeler || {}) };
+        ek[id] = Math.max(0, (Number(ek[id]) || 0) + amount);
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', job.id), { assignedMaterials: { ...est, ekMalzemeler: ek } });
+    };
 
     const handleNoteBlur = async () => {
         if (note !== job.notes) {
@@ -4229,6 +4238,20 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                  </div>
               </div>
             ))}
+            {/* YENİ (kullanıcı talebi): Tahmini Malzeme tablosundaki EK malzemeler (Malzeme Listesi'ne sonradan eklenenler) */}
+            {Object.entries(est.ekMalzemeler || {}).map(([id, v]) => {
+              const m = (materials || []).find(mm => mm.id === id);
+              return (
+                <div key={id} className="flex items-center justify-between border p-1 rounded shadow-sm text-[9px] bg-emerald-50 border-emerald-300">
+                  <span className="font-bold text-emerald-800 truncate">{m?.name || malzemeEkAdi(id)}</span>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => handleEkMalzemeChange(id, -1)} className="bg-red-50 text-red-600 rounded w-3.5 h-3.5 flex items-center justify-center font-bold">-</button>
+                    <span className="w-3 text-center font-black">{v}</span>
+                    <button onClick={() => handleEkMalzemeChange(id, 1)} className="bg-green-50 text-green-600 rounded w-3.5 h-3.5 flex items-center justify-center font-bold">+</button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           {/* SİSTEM HARİCİ MALZEME EKLEME - DOĞRUDAN KARTA GÖMÜLDÜ */}
@@ -5267,7 +5290,7 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                     <div className="flex items-center gap-1.5 shrink-0"><Package className="w-4 h-4 text-amber-600" /> <b className="text-amber-900">Operasyon Malzemeleri:</b></div>
                     <div className="flex gap-3 flex-wrap flex-1">
                       {(() => {
-                        const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking, job.type);
+                        const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking, job.type, job);
                         return (
                           <>
                             <span><b>{est.strec}</b> Streç</span>
@@ -5276,6 +5299,7 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                             <span><b>{est.kagit}kg</b> Kağıt</span>
                             <span><b>{est.koli}</b> Koli</span>
                             {job.type === 'Depo' && est.depoPatpati > 0 && <span className="text-blue-700"><b>{est.depoPatpati}</b> Depo Patpatı</span>}
+                            {Object.entries(est.ekMalzemeler || {}).map(([id, v]) => <span key={id} className="text-emerald-700"><b>{v}</b> {malzemeEkAdi(id)}</span>)}
                           </>
                         );
                       })()}
