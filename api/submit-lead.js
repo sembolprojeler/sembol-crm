@@ -312,10 +312,13 @@ const DEPOEVIM_TESLIM_LABEL = {
 function tarihTemizle(v) {
   return String(v || '').replace(/\s+/g, ' ').replace(/\s*:\s*/g, ' - ').trim().slice(0, 200);
 }
-function tarihMetni(p, tarih) {
+// Kesin tarih seçilip ayrıca tercih/not da yazıldıysa hepsi gösterilir
+// (DepoEvim sihirbazının kendi özetindeki gibi: "tarih · tercih · not").
+// "bosIse": hiçbir tarih bilgisi yoksa yazılacak değer.
+function tarihMetni(p, tarih, bosIse = '-') {
   const tercih = [tarihTemizle(p.tarihTercihi), tarihTemizle(p.tarihNotu)].filter(Boolean).join(' · ');
   if (p.dateFlexible) return tercih || 'Esnek';
-  return tarih || tercih || '-';
+  return [tarihTemizle(tarih), tercih].filter(Boolean).join(' · ') || bosIse;
 }
 
 function ortakKuyruk(satirlar, p) {
@@ -432,8 +435,10 @@ function buildSonMesajDepoEvim(p) {
   // aynı olmak zorunda, yoksa ayrıştırıcı bunları ayrı satır olarak yakalayıp
   // bölemez — bir önceki alanın değerine yapışık görünürler.
   if (p.pickupCity) satirlar.push(`Eşyaların Alınacağı Yer: ${p.pickupCity}${p.pickupDistrict ? '/' + p.pickupDistrict : ''}`);
-  const baslangic = tarihMetni(p, p.baslangicTarihi);
-  if (baslangic !== '-') satirlar.push(`Başlangıç Tarihi: ${baslangic}`);
+  // DÜZELTME: DepoEvim sihirbazı "dateFlexible" GÖNDERMİYOR — tarih adımı
+  // isteğe bağlı bir tarih + "Bu hafta" gibi hızlı seçim + not. Hiçbiri
+  // seçilmediyse de satır "Esnek" olarak gösterilir (eskiden hiç çıkmıyordu).
+  satirlar.push(`Başlangıç Tarihi: ${tarihMetni(p, p.baslangicTarihi, 'Esnek')}`);
   if (p.fiyatAylik) satirlar.push(`Aylık Fiyat: ${fmtTL(p.fiyatAylik)} TL`);
   if (p.fiyatToplam) satirlar.push(`Toplam Ödenecek (peşin): ${fmtTL(p.fiyatToplam)} TL`);
   if (p.nakliyeMin) satirlar.push(`Tahmini Alım/Nakliye Ücreti: ${fmtTL(p.nakliyeMin)} - ${fmtTL(p.nakliyeMax || p.nakliyeMin)} TL`);
