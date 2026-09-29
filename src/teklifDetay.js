@@ -118,6 +118,21 @@ const depoevimDepolama = (a) => {
 
 const TURLER = { depolama: sembolDepolama, depoevimDepolama };
 
+// ESKİ KAYITLAR (teklifAlanlari yok): sonMesaj metni ayrıştırılmadan önce
+// Sembol "Eşya Depolama" metni yeni kart düzenine yaklaştırılır:
+//   "Eşyanın bulunduğu yer: Adıyaman/Merkez" → başlık "Adıyaman/Merkez → Depo"
+//   "Kutulama: ..." → "Toplama: ..." (değer de yeni karttaki gibi)
+// Diğer metinlere dokunulmaz.
+const ESKI_TOPLAMA = {
+  kendim: 'Kendim toplayacağım', firma: 'Firma toplasın',
+  'Firma paketlesin': 'Firma toplasın', 'Kendim paketleyeceğim': 'Kendim toplayacağım', 'Kısmi paketleme': 'Kısmi toplama',
+};
+export const eskiTeklifMetni = (sonMesaj) => {
+  let m = String(sonMesaj || '');
+  if (/^\[Eşya Depolama\]/.test(m)) m = m.replace(/^(\[Eşya Depolama\]\s*)Eşyanın bulunduğu yer:\s*([^\n]*)/, (_, b, y) => `${b}${y.trim()} → Depo`);
+  return m.replace(/Kutulama:[ \t]*([^\n]*)/g, (_, v) => `Toplama: ${ESKI_TOPLAMA[v.trim()] || v.trim()}`);
+};
+
 // Kayıtta tanınan "teklifAlanlari" varsa satırları üretir, yoksa null döner
 // (çağıran eski metin ayrıştırmaya düşer).
 export const teklifDetayiAlanlardan = (kayit, baslik = '') => {

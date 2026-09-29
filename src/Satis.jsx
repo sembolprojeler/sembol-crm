@@ -10,7 +10,7 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
 // YENİ: QR Site Takip bölümü dahili QR üretecini OperasyonPersonel.jsx'ten alır (CDN gerektirmez)
 import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
 // YENİ (kullanıcı talebi): depolama tekliflerinin Teklif Detayı satırları (siteden gelen ham alanlardan)
-import { teklifDetayiAlanlardan } from './teklifDetay.js';
+import { teklifDetayiAlanlardan, eskiTeklifMetni } from './teklifDetay.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
 import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari } from './fiyatSema.js';
 
@@ -3223,6 +3223,9 @@ const TEKLIF_ALANLARI = [
   'Çıkış asansör', 'Varış asansör', 'Ambalaj malzemesi', 'Ek hizmetler',
   'Paketleme', 'Hizmet', 'Tarih', 'Tip', 'Kat', 'Eşya', 'Hacim', 'Süre',
   'Depo', 'Adres', 'Bütçe', 'Not', 'Asansör', 'Kişi', 'Mesafe',
+  // DÜZELTME (kullanıcı talebi): Sembol "Eşya Depolama" sihirbazının alanları —
+  // tanınmadıkları için "Kiralama Süresi" satırına yığılıyorlardı.
+  'Depo Hacmi', 'Bulunduğu Kat', 'Alım/Teslim', 'Toplama', 'Depoya Giriş Tarihi',
   // YENİ (kullanıcı talebi): DepoEvim sihirbazının alanları — depolama
   // teklifleri de artık nakliye gibi satır satır ayrıştırılır.
   // (Ayrıştırıcı uzun adı önce dener: "Depo Boyutu" varken "Depo" yakalanmaz.)
@@ -3276,6 +3279,10 @@ const TEKLIF_PARA_ALANLARI = ['Aylık Fiyat', 'Toplam Ödenecek (peşin)', 'Topl
 const TEKLIF_ETIKET_ADLARI = {
   'Çıkış asansör': 'Yükleme Şekli',
   'Varış asansör': 'Boşaltma Şekli',
+  // Sembol Eşya Depolama — yeni kart düzeniyle (src/teklifDetay.js) aynı adlar
+  'Bulunduğu Kat': 'Kat',
+  'Alım/Teslim': 'Depoya Ulaşım',
+  'Depoya Giriş Tarihi': 'Giriş Tarihi',
 };
 const teklifEtiketAdi = (etiket) => TEKLIF_ETIKET_ADLARI[etiket] || etiket;
 
@@ -5155,7 +5162,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 // DEĞİŞTİ (kullanıcı talebi): Sembol Eşya Depolama ve DepoEvim kayıtlarında
                 // satırlar siteden gelen alanlardan (teklifAlanlari) üretilir; bu alanları
                 // olmayan eski kayıtlar eskisi gibi metinden ayrıştırılır. "Kutulama" → "Toplama".
-                const metinden = teklifOzetiAyristir(detayKayit.sonMesaj.replace(/Kutulama:/g, 'Toplama:'));
+                const metinden = teklifOzetiAyristir(eskiTeklifMetni(detayKayit.sonMesaj));
                 const teklif = teklifDetayiAlanlardan(detayKayit, metinden.baslik) || metinden;
                 return (
                   <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
