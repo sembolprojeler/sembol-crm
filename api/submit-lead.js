@@ -303,6 +303,21 @@ const DEPOEVIM_TESLIM_LABEL = {
   kendim: 'Müşteri kendi getirecek', anahtar_teslim: 'Anahtar teslim (firma alım yapacak)',
 };
 
+// YENİ (kullanıcı talebi): TARİH SATIRI — müşteri tarihte esnekse (dateFlexible)
+// "Esnek" yerine sihirbazın gönderdiği tarih tercihi (ör. "Hafta sonu") ve
+// tarih notu yazılır; ikisi de boşsa "Esnek" kalır. Kesin tarih varsa o yazılır.
+// Not serbest metindir: satır sonları ve ":" temizlenir, yoksa Satis.jsx'teki
+// teklifOzetiAyristir notun içindeki "Kat:" / "Not:" gibi ifadeleri yeni bir
+// alan sanıp Tarih satırını bölerdi.
+function tarihTemizle(v) {
+  return String(v || '').replace(/\s+/g, ' ').replace(/\s*:\s*/g, ' - ').trim().slice(0, 200);
+}
+function tarihMetni(p, tarih) {
+  const tercih = [tarihTemizle(p.tarihTercihi), tarihTemizle(p.tarihNotu)].filter(Boolean).join(' · ');
+  if (p.dateFlexible) return tercih || 'Esnek';
+  return tarih || tercih || '-';
+}
+
 function ortakKuyruk(satirlar, p) {
   if (p.priceMin && p.priceMax) satirlar.push(`Sistem fiyat tahmini: ${fmtTL(p.priceMin)} - ${fmtTL(p.priceMax)} TL`);
   if (Array.isArray(p.photoUrls) && p.photoUrls.length) satirlar.push(`${p.photoUrls.length} fotoğraf eklendi`);
@@ -324,7 +339,7 @@ function buildSonMesajEvdenEve(p) {
   if (Array.isArray(p.specialItems) && p.specialItems.length && !(p.specialItems.length === 1 && p.specialItems[0] === 'yok')) {
     satirlar.push(`Özel eşyalar: ${p.specialItems.join(', ')}`);
   }
-  satirlar.push(`Tarih: ${p.dateFlexible ? 'Esnek' : (p.moveDate || '-')}`);
+  satirlar.push(`Tarih: ${tarihMetni(p, p.moveDate)}`);
   return ortakKuyruk(satirlar, p);
 }
 
@@ -342,7 +357,7 @@ function buildSonMesajParcaEsya(p) {
   if (Array.isArray(p.specialItems) && p.specialItems.length && !(p.specialItems.length === 1 && p.specialItems[0] === 'yok')) {
     satirlar.push(`Özel eşyalar: ${p.specialItems.join(', ')}`);
   }
-  satirlar.push(`Tarih: ${p.dateFlexible ? 'Esnek' : (p.moveDate || '-')}`);
+  satirlar.push(`Tarih: ${tarihMetni(p, p.moveDate)}`);
   return ortakKuyruk(satirlar, p);
 }
 
@@ -361,7 +376,7 @@ function buildSonMesajOfis(p) {
   if (Array.isArray(p.specialItems) && p.specialItems.length && !(p.specialItems.length === 1 && p.specialItems[0] === 'yok')) {
     satirlar.push(`Özel ekipmanlar: ${p.specialItems.join(', ')}`);
   }
-  satirlar.push(`Tarih: ${p.dateFlexible ? 'Esnek' : (p.moveDate || '-')}`);
+  satirlar.push(`Tarih: ${tarihMetni(p, p.moveDate)}`);
   return ortakKuyruk(satirlar, p);
 }
 
@@ -380,7 +395,7 @@ function buildSonMesajDepolama(p) {
   if (Array.isArray(p.specialItems) && p.specialItems.length && !(p.specialItems.length === 1 && p.specialItems[0] === 'yok')) {
     satirlar.push(`Özel eşyalar: ${p.specialItems.join(', ')}`);
   }
-  satirlar.push(`Depoya Giriş Tarihi: ${p.dateFlexible ? 'Esnek' : (p.moveDate || '-')}`);
+  satirlar.push(`Depoya Giriş Tarihi: ${tarihMetni(p, p.moveDate)}`);
   return ortakKuyruk(satirlar, p);
 }
 
@@ -417,7 +432,8 @@ function buildSonMesajDepoEvim(p) {
   // aynı olmak zorunda, yoksa ayrıştırıcı bunları ayrı satır olarak yakalayıp
   // bölemez — bir önceki alanın değerine yapışık görünürler.
   if (p.pickupCity) satirlar.push(`Eşyaların Alınacağı Yer: ${p.pickupCity}${p.pickupDistrict ? '/' + p.pickupDistrict : ''}`);
-  if (p.baslangicTarihi) satirlar.push(`Başlangıç Tarihi: ${p.baslangicTarihi}`);
+  const baslangic = tarihMetni(p, p.baslangicTarihi);
+  if (baslangic !== '-') satirlar.push(`Başlangıç Tarihi: ${baslangic}`);
   if (p.fiyatAylik) satirlar.push(`Aylık Fiyat: ${fmtTL(p.fiyatAylik)} TL`);
   if (p.fiyatToplam) satirlar.push(`Toplam Ödenecek (peşin): ${fmtTL(p.fiyatToplam)} TL`);
   if (p.nakliyeMin) satirlar.push(`Tahmini Alım/Nakliye Ücreti: ${fmtTL(p.nakliyeMin)} - ${fmtTL(p.nakliyeMax || p.nakliyeMin)} TL`);
