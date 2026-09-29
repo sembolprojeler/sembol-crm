@@ -5361,13 +5361,13 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                       }}
                       className={`basis-2/5 py-2.5 rounded-xl text-white text-sm font-black transition shadow-lg flex items-center justify-center gap-1.5 disabled:opacity-60 ${depoMu ? 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/30' : 'bg-red-600 hover:bg-red-700 shadow-red-600/30'}`}>
                       <PhoneCall className="w-4 h-4" />
-                      <span className="leading-tight text-left">Fiyat Hesapla<span className="block text-[9px] font-bold opacity-80">Telefon görüşmesi · {depoMu ? 'DepoEvim' : 'Evden Eve'}</span></span>
+                      <span className="leading-tight text-left">{/* DEĞİŞTİ (kullanıcı talebi): "Fiyat Hesapla" → "Teklif Gönder" */}Teklif Gönder<span className="block text-[9px] font-bold opacity-80">Telefon görüşmesi · {depoMu ? 'DepoEvim' : 'Evden Eve'}</span></span>
                     </button>
                   );
                 })()}
               </div>
               <p className="text-[10px] font-bold text-neutral-400 text-center mt-1.5">
-                <b className="text-neutral-500">Kaydet</b> veya <b className="text-neutral-500">Fiyat Hesapla</b>'ya basıldığında talep {kullaniciAdi} adına alınır, havuzdan çıkar ve <b className="text-neutral-500">Telefon Görüşmesi</b> sayfanıza geçer. Başka personele devretmek için <span className="font-black text-neutral-500">Transfer Et</span> kullanın.
+                <b className="text-neutral-500">Kaydet</b> veya <b className="text-neutral-500">Teklif Gönder</b>'e basıldığında talep {kullaniciAdi} adına alınır, havuzdan çıkar ve <b className="text-neutral-500">Telefon Görüşmesi</b> sayfanıza geçer. Başka personele devretmek için <span className="font-black text-neutral-500">Transfer Et</span> kullanın.
               </p>
             </div>
           </div>
