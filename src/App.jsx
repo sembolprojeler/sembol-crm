@@ -47,7 +47,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapPin, Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where, documentId } from 'firebase/firestore';
-import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
+import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, malzemeIhtiyaclari, useMalzemeTahminTablosu, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
   // YENİ: Resmi Ayarları ekranının kullandığı veri ve yardımcılar.
   // Sözleşme PDF'i ve WhatsApp mesajları da aynı kaynaktan okuyacağı için
   // bu tanımlar shared.jsx içinde tek noktada tutuluyor.
@@ -4098,6 +4098,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       } catch (e) { return 'dashboard'; }
     }); 
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+    // YENİ (kullanıcı talebi): Tahmini Malzeme Durumu tablosunu canlı dinle —
+    // değişince tüm ekranlardaki tahminler (Ekip Kurma Tahtası vb.) yenilenir
+    useMalzemeTahminTablosu();
     // YENİ (kullanıcı talebi): SATIŞ PERSONELİ "+" KISAYOLU — Yeni Telefon Görüşmesi
     //   gorusmeSecimAcik: "Evden Eve / Depo" seçim penceresi açık mı?
     //   hizliGorusme: { hizmet, no } → Müşteri Havuzu'na iletilir, sihirbaz açılır
@@ -6679,7 +6682,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       }
       setManualExtraAssignees(manual);
 
-      const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking, job.type);
+      const est = job.assignedMaterials || calculateMaterials(job.fromRoomCount, job.fromPacking, job.type, job);
       setAssignedMaterials({
         strec: est.strec || 0,
         bant: est.bant || 0,
@@ -6687,7 +6690,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         kagit: est.kagit || 0,
         koli: est.koli || 0,
         // Depo patpatı yalnızca depo işlerinde taşınır
-        ...(job.type === 'Depo' ? { depoPatpati: est.depoPatpati || 0 } : {})
+        ...(job.type === 'Depo' ? { depoPatpati: est.depoPatpati || 0 } : {}),
+        // YENİ: tahmin tablosundaki ek malzemeler (Malzeme Listesi'ne sonradan eklenenler) korunur
+        ...(est.ekMalzemeler ? { ekMalzemeler: est.ekMalzemeler } : {})
       });
       setCustomMaterials(job.customMaterials || []);
       setNewCustomMaterial({ name: '', amount: 1 });
@@ -6873,42 +6878,18 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       setEndJobError('');
 
       if (!jobToEnd.materialsDeducted && jobToEnd.type !== 'Asansör') {
-        const estData = jobToEnd.assignedMaterials || calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking, jobToEnd.type);
+        const estData = jobToEnd.assignedMaterials || calculateMaterials(jobToEnd.fromRoomCount, jobToEnd.fromPacking, jobToEnd.type, jobToEnd);
         const customMats = jobToEnd.customMaterials || [];
         let deductedList = [];
 
-        const norm = (s) => (s || '').toLocaleLowerCase('tr-TR');
-        const materialTypes = [
-          { key: 'streç', amount: estData.strec || 0 },
-          { key: 'bant', amount: estData.bant || 0 },
-          { key: 'poşet', amount: estData.poset || 0 },
-          { key: 'kağıt', amount: estData.kagit || 0 },
-          { key: 'koli', amount: estData.koli || 0 },
-          // YENİ: Depo patpatı YALNIZCA depo işlerinde stoktan düşülür.
-          // (calculateMaterials bu kalemi zaten sadece jobType==='Depo' iken üretir;
-          //  ayrıca burada da iş tipi kontrol edilerek çift güvence sağlanır.)
-          { key: 'patpat', amount: (jobToEnd.type === 'Depo' ? (estData.depoPatpati || 0) : 0) }
-        ];
-
-        // YENİ: Aynı malzeme birden fazla kez düşülecekse TEK kalemde toplanır.
-        // Böylece stok hareketi kaydında "7 Adet Koli, 7 Adet Koli, ..." gibi
-        // tekrar eden uzun listeler oluşmaz.
+        // DEĞİŞTİ (kullanıcı talebi): düşülecek miktarlar ortak "malzemeIhtiyaclari"
+        // hesabından gelir: 5 standart malzeme + depo patpatı + tahmin tablosundaki
+        // EK malzemeler + işe eklenen ekstra malzemeler. Aynı malzeme tek kalemde toplanır.
+        // (Eskiden listede sonradan eklenen malzemeler hiç düşülmüyordu.)
         const toplamlar = new Map(); // materialId -> { target, miktar }
-
-        for (const mt of materialTypes) {
-          const target = materials.find(m => norm(m.name).includes(mt.key));
-          if (!target) continue;
-
-          let deductAmount = mt.amount;
-          const cMat = customMats.find(cm => norm(cm.name).includes(mt.key));
-          if (cMat) deductAmount += parseFloat(cMat.amount) || 0;
-
-          if (deductAmount > 0) {
-            const mevcut = toplamlar.get(target.id);
-            if (mevcut) mevcut.miktar += deductAmount;
-            else toplamlar.set(target.id, { target, miktar: deductAmount });
-          }
-        }
+        malzemeIhtiyaclari(estData, materials, customMats, jobToEnd.type).forEach(({ malzeme, miktar }) => {
+          toplamlar.set(malzeme.id, { target: malzeme, miktar });
+        });
 
         for (const { target, miktar } of toplamlar.values()) {
           const yuvarlanmis = Math.round(miktar * 100) / 100; // ondalık artıkları temizle
@@ -6968,8 +6949,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     };
 
     const handleEstimateMaterials = (job) => {
-      const est = calculateMaterials(job.fromRoomCount, job.fromPacking, job.type);
-      const content = `Tahmini Gerekli Malzemeler:\n\n- ${est.strec} Rulo Streç\n- ${est.bant} Adet Bant\n- ${est.poset} Adet Poşet\n- ${est.kagit} Kg Kağıt\n- ${est.koli} Adet Koli${job.type === 'Depo' && est.depoPatpati ? `\n- ${est.depoPatpati} Adet Depo Patpatı` : ''}`;
+      const est = calculateMaterials(job.fromRoomCount, job.fromPacking, job.type, job);
+      const ekSatirlar = Object.entries(est.ekMalzemeler || {}).map(([id, v]) => { const m = materials.find(mm => mm.id === id); return m ? `\n- ${v} ${m.unit} ${m.name}` : ''; }).join('');
+      const content = `Tahmini Gerekli Malzemeler:\n\n- ${est.strec} Rulo Streç\n- ${est.bant} Adet Bant\n- ${est.poset} Adet Poşet\n- ${est.kagit} Kg Kağıt\n- ${est.koli} Adet Koli${job.type === 'Depo' && est.depoPatpati ? `\n- ${est.depoPatpati} Adet Depo Patpatı` : ''}${ekSatirlar}`;
       setAiModal({ isOpen: true, loading: false, content, title: '📦 Malzeme Tahmini', type: 'material', jobId: job.id, estData: est, alreadyDeducted: job.materialsDeducted });
     };
 
@@ -6982,27 +6964,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       const actualEst = job?.assignedMaterials || estData;
       let deductedList = [];
 
-      const norm = (s) => (s || '').toLocaleLowerCase('tr-TR');
-      const materialTypes = [
-        { key: 'streç', amount: actualEst.strec || 0 },
-        { key: 'bant', amount: actualEst.bant || 0 },
-        { key: 'poşet', amount: actualEst.poset || 0 },
-        { key: 'kağıt', amount: actualEst.kagit || 0 },
-        { key: 'koli', amount: actualEst.koli || 0 }
-      ];
-
-      for (const mt of materialTypes) {
-        const target = materials.find(m => norm(m.name).includes(mt.key));
-        if (!target) continue;
-
-        let deductAmount = mt.amount;
-        const cMat = customMats.find(cm => norm(cm.name).includes(mt.key));
-        if (cMat) deductAmount += parseFloat(cMat.amount) || 0;
-
-        if (deductAmount > 0) {
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', target.id), { stock: String((parseFloat(target.stock) || 0) - deductAmount) });
-          deductedList.push(`${deductAmount} ${target.unit} ${target.name}`);
-        }
+      // DEĞİŞTİ (kullanıcı talebi): ek malzemeler dahil ortak ihtiyaç hesabı
+      for (const { malzeme: target, miktar: deductAmount } of malzemeIhtiyaclari(actualEst, materials, customMats, job?.type)) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'materials', target.id), { stock: String((parseFloat(target.stock) || 0) - deductAmount) });
+        deductedList.push(`${deductAmount} ${target.unit} ${target.name}`);
       }
 
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'jobs', jobId), { materialsDeducted: true });
@@ -9458,7 +9423,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'isKilavuzu' &&
               <IsKilavuzuView currentUser={currentUser} personnelList={personnelList} addSystemLog={addSystemLog} />}
 
-            {activeTab === 'materialList' && showOperasyon && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} onUpdateStock={handleUpdateMaterialStock} onAdd={handleAddMaterial} systemLogs={systemLogs} />}
+            {activeTab === 'materialList' && showOperasyon && <MaterialListView materials={materials} onDelete={handleDeleteMaterial} onUpdateStock={handleUpdateMaterialStock} onAdd={handleAddMaterial} systemLogs={systemLogs} currentUser={currentUser} jobs={jobs} addSystemLog={addSystemLog} />}
             
             {/* ==================================================================
                 KALDIRILDI (kullanıcı talebi): "Kasa Özeti" sayfası kaldırıldı.
