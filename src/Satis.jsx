@@ -3932,6 +3932,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [aktariliyor, setAktariliyor] = useState(false);   // Telefon Görüşmesi'ne aktarım sürüyor
   // YENİ (kullanıcı talebi): "Diğer Kanallar" grubu varsayılan kapalı, düğmeyle açılır
   const [digerAcik, setDigerAcik] = useState(false);
+  // YENİ (kullanıcı talebi): Fiyat Tablosu penceresi + canlı fiyat dinleyicisi
+  const [fiyatTablosuAcik, setFiyatTablosuAcik] = useState(false);
+  const fiyatBilgi = useFiyatTablosu(true);
   // YENİ: havuzdan "Görüşmeye Bak" ile açılacak telefon görüşmesi
   const [telefonDetayId, setTelefonDetayId] = useState(null);
 
@@ -4635,6 +4638,12 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               </button>
             ))}
           </div>
+          {/* YENİ (kullanıcı talebi): FİYAT TABLOSU — İstatistikleri Gör'ün solunda */}
+          <div className="flex flex-wrap justify-end gap-2">
+          <button type="button" onClick={() => setFiyatTablosuAcik(true)}
+            className="px-4 py-2 rounded-xl text-xs font-black tracking-wide transition flex items-center gap-2 border bg-white/10 text-emerald-100 border-emerald-400/50 hover:bg-white/20">
+            <FileText className="w-4 h-4" /> Fiyat Tablosu
+          </button>
           {/* YENİ (kullanıcı talebi): İSTATİSTİKLERİ GÖR — kaynak özet panelini açar/kapatır */}
           <button type="button" onClick={() => setIstatistikAcik(a => !a)} aria-expanded={istatistikAcik}
             className={`px-4 py-2 rounded-xl text-xs font-black tracking-wide transition flex items-center gap-2 border ${istatistikAcik ? 'bg-yellow-400 text-neutral-900 border-yellow-400' : 'bg-white/10 text-yellow-100 border-yellow-400/40 hover:bg-white/20'}`}>
@@ -4642,6 +4651,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             {/* Ok simgesi panel açıkken yukarı döner */}
             <ChevronDown className={`w-4 h-4 transition-transform ${istatistikAcik ? 'rotate-180' : ''}`} />
           </button>
+          </div>
           </div>
         </div>
 
@@ -5459,6 +5469,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           </div>
         </div>
       )}
+
+      {/* YENİ (kullanıcı talebi): FİYAT TABLOSU PENCERESİ */}
+      {fiyatTablosuAcik && <FiyatTablosuPenceresi currentUser={currentUser} fiyatBilgi={fiyatBilgi} onKapat={() => setFiyatTablosuAcik(false)} />}
 
       {/* YENİ (kullanıcı talebi): PERSONEL TRANSFER PENCERESİ */}
       {transferKayit && (
@@ -8573,6 +8586,65 @@ const FL_IL_EVDEN_DEPOYA = {
 };
 
 // ============================================================================
+// YENİ (kullanıcı talebi): DÜZENLENEBİLİR FİYAT TABLOSU
+// ----------------------------------------------------------------------------
+// Yukarıdaki PDF fiyatları VARSAYILANDIR. Müdür "Fiyat Tablosu" penceresinden
+// fiyatları değiştirince Firestore'a (ayarlar/fiyatTablosu) yazılır; tüm
+// kullanıcılarda canlı olarak bu tablolara uygulanır ve sistem fiyatı
+// hesaplaması (ttFiyatHesapla) anında yeni fiyatları kullanır.
+// ============================================================================
+// Şehirler arası ekler Evden Depoya listesi için AYRI düzenlenir (varsayılan: aynı değerler)
+const FL_SEHIRLER_ARASI_EK_DEPO = JSON.parse(JSON.stringify(FL_SEHIRLER_ARASI_EK));
+// Kiralık depo aylık ücretleri — ŞUBE BAZLI, +KDV girilir. "Genel" = şube farketmez / web sitesi
+const TT_DEPO_KIRA = (() => {
+  const genel = {};
+  TT_DEPO_BOYUTLARI.forEach(b => { if (b.aylik) genel[b.id] = b.aylik; });
+  const liste = { Genel: { ...genel } };
+  DEPO_LOCATIONS.forEach(d => { liste[d.name] = { ...genel }; });
+  return liste;
+})();
+const ttFiyatTablolari = () => ({
+  sehirIciEve: FL_SEHIR_ICI_EVE, sehirIciDepo: FL_SEHIR_ICI_DEPO,
+  sehirlerArasiEkEve: FL_SEHIRLER_ARASI_EK, sehirlerArasiEkDepo: FL_SEHIRLER_ARASI_EK_DEPO,
+  ilEve: FL_IL_EVDEN_EVE, ilDepo: FL_IL_EVDEN_DEPOYA, depoKira: TT_DEPO_KIRA,
+});
+// PDF fiyatlarının kopyası — "Varsayılana Dön" için
+const TT_FIYAT_VARSAYILAN = JSON.parse(JSON.stringify(ttFiyatTablolari()));
+let ttFiyatSurumu = 0;    // Fiyat her güncellendiğinde artar → hesap panelleri yeniden hesaplar
+const ttDerinUygula = (hedef, kaynak) => {
+  Object.keys(kaynak || {}).forEach(k => {
+    const v = kaynak[k];
+    if (v && typeof v === 'object' && !Array.isArray(v) && hedef[k] && typeof hedef[k] === 'object' && !Array.isArray(hedef[k])) ttDerinUygula(hedef[k], v);
+    else if (v !== null && v !== undefined && v !== '') hedef[k] = v;
+  });
+};
+const ttFiyatlariUygula = (veri) => {
+  const t = ttFiyatTablolari();
+  Object.keys(t).forEach(k => { if (veri && veri[k]) ttDerinUygula(t[k], veri[k]); });
+  ttFiyatSurumu += 1;
+};
+const ttFiyatBelge = () => doc(db, 'artifacts', appId, 'public', 'data', 'ayarlar', 'fiyatTablosu');
+// Şubeye göre aylık depo kirası (+KDV); şube yoksa / farketmezse Genel liste
+const ttDepoAylik = (sube, boyut) => (TT_DEPO_KIRA[sube] && TT_DEPO_KIRA[sube][boyut])
+  || (TT_DEPO_KIRA.Genel && TT_DEPO_KIRA.Genel[boyut]) || TT_DEPO_BOYUTLARI.find(b => b.id === boyut)?.aylik || null;
+// Canlı fiyat dinleyicisi — Müşteri Havuzu'nda bir kez çalışır
+const useFiyatTablosu = (aktif = true) => {
+  const [bilgi, setBilgi] = useState({ surum: 0, guncelleyen: '', tarih: '' });
+  useEffect(() => {
+    if (!aktif) return undefined;
+    const unsub = onSnapshot(ttFiyatBelge(), snap => {
+      if (snap && typeof snap.exists === 'function' && snap.exists()) {
+        const v = snap.data();
+        ttFiyatlariUygula(v);
+        setBilgi({ surum: ttFiyatSurumu, guncelleyen: v.guncelleyen || '', tarih: v.guncellemeTarihi || '' });
+      }
+    }, err => console.error('Fiyat tablosu okunamadı:', err));
+    return () => unsub();
+  }, [aktif]);
+  return bilgi;
+};
+
+// ============================================================================
 // (2) YARDIMCI FONKSİYONLAR
 // ============================================================================
 const ttBugunStr = () => {
@@ -8746,9 +8818,11 @@ const ttFiyatHesapla = (fHam) => {
   if (f.hizmetTipi === 'Depo') {
     const b = TT_DEPO_BOYUTLARI.find(x => x.id === f.depoBoyutu);
     const k = TT_KIRALAMA.find(x => x.id === (f.kiralamaSuresi || '1')) || TT_KIRALAMA[0];
-    if (b?.aylik) {
-      const pesin = b.aylik * k.odenecekAy;
-      depo = { boyut: b, kiralama: k, aylik: b.aylik, aylikKdvli: b.aylik * (1 + TT_KDV), pesin, pesinKdvli: pesin * (1 + TT_KDV), hediyeAy: k.toplamAy - k.odenecekAy };
+    // DEĞİŞTİ (kullanıcı talebi): aylık kira Fiyat Tablosu'ndaki ŞUBE fiyatından gelir
+    const aylikKira = b ? ttDepoAylik(f.sube, b.id) : null;
+    if (b && aylikKira) {
+      const pesin = aylikKira * k.odenecekAy;
+      depo = { boyut: b, kiralama: k, aylik: aylikKira, aylikKdvli: aylikKira * (1 + TT_KDV), pesin, pesinKdvli: pesin * (1 + TT_KDV), hediyeAy: k.toplamAy - k.odenecekAy };
       if (k.odenecekAy > 1) bilgiler.push('Kredi kartı YALNIZCA bu kampanyalı toplu ödemede geçerlidir; aylık ödemeler IBAN\'a yapılır.');
     } else if (f.depoBoyutu === 'Özel') uyarilar.push('Özel ölçü depo — video ile hacim belirlenip fiyat verilir.');
     if (f.esyaCinsi === 'İş Yeri Eşyası') uyarilar.push('İş yeri eşyası: teklif dosyası + KDV gerekir, bilgileri Mehmet Bey\'e aktarın. Her gün giriş-çıkış yapılacak ticari kullanıma depo verilmez.');
@@ -8813,7 +8887,7 @@ const ttFiyatHesapla = (fHam) => {
   // YENİ (kullanıcı talebi): şehirler arası işte de İstanbul tarafındaki adres Avrupa
   // Yakası ise (ya da depo şubesi Avrupa'daysa) Avrupa ekstrası eklenir
   if (ttAvrupaAdresVarMi(f)) ttAvrupaEkstraEkle(depoListesi ? FL_SEHIR_ICI_DEPO : FL_SEHIR_ICI_EVE, odaK, kalemler, uyarilar);
-  const E = FL_SEHIRLER_ARASI_EK;
+  const E = depoListesi ? FL_SEHIRLER_ARASI_EK_DEPO : FL_SEHIRLER_ARASI_EK;   // DEĞİŞTİ: listeye özel ekler
   if (f.toplama === 'Firma') kalemler.push({ ad: `${odaK} toplama hizmeti`, tutar: E.toplama[odaK] });
   adresler.forEach(a => {
     const kat = ttKatNo(a.kat);
@@ -8831,6 +8905,26 @@ const ttFiyatHesapla = (fHam) => {
   if (f.videoDurumu !== 'Alındı' && f.videoDurumu !== 'Keşif Yapıldı') uyarilar.push('Video/fotoğraf gelmeden fiyat kesinleşmez — mutlaka isteyin.');
   const toplam = kalemler.reduce((s, k) => s + (k.tutar || 0), 0);
   return { tur: 'sehirlerArasi', liste, kalemler, nakliyeToplam: toplam, depo, uyarilar, bilgiler };
+};
+
+// ============================================================================
+// YENİ (kullanıcı talebi): FİYAT ARALIĞI — TABAN + AÇILIŞ (%25 FAZLASI)
+// Sistemin hesapladığı fiyat TABAN fiyattır (inilebilecek en alt fiyat).
+// Satışçı müşteriye AÇILIŞ fiyatıyla (taban + %25) başlar; pazarlıkta
+// tabana kadar iskonto yapabilir. Tutarlar 500 ₺'ye yuvarlanır.
+// ============================================================================
+const TT_ACILIS_ORANI = 0.25;
+const ttYuvarla500 = (n) => Math.round((Number(n) || 0) / 500) * 500;
+const ttAcilisFiyati = (taban) => (taban ? Math.ceil((taban * (1 + TT_ACILIS_ORANI)) / 500) * 500 : 0);
+// Açılış fiyatından iskonto kademeleri (tabanın altına inmez)
+const ttIskontoKademeleri = (taban) => {
+  if (!taban) return [];
+  const acilis = ttAcilisFiyati(taban);
+  return [
+    { ad: 'Açılış fiyatı', not: `+%${Math.round(TT_ACILIS_ORANI * 100)}`, tutar: acilis },
+    ...[5, 10, 15].map(y => ({ ad: `%${y} iskonto`, not: 'açılıştan', tutar: Math.max(taban, ttYuvarla500(acilis * (1 - y / 100))) })),
+    { ad: 'Taban fiyat', not: 'en son', tutar: taban },
+  ].filter((k, i, a) => a.findIndex(x => x.tutar === k.tutar) === i);
 };
 
 // Adres kısa metni: İstanbul'da yalnızca ilçe ("Pendik"), diğer illerde "Çankaya, Ankara"
@@ -8984,7 +9078,7 @@ const ttWhatsappSablonlariHam = (tHam, gonderen = '') => {
   const selam = ad ? `Merhaba ${ad},` : 'Merhabalar,';
   const ben = gonderen ? ` ben ${gonderen.split(' ')[0]}` : '';
   const hesap = ttFiyatHesapla(t);
-  const fiyat = ttFiyatSayi(t.verilenFiyat) || hesap.nakliyeToplam;
+  const fiyat = ttFiyatSayi(t.verilenFiyat) || ttAcilisFiyati(hesap.nakliyeToplam);   // DEĞİŞTİ: yoksa açılış fiyatı
   const tarih = t.tasinmaTarihi ? ttTrTarih(t.tasinmaTarihi) : (t.tasinmaNotu || '');
   const odaAd = TT_ODA_SECENEKLERI.find(o => o.id === t.odaSayisi)?.ad || t.odaSayisi;
 
@@ -9013,7 +9107,8 @@ const ttWhatsappSablonlariHam = (tHam, gonderen = '') => {
   // ---- DEPOEVİM (Depo / Depodan Çıkış) ----
   const b = TT_DEPO_BOYUTLARI.find(x => x.id === t.depoBoyutu);
   const sube = DEPO_LOCATIONS.find(d => d.name === t.sube);
-  const depoSatiri = b ? `📦 Depo: ${b.id} Depo${b.m3 ? ` (${b.m3} m³)` : ''}${b.aylik ? ` — ${ttTl(b.aylik)} + KDV / ay` : ''}` : '';
+  const bAylik = b ? ttDepoAylik(t.sube, b.id) : null;   // YENİ: şube bazlı kira
+  const depoSatiri = b ? `📦 Depo: ${b.id} Depo${b.m3 ? ` (${b.m3} m³)` : ''}${bAylik ? ` — ${ttTl(bAylik)} + KDV / ay` : ''}` : '';
   const kiraSatiri = hesap.depo && hesap.depo.kiralama.odenecekAy > 1
     ? `🎁 ${hesap.depo.kiralama.ad}: ${ttTl(hesap.depo.pesin)} + KDV (${hesap.depo.kiralama.toplamAy} ay kullanım)` : '';
   const nakliyeSatiri = t.hizmetTipi === 'Depo'
@@ -9036,7 +9131,7 @@ const ttWhatsappSablonlariHam = (tHam, gonderen = '') => {
     { id: 'video', ad: 'Video Hatırlatma',
       metin: `${selam} DepoEvim'den${ben}. Hem hangi depomuza sığacağını netleştirmek hem nakliye fiyatınızı kesinleştirmek için eşya videonuzu bekliyoruz. Müsait olduğunuzda gönderirseniz hemen fiyat çalışması dönerim. İyi günler.` },
     { id: 'kampanya', ad: 'Uzun Dönem Kampanya',
-      metin: `${selam} Uzun süreli depolamada kampanyamızı hatırlatmak isterim:\n🎁 5 ay öde → 1 ay hediye (6 ay)\n🎁 10 ay öde → 2 ay hediye (12 ay)\n${b?.aylik ? `\nSizin deponuz için: 6 ay ${ttTl(b.aylik * 5)} + KDV · 12 ay ${ttTl(b.aylik * 10)} + KDV\n` : ''}\nKredi kartı yalnızca bu toplu ödemelerde geçerlidir; aylık ödemeler IBAN'a yapılır. Taahhüt zorunluluğu yoktur.` },
+      metin: `${selam} Uzun süreli depolamada kampanyamızı hatırlatmak isterim:\n🎁 5 ay öde → 1 ay hediye (6 ay)\n🎁 10 ay öde → 2 ay hediye (12 ay)\n${bAylik ? `\nSizin deponuz için: 6 ay ${ttTl(bAylik * 5)} + KDV · 12 ay ${ttTl(bAylik * 10)} + KDV\n` : ''}\nKredi kartı yalnızca bu toplu ödemelerde geçerlidir; aylık ödemeler IBAN'a yapılır. Taahhüt zorunluluğu yoktur.` },
     { id: 'davet', ad: 'Depo Ziyaret Daveti',
       metin: `${selam} Depolarımızı dilediğiniz zaman gelip görebilirsiniz${sube ? `:\n📍 ${sube.name} — ${sube.address}, ${sube.district}` : '.'}\nZiyaret için 1-2 gün önceden randevu almanız yeterli. Instagram ve YouTube'daki müşteri memnuniyet videolarımızı da izleyebilirsiniz.` },
     { id: 'kapora', ad: 'Kayıt & Kapora Bilgisi',
@@ -9197,7 +9292,7 @@ const MusteriGecmisiKutusu = ({ gecmis, ad = '', kompakt = false }) => {
 // CANLI FİYAT PANELİ — form değiştikçe sistem fiyatı yeniden hesaplanır
 // ============================================================================
 const TTFiyatPaneli = ({ form }) => {
-  const h = useMemo(() => ttFiyatHesapla(form), [form]);
+  const h = useMemo(() => ttFiyatHesapla(form), [form, ttFiyatSurumu]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
     <div className="bg-neutral-900 text-white rounded-2xl p-3.5 space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -9214,9 +9309,21 @@ const TTFiyatPaneli = ({ form }) => {
         </ul>
       )}
       {(form.hizmetTipi !== 'Depo' || form.nakliyeIstiyor === 'Firma') && (
-        <div className="flex items-end justify-between gap-2 pt-2 border-t border-white/10">
-          <span className="text-[10px] font-bold uppercase text-neutral-400">{form.hizmetTipi === 'Nakliye' ? 'Taşıma fiyatı' : 'Nakliye fiyatı'}</span>
-          <span className="text-2xl font-black text-yellow-400 leading-none">{h.nakliyeToplam ? ttTl(h.nakliyeToplam) : '—'}</span>
+        <div className="pt-2 border-t border-white/10 space-y-1.5">
+          {/* DEĞİŞTİ (kullanıcı talebi): sistem fiyatı = TABAN; ayrıca +%25 açılış fiyatı */}
+          <div className="flex items-end justify-between gap-2">
+            <span className="text-[10px] font-bold uppercase text-neutral-400">{form.hizmetTipi === 'Nakliye' ? 'Taşıma' : 'Nakliye'} · Taban fiyat</span>
+            <span className="text-2xl font-black text-yellow-400 leading-none">{h.nakliyeToplam ? ttTl(h.nakliyeToplam) : '—'}</span>
+          </div>
+          {h.nakliyeToplam > 0 && (<>
+            <div className="flex items-end justify-between gap-2">
+              <span className="text-[10px] font-bold uppercase text-neutral-400">Açılış fiyatı (+%{Math.round(TT_ACILIS_ORANI * 100)})</span>
+              <span className="text-lg font-black text-emerald-300 leading-none">{ttTl(ttAcilisFiyati(h.nakliyeToplam))}</span>
+            </div>
+            <p className="text-[10px] font-bold text-neutral-300 bg-white/5 rounded-lg px-2 py-1">
+              💬 Fiyat aralığı: <b className="text-white">{ttTl(h.nakliyeToplam)} – {ttTl(ttAcilisFiyati(h.nakliyeToplam))}</b>. Açılışta +%{Math.round(TT_ACILIS_ORANI * 100)} fiyatla başlayın; pazarlıkta tabana kadar iskonto yapabilirsiniz.
+            </p>
+          </>)}
         </div>
       )}
       {/* Depo ücreti: aylık + KDV ve kampanyalı peşin tutar */}
@@ -9683,8 +9790,9 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
         site: ttSiteOf(form.hizmetTipi),
         sistemFiyati: hesap.nakliyeToplam || 0,
         depoAylik: hesap.depo?.aylik || '',
-        // Satışçı fiyat yazmadıysa sistem fiyatı müşteriye söylenen fiyat kabul edilir
-        verilenFiyat: form.verilenFiyat || (nakliyeVar && hesap.nakliyeToplam ? String(hesap.nakliyeToplam) : ''),
+        // DEĞİŞTİ (kullanıcı talebi): fiyat yazılmadıysa AÇILIŞ fiyatı (taban + %25) söylenmiş kabul edilir
+        verilenFiyat: form.verilenFiyat || (nakliyeVar && hesap.nakliyeToplam ? String(ttAcilisFiyati(hesap.nakliyeToplam)) : ''),
+        acilisFiyati: nakliyeVar && hesap.nakliyeToplam ? ttAcilisFiyati(hesap.nakliyeToplam) : 0,
       });
     } catch (e) { setHata('Kaydedilemedi: ' + (e?.message || 'bilinmeyen hata')); setKaydediliyor(false); }
   };
@@ -9835,7 +9943,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
                   <span className="block text-base font-black">{b.id} Depo</span>
                   <span className={`block text-[10px] font-bold ${secili ? 'text-white/80' : 'text-neutral-500'}`}>{b.m3 ? `${b.m3} m³ · ${b.olcu}` : b.olcu}</span>
                   {/* Aylık fiyat HEMEN görünür — kılavuz: "ilk 30 saniyede fiyatı söyle" */}
-                  <span className="block text-sm font-black mt-1">{b.aylik ? `${ttTl(b.aylik)} +KDV/ay` : 'Video ile'}</span>
+                  <span className="block text-sm font-black mt-1">{ttDepoAylik(form.sube, b.id) && b.aylik ? `${ttTl(ttDepoAylik(form.sube, b.id))} +KDV/ay` : 'Video ile'}</span>
                 </button>
               );
             })}
@@ -9894,17 +10002,48 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
             </div>
           </div>
           {(form.hizmetTipi !== 'Depo' || form.nakliyeIstiyor === 'Firma') && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
-              <div className="rounded-2xl bg-neutral-900 text-white p-3">
-                <p className="text-[10px] font-black uppercase text-neutral-400">Sistemin hesapladığı fiyat</p>
-                <p className="text-2xl font-black text-yellow-400">{hesap.nakliyeToplam ? ttTl(hesap.nakliyeToplam) : '—'}</p>
-                <p className="text-[10px] font-bold text-neutral-400">{hesap.liste}</p>
+            <div className="space-y-3">
+              {/* DEĞİŞTİ (kullanıcı talebi): sistem fiyatı TABAN; açılış = taban + %25 */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-2xl bg-neutral-900 text-white p-3">
+                  <p className="text-[10px] font-black uppercase text-neutral-400">Taban fiyat (sistem · en alt)</p>
+                  <p className="text-2xl font-black text-yellow-400">{hesap.nakliyeToplam ? ttTl(hesap.nakliyeToplam) : '—'}</p>
+                  <p className="text-[10px] font-bold text-neutral-400">{hesap.liste}</p>
+                </div>
+                <div className="rounded-2xl bg-emerald-700 text-white p-3">
+                  <p className="text-[10px] font-black uppercase text-emerald-100">Açılış fiyatı (+%{Math.round(TT_ACILIS_ORANI * 100)}) · müşteriye ilk söylenecek</p>
+                  <p className="text-2xl font-black">{hesap.nakliyeToplam ? ttTl(ttAcilisFiyati(hesap.nakliyeToplam)) : '—'}</p>
+                  <p className="text-[10px] font-bold text-emerald-100">Pazarlıkta tabana kadar iskonto yapabilirsiniz</p>
+                </div>
               </div>
+              {hesap.nakliyeToplam > 0 && (
+                <div>
+                  <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">İskonto seçenekleri — tıklayınca söylenen fiyata yazılır</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {ttIskontoKademeleri(hesap.nakliyeToplam).map(k => {
+                      const secili = ttFiyatSayi(form.verilenFiyat) === k.tutar;
+                      return (
+                        <button key={k.ad} type="button" onClick={() => d('verilenFiyat')(String(k.tutar))}
+                          className={`px-3 py-2 rounded-xl border-2 text-left transition ${secili ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-800 border-neutral-200 hover:border-neutral-400'}`}>
+                          <span className="block text-sm font-black leading-tight">{ttTl(k.tutar)}</span>
+                          <span className={`block text-[10px] font-bold ${secili ? 'text-white/70' : 'text-neutral-500'}`}>{k.ad} · {k.not}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <label className="block">
                 <span className="block text-[10px] font-black uppercase text-neutral-500 mb-1">Müşteriye söylenen fiyat (₺)</span>
                 <input value={form.verilenFiyat} onChange={e => d('verilenFiyat')(e.target.value)} inputMode="numeric"
-                  placeholder={hesap.nakliyeToplam ? `Boş bırakılırsa ${ttTl(hesap.nakliyeToplam)}` : 'Örn. 32000'}
+                  placeholder={hesap.nakliyeToplam ? `Boş bırakılırsa açılış fiyatı ${ttTl(ttAcilisFiyati(hesap.nakliyeToplam))}` : 'Örn. 32000'}
                   className={`w-full px-3 py-3 rounded-xl border-2 border-neutral-300 text-base font-black outline-none focus:ring-2 ${S.halka}`} />
+                {/* Tabanın altı uyarısı */}
+                {hesap.nakliyeToplam > 0 && ttFiyatSayi(form.verilenFiyat) > 0 && ttFiyatSayi(form.verilenFiyat) < hesap.nakliyeToplam && (
+                  <span className="mt-1 text-[11px] font-black text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1 flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5" /> Taban fiyatın ({ttTl(hesap.nakliyeToplam)}) altında! Ek iskonto için Mehmet Bey'e danışın.
+                  </span>
+                )}
               </label>
             </div>
           )}
@@ -9935,23 +10074,29 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
               </div>
             </div>
           </div>
-          <textarea value={form.aciklama} onChange={e => d('aciklama')(e.target.value)} rows={3}
-            placeholder="Açıklama — örn. ev büyükleriyle konuşup dönecek, halılar ve dikiş makinesi kıymetli"
-            className="w-full px-3 py-2.5 rounded-xl border border-neutral-200 text-sm font-semibold outline-none focus:ring-2 focus:ring-neutral-900/20" />
-          {/* Cevap özeti — tıklanınca o soruya dönülür */}
-          <div className="rounded-2xl border border-neutral-200 p-3">
-            <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Cevap Özeti</p>
-            <div className="flex flex-wrap gap-1.5">
-              {adimlar.filter(a => a.soru).map(a => {
-                const i = adimlar.indexOf(a);
-                const tamam = ttAdimTamam(form, a.id);
-                return (
-                  <button key={a.id} type="button" onClick={() => git(i)}
-                    className={`px-2 py-1 rounded-lg text-[10px] font-black border ${tamam ? 'bg-green-50 text-green-800 border-green-200' : 'bg-amber-50 text-amber-800 border-amber-200'}`}>
-                    {tamam ? '✓' : '!'} {a.baslik}
-                  </button>
-                );
-              })}
+          {/* DEĞİŞTİ (kullanıcı talebi): "Açıklama" yerine GÖRÜŞME NOTU + hazır şablonlar.
+              Yazılan not kaydedilince notlara eklenir ve görüşme listesinde görünür.
+              KALDIRILDI: "Cevap Özeti" bölümü (sol taraftaki soru listesi zaten gösteriyor). */}
+          <div className="rounded-2xl border-2 border-yellow-200 bg-yellow-50/60 p-3 space-y-2">
+            <p className="text-[11px] font-black uppercase text-yellow-900 flex items-center gap-1.5"><StickyNote className="w-4 h-4" /> Görüşme Notu</p>
+            {/* Daha önce girilmiş notlar (düzenlemede) */}
+            {ttSonNot(form).slice(0, 3).map((n, i) => (
+              <div key={i} className="bg-white border border-yellow-100 rounded-lg px-2.5 py-1.5">
+                <p className="text-xs font-semibold text-neutral-800">{n.metin}</p>
+                <p className="text-[10px] font-bold text-neutral-400">{n.kullanici} · {new Date(n.tarih).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}</p>
+              </div>
+            ))}
+            <textarea value={form.yeniNot || ''} onChange={e => d('yeniNot')(e.target.value)} rows={3}
+              placeholder="Görüşme notu — örn. müşteri ile görüşüldü, yakını için düşünüyor, dönüş bekliyoruz"
+              className="w-full px-3 py-2.5 rounded-xl border border-yellow-200 bg-white text-sm font-semibold outline-none focus:ring-2 focus:ring-yellow-400" />
+            <div>
+              <p className="text-[10px] font-black uppercase text-yellow-800 mb-1.5">Hazır Şablonlar — tıklayınca nota eklenir</p>
+              <div className="flex flex-wrap gap-1.5">
+                {ttNotSablonlari(form.hizmetTipi).map(sb => (
+                  <button key={sb} type="button" onClick={() => d('yeniNot')((form.yeniNot || '').trim() ? `${form.yeniNot.trim()} ${sb}` : sb)}
+                    className="px-2.5 py-1.5 rounded-lg bg-white border border-yellow-300 hover:bg-yellow-100 text-[11px] font-bold text-neutral-700 text-left transition">{sb}</button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -10076,6 +10221,17 @@ const useTelefonTeklifleri = (aktif = true) => {
   }, [aktif]);
   return teklifler;
 };
+
+// YENİ (kullanıcı talebi): telefon görüşmesi hazır not şablonları —
+// Hızlı Teklifler'deki şablonlar + görüşme sonrası sık kullanılanlar
+const ttNotSablonlari = (hizmetTipi) => [
+  'Müşteri ile görüşüldü, yakını için düşünüyor. Dönüş bekliyoruz.',
+  'Fiyat verildi, müşteri düşünüp dönecek.',
+  'Video / fotoğraf bekleniyor, gelince net fiyat verilecek.',
+  ...((typeof NOT_SABLONLARI !== 'undefined' && NOT_SABLONLARI[ttSiteOf(hizmetTipi)]) || []),
+].filter((x, i, a) => a.indexOf(x) === i);
+// Kaydın en son notu (liste görünümü için)
+const ttSonNot = (t) => [...(t.notlar || [])].sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || '')));
 
 // Görünürlük (kullanıcı talebi): her satışçı KENDİ görüşmelerini görür,
 // yöneticiler (Firma Sahibi / Yönetici / Müdür / düzenleme yetkili) HEPSİNİ görür.
@@ -10237,7 +10393,22 @@ const TelefonTeklifSatiri = ({ tHam, gecmis, sahibiGoster, onAc, onDurum, onWhat
         <TTTakipRozeti t={t} />
       </div>
       <ChevronRight className="hidden md:block w-4 h-4 text-neutral-300" />
-      {t.aciklama && <p className="md:col-span-6 text-[11px] text-neutral-600 bg-yellow-50 border border-yellow-100 rounded-lg px-2 py-1 line-clamp-2">{t.aciklama}</p>}
+      {/* DEĞİŞTİ (kullanıcı talebi): burada müşteriye girilen SON NOT görünür; not yoksa uyarı */}
+      {(() => {
+        const notlar = ttSonNot(t);
+        if (!notlar.length) return (
+          <p className="md:col-span-6 text-[11px] font-black text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1 flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" /> Not girilmemiş — müşteriyle görüşme notu ekleyin
+          </p>
+        );
+        const n = notlar[0];
+        return (
+          <div className="md:col-span-6 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5">
+            <p className="text-xs font-semibold text-neutral-800 line-clamp-2 flex gap-1.5"><StickyNote className="w-3.5 h-3.5 text-yellow-600 shrink-0 mt-0.5" /> {n.metin}</p>
+            <p className="text-[10px] font-bold text-neutral-400 ml-5">{n.kullanici} · {new Date(n.tarih).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}{notlar.length > 1 ? ` · +${notlar.length - 1} not daha` : ''}</p>
+          </div>
+        );
+      })()}
     </div>
   );
 };
@@ -10358,6 +10529,13 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
                   placeholder="Görüşme notu ekle (örn. 15.10'da tekrar aranacak)"
                   className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-neutral-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-neutral-900/20" />
                 <button type="button" onClick={notGonder} className="px-3 rounded-xl bg-neutral-900 text-white hover:bg-neutral-700"><Send className="w-4 h-4" /></button>
+              </div>
+              {/* YENİ (kullanıcı talebi): hazır not şablonları — tıklayınca kutuya yazılır */}
+              <div className="flex flex-wrap gap-1 mb-2">
+                {ttNotSablonlari(t.hizmetTipi).map(sb => (
+                  <button key={sb} type="button" onClick={() => setNot(sb)}
+                    className="px-2 py-1 rounded-lg bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 text-[10px] font-bold text-neutral-700 text-left">{sb}</button>
+                ))}
               </div>
               <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
                 {[...(t.notlar || []).map(n => ({ ...n, tur: 'not' })), ...(t.hareketler || []).map(h => ({ ...h, tur: 'hareket', metin: h.islem }))]
@@ -10486,16 +10664,18 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
 
   const kaydet = async (veri) => {
     // Formdan yalnızca FORM alanları yazılır; notlar/süreç/geçmiş eski kopyayla ezilmez
-    const { id: _id, notlar: _n, hareketler: _h, surecAdimlari: _s, createdAt: _c, olusturan: _o, atanan: _a, kayitAcildi: _k, ...alanlar } = veri;
+    const { id: _id, notlar: _n, hareketler: _h, surecAdimlari: _s, createdAt: _c, olusturan: _o, atanan: _a, kayitAcildi: _k, yeniNot, ...alanlar } = veri;
+    // YENİ (kullanıcı talebi): sihirbazdaki görüşme notu notlar listesine eklenir
+    const notKaydi = (yeniNot || '').trim() ? { tarih: new Date().toISOString(), kullanici, metin: yeniNot.trim() } : null;
     // Havuzdan aktarılan kayıt henüz listeye düşmemiş olabilir → açılış verisi kullanılır
     const duzenlenen = form?.baslangic?.id ? (teklifler.find(x => x.id === form.baslangic.id) || form.baslangic) : null;
     if (duzenlenen) {
-      await guncelle(duzenlenen, alanlar, 'Görüşme cevapları güncellendi');
+      await guncelle(duzenlenen, { ...alanlar, ...(notKaydi ? { notlar: [...(duzenlenen.notlar || []), notKaydi] } : {}) }, notKaydi ? 'Görüşme cevapları güncellendi • not eklendi' : 'Görüşme cevapları güncellendi');
       addSystemLog?.('Telefon Görüşmesi', `${alanlar.musteriAdi || alanlar.telefon} güncellendi.`);
       setDetayId(duzenlenen.id);   // Kaydedince detay (WhatsApp butonlarıyla) açık gelir
     } else {
       const ref = await addDoc(ttKoleksiyon(), {
-        ...alanlar, notlar: [], surecAdimlari: {}, olusturan: kullanici, atanan: kullanici,
+        ...alanlar, notlar: notKaydi ? [notKaydi] : [], surecAdimlari: {}, olusturan: kullanici, atanan: kullanici,
         createdAt: new Date().toISOString(), hareketler: [hareket(`Telefon görüşmesi kaydedildi (${alanlar.hizmetTipi}${alanlar.sistemFiyati ? `, sistem fiyatı ${ttTl(alanlar.sistemFiyati)}` : ''})`)],
       });
       addSystemLog?.('Telefon Görüşmesi', `Yeni telefon teklifi: ${alanlar.musteriAdi || alanlar.telefon} (${alanlar.hizmetTipi})`);
@@ -10761,6 +10941,258 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
           </div>
         </div>
       )}
+    </div>
+  );
+};
+
+// ############################################################################
+//  YENİ (kullanıcı talebi): FİYAT TABLOSU PENCERESİ
+// ----------------------------------------------------------------------------
+//  Müşteri Havuzu başlığındaki "Fiyat Tablosu" butonuyla açılır. Üç bölüm:
+//    1) SEMBOL · Evden Eve Nakliyat   → Şehir İçi / Şehirler Arası
+//    2) DEPOEVİM · Evden Depoya Nakliye → Şehir İçi / Şehirler Arası
+//    3) DEPOEVİM · Kiralık Depo        → şube bazlı aylık kira (+KDV girilir,
+//                                        KDV dahil fiyat otomatik gösterilir)
+//  Yerleşim PDF fiyat listeleriyle aynı mantıktadır. Yalnızca MÜDÜR rütbesi
+//  (ve Firma Sahibi) "Fiyatları Düzenle" ile değiştirebilir; kaydedilen
+//  fiyatlar sistem fiyatı hesaplamasında HEMEN kullanılır.
+// ############################################################################
+const TT_FT_ODALAR = ['1+0', '1+1', '2+1', '3+1', '4+1'];
+// Şehir içi liste bölümleri (PDF sırası)
+const ttSehirIciBolumleri = (a) => [
+  { baslik: 'NAKLİYE TABAN FİYATI (ANADOLU YAKASI)', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Nakliye`, yol: [a, 'taban', o] })) },
+  { baslik: 'TOPLAMA HİZMETİ MALİYETİ', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Toplama`, yol: [a, 'toplama', o] })) },
+  { baslik: 'MERDİVEN MALİYETİ (ASANSÖR YOKSA)', satirlar: [3, 4, 5].map(k => ({ etiket: `${k}. Kat Merdiven Taşıma`, yol: [a, 'merdiven', String(k)] })) },
+  { baslik: 'DIŞ CEPHE ASANSÖR MALİYETİ', satirlar: [{ etiket: 'Anadolu Yakası (2-9 Kat)', yol: [a, 'disCephe', 'Anadolu'] }, { etiket: 'Avrupa Yakası (Tek Taraf Kurulum)', yol: [a, 'disCephe', 'Avrupa'] }] },
+  { baslik: 'AVRUPA YAKASI EKSTRA MALİYET (YAKAYA EKLENİR)', satirlar: ['1+0', '1+1', '2+1', '3+1'].map(o => ({ etiket: `${o} Nakliye Ekstra`, yol: [a, 'avrupaEkstra', o] })) },
+  { baslik: 'YÜRÜME MESAFESİ MALİYETİ (ARAÇ YANAŞAMAZSA)', satirlar: [50, 100].map(m => ({ etiket: `${m} Adım / Metre`, yol: [a, 'yurume', String(m)] })) },
+];
+// Şehirler arası ek maliyetler
+const ttSehirlerArasiEkBolumleri = (a) => [
+  { baslik: 'TOPLAMA HİZMETİ (İSTENİRSE)', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Toplama`, yol: [a, 'toplama', o] })) },
+  { baslik: 'MERDİVEN (ASANSÖR YOKSA)', satirlar: [3, 4, 5].map(k => ({ etiket: `${k}. Kat Merdiven`, yol: [a, 'merdiven', String(k)] })) },
+  { baslik: 'DIŞ CEPHE ASANSÖRÜ', satirlar: [{ etiket: 'Anadolu Yakası (2-9 Kat)', yol: [a, 'disCephe', 'Anadolu'] }, { etiket: 'Avrupa Yakası (Tek Taraf Kurulum)', yol: [a, 'disCephe', 'Avrupa'] }] },
+  { baslik: 'YÜRÜME MESAFESİ (ARAÇ YANAŞAMAZSA)', satirlar: [50, 100].map(m => ({ etiket: `${m} Adım / Metre`, yol: [a, 'yurume', String(m)] })) },
+];
+const TT_FT_SEKMELER = [
+  { id: 'sembol', ad: 'Evden Eve Nakliyat', marka: 'SEMBOL', alt: 'Evden eve taşıma fiyatları', Ikon: Truck, sehirIci: 'sehirIciEve', ek: 'sehirlerArasiEkEve', il: 'ilEve',
+    secili: 'bg-red-600 text-white border-red-600', pasif: 'bg-white text-red-700 border-red-200 hover:border-red-400', baslikCls: 'bg-red-600' },
+  { id: 'depo', ad: 'Eşya Depolama Nakliyesi', marka: 'DEPOEVİM', alt: 'Evden depoya nakliye fiyatları', Ikon: Package, sehirIci: 'sehirIciDepo', ek: 'sehirlerArasiEkDepo', il: 'ilDepo',
+    secili: 'bg-blue-600 text-white border-blue-600', pasif: 'bg-white text-blue-700 border-blue-200 hover:border-blue-400', baslikCls: 'bg-blue-600' },
+  { id: 'kira', ad: 'Kiralık Depo', marka: 'DEPOEVİM', alt: 'Şube bazlı aylık depo kirası', Ikon: Wallet,
+    secili: 'bg-sky-600 text-white border-sky-600', pasif: 'bg-white text-sky-700 border-sky-200 hover:border-sky-400', baslikCls: 'bg-sky-600' },
+];
+const ttYolAl = (o, yol) => yol.reduce((x, k) => (x == null ? x : x[k]), o);
+const ttYolYaz = (o, yol, v) => {
+  const kopya = JSON.parse(JSON.stringify(o));
+  let x = kopya;
+  yol.slice(0, -1).forEach(k => { if (x[k] == null) x[k] = {}; x = x[k]; });
+  x[yol[yol.length - 1]] = v;
+  return kopya;
+};
+
+// Tek fiyat hücresi — görüntülemede "12.000 ₺", düzenlemede sayı kutusu
+const TTFiyatHucresi = ({ deger, duzenle, onDegis, degisti = false }) => (duzenle ? (
+  <input value={deger ?? ''} inputMode="numeric"
+    onChange={e => { const r = e.target.value.replace(/\D/g, ''); onDegis(r === '' ? '' : Number(r)); }}
+    className={`w-28 px-2 py-1 rounded-lg border text-right text-sm font-black outline-none focus:ring-2 focus:ring-yellow-400 ${degisti ? 'border-yellow-400 bg-yellow-50' : 'border-neutral-300 bg-white'}`} />
+) : <span className="text-sm font-black text-neutral-900">{ttTl(deger)}</span>);
+
+// PDF'teki gibi başlıklı fiyat bölümü
+const TTFiyatBolumu = ({ bolum, veri, duzenle, onDegis, renk }) => (
+  <div className="rounded-2xl border border-neutral-200 overflow-hidden bg-white">
+    <div className={`px-3 py-2 text-[11px] font-black text-white tracking-wide ${renk}`}>{bolum.baslik}</div>
+    {bolum.satirlar.map((st, i) => {
+      const d = ttYolAl(veri, st.yol);
+      return (
+        <div key={st.etiket} className={`flex items-center justify-between gap-2 px-3 py-2 ${i % 2 ? 'bg-neutral-50' : 'bg-white'}`}>
+          <span className="text-xs font-bold text-neutral-700">{st.etiket}</span>
+          <TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => onDegis(st.yol, v)} degisti={d !== ttYolAl(TT_FIYAT_VARSAYILAN, st.yol)} />
+        </div>
+      );
+    })}
+  </div>
+);
+
+const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
+  const duzenleyebilir = ttMudurMu(currentUser);
+  const [sekme, setSekme] = useState('sembol');
+  const [kapsam, setKapsam] = useState('sehirIci');     // sehirIci | sehirlerArasi
+  const [duzenle, setDuzenle] = useState(false);
+  const [taslak, setTaslak] = useState(() => JSON.parse(JSON.stringify(ttFiyatTablolari())));
+  const [ilArama, setIlArama] = useState('');
+  const [kaydediliyor, setKaydediliyor] = useState(false);
+  const [mesaj, setMesaj] = useState('');
+  // Düzenleme dışındayken canlı (Firestore'dan gelen) fiyatlar gösterilir
+  const veri = duzenle ? taslak : ttFiyatTablolari();
+  const aktifSekme = TT_FT_SEKMELER.find(x => x.id === sekme);
+  const degis = (yol, v) => setTaslak(t => ttYolYaz(t, yol, v));
+
+  const duzenlemeyiAc = () => { setTaslak(JSON.parse(JSON.stringify(ttFiyatTablolari()))); setDuzenle(true); setMesaj(''); };
+  const kaydet = async () => {
+    setKaydediliyor(true); setMesaj('');
+    try {
+      // Boş bırakılan kutularda mevcut fiyat korunur
+      const bosDoldur = (t, mevcut) => {
+        if (Array.isArray(t)) return t.map((v, i) => (v === '' || v == null ? mevcut?.[i] : (typeof v === 'object' ? bosDoldur(v, mevcut?.[i]) : v)));
+        if (t && typeof t === 'object') { const o = {}; Object.keys(t).forEach(k => { o[k] = bosDoldur(t[k], mevcut?.[k]); }); return o; }
+        return t === '' || t == null ? mevcut : t;
+      };
+      const temiz = JSON.parse(JSON.stringify(bosDoldur(taslak, ttFiyatTablolari())));
+      await setDoc(ttFiyatBelge(), { ...temiz, guncelleyen: currentUser?.fullName || 'Sistem', guncellemeTarihi: new Date().toISOString() });
+      ttFiyatlariUygula(temiz);            // Bu ekranda beklemeden uygula
+      setDuzenle(false); setMesaj('Fiyatlar kaydedildi — sistem fiyatı hesaplamaları yeni fiyatları kullanıyor.');
+    } catch (e) { console.error(e); setMesaj('Kaydedilemedi: ' + (e?.message || '')); }
+    finally { setKaydediliyor(false); }
+  };
+  const varsayilanaDon = () => { setTaslak(JSON.parse(JSON.stringify(TT_FIYAT_VARSAYILAN))); setMesaj('PDF (Eylül 2026) fiyatları yüklendi — kalıcı olması için Kaydet\'e basın.'); };
+
+  const iller = aktifSekme.il ? Object.keys(veri[aktifSekme.il] || {}).sort((a, b) => a.localeCompare(b, 'tr'))
+    .filter(il => !ilArama.trim() || il.toLocaleLowerCase('tr-TR').includes(ilArama.trim().toLocaleLowerCase('tr-TR'))) : [];
+  const kiraSatirlari = ['Genel', ...DEPO_LOCATIONS.map(d => d.name)];
+  const kiraBoyutlari = TT_DEPO_BOYUTLARI.filter(b => b.aylik);
+
+  return (
+    <div className="fixed inset-0 z-[9990] bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-3 md:p-4" onClick={onKapat}>
+      <div className="bg-neutral-50 sm:rounded-3xl shadow-2xl w-full max-w-6xl h-[100dvh] sm:h-[calc(100dvh-1.5rem)] md:h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
+        {/* BAŞLIK */}
+        <div className="shrink-0 bg-neutral-900 text-white px-4 md:px-5 py-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-lg font-black flex items-center gap-2"><FileText className="w-5 h-5 text-yellow-400" /> Fiyat Tablosu <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/10 text-neutral-300">Güncel Fiyat Listesi 2026</span></h3>
+            <p className="text-[11px] font-bold text-neutral-400">
+              Sistem fiyatı hesaplaması bu tabloyu kullanır.
+              {fiyatBilgi?.guncelleyen ? ` Son güncelleme: ${fiyatBilgi.guncelleyen} · ${new Date(fiyatBilgi.tarih).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}` : ' Şu an PDF (Eylül 2026) fiyatları geçerli.'}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Yalnızca müdür rütbesi düzenleyebilir */}
+            {duzenleyebilir && !duzenle && (
+              <button type="button" onClick={duzenlemeyiAc} className="px-3 py-2 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-neutral-900 text-xs font-black flex items-center gap-1.5"><Edit className="w-4 h-4" /> Fiyatları Düzenle</button>
+            )}
+            {duzenle && (<>
+              <button type="button" onClick={varsayilanaDon} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-black flex items-center gap-1.5"><RefreshCw className="w-4 h-4" /> PDF Fiyatlarına Dön</button>
+              <button type="button" onClick={() => { setDuzenle(false); setMesaj(''); }} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-black">Vazgeç</button>
+              <button type="button" onClick={kaydet} disabled={kaydediliyor} className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-black flex items-center gap-1.5 disabled:opacity-60">
+                {kaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Fiyatları Kaydet
+              </button>
+            </>)}
+            <button type="button" onClick={onKapat} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center"><X className="w-5 h-5" /></button>
+          </div>
+        </div>
+        {/* SEKMELER: Sembol · Depo nakliye · Kiralık depo */}
+        <div className="shrink-0 px-4 md:px-5 pt-3 space-y-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {TT_FT_SEKMELER.map(x => (
+              <button key={x.id} type="button" onClick={() => setSekme(x.id)}
+                className={`px-3 py-2.5 rounded-2xl border-2 text-left transition flex items-center gap-2.5 ${sekme === x.id ? x.secili + ' shadow-lg' : x.pasif}`}>
+                <x.Ikon className="w-5 h-5 shrink-0" />
+                <span className="min-w-0">
+                  <span className={`block text-[9px] font-black ${sekme === x.id ? 'text-white/80' : ''}`}>{x.marka}</span>
+                  <span className="block text-sm font-black leading-tight">{x.ad}</span>
+                  <span className={`block text-[10px] font-bold ${sekme === x.id ? 'text-white/80' : 'text-neutral-500'}`}>{x.alt}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+          {sekme !== 'kira' && (
+            <div className="flex gap-1.5">
+              {[['sehirIci', 'Şehir İçi (İstanbul)'], ['sehirlerArasi', 'Şehirler Arası (81 İl)']].map(([id, ad]) => (
+                <button key={id} type="button" onClick={() => setKapsam(id)}
+                  className={`px-4 py-2 rounded-xl text-xs font-black border-2 transition ${kapsam === id ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'}`}>{ad}</button>
+              ))}
+            </div>
+          )}
+          {duzenle && <p className="text-[11px] font-black text-yellow-800 bg-yellow-100 border border-yellow-300 rounded-xl px-3 py-2">Düzenleme modu: fiyatları yazın ve "Fiyatları Kaydet"e basın. PDF'ten farklı olan kutular sarı görünür.</p>}
+          {mesaj && <p className="text-[11px] font-black text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">{mesaj}</p>}
+        </div>
+
+        {/* İÇERİK */}
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-5">
+          {sekme !== 'kira' && kapsam === 'sehirIci' && (
+            <div className="space-y-3">
+              <p className="text-[11px] font-bold text-neutral-500">Nakliye taban fiyatları Anadolu Yakası çıkışlıdır; Avrupa Yakası için ekstra maliyet eklenir. Ek hizmetler taban fiyata ilave edilir.{sekme === 'depo' ? ' Depolama süresi ücreti ayrıca hesaplanır.' : ''}</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {ttSehirIciBolumleri(aktifSekme.sehirIci).map(b => <TTFiyatBolumu key={b.baslik} bolum={b} veri={veri} duzenle={duzenle} onDegis={degis} renk={aktifSekme.baslikCls} />)}
+              </div>
+            </div>
+          )}
+          {sekme !== 'kira' && kapsam === 'sehirlerArasi' && (
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+              <div className="rounded-2xl border border-neutral-200 bg-white overflow-hidden">
+                <div className={`px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-white ${aktifSekme.baslikCls}`}>
+                  <span className="text-[11px] font-black tracking-wide">81 İL — PENDİK ÇIKIŞLI ORTALAMA BEDELLER</span>
+                  <div className="relative">
+                    <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                    <input value={ilArama} onChange={e => setIlArama(e.target.value)} placeholder="İl ara…" className="pl-7 pr-2 py-1 rounded-lg text-xs font-bold text-neutral-900 outline-none w-40" />
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead className="bg-neutral-100 text-neutral-600">
+                      <tr><th className="text-left px-3 py-2 font-black">İl</th>{['1+1', '2+1', '3+1', '4+1'].map(o => <th key={o} className="text-right px-3 py-2 font-black">{o}</th>)}</tr>
+                    </thead>
+                    <tbody>
+                      {iller.map((il, i) => (
+                        <tr key={il} className={i % 2 ? 'bg-neutral-50' : 'bg-white'}>
+                          <td className="px-3 py-1.5 font-black text-neutral-800">{il}</td>
+                          {[0, 1, 2, 3].map(s => {
+                            const yol = [aktifSekme.il, il, s];
+                            const d = ttYolAl(veri, yol);
+                            return <td key={s} className="px-3 py-1.5 text-right"><TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => degis(yol, v)} degisti={d !== ttYolAl(TT_FIYAT_VARSAYILAN, yol)} /></td>;
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="px-3 py-2 text-[10px] font-bold text-neutral-500 border-t border-neutral-100">1+0 için 1+1 sütunu kullanılır. Trakya / Avrupa Yakası ötesi illerde %15 geçiş farkı dahildir. İskonto (%10) için Mehmet Bey'e danışın.</p>
+              </div>
+              <div className="space-y-3">
+                <p className="text-[11px] font-black text-neutral-600">Bu fiyatların üzerine eklenebilecek ek maliyetler:</p>
+                {ttSehirlerArasiEkBolumleri(aktifSekme.ek).map(b => <TTFiyatBolumu key={b.baslik} bolum={b} veri={veri} duzenle={duzenle} onDegis={degis} renk={aktifSekme.baslikCls} />)}
+              </div>
+            </div>
+          )}
+          {sekme === 'kira' && (
+            <div className="space-y-3">
+              <p className="text-[11px] font-bold text-neutral-500">Aylık depo kirası şube bazlıdır. Fiyatlar <b>+KDV</b> girilir; KDV dahil tutar (%{Math.round(TT_KDV * 100)}) otomatik hesaplanır. "Genel" satırı şube farketmez seçildiğinde ve web sitesinde kullanılır.</p>
+              <div className="rounded-2xl border border-neutral-200 bg-white overflow-x-auto">
+                <table className="w-full text-xs min-w-[720px]">
+                  <thead className="bg-sky-600 text-white">
+                    <tr>
+                      <th className="text-left px-3 py-2.5 font-black">Şube</th>
+                      {kiraBoyutlari.map(b => <th key={b.id} className="text-right px-3 py-2.5 font-black">{b.id} Depo<span className="block text-[9px] font-bold text-white/80">{b.m3} m³ · {b.olcu}</span></th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {kiraSatirlari.map((sube, i) => (
+                      <tr key={sube} className={`${i % 2 ? 'bg-neutral-50' : 'bg-white'} ${sube === 'Genel' ? 'border-b-2 border-sky-200' : ''}`}>
+                        <td className="px-3 py-2 font-black text-neutral-800">{sube === 'Genel' ? 'Genel Liste (Şube farketmez)' : sube}</td>
+                        {kiraBoyutlari.map(b => {
+                          const yol = ['depoKira', sube, b.id];
+                          const d = ttYolAl(veri, yol);
+                          return (
+                            <td key={b.id} className="px-3 py-2 text-right align-top">
+                              <TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => degis(yol, v)} degisti={d !== ttYolAl(TT_FIYAT_VARSAYILAN, yol)} />
+                              <span className="block text-[10px] font-bold text-neutral-400">+KDV / ay</span>
+                              {/* İki fiyat: +KDV ve KDV dahil */}
+                              <span className="block text-[11px] font-black text-sky-700">{d ? `${ttTl(Number(d) * (1 + TT_KDV))} KDV dahil` : '—'}</span>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-[11px] font-bold text-emerald-900 space-y-0.5">
+                <p className="font-black">🎁 Uzun dönem kampanyası (hesaplamada otomatik uygulanır)</p>
+                <p>6 Ay Peşin → 5 ay öde, 1 ay hediye · 12 Ay Peşin → 10 ay öde, 2 ay hediye. Kredi kartı yalnızca toplu ödemede geçer.</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
