@@ -9,6 +9,8 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
   anaIsleriFiltrele, isToplamGun, isToplamArac } from './shared.jsx';
 // YENİ: QR Site Takip bölümü dahili QR üretecini OperasyonPersonel.jsx'ten alır (CDN gerektirmez)
 import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
+// YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
+import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari } from './fiyatSema.js';
 
   // ============================================================================
   // YENİ: Ortak Bölüm Başlığı Bileşeni (SectionHeader)
@@ -8479,20 +8481,9 @@ const TT_NAKLIYE_TERCIHI = [
   { id: 'Firma',   ad: 'Firma adresimden alsın (Anahtar Teslim)', alt: 'Sigortalı taşıma, kendi ekibimiz, kalıcı ambalaj' },
 ];
 
-// Depo boyutları — depoevim.com/depo-fiyatlarimiz (Eylül 2026), +%20 KDV
-const TT_DEPO_BOYUTLARI = [
-  { id: '1+0', m3: 10, olcu: '2×1.7×3 m', aylik: 4500, aciklama: 'Birkaç parça / stüdyo eşyası' },
-  { id: '1+1', m3: 15, olcu: '2×2.5×3 m', aylik: 6000, aciklama: '1+1 ev eşyası' },
-  { id: '2+1', m3: 22, olcu: '3×2.5×3 m', aylik: 7500, aciklama: '2+1 ev eşyası, kentsel dönüşüm' },
-  { id: '3+1', m3: 30, olcu: '4×2.5×3 m', aylik: 9000, aciklama: '3+1 ev eşyası' },
-  { id: 'Özel', m3: null, olcu: '40 m³ ve üzeri', aylik: null, aciklama: 'Video ile ölçü belirlenir' },
-];
-// Kiralama süresi — web sihirbazı: 6 ay peşin (1 ay hediye) = 5 öde 1 hediye; 12 ay = 10 öde 2 hediye
-const TT_KIRALAMA = [
-  { id: '1',  ad: '1 Aylık Kiralama',            odenecekAy: 1,  toplamAy: 1 },
-  { id: '6',  ad: '6 Ay Peşin (1 Ay Hediye)',    odenecekAy: 5,  toplamAy: 6 },
-  { id: '12', ad: '12 Ay Peşin (2 Ay Hediye)',   odenecekAy: 10, toplamAy: 12 },
-];
+// Depo boyutları ve kiralama süreleri — src/fiyatSema.js (API ile ortak)
+const TT_DEPO_BOYUTLARI = DEPO_BOYUTLARI;
+const TT_KIRALAMA = DEPO_KIRALAMA;
 // Şubeler — kayıt ekranının "Depo" seçimiyle aynı isimler (DEPO_LOCATIONS)
 const TT_SUBELER = [...DEPO_LOCATIONS.map(d => d.name), 'Farketmez'];
 const TT_KDV = 0.20;
@@ -8635,16 +8626,25 @@ const ttFiyatBelge = () => doc(db, 'artifacts', appId, 'public', 'data', 'ayarla
 // Şubeye göre aylık depo kirası (+KDV); şube yoksa / farketmezse Genel liste
 const ttDepoAylik = (sube, boyut) => (TT_DEPO_KIRA[sube] && TT_DEPO_KIRA[sube][boyut])
   || (TT_DEPO_KIRA.Genel && TT_DEPO_KIRA.Genel[boyut]) || TT_DEPO_BOYUTLARI.find(b => b.id === boyut)?.aylik || null;
-// Canlı fiyat dinleyicisi — Müşteri Havuzu'nda bir kez çalışır
+// DEĞİŞTİ (kullanıcı talebi): fiyatlar artık YALNIZCA sunucu üzerinden yazılır
+// (/api/fiyatlar — kullanıcı doğrulama + versiyon + fiyat_gecmisi). Tarayıcı bu
+// belgeye doğrudan yazamaz (firestore.rules).
+const TT_FIYAT_API = '/api/fiyatlar';
+const ttFiyatGecmisKoleksiyon = () => collection(db, 'artifacts', appId, 'public', 'data', 'fiyat_gecmisi');
+// Canlı fiyat dinleyicisi — Müşteri Havuzu'nda bir kez çalışır.
+// "veri": Firestore belgesinin fiyat kısmı, OLDUĞU GİBİ. Fiyat Tablosu penceresi
+// bunu gösterir; /api/fiyatlar da aynı belgeyi döndürür → ekran = API.
 const useFiyatTablosu = (aktif = true) => {
-  const [bilgi, setBilgi] = useState({ surum: 0, guncelleyen: '', tarih: '' });
+  const [bilgi, setBilgi] = useState({ surum: 0, guncelleyen: '', tarih: '', versiyon: 0, veri: null });
   useEffect(() => {
     if (!aktif) return undefined;
     const unsub = onSnapshot(ttFiyatBelge(), snap => {
       if (snap && typeof snap.exists === 'function' && snap.exists()) {
         const v = snap.data();
         ttFiyatlariUygula(v);
-        setBilgi({ surum: ttFiyatSurumu, guncelleyen: v.guncelleyen || '', tarih: v.guncellemeTarihi || '' });
+        const veri = {};
+        FIYAT_VERI_ANAHTARLARI.forEach(k => { if (v[k] !== undefined) veri[k] = v[k]; });
+        setBilgi({ surum: ttFiyatSurumu, guncelleyen: v.guncelleyen || '', tarih: v.guncellendi || v.guncellemeTarihi || '', versiyon: Number(v.versiyon) || 1, veri });
       }
     }, err => console.error('Fiyat tablosu okunamadı:', err));
     return () => unsub();
@@ -10983,14 +10983,12 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
 //  (ve Firma Sahibi) "Fiyatları Düzenle" ile değiştirebilir; kaydedilen
 //  fiyatlar sistem fiyatı hesaplamasında HEMEN kullanılır.
 // ############################################################################
-const TT_FT_ODALAR = ['1+0', '1+1', '2+1', '3+1', '4+1'];
-// Dış cephe asansörü kademeleri (YENİ: 9-13 kat için Anadolu ve Avrupa seçenekleri)
-const TT_FT_DIS_CEPHE = [
-  { etiket: 'Anadolu Yakası (2-9 Kat)', anahtar: 'Anadolu' },
-  { etiket: 'Avrupa Yakası (2-9 Kat · Tek Taraf Kurulum)', anahtar: 'Avrupa' },
-  { etiket: 'Anadolu Yakası (9-13 Kat)', anahtar: 'Anadolu913' },
-  { etiket: 'Avrupa Yakası (9-13 Kat · Tek Taraf Kurulum)', anahtar: 'Avrupa913' },
-];
+// DEĞİŞTİ (kullanıcı talebi): bölüm başlıkları ve satır adları src/fiyatSema.js'ten gelir.
+// /api/fiyatlar aynı başlıkları "etiket" alanında döndürür → ekran ile API ayrışmaz.
+const ttFtBolumler = (gruplar, a) => gruplar.map(g => ({
+  baslik: g.etiket.toLocaleUpperCase('tr-TR'),
+  satirlar: g.satirlar.map(s => ({ etiket: s.etiket, yol: [a, g.ic, s.ic] })),
+}));
 // PDF'te olmayan (tahmini) kalemler — düzeltilene kadar "tahmini" etiketi gösterilir
 const TT_FT_TAHMINI = (yol) => {
   const [, grup, anahtar] = yol;
@@ -11000,22 +10998,9 @@ const TT_FT_TAHMINI = (yol) => {
     || (grup === 'avrupaEkstra' && anahtar === '4+1');
 };
 // Şehir içi liste bölümleri (PDF sırası)
-const ttSehirIciBolumleri = (a) => [
-  { baslik: 'NAKLİYE TABAN FİYATI (ANADOLU YAKASI)', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Nakliye`, yol: [a, 'taban', o] })) },
-  { baslik: 'TOPLAMA HİZMETİ MALİYETİ', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Toplama`, yol: [a, 'toplama', o] })) },
-  // DEĞİŞTİ (kullanıcı talebi): 7. kata kadar, 9-13 kat dış cephe, 4+1 Avrupa ekstra, 150-200 m
-  { baslik: 'MERDİVEN MALİYETİ (ASANSÖR YOKSA)', satirlar: [3, 4, 5, 6, 7].map(k => ({ etiket: `${k}. Kat Merdiven Taşıma`, yol: [a, 'merdiven', String(k)] })) },
-  { baslik: 'DIŞ CEPHE ASANSÖR MALİYETİ', satirlar: TT_FT_DIS_CEPHE.map(x => ({ ...x, yol: [a, 'disCephe', x.anahtar] })) },
-  { baslik: 'AVRUPA YAKASI EKSTRA MALİYET (YAKAYA EKLENİR)', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Nakliye Ekstra`, yol: [a, 'avrupaEkstra', o] })) },
-  { baslik: 'YÜRÜME MESAFESİ MALİYETİ (ARAÇ YANAŞAMAZSA)', satirlar: [50, 100, 150, 200].map(m => ({ etiket: `${m} Adım / Metre`, yol: [a, 'yurume', String(m)] })) },
-];
+const ttSehirIciBolumleri = (a) => ttFtBolumler(SEHIR_ICI_GRUPLARI, a);
 // Şehirler arası ek maliyetler
-const ttSehirlerArasiEkBolumleri = (a) => [
-  { baslik: 'TOPLAMA HİZMETİ (İSTENİRSE)', satirlar: TT_FT_ODALAR.map(o => ({ etiket: `${o} Toplama`, yol: [a, 'toplama', o] })) },
-  { baslik: 'MERDİVEN (ASANSÖR YOKSA)', satirlar: [3, 4, 5, 6, 7].map(k => ({ etiket: `${k}. Kat Merdiven`, yol: [a, 'merdiven', String(k)] })) },
-  { baslik: 'DIŞ CEPHE ASANSÖRÜ', satirlar: TT_FT_DIS_CEPHE.map(x => ({ ...x, yol: [a, 'disCephe', x.anahtar] })) },
-  { baslik: 'YÜRÜME MESAFESİ (ARAÇ YANAŞAMAZSA)', satirlar: [50, 100, 150, 200].map(m => ({ etiket: `${m} Adım / Metre`, yol: [a, 'yurume', String(m)] })) },
-];
+const ttSehirlerArasiEkBolumleri = (a) => ttFtBolumler(SEHIRLER_ARASI_EK_GRUPLARI, a);
 const TT_FT_SEKMELER = [
   { id: 'sembol', ad: 'Evden Eve Nakliyat', marka: 'SEMBOL', alt: 'Evden eve taşıma fiyatları', Ikon: Truck, sehirIci: 'sehirIciEve', ek: 'sehirlerArasiEkEve', il: 'ilEve', oran: 'acilisOraniEve', hizmet: 'Nakliye',
     secili: 'bg-red-600 text-white border-red-600', pasif: 'bg-white text-red-700 border-red-200 hover:border-red-400', baslikCls: 'bg-red-600' },
@@ -11033,15 +11018,16 @@ const ttYolYaz = (o, yol, v) => {
   return kopya;
 };
 
-// Tek fiyat hücresi — görüntülemede "12.000 ₺", düzenlemede sayı kutusu
-const TTFiyatHucresi = ({ deger, duzenle, onDegis, degisti = false }) => (duzenle ? (
-  <input value={deger ?? ''} inputMode="numeric"
+// Tek fiyat hücresi — görüntülemede "12.000 ₺", düzenlemede sayı kutusu.
+// YENİ: durum = { tur: 'hata' | 'uyari', mesaj } → kırmızı / turuncu çerçeve
+const TTFiyatHucresi = ({ deger, duzenle, onDegis, degisti = false, durum = null }) => (duzenle ? (
+  <input value={deger ?? ''} inputMode="numeric" title={durum?.mesaj || ''}
     onChange={e => { const r = e.target.value.replace(/\D/g, ''); onDegis(r === '' ? '' : Number(r)); }}
-    className={`w-28 px-2 py-1 rounded-lg border text-right text-sm font-black outline-none focus:ring-2 focus:ring-yellow-400 ${degisti ? 'border-yellow-400 bg-yellow-50' : 'border-neutral-300 bg-white'}`} />
+    className={`w-28 px-2 py-1 rounded-lg border text-right text-sm font-black outline-none focus:ring-2 focus:ring-yellow-400 ${durum?.tur === 'hata' ? 'border-red-500 border-2 bg-red-50 text-red-700' : durum?.tur === 'uyari' ? 'border-orange-400 border-2 bg-orange-50' : degisti ? 'border-yellow-400 bg-yellow-50' : 'border-neutral-300 bg-white'}`} />
 ) : <span className="text-sm font-black text-neutral-900">{ttTl(deger)}</span>);
 
 // PDF'teki gibi başlıklı fiyat bölümü
-const TTFiyatBolumu = ({ bolum, veri, duzenle, onDegis, renk }) => (
+const TTFiyatBolumu = ({ bolum, veri, kayitli, durumlar, duzenle, onDegis, renk }) => (
   <div className="rounded-2xl border border-neutral-200 overflow-hidden bg-white">
     <div className={`px-3 py-2 text-[11px] font-black text-white tracking-wide ${renk}`}>{bolum.baslik}</div>
     {bolum.satirlar.map((st, i) => {
@@ -11052,72 +11038,133 @@ const TTFiyatBolumu = ({ bolum, veri, duzenle, onDegis, renk }) => (
             {/* YENİ: PDF'te olmayan ve henüz değiştirilmemiş tutar */}
             {TT_FT_TAHMINI(st.yol) && d === ttYolAl(TT_FIYAT_VARSAYILAN, st.yol) && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">tahmini — kontrol edin</span>}
           </span>
-          <TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => onDegis(st.yol, v)} degisti={d !== ttYolAl(TT_FIYAT_VARSAYILAN, st.yol)} />
+          <TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => onDegis(st.yol, v)} degisti={d !== ttYolAl(kayitli, st.yol)} durum={durumlar?.get(fiyatYolAnahtari(st.yol))} />
         </div>
       );
     })}
   </div>
 );
 
+// YENİ (kullanıcı talebi): fiyat kaydı / geri dönüş sunucu üzerinden (/api/fiyatlar)
+const ttFiyatApiGonder = async (govde) => {
+  const r = await fetch(TT_FIYAT_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(govde) });
+  let j;
+  try { j = await r.json(); } catch { j = {}; }
+  if (!r.ok) { const e = new Error(j.error || `Sunucu hatası (${r.status})`); e.hatalar = j.hatalar; throw e; }
+  return j;
+};
+const TT_WOO_UYARI = 'WooCommerce mağazasındaki ürün fiyatlarını da güncellemeyi unutma.';
+const ttFarkDeger = (f, v) => (v == null || v === '' ? '—' : f.yol[0] === 'genel' ? `%${v}` : ttTl(v));
+const ttTarihKisa = (iso) => (iso ? new Date(iso).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }) : '');
+
 const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
   const duzenleyebilir = ttMudurMu(currentUser);
   const [sekme, setSekme] = useState('sembol');
   const [kapsam, setKapsam] = useState('sehirIci');     // sehirIci | sehirlerArasi
   const [duzenle, setDuzenle] = useState(false);
-  const [taslak, setTaslak] = useState(() => JSON.parse(JSON.stringify(ttFiyatTablolari())));
+  const [taslak, setTaslak] = useState(null);
   const [ilArama, setIlArama] = useState('');
   const [kaydediliyor, setKaydediliyor] = useState(false);
-  const [mesaj, setMesaj] = useState('');
-  // Düzenleme dışındayken canlı (Firestore'dan gelen) fiyatlar gösterilir
-  const veri = duzenle ? taslak : ttFiyatTablolari();
+  const [mesaj, setMesaj] = useState(null);             // { tur: 'ok' | 'hata' | 'uyari', metin }
+  const [ozet, setOzet] = useState(null);               // kaydetmeden önce "şu değerler değişecek"
+  const [gecmisAcik, setGecmisAcik] = useState(false);
+  const [gecmis, setGecmis] = useState(null);           // null = yükleniyor
+  const [gecmisDetay, setGecmisDetay] = useState(null);
+  // DEĞİŞTİ (kullanıcı talebi): tek kaynak Firestore — pencere belgeyi OLDUĞU GİBİ gösterir
+  const kayitli = fiyatBilgi?.veri || null;
+  const veri = duzenle && taslak ? taslak : (kayitli || ttFiyatTablolari());
   const aktifSekme = TT_FT_SEKMELER.find(x => x.id === sekme);
   const degis = (yol, v) => setTaslak(t => ttYolYaz(t, yol, v));
 
-  const duzenlemeyiAc = () => { setTaslak(JSON.parse(JSON.stringify(ttFiyatTablolari()))); setDuzenle(true); setMesaj(''); };
-  const kaydet = async () => {
-    setKaydediliyor(true); setMesaj('');
+  // Düzenlemede canlı doğrulama: hatalı hücre kırmızı, sıra uyarısı turuncu
+  const dogrulama = useMemo(() => (duzenle && taslak ? fiyatDogrula(taslak, kayitli || taslak) : { hatalar: [], uyarilar: [] }), [duzenle, taslak, kayitli]);
+  const durumlar = useMemo(() => {
+    const m = new Map();
+    dogrulama.uyarilar.forEach(u => m.set(fiyatYolAnahtari(u.yol), { tur: 'uyari', mesaj: u.mesaj }));
+    dogrulama.hatalar.forEach(h => m.set(fiyatYolAnahtari(h.yol), { tur: 'hata', mesaj: h.mesaj }));
+    return m;
+  }, [dogrulama]);
+
+  const duzenlemeyiAc = () => { setTaslak(JSON.parse(JSON.stringify(kayitli))); setDuzenle(true); setMesaj(null); setGecmisAcik(false); };
+  const kaydetIste = () => {
+    if (dogrulama.hatalar.length) {
+      setMesaj({ tur: 'hata', metin: `${dogrulama.hatalar.length} hücrede hatalı değer var (kırmızı kutular) — boş, sıfır veya sayı olmayan değer kaydedilemez. İlk hata: ${dogrulama.hatalar[0].etiket} → ${dogrulama.hatalar[0].mesaj}` });
+      return;
+    }
+    const temiz = fiyatTemizle(taslak, kayitli);
+    const farklar = fiyatFarklari(kayitli, temiz);
+    if (!farklar.length) { setMesaj({ tur: 'uyari', metin: 'Değişiklik yok — kaydedilecek bir şey bulunmadı.' }); return; }
+    setOzet({ temiz, farklar, uyarilar: dogrulama.uyarilar, kiraDegisti: farklar.some(f => f.yol[0] === 'depoKira') });
+  };
+  const kaydetOnayla = async () => {
+    if (!ozet) return;
+    setKaydediliyor(true);
     try {
-      // Boş bırakılan kutularda mevcut fiyat korunur
-      const bosDoldur = (t, mevcut) => {
-        if (Array.isArray(t)) return t.map((v, i) => (v === '' || v == null ? mevcut?.[i] : (typeof v === 'object' ? bosDoldur(v, mevcut?.[i]) : v)));
-        if (t && typeof t === 'object') { const o = {}; Object.keys(t).forEach(k => { o[k] = bosDoldur(t[k], mevcut?.[k]); }); return o; }
-        return t === '' || t == null ? mevcut : t;
-      };
-      const temiz = JSON.parse(JSON.stringify(bosDoldur(taslak, ttFiyatTablolari())));
-      await setDoc(ttFiyatBelge(), { ...temiz, guncelleyen: currentUser?.fullName || 'Sistem', guncellemeTarihi: new Date().toISOString() });
-      ttFiyatlariUygula(temiz);            // Bu ekranda beklemeden uygula
-      setDuzenle(false); setMesaj('Fiyatlar kaydedildi — sistem fiyatı hesaplamaları yeni fiyatları kullanıyor.');
-    } catch (e) { console.error(e); setMesaj('Kaydedilemedi: ' + (e?.message || '')); }
+      const r = await ttFiyatApiGonder({ islem: 'kaydet', kullaniciId: currentUser?.id, sifre: currentUser?.password, veri: ozet.temiz, beklenenVersiyon: fiyatBilgi?.versiyon });
+      ttFiyatlariUygula(ozet.temiz);            // Bu ekranda beklemeden uygula
+      setDuzenle(false); setTaslak(null);
+      setMesaj({ tur: 'ok', metin: `Fiyatlar kaydedildi (v${r.versiyon}, ${r.degisenHucre} hücre) — sistem fiyatı hesaplamaları ve web siteleri yeni fiyatları kullanıyor.${ozet.kiraDegisti ? ` ⚠️ ${TT_WOO_UYARI}` : ''}` });
+      setOzet(null); setGecmis(null);
+    } catch (e) {
+      console.error(e);
+      setOzet(null);
+      setMesaj({ tur: 'hata', metin: `Kaydedilemedi: ${e?.message || ''}${e?.hatalar?.length ? ` (${e.hatalar[0].etiket} → ${e.hatalar[0].mesaj})` : ''}` });
+    } finally { setKaydediliyor(false); }
+  };
+  const varsayilanaDon = () => { setTaslak(JSON.parse(JSON.stringify(TT_FIYAT_VARSAYILAN))); setMesaj({ tur: 'uyari', metin: 'PDF (Eylül 2026) fiyatları yüklendi — kalıcı olması için Kaydet\'e basın.' }); };
+
+  // YENİ (kullanıcı talebi): geçmiş listesi — yalnızca açılınca okunur (son 20 kayıt)
+  const gecmisiAc = async () => {
+    setGecmisAcik(true); setGecmis(null); setGecmisDetay(null);
+    try {
+      const snap = await getDocs(query(ttFiyatGecmisKoleksiyon(), orderBy('versiyon', 'desc'), limit(20)));
+      setGecmis(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    } catch (e) { console.error(e); setGecmis([]); setMesaj({ tur: 'hata', metin: 'Geçmiş okunamadı: ' + (e?.message || '') }); }
+  };
+  const geriDon = async (g) => {
+    const hedef = (Number(g.versiyon) || 1) - 1;
+    const kira = fiyatFarklari(g.eskiVeri, g.yeniVeri).some(f => f.yol[0] === 'depoKira');
+    if (!window.confirm(`v${g.versiyon} değişikliği geri alınacak: fiyatlar v${hedef} haline döner (yeni kayıt olarak v${(fiyatBilgi?.versiyon || 1) + 1}).${kira ? `\n\n⚠️ ${TT_WOO_UYARI}` : ''}\n\nDevam edilsin mi?`)) return;
+    setKaydediliyor(true);
+    try {
+      const r = await ttFiyatApiGonder({ islem: 'geriDon', kullaniciId: currentUser?.id, sifre: currentUser?.password, gecmisId: g.id, beklenenVersiyon: fiyatBilgi?.versiyon });
+      ttFiyatlariUygula(g.eskiVeri);
+      setMesaj({ tur: 'ok', metin: `v${hedef} fiyatlarına geri dönüldü (yeni kayıt v${r.versiyon}).${kira ? ` ⚠️ ${TT_WOO_UYARI}` : ''}` });
+      gecmisiAc();
+    } catch (e) { console.error(e); setMesaj({ tur: 'hata', metin: 'Geri dönülemedi: ' + (e?.message || '') }); }
     finally { setKaydediliyor(false); }
   };
-  const varsayilanaDon = () => { setTaslak(JSON.parse(JSON.stringify(TT_FIYAT_VARSAYILAN))); setMesaj('PDF (Eylül 2026) fiyatları yüklendi — kalıcı olması için Kaydet\'e basın.'); };
 
   const iller = aktifSekme.il ? Object.keys(veri[aktifSekme.il] || {}).sort((a, b) => a.localeCompare(b, 'tr'))
     .filter(il => !ilArama.trim() || il.toLocaleLowerCase('tr-TR').includes(ilArama.trim().toLocaleLowerCase('tr-TR'))) : [];
   const kiraSatirlari = ['Genel', ...DEPO_LOCATIONS.map(d => d.name)];
   const kiraBoyutlari = TT_DEPO_BOYUTLARI.filter(b => b.aylik);
+  const mesajCls = { ok: 'text-emerald-800 bg-emerald-50 border-emerald-200', hata: 'text-red-800 bg-red-50 border-red-200', uyari: 'text-amber-900 bg-amber-50 border-amber-200' };
 
   return (
     <div className="fixed inset-0 z-[9990] bg-black/60 backdrop-blur-sm flex items-center justify-center p-0 sm:p-3 md:p-4" onClick={onKapat}>
-      <div className="bg-neutral-50 sm:rounded-3xl shadow-2xl w-full max-w-6xl h-[100dvh] sm:h-[calc(100dvh-1.5rem)] md:h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
+      <div className="relative bg-neutral-50 sm:rounded-3xl shadow-2xl w-full max-w-6xl h-[100dvh] sm:h-[calc(100dvh-1.5rem)] md:h-[calc(100dvh-2rem)] flex flex-col overflow-hidden animate-in fade-in zoom-in-95" onClick={e => e.stopPropagation()}>
         {/* BAŞLIK */}
         <div className="shrink-0 bg-neutral-900 text-white px-4 md:px-5 py-3 flex flex-col md:flex-row md:items-center justify-between gap-2">
           <div className="min-w-0">
             <h3 className="text-lg font-black flex items-center gap-2"><FileText className="w-5 h-5 text-yellow-400" /> Fiyat Tablosu <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/10 text-neutral-300">Güncel Fiyat Listesi 2026</span></h3>
             <p className="text-[11px] font-bold text-neutral-400">
-              Sistem fiyatı hesaplaması bu tabloyu kullanır.
-              {fiyatBilgi?.guncelleyen ? ` Son güncelleme: ${fiyatBilgi.guncelleyen} · ${new Date(fiyatBilgi.tarih).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}` : ' Şu an PDF (Eylül 2026) fiyatları geçerli.'}
+              Sistem fiyatı hesaplaması ve web sitelerinin fiyat sihirbazları bu tabloyu kullanır.
+              {!kayitli ? ' Fiyatlar yükleniyor…' : fiyatBilgi?.guncelleyen ? ` Son güncelleme: ${fiyatBilgi.guncelleyen} · ${ttTarihKisa(fiyatBilgi.tarih)} · v${fiyatBilgi.versiyon}` : ` v${fiyatBilgi?.versiyon || 1}`}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {!duzenle && (
+              <button type="button" onClick={() => (gecmisAcik ? setGecmisAcik(false) : gecmisiAc())} className={`px-3 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 ${gecmisAcik ? 'bg-white text-neutral-900' : 'bg-white/10 hover:bg-white/20'}`}><History className="w-4 h-4" /> Geçmiş</button>
+            )}
             {/* Yalnızca müdür rütbesi düzenleyebilir */}
             {duzenleyebilir && !duzenle && (
-              <button type="button" onClick={duzenlemeyiAc} className="px-3 py-2 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-neutral-900 text-xs font-black flex items-center gap-1.5"><Edit className="w-4 h-4" /> Fiyatları Düzenle</button>
+              <button type="button" onClick={duzenlemeyiAc} disabled={!kayitli} className="px-3 py-2 rounded-xl bg-yellow-400 hover:bg-yellow-300 text-neutral-900 text-xs font-black flex items-center gap-1.5 disabled:opacity-50"><Edit className="w-4 h-4" /> Fiyatları Düzenle</button>
             )}
             {duzenle && (<>
               <button type="button" onClick={varsayilanaDon} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-black flex items-center gap-1.5"><RefreshCw className="w-4 h-4" /> PDF Fiyatlarına Dön</button>
-              <button type="button" onClick={() => { setDuzenle(false); setMesaj(''); }} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-black">Vazgeç</button>
-              <button type="button" onClick={kaydet} disabled={kaydediliyor} className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-black flex items-center gap-1.5 disabled:opacity-60">
+              <button type="button" onClick={() => { setDuzenle(false); setTaslak(null); setMesaj(null); }} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-black">Vazgeç</button>
+              <button type="button" onClick={kaydetIste} disabled={kaydediliyor} className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-black flex items-center gap-1.5 disabled:opacity-60">
                 {kaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Fiyatları Kaydet
               </button>
             </>)}
@@ -11147,34 +11194,79 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
               ))}
             </div>
           )}
-          {duzenle && <p className="text-[11px] font-black text-yellow-800 bg-yellow-100 border border-yellow-300 rounded-xl px-3 py-2">Düzenleme modu: fiyatları yazın ve "Fiyatları Kaydet"e basın. PDF'ten farklı olan kutular sarı görünür.</p>}
-          {mesaj && <p className="text-[11px] font-black text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2">{mesaj}</p>}
+          {duzenle && <p className="text-[11px] font-black text-yellow-800 bg-yellow-100 border border-yellow-300 rounded-xl px-3 py-2">Düzenleme modu: fiyatları yazın ve "Fiyatları Kaydet"e basın. Değiştirdiğiniz kutular sarı, hatalı kutular kırmızı, büyük boyu küçükten ucuz olan kutular turuncu görünür.
+            {(dogrulama.hatalar.length > 0 || dogrulama.uyarilar.length > 0) && <span className="block mt-0.5">{dogrulama.hatalar.length} hata · {dogrulama.uyarilar.length} sıra uyarısı</span>}</p>}
+          {mesaj && <p className={`text-[11px] font-black border rounded-xl px-3 py-2 ${mesajCls[mesaj.tur]}`}>{mesaj.metin}</p>}
         </div>
 
         {/* İÇERİK */}
         <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 md:p-5">
-          {/* YENİ (kullanıcı talebi): AÇILIŞ FİYATI ORANI — taban fiyata eklenecek pazarlık payı.
-              Müşteriye ilk söylenecek fiyat = taban × (1 + oran). Müdür değiştirebilir (ör. %10). */}
+          {/* YENİ (kullanıcı talebi): GEÇMİŞ — her kayıt bir versiyon; bir öncekine geri dönülebilir */}
+          {gecmisAcik && !duzenle && (
+            <div className="mb-4 rounded-2xl border-2 border-neutral-300 bg-white overflow-hidden">
+              <div className="px-3 py-2 bg-neutral-900 text-white text-[11px] font-black tracking-wide">FİYAT GEÇMİŞİ (SON 20 KAYIT)</div>
+              {gecmis === null ? <p className="p-3 text-xs font-bold text-neutral-500 flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Yükleniyor…</p>
+                : gecmis.length === 0 ? <p className="p-3 text-xs font-bold text-neutral-500">Henüz geçmiş kaydı yok — şu anki fiyatlar v{fiyatBilgi?.versiyon || 1}. İlk kayıttan sonra her değişiklik burada listelenir.</p>
+                : gecmis.map(g => {
+                  const acik = gecmisDetay === g.id;
+                  const farklar = acik ? fiyatFarklari(g.eskiVeri, g.yeniVeri) : [];
+                  return (
+                    <div key={g.id} className="border-t border-neutral-100 first:border-t-0">
+                      <div className="px-3 py-2 flex flex-col sm:flex-row sm:items-center gap-2 justify-between">
+                        <button type="button" onClick={() => setGecmisDetay(acik ? null : g.id)} className="text-left min-w-0 flex items-center gap-2">
+                          {acik ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
+                          <span className="text-xs font-black text-neutral-900">v{g.versiyon}</span>
+                          <span className="text-xs font-bold text-neutral-600 truncate">{g.guncelleyen} · {ttTarihKisa(g.tarih)} · {g.degisenHucre ?? '?'} hücre{g.geriDonus ? ` · v${g.geriDonus.hedefVersiyon} fiyatlarına geri dönüş` : ''}</span>
+                        </button>
+                        {duzenleyebilir && g.eskiVeri && (
+                          <button type="button" disabled={kaydediliyor} onClick={() => geriDon(g)} className="shrink-0 px-2.5 py-1.5 rounded-lg border border-neutral-300 hover:bg-neutral-100 text-[11px] font-black text-neutral-800 flex items-center gap-1 disabled:opacity-50">
+                            <RefreshCw className="w-3.5 h-3.5" /> Bu değişiklikten önceki hale (v{(Number(g.versiyon) || 1) - 1}) dön
+                          </button>
+                        )}
+                      </div>
+                      {acik && (
+                        <div className="px-3 pb-2 max-h-64 overflow-y-auto">
+                          <table className="w-full text-[11px]"><tbody>
+                            {farklar.map(f => (
+                              <tr key={fiyatYolAnahtari(f.yol)} className="border-t border-neutral-100">
+                                <td className="py-1 pr-2 font-bold text-neutral-700">{f.etiket}</td>
+                                <td className="py-1 px-2 text-right text-neutral-500 line-through whitespace-nowrap">{ttFarkDeger(f, f.eski)}</td>
+                                <td className="py-1 pl-2 text-right font-black text-neutral-900 whitespace-nowrap">{ttFarkDeger(f, f.yeni)}</td>
+                              </tr>
+                            ))}
+                          </tbody></table>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+            </div>
+          )}
+          {/* DEĞİŞTİ (kullanıcı talebi): FİYAT ARALIĞI YÜZDESİ (eski adı: açılış fiyatı oranı).
+              Toplam nakliye fiyatı TABAN'dır; müşteriye TABAN – TABAN × (1 + yüzde/100) aralığı
+              gösterilir. Yüzde kalemlere değil TOPLAMA uygulanır; üst sınır 500 ₺'ye yukarı yuvarlanır. */}
           {sekme !== 'kira' && (() => {
             const yol = ['genel', aktifSekme.oran];
             const oran = Number(ttYolAl(veri, yol));
             const ornekTaban = Number(ttYolAl(veri, [aktifSekme.sehirIci, 'taban', '2+1'])) || 0;
             const ornekAcilis = ornekTaban ? Math.ceil((ornekTaban * (1 + (Number.isFinite(oran) ? oran : 0) / 100)) / 500) * 500 : 0;
+            const durum = durumlar.get(fiyatYolAnahtari(yol));
             return (
               <div className="mb-4 rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-3 flex flex-col md:flex-row md:items-center gap-3">
                 <div className="flex-1 min-w-0">
-                  <p className="text-[11px] font-black uppercase text-emerald-900">Açılış Fiyatı Oranı — pazarlık payı ({aktifSekme.marka})</p>
-                  <p className="text-[11px] font-bold text-emerald-800">Sistemin hesapladığı fiyat <b>taban</b> fiyattır. Satışçı müşteriye taban + bu oranla açılış yapar, pazarlıkta tabana kadar iskonto yapabilir.
-                    {ornekTaban ? ` Örnek: 2+1 şehir içi taban ${ttTl(ornekTaban)} → açılış ${ttTl(ornekAcilis)}.` : ''}</p>
+                  <p className="text-[11px] font-black uppercase text-emerald-900">Fiyat Aralığı Yüzdesi ({aktifSekme.marka} · {aktifSekme.ad})</p>
+                  <p className="text-[11px] font-bold text-emerald-800">Tablodaki kalemlerle hesaplanan toplam nakliye fiyatı <b>taban</b>dır. Müşteriye <b>taban – taban × (1 + yüzde)</b> aralığı gösterilir; yüzde kalemlere tek tek değil toplama uygulanır, üst sınır 500 ₺'ye yukarı yuvarlanır. Satışçı üst sınırla açılış yapar, pazarlıkta tabana kadar iner.
+                    {ornekTaban ? ` Örnek: 2+1 şehir içi taban ${ttTl(ornekTaban)} → aralık ${ttTl(ornekTaban)} – ${ttTl(ornekAcilis)}.` : ''}</p>
+                  {durum && <p className="text-[11px] font-black text-red-700 mt-1">{durum.mesaj}</p>}
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   <span className="text-xs font-black text-emerald-900">Taban +</span>
                   {duzenle ? (
                     <span className="flex items-center gap-1">
                       <span className="text-lg font-black text-emerald-800">%</span>
-                      <input value={Number.isFinite(oran) ? oran : ''} inputMode="numeric"
-                        onChange={e => { const r = e.target.value.replace(/\D/g, '').slice(0, 3); degis(yol, r === '' ? '' : Math.min(100, Number(r))); }}
-                        className={`w-20 px-2 py-1.5 rounded-lg border-2 text-right text-lg font-black outline-none focus:ring-2 focus:ring-yellow-400 ${oran !== ttYolAl(TT_FIYAT_VARSAYILAN, yol) ? 'border-yellow-400 bg-yellow-50' : 'border-emerald-300 bg-white'}`} />
+                      <input value={Number.isFinite(oran) && ttYolAl(veri, yol) !== '' ? oran : ''} inputMode="numeric"
+                        onChange={e => { const r = e.target.value.replace(/\D/g, '').slice(0, 3); degis(yol, r === '' ? '' : Number(r)); }}
+                        className={`w-20 px-2 py-1.5 rounded-lg border-2 text-right text-lg font-black outline-none focus:ring-2 focus:ring-yellow-400 ${durum ? 'border-red-500 bg-red-50 text-red-700' : oran !== ttYolAl(kayitli, yol) ? 'border-yellow-400 bg-yellow-50' : 'border-emerald-300 bg-white'}`} />
                     </span>
                   ) : <span className="text-2xl font-black text-emerald-700">%{Number.isFinite(oran) ? oran : 25}</span>}
                 </div>
@@ -11185,7 +11277,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
             <div className="space-y-3">
               <p className="text-[11px] font-bold text-neutral-500">Nakliye taban fiyatları Anadolu Yakası çıkışlıdır; Avrupa Yakası için ekstra maliyet eklenir. Ek hizmetler taban fiyata ilave edilir.{sekme === 'depo' ? ' Depolama süresi ücreti ayrıca hesaplanır.' : ''}</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {ttSehirIciBolumleri(aktifSekme.sehirIci).map(b => <TTFiyatBolumu key={b.baslik} bolum={b} veri={veri} duzenle={duzenle} onDegis={degis} renk={aktifSekme.baslikCls} />)}
+                {ttSehirIciBolumleri(aktifSekme.sehirIci).map(b => <TTFiyatBolumu key={b.baslik} bolum={b} veri={veri} kayitli={kayitli} durumlar={durumlar} duzenle={duzenle} onDegis={degis} renk={aktifSekme.baslikCls} />)}
               </div>
             </div>
           )}
@@ -11193,7 +11285,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
               <div className="rounded-2xl border border-neutral-200 bg-white overflow-hidden">
                 <div className={`px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-white ${aktifSekme.baslikCls}`}>
-                  <span className="text-[11px] font-black tracking-wide">81 İL — PENDİK ÇIKIŞLI ORTALAMA BEDELLER</span>
+                  <span className="text-[11px] font-black tracking-wide">{IL_TABLOSU_ETIKET.toLocaleUpperCase('tr-TR')}</span>
                   <div className="relative">
                     <Search className="w-3.5 h-3.5 text-neutral-400 absolute left-2 top-1/2 -translate-y-1/2" />
                     <input value={ilArama} onChange={e => setIlArama(e.target.value)} placeholder="İl ara…" className="pl-7 pr-2 py-1 rounded-lg text-xs font-bold text-neutral-900 outline-none w-40" />
@@ -11211,24 +11303,26 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                           {[0, 1, 2, 3].map(s => {
                             const yol = [aktifSekme.il, il, s];
                             const d = ttYolAl(veri, yol);
-                            return <td key={s} className="px-3 py-1.5 text-right"><TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => degis(yol, v)} degisti={d !== ttYolAl(TT_FIYAT_VARSAYILAN, yol)} /></td>;
+                            return <td key={s} className="px-3 py-1.5 text-right"><TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => degis(yol, v)} degisti={d !== ttYolAl(kayitli, yol)} durum={durumlar.get(fiyatYolAnahtari(yol))} /></td>;
                           })}
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
-                <p className="px-3 py-2 text-[10px] font-bold text-neutral-500 border-t border-neutral-100">1+0 için 1+1 sütunu kullanılır. Trakya / Avrupa Yakası ötesi illerde %15 geçiş farkı dahildir. İskonto (%10) için Mehmet Bey'e danışın.</p>
+                <p className="px-3 py-2 text-[10px] font-bold text-neutral-500 border-t border-neutral-100">{IL_TABLOSU_NOTU}</p>
               </div>
               <div className="space-y-3">
                 <p className="text-[11px] font-black text-neutral-600">Bu fiyatların üzerine eklenebilecek ek maliyetler:</p>
-                {ttSehirlerArasiEkBolumleri(aktifSekme.ek).map(b => <TTFiyatBolumu key={b.baslik} bolum={b} veri={veri} duzenle={duzenle} onDegis={degis} renk={aktifSekme.baslikCls} />)}
+                {ttSehirlerArasiEkBolumleri(aktifSekme.ek).map(b => <TTFiyatBolumu key={b.baslik} bolum={b} veri={veri} kayitli={kayitli} durumlar={durumlar} duzenle={duzenle} onDegis={degis} renk={aktifSekme.baslikCls} />)}
               </div>
             </div>
           )}
           {sekme === 'kira' && (
             <div className="space-y-3">
               <p className="text-[11px] font-bold text-neutral-500">Aylık depo kirası şube bazlıdır. Fiyatlar <b>+KDV</b> girilir; KDV dahil tutar (%{Math.round(TT_KDV * 100)}) otomatik hesaplanır. "Genel" satırı şube farketmez seçildiğinde ve web sitesinde kullanılır.</p>
+              {/* YENİ (kullanıcı talebi): kira sitede WooCommerce ürünü olarak da satılıyor */}
+              {duzenle && <p className="text-[11px] font-black text-orange-900 bg-orange-50 border border-orange-300 rounded-xl px-3 py-2">⚠️ {TT_WOO_UYARI}</p>}
               <div className="rounded-2xl border border-neutral-200 bg-white overflow-x-auto">
                 <table className="w-full text-xs min-w-[720px]">
                   <thead className="bg-sky-600 text-white">
@@ -11246,7 +11340,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                           const d = ttYolAl(veri, yol);
                           return (
                             <td key={b.id} className="px-3 py-2 text-right align-top">
-                              <TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => degis(yol, v)} degisti={d !== ttYolAl(TT_FIYAT_VARSAYILAN, yol)} />
+                              <TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => degis(yol, v)} degisti={d !== ttYolAl(kayitli, yol)} durum={durumlar.get(fiyatYolAnahtari(yol))} />
                               <span className="block text-[10px] font-bold text-neutral-400">+KDV / ay</span>
                               {/* İki fiyat: +KDV ve KDV dahil */}
                               <span className="block text-[11px] font-black text-sky-700">{d ? `${ttTl(Number(d) * (1 + TT_KDV))} KDV dahil` : '—'}</span>
@@ -11265,6 +11359,45 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
             </div>
           )}
         </div>
+
+        {/* YENİ (kullanıcı talebi): KAYDETMEDEN ÖNCE ÖZET — "şu değerler değişecek" */}
+        {ozet && (
+          <div className="absolute inset-0 z-10 bg-black/50 flex items-center justify-center p-3" onClick={() => !kaydediliyor && setOzet(null)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-full flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="px-4 py-3 bg-neutral-900 text-white">
+                <p className="text-sm font-black">Şu değerler değişecek ({ozet.farklar.length} hücre)</p>
+                <p className="text-[11px] font-bold text-neutral-400">Kayıt v{fiyatBilgi?.versiyon || 1} → v{(fiyatBilgi?.versiyon || 1) + 1} · {currentUser?.fullName}</p>
+              </div>
+              <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3">
+                {ozet.uyarilar.length > 0 && (
+                  <div className="rounded-xl border-2 border-orange-300 bg-orange-50 p-3 text-[11px] font-bold text-orange-900">
+                    <p className="font-black flex items-center gap-1.5"><AlertTriangle className="w-4 h-4" /> Büyük boy küçükten ucuz ({ozet.uyarilar.length}) — kontrol edin, yine de kaydedebilirsiniz:</p>
+                    <ul className="mt-1 space-y-0.5 list-disc pl-5">{ozet.uyarilar.map(u => <li key={fiyatYolAnahtari(u.yol)}>{u.etiket}: {u.mesaj}</li>)}</ul>
+                  </div>
+                )}
+                {ozet.kiraDegisti && <p className="rounded-xl border-2 border-orange-300 bg-orange-50 p-3 text-[11px] font-black text-orange-900">⚠️ Kiralık Depo fiyatı değişiyor: {TT_WOO_UYARI}</p>}
+                <table className="w-full text-[11px]">
+                  <thead><tr className="text-neutral-500"><th className="text-left font-black pb-1">Hücre</th><th className="text-right font-black pb-1 px-2">Eski</th><th className="text-right font-black pb-1">Yeni</th></tr></thead>
+                  <tbody>
+                    {ozet.farklar.map(f => (
+                      <tr key={fiyatYolAnahtari(f.yol)} className="border-t border-neutral-100">
+                        <td className="py-1 pr-2 font-bold text-neutral-700">{f.etiket}</td>
+                        <td className="py-1 px-2 text-right text-neutral-500 line-through whitespace-nowrap">{ttFarkDeger(f, f.eski)}</td>
+                        <td className="py-1 text-right font-black text-neutral-900 whitespace-nowrap">{ttFarkDeger(f, f.yeni)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-4 py-3 border-t border-neutral-200 flex justify-end gap-2">
+                <button type="button" disabled={kaydediliyor} onClick={() => setOzet(null)} className="px-3 py-2 rounded-xl border border-neutral-300 text-xs font-black">Geri Dön ve Düzelt</button>
+                <button type="button" disabled={kaydediliyor} onClick={kaydetOnayla} className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-black flex items-center gap-1.5 disabled:opacity-60">
+                  {kaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Onayla ve Kaydet
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
