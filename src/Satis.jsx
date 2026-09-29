@@ -4024,7 +4024,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // YENİ: Bu kullanıcının görebildiği havuz kayıtları — liste, sayaç ve istatistikler buradan hesaplanır
   const gorunurKayitlar = useMemo(() => kayitlar.filter(gorunurMu), [kayitlar, tamYetki, kullaniciAdi]); // eslint-disable-line react-hooks/exhaustive-deps
   // YENİ: Telefon teklifleri — satışçı kendi görüşmelerini, yönetici hepsini görür
-  const gorunurTelefonTeklifleri = useMemo(() => telefonTeklifleri.filter(t => ttGorunurMu(t, kullaniciAdi, tamYetki)), [telefonTeklifleri, kullaniciAdi, tamYetki]);
+  // DEĞİŞTİ (kullanıcı talebi): telefon görüşmelerinde "herkesi görme" yalnızca müdür rütbesinde
+  const telefonMudurMu = ttMudurMu(currentUser);
+  const gorunurTelefonTeklifleri = useMemo(() => telefonTeklifleri.filter(t => ttGorunurMu(t, kullaniciAdi, telefonMudurMu)), [telefonTeklifleri, kullaniciAdi, telefonMudurMu]);
   // YENİ (kullanıcı talebi): MÜŞTERİ GEÇMİŞİ — telefon numarasıyla (0'lı/0'sız,
   // boşluklu yazımlar aynı sayılır) iş kayıtları + havuz + telefon teklifleri
   // eşleştirilir. Görünürlükten bağımsız TÜM kayıtlar taranır ki "bu müşteriyle
@@ -4668,7 +4670,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           <div className="space-y-2">
             {/* ---- YENİ (kullanıcı talebi): TELEFON TEKLİFLERİ — Hızlı Tekliflerin üstünde ----
                 Tıklayınca telefonda görüşülen müşterilerin manuel girildiği sayfa açılır. */}
-            <TelefonTeklifleriButonu teklifler={gorunurTelefonTeklifleri} aktif={telefonTeklifAcik} onClick={() => setTelefonTeklifAcik(true)} tamYetki={tamYetki} />
+            <TelefonTeklifleriButonu teklifler={gorunurTelefonTeklifleri} aktif={telefonTeklifAcik} onClick={() => setTelefonTeklifAcik(true)} tamYetki={telefonMudurMu} />
             {/* KALDIRILDI (kullanıcı talebi): "Eski havuz talepleri aktarılıyor" çubuğu.
                 Aktarım arka planda sessizce, otomatik yapılır; hata olursa yalnızca
                 tarayıcı konsoluna yazılır ve bir sonraki açılışta yeniden denenir. */}
@@ -4744,7 +4746,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
       {/* YENİ (kullanıcı talebi): TELEFON GÖRÜŞMESİ — ayrı sayfa yerine menünün altında.
           Seçiliyken havuz filtreleri/tablosu yerine görüşme listesi gösterilir. */}
       {telefonTeklifAcik ? (
-        <TelefonTeklifleriView teklifler={telefonTeklifleri} currentUser={currentUser} tamYetki={tamYetki}
+        <TelefonTeklifleriView teklifler={telefonTeklifleri} currentUser={currentUser} tamYetki={telefonMudurMu}
           satiscilar={satiscilar.map(p => p.fullName)} gecmisIndeksi={gecmisIndeksi}
           addSystemLog={addSystemLog} onKayitAc={onKayitAc}
           acilisFormu={telefonOnDoldur} onAcilisFormuKullanildi={() => setTelefonOnDoldur(null)}
@@ -8637,6 +8639,10 @@ const ttKaynakTuru = (t) => (t.havuzKayitId ? 'havuz' : 'manuel');
 const ttKaynakBul = (t) => TT_KAYNAKLAR.find(k => k.id === ttKaynakTuru(t));
 // Kaydın sahibi (görünürlük ve transfer için): atanan yoksa oluşturan
 const ttSahibi = (t) => t.atanan || t.olusturan || '';
+// YENİ (kullanıcı talebi): Telefon Görüşmesi'nde BAŞKASININ ekranını yalnızca MÜDÜR
+// rütbesi (ve Firma Sahibi / Sistem Yöneticisi) görebilir. Düzenleme yetkisi olan
+// ama müdür olmayan personel de yalnızca KENDİ görüşmelerini görür.
+const ttMudurMu = (u) => u?.rank === 'Müdür' || (u?.position || '').includes('Firma Sahibi') || u?.fullName === 'Sistem Yöneticisi';
 const ttSiteOf = (hizmetTipi) => ttHizmetBul(hizmetTipi).site;
 
 // ----------------------------------------------------------------------------
