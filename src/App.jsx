@@ -2437,7 +2437,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         {/* WhatsApp benzeri baloncuk — gerçek görünümü taklit eder */}
         <div className="bg-[#E7FFDB] border border-green-200 rounded-2xl rounded-tr-sm p-4 max-w-md">
           <p className="text-xs text-neutral-800 whitespace-pre-line leading-relaxed font-medium">
-            {'💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %20\'si olan *X.XXX TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\n' + bankaBlogu}
+            {'💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %25\'i olan *X.XXX TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\n' + bankaBlogu}
           </p>
           <p className="text-[10px] text-neutral-500 text-right mt-2">şimdi ✓✓</p>
         </div>
@@ -7315,7 +7315,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // Böylece menü kapalıyken bile içeride kaç iş beklediği tek bakışta görülür.
     // ========================================================================
     const unresolvedDamageCountTotal = jobs.filter(j => j.endJobDetails?.damageStatus === 'Hasar var' && !j.endJobDetails?.damageResolved).length;
-    const operasyonToplamBildirim = unresolvedDamageCountTotal + generalTodoTasksCount + dueMaintenanceCount;
+    // YENİ (kullanıcı talebi): KRİTİK STOK — Malzeme Listesi'ndeki "Kritik Stok!" kuralının
+    // aynısı (stok ≤ 10). Kaç malzeme kritikteyse o kadar bildirim sayılır.
+    const kritikMalzemeSayisi = materials.filter(m => parseInt(m.stock) <= 10).length;
+    // DEĞİŞTİ: Operasyon başlığı toplamına kritik malzeme sayısı da eklendi
+    const operasyonToplamBildirim = unresolvedDamageCountTotal + generalTodoTasksCount + dueMaintenanceCount + kritikMalzemeSayisi;
 
     // ========================================================================
     // YENİ: İNSAN KAYNAKLARI BAŞLIĞI TOPLAM BİLDİRİM SAYISI
@@ -8018,7 +8022,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                         beyaz zemin+siyah yazı ile kırmızı zemin+beyaz yazı arasında
                         geçiş yaparak yanıp söner. Menü açıkken gizlenir (alt
                         menülerde kırılımı ayrı ayrı görüldüğü için). */}
-                    {operasyonToplamBildirim > 0 && !isOperasyonSubMenuOpen && (
+                    {/* DEĞİŞTİ (kullanıcı talebi): menü açıkken de alt bildirimlerin toplamı yanıp söner */}
+                    {operasyonToplamBildirim > 0 && (
                       <span className="flex items-center gap-1.5 shrink-0">
                         {/* YENİ: Hatırlatmalar/İK ile aynı görsel dil — yanıp sönen ışık */}
                         <span className="relative flex w-2.5 h-2.5">
@@ -8124,6 +8129,18 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'materialList' ? 'bg-orange-500 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'materialList' ? 'bg-white' : 'bg-orange-500'}`}></div> Malzeme Listesi
+                      {/* YENİ (kullanıcı talebi): kritik stoktaki malzeme sayısı — Hasarlı İşler ile aynı yanıp sönen rozet */}
+                      {kritikMalzemeSayisi > 0 && (
+                        <span className="ml-auto flex items-center gap-1.5" title={`${kritikMalzemeSayisi} malzeme kritik stokta (10 ve altı)`}>
+                          <span className="relative flex w-2.5 h-2.5">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                            <span className="relative inline-flex rounded-full w-2.5 h-2.5 bg-red-600"></span>
+                          </span>
+                          <span className="bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-full min-w-[18px] text-center animate-pulse shadow-sm">
+                            {kritikMalzemeSayisi}
+                          </span>
+                        </span>
+                      )}
                     </button>
                   </div>
                 )}
@@ -8699,7 +8716,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                             else if (!phone.startsWith('90')) phone = '90' + phone;
                             // Her müşteriye özel değerler
                             const price = parseInt(savedJobInfo.price || 0);
-                            const kapora = Math.round(price * 0.20); // Toplam tutarın %20'si kapora (sözleşme 20. madde)
+                            const kapora = Math.round(price * 0.25); // DEĞİŞTİ (kullanıcı talebi): toplam tutarın %25'i kapora (sözleşme 20. madde)
                             const kaporaStr = kapora.toLocaleString('tr-TR');
                             const teslimKodu = savedJobInfo.deliveryCode || '------';
                             // Kurumsal/bireysel başlığa göre özel hitap
@@ -8707,7 +8724,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                             const isTipi = savedJobInfo.type || 'Nakliye';
                             const msg = `${unvan} *${savedJobInfo.customerName}*,\n\n` +
                               `💰 *Kapora Bilgilendirmesi:*\n` +
-                              `İşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %20'si olan *${kaporaStr} TL* kapora ödemenizi rica ederiz.\n\n` +
+                              `İşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %25'i olan *${kaporaStr} TL* kapora ödemenizi rica ederiz.\n\n` +
                               `🏦 *Banka Bilgileri:*\n` +
                               // DEĞİŞİKLİK: Banka bilgisi artık sabit değil.
                               // aktifBankaBilgiMetni() Resmi Ayarları'ndaki VARSAYILAN hesabı
