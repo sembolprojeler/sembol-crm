@@ -131,6 +131,13 @@ if (ESKI_QR_SITE_ID && !new URLSearchParams(window.location.search).get('qrt')) 
 // DEĞİŞTİ: rütbesi "Müdür" olanlar da süper yönetici sayılır.
 const superYoneticiMi = (p) => p?.fullName === 'Sistem Yöneticisi' || p?.position === 'Firma Sahibi' || p?.rank === 'Müdür';
 // YENİ: Giriş ekranı duyurusu — ayar hiç kaydedilmemişse bu metin gösterilir, boş kaydedilirse gizlenir.
+// YENİ (güvenlik): Google ile girişte e-posta eşleşmesiyle OTOMATİK bağlamaya izin verilen alan adları.
+// Bunların dışındaki (ör. @gmail.com) hesaplar yalnızca şifreli girişten sonra elle bağlanabilir.
+const OTOMATIK_BAGLAMA_ALAN_ADLARI = ['sembolevdeneve.com', 'depoevim.com'];
+const otomatikBaglamaAlanAdiMi = (eposta) => {
+  const alan = String(eposta || '').trim().toLowerCase().split('@')[1] || '';
+  return OTOMATIK_BAGLAMA_ALAN_ADLARI.includes(alan);
+};
 const VARSAYILAN_GIRIS_DUYURUSU = "CRM'e artık Google hesabınızla da girebilirsiniz. Her zamanki gibi kullanıcı adı ve şifrenizle girin, açılan pencerede 'Google Hesabımı Bağla'ya basın. İsterseniz 'Bağlamadan Devam Et' diyebilirsiniz. CRM'i WhatsApp içinden değil, Chrome veya Safari'den açın.";
 // YENİ: WhatsApp / Instagram / Facebook gibi uygulama içi tarayıcılar Google açılır penceresini engeller.
 const uygulamaIciTarayiciMi = () => {
@@ -1340,7 +1347,7 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
       .sort((a, b) => (a.fullName || '').localeCompare((b.fullName || ''), 'tr-TR'));
 
     return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-5xl mx-auto">
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in w-full">
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <Users className="w-6 h-6 text-red-600" /> Mevcut Kullanıcılar ve Yetkileri
         </h2>
@@ -1387,48 +1394,55 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
+            {/* DEĞİŞTİ: hücre boşlukları azaltıldı (p-4 → px-3 py-3); e-posta sütunları kırılmaz.
+                Ad ve İşlemler hücrelerindeki flex, tablo düzenini bozmasın diye içteki div'e taşındı. */}
             <thead className="bg-black text-white">
               <tr>
-                <th className="p-4 font-bold rounded-tl-xl">Ad Soyad</th>
-                <th className="p-4 font-bold">Kullanıcı Adı / E-Posta</th>
-                <th className="p-4 font-bold">Pozisyon / Rütbe</th>
-                <th className="p-4 font-bold">Google</th>
-                <th className="p-4 font-bold text-center">Durum</th>
-                <th className="p-4 font-bold rounded-tr-xl text-center">İşlemler</th>
+                <th className="px-3 py-3 font-bold rounded-tl-xl whitespace-nowrap">Ad Soyad</th>
+                <th className="px-3 py-3 font-bold whitespace-nowrap">Kullanıcı Adı / E-Posta</th>
+                <th className="px-3 py-3 font-bold whitespace-nowrap">Pozisyon / Rütbe</th>
+                <th className="px-3 py-3 font-bold whitespace-nowrap">Google</th>
+                <th className="px-3 py-3 font-bold text-center whitespace-nowrap">Durum</th>
+                <th className="px-3 py-3 font-bold rounded-tr-xl text-center whitespace-nowrap">İşlemler</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
               {filteredSortedPersonnel.map(person => (
                 <tr key={person.id} className="hover:bg-neutral-50 transition">
-                  <td className="p-4 font-bold text-black flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
-                      {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover" alt="Profil"/> : <User className="w-4 h-4 text-neutral-400"/>}
+                  <td className="px-3 py-3 font-bold text-black">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
+                        {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover" alt="Profil"/> : <User className="w-4 h-4 text-neutral-400"/>}
+                      </div>
+                      <span className="whitespace-nowrap">{person.fullName}</span>
                     </div>
-                    {person.fullName}
                   </td>
-                  <td className="p-4 text-neutral-600 font-medium">{person.email}</td>
-                  <td className="p-4 text-neutral-600">{person.position} <span className="text-xs text-neutral-400">({person.rank})</span></td>
-                  {/* YENİ (kullanıcı talebi): Google bağlantı durumu */}
-                  <td className="p-4">
+                  <td className="px-3 py-3 text-neutral-600 font-medium whitespace-nowrap">{person.email}</td>
+                  <td className="px-3 py-3 text-neutral-600">{person.position} <span className="text-xs text-neutral-400">({person.rank})</span></td>
+                  {/* YENİ (kullanıcı talebi): Google bağlantı durumu — e-posta tek satır, tarih altında */}
+                  <td className="px-3 py-3">
                     {person.googleUid ? (
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-green-700 break-all">{person.googleEmail || 'Bağlı'}</p>
-                        {person.googleBaglamaTarihi && <p className="text-[10px] text-neutral-400 font-medium">{new Date(person.googleBaglamaTarihi).toLocaleDateString('tr-TR')}</p>}
+                      <div>
+                        <p className="text-xs font-bold text-green-700 whitespace-nowrap">{person.googleEmail || 'Bağlı'}</p>
+                        {person.googleBaglamaTarihi && <p className="text-[10px] text-neutral-400 font-medium whitespace-nowrap">{new Date(person.googleBaglamaTarihi).toLocaleDateString('tr-TR')}</p>}
                       </div>
                     ) : (
                       <span className="px-2 py-1 rounded-lg text-xs font-bold bg-neutral-100 text-neutral-500 whitespace-nowrap">Bağlanmadı</span>
                     )}
                   </td>
-                  <td className="p-4 text-center">
-                    <span className={`px-2 py-1 rounded-lg text-xs font-bold ${person.employmentStatus === 'Aktif' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  <td className="px-3 py-3 text-center">
+                    {/* DÜZELTME: boş durum "Aktif" sayılır ve yeşil görünür; yalnızca Pasif kırmızı */}
+                    <span className={`px-2 py-1 rounded-lg text-xs font-bold ${person.employmentStatus === 'Pasif' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                       {person.employmentStatus || 'Aktif'}
                     </span>
                   </td>
-                  <td className="p-4 flex items-center justify-center gap-2">
-                    <button onClick={() => setEditingUser(person)} className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition" title="Düzenle ve Özel Yetki Ver">
-                      Düzenle & Yetkilendir
-                    </button>
-                    <button onClick={() => { if(window.confirm('Bu kullanıcıyı sistemden silmek istediğinize emin misiniz?')) onDelete(person.id); }} className="p-2 text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition" title="Sil"><X className="w-4 h-4"/></button>
+                  <td className="px-3 py-3">
+                    <div className="flex items-center justify-center gap-2">
+                      <button onClick={() => setEditingUser(person)} className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition whitespace-nowrap" title="Düzenle ve Özel Yetki Ver">
+                        Düzenle & Yetkilendir
+                      </button>
+                      <button onClick={() => { if(window.confirm('Bu kullanıcıyı sistemden silmek istediğinize emin misiniz?')) onDelete(person.id); }} className="p-2 text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition" title="Sil"><X className="w-4 h-4"/></button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -7477,7 +7491,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
     // YENİ (kullanıcı talebi): GOOGLE İLE GİRİŞ
     //  1) Google oturumunun uid'si personel kaydındaki googleUid ile eşleşirse giriş.
-    //  2) YEDEK: eşleşmezse ve Google e-postası doğrulanmışsa (email_verified), e-posta
+    //  2) YEDEK: eşleşmezse, Google e-postası doğrulanmışsa (email_verified) VE şirket alan
+    //     adındaysa (OTOMATIK_BAGLAMA_ALAN_ADLARI), e-posta
     //     büyük/küçük harf ve boşluk duyarsız karşılaştırılır. TEK bir aktif personelle
     //     eşleşir ve o kişinin googleUid'si boşsa otomatik bağlanır ('otomatik-eposta').
     //     Birden fazla eşleşme varsa ya da kişi başka bir Google hesabına bağlıysa bağlanmaz.
@@ -7498,7 +7513,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       let user = personnelList.find(p => p.googleUid && p.googleUid === gUser.uid);
       const cikisYap = async () => { try { await signOut(googleAuth); } catch (e) {} };
       let otomatikBaglanacak = false;
-      if (!user && gUser.emailVerified && gUser.email) {
+      // GÜVENLİK: Personel kayıtlarındaki e-postaların çoğu uydurma olabilir (başkasına ait
+      // bir Gmail adresi). Otomatik bağlama YALNIZCA şirket alan adlarındaki Google hesapları için.
+      if (!user && gUser.emailVerified && gUser.email && otomatikBaglamaAlanAdiMi(gUser.email)) {
         const epostaNorm = (v) => String(v || '').replace(/\s+/g, '').toLowerCase();
         const gEposta = epostaNorm(gUser.email);
         const adaylar = personnelList.filter(p => p.employmentStatus !== 'Pasif' && epostaNorm(p.email) === gEposta);
@@ -9021,7 +9038,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         )}
 
         <main ref={mainScrollRef} className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
-          <div className="max-w-6xl mx-auto">
+          {/* DEĞİŞTİ: Kullanıcı Yönetimi ekranı tam genişlik kullanır; diğer sayfalar max-w-6xl kalır */}
+          <div className={activeTab === 'userList' ? 'w-full' : 'max-w-6xl mx-auto'}>
             {/* YENİ (kullanıcı talebi): Elle yapılan şifreli girişten sonra "Google hesabını bağla" penceresi.
                 "Bağlamadan Devam Et" yalnızca pencereyi kapatır; bir sonraki şifreli girişte yine açılır. */}
             {googleBaglaPenceresi && googleAktif && currentUser && !currentUser.googleUid && (
@@ -10067,7 +10085,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             }
             
             {activeTab === 'userList' && showAuth && (
-              <div className="max-w-5xl mx-auto">
+              <div className="w-full">
                 {/* YENİ: Mevcut Kullanıcılar / İzinler Yönetimi / Modül Görüntüleme / Pozisyonlar /
                     Rütbeler artık aynı sayfada sekme olarak bir arada; ayrı sol menü öğeleri kaldırıldı. */}
                 <div className="flex flex-wrap gap-2 mb-4 bg-neutral-100 p-1.5 rounded-xl">
