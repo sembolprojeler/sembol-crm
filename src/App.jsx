@@ -2437,7 +2437,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         {/* WhatsApp benzeri baloncuk — gerçek görünümü taklit eder */}
         <div className="bg-[#E7FFDB] border border-green-200 rounded-2xl rounded-tr-sm p-4 max-w-md">
           <p className="text-xs text-neutral-800 whitespace-pre-line leading-relaxed font-medium">
-            {'💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %25\'i olan *X.XXX TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\n' + bankaBlogu}
+            {'💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %20\'si olan *X.XXX TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\n' + bankaBlogu}
           </p>
           <p className="text-[10px] text-neutral-500 text-right mt-2">şimdi ✓✓</p>
         </div>
@@ -8716,7 +8716,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                             else if (!phone.startsWith('90')) phone = '90' + phone;
                             // Her müşteriye özel değerler
                             const price = parseInt(savedJobInfo.price || 0);
-                            const kapora = Math.round(price * 0.25); // DEĞİŞTİ (kullanıcı talebi): toplam tutarın %25'i kapora (sözleşme 20. madde)
+                            const kapora = Math.round(price * 0.20); // Toplam tutarın %20'si kapora (sözleşme 20. madde)
                             const kaporaStr = kapora.toLocaleString('tr-TR');
                             const teslimKodu = savedJobInfo.deliveryCode || '------';
                             // Kurumsal/bireysel başlığa göre özel hitap
@@ -8724,7 +8724,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                             const isTipi = savedJobInfo.type || 'Nakliye';
                             const msg = `${unvan} *${savedJobInfo.customerName}*,\n\n` +
                               `💰 *Kapora Bilgilendirmesi:*\n` +
-                              `İşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %25'i olan *${kaporaStr} TL* kapora ödemenizi rica ederiz.\n\n` +
+                              `İşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %20'si olan *${kaporaStr} TL* kapora ödemenizi rica ederiz.\n\n` +
                               `🏦 *Banka Bilgileri:*\n` +
                               // DEĞİŞİKLİK: Banka bilgisi artık sabit değil.
                               // aktifBankaBilgiMetni() Resmi Ayarları'ndaki VARSAYILAN hesabı
