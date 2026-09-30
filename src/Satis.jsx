@@ -191,7 +191,7 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
     const labelCls = "block text-xs md:text-sm font-bold text-neutral-700 mb-1";
 
     return (
-      <div className={`max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in ${type === 'Depo' ? 'kayit-depo-mavi' : ''}`}>
+      <div className={`max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in ${type === 'Depo' ? 'kayit-depo-mavi' : type === 'Asansör' ? 'kayit-asansor-yesil' : ''}`}>
         {/* ==================================================================
             YENİ (kullanıcı talebi): DEPO KAYDINDA FORMUN RENKLERİ MAVİ
             Formdaki kırmızı sınıflar (başlık şeritleri, ikon rozetleri, seçili
@@ -215,6 +215,26 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
             .kayit-depo-mavi .focus\:ring-red-600:focus { --tw-ring-color: #2563eb !important; }
             .kayit-depo-mavi .shadow-red-600\/30 { --tw-shadow-color: rgb(37 99 235 / 0.3) !important; }
             .kayit-depo-mavi .from-red-600\/10 { --tw-gradient-from: rgb(37 99 235 / 0.1) !important; }
+          `}</style>
+        )}
+        {/* YENİ (kullanıcı talebi): ASANSÖR KAYDINDA FORMUN RENKLERİ YEŞİL
+            (Depo'daki mavi temayla aynı yöntem — kodlara dokunulmadan) */}
+        {type === 'Asansör' && (
+          <style>{`
+            .kayit-asansor-yesil .text-red-600 { color: #16a34a !important; }
+            .kayit-asansor-yesil .text-red-700 { color: #15803d !important; }
+            .kayit-asansor-yesil .bg-red-50 { background-color: #f0fdf4 !important; }
+            .kayit-asansor-yesil .bg-red-100, .kayit-asansor-yesil .hover\:bg-red-100:hover { background-color: #dcfce7 !important; }
+            .kayit-asansor-yesil .bg-red-600 { background-color: #16a34a !important; }
+            .kayit-asansor-yesil .hover\:bg-red-700:hover { background-color: #15803d !important; }
+            .kayit-asansor-yesil .border-red-100 { border-color: #dcfce7 !important; }
+            .kayit-asansor-yesil .border-red-200 { border-color: #bbf7d0 !important; }
+            .kayit-asansor-yesil .border-red-400 { border-color: #4ade80 !important; }
+            .kayit-asansor-yesil .border-red-600\/20 { border-color: rgb(22 163 74 / 0.2) !important; }
+            .kayit-asansor-yesil .ring-red-200 { --tw-ring-color: #bbf7d0 !important; }
+            .kayit-asansor-yesil .focus\:ring-red-600:focus { --tw-ring-color: #16a34a !important; }
+            .kayit-asansor-yesil .shadow-red-600\/30 { --tw-shadow-color: rgb(22 163 74 / 0.3) !important; }
+            .kayit-asansor-yesil .from-red-600\/10 { --tw-gradient-from: rgb(22 163 74 / 0.1) !important; }
           `}</style>
         )}
         <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
@@ -11013,12 +11033,13 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
             {(currentUser?.position || '').includes('Firma Sahibi') && (
               <button type="button" onClick={() => ttCsvIndir(liste)} className="px-3 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-black flex items-center gap-1.5"><Download className="w-4 h-4" /> Excel</button>
             )}
-            {TT_HIZMETLER.slice(0, 2).map(h => (
-              <button key={h.id} type="button" onClick={() => setForm({ baslangic: null, hizmet: h.id })}
-                className={`px-4 py-2 rounded-xl text-white text-xs font-black flex items-center gap-1.5 shadow-lg ${h.stil.dugme}`}>
-                <PlusCircle className="w-4 h-4" /> {h.id === 'Nakliye' ? 'Evden Eve Görüşmesi' : 'Depo Görüşmesi'}
-              </button>
-            ))}
+            {/* DEĞİŞTİ (kullanıcı talebi): "Evden Eve Görüşmesi" + "Depo Görüşmesi" → TEK BUTON.
+                Pencere Evden Eve Nakliyat seçili açılır; üstteki hizmet kartlarından
+                Eşya Depolama / Depodan Çıkış'a geçilebilir. */}
+            <button type="button" onClick={() => setForm({ baslangic: null, hizmet: 'Nakliye' })}
+              className="px-4 py-2 rounded-xl text-white text-xs font-black flex items-center gap-1.5 shadow-lg bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30">
+              <PlusCircle className="w-4 h-4" /> Telefon Görüşmesi Ekle
+            </button>
           </div>
         </div>
         <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
