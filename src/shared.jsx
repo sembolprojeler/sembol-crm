@@ -1708,7 +1708,7 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
       id: 'grup_odeme',
       baslik: 'ÖDEME, İPTAL VE DEPOLAMA HÜKÜMLERİ',
       maddeler: [
-        "Hizmet bedelinin %20'si kapora olarak alınır; kalan bakiye teslim edilecek adreste tahsil edilir.",
+        "Hizmet bedelinin %25'i kapora olarak alınır; kalan bakiye teslim edilecek adreste tahsil edilir.", // DEĞİŞTİ (kullanıcı talebi): %20 → %25
         'Anlaşılan nakliye fiyatına KDV dahil değildir.',
         'Şehirler arası taşımalarda eşya araca yüklendikten sonra %50 ödemeye tamamlanmaktadır.',
         "Taşıma gününe 72 saatten az süre kala yapılan iptal ve değişikliklerde toplam bedelin %50'si cayma tazminatı olarak fatura edilir.",
