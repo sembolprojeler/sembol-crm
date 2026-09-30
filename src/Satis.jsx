@@ -47,7 +47,7 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
   //
   // ÇÖZÜM: Bekleyen iş SAYISI 1'den fazlaysa pencerede iş seçimi sorulur;
   // seçim yapılmadan kaydetmeye izin verilmez. Seçilen işin fiyatı, mevcut
-  // kaporası ve KALAN BAKİYESİ ekranda gösterilir; %20 önerisi de seçilen işe
+  // kaporası ve KALAN BAKİYESİ ekranda gösterilir; %25 önerisi de seçilen işe
   // göre yeniden hesaplanır. Tek bekleyen iş varsa eski davranış korunur
   // (otomatik seçilir, kullanıcıya fazladan soru sorulmaz).
   // ============================================================================
@@ -1637,8 +1637,8 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                 setKaporaIsler(bekleyenler);
                 // TEK iş varsa otomatik seç; BİRDEN FAZLAYSA seçim kullanıcıya bırakılır
                 const tekIs = bekleyenler.length === 1 ? bekleyenler[0] : null;
-                // %20 öneri: yalnızca iş belliyse hesaplanır (tam sayıya yuvarlanır)
-                const oneri = tekIs ? Math.round((parseFloat(tekIs.price) || 0) * 0.20) : 0;
+                // DEĞİŞTİ (kullanıcı talebi): %25 öneri (eskiden %20) — yalnızca iş belliyse hesaplanır
+                const oneri = tekIs ? Math.round((parseFloat(tekIs.price) || 0) * 0.25) : 0;
                 setKaporaForm({ tutar: oneri ? String(oneri) : '', defterId: bankaDefteri?.id || defterListesi[0]?.id || '', jobId: tekIs?.id || '' });
                 setShowKaporaModal(true);
               }} className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
@@ -2173,7 +2173,7 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
         {/* YENİ: Manuel Borç Ekle Modalı */}
         {/* ==================================================================
             YENİ: KAPORA EKLE PENCERESİ
-            İş fiyatının %20'si önerilir; tutar elle değiştirilebilir.
+            İş fiyatının %25'i önerilir; tutar elle değiştirilebilir.
             Kaydedilince İKİ şey olur:
               1) İşin deposit alanına eklenir -> iş kartında ve sonlandırma
                  hesabında kapora olarak düşer (kayıt ekranındaki kaporayla
@@ -2194,16 +2194,16 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
           const seciliDefter = kaporaDefterler.find(d => d.id === kaporaForm.defterId);
           // Seçilen işin kalan bakiyesi — kapora bu tutardan düşer
           const kalanBakiye = Math.max(0, fiyat - mevcutKapora);
-          // İş seçilince %20 önerisi o işe göre yeniden hesaplanır
-          // DEĞİŞTİ (kullanıcı talebi): %20 yalnızca ÖNERİDİR. Kullanıcı tutarı
+          // İş seçilince %25 önerisi o işe göre yeniden hesaplanır
+          // DEĞİŞTİ (kullanıcı talebi): %25 yalnızca ÖNERİDİR. Kullanıcı tutarı
           // elle yazdıysa (öneriden farklıysa) iş seçimi değişince tutar SİLİNMEZ,
-          // %20 ile ezilmez — girilen rakam ne ise o kaydedilir (az ya da çok).
+          // %25 ile ezilmez — girilen rakam ne ise o kaydedilir (az ya da çok).
           const isSec = (jobId) => {
             const secilen = kaporaIsler.find(j => j.id === jobId);
-            const oneri = secilen ? Math.round((parseFloat(secilen.price) || 0) * 0.20) : 0;
+            const oneri = secilen ? Math.round((parseFloat(secilen.price) || 0) * 0.25) : 0;
             setKaporaForm(f => {
               const oncekiIs = kaporaIsler.find(j => j.id === f.jobId);
-              const oncekiOneri = oncekiIs ? Math.round((parseFloat(oncekiIs.price) || 0) * 0.20) : 0;
+              const oncekiOneri = oncekiIs ? Math.round((parseFloat(oncekiIs.price) || 0) * 0.25) : 0;
               const elleGirildi = f.tutar !== '' && String(f.tutar) !== String(oncekiOneri || '');
               return { ...f, jobId, tutar: elleGirildi ? f.tutar : (oneri ? String(oneri) : '') };
             });
@@ -2287,7 +2287,7 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                     <input type="number" inputMode="decimal" value={kaporaForm.tutar}
                       onChange={e => setKaporaForm({ ...kaporaForm, tutar: e.target.value })}
                       className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-lg font-black" />
-                    <p className="text-[10px] font-bold text-neutral-400 mt-1">%20 yalnızca öneridir — daha az ya da daha fazla girebilirsiniz; yazdığınız tutar aynen seçtiğiniz deftere işlenir.</p>
+                    <p className="text-[10px] font-bold text-neutral-400 mt-1">%25 yalnızca öneridir — daha az ya da daha fazla girebilirsiniz; yazdığınız tutar aynen seçtiğiniz deftere işlenir.</p>
                   </div>
 
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaba yazılsın? *</label>
@@ -9167,7 +9167,7 @@ const TT_SUREC_NAKLIYE = [
   { id: 'video',      ad: 'Eşya videosu / fotoğrafı istendi' },
   { id: 'netFiyat',   ad: 'Video sonrası net fiyat verildi' },
   { id: 'kayit',      ad: 'Sembol CRM\'de kayıt açıldı (taşımadan 15 gün öncesine kadar)' },
-  { id: 'kapora',     ad: '%10 kapora alındı — tarih kesinleşti' },
+  { id: 'kapora',     ad: '%25 kapora alındı — tarih kesinleşti' },
   { id: 'sozlesme',   ad: 'Sözleşme PDF olarak WhatsApp\'tan gönderildi' },
   { id: 'teslimKodu', ad: 'Teslim / güvenlik kodu anlatıldı' },
   { id: 'kurallar',   ad: '72 saat iptal kuralı ve yapılmayan hizmetler söylendi' },
@@ -9178,7 +9178,7 @@ const TT_SUREC_DEPO = [
   { id: 'davet',      ad: 'Müşteri depoya ziyarete davet edildi' },
   { id: 'netFiyat',   ad: 'Net fiyat çalışması dönüldü' },
   { id: 'kayit',      ad: 'Depoevim CRM\'de nakliye kaydı açıldı' },
-  { id: 'kapora',     ad: '%10 kapora alındı — alım tarihi kesinleşti' },
+  { id: 'kapora',     ad: '%25 kapora alındı — alım tarihi kesinleşti' },
   { id: 'teyit',      ad: 'Alımdan 1 gün önce teyit araması yapıldı' },
   { id: 'sozlesme',   ad: 'Eşya depoya konduktan sonra sözleşme yapıldı (oda no + KDV dahil ücret)' },
   { id: 'kurallar',   ad: 'Aylık ödeme (5 gün, IBAN), mühür (200 ₺+KDV) ve 7 gün önce çıkış bildirimi anlatıldı' },
@@ -9220,7 +9220,7 @@ const ttWhatsappSablonlariHam = (tHam, gonderen = '') => {
         metin: `Merhabalar, tüm detayları öğrenebilir miyiz?\n1. Eviniz kaç odalıdır?\n2. Nereden nereye nakliye olacaktır?\n3. Oturduğunuz ev ve yeni taşınacak ev kaçıncı kattadır?\n4. Bina içi asansör durumu nedir?\n5. Küçük eşyaları (kırılacak, kıyafet vb.) kendiniz mi toplayacaksınız?\n6. Kamyon iki adreste de binaya yanaşabiliyor mu?\n7. Ne zaman taşınmayı düşünüyorsunuz?\n\nOrtalama bir fiyat verebiliriz. Daha net fiyat için eşyanın fotoğraf ya da videosunu gönderirseniz seviniriz.` },
       // KALDIRILDI (kullanıcı talebi): "Yazılı Teklif" şablonu
       { id: 'kapora', ad: 'Kayıt & Kapora Bilgisi',
-        metin: `${selam} Taşıma tarihinizi kesinleştirmek için iş bedelinin %10'u kapora olarak alınmaktadır; kalan tutar iş bitiminde ödenir. Kapora sonrası sözleşmeniz PDF olarak buradan gönderilecek; sözleşmedeki teslim kodunu teslimatta ekibimize iletmeniz yeterli. Taşımaya 72 saatten fazla varsa kapora hariç ücretsiz iptal/erteleme yapılabilir. Teşekkür ederiz.` },
+        metin: `${selam} Taşıma tarihinizi kesinleştirmek için iş bedelinin %25'i kapora olarak alınmaktadır; kalan tutar iş bitiminde ödenir. Kapora sonrası sözleşmeniz PDF olarak buradan gönderilecek; sözleşmedeki teslim kodunu teslimatta ekibimize iletmeniz yeterli. Taşımaya 72 saatten fazla varsa kapora hariç ücretsiz iptal/erteleme yapılabilir. Teşekkür ederiz.` },
     ];
   }
 
@@ -9242,7 +9242,7 @@ const ttWhatsappSablonlariHam = (tHam, gonderen = '') => {
       { id: 'ozet', ad: 'Çıkış Teklifi',
         metin: `${selam} DepoEvim'den${ben}. Eşyalarınızın depodan teslimi için konuştuğumuz bilgiler:\n\n${ozetSatirlari}\n\nÇıkış günü planlaması için en az 7 gün önceden haber vermeniz yeterlidir. Depo ücreti veya birikmiş ödeme varsa teslimden önce kapatılması gerekir. Sorularınız için buradayız.` },
       { id: 'kapora', ad: 'Kapora & Tarih',
-        metin: `${selam} Teslim tarihinizi kesinleştirmek için iş bedelinin %10'u kapora olarak alınmaktadır; kalan tutar teslimde ödenir. Tarih kesinleşince ekibimiz planlamayı yapacaktır. Teşekkür ederiz.` },
+        metin: `${selam} Teslim tarihinizi kesinleştirmek için iş bedelinin %25'i kapora olarak alınmaktadır; kalan tutar teslimde ödenir. Tarih kesinleşince ekibimiz planlamayı yapacaktır. Teşekkür ederiz.` },
     ];
   }
   return [
@@ -9255,7 +9255,7 @@ const ttWhatsappSablonlariHam = (tHam, gonderen = '') => {
     { id: 'davet', ad: 'Depo Ziyaret Daveti',
       metin: `${selam} Depolarımızı dilediğiniz zaman gelip görebilirsiniz${sube ? `:\n📍 ${sube.name} — ${sube.address}, ${sube.district}` : '.'}\nZiyaret için 1-2 gün önceden randevu almanız yeterli. Instagram ve YouTube'daki müşteri memnuniyet videolarımızı da izleyebilirsiniz.` },
     { id: 'kapora', ad: 'Kayıt & Kapora Bilgisi',
-      metin: `${selam} Alım tarihinizi kesinleştirmek için nakliye bedelinin %10'u kapora olarak alınmaktadır. Depo sözleşmeniz eşyalarınız depoya konduktan sonra yapılır ve oda numaranız paylaşılır. Aylık ücret giriş tarihinden itibaren en geç 5 gün içinde IBAN'a yatırılır. Çıkıştan en az 7 gün önce bilgi vermeniz yeterlidir. Teşekkür ederiz.` },
+      metin: `${selam} Alım tarihinizi kesinleştirmek için nakliye bedelinin %25'i kapora olarak alınmaktadır. Depo sözleşmeniz eşyalarınız depoya konduktan sonra yapılır ve oda numaranız paylaşılır. Aylık ücret giriş tarihinden itibaren en geç 5 gün içinde IBAN'a yatırılır. Çıkıştan en az 7 gün önce bilgi vermeniz yeterlidir. Teşekkür ederiz.` },
   ];
 };
 
@@ -9489,7 +9489,7 @@ const TT_REHBER = {
         '"Az eşyam var": "Videonuzu görünce en uygun rakamı veririm."',
       ] },
       { baslik: 'Kurallar', maddeler: [
-        'Kayıt taşımadan 15 gün öncesine kadar açılabilir; %10 kapora ile tarih kesinleşir.',
+        'Kayıt taşımadan 15 gün öncesine kadar açılabilir; %25 kapora ile tarih kesinleşir.',
         '72 saatten fazla varsa kapora hariç ücretsiz iptal; daha az kala %50 cayma bedeli.',
         'Yapılmaz: klima söküm-montajı, duvar montajı, elektrik işleri. Avize/perde/ankastre sökülür, montajı yapılmaz.',
         '30 metreyi aşan yanaşma mesafesinde ek işçilik doğar.',
@@ -11147,7 +11147,7 @@ const depoSunumuIndir = (tHam, gonderen = '') => {
       <div class="ic"><div class="adim">
         <div><b>1</b>Eşya videosunu gönderin, net fiyatı iletelim</div>
         <div><b>2</b>Dilerseniz depomuzu gelip görün</div>
-        <div><b>3</b>%10 kapora ile tarihiniz kesinleşsin</div>
+        <div><b>3</b>%25 kapora ile tarihiniz kesinleşsin</div>
         <div><b>4</b>Ekibimiz adresinizden alsın, depoya yerleştirsin</div>
         <div><b>5</b>Sözleşme + oda numaranız size iletilsin</div>
       </div></div>
@@ -11187,7 +11187,7 @@ const NAKLIYE_SUNUM_ODA = (oda) => (NAKLIYE_SUNUM_ARAC[oda] ? oda : oda === 'Vil
 // Sembol Nakliyat iletişim (Ön Bilgilendirme sunumu)
 const SEMBOL_ILETISIM = {
   adres: 'Bahçelievler Mah. Yeni Sok. No 5 C Pendik / İstanbul',
-  tel: '0 216 390 89 99', eposta: 'sembolnakliyatbusiness@gmail.com', web: 'www.sembolnakliyat.com',
+  tel: '0 216 390 89 99', eposta: 'sembolnakliyatbusiness@gmail.com', web: 'www.sembolevdeneve.com',   // DEĞİŞTİ (kullanıcı talebi)
   saat: 'Hafta içi 09.00 – 19.00 · Hafta sonu 10.00 – 17.00',
 };
 
@@ -11257,16 +11257,19 @@ const nakliyeSunumuIndir = (tHam, gonderen = '') => {
     ...(disCephe ? ['Dış cephe asansörü ile asansörlü taşıma'] : []),
   ];
 
+  // DEĞİŞTİ (kullanıcı talebi): logo simgesi kaldırıldı, başlık ORTALANDI
   const ust = (sayfa) => `
-    <table class="ust" style="width:100%;border-collapse:separate"><tr><td style="vertical-align:top">
-        <div class="logo">⌂ SEMBOL NAKLİYAT</div>
-        <div class="alt-logo">EVDEN EVE · ASANSÖRLÜ TAŞIMA · DEPOLAMA</div>
-        <div class="ofis">${k(SEMBOL_ILETISIM.adres)}<br>${k(SEMBOL_ILETISIM.tel)} | ${k(SEMBOL_ILETISIM.web)}</div>
-      </td><td class="teklif" style="vertical-align:top">
-        <div class="no">TEKLİF #${k(teklifNo)}</div>
-        <div>Tarih: ${trT(bugunD)}</div><div>Geçerlilik: ${trT(gecerlilik)}</div>
-        <div>Sayfa ${sayfa} / 2</div>
-      </td></tr></table>`;
+    <div class="ust" style="display:block;text-align:center">
+      <div class="logo">SEMBOL NAKLİYAT</div>
+      <div class="alt-logo">EVDEN EVE · ASANSÖRLÜ TAŞIMA · DEPOLAMA</div>
+      <div class="ofis">${k(SEMBOL_ILETISIM.adres)} · ${k(SEMBOL_ILETISIM.tel)} · ${k(SEMBOL_ILETISIM.web)}</div>
+      <div class="teklif" style="text-align:center;margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.35)">
+        <span class="no">TEKLİF #${k(teklifNo)}</span>
+        <span style="margin:0 8px;opacity:.6">|</span>Tarih: ${trT(bugunD)}
+        <span style="margin:0 8px;opacity:.6">|</span>Geçerlilik: ${trT(gecerlilik)}
+        <span style="margin:0 8px;opacity:.6">|</span>Sayfa ${sayfa} / 2
+      </div>
+    </div>`;
 
   const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>${k(dosyaAdi)}</title>
   <style>
@@ -11278,7 +11281,7 @@ const nakliyeSunumuIndir = (tHam, gonderen = '') => {
     .ust { background: #c81e2b; color: #fff; border-radius: 14px; padding: 14px 18px; display: flex; justify-content: space-between; align-items: flex-start; }
     .logo { font-size: 24px; font-weight: 900; letter-spacing: .5px; } .alt-logo { font-size: 9.5px; font-weight: 800; letter-spacing: 1px; opacity: .95; }
     .ofis { font-size: 9.5px; margin-top: 6px; opacity: .9; }
-    .teklif { text-align: right; font-size: 10.5px; line-height: 1.5; } .teklif .no { font-size: 20px; font-weight: 900; letter-spacing: 1px; }
+    .teklif { text-align: right; font-size: 10.5px; line-height: 1.5; } .teklif .no { font-size: 17px; font-weight: 900; letter-spacing: 1px; }
     .baslik { background: #111827; color: #fff; font-weight: 900; font-size: 11.5px; padding: 6px 12px; letter-spacing: .3px; }
     .kart { border: 1.5px solid #fecaca; border-radius: 10px; overflow: hidden; background: #fff; }
     .kart .ic { padding: 10px 12px; }
@@ -11400,7 +11403,7 @@ const nakliyeSunumuIndir = (tHam, gonderen = '') => {
       <div class="kart"><div class="baslik">📄 KOŞUL VE ŞARTLAR</div><div class="ic"><ul class="tik">
         <li>Kesin fiyat, eşya video / fotoğrafı gönderildikten sonra verilir.</li>
         <li>Kayıt taşımadan 15 gün öncesine kadar açılabilir; verilen fiyat geçerlidir.</li>
-        <li>Kayıtta iş bedelinin %10'u kapora olarak alınır.</li>
+        <li>Kayıtta iş bedelinin %25'i kapora olarak alınır.</li>
         <li>${sehirlerArasi ? 'Eşya araca yüklendikten sonra %50 ödeme alınır; kalan tutar teslimde ödenir.' : 'Kalan ödeme iş bitiminde şirket hesabına ya da ekip şefimize yapılır.'}</li>
         <li>72 saat öncesine kadar kapora hariç ücretsiz iptal veya erteleme yapılır.</li>
         <li>Tüm anlaşmalarda sözleşme PDF olarak gönderilir.</li>
@@ -11426,7 +11429,7 @@ const nakliyeSunumuIndir = (tHam, gonderen = '') => {
       <td><b>1</b>Teklif: soruları eksiksiz cevaplayın</td>
       <td><b>2</b>Fiyat: video ile kesin fiyat</td>
       <td><b>3</b>Randevu: 15 gün önce kayıt</td>
-      <td><b>4</b>Kapora: iş bedelinin %10'u</td>
+      <td><b>4</b>Kapora: iş bedelinin %25'i</td>
       <td><b>5</b>Sözleşme: PDF olarak iletilir</td>
       <td><b>6</b>Taşınma: 09.00'da ekip kapıda</td>
     </tr></table></div></div>
@@ -11437,11 +11440,7 @@ const nakliyeSunumuIndir = (tHam, gonderen = '') => {
       <div><b>Klima montajı:</b> Klima söküm-montajı yapılmaz; beyaz eşya söküm ve montajı mevcuttur.</div>
     </div></div>
 
-    <div class="alt">
-      <span>Müşteri Temsilciniz: <span class="t">${k(gonderen || 'Sembol Nakliyat')}</span></span>
-      <span>${k(SEMBOL_ILETISIM.tel)} · ${k(SEMBOL_ILETISIM.eposta)}</span>
-      <span>${k(SEMBOL_ILETISIM.saat)}</span>
-    </div>
+    <!-- KALDIRILDI (kullanıcı talebi): 2. sayfa alt şeridi (temsilci · telefon · çalışma saatleri) -->
   </section>
   <script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 400); });</script>
   </body></html>`;
@@ -11667,8 +11666,11 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
   // ================================================================ RENDER ===
   return (
     <div className="max-w-7xl mx-auto animate-in fade-in space-y-4">
-      {/* BAŞLIK */}
-      <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 rounded-2xl p-4 text-white shadow-lg space-y-3">
+      {/* BAŞLIK — DEĞİŞTİ (kullanıcı talebi): varsayılan GİZLİ; Müşteri Havuzu'ndaki
+          "Görüşme İstatistikleri" düğmesine basınca (başlık + sayaçlar) görünür.
+          Excel ve "Telefon Görüşmesi Ekle" düğmeleri gizliyken filtre satırında durur. */}
+      {istatistikGoster && (
+      <div className="bg-gradient-to-r from-neutral-900 via-neutral-800 to-neutral-900 rounded-2xl p-4 text-white shadow-lg space-y-3 animate-in fade-in slide-in-from-top-1">
         <div className="flex flex-col md:flex-row justify-between md:items-center gap-3">
           <div className="flex items-center gap-3">
             {onGeri && <button type="button" onClick={onGeri} className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center shrink-0" title="Müşteri Havuzu'na dön"><ChevronLeft className="w-5 h-5" /></button>}
@@ -11720,6 +11722,7 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
         </div>
         )}
       </div>
+      )}
 
       {/* YENİ (kullanıcı talebi): YÖNETİCİ — KİMİN EKRANINI GÖRMEK İSTİYORSUNUZ?
           Satışçı seçilince liste, sayaçlar ve filtreler o satışçının kendi
@@ -11779,6 +11782,18 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
               className="px-2.5 py-2 rounded-xl text-[11px] font-black text-red-600 hover:bg-red-50 flex items-center gap-1 whitespace-nowrap"><X className="w-3.5 h-3.5" /> Temizle</button>
           )}
         </div>
+        {/* YENİ: başlık gizliyken düğmeler burada (aynı işlevler) */}
+        {!istatistikGoster && (
+          <div className="flex gap-1.5 lg:ml-1 shrink-0">
+            {(currentUser?.position || '').includes('Firma Sahibi') && (
+              <button type="button" onClick={() => ttCsvIndir(liste)} className="px-3 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-xs font-black flex items-center gap-1.5 whitespace-nowrap"><Download className="w-4 h-4" /> Excel</button>
+            )}
+            <button type="button" onClick={() => setForm({ baslangic: null, hizmet: 'Nakliye' })}
+              className="px-4 py-2 rounded-xl text-white text-xs font-black flex items-center gap-1.5 shadow-lg bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30 whitespace-nowrap">
+              <PlusCircle className="w-4 h-4" /> Telefon Görüşmesi Ekle
+            </button>
+          </div>
+        )}
       </div>
 
       {/* LİSTE */}
