@@ -10684,10 +10684,17 @@ const TTBilgi = ({ e, v }) => (
   <div className="min-w-0"><p className="text-[9px] font-black uppercase text-neutral-400">{e}</p><p className="text-xs font-black text-neutral-800 break-words">{v || '—'}</p></div>
 );
 
-const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, onNotEkle, onDuzenle, onKayitAc, onWhatsapp, onTransfer, onHizmetAktar, onSil }) => {
+const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, onNotEkle, onDuzenle, onKayitAc, onWhatsapp, onTransfer, onHizmetAktar, onSil,
+  onNotGuncelle = null, onNotSil = null, kullanici = '' }) => {
   // onWhatsapp(sablonId?) — şablon verilirse pencere o şablonla açılır
   const t = ttNormalize(tHam);
   const [not, setNot] = useState('');
+  // YENİ (kullanıcı talebi): kaydedilmiş notu düzenleme / silme
+  const [notDuzenle, setNotDuzenle] = useState(null);    // { anahtar, metin }
+  const [notSilinecek, setNotSilinecek] = useState(null); // not nesnesi
+  const notAnahtari = (n) => `${n.tarih}|${n.kullanici}`;
+  // Notu yazan kişi veya yetkili (yönetici / kaydın sahibi) düzenleyebilir
+  const notDuzenleyebilir = (n) => yetkili || (kullanici && n.kullanici === kullanici);
   const hz = ttHizmetBul(t.hizmetTipi);
   const hesap = ttFiyatHesapla(t);
   const adimlar = ttSurecAdimlari(t);
@@ -10716,7 +10723,7 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
             {ttTelGecerli(t.telefon) && <a href={`tel:0${ttTelAnahtar(t.telefon)}`} className="px-3 py-1.5 rounded-xl bg-white text-blue-700 text-xs font-black flex items-center gap-1.5 shadow"><Phone className="w-3.5 h-3.5" /> Ara</a>}
             {ttTelGecerli(t.telefon) && <button type="button" onClick={() => onWhatsapp()} className="px-3 py-1.5 rounded-xl bg-green-500 hover:bg-green-400 text-white text-xs font-black flex items-center gap-1.5 shadow"><MessageCircle className="w-3.5 h-3.5" /> WhatsApp Mesajı</button>}
             {onKayitAc && <button type="button" onClick={onKayitAc} className="px-3 py-1.5 rounded-xl bg-neutral-900 hover:bg-black text-white text-xs font-black flex items-center gap-1.5 shadow"><UserPlus className="w-3.5 h-3.5" /> Kayıt Aç</button>}
-            <button type="button" onClick={onDuzenle} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5"><Edit className="w-3.5 h-3.5" /> Soruları Düzenle</button>
+            <button type="button" onClick={onDuzenle} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5"><Edit className="w-3.5 h-3.5" /> Düzenle</button>
             <button type="button" onClick={onTransfer} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5"><RefreshCw className="w-3.5 h-3.5" /> Personele Transfer</button>
             <button type="button" onClick={() => onHizmetAktar(hedefHizmet)} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5">
               <ArrowUpDown className="w-3.5 h-3.5" /> {hedefHizmet === 'Depo' ? 'DepoEvim\'e Aktar' : 'Sembol\'e Aktar'}
@@ -10745,6 +10752,14 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
           <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
             {/* Cevaplar */}
             <div className="grid grid-cols-2 md:grid-cols-3 gap-3 bg-neutral-50 border border-neutral-200 rounded-2xl p-3 self-start">
+              {/* YENİ (kullanıcı talebi): kaydedilmiş bilgileri düzenle — soru sayfası dolu açılır */}
+              <div className="col-span-2 md:col-span-3 flex items-center justify-between gap-2 -mb-1">
+                <p className="text-[10px] font-black uppercase text-neutral-500">Kaydedilen Bilgiler</p>
+                <button type="button" onClick={onDuzenle}
+                  className={`px-3 py-1.5 rounded-lg text-white text-[11px] font-black flex items-center gap-1.5 shadow ${hz.stil.dugme}`}>
+                  <Edit className="w-3.5 h-3.5" /> Bilgileri Düzenle
+                </button>
+              </div>
               <TTBilgi e="Görüşme Tarihi" v={ttTrTarih(t.iletisimTarihi)} />
               <TTBilgi e="Taşınma / İşlem Tarihi" v={[t.tasinmaTarihi && ttTrTarih(t.tasinmaTarihi), t.tasinmaNotu].filter(Boolean).join(' · ')} />
               {t.hizmetTipi === 'Nakliye' && <TTBilgi e="Ev Tipi" v={TT_ODA_SECENEKLERI.find(o => o.id === t.odaSayisi)?.ad || t.odaSayisi} />}
@@ -10807,9 +10822,31 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
                 {[...(t.notlar || []).map(n => ({ ...n, tur: 'not' })), ...(t.hareketler || []).map(h => ({ ...h, tur: 'hareket', metin: h.islem }))]
                   .sort((a, b) => (b.tarih || '').localeCompare(a.tarih || ''))
                   .map((x, i) => (
-                    <div key={i} className={`rounded-lg px-2 py-1.5 text-[11px] ${x.tur === 'not' ? 'bg-yellow-50 border border-yellow-100 text-neutral-800 font-semibold' : 'bg-neutral-50 text-neutral-500'}`}>
-                      <p className="whitespace-pre-wrap">{x.metin}</p>
-                      <p className="text-[9px] font-bold text-neutral-400 mt-0.5">{x.kullanici} · {new Date(x.tarih).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}</p>
+                    <div key={i} className={`group rounded-lg px-2 py-1.5 text-[11px] ${x.tur === 'not' ? 'bg-yellow-50 border border-yellow-100 text-neutral-800 font-semibold' : 'bg-neutral-50 text-neutral-500'}`}>
+                      {/* YENİ (kullanıcı talebi): not düzenleme kutusu */}
+                      {x.tur === 'not' && notDuzenle?.anahtar === notAnahtari(x) ? (
+                        <div className="space-y-1.5">
+                          <textarea value={notDuzenle.metin} onChange={e => setNotDuzenle(nd => ({ ...nd, metin: e.target.value }))} rows={3} autoFocus
+                            className="w-full p-2 rounded-lg border border-yellow-300 bg-white text-[11px] font-semibold outline-none focus:ring-2 focus:ring-yellow-400 resize-y" />
+                          <div className="flex justify-end gap-1.5">
+                            <button type="button" onClick={() => setNotDuzenle(null)} className="px-2.5 py-1 rounded-lg bg-white border border-neutral-200 text-[10px] font-black text-neutral-600">Vazgeç</button>
+                            <button type="button" disabled={!notDuzenle.metin.trim()}
+                              onClick={async () => { await onNotGuncelle?.(x, notDuzenle.metin.trim()); setNotDuzenle(null); }}
+                              className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-[10px] font-black flex items-center gap-1 disabled:opacity-40"><Save className="w-3 h-3" /> Kaydet</button>
+                          </div>
+                        </div>
+                      ) : (<>
+                        <div className="flex items-start gap-1.5">
+                          <p className="whitespace-pre-wrap flex-1 min-w-0">{x.metin}</p>
+                          {x.tur === 'not' && notDuzenleyebilir(x) && onNotGuncelle && (
+                            <span className="flex gap-0.5 shrink-0 opacity-60 group-hover:opacity-100 transition">
+                              <button type="button" title="Notu düzenle" onClick={() => setNotDuzenle({ anahtar: notAnahtari(x), metin: x.metin })} className="p-1 rounded hover:bg-yellow-100 text-neutral-600"><Edit className="w-3 h-3" /></button>
+                              <button type="button" title="Notu sil" onClick={() => setNotSilinecek(x)} className="p-1 rounded hover:bg-red-100 text-red-600"><Trash2 className="w-3 h-3" /></button>
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[9px] font-bold text-neutral-400 mt-0.5">{x.kullanici} · {new Date(x.tarih).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}{x.duzenlendi ? ` · düzenlendi (${x.duzenleyen || ''})` : ''}</p>
+                      </>)}
                     </div>
                   ))}
               </div>
@@ -10817,6 +10854,18 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
           </div>
         </div>
       </div>
+      {notSilinecek && (
+        <div className="fixed inset-0 z-[99999] bg-black/60 flex items-center justify-center p-4" onClick={(e) => { e.stopPropagation(); setNotSilinecek(null); }}>
+          <div className="bg-white rounded-2xl p-5 max-w-sm w-full space-y-3" onClick={e => e.stopPropagation()}>
+            <p className="text-sm font-black text-neutral-900">Bu not silinsin mi?</p>
+            <p className="text-xs text-neutral-600 bg-yellow-50 border border-yellow-100 rounded-lg p-2 whitespace-pre-wrap">{notSilinecek.metin}</p>
+            <div className="flex gap-2 justify-end">
+              <button type="button" onClick={() => setNotSilinecek(null)} className="px-4 py-2 rounded-xl bg-neutral-100 text-xs font-black">Vazgeç</button>
+              <button type="button" onClick={async () => { await onNotSil?.(notSilinecek); setNotSilinecek(null); }} className="px-4 py-2 rounded-xl bg-red-600 text-white text-xs font-black">Sil</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -10968,6 +11017,25 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
   const notEkle = async (t, metin) => {
     const canli = teklifler.find(x => x.id === t.id) || t;
     await updateDoc(ttBelge(t.id), { notlar: [...(canli.notlar || []), { tarih: new Date().toISOString(), kullanici, metin }], updatedAt: new Date().toISOString() });
+  };
+  // YENİ (kullanıcı talebi): kaydedilmiş notu düzenle / sil — not, tarih + yazan kişiyle bulunur;
+  // eski metin hareket geçmişine yazılır (iz kaybolmaz)
+  const ayniNot = (a, b) => a.tarih === b.tarih && a.kullanici === b.kullanici;
+  const notGuncelle = async (t, eskiNot, yeniMetin) => {
+    const canli = teklifler.find(x => x.id === t.id) || t;
+    await updateDoc(ttBelge(t.id), {
+      notlar: (canli.notlar || []).map(n => (ayniNot(n, eskiNot) ? { ...n, metin: yeniMetin, duzenlendi: new Date().toISOString(), duzenleyen: kullanici } : n)),
+      hareketler: [...(canli.hareketler || []), hareket(`Not düzenlendi (eski: "${String(eskiNot.metin || '').slice(0, 80)}")`)],
+      updatedAt: new Date().toISOString(),
+    });
+  };
+  const notSil = async (t, silinecekNot) => {
+    const canli = teklifler.find(x => x.id === t.id) || t;
+    await updateDoc(ttBelge(t.id), {
+      notlar: (canli.notlar || []).filter(n => !ayniNot(n, silinecekNot)),
+      hareketler: [...(canli.hareketler || []), hareket(`Not silindi: "${String(silinecekNot.metin || '').slice(0, 80)}"`)],
+      updatedAt: new Date().toISOString(),
+    });
   };
   const transferEt = async (t, yeniSahip, not) => {
     const eski = ttSahibi(t) || 'Atanmadı';
@@ -11183,6 +11251,7 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
       {detay && !form && (
         <TelefonTeklifDetay tHam={detay} gecmis={gecmisOf(detay)} yetkili={yetkiliMi(detay)} onKapat={() => setDetayId(null)}
           onDurum={(y) => durumDegistir(detay, y)} onSurec={(a, v) => surecIsaretle(detay, a, v)} onNotEkle={(m) => notEkle(detay, m)}
+          onNotGuncelle={(n, m) => notGuncelle(detay, n, m)} onNotSil={(n) => notSil(detay, n)} kullanici={kullanici}
           onDuzenle={() => setForm({ baslangic: detay, hizmet: detay.hizmetTipi })}
           onKayitAc={onKayitAc ? () => kayitAc(detay) : null}
           onWhatsapp={(sablon) => setWaKayit({ t: detay, sablon: sablon || null })} onTransfer={() => setTransferKayit(detay)}
