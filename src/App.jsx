@@ -4106,6 +4106,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     //   hizliGorusme: { hizmet, no } → Müşteri Havuzu'na iletilir, sihirbaz açılır
     const [gorusmeSecimAcik, setGorusmeSecimAcik] = useState(false);
     const [hizliGorusme, setHizliGorusme] = useState(null);
+    // YENİ (kullanıcı talebi): satış personelinin "Portföyüm" butonu → Müşteri Havuzu'nda
+    // Telefon Görüşmesi sekmesini açma isteği (her tıklamada farklı sayı)
+    const [telefonPortfoyIstegi, setTelefonPortfoyIstegi] = useState(null);
     const [globalSearchQuery, setGlobalSearchQuery] = useState('');
     const [isSubMenuOpen, setIsSubMenuOpen] = useState(false);
     const [isAddJobSubMenuOpen, setIsAddJobSubMenuOpen] = useState(false);
@@ -7580,9 +7583,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     ========================================================== */}
                 {(currentUser?.position || '').includes('Satış') && showSatisMusteriHavuzu && (
                   <button
-                    onClick={() => setGorusmeSecimAcik(true)}
+                    /* DEĞİŞTİ (kullanıcı talebi): "Evden Eve / Depo" seçim penceresi çıkmaz —
+                       görüşme penceresi doğrudan Evden Eve Nakliyat seçili açılır; pencerenin
+                       üstündeki hizmet kartlarından Eşya Depolama / Depodan Çıkış'a geçilebilir.
+                       (Seçim penceresinin kodu yerinde duruyor; kullanılmıyor.) */
+                    onClick={() => { setHizliGorusme({ hizmet: 'Nakliye', no: Date.now() }); setIsSidebarOpen(false); setActiveTab('musteriHavuzu'); }}
                     className="relative p-2 rounded-xl transition shrink-0 gorusme-kisayol-yanson text-white"
-                    title="Yeni telefon görüşmesi — Evden Eve / Depo"
+                    title="Telefon Görüşmesi Ekle"
                   >
                     <Plus className="w-5 h-5" strokeWidth={3} />
                   </button>
@@ -7596,6 +7603,21 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     title="Defter — Kasa, cari ve borç/alacak takibi"
                   >
                     <BookOpen className="w-5 h-5" />
+                  </button>
+                ) : (currentUser?.position || '').includes('Satış') && showSatisMusteriHavuzu ? (
+                  /* ============================================================
+                     YENİ (kullanıcı talebi): SATIŞ PERSONELİNDE İş Kılavuzu yerine
+                     "TELEFON GÖRÜŞMESİ PORTFÖYÜM" butonu. Tıklayınca Müşteri
+                     Havuzu > Telefon Görüşmesi (kişiye özel alan) açılır.
+                     Diğer personelde İş Kılavuzu butonu aynen kalır.
+                     ============================================================ */
+                  <button
+                    onClick={() => { setTelefonPortfoyIstegi(Date.now()); setActiveTab('musteriHavuzu'); setIsSidebarOpen(false); setIsSubMenuOpen(true); }}
+                    className="relative p-2 rounded-xl transition shrink-0 text-white bg-gradient-to-br from-emerald-500 to-teal-600 ring-2 ring-emerald-300/70 shadow-lg shadow-emerald-500/40 hover:from-emerald-400 hover:to-teal-500"
+                    title="Portföyüm — Telefon Görüşmesi (size ait müşteriler)"
+                  >
+                    <Briefcase className="w-5 h-5" />
+                    <span className="absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full bg-yellow-400 border-2 border-neutral-900 animate-pulse" />
                   </button>
                 ) : (
                 <button
@@ -8798,6 +8820,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 jobs={jobs}
                 /* YENİ (kullanıcı talebi): "+" kısayolundan gelen görüşme isteği — kullanılınca temizlenir */
                 hizliGorusme={hizliGorusme} onHizliGorusmeKullanildi={() => setHizliGorusme(null)}
+                /* YENİ (kullanıcı talebi): "Portföyüm" butonu → Telefon Görüşmesi sekmesi */
+                telefonPortfoyIstegi={telefonPortfoyIstegi} onTelefonPortfoyKullanildi={() => setTelefonPortfoyIstegi(null)}
                 /* YENİ: Teklife Bak penceresindeki "Kayıt Aç" butonu için */
                 onKayitAc={showSatisMusteriKayit ? havuzdanKayitAc : null} />}
 
