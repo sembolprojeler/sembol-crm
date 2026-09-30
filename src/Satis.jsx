@@ -10685,7 +10685,7 @@ const TTBilgi = ({ e, v }) => (
 );
 
 const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, onNotEkle, onDuzenle, onKayitAc, onWhatsapp, onTransfer, onHizmetAktar, onSil,
-  onNotGuncelle = null, onNotSil = null, kullanici = '' }) => {
+  onNotGuncelle = null, onNotSil = null, kullanici = '', onSunum = null }) => {
   // onWhatsapp(sablonId?) — şablon verilirse pencere o şablonla açılır
   const t = ttNormalize(tHam);
   const [not, setNot] = useState('');
@@ -10728,6 +10728,12 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
             <button type="button" onClick={() => onHizmetAktar(hedefHizmet)} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5">
               <ArrowUpDown className="w-3.5 h-3.5" /> {hedefHizmet === 'Depo' ? 'DepoEvim\'e Aktar' : 'Sembol\'e Aktar'}
             </button>
+            {/* YENİ (kullanıcı talebi): DEPO SUNUMU (2 sayfa PDF) — yalnızca Eşya Depolama görüşmelerinde */}
+            {t.hizmetTipi === 'Depo' && onSunum && (
+              <button type="button" onClick={onSunum} className="px-3 py-1.5 rounded-xl bg-white text-blue-700 hover:bg-blue-50 text-xs font-black flex items-center gap-1.5 shadow">
+                <FileText className="w-3.5 h-3.5" /> PDF Sunum İndir
+              </button>
+            )}
             {yetkili && <button type="button" onClick={onSil} className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-red-700 text-white text-xs font-black flex items-center gap-1.5 ml-auto"><Trash2 className="w-3.5 h-3.5" /> Sil</button>}
           </div>
         </div>
@@ -10868,6 +10874,243 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
       )}
     </div>
   );
+};
+
+
+// ############################################################################
+//  YENİ (kullanıcı talebi): DEPO SUNUMU — 2 SAYFALIK PDF
+// ----------------------------------------------------------------------------
+//  Yalnızca DEPO (eşyanın depoya girişi) görüşmelerinde, detay penceresindeki
+//  "PDF Sunum İndir" butonuyla üretilir. Sözleşme PDF'iyle aynı yöntem:
+//  yeni sekmede hazır sayfa açılır ve yazdır penceresinden "PDF olarak kaydet".
+//  Sayfa 1: Müşteri analizi · m³ ihtiyacı · eşya dağılımı · 3D oda · "neler sığar"
+//  Sayfa 2: Depo özellikleri · fiyat teklifi (kira + kampanya + nakliye) · şube ·
+//           süreç · iletişim
+//  Metinler Depoevim Oda Kataloğu (PDF) ve oryantasyon kılavuzundan alındı.
+// ############################################################################
+const DEPO_SUNUM_KATALOG = {
+  '1+0': { m3: 10, en: 2.0, boy: 1.7, yuk: 3.0, koli: '20–25 koli',
+    sigar: ['Yaklaşık 20–25 koli', 'Yorgan ve nevresim hurçları', 'Halı ve perde ruloları', 'Kışlık kıyafet ve ayakkabılar', 'Kitaplar ve dekorasyon', 'Valiz ve küçük mutfak eşyaları'],
+    dagilim: [['Koli & küçük eşyalar', 4.0], ['Kıyafet & tekstil', 2.5], ['Halı & perde ruloları', 1.5], ['Kitap & dekorasyon', 1.0], ['Valiz & diğer', 1.0]] },
+  '1+1': { m3: 15, en: 2.5, boy: 2.0, yuk: 3.0, koli: '30–35 koli',
+    sigar: ['Yaklaşık 30–35 koli', 'Çamaşır makinesi ve fırın', 'Çift kişilik yatak', 'Demonte kanepe ve TV ünitesi', 'Halı ve perde ruloları', 'Yorgan ve nevresim hurçları'],
+    dagilim: [['Yatak & baza', 3.5], ['Kanepe & TV ünitesi', 3.0], ['Beyaz eşya', 2.5], ['Koli & küçük eşyalar', 3.5], ['Halı & perde ruloları', 1.5], ['Diğer (masa, sandalye vb.)', 1.0]] },
+  '2+1': { m3: 22, en: 3.0, boy: 2.5, yuk: 3.0, koli: '40–50 koli',
+    sigar: ['Yaklaşık 40–50 koli', 'Buzdolabı ve çamaşır makinesi', 'Çift kişilik yatak ve baza', 'Demonte gardırop panelleri', 'Demonte kanepe ve TV ünitesi', 'Çocuk odası eşyaları'],
+    dagilim: [['Oturma grubu', 6.5], ['Yatak & baza', 4.2], ['Gardırop / dolap', 3.8], ['Beyaz eşya', 2.1], ['Koli & küçük eşyalar', 2.4], ['Diğer (masa, sandalye vb.)', 3.0]] },
+  '3+1': { m3: 30, en: 4.0, boy: 2.5, yuk: 3.0, koli: '60–70 koli',
+    sigar: ['Yaklaşık 60–70 koli', 'Beyaz eşyalar (3 adet)', 'İki yatak ve bazalar', 'Demonte gardıroplar', 'Yemek masası ve sandalyeler', 'Koltuk takımı ve TV'],
+    dagilim: [['Oturma grubu', 8.0], ['Yatak & bazalar', 6.0], ['Gardıroplar', 5.0], ['Beyaz eşya', 3.5], ['Yemek masası & sandalye', 2.5], ['Koli & küçük eşyalar', 3.5], ['Diğer', 1.5]] },
+};
+const DEPO_SUNUM_OZELLIKLER = [
+  ['🏢', 'Yüksek kat, rutubetsiz depolar', 'Eşyalarınız nem ve rutubetten uzak, kuru ortamda saklanır.'],
+  ['🔒', 'Size özel mühürlü oda', 'Odanızın kapısı sizin gözünüzün önünde mühürlenir; anahtar ve mühür size özeldir.'],
+  ['📷', '7/24 kamera ve güvenlik', 'Tesislerimiz gece gündüz kamera ile izlenir.'],
+  ['🛡️', 'Sigortalı depolama', 'Eşyalarınız depolama süresince sigorta güvencesindedir.'],
+  ['📦', 'Kalıcı ambalaj (pat pat)', 'Firma nakliyesinde eşyalar kalıcı ambalajla sarılır, depoda da öyle bekler.'],
+  ['📅', 'Taahhüt yok, esnek kiralama', 'Aylık çalışırız; çıkmadan 7 gün önce haber vermeniz yeterli.'],
+  ['🚚', 'Anahtar teslim nakliye', 'Kendi ekibimiz ve araçlarımızla adresinizden alır, depoya yerleştiririz.'],
+  ['👀', 'Ziyaret imkânı', 'Depolarımızı dilediğiniz zaman gelip görebilir, eşyanıza ulaşabilirsiniz (1-2 gün önce randevu).'],
+];
+
+const depoSunumuIndir = (tHam, gonderen = '') => {
+  const t = ttNormalize(tHam);
+  const k = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const boyutId = DEPO_SUNUM_KATALOG[t.depoBoyutu] ? t.depoBoyutu : '2+1';   // Özel / boş → 2+1 örneği
+  const kat = DEPO_SUNUM_KATALOG[boyutId];
+  const ozelMi = !DEPO_SUNUM_KATALOG[t.depoBoyutu];
+  const hesap = ttFiyatHesapla(t);
+  const aylik = ttDepoAylik(t.sube, boyutId);
+  const kdvli = aylik ? Math.round(aylik * (1 + TT_KDV)) : 0;
+  const kira = TT_KIRALAMA.find(x => x.id === (t.kiralamaSuresi || '1')) || TT_KIRALAMA[0];
+  const nakliyeVar = t.nakliyeIstiyor === 'Firma';
+  const nakliyeFiyat = ttFiyatSayi(t.verilenFiyat) || ttAcilisFiyati(hesap.nakliyeToplam, 'Depo');
+  const sube = DEPO_LOCATIONS.find(d => d.name === t.sube);
+  const bugun = new Date().toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+  const musteriNo = String(t.id || '').replace(/\D/g, '').slice(-4) || String(Date.now()).slice(-4);
+  const toplamDagilim = kat.dagilim.reduce((s, [, v]) => s + v, 0);
+  const ihtiyacAlt = Math.max(1, Math.round(toplamDagilim - kat.m3 * 0.08));
+  const tl = (n) => `${Math.round(Number(n) || 0).toLocaleString('tr-TR')} ₺`;
+  const dosyaAdi = `Depoevim-Depo-Sunumu-${(t.musteriAdi || 'Musteri').trim().replace(/\s+/g, '-')}`;
+
+  // 3D oda çizimi (izometrik kutu + ölçü etiketleri)
+  const odaSvg = `
+    <svg viewBox="0 0 320 300" width="100%" height="235" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="zemin" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e2e8f0"/><stop offset="1" stop-color="#cbd5e1"/></linearGradient>
+        <linearGradient id="solD" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f8fafc"/><stop offset="1" stop-color="#e2e8f0"/></linearGradient>
+        <linearGradient id="sagD" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f1f5f9"/><stop offset="1" stop-color="#cbd5e1"/></linearGradient>
+      </defs>
+      <!-- sol duvar -->
+      <polygon points="40,70 160,20 160,170 40,220" fill="url(#solD)" stroke="#94a3b8" stroke-width="1.5"/>
+      <!-- sağ duvar -->
+      <polygon points="160,20 280,70 280,220 160,170" fill="url(#sagD)" stroke="#94a3b8" stroke-width="1.5"/>
+      <!-- zemin -->
+      <polygon points="40,220 160,170 280,220 160,270" fill="url(#zemin)" stroke="#94a3b8" stroke-width="1.5"/>
+      <!-- eşya blokları -->
+      <g opacity="0.95">
+        <polygon points="75,175 120,158 120,110 75,127" fill="#d6b48a"/><polygon points="120,158 160,175 160,127 120,110" fill="#b8926a"/><polygon points="75,127 120,110 160,127 115,144" fill="#eacba4"/>
+        <polygon points="130,205 175,188 175,140 130,157" fill="#94a3b8"/><polygon points="175,188 215,205 215,157 175,140" fill="#64748b"/><polygon points="130,157 175,140 215,157 170,174" fill="#cbd5e1"/>
+        <polygon points="185,168 230,151 230,88 185,105" fill="#e9c46a"/><polygon points="230,151 255,163 255,100 230,88" fill="#c9a24d"/><polygon points="185,105 230,88 255,100 210,117" fill="#f4dd8f"/>
+        <polygon points="95,225 130,212 130,178 95,191" fill="#7fb3d5"/><polygon points="130,212 160,225 160,191 130,178" fill="#5d97bf"/><polygon points="95,191 130,178 160,191 125,204" fill="#a9cfe6"/>
+      </g>
+      <!-- ölçüler -->
+      <line x1="30" y1="70" x2="30" y2="220" stroke="#0e7490" stroke-width="1.5"/><text x="8" y="150" font-size="11" font-weight="700" fill="#0e7490">${kat.yuk.toLocaleString('tr-TR')} m</text>
+      <line x1="45" y1="235" x2="160" y2="282" stroke="#0e7490" stroke-width="1.5"/><text x="70" y="275" font-size="11" font-weight="700" fill="#0e7490">${kat.boy.toLocaleString('tr-TR')} m</text>
+      <line x1="160" y1="282" x2="285" y2="235" stroke="#0e7490" stroke-width="1.5"/><text x="235" y="278" font-size="11" font-weight="700" fill="#0e7490">${kat.en.toLocaleString('tr-TR')} m</text>
+    </svg>`;
+
+  const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>${k(dosyaAdi)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 9mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #0f172a; background: #fff; }
+    .sayfa { width: 192mm; min-height: 277mm; margin: 0 auto; page-break-after: always; display: flex; flex-direction: column; gap: 9px; }
+    .sayfa:last-child { page-break-after: auto; }
+    .ust { background: linear-gradient(135deg, #0e7490, #06b6d4); color: #fff; border-radius: 14px; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; }
+    .logo { font-size: 26px; font-weight: 900; letter-spacing: -0.5px; } .logo small { display: block; font-size: 10px; font-weight: 700; letter-spacing: 2px; opacity: .9; }
+    .slogan { text-align: right; font-size: 12px; font-weight: 700; line-height: 1.3; opacity: .95; }
+    .baslik { background: #0f4c81; color: #fff; font-weight: 900; font-size: 12px; padding: 6px 12px; border-radius: 8px 8px 0 0; letter-spacing: .3px; }
+    .kart { border: 1.5px solid #cfe3ee; border-radius: 10px; overflow: hidden; background: #fff; }
+    .kart .ic { padding: 10px 12px; }
+    .iki { display: grid; grid-template-columns: 1fr 1.25fr; gap: 9px; }
+    .uc { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; }
+    .etiket { font-size: 9px; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: .5px; }
+    .deger { font-size: 13px; font-weight: 800; color: #0f172a; }
+    .buyuk { font-size: 30px; font-weight: 900; color: #0f4c81; line-height: 1; }
+    .m3 { font-size: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    td { padding: 5px 4px; border-bottom: 1px solid #e2e8f0; } td:last-child { text-align: right; font-weight: 800; }
+    tr.toplam td { border-top: 2px solid #0f4c81; border-bottom: 0; font-weight: 900; color: #0f4c81; }
+    .sonuc { background: #0f4c81; color: #fff; border-radius: 10px; padding: 12px 14px; display: flex; align-items: center; gap: 14px; }
+    .sonuc .b { font-size: 28px; font-weight: 900; line-height: 1; }
+    ul.tik { list-style: none; padding: 0; margin: 0; columns: 2; column-gap: 14px; font-size: 11px; font-weight: 700; }
+    ul.tik li { break-inside: avoid; padding: 3px 0 3px 18px; position: relative; } ul.tik li:before { content: "✔"; position: absolute; left: 0; color: #0891b2; font-weight: 900; }
+    .ozellik { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+    .ozellik div { border: 1px solid #cfe3ee; border-radius: 9px; padding: 8px 10px; font-size: 10.5px; display: flex; gap: 8px; }
+    .ozellik b { display: block; font-size: 11px; color: #0f4c81; margin-bottom: 1px; }
+    .fiyat { background: #f0f9ff; border: 1.5px solid #bae6fd; border-radius: 10px; padding: 10px 12px; }
+    .fiyat .satir { display: flex; justify-content: space-between; align-items: baseline; padding: 4px 0; border-bottom: 1px dashed #bae6fd; font-size: 11px; font-weight: 700; }
+    .fiyat .satir:last-child { border: 0; } .fiyat .tutar { font-size: 15px; font-weight: 900; color: #0f4c81; }
+    .kampanya { background: #ecfdf5; border: 1.5px solid #a7f3d0; border-radius: 10px; padding: 9px 12px; font-size: 11px; }
+    .kampanya b { color: #047857; }
+    .not { font-size: 9.5px; color: #64748b; font-style: italic; }
+    .alt { margin-top: auto; background: #0f4c81; color: #fff; border-radius: 10px; padding: 8px 14px; display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; font-weight: 700; }
+    .rozetler { display: flex; justify-content: space-around; gap: 6px; font-size: 10px; font-weight: 800; color: #0f4c81; padding: 6px 0; }
+    .rozetler span { text-align: center; } .rozetler i { display: block; font-style: normal; font-size: 18px; }
+    .adim { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+    .adim div { border: 1px solid #cfe3ee; border-radius: 8px; padding: 7px 6px; font-size: 9.5px; font-weight: 700; text-align: center; }
+    .adim b { display: block; width: 20px; height: 20px; border-radius: 50%; background: #0891b2; color: #fff; margin: 0 auto 4px; line-height: 20px; font-size: 11px; }
+    @media screen { body { background: #e2e8f0; padding: 16px; } .sayfa { background: #fff; padding: 9mm; box-shadow: 0 4px 24px rgba(0,0,0,.15); margin-bottom: 16px; } .yazdir { position: fixed; right: 16px; top: 16px; background: #0f4c81; color: #fff; border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 900; cursor: pointer; } }
+    @media print { .yazdir { display: none; } }
+  </style></head><body>
+  <button class="yazdir" onclick="window.print()">🖨 PDF Olarak Kaydet</button>
+
+  <!-- ============================ SAYFA 1 ============================ -->
+  <section class="sayfa">
+    <div class="ust">
+      <div class="logo">Depoevim<small>EŞYA DEPOLAMA · www.depoevim.com</small></div>
+      <div class="slogan">Eşyalarınız için<br>en doğru alanı<br>birlikte planlıyoruz.</div>
+    </div>
+    <div class="iki">
+      <div class="kart">
+        <div class="baslik">👤 Müşteri Analizi</div>
+        <div class="ic">
+          <div class="etiket">Müşteri</div><div class="deger">${k(t.musteriAdi || 'Değerli Müşterimiz')}</div>
+          <div style="height:6px"></div>
+          <div class="uc" style="gap:6px">
+            <div><div class="etiket">Müşteri No</div><div class="deger">${k(musteriNo)}</div></div>
+            <div><div class="etiket">Tarih</div><div class="deger">${k(bugun)}</div></div>
+            <div><div class="etiket">Temsilci</div><div class="deger">${k(gonderen || '—')}</div></div>
+          </div>
+          <div style="height:10px"></div>
+          <div class="etiket">Toplam hacim ihtiyacı</div>
+          <div class="buyuk">${ihtiyacAlt}–${kat.m3} <span class="m3">m³</span></div>
+          <div class="not">(eşyalarınızın toplam kapladığı alan${ozelMi ? ' — özel ölçü için örnek' : ''})</div>
+          <div style="height:10px"></div>
+          <div class="etiket">Eşya dağılımı ve tahmini hacim</div>
+          <table>
+            ${kat.dagilim.map(([ad, m]) => `<tr><td>${k(ad)}</td><td>${m.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m³</td></tr>`).join('')}
+            <tr class="toplam"><td>Toplam tahmini hacim</td><td>${toplamDagilim.toLocaleString('tr-TR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })} m³</td></tr>
+          </table>
+          <div class="not" style="margin-top:6px">Not: Bu analiz, beyan ettiğiniz eşya bilgilerine göre hazırlanmıştır. Gerçek hacim, eşyaların ölçülerine ve paketleme şekline göre küçük farklılık gösterebilir.</div>
+        </div>
+      </div>
+      <div class="kart">
+        <div class="baslik">📐 3D Alan Analizi — ${k(boyutId)} Oda · ${kat.m3} m³</div>
+        <div class="ic">
+          <div style="font-size:11px;font-weight:700">Eşyalarınız yaklaşık olarak <b>${ihtiyacAlt}–${kat.m3} m³</b>'lük bir depolama alanı kaplamaktadır. Size <b>${k(boyutId)} Oda</b> (${kat.en.toLocaleString('tr-TR')} × ${kat.boy.toLocaleString('tr-TR')} × ${kat.yuk.toLocaleString('tr-TR')} m) öneriyoruz.</div>
+          ${odaSvg}
+          <div class="sonuc">
+            <div>📦</div>
+            <div><div style="font-size:10px;font-weight:800;opacity:.85">SONUÇ</div><div class="b">${kat.m3} m³</div></div>
+            <div style="font-size:11px;font-weight:700;line-height:1.3">depolama alanı ihtiyacı<br><span style="opacity:.85">${k(boyutId)} Oda · ${kat.en.toLocaleString('tr-TR')} × ${kat.boy.toLocaleString('tr-TR')} × ${kat.yuk.toLocaleString('tr-TR')} m</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="kart">
+      <div class="baslik">✅ Bu odaya neler sığar?</div>
+      <div class="ic"><ul class="tik">${kat.sigar.map(x => `<li>${k(x)}</li>`).join('')}</ul>
+        <div class="not" style="margin-top:6px">* Ölçüler tahminidir; odalara göre değişiklik gösterebilir.</div></div>
+    </div>
+    <div class="rozetler">
+      <span><i>🛡️</i>Korumalı Depolama</span><span><i>🌡️</i>İdeal Sıcaklık ve Nem</span><span><i>📷</i>7/24 Güvenlik</span><span><i>🚚</i>Kolay Ulaşım</span><span><i>😊</i>Eşyalarınız Her Zaman Güvende</span>
+    </div>
+    <div class="alt"><span>Depoevim · Eşyalarınız Emin Ellerde</span><span>Doğru hesaplama, daha güvenli bir depolama deneyimi.</span><span>Sayfa 1 / 2</span></div>
+  </section>
+
+  <!-- ============================ SAYFA 2 ============================ -->
+  <section class="sayfa">
+    <div class="ust">
+      <div class="logo">Depoevim<small>DEPO ÖZELLİKLERİ · FİYAT TEKLİFİ</small></div>
+      <div class="slogan">${k(t.musteriAdi || 'Değerli Müşterimiz')} için<br>hazırlanan teklif<br>${k(bugun)}</div>
+    </div>
+    <div class="kart">
+      <div class="baslik">🏢 Depomuzun Özellikleri</div>
+      <div class="ic"><div class="ozellik">
+        ${DEPO_SUNUM_OZELLIKLER.map(([ik, b, a]) => `<div><span style="font-size:18px">${ik}</span><span><b>${k(b)}</b>${k(a)}</span></div>`).join('')}
+      </div></div>
+    </div>
+    <div class="iki" style="grid-template-columns:1.2fr 1fr">
+      <div class="kart">
+        <div class="baslik">💰 Fiyat Teklifi</div>
+        <div class="ic">
+          <div class="fiyat">
+            <div class="satir"><span>${k(boyutId)} Oda · ${kat.m3} m³ · aylık kira</span><span class="tutar">${aylik ? `${tl(aylik)} <small style="font-size:10px">+KDV</small>` : 'Video ile'}</span></div>
+            ${aylik ? `<div class="satir"><span>KDV dahil aylık (%${Math.round(TT_KDV * 100)})</span><span style="font-weight:900">${tl(kdvli)}</span></div>` : ''}
+            ${aylik && kira.odenecekAy > 1 ? `<div class="satir"><span>${k(kira.ad)} — ${kira.odenecekAy} ay öde, ${kira.toplamAy} ay kullan</span><span class="tutar">${tl(aylik * kira.odenecekAy)} <small style="font-size:10px">+KDV</small></span></div>` : ''}
+            ${nakliyeVar ? `<div class="satir"><span>Anahtar teslim nakliye${t.yukIlce || t.yukIl ? ` (${k(ttAdresKisa(t.yukIl, t.yukIlce))} → Depo)` : ''}</span><span class="tutar">${nakliyeFiyat ? tl(nakliyeFiyat) : 'Video ile'}</span></div>` : `<div class="satir"><span>Nakliye</span><span>Eşyalarınızı kendiniz getireceksiniz</span></div>`}
+          </div>
+          <div class="not" style="margin-top:6px">Nakliye bedeline sigortalı taşıma, kendi ekibimiz, kalıcı ambalaj ve depoya yerleştirme dahildir. Depo sözleşmesi eşyalar depoya yerleştirildikten sonra yapılır; oda numaranız paylaşılır.</div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:9px">
+        <div class="kampanya"><b>🎁 Uzun dönem kampanyası</b><br>6 Ay Peşin: 5 ay öde, 1 ay hediye${aylik ? ` → <b>${tl(aylik * 5)} +KDV</b>` : ''}<br>12 Ay Peşin: 10 ay öde, 2 ay hediye${aylik ? ` → <b>${tl(aylik * 10)} +KDV</b>` : ''}<br><span class="not">Kredi kartı yalnızca toplu ödemelerde geçerlidir; aylık ödemeler IBAN ile yapılır. Taahhüt yoktur.</span></div>
+        <div class="kart"><div class="baslik">📍 Şube</div><div class="ic" style="font-size:11px;font-weight:700">
+          ${sube ? `${k(sube.name)}<br><span style="font-weight:500">${k(sube.address)}, ${k(sube.district)}</span>` : `Şube tercihi: farketmez — size en uygun şubemizi birlikte belirleyelim:<br><span style="font-weight:500">${DEPO_LOCATIONS.map(d => k(d.district)).join(' · ')}</span>`}
+          ${t.tasinmaTarihi || t.tasinmaNotu ? `<br><span class="etiket" style="display:block;margin-top:6px">Planlanan giriş</span>${k([t.tasinmaTarihi && ttTrTarih(t.tasinmaTarihi), t.tasinmaNotu].filter(Boolean).join(' · '))}` : ''}
+        </div></div>
+      </div>
+    </div>
+    <div class="kart">
+      <div class="baslik">🧭 Süreç Nasıl İşler?</div>
+      <div class="ic"><div class="adim">
+        <div><b>1</b>Eşya videosunu gönderin, net fiyatı iletelim</div>
+        <div><b>2</b>Dilerseniz depomuzu gelip görün</div>
+        <div><b>3</b>%10 kapora ile tarihiniz kesinleşsin</div>
+        <div><b>4</b>Ekibimiz adresinizden alsın, depoya yerleştirsin</div>
+        <div><b>5</b>Sözleşme + oda numaranız size iletilsin</div>
+      </div></div>
+    </div>
+    <div class="alt"><span>Müşteri Temsilciniz: <b>${k(gonderen || 'Depoevim')}</b> · ${k(QR_SIRKET_TELEFONU)}</span><span>www.depoevim.com</span><span>Sayfa 2 / 2</span></div>
+  </section>
+  <script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 400); });</script>
+  </body></html>`;
+
+  const pencere = window.open('', '_blank');
+  if (!pencere) { alert('Tarayıcı yeni pencereyi engelledi. Açılır pencere iznini verip tekrar deneyin.'); return; }
+  pencere.document.open(); pencere.document.write(html); pencere.document.close();
 };
 
 // CSV (Excel) dışa aktarma — Türkçe Excel için ";" ayırıcı ve BOM
@@ -11226,10 +11469,44 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
             <PhoneCall className="w-8 h-8 text-neutral-300 mx-auto mb-2" />
             <p className="text-sm font-black text-neutral-500">{gorunur.length ? 'Filtreye uyan görüşme yok.' : 'Henüz telefon görüşmesi eklenmedi.'}</p>
           </div>
-        ) : gorunenListe.map(t => (
-          <TelefonTeklifSatiri key={t.id} tHam={t} gecmis={gecmisOf(t)} sahibiGoster={tamYetki}
-            onAc={() => setDetayId(t.id)} onDurum={(y) => durumDegistir(t, y)} onWhatsapp={() => setWaKayit({ t, sablon: 'ozet' })} />
-        ))}
+        ) : (() => {
+          // YENİ (kullanıcı talebi): HAVUZDAKİ GİBİ GÜN GÜN BÖLÜNMÜŞ LİSTE
+          // Liste görüşme tarihine göre (en yeni üstte) sıralı gelir; aynı günün
+          // kayıtları bir "29 Eylül 2026 Görüşmeleri" ayracının altında toplanır.
+          // Ayraçtaki sayılar o günün TÜM kayıtlarını sayar (50'lik sayfalama dahil değil).
+          const gunKey = (t) => (t.iletisimTarihi || '').slice(0, 10) || 'bilinmiyor';
+          const gunSayilari = {};
+          liste.forEach(t => { const k = gunKey(t); const g = gunSayilari[k] || (gunSayilari[k] = { toplam: 0, yeni: 0 }); g.toplam += 1; if ((t.durum || 'Yeni') === 'Yeni') g.yeni += 1; });
+          const gruplar = [];
+          gorunenListe.forEach(t => {
+            const k = gunKey(t);
+            const son = gruplar[gruplar.length - 1];
+            if (son && son.anahtar === k) son.kayitlar.push(t); else gruplar.push({ anahtar: k, kayitlar: [t] });
+          });
+          return gruplar.map(grup => {
+            const goreli = gunGoreliEtiket(grup.anahtar);
+            const say = gunSayilari[grup.anahtar] || { toplam: grup.kayitlar.length, yeni: 0 };
+            return (
+              <React.Fragment key={grup.anahtar}>
+                {/* ---------- GÜN AYRACI ---------- */}
+                <div className="flex items-center gap-3 px-3 py-2 bg-emerald-50 border-y border-emerald-200">
+                  <span className="w-1.5 h-6 rounded-full bg-emerald-600" />
+                  <CalendarDays className="w-4 h-4 text-emerald-800" />
+                  <span className="font-black text-sm text-emerald-900">{gunBasligi(grup.anahtar).replace(/Teklifleri$/, 'Görüşmeleri')}</span>
+                  {goreli && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white">{goreli}</span>}
+                  <span className="text-[11px] font-bold text-neutral-500 ml-auto">
+                    {say.toplam} görüşme
+                    {say.yeni > 0 && <span className="ml-2 text-neutral-800">• {say.yeni} yeni</span>}
+                  </span>
+                </div>
+                {grup.kayitlar.map(t => (
+                  <TelefonTeklifSatiri key={t.id} tHam={t} gecmis={gecmisOf(t)} sahibiGoster={tamYetki}
+                    onAc={() => setDetayId(t.id)} onDurum={(y) => durumDegistir(t, y)} onWhatsapp={() => setWaKayit({ t, sablon: 'ozet' })} />
+                ))}
+              </React.Fragment>
+            );
+          });
+        })()}
         {/* YENİ: 50'den fazlası için devamını gör */}
         {kalanSayi > 0 && (
           <div className="p-3 border-t border-neutral-200 bg-neutral-50 flex flex-col sm:flex-row items-center justify-center gap-2 rounded-b-2xl">
@@ -11252,6 +11529,7 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
         <TelefonTeklifDetay tHam={detay} gecmis={gecmisOf(detay)} yetkili={yetkiliMi(detay)} onKapat={() => setDetayId(null)}
           onDurum={(y) => durumDegistir(detay, y)} onSurec={(a, v) => surecIsaretle(detay, a, v)} onNotEkle={(m) => notEkle(detay, m)}
           onNotGuncelle={(n, m) => notGuncelle(detay, n, m)} onNotSil={(n) => notSil(detay, n)} kullanici={kullanici}
+          onSunum={() => { depoSunumuIndir(detay, kullanici); guncelle(detay, {}, 'Depo sunumu (PDF) indirildi'); }}
           onDuzenle={() => setForm({ baslangic: detay, hizmet: detay.hizmetTipi })}
           onKayitAc={onKayitAc ? () => kayitAc(detay) : null}
           onWhatsapp={(sablon) => setWaKayit({ t: detay, sablon: sablon || null })} onTransfer={() => setTransferKayit(detay)}
