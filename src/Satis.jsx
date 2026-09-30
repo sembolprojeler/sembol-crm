@@ -4036,7 +4036,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [istatistikAcik, setIstatistikAcik] = useState(false);
   // YENİ (kullanıcı talebi): TELEFON TEKLİFLERİ — ayrı sayfa (QR Takip gibi havuzun yerine açılır).
   // Veri burada TEK KEZ dinlenir; hem giriş butonu hem sayfa aynı listeyi kullanır.
-  const [telefonTeklifAcik, setTelefonTeklifAcik] = useState(false);
+  // DEĞİŞTİ (kullanıcı talebi): Müşteri Havuzu açılınca ilk olarak Telefon Görüşmesi seçili gelir
+  const [telefonTeklifAcik, setTelefonTeklifAcik] = useState(true);
+  // YENİ (kullanıcı talebi): Telefon Görüşmesi istatistik kutuları başlıktaki düğmeyle açılır
+  const [gorusmeIstatAcik, setGorusmeIstatAcik] = useState(false);
   const telefonTeklifleri = useTelefonTeklifleri(true);
   const qrKampanyalariSembol = useQrKampanyalari('sembolevdeneve', true);
   const qrKampanyalariDepoevim = useQrKampanyalari('depoevim', true);
@@ -4723,6 +4726,12 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             className="px-4 py-2 rounded-xl text-xs font-black tracking-wide transition flex items-center gap-2 border bg-white/10 text-emerald-100 border-emerald-400/50 hover:bg-white/20">
             <FileText className="w-4 h-4" /> Fiyat Tablosu
           </button>
+          {/* YENİ (kullanıcı talebi): GÖRÜŞME İSTATİSTİKLERİ — Telefon Görüşmesi sayaçlarını aç/kapa */}
+          <button type="button" onClick={() => { setGorusmeIstatAcik(a => !a); setTelefonTeklifAcik(true); }} aria-expanded={gorusmeIstatAcik}
+            className={`px-4 py-2 rounded-xl text-xs font-black tracking-wide transition flex items-center gap-2 border ${gorusmeIstatAcik ? 'bg-emerald-500 text-white border-emerald-500' : 'bg-white/10 text-emerald-100 border-emerald-400/50 hover:bg-white/20'}`}>
+            <PhoneCall className="w-4 h-4" /> Görüşme İstatistikleri
+            <ChevronDown className={`w-4 h-4 transition-transform ${gorusmeIstatAcik ? 'rotate-180' : ''}`} />
+          </button>
           {/* YENİ (kullanıcı talebi): İSTATİSTİKLERİ GÖR — kaynak özet panelini açar/kapatır */}
           <button type="button" onClick={() => setIstatistikAcik(a => !a)} aria-expanded={istatistikAcik}
             className={`px-4 py-2 rounded-xl text-xs font-black tracking-wide transition flex items-center gap-2 border ${istatistikAcik ? 'bg-yellow-400 text-neutral-900 border-yellow-400' : 'bg-white/10 text-yellow-100 border-yellow-400/40 hover:bg-white/20'}`}>
@@ -4767,6 +4776,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           <div className="space-y-2">
             {/* ---- YENİ (kullanıcı talebi): TELEFON TEKLİFLERİ — Hızlı Tekliflerin üstünde ----
                 Tıklayınca telefonda görüşülen müşterilerin manuel girildiği sayfa açılır. */}
+            {/* DEĞİŞTİ (kullanıcı talebi): Telefon Görüşmesi (sol) ve Hızlı Teklifler Havuzu (sağ) tek satırda yan yana */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
             <TelefonTeklifleriButonu teklifler={gorunurTelefonTeklifleri} aktif={telefonTeklifAcik} onClick={() => setTelefonTeklifAcik(true)} tamYetki={telefonMudurMu} />
             {/* KALDIRILDI (kullanıcı talebi): "Eski havuz talepleri aktarılıyor" çubuğu.
                 Aktarım arka planda sessizce, otomatik yapılır; hata olursa yalnızca
@@ -4785,7 +4796,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   {/* YENİ: ortak alan olduğunu belirt */}
                   <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1 ${webAktif ? 'bg-white text-orange-700' : 'bg-orange-500 text-white'}`}><Users className="w-2.5 h-2.5" /> ORTAK ALAN</span>
                 </span>
-                <span className={`block text-[10px] font-bold mt-0.5 ${webAktif ? 'text-white/80' : 'text-orange-600'}`}>
+                <span className={`block text-[10px] font-bold mt-0.5 truncate ${webAktif ? 'text-white/80' : 'text-orange-600'}`} title="sembolevdeneve.com + depoevim.com sihirbazlarından gelen teklif talepleri — gün gün listelenir">
                   sembolevdeneve.com + depoevim.com sihirbazlarından gelen teklif talepleri — gün gün listelenir
                 </span>
               </span>
@@ -4798,6 +4809,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               )}
               <span className={`text-xs font-black px-2 py-0.5 rounded-full ${webAktif ? 'bg-white/25' : 'bg-orange-50'}`}>{webKayitlari.length}</span>
             </button>
+            </div>
 
             {/* ---- DİĞER KANALLAR ----
                 DEĞİŞTİ (kullanıcı talebi): varsayılan GİZLİ; "Diğer Kanallar" düğmesine
@@ -4848,7 +4860,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           addSystemLog={addSystemLog} onKayitAc={onKayitAc}
           acilisFormu={telefonOnDoldur} onAcilisFormuKullanildi={() => setTelefonOnDoldur(null)}
           onHavuzKaydinaIsle={havuzKaydinaIsle} onGeri={null}
-          acilisDetayId={telefonDetayId} onAcilisDetayKullanildi={() => setTelefonDetayId(null)} />
+          acilisDetayId={telefonDetayId} onAcilisDetayKullanildi={() => setTelefonDetayId(null)}
+          istatistikGoster={gorusmeIstatAcik} />
       ) : (<>
       {/* ARAÇ ÇUBUĞU: hesap filtresi + arama + aksiyonlar
           GİZLENDİ (kullanıcı talebi): "şu an işimiz yok". Kod duruyor; tekrar
@@ -10553,6 +10566,41 @@ const TelefonTeklifleriButonu = ({ teklifler, onClick, aktif = false, tamYetki =
   );
 };
 
+// YENİ (kullanıcı talebi): AÇILIR FİLTRE DÜĞMESİ — "Durum: Tümü ▾" tıklanınca seçenekler açılır
+const TTFiltreAcilir = ({ baslik, deger, secenekler = [], onSec }) => {
+  const [acik, setAcik] = useState(false);
+  const secili = secenekler.find(x => x.id === deger) || secenekler[0];
+  const aktif = deger !== 'Tümü';
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setAcik(a => !a)} aria-expanded={acik}
+        className={`px-3 py-2 rounded-xl text-xs font-black border-2 transition flex items-center gap-1.5 whitespace-nowrap ${aktif ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-700 border-neutral-200 hover:border-neutral-400'}`}>
+        <span className={aktif ? 'text-white/60' : 'text-neutral-400'}>{baslik}:</span>
+        {secili?.nokta && aktif && <span className={`w-2 h-2 rounded-full ${secili.nokta}`} />}
+        <span className="max-w-[140px] truncate">{secili?.ad}</span>
+        {secili?.sayi !== undefined && <span className={`text-[10px] ${aktif ? 'text-white/70' : 'text-neutral-400'}`}>({secili.sayi})</span>}
+        <ChevronDown className={`w-3.5 h-3.5 transition-transform ${acik ? 'rotate-180' : ''}`} />
+      </button>
+      {acik && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setAcik(false)} />
+          <div className="absolute z-40 mt-1 right-0 min-w-[210px] max-h-72 overflow-y-auto bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5 animate-in fade-in slide-in-from-top-1">
+            {secenekler.map(x => (
+              <button key={x.id} type="button" onClick={() => { onSec(x.id); setAcik(false); }}
+                className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs font-black flex items-center gap-2 hover:bg-neutral-50 ${x.id === deger ? 'bg-neutral-100' : ''}`}>
+                {x.nokta ? <span className={`w-2 h-2 rounded-full shrink-0 ${x.nokta}`} /> : <span className="w-2 h-2 shrink-0" />}
+                <span className="flex-1 truncate">{x.ad}</span>
+                {x.sayi !== undefined && <span className="text-[10px] text-neutral-400">{x.sayi}</span>}
+                {x.id === deger && <CheckCircle className="w-3.5 h-3.5 text-neutral-500" />}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 // Satırdaki durum seçici — durum her an değiştirilebilir
 const TTDurumSecici = ({ durum, onDegis }) => {
   const [acik, setAcik] = useState(false);
@@ -10728,9 +10776,10 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
             <button type="button" onClick={() => onHizmetAktar(hedefHizmet)} className="px-3 py-1.5 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-black flex items-center gap-1.5">
               <ArrowUpDown className="w-3.5 h-3.5" /> {hedefHizmet === 'Depo' ? 'DepoEvim\'e Aktar' : 'Sembol\'e Aktar'}
             </button>
-            {/* YENİ (kullanıcı talebi): DEPO SUNUMU (2 sayfa PDF) — yalnızca Eşya Depolama görüşmelerinde */}
-            {t.hizmetTipi === 'Depo' && onSunum && (
-              <button type="button" onClick={onSunum} className="px-3 py-1.5 rounded-xl bg-white text-blue-700 hover:bg-blue-50 text-xs font-black flex items-center gap-1.5 shadow">
+            {/* YENİ (kullanıcı talebi): MÜŞTERİYE ÖZEL SUNUM (2 sayfa PDF)
+                Eşya Depolama → Depo Sunumu · Evden Eve Nakliyat → Taşıma Sunumu (Depodan Çıkış'ta yok) */}
+            {(t.hizmetTipi === 'Depo' || t.hizmetTipi === 'Nakliye') && onSunum && (
+              <button type="button" onClick={onSunum} className={`px-3 py-1.5 rounded-xl bg-white text-xs font-black flex items-center gap-1.5 shadow ${t.hizmetTipi === 'Nakliye' ? 'text-red-700 hover:bg-red-50' : 'text-blue-700 hover:bg-blue-50'}`}>
                 <FileText className="w-3.5 h-3.5" /> PDF Sunum İndir
               </button>
             )}
@@ -11113,6 +11162,295 @@ const depoSunumuIndir = (tHam, gonderen = '') => {
   pencere.document.open(); pencere.document.write(html); pencere.document.close();
 };
 
+
+// ############################################################################
+//  YENİ (kullanıcı talebi): EVDEN EVE NAKLİYAT SUNUMU — 2 SAYFALIK PDF
+// ----------------------------------------------------------------------------
+//  Yalnızca EVDEN EVE NAKLİYAT görüşmelerinde "PDF Sunum İndir" ile üretilir.
+//  Düzen "Sembol Nakliyat Teklif – Hizmet Sunumu" (kırmızı başlık, TEKLİF #,
+//  Açıklama/Toplam, Koşul ve Şartlar); içerik "Sembol Nakliyat Ön Bilgilendirme"
+//  sunumundan (süreç, kurallar, hizmetler, yapılmayan hizmetler, iletişim).
+//  Sayfa 1: Müşteri + güzergâh · taşıma analizi (m³ + ARAÇ görseli) · adres
+//           detayları · taşıma günü
+//  Sayfa 2: Fiyat teklifi · dahil hizmetler · koşul ve şartlar · neden Sembol ·
+//           yapılmayan hizmetler · iletişim
+// ############################################################################
+// Ev tipine göre tahmini hacim ve araç (kullanıcı bilgisi)
+const NAKLIYE_SUNUM_ARAC = {
+  '1+0': { m3: 10, arac: 'Panelvan', tip: 'panelvan', ekip: '2 kişilik ekip', koli: '15–20 koli' },
+  '1+1': { m3: 15, arac: 'Panelvan', tip: 'panelvan', ekip: '3 kişilik ekip', koli: '25–35 koli' },
+  '2+1': { m3: 25, arac: 'Kamyonet', tip: 'kamyonet', ekip: '3–4 kişilik ekip', koli: '40–50 koli' },
+  '3+1': { m3: 33, arac: 'Kamyon', tip: 'kamyon', ekip: '4–5 kişilik ekip', koli: '60–70 koli' },
+  '4+1': { m3: 40, arac: 'Kamyon', tip: 'kamyon', ekip: '5–6 kişilik ekip', koli: '80–90 koli' },
+};
+const NAKLIYE_SUNUM_ODA = (oda) => (NAKLIYE_SUNUM_ARAC[oda] ? oda : oda === 'Villa' ? '4+1' : oda === 'Ofis' ? '3+1' : oda === 'Parça Eşya' ? '1+0' : '2+1');
+// Sembol Nakliyat iletişim (Ön Bilgilendirme sunumu)
+const SEMBOL_ILETISIM = {
+  adres: 'Bahçelievler Mah. Yeni Sok. No 5 C Pendik / İstanbul',
+  tel: '0 216 390 89 99', eposta: 'sembolnakliyatbusiness@gmail.com', web: 'www.sembolnakliyat.com',
+  saat: 'Hafta içi 09.00 – 19.00 · Hafta sonu 10.00 – 17.00',
+};
+
+// Araç görseli — panelvan / kamyonet / kamyon (hacme göre kasa boyu değişir)
+const nakliyeAracSvg = (tip, m3) => {
+  const R = '#c81e2b';
+  const tekerlek = (x) => `<circle cx="${x}" cy="168" r="17" fill="#1f2937"/><circle cx="${x}" cy="168" r="7" fill="#9ca3af"/>`;
+  const logo = (x, y) => `<text x="${x}" y="${y}" font-size="15" font-weight="900" fill="#fff" font-family="Arial">SEMBOL</text><text x="${x}" y="${y + 13}" font-size="7" font-weight="700" fill="#fee2e2" font-family="Arial">NAKLİYAT · SİGORTALI TAŞIMA</text>`;
+  if (tip === 'panelvan') return `
+    <svg viewBox="0 0 360 200" width="100%" height="205" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="180" cy="186" rx="150" ry="7" fill="#e5e7eb"/>
+      <path d="M40 150 L40 70 Q40 55 55 55 L230 55 Q248 55 258 70 L300 115 Q310 122 310 135 L310 150 Z" fill="${R}"/>
+      <path d="M236 64 L262 64 Q268 64 272 70 L296 108 L236 108 Z" fill="#bfdbfe"/>
+      <rect x="40" y="140" width="270" height="12" fill="#991b1b"/>
+      ${logo(70, 100)}
+      <text x="70" y="130" font-size="10" font-weight="800" fill="#fff" font-family="Arial">${m3} m³ PANELVAN</text>
+      ${tekerlek(95)}${tekerlek(260)}
+    </svg>`;
+  const kasaBoy = tip === 'kamyonet' ? 190 : (m3 >= 40 ? 225 : 210);
+  const kasaY = tip === 'kamyonet' ? 58 : 40;
+  const kx = 30;
+  return `
+    <svg viewBox="0 0 380 200" width="100%" height="205" xmlns="http://www.w3.org/2000/svg">
+      <ellipse cx="190" cy="186" rx="170" ry="7" fill="#e5e7eb"/>
+      <rect x="${kx}" y="${kasaY}" width="${kasaBoy}" height="${150 - kasaY}" rx="6" fill="#f8fafc" stroke="${R}" stroke-width="4"/>
+      <rect x="${kx}" y="${kasaY}" width="${kasaBoy}" height="26" rx="6" fill="${R}"/>
+      <text x="${kx + 14}" y="${kasaY + 18}" font-size="13" font-weight="900" fill="#fff" font-family="Arial">SEMBOL NAKLİYAT</text>
+      <text x="${kx + 14}" y="${kasaY + 60}" font-size="26" font-weight="900" fill="${R}" font-family="Arial">${m3} m³</text>
+      <text x="${kx + 14}" y="${kasaY + 78}" font-size="10" font-weight="800" fill="#475569" font-family="Arial">${tip === 'kamyonet' ? 'KAMYONET' : 'KAMYON'} · KAPALI KASA</text>
+      <path d="M${kx + kasaBoy + 6} 150 L${kx + kasaBoy + 6} 75 L${kx + kasaBoy + 70} 75 L${kx + kasaBoy + 100} 110 L${kx + kasaBoy + 100} 150 Z" fill="${R}"/>
+      <path d="M${kx + kasaBoy + 16} 84 L${kx + kasaBoy + 64} 84 L${kx + kasaBoy + 86} 108 L${kx + kasaBoy + 16} 108 Z" fill="#bfdbfe"/>
+      <rect x="${kx}" y="146" width="${kasaBoy + 100}" height="10" fill="#374151"/>
+      ${tekerlek(kx + 45)}${tip === 'kamyon' ? tekerlek(kx + 85) : ''}${tekerlek(kx + kasaBoy + 60)}
+    </svg>`;
+};
+
+const nakliyeSunumuIndir = (tHam, gonderen = '') => {
+  const t = ttNormalize(tHam);
+  const k = (v) => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const odaK = NAKLIYE_SUNUM_ODA(t.odaSayisi);
+  const arac = NAKLIYE_SUNUM_ARAC[odaK];
+  const odaAd = TT_ODA_SECENEKLERI.find(o => o.id === t.odaSayisi)?.ad || t.odaSayisi || odaK;
+  const hesap = ttFiyatHesapla(t);
+  const fiyat = ttFiyatSayi(t.verilenFiyat) || ttAcilisFiyati(hesap.nakliyeToplam, 'Nakliye');
+  const sehirlerArasi = hesap.tur === 'sehirlerArasi';
+  const bugunD = new Date();
+  const trT = (d) => d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const gecerlilik = new Date(bugunD); gecerlilik.setDate(gecerlilik.getDate() + 7);
+  const teklifNo = String(t.id || '').replace(/\D/g, '').slice(-4) || String(Date.now()).slice(-4);
+  const tl = (n) => `${Math.round(Number(n) || 0).toLocaleString('tr-TR')} ₺`;
+  const tasimaMetni = (v) => (v === 'Dış Cephe Asansörü' ? 'Dış cephe asansörü' : v === 'Bina Asansörü' ? 'Bina asansörü' : v === 'Merdiven' ? 'Merdivenden' : '—');
+  const yanasmaMetni = (v) => TT_YANASMA.find(y => y.id === v)?.ad || '—';
+  const adresTam = (il, ilce, acik) => [acik, ilce, il].filter(Boolean).join(', ') || '—';
+  const tarih = [t.tasinmaTarihi && ttTrTarih(t.tasinmaTarihi), t.tasinmaNotu].filter(Boolean).join(' · ') || 'Birlikte planlanacak';
+  const disCephe = t.yukTasima === 'Dış Cephe Asansörü' || t.bosTasima === 'Dış Cephe Asansörü';
+  const toplama = t.toplama === 'Firma';
+  const dosyaAdi = `Sembol-Nakliyat-Tasima-Sunumu-${(t.musteriAdi || 'Musteri').trim().replace(/\s+/g, '-')}`;
+  // Fiyata dahil hizmetler (seçimlere göre)
+  const dahil = [
+    'Sigortalı taşıma (firma güvencesi)',
+    'Kadrolu, uzman taşıma ekibi',
+    'Mobilya ustası ile söküm – montaj',
+    'Özel ambalaj ve kaliteli, hijyenik malzeme',
+    `${arac.m3} m³ ${arac.arac.toLowerCase()} ile kapalı kasa taşıma`,
+    'Askılı kıyafetler için modüler elbise dolabı',
+    ...(toplama ? ['Küçük eşya toplama – kolileme (kırılacaklar özel ambalajla)'] : []),
+    ...(disCephe ? ['Dış cephe asansörü ile asansörlü taşıma'] : []),
+  ];
+
+  const ust = (sayfa) => `
+    <table class="ust" style="width:100%;border-collapse:separate"><tr><td style="vertical-align:top">
+        <div class="logo">⌂ SEMBOL NAKLİYAT</div>
+        <div class="alt-logo">EVDEN EVE · ASANSÖRLÜ TAŞIMA · DEPOLAMA</div>
+        <div class="ofis">${k(SEMBOL_ILETISIM.adres)}<br>${k(SEMBOL_ILETISIM.tel)} | ${k(SEMBOL_ILETISIM.web)}</div>
+      </td><td class="teklif" style="vertical-align:top">
+        <div class="no">TEKLİF #${k(teklifNo)}</div>
+        <div>Tarih: ${trT(bugunD)}</div><div>Geçerlilik: ${trT(gecerlilik)}</div>
+        <div>Sayfa ${sayfa} / 2</div>
+      </td></tr></table>`;
+
+  const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8"><title>${k(dosyaAdi)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 9mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color: #111827; background: #fff; }
+    .sayfa { width: 192mm; min-height: 277mm; margin: 0 auto; page-break-after: always; display: flex; flex-direction: column; gap: 9px; }
+    .sayfa:last-child { page-break-after: auto; }
+    .ust { background: #c81e2b; color: #fff; border-radius: 14px; padding: 14px 18px; display: flex; justify-content: space-between; align-items: flex-start; }
+    .logo { font-size: 24px; font-weight: 900; letter-spacing: .5px; } .alt-logo { font-size: 9.5px; font-weight: 800; letter-spacing: 1px; opacity: .95; }
+    .ofis { font-size: 9.5px; margin-top: 6px; opacity: .9; }
+    .teklif { text-align: right; font-size: 10.5px; line-height: 1.5; } .teklif .no { font-size: 20px; font-weight: 900; letter-spacing: 1px; }
+    .baslik { background: #111827; color: #fff; font-weight: 900; font-size: 11.5px; padding: 6px 12px; letter-spacing: .3px; }
+    .kart { border: 1.5px solid #fecaca; border-radius: 10px; overflow: hidden; background: #fff; }
+    .kart .ic { padding: 10px 12px; }
+    .iki { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    /* Her yazdırma motorunda (eski WebKit dahil) yan yana kalması için tablo düzeni */
+    table.duzen { width: 100%; border-collapse: separate; border-spacing: 9px 0; margin: 0 -9px; table-layout: fixed; }
+    table.duzen > tbody > tr > td { vertical-align: top; padding: 0; border: 0; }
+    table.kutular { width: 100%; border-collapse: separate; border-spacing: 5px 0; table-layout: fixed; margin: 0 -5px; }
+    table.kutular td { border: 1px solid #fecaca; border-radius: 8px; padding: 7px 5px; font-size: 9.5px; font-weight: 700; text-align: center; vertical-align: top; }
+    table.kutular td b { display: block; width: 20px; height: 20px; border-radius: 50%; background: #c81e2b; color: #fff; margin: 0 auto 4px; line-height: 20px; font-size: 11px; }
+    table.istat2 { width: 100%; border-collapse: separate; border-spacing: 5px 0; table-layout: fixed; margin: 0 -5px; }
+    table.istat2 td { background: #fef2f2; border-radius: 8px; padding: 7px 4px; text-align: center; border: 0; }
+    table.istat2 b { display: block; font-size: 18px; font-weight: 900; color: #c81e2b; } table.istat2 span { font-size: 9.5px; font-weight: 800; color: #6b7280; }
+    .etiket { font-size: 9px; font-weight: 800; color: #6b7280; text-transform: uppercase; letter-spacing: .5px; }
+    .deger { font-size: 12.5px; font-weight: 800; }
+    .buyuk { font-size: 30px; font-weight: 900; color: #c81e2b; line-height: 1; }
+    table { width: 100%; border-collapse: collapse; font-size: 11px; }
+    th { text-align: left; font-size: 10px; color: #6b7280; padding: 4px; border-bottom: 2px solid #f97316; }
+    td { padding: 5px 4px; border-bottom: 1px solid #f1f5f9; }
+    .rota { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 900; }
+    .rota .ok { color: #c81e2b; font-size: 18px; }
+    ul.tik { list-style: none; padding: 0; margin: 0; font-size: 11px; font-weight: 700; }
+    ul.tik li { padding: 3px 0 3px 18px; position: relative; } ul.tik li:before { content: "✔"; position: absolute; left: 0; color: #c81e2b; font-weight: 900; }
+    ul.iki-sutun { columns: 2; column-gap: 14px; } ul.iki-sutun li { break-inside: avoid; }
+    .gun { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .gun div, .adim div { border: 1px solid #fecaca; border-radius: 8px; padding: 7px 6px; font-size: 9.5px; font-weight: 700; text-align: center; }
+    .gun b, .adim b { display: block; width: 20px; height: 20px; border-radius: 50%; background: #c81e2b; color: #fff; margin: 0 auto 4px; line-height: 20px; font-size: 11px; }
+    .adim { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+    .fiyat td:last-child { text-align: right; font-weight: 900; }
+    .toplam { display: flex; justify-content: flex-end; align-items: baseline; gap: 10px; border-top: 2px solid #f97316; padding-top: 8px; margin-top: 4px; }
+    .toplam span { font-size: 12px; font-weight: 800; color: #6b7280; } .toplam b { font-size: 26px; font-weight: 900; color: #c81e2b; }
+    .istat { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; text-align: center; }
+    .istat div { background: #fef2f2; border-radius: 8px; padding: 7px 4px; } .istat b { display: block; font-size: 18px; font-weight: 900; color: #c81e2b; } .istat span { font-size: 9.5px; font-weight: 800; color: #6b7280; }
+    .yapilmaz div { font-size: 10.5px; padding: 3px 0; } .yapilmaz b { color: #b91c1c; }
+    .not { font-size: 9.5px; color: #6b7280; font-style: italic; }
+    .alt { margin-top: auto; border-top: 2px solid #c81e2b; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; font-weight: 700; }
+    .alt .t { color: #c81e2b; font-weight: 900; }
+    @media screen { body { background: #e5e7eb; padding: 16px; } .sayfa { background: #fff; padding: 9mm; box-shadow: 0 4px 24px rgba(0,0,0,.15); margin-bottom: 16px; } .yazdir { position: fixed; right: 16px; top: 16px; background: #c81e2b; color: #fff; border: 0; border-radius: 10px; padding: 10px 16px; font-weight: 900; cursor: pointer; } }
+    @media print { .yazdir { display: none; } }
+  </style></head><body>
+  <button class="yazdir" onclick="window.print()">🖨 PDF Olarak Kaydet</button>
+
+  <!-- ============================ SAYFA 1 ============================ -->
+  <section class="sayfa">
+    ${ust(1)}
+    <table class="duzen"><tr><td>
+      <div class="kart"><div class="baslik">MÜŞTERİ</div><div class="ic">
+        <div class="deger" style="font-size:15px">${k(t.musteriAdi || 'Değerli Müşterimiz')}</div>
+        <div style="font-size:11px;font-weight:600;color:#374151">${k(ttTelGoster(t.telefon) || '')}</div>
+        <div style="height:8px"></div>
+        <div class="etiket">Taşınma tarihi</div><div class="deger">${k(tarih)}</div>
+        <div style="height:6px"></div>
+        <div class="etiket">Müşteri temsilciniz</div><div class="deger">${k(gonderen || 'Sembol Nakliyat')}</div>
+      </div></div>
+      </td><td>
+      <div class="kart"><div class="baslik">PROJE AÇIKLAMASI</div><div class="ic">
+        <div class="deger">${k(odaAd)} ev taşıma · ${sehirlerArasi ? 'Şehirler arası' : 'Şehir içi'}</div>
+        <div style="height:8px"></div>
+        <div class="rota"><span>${k(ttAdresKisa(t.yukIl, t.yukIlce) || 'Yükleme')}</span><span class="ok">➜</span><span>${k(ttAdresKisa(t.bosIl, t.bosIlce) || 'Boşaltma')}</span></div>
+        <div style="height:8px"></div>
+        <div class="etiket">Küçük eşya toplama</div><div class="deger">${toplama ? 'Firmamız toplayacak (kolileme dahil)' : 'Müşteri tarafından toplanacak'}</div>
+      </div></div>
+    </td></tr></table>
+
+    <div class="kart"><div class="baslik">🚚 TAŞIMA ANALİZİ — ARACINIZ</div><div class="ic">
+      <table class="duzen"><tr><td style="width:56%;vertical-align:middle">
+        ${nakliyeAracSvg(arac.tip, arac.m3)}
+        </td><td style="vertical-align:middle">
+          <div class="etiket">Tahmini eşya hacmi</div><div class="buyuk">${arac.m3} <span style="font-size:16px">m³</span></div>
+          <div style="height:6px"></div>
+          <div class="etiket">Araç</div><div class="deger">${arac.m3} m³ ${k(arac.arac)} · kapalı kasa</div>
+          <div style="height:6px"></div>
+          <div class="etiket">Tahmini ekip / koli</div><div class="deger">${k(arac.ekip)} · ${k(arac.koli)}</div>
+          ${t.odaSayisi === 'Villa' ? '<div class="not" style="margin-top:6px">5+1 / villa taşımalarında eşya durumuna göre ikinci araç planlanabilir.</div>' : ''}
+          ${t.odaSayisi === 'Ofis' ? '<div class="not" style="margin-top:6px">Kurumsal taşımalarda araç ve ekip keşif sonrası kesinleşir.</div>' : ''}
+        </td></tr></table>
+      <div class="not">Hacim ve araç, beyan edilen ev tipine göre tahminidir; eşya videosu ile kesinleşir. Güçlü filomuzda eşyanızın durumuna göre her büyüklükte araç mevcuttur.</div>
+    </div></div>
+
+    <div class="kart"><div class="baslik">📍 ADRES DETAYLARI</div><div class="ic">
+      <table>
+        <tr><th></th><th>Yükleme (mevcut ev)</th><th>Boşaltma (yeni ev)</th></tr>
+        <tr><td class="etiket">Adres</td><td>${k(adresTam(t.yukIl, t.yukIlce, t.yukAdres))}</td><td>${k(adresTam(t.bosIl, t.bosIlce, t.bosAdres))}</td></tr>
+        <tr><td class="etiket">Kat</td><td>${k(t.yukKat || '—')}</td><td>${k(t.bosKat || '—')}</td></tr>
+        <tr><td class="etiket">Taşıma şekli</td><td>${k(tasimaMetni(t.yukTasima))}</td><td>${k(tasimaMetni(t.bosTasima))}</td></tr>
+        <tr><td class="etiket">Araç yanaşma</td><td>${k(yanasmaMetni(t.yukMesafe))}</td><td>${k(yanasmaMetni(t.bosMesafe))}</td></tr>
+      </table>
+    </div></div>
+
+    <div class="kart"><div class="baslik">🕘 TAŞINMA GÜNÜ NASIL GEÇER?</div><div class="ic"><table class="kutular"><tr>
+      <td><b>1</b>Sabah 09.00'da ekibimiz adresinizde</td>
+      <td><b>2</b>Ustalarımız mobilyaları söker, özel ambalajlar</td>
+      <td><b>3</b>Eşyalar ${arac.m3} m³ kapalı kasa araçla taşınır</td>
+      <td><b>4</b>Yeni adresinizde kusursuz kurulum</td>
+    </tr></table></div></div>
+    <div class="alt"><span class="t">Tüm süreci profesyonel ve sorunsuz yaşamanız için buradayız.</span><span>${k(SEMBOL_ILETISIM.web)}</span></div>
+  </section>
+
+  <!-- ============================ SAYFA 2 ============================ -->
+  <section class="sayfa">
+    ${ust(2)}
+    <div class="kart"><div class="baslik">💰 FİYAT TEKLİFİ</div><div class="ic">
+      <table class="fiyat">
+        <tr><th>AÇIKLAMA</th><th style="text-align:right">TOPLAM</th></tr>
+        <tr><td>Nakliye Hizmet Bedeli — ${k(odaAd)}, ${k(ttAdresKisa(t.yukIl, t.yukIlce))} ➜ ${k(ttAdresKisa(t.bosIl, t.bosIlce))}</td><td>${fiyat ? tl(fiyat) : 'Video sonrası'}</td></tr>
+        ${toplama ? '<tr><td>Küçük eşya toplama – kolileme</td><td>Dahil</td></tr>' : ''}
+        ${disCephe ? '<tr><td>Dış cephe asansörü kurulumu</td><td>Dahil</td></tr>' : ''}
+      </table>
+      <div class="toplam"><span>TOPLAM FİYAT:</span><b>${fiyat ? tl(fiyat) : 'Video sonrası netleşir'}</b></div>
+      <div style="height:8px"></div>
+      <div class="etiket" style="margin-bottom:3px">Fiyata dahil hizmetler</div>
+      <table class="duzen"><tr>
+        <td><ul class="tik">${dahil.slice(0, Math.ceil(dahil.length / 2)).map(x => `<li>${k(x)}</li>`).join('')}</ul></td>
+        <td><ul class="tik">${dahil.slice(Math.ceil(dahil.length / 2)).map(x => `<li>${k(x)}</li>`).join('')}</ul></td>
+      </tr></table>
+    </div></div>
+
+    <table class="duzen"><tr><td>
+      <div class="kart"><div class="baslik">📄 KOŞUL VE ŞARTLAR</div><div class="ic"><ul class="tik">
+        <li>Kesin fiyat, eşya video / fotoğrafı gönderildikten sonra verilir.</li>
+        <li>Kayıt taşımadan 15 gün öncesine kadar açılabilir; verilen fiyat geçerlidir.</li>
+        <li>Kayıtta iş bedelinin %10'u kapora olarak alınır.</li>
+        <li>${sehirlerArasi ? 'Eşya araca yüklendikten sonra %50 ödeme alınır; kalan tutar teslimde ödenir.' : 'Kalan ödeme iş bitiminde şirket hesabına ya da ekip şefimize yapılır.'}</li>
+        <li>72 saat öncesine kadar kapora hariç ücretsiz iptal veya erteleme yapılır.</li>
+        <li>Tüm anlaşmalarda sözleşme PDF olarak gönderilir.</li>
+      </ul></div></div>
+      </td><td>
+      <div class="kart"><div class="baslik">⭐ NEDEN SEMBOL NAKLİYAT?</div><div class="ic">
+        <table class="istat2"><tr>
+          <td><b>2004</b><span>'ten beri</span></td><td><b>20 Bin+</b><span>ev taşıma</span></td>
+          <td><b>25</b><span>çalışan</span></td><td><b>10</b><span>araç</span></td>
+        </tr></table>
+        <div style="height:8px"></div>
+        <ul class="tik">
+          <li>Uygun fiyat — verilen hizmete göre en iyi fiyat</li>
+          <li>Kadrolu, tecrübeli personel</li>
+          <li>Dayanıklı ve hijyenik ambalaj malzemesi</li>
+          <li>Güçlü filo — her büyüklükte kamyon</li>
+          <li>Sigortalı taşıma, firma güvencesi</li>
+        </ul>
+      </div></div>
+    </td></tr></table>
+
+    <div class="kart"><div class="baslik">🧭 BİZİMLE TAŞINMAK İÇİN</div><div class="ic"><table class="kutular"><tr>
+      <td><b>1</b>Teklif: soruları eksiksiz cevaplayın</td>
+      <td><b>2</b>Fiyat: video ile kesin fiyat</td>
+      <td><b>3</b>Randevu: 15 gün önce kayıt</td>
+      <td><b>4</b>Kapora: iş bedelinin %10'u</td>
+      <td><b>5</b>Sözleşme: PDF olarak iletilir</td>
+      <td><b>6</b>Taşınma: 09.00'da ekip kapıda</td>
+    </tr></table></div></div>
+
+    <div class="kart"><div class="baslik">ℹ️ YAPILMAYAN HİZMETLER</div><div class="ic yapilmaz">
+      <div><b>Duvar montajı:</b> Yalnızca modüler mobilyaların söküm ve montajı yapılır.</div>
+      <div><b>Elektrik işlemi:</b> Avizelerin sökümü ve taşıması yapılır; elektrik bağlantısı yapılmaz.</div>
+      <div><b>Klima montajı:</b> Klima söküm-montajı yapılmaz; beyaz eşya söküm ve montajı mevcuttur.</div>
+    </div></div>
+
+    <div class="alt">
+      <span>Müşteri Temsilciniz: <span class="t">${k(gonderen || 'Sembol Nakliyat')}</span></span>
+      <span>${k(SEMBOL_ILETISIM.tel)} · ${k(SEMBOL_ILETISIM.eposta)}</span>
+      <span>${k(SEMBOL_ILETISIM.saat)}</span>
+    </div>
+  </section>
+  <script>window.addEventListener('load', function () { setTimeout(function () { window.print(); }, 400); });</script>
+  </body></html>`;
+
+  const pencere = window.open('', '_blank');
+  if (!pencere) { alert('Tarayıcı yeni pencereyi engelledi. Açılır pencere iznini verip tekrar deneyin.'); return; }
+  pencere.document.open(); pencere.document.write(html); pencere.document.close();
+};
+
 // CSV (Excel) dışa aktarma — Türkçe Excel için ";" ayırıcı ve BOM
 const ttCsvIndir = (list) => {
   const S = [
@@ -11138,7 +11476,8 @@ const ttCsvIndir = (list) => {
 //        ön doldurma), onAcilisFormuKullanildi, onHavuzKaydinaIsle, onGeri
 const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], tamYetki = false, gecmisIndeksi = null, addSystemLog, onKayitAc = null,
   acilisFormu = null, onAcilisFormuKullanildi, onHavuzKaydinaIsle, onGeri,
-  acilisDetayId = null, onAcilisDetayKullanildi }) => {
+  acilisDetayId = null, onAcilisDetayKullanildi,
+  istatistikGoster = true }) => {   // YENİ: sayaç kutuları (Müşteri Havuzu'nda "Görüşme İstatistikleri" düğmesiyle)
   const [form, setForm] = useState(null);             // { baslangic, hizmet } — açık sihirbaz
   const [detayId, setDetayId] = useState(null);
   const [waKayit, setWaKayit] = useState(null);        // { t, sablon } — WhatsApp penceresi
@@ -11362,7 +11701,8 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
             </button>
           </div>
         </div>
-        <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+        {istatistikGoster && (
+        <div className="grid grid-cols-3 md:grid-cols-6 gap-2 animate-in fade-in slide-in-from-top-1">
           {[
             { e: 'Toplam', v: ozet.toplam, r: 'text-white', tik: () => { setTakipFiltre('Tümü'); setDurumFiltre('Tümü'); } },
             { e: 'Bu Ay', v: ozet.buAy, r: 'text-white', tik: () => setAyFiltre(ttBugunStr().slice(0, 7)) },
@@ -11378,6 +11718,7 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
             </button>
           ))}
         </div>
+        )}
       </div>
 
       {/* YENİ (kullanıcı talebi): YÖNETİCİ — KİMİN EKRANINI GÖRMEK İSTİYORSUNUZ?
@@ -11402,60 +11743,41 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
         </div>
       )}
 
-      {/* FİLTRELER */}
-      <div className="bg-white rounded-2xl border border-neutral-200 p-3 space-y-2">
-        {/* YENİ (kullanıcı talebi): KAYNAK — elle girilen görüşmeler / Hızlı Teklif Havuzu'ndan gelenler */}
-        <div className="flex flex-wrap gap-1.5">
-          {[{ id: 'Tümü', ad: 'Tüm Görüşmeler', stil: 'bg-neutral-900 text-white border-neutral-900', pasif: 'bg-white text-neutral-600 border-neutral-200' }, ...TT_KAYNAKLAR.map(k => ({ ...k, stil: `${k.stil} border-transparent` }))].map(k => {
-            const sayi = gorunur.filter(t => k.id === 'Tümü' || ttKaynakTuru(t) === k.id).length;
-            return (
-              <button key={k.id} type="button" onClick={() => setKaynakFiltre(k.id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 transition ${kaynakFiltre === k.id ? k.stil : k.pasif}`}>
-                {k.ad} <span className="opacity-70">({sayi})</span>
-              </button>
-            );
-          })}
+      {/* FİLTRELER — DEĞİŞTİ (kullanıcı talebi): tüm seçenekler TEK SATIRDA, açılır düğmelerle */}
+      <div className="bg-white rounded-2xl border border-neutral-200 p-2.5 flex flex-col lg:flex-row lg:items-center gap-2 relative z-20">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Ad, telefon (0'lı/0'sız), ilçe, açıklama veya satışçı ara…"
+            className="w-full pl-9 pr-3 py-2 rounded-xl border border-neutral-200 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-neutral-900/20" />
         </div>
-        {/* Hizmet ayrımı — Sembol ve DepoEvim aynı havuzda, buradan ayrılır */}
-        <div className="flex flex-wrap gap-1.5">
-          {['Tümü', ...TT_HIZMETLER.map(h => h.id)].map(id => {
-            const h = id === 'Tümü' ? null : ttHizmetBul(id);
-            const sayi = gorunur.filter(t => id === 'Tümü' || (t.hizmetTipi || 'Nakliye') === id).length;
-            return (
-              <button key={id} type="button" onClick={() => setHizmetFiltre(id)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 transition flex items-center gap-1.5 ${hizmetFiltre === id ? (h ? h.stil.secili : 'bg-neutral-900 text-white border-neutral-900') : (h ? h.stil.pasif : 'bg-white text-neutral-600 border-neutral-200')}`}>
-                {h && <h.Ikon className="w-3.5 h-3.5" />} {h ? h.ad : 'Tümü'} <span className="opacity-70">({sayi})</span>
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex flex-col md:flex-row gap-2">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Ad, telefon (0'lı/0'sız), ilçe, açıklama veya satışçı ara…"
-              className="w-full pl-9 pr-3 py-2 rounded-xl border border-neutral-200 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-neutral-900/20" />
-          </div>
-          <select value={ayFiltre} onChange={e => setAyFiltre(e.target.value)} className="px-3 py-2 rounded-xl border border-neutral-200 text-sm font-black bg-white">
-            <option value="Tümü">Tüm Aylar</option>
-            {aylar.map(a => <option key={a} value={a}>{ayAdi(a)}</option>)}
-          </select>
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[10px] font-black text-neutral-500 mr-1">DURUM:</span>
-          {['Tümü', ...TT_DURUMLAR.map(d => d.id)].map(id => {
-            const d = id === 'Tümü' ? null : ttDurumBul(id);
-            return (
-              <button key={id} type="button" onClick={() => setDurumFiltre(id)}
-                className={`px-2 py-1 rounded-lg text-[10px] font-black border transition ${durumFiltre === id ? 'bg-neutral-900 text-white border-neutral-900' : d ? `${d.rozet} opacity-80 hover:opacity-100` : 'bg-white text-neutral-600 border-neutral-200'}`}>
-                {d ? d.etiket : 'Tümü'} ({durumSayisi(id)})
-              </button>
-            );
-          })}
-          <span className="text-[10px] font-black text-neutral-500 ml-2 mr-1">TAKİP:</span>
-          {[['Tümü', 'Tümü'], ['Bugün', `Bugün (${ozet.bugun})`], ['Geciken', `Geciken (${ozet.geciken})`], ['Takipsiz', 'Tarihsiz']].map(([id, ad]) => (
-            <button key={id} type="button" onClick={() => setTakipFiltre(id)}
-              className={`px-2 py-1 rounded-lg text-[10px] font-black border transition ${takipFiltre === id ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'}`}>{ad}</button>
-          ))}
+        <div className="flex flex-wrap lg:flex-nowrap gap-1.5">
+          <TTFiltreAcilir baslik="Kaynak" deger={kaynakFiltre} onSec={setKaynakFiltre} secenekler={[
+            { id: 'Tümü', ad: 'Tüm Görüşmeler', sayi: gorunur.length },
+            ...TT_KAYNAKLAR.map(k => ({ id: k.id, ad: k.ad, sayi: gorunur.filter(t => ttKaynakTuru(t) === k.id).length, nokta: k.id === 'havuz' ? 'bg-orange-500' : 'bg-emerald-600' })),
+          ]} />
+          <TTFiltreAcilir baslik="Hizmet" deger={hizmetFiltre} onSec={setHizmetFiltre} secenekler={[
+            { id: 'Tümü', ad: 'Tüm Hizmetler', sayi: gorunur.length },
+            ...TT_HIZMETLER.map(h => ({ id: h.id, ad: h.ad, sayi: gorunur.filter(t => (t.hizmetTipi || 'Nakliye') === h.id).length, nokta: h.stil.serit })),
+          ]} />
+          <TTFiltreAcilir baslik="Durum" deger={durumFiltre} onSec={setDurumFiltre} secenekler={[
+            { id: 'Tümü', ad: 'Tüm Durumlar', sayi: durumSayisi('Tümü') },
+            ...TT_DURUMLAR.map(d => ({ id: d.id, ad: d.etiket, sayi: durumSayisi(d.id), nokta: d.nokta })),
+          ]} />
+          <TTFiltreAcilir baslik="Takip" deger={takipFiltre} onSec={setTakipFiltre} secenekler={[
+            { id: 'Tümü', ad: 'Tüm Takipler' },
+            { id: 'Bugün', ad: 'Bugün Aranacak', sayi: ozet.bugun, nokta: 'bg-orange-500' },
+            { id: 'Geciken', ad: 'Geciken', sayi: ozet.geciken, nokta: 'bg-red-600' },
+            { id: 'Takipsiz', ad: 'Tarihsiz' },
+          ]} />
+          <TTFiltreAcilir baslik="Ay" deger={ayFiltre} onSec={setAyFiltre} secenekler={[
+            { id: 'Tümü', ad: 'Tüm Aylar' },
+            ...aylar.map(a => ({ id: a, ad: ayAdi(a) })),
+          ]} />
+          {/* Filtreleri tek tıkla temizle */}
+          {(kaynakFiltre !== 'Tümü' || hizmetFiltre !== 'Tümü' || durumFiltre !== 'Tümü' || takipFiltre !== 'Tümü' || ayFiltre !== 'Tümü' || arama) && (
+            <button type="button" onClick={() => { setKaynakFiltre('Tümü'); setHizmetFiltre('Tümü'); setDurumFiltre('Tümü'); setTakipFiltre('Tümü'); setAyFiltre('Tümü'); setArama(''); }}
+              className="px-2.5 py-2 rounded-xl text-[11px] font-black text-red-600 hover:bg-red-50 flex items-center gap-1 whitespace-nowrap"><X className="w-3.5 h-3.5" /> Temizle</button>
+          )}
         </div>
       </div>
 
@@ -11529,7 +11851,10 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
         <TelefonTeklifDetay tHam={detay} gecmis={gecmisOf(detay)} yetkili={yetkiliMi(detay)} onKapat={() => setDetayId(null)}
           onDurum={(y) => durumDegistir(detay, y)} onSurec={(a, v) => surecIsaretle(detay, a, v)} onNotEkle={(m) => notEkle(detay, m)}
           onNotGuncelle={(n, m) => notGuncelle(detay, n, m)} onNotSil={(n) => notSil(detay, n)} kullanici={kullanici}
-          onSunum={() => { depoSunumuIndir(detay, kullanici); guncelle(detay, {}, 'Depo sunumu (PDF) indirildi'); }}
+          onSunum={() => {
+            if (detay.hizmetTipi === 'Nakliye') { nakliyeSunumuIndir(detay, kullanici); guncelle(detay, {}, 'Taşıma sunumu (PDF) indirildi'); }
+            else { depoSunumuIndir(detay, kullanici); guncelle(detay, {}, 'Depo sunumu (PDF) indirildi'); }
+          }}
           onDuzenle={() => setForm({ baslangic: detay, hizmet: detay.hizmetTipi })}
           onKayitAc={onKayitAc ? () => kayitAc(detay) : null}
           onWhatsapp={(sablon) => setWaKayit({ t: detay, sablon: sablon || null })} onTransfer={() => setTransferKayit(detay)}
