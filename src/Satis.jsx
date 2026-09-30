@@ -47,7 +47,7 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
   //
   // ÇÖZÜM: Bekleyen iş SAYISI 1'den fazlaysa pencerede iş seçimi sorulur;
   // seçim yapılmadan kaydetmeye izin verilmez. Seçilen işin fiyatı, mevcut
-  // kaporası ve KALAN BAKİYESİ ekranda gösterilir; %25 önerisi de seçilen işe
+  // kaporası ve KALAN BAKİYESİ ekranda gösterilir; %20 önerisi de seçilen işe
   // göre yeniden hesaplanır. Tek bekleyen iş varsa eski davranış korunur
   // (otomatik seçilir, kullanıcıya fazladan soru sorulmaz).
   // ============================================================================
@@ -1637,8 +1637,8 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                 setKaporaIsler(bekleyenler);
                 // TEK iş varsa otomatik seç; BİRDEN FAZLAYSA seçim kullanıcıya bırakılır
                 const tekIs = bekleyenler.length === 1 ? bekleyenler[0] : null;
-                // DEĞİŞTİ (kullanıcı talebi): %25 öneri (eskiden %20) — yalnızca iş belliyse hesaplanır
-                const oneri = tekIs ? Math.round((parseFloat(tekIs.price) || 0) * 0.25) : 0;
+                // %20 öneri: yalnızca iş belliyse hesaplanır (tam sayıya yuvarlanır)
+                const oneri = tekIs ? Math.round((parseFloat(tekIs.price) || 0) * 0.20) : 0;
                 setKaporaForm({ tutar: oneri ? String(oneri) : '', defterId: bankaDefteri?.id || defterListesi[0]?.id || '', jobId: tekIs?.id || '' });
                 setShowKaporaModal(true);
               }} className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition flex items-center gap-1.5">
@@ -2173,7 +2173,7 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
         {/* YENİ: Manuel Borç Ekle Modalı */}
         {/* ==================================================================
             YENİ: KAPORA EKLE PENCERESİ
-            İş fiyatının %25'i önerilir; tutar elle değiştirilebilir.
+            İş fiyatının %20'si önerilir; tutar elle değiştirilebilir.
             Kaydedilince İKİ şey olur:
               1) İşin deposit alanına eklenir -> iş kartında ve sonlandırma
                  hesabında kapora olarak düşer (kayıt ekranındaki kaporayla
@@ -2194,16 +2194,16 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
           const seciliDefter = kaporaDefterler.find(d => d.id === kaporaForm.defterId);
           // Seçilen işin kalan bakiyesi — kapora bu tutardan düşer
           const kalanBakiye = Math.max(0, fiyat - mevcutKapora);
-          // İş seçilince %25 önerisi o işe göre yeniden hesaplanır
-          // DEĞİŞTİ (kullanıcı talebi): %25 yalnızca ÖNERİDİR. Kullanıcı tutarı
+          // İş seçilince %20 önerisi o işe göre yeniden hesaplanır
+          // DEĞİŞTİ (kullanıcı talebi): %20 yalnızca ÖNERİDİR. Kullanıcı tutarı
           // elle yazdıysa (öneriden farklıysa) iş seçimi değişince tutar SİLİNMEZ,
-          // %25 ile ezilmez — girilen rakam ne ise o kaydedilir (az ya da çok).
+          // %20 ile ezilmez — girilen rakam ne ise o kaydedilir (az ya da çok).
           const isSec = (jobId) => {
             const secilen = kaporaIsler.find(j => j.id === jobId);
-            const oneri = secilen ? Math.round((parseFloat(secilen.price) || 0) * 0.25) : 0;
+            const oneri = secilen ? Math.round((parseFloat(secilen.price) || 0) * 0.20) : 0;
             setKaporaForm(f => {
               const oncekiIs = kaporaIsler.find(j => j.id === f.jobId);
-              const oncekiOneri = oncekiIs ? Math.round((parseFloat(oncekiIs.price) || 0) * 0.25) : 0;
+              const oncekiOneri = oncekiIs ? Math.round((parseFloat(oncekiIs.price) || 0) * 0.20) : 0;
               const elleGirildi = f.tutar !== '' && String(f.tutar) !== String(oncekiOneri || '');
               return { ...f, jobId, tutar: elleGirildi ? f.tutar : (oneri ? String(oneri) : '') };
             });
@@ -2287,7 +2287,7 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                     <input type="number" inputMode="decimal" value={kaporaForm.tutar}
                       onChange={e => setKaporaForm({ ...kaporaForm, tutar: e.target.value })}
                       className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-amber-500 text-lg font-black" />
-                    <p className="text-[10px] font-bold text-neutral-400 mt-1">%25 yalnızca öneridir — daha az ya da daha fazla girebilirsiniz; yazdığınız tutar aynen seçtiğiniz deftere işlenir.</p>
+                    <p className="text-[10px] font-bold text-neutral-400 mt-1">%20 yalnızca öneridir — daha az ya da daha fazla girebilirsiniz; yazdığınız tutar aynen seçtiğiniz deftere işlenir.</p>
                   </div>
 
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hangi hesaba yazılsın? *</label>
@@ -8517,6 +8517,10 @@ const TT_DURUMLAR = [
   { id: 'Reddedildi',      etiket: 'Reddedildi',               rozet: 'bg-red-50 text-red-700 border-red-300',             nokta: 'bg-red-600' },
 ];
 const ttDurumBul = (id) => TT_DURUMLAR.find(d => d.id === id) || TT_DURUMLAR[0];
+// YENİ (kullanıcı talebi): Telefon Görüşmesi'nde SEÇİLEBİLEN durumlar — "Ulaşılamadı" ve
+// "Kesin Değil · Bilgi Aldı" kaldırıldı (Evden Eve, Eşya Depolama, Depodan Çıkış hepsinde).
+// TT_DURUMLAR aynen duruyor: bu durumdaki ESKİ kayıtlar etiketini/rengini kaybetmez.
+const TT_SECILEBILIR_DURUMLAR = TT_DURUMLAR.filter(d => d.id !== 'Ulaşılamadı' && d.id !== 'Bilgi Aldı');
 const TT_KAPALI_DURUMLAR = ['İşi Aldık', 'Reddedildi']; // Bunlarda takip "gecikti" sayılmaz
 
 // Hizmetler — renkler canlı ve belirgin (kullanıcı talebi: "çok soluk").
@@ -9167,7 +9171,7 @@ const TT_SUREC_NAKLIYE = [
   { id: 'video',      ad: 'Eşya videosu / fotoğrafı istendi' },
   { id: 'netFiyat',   ad: 'Video sonrası net fiyat verildi' },
   { id: 'kayit',      ad: 'Sembol CRM\'de kayıt açıldı (taşımadan 15 gün öncesine kadar)' },
-  { id: 'kapora',     ad: '%25 kapora alındı — tarih kesinleşti' },
+  { id: 'kapora',     ad: '%20 kapora alındı — tarih kesinleşti' },
   { id: 'sozlesme',   ad: 'Sözleşme PDF olarak WhatsApp\'tan gönderildi' },
   { id: 'teslimKodu', ad: 'Teslim / güvenlik kodu anlatıldı' },
   { id: 'kurallar',   ad: '72 saat iptal kuralı ve yapılmayan hizmetler söylendi' },
@@ -9178,7 +9182,7 @@ const TT_SUREC_DEPO = [
   { id: 'davet',      ad: 'Müşteri depoya ziyarete davet edildi' },
   { id: 'netFiyat',   ad: 'Net fiyat çalışması dönüldü' },
   { id: 'kayit',      ad: 'Depoevim CRM\'de nakliye kaydı açıldı' },
-  { id: 'kapora',     ad: '%25 kapora alındı — alım tarihi kesinleşti' },
+  { id: 'kapora',     ad: '%20 kapora alındı — alım tarihi kesinleşti' },
   { id: 'teyit',      ad: 'Alımdan 1 gün önce teyit araması yapıldı' },
   { id: 'sozlesme',   ad: 'Eşya depoya konduktan sonra sözleşme yapıldı (oda no + KDV dahil ücret)' },
   { id: 'kurallar',   ad: 'Aylık ödeme (5 gün, IBAN), mühür (200 ₺+KDV) ve 7 gün önce çıkış bildirimi anlatıldı' },
@@ -9220,7 +9224,7 @@ const ttWhatsappSablonlariHam = (tHam, gonderen = '') => {
         metin: `Merhabalar, tüm detayları öğrenebilir miyiz?\n1. Eviniz kaç odalıdır?\n2. Nereden nereye nakliye olacaktır?\n3. Oturduğunuz ev ve yeni taşınacak ev kaçıncı kattadır?\n4. Bina içi asansör durumu nedir?\n5. Küçük eşyaları (kırılacak, kıyafet vb.) kendiniz mi toplayacaksınız?\n6. Kamyon iki adreste de binaya yanaşabiliyor mu?\n7. Ne zaman taşınmayı düşünüyorsunuz?\n\nOrtalama bir fiyat verebiliriz. Daha net fiyat için eşyanın fotoğraf ya da videosunu gönderirseniz seviniriz.` },
       // KALDIRILDI (kullanıcı talebi): "Yazılı Teklif" şablonu
       { id: 'kapora', ad: 'Kayıt & Kapora Bilgisi',
-        metin: `${selam} Taşıma tarihinizi kesinleştirmek için iş bedelinin %25'i kapora olarak alınmaktadır; kalan tutar iş bitiminde ödenir. Kapora sonrası sözleşmeniz PDF olarak buradan gönderilecek; sözleşmedeki teslim kodunu teslimatta ekibimize iletmeniz yeterli. Taşımaya 72 saatten fazla varsa kapora hariç ücretsiz iptal/erteleme yapılabilir. Teşekkür ederiz.` },
+        metin: `${selam} Taşıma tarihinizi kesinleştirmek için iş bedelinin %20'si kapora olarak alınmaktadır; kalan tutar iş bitiminde ödenir. Kapora sonrası sözleşmeniz PDF olarak buradan gönderilecek; sözleşmedeki teslim kodunu teslimatta ekibimize iletmeniz yeterli. Taşımaya 72 saatten fazla varsa kapora hariç ücretsiz iptal/erteleme yapılabilir. Teşekkür ederiz.` },
     ];
   }
 
@@ -9242,7 +9246,7 @@ const ttWhatsappSablonlariHam = (tHam, gonderen = '') => {
       { id: 'ozet', ad: 'Çıkış Teklifi',
         metin: `${selam} DepoEvim'den${ben}. Eşyalarınızın depodan teslimi için konuştuğumuz bilgiler:\n\n${ozetSatirlari}\n\nÇıkış günü planlaması için en az 7 gün önceden haber vermeniz yeterlidir. Depo ücreti veya birikmiş ödeme varsa teslimden önce kapatılması gerekir. Sorularınız için buradayız.` },
       { id: 'kapora', ad: 'Kapora & Tarih',
-        metin: `${selam} Teslim tarihinizi kesinleştirmek için iş bedelinin %25'i kapora olarak alınmaktadır; kalan tutar teslimde ödenir. Tarih kesinleşince ekibimiz planlamayı yapacaktır. Teşekkür ederiz.` },
+        metin: `${selam} Teslim tarihinizi kesinleştirmek için iş bedelinin %20'si kapora olarak alınmaktadır; kalan tutar teslimde ödenir. Tarih kesinleşince ekibimiz planlamayı yapacaktır. Teşekkür ederiz.` },
     ];
   }
   return [
@@ -9255,7 +9259,7 @@ const ttWhatsappSablonlariHam = (tHam, gonderen = '') => {
     { id: 'davet', ad: 'Depo Ziyaret Daveti',
       metin: `${selam} Depolarımızı dilediğiniz zaman gelip görebilirsiniz${sube ? `:\n📍 ${sube.name} — ${sube.address}, ${sube.district}` : '.'}\nZiyaret için 1-2 gün önceden randevu almanız yeterli. Instagram ve YouTube'daki müşteri memnuniyet videolarımızı da izleyebilirsiniz.` },
     { id: 'kapora', ad: 'Kayıt & Kapora Bilgisi',
-      metin: `${selam} Alım tarihinizi kesinleştirmek için nakliye bedelinin %25'i kapora olarak alınmaktadır. Depo sözleşmeniz eşyalarınız depoya konduktan sonra yapılır ve oda numaranız paylaşılır. Aylık ücret giriş tarihinden itibaren en geç 5 gün içinde IBAN'a yatırılır. Çıkıştan en az 7 gün önce bilgi vermeniz yeterlidir. Teşekkür ederiz.` },
+      metin: `${selam} Alım tarihinizi kesinleştirmek için nakliye bedelinin %20'si kapora olarak alınmaktadır. Depo sözleşmeniz eşyalarınız depoya konduktan sonra yapılır ve oda numaranız paylaşılır. Aylık ücret giriş tarihinden itibaren en geç 5 gün içinde IBAN'a yatırılır. Çıkıştan en az 7 gün önce bilgi vermeniz yeterlidir. Teşekkür ederiz.` },
   ];
 };
 
@@ -9489,7 +9493,7 @@ const TT_REHBER = {
         '"Az eşyam var": "Videonuzu görünce en uygun rakamı veririm."',
       ] },
       { baslik: 'Kurallar', maddeler: [
-        'Kayıt taşımadan 15 gün öncesine kadar açılabilir; %25 kapora ile tarih kesinleşir.',
+        'Kayıt taşımadan 15 gün öncesine kadar açılabilir; %20 kapora ile tarih kesinleşir.',
         '72 saatten fazla varsa kapora hariç ücretsiz iptal; daha az kala %50 cayma bedeli.',
         'Yapılmaz: klima söküm-montajı, duvar montajı, elektrik işleri. Avize/perde/ankastre sökülür, montajı yapılmaz.',
         '30 metreyi aşan yanaşma mesafesinde ek işçilik doğar.',
@@ -9862,6 +9866,7 @@ const ttHavuzdanTeklifVerisi = (k, kullanici) => {
 
 const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', gecmisIndeksi = null, gonderen = '', onKaydet, onKapat, onWhatsappKaydi = null }) => {
   const [waSablon, setWaSablon] = useState(null);          // YENİ: açık WhatsApp şablonu
+  const [notSablonAcik, setNotSablonAcik] = useState(false); // YENİ (kullanıcı talebi): hazır not şablonları kapalı başlar
   const [form, setForm] = useState(() => ({ ...ttBosForm(varsayilanHizmet), ...(baslangic ? ttNormalize(baslangic) : {}), surum: 2 }));
   const [adimIdx, setAdimIdx] = useState(0);
   const [panel, setPanel] = useState('fiyat');            // Sağ panel sekmesi: fiyat | gecmis | rehber
@@ -10260,7 +10265,11 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
             <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Video Durumu</p>
             <div className="flex flex-wrap gap-1.5">
               {TT_VIDEO.map(v => (
-                <button key={v} type="button" onClick={() => d('videoDurumu')(v)}
+                <button key={v} type="button" onClick={() => {
+                  d('videoDurumu')(v);
+                  // YENİ (kullanıcı talebi): video bekleniyorsa durum otomatik "Dönüş Bekliyoruz"
+                  if (v === 'Bekleniyor') d('durum')('Dönüş Bekliyor');
+                }}
                   className={`px-3 py-2 rounded-xl text-xs font-black border-2 transition ${form.videoDurumu === v ? 'bg-sky-600 text-white border-sky-600' : 'bg-white text-sky-800 border-sky-200 hover:border-sky-500'}`}>{v}</button>
               ))}
             </div>
@@ -10319,17 +10328,22 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
                 {[['Yarın', 1], ['3 gün sonra', 3], ['1 hafta sonra', 7], ['2 hafta sonra', 14], ['1 ay sonra', 30]].map(([ad, g]) => {
                   const hedef = ttGunEkle(ttBugunStr(), g);
                   return (
-                    <button key={ad} type="button" onClick={() => d('takipTarihi')(form.takipTarihi === hedef ? '' : hedef)}
+                    <button key={ad} type="button" onClick={() => {
+                      const yeni = form.takipTarihi === hedef ? '' : hedef;
+                      d('takipTarihi')(yeni);
+                      // YENİ (kullanıcı talebi): tekrar arama tarihi seçilince durum "Tekrar Aranacak"
+                      if (yeni) d('durum')('Tekrar Aranacak');
+                    }}
                       className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border transition ${form.takipTarihi === hedef ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-orange-800 border-orange-200 hover:border-orange-400'}`}>{ad}</button>
                   );
                 })}
               </div>
-              <input type="date" value={form.takipTarihi} onChange={e => d('takipTarihi')(e.target.value)} className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-sm font-bold" />
+              <input type="date" value={form.takipTarihi} onChange={e => { d('takipTarihi')(e.target.value); if (e.target.value) d('durum')('Tekrar Aranacak'); }} className="w-full px-3 py-2 rounded-xl border border-neutral-200 text-sm font-bold" />
             </div>
             <div>
               <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Görüşme Durumu</p>
               <div className="flex flex-wrap gap-1.5">
-                {TT_DURUMLAR.map(s => (
+                {TT_SECILEBILIR_DURUMLAR.map(s => (
                   <button key={s.id} type="button" onClick={() => d('durum')(s.id)}
                     className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border flex items-center gap-1.5 transition ${form.durum === s.id ? `${s.rozet} ring-2 ring-neutral-900 ring-offset-1` : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'}`}>
                     <span className={`w-2 h-2 rounded-full ${s.nokta}`} /> {s.etiket}
@@ -10354,13 +10368,21 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
               placeholder="Görüşme notu — örn. müşteri ile görüşüldü, yakını için düşünüyor, dönüş bekliyoruz"
               className="w-full px-3 py-2.5 rounded-xl border border-yellow-200 bg-white text-sm font-semibold outline-none focus:ring-2 focus:ring-yellow-400" />
             <div>
-              <p className="text-[10px] font-black uppercase text-yellow-800 mb-1.5">Hazır Şablonlar — tıklayınca nota eklenir</p>
-              <div className="flex flex-wrap gap-1.5">
-                {ttNotSablonlari(form.hizmetTipi).map(sb => (
-                  <button key={sb} type="button" onClick={() => d('yeniNot')((form.yeniNot || '').trim() ? `${form.yeniNot.trim()} ${sb}` : sb)}
-                    className="px-2.5 py-1.5 rounded-lg bg-white border border-yellow-300 hover:bg-yellow-100 text-[11px] font-bold text-neutral-700 text-left transition">{sb}</button>
-                ))}
-              </div>
+              {/* DEĞİŞTİ (kullanıcı talebi): açılır bölüm — seçenekler tıklayınca görünür */}
+              <button type="button" onClick={() => setNotSablonAcik(a => !a)} aria-expanded={notSablonAcik}
+                className="w-full flex items-center gap-1.5 text-left text-[10px] font-black uppercase text-yellow-800 hover:text-yellow-900">
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${notSablonAcik ? 'rotate-180' : ''}`} />
+                Hazır Şablonlar — tıklayınca nota eklenir
+                <span className="ml-auto normal-case font-bold text-yellow-700">{notSablonAcik ? 'Gizle' : `${ttNotSablonlari(form.hizmetTipi).length} şablon · Göster`}</span>
+              </button>
+              {notSablonAcik && (
+                <div className="flex flex-wrap gap-1.5 mt-1.5 animate-in fade-in slide-in-from-top-1">
+                  {ttNotSablonlari(form.hizmetTipi).map(sb => (
+                    <button key={sb} type="button" onClick={() => d('yeniNot')((form.yeniNot || '').trim() ? `${form.yeniNot.trim()} ${sb}` : sb)}
+                      className="px-2.5 py-1.5 rounded-lg bg-white border border-yellow-300 hover:bg-yellow-100 text-[11px] font-bold text-neutral-700 text-left transition">{sb}</button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -10616,7 +10638,7 @@ const TTDurumSecici = ({ durum, onDegis }) => {
         <>
           <div className="fixed inset-0 z-30" onClick={(e) => { e.stopPropagation(); setAcik(false); }} />
           <div className="absolute z-40 mt-1 right-0 w-52 bg-white border border-neutral-200 rounded-xl shadow-xl p-1.5 animate-in fade-in slide-in-from-top-1">
-            {TT_DURUMLAR.map(s => (
+            {TT_SECILEBILIR_DURUMLAR.map(s => (
               <button key={s.id} type="button" onClick={(e) => { e.stopPropagation(); setAcik(false); onDegis(s.id); }}
                 className={`w-full text-left px-2 py-1.5 rounded-lg text-[11px] font-black flex items-center gap-2 hover:bg-neutral-50 ${s.id === durum ? 'bg-neutral-100' : ''}`}>
                 <span className={`w-2 h-2 rounded-full ${s.nokta}`} /> {s.etiket}
@@ -10740,6 +10762,7 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
   // YENİ (kullanıcı talebi): kaydedilmiş notu düzenleme / silme
   const [notDuzenle, setNotDuzenle] = useState(null);    // { anahtar, metin }
   const [notSilinecek, setNotSilinecek] = useState(null); // not nesnesi
+  const [notSablonAcik, setNotSablonAcik] = useState(false); // YENİ (kullanıcı talebi): hazır şablonlar kapalı başlar
   const notAnahtari = (n) => `${n.tarih}|${n.kullanici}`;
   // Notu yazan kişi veya yetkili (yönetici / kaydın sahibi) düzenleyebilir
   const notDuzenleyebilir = (n) => yetkili || (kullanici && n.kullanici === kullanici);
@@ -10794,7 +10817,7 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
           <div>
             <p className="text-[10px] font-black uppercase text-neutral-500 mb-1.5">Görüşme Durumu</p>
             <div className="flex flex-wrap gap-1.5">
-              {TT_DURUMLAR.map(s => (
+              {TT_SECILEBILIR_DURUMLAR.map(s => (
                 <button key={s.id} type="button" onClick={() => onDurum(s.id)}
                   className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border flex items-center gap-1.5 transition ${(t.durum || 'Yeni') === s.id ? `${s.rozet} ring-2 ring-neutral-900 ring-offset-1` : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'}`}>
                   <span className={`w-2 h-2 rounded-full ${s.nokta}`} /> {s.etiket}
@@ -10866,12 +10889,22 @@ const TelefonTeklifDetay = ({ tHam, gecmis, yetkili, onKapat, onDurum, onSurec, 
                   className="flex-1 min-w-0 px-3 py-2 rounded-xl border border-neutral-200 text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-neutral-900/20" />
                 <button type="button" onClick={notGonder} className="px-3 rounded-xl bg-neutral-900 text-white hover:bg-neutral-700"><Send className="w-4 h-4" /></button>
               </div>
-              {/* YENİ (kullanıcı talebi): hazır not şablonları — tıklayınca kutuya yazılır */}
-              <div className="flex flex-wrap gap-1 mb-2">
-                {ttNotSablonlari(t.hizmetTipi).map(sb => (
-                  <button key={sb} type="button" onClick={() => setNot(sb)}
-                    className="px-2 py-1 rounded-lg bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 text-[10px] font-bold text-neutral-700 text-left">{sb}</button>
-                ))}
+              {/* YENİ (kullanıcı talebi): hazır not şablonları — açılır bölüm, tıklayınca kutuya yazılır */}
+              <div className="mb-2">
+                <button type="button" onClick={() => setNotSablonAcik(a => !a)} aria-expanded={notSablonAcik}
+                  className="w-full flex items-center gap-1.5 text-left text-[10px] font-black uppercase text-yellow-800 hover:text-yellow-900">
+                  <ChevronDown className={`w-3.5 h-3.5 transition-transform ${notSablonAcik ? 'rotate-180' : ''}`} />
+                  Hazır Şablonlar
+                  <span className="ml-auto normal-case font-bold text-yellow-700">{notSablonAcik ? 'Gizle' : `${ttNotSablonlari(t.hizmetTipi).length} şablon · Göster`}</span>
+                </button>
+                {notSablonAcik && (
+                  <div className="flex flex-wrap gap-1 mt-1.5 animate-in fade-in slide-in-from-top-1">
+                    {ttNotSablonlari(t.hizmetTipi).map(sb => (
+                      <button key={sb} type="button" onClick={() => { setNot(sb); setNotSablonAcik(false); }}
+                        className="px-2 py-1 rounded-lg bg-yellow-50 border border-yellow-200 hover:bg-yellow-100 text-[10px] font-bold text-neutral-700 text-left">{sb}</button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
                 {[...(t.notlar || []).map(n => ({ ...n, tur: 'not' })), ...(t.hareketler || []).map(h => ({ ...h, tur: 'hareket', metin: h.islem }))]
@@ -11147,7 +11180,7 @@ const depoSunumuIndir = (tHam, gonderen = '') => {
       <div class="ic"><div class="adim">
         <div><b>1</b>Eşya videosunu gönderin, net fiyatı iletelim</div>
         <div><b>2</b>Dilerseniz depomuzu gelip görün</div>
-        <div><b>3</b>%25 kapora ile tarihiniz kesinleşsin</div>
+        <div><b>3</b>%20 kapora ile tarihiniz kesinleşsin</div>
         <div><b>4</b>Ekibimiz adresinizden alsın, depoya yerleştirsin</div>
         <div><b>5</b>Sözleşme + oda numaranız size iletilsin</div>
       </div></div>
@@ -11403,7 +11436,7 @@ const nakliyeSunumuIndir = (tHam, gonderen = '') => {
       <div class="kart"><div class="baslik">📄 KOŞUL VE ŞARTLAR</div><div class="ic"><ul class="tik">
         <li>Kesin fiyat, eşya video / fotoğrafı gönderildikten sonra verilir.</li>
         <li>Kayıt taşımadan 15 gün öncesine kadar açılabilir; verilen fiyat geçerlidir.</li>
-        <li>Kayıtta iş bedelinin %25'i kapora olarak alınır.</li>
+        <li>Kayıtta iş bedelinin %20'si kapora olarak alınır.</li>
         <li>${sehirlerArasi ? 'Eşya araca yüklendikten sonra %50 ödeme alınır; kalan tutar teslimde ödenir.' : 'Kalan ödeme iş bitiminde şirket hesabına ya da ekip şefimize yapılır.'}</li>
         <li>72 saat öncesine kadar kapora hariç ücretsiz iptal veya erteleme yapılır.</li>
         <li>Tüm anlaşmalarda sözleşme PDF olarak gönderilir.</li>
@@ -11429,7 +11462,7 @@ const nakliyeSunumuIndir = (tHam, gonderen = '') => {
       <td><b>1</b>Teklif: soruları eksiksiz cevaplayın</td>
       <td><b>2</b>Fiyat: video ile kesin fiyat</td>
       <td><b>3</b>Randevu: 15 gün önce kayıt</td>
-      <td><b>4</b>Kapora: iş bedelinin %25'i</td>
+      <td><b>4</b>Kapora: iş bedelinin %20'si</td>
       <td><b>5</b>Sözleşme: PDF olarak iletilir</td>
       <td><b>6</b>Taşınma: 09.00'da ekip kapıda</td>
     </tr></table></div></div>
@@ -11764,7 +11797,7 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
           ]} />
           <TTFiltreAcilir baslik="Durum" deger={durumFiltre} onSec={setDurumFiltre} secenekler={[
             { id: 'Tümü', ad: 'Tüm Durumlar', sayi: durumSayisi('Tümü') },
-            ...TT_DURUMLAR.map(d => ({ id: d.id, ad: d.etiket, sayi: durumSayisi(d.id), nokta: d.nokta })),
+            ...TT_DURUMLAR.filter(d => TT_SECILEBILIR_DURUMLAR.includes(d) || durumSayisi(d.id) > 0).map(d => ({ id: d.id, ad: d.etiket, sayi: durumSayisi(d.id), nokta: d.nokta })),
           ]} />
           <TTFiltreAcilir baslik="Takip" deger={takipFiltre} onSec={setTakipFiltre} secenekler={[
             { id: 'Tümü', ad: 'Tüm Takipler' },
