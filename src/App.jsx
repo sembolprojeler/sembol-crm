@@ -4288,10 +4288,47 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     }, []);
     const [oturumDenendi, setOturumDenendi] = useState(false);
     // YENİ (kullanıcı talebi): Google hesap bağlama / Google ile giriş
-    const [girisAyarlari, setGirisAyarlari] = useState({ googleGecisBitis: '', googleGirisGoster: true, girisDuyurusu: VARSAYILAN_GIRIS_DUYURUSU });
+    // DEĞİŞTİ: Google butonu ve duyuru giriş ekranında BEKLEMEDEN görünsün diye başlangıç değeri
+    // son kaydedilen ayardan (localStorage 'sembol_giris_ayarlari') gelir; yoksa varsayılanlar.
+    // yuklendi her zaman false başlar: geçiş tarihi yalnızca canlı ayar geldikten sonra uygulanır.
+    const [girisAyarlari, setGirisAyarlari] = useState(() => {
+      const varsayilan = { googleGecisBitis: '', googleGirisGoster: true, girisDuyurusu: VARSAYILAN_GIRIS_DUYURUSU };
+      try {
+        const k = JSON.parse(localStorage.getItem('sembol_giris_ayarlari') || 'null');
+        if (k && typeof k === 'object') {
+          return {
+            ...varsayilan,
+            googleGecisBitis: typeof k.googleGecisBitis === 'string' ? k.googleGecisBitis : '',
+            googleGirisGoster: k.googleGirisGoster !== false,
+            girisDuyurusu: typeof k.girisDuyurusu === 'string' ? k.girisDuyurusu : VARSAYILAN_GIRIS_DUYURUSU,
+            yuklendi: false
+          };
+        }
+      } catch (e) {}
+      return { ...varsayilan, yuklendi: false };
+    });
     // YENİ: "Google ile girişi göster" kapalıyken Google'a dair her şey gizlenir ve geçiş tarihi uygulanmaz
     const googleAktif = girisAyarlari.googleGirisGoster !== false;
-    const etkinGecisBitis = googleAktif ? girisAyarlari.googleGecisBitis : '';
+    // DEĞİŞTİ: önbellekteki tarihe göre kimse kilitlenmesin — tarih yalnızca canlı ayar yüklendikten sonra etkin
+    const etkinGecisBitis = googleAktif && girisAyarlari.yuklendi ? girisAyarlari.googleGecisBitis : '';
+
+    // DEĞİŞTİ (kullanıcı talebi): Giriş ayarları, anonim oturum hazır olur olmaz DİĞER TÜM
+    // dinleyicilerden önce ve onlardan bağımsız okunur (bu effect, firebaseUser'a bağlı ilk effect).
+    const firebaseHazir = !!firebaseUser;
+    useEffect(() => {
+      if (!firebaseHazir) return;
+      return onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'girisAyarlari'), docSnap => {
+        const v = docSnap.exists() ? docSnap.data() : {};
+        const yeni = {
+          googleGecisBitis: v.googleGecisBitis || '',
+          // anahtar varsayılan AÇIK; duyuru hiç kaydedilmemişse varsayılan metin, boş kaydedilmişse gizli
+          googleGirisGoster: v.googleGirisGoster !== false,
+          girisDuyurusu: typeof v.girisDuyurusu === 'string' ? v.girisDuyurusu : VARSAYILAN_GIRIS_DUYURUSU
+        };
+        setGirisAyarlari({ ...yeni, yuklendi: true });
+        try { localStorage.setItem('sembol_giris_ayarlari', JSON.stringify(yeni)); } catch (e) {}
+      }, (e) => { console.error(e); setGirisAyarlari(p => ({ ...p, yuklendi: true })); });
+    }, [firebaseHazir]);
     // YENİ: Elle yapılan şifreli girişten sonra açılan "Google hesabını bağla" penceresi
     // ("Beni Hatırla" ile otomatik açılan oturumlarda açılmaz) ve bağlama sonrası kısa onay mesajı
     const [googleBaglaPenceresi, setGoogleBaglaPenceresi] = useState(false);
@@ -5482,17 +5519,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         try { localStorage.setItem('sembol_crm_branding', JSON.stringify(yeni)); } catch (e) {}
       }, console.error));
 
-      // YENİ (kullanıcı talebi): Google'a geçiş bitiş tarihi (Uygulama Ayarları)
-      unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'girisAyarlari'), docSnap => {
-        const v = docSnap.exists() ? docSnap.data() : {};
-        setGirisAyarlari({
-          googleGecisBitis: v.googleGecisBitis || '',
-          // YENİ: anahtar varsayılan AÇIK; duyuru hiç kaydedilmemişse varsayılan metin, boş kaydedilmişse gizli
-          googleGirisGoster: v.googleGirisGoster !== false,
-          girisDuyurusu: typeof v.girisDuyurusu === 'string' ? v.girisDuyurusu : VARSAYILAN_GIRIS_DUYURUSU,
-          yuklendi: true
-        });
-      }, (e) => { console.error(e); setGirisAyarlari(p => ({ ...p, yuklendi: true })); }));
+      // NOT: settings/girisAyarlari dinleyicisi buradan alındı; yukarıda kendi effect'inde, ilk sırada.
 
       return () => unsubs.forEach(unsub => unsub());
     }, [firebaseUser, currentUser?.id]);   // DEĞİŞTİ: bildirimler kullanıcıya göre çekildiği için kullanıcı değişince yenilenir
@@ -7637,7 +7664,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     if (ESKI_QR_SITE_ID) return null;
 
     if (!isAuthenticated) {
-      return <LoginScreen onLogin={handleLogin} onGoogleLogin={handleGoogleLogin} error={loginError} appBranding={appBranding} googleAktif={googleAktif && !!girisAyarlari.yuklendi} googleGecisBitis={etkinGecisBitis} girisDuyurusu={girisAyarlari.girisDuyurusu || ""} />;
+      return <LoginScreen onLogin={handleLogin} onGoogleLogin={handleGoogleLogin} error={loginError} appBranding={appBranding} googleAktif={googleAktif} googleGecisBitis={etkinGecisBitis} girisDuyurusu={girisAyarlari.girisDuyurusu || ""} />;
     }
 
     if (currentUser?.employmentStatus === 'Pasif') {
