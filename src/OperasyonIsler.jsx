@@ -2290,10 +2290,10 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                                 if (phone.startsWith('0')) phone = '90' + phone.substring(1);
                                 else if (!phone.startsWith('90')) phone = '90' + phone;
 
-                                const kapora = parseInt(job.price || 0) * 0.20; // Sözleşme 20. madde: %20 kapora
+                                const kapora = parseInt(job.price || 0) * 0.25; // DEĞİŞTİ (kullanıcı talebi): sözleşme 20. madde — %25 kapora
                                 const kaporaText = kapora > 0 ? kapora.toLocaleString('tr-TR') : '...';
 
-                                const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %20'si olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\n${aktifBankaBilgiMetni()}\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
+                                const msg = `Sayın *${job.customerName}*,\n\n*Sembol Nakliyat* olarak ${job.date} tarihinde saat ${job.time} sularında planlanan işleminiz sistemimize başarıyla kaydedilmiştir.\n\n🚚 *Güzergah Bilgisi:*\n📍 Alış: ${job.fromProvince} / ${job.fromDistrict}\n📍 Teslim: ${job.toProvince ? job.toProvince + ' / ' + job.toDistrict : 'Belirtilmemiş'}\n\n🔒 *Güvenliğiniz için Teslim Kodunuz:* ${job.deliveryCode || 'Bulunmuyor'}\n(Ekibimiz geldiğinde eşya teslimi için bu kodu kendilerine iletebilirsiniz.)\n\n💰 *Kapora Bilgilendirmesi:*\nİşleminizin onaylanması ve aracınızın rezerve edilmesi için toplam tutarın %25'i olan *${kaporaText} TL* kapora ödemenizi rica ederiz.\n\n🏦 *Banka Bilgileri:*\n${aktifBankaBilgiMetni()}\n\n⚠️ *ÖNEMLİ NOT:* Lütfen ödeme yaparken açıklama kısmına sadece size gönderdiğimiz teslim kodunu (${job.deliveryCode || 'Yok'}) yazınız.\n\nBizi tercih ettiğiniz için teşekkür eder, yeni yerinizin hayırlı olmasını dileriz. İyi günler!`;
                               window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
                             }} 
                             className="flex-1 min-w-0 px-1 py-1.5 bg-[#25D366] hover:bg-[#128C7E] text-white text-[9px] font-bold rounded-lg transition flex items-center justify-center gap-0.5 shadow-sm whitespace-nowrap overflow-hidden"
@@ -5794,11 +5794,11 @@ export const KILAVUZ_VARSAYILAN = [
           'Konuştuğun her müşteriyi (isim, telefon, cevaplar) not defterine/CRM\'e yazmak, tek bir kayıtsız arama bırakmamak',
           'Saat 10:30\'dan sonra tüm cevapsız aramaları tek tek geri aramak',
           'WhatsApp (hem cep hem sabit hat) ve Instagram mesajlarını yanıtlamak, günde 3 Instagram paylaşımı yapmak',
-          'Video gelince net fiyatı verip Sembol CRM\'de kaydı açmak, %20 kapora isteyip sözleşmeyi PDF olarak göndermek',
+          'Video gelince net fiyatı verip Sembol CRM\'de kaydı açmak, %25 kapora isteyip sözleşmeyi PDF olarak göndermek',
         ],
         kurallar: [
           '7 soru fiyatın kalbidir — video/foto gelmeden KESİN fiyat asla verilmez, sadece "ortalama" denir',
-          'Kayıt taşımadan 15 gün öncesine kadar açılabilir; kayıt açan müşteriden iş fiyatının %20\'si kapora alınır',
+          'Kayıt taşımadan 15 gün öncesine kadar açılabilir; kayıt açan müşteriden iş fiyatının %25\'i kapora alınır',
           'Sözleşmedeki güvenlik/teslim kodunu müşteriye anlat — eşya ancak bu kodla teslim edilir',
           'Taşımaya 72 saatten fazla varsa iptal/erteleme kapora hariç ücretsizdir; 72 saatten az kalan iptalde toplam bedelin %50\'si cayma tazminatıdır',
           'Yapılmayan hizmetleri baştan söyle: klima söküm-montajı, duvar montajı, elektrik işleri yapılmaz; avize/perde/ankastre sökülür ama montajı yapılmaz',
@@ -5813,7 +5813,7 @@ export const KILAVUZ_VARSAYILAN = [
           { baslik: '5. Ortalama Fiyat Ver + Video İste', detay: '"Video atarsanız fiyatta yardımcı oluruz" — kesin fiyat videoya bağlıdır.' },
           { baslik: '6. Kaydet', detay: 'İsim, telefon ve verdiğin cevapları not defterine/CRM\'e yaz, bilgilendirme mesajı gönder.' },
           { baslik: '7. Teyit + Kapat', detay: 'Özetle, ofise davet et, kibarca kapat.' },
-          { baslik: '8. Takip + Sözleşme', detay: 'Video gelince net fiyatı ver, %20 kapora al, sözleşmeyi PDF olarak gönder.' },
+          { baslik: '8. Takip + Sözleşme', detay: 'Video gelince net fiyatı ver, %25 kapora al, sözleşmeyi PDF olarak gönder.' },
         ],
         avantajlar: [
           'Ekibin tamamı kadrolu — günübirlik/dışarıdan işçi yok; eşyaya kimin dokunduğunu biliyoruz',
@@ -5826,7 +5826,7 @@ export const KILAVUZ_VARSAYILAN = [
           { baslik: 'Karşılama', metin: '"Sembol Nakliyat, ben [adın], hayırlı günler, nasıl yardımcı olabilirim?"' },
           { baslik: 'Fiyat Verme', metin: '"Bu taşıma için ortalama fiyatımız [X] TL. Eşyanın videosunu/fotoğrafını atarsanız fiyatı netleştirebiliriz."' },
           { baslik: 'Video İsteme', metin: '"Fiyatta yardımcı olabilmemiz için eşyaların videosunu/fotoğrafını WhatsApp\'tan gönderin."' },
-          { baslik: 'Kapora', metin: '"Tarihinizi kesinleştirmek için %20 kapora alıyoruz, kalanı iş bitiminde."' },
+          { baslik: 'Kapora', metin: '"Tarihinizi kesinleştirmek için %25 kapora alıyoruz, kalanı iş bitiminde."' },
           { baslik: 'Kapatma', metin: '"Aradığınız için teşekkürler, iyi günler dilerim."' },
         ],
         itirazlar: [
@@ -5864,7 +5864,7 @@ export const KILAVUZ_VARSAYILAN = [
           'Video istemek (hem hangi depoya sığacağını hem nakliye fiyatını netleştirir) ve depoya ziyarete davet etmek',
           'Konuştuğun her müşteriyi not defterine/CRM\'e yazmak; özellikle süresi dolmak üzere olan depolama müşterilerini takip etmek',
           'Saat 10:30\'dan sonra cevapsız aramaları geri aramak, WhatsApp/Instagram yönetmek',
-          'Video onaylanınca Depoevim CRM\'de NAKLİYE kaydı açmak, %20 kapora almak (depo sözleşmesi eşya depoya konduktan SONRA yapılır)',
+          'Video onaylanınca Depoevim CRM\'de NAKLİYE kaydı açmak, %25 kapora almak (depo sözleşmesi eşya depoya konduktan SONRA yapılır)',
         ],
         kurallar: [
           'Aylık depo fiyatı İLK 2 soruda (eşya cinsi + kaç+1) hemen söylenir — nakliye soruları yalnızca müşteri nakliyeyi bizden isterse sorulur',
