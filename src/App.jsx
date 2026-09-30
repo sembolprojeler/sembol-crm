@@ -138,7 +138,7 @@ const otomatikBaglamaAlanAdiMi = (eposta) => {
   const alan = String(eposta || '').trim().toLowerCase().split('@')[1] || '';
   return OTOMATIK_BAGLAMA_ALAN_ADLARI.includes(alan);
 };
-const VARSAYILAN_GIRIS_DUYURUSU = "CRM'e artık Google hesabınızla da girebilirsiniz. Her zamanki gibi kullanıcı adı ve şifrenizle girin, açılan pencerede 'Google Hesabımı Bağla'ya basın. İsterseniz 'Bağlamadan Devam Et' diyebilirsiniz. CRM'i WhatsApp içinden değil, Chrome veya Safari'den açın.";
+const VARSAYILAN_GIRIS_DUYURUSU = "Bundan sonra CRM'e kullandığınız aktif bir Google hesabınızla da (cep telefonunuza bağlı Gmail adresiniz olabilir) girebilirsiniz. Her zamanki gibi kullanıcı adı ve şifrenizle girin, açılan pencerede 'Google Hesabımı Bağla'ya basın. İsterseniz 'Bağlamadan Devam Et' de diyebilirsiniz. Ama Google ile de girebilmek için önce 1 kez bu işlemi yapmanız gerekiyor.\n\nNot: CRM'i WhatsApp içinden değil, Chrome veya Safari'den açın.";
 // YENİ: WhatsApp / Instagram / Facebook gibi uygulama içi tarayıcılar Google açılır penceresini engeller.
 const uygulamaIciTarayiciMi = () => {
   if (typeof navigator === 'undefined') return false;
@@ -2986,9 +2986,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
           {/* YENİ: Giriş ekranı duyurusu */}
           <div className="mt-5">
-            <label className="block text-sm font-bold text-black mb-1">Giriş ekranı duyurusu (📢 Önemli — lütfen okuyun)</label>
-            <p className="text-xs text-neutral-500 font-medium mb-2">Boş kaydedilirse duyuru kutusu gizlenir.</p>
-            <textarea value={duyuru} onChange={e => setDuyuru(e.target.value)} rows={4}
+            <label className="block text-sm font-bold text-black mb-1">Giriş ekranı duyurusu (ℹ️ Google ile giriş nasıl yapılır?)</label>
+            <p className="text-xs text-neutral-500 font-medium mb-2">Giriş kartında Google butonunun altında görünür. "Not:" ile başlayan satırlar daha küçük gösterilir. Boş kaydedilirse gizlenir.</p>
+            <textarea value={duyuru} onChange={e => setDuyuru(e.target.value)} rows={6}
               className="w-full p-3 border border-neutral-300 rounded-xl bg-white text-sm font-medium outline-none focus:ring-2 focus:ring-red-600" />
             <div className="flex flex-col sm:flex-row gap-3 mt-2">
               <button type="button" onClick={() => setDuyuru(VARSAYILAN_GIRIS_DUYURUSU)}
@@ -4110,13 +4110,6 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
     return (
       <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4 animate-in fade-in">
-        {/* YENİ (kullanıcı talebi): Duyuru kutusu — metin Uygulama Ayarları'ndan, boşsa gizli */}
-        {googleAktif && girisDuyurusu.trim() && (
-          <div className="w-full max-w-md mb-4 p-4 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-900">
-            <p className="text-sm font-black mb-1">📢 Önemli — lütfen okuyun</p>
-            <p className="text-sm font-medium whitespace-pre-line">{girisDuyurusu}</p>
-          </div>
-        )}
         <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
           <div className="bg-neutral-50 p-8 flex flex-col items-center border-b border-neutral-200">
             <MarkaLogo
@@ -4221,6 +4214,21 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               )}
               Google ile Giriş Yap
             </button>
+            )}
+
+            {/* DEĞİŞTİ (kullanıcı talebi): Duyuru artık kartın içinde, Google butonunun hemen altında.
+                Metin Uygulama Ayarları'ndan gelir, boşsa gizli. "Not:" ile başlayan satırlar daha küçük/soluk. */}
+            {girisDuyurusu.trim() && (
+              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">
+                <p className="text-sm font-black mb-1.5">ℹ️ Google ile giriş nasıl yapılır?</p>
+                {girisDuyurusu.trim().split('\n').map((satir, i) => (
+                  satir.trim().startsWith('Not:')
+                    ? <p key={i} className="text-xs font-medium text-amber-800/70 mt-2">{satir}</p>
+                    : satir.trim()
+                      ? <p key={i} className="text-sm font-medium">{satir}</p>
+                      : null
+                ))}
+              </div>
             )}
 
             {sifreKapali ? (
