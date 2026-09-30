@@ -32,6 +32,12 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
 
   export const app = initializeApp(firebaseConfig);
   export const auth = getAuth(app);
+  // YENİ (kullanıcı talebi): GOOGLE HESAP BAĞLAMA / GOOGLE İLE GİRİŞ
+  // Google oturumu AYRI bir Firebase uygulama örneğinde açılır. Böylece
+  // Firestore'un kullandığı ana (anonim) oturum hiç değişmez; Google ile
+  // giriş yapıldığında tüm canlı dinleyiciler yeniden başlayıp baştan
+  // okuma yapmaz. Buradan yalnızca Google hesabının uid'si okunur.
+  export const googleAuth = getAuth(initializeApp(firebaseConfig, 'googleGiris'));
   // ==========================================================================
   // KALICI YEREL ÖNBELLEK (IndexedDB)
   // AMAÇ: "Tüm geçmiş her zaman görünsün" isteğini, Firestore okuma faturasını
