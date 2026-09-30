@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/",
+      "has": [{ "type": "query", "key": "qr" }],
+      "missing": [{ "type": "query", "key": "qrt" }],
+      "destination": "/api/qr-yonlendir",
+      "statusCode": 302
+    }
+  ]
+}

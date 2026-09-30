@@ -77,8 +77,10 @@ import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJ
 import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir, useBugunQrEksikSayisi } from './OperasyonPersonel.jsx';
 // YENİ (kullanıcı talebi): QR SİTE TAKİP — asansör afişi QR reklam modülü
 //   • QrSiteTakipView : yönetim ekranı (Saha Portföy'deki butondan açılır) — Satis.jsx içinde
-//   • QrSiteLanding   : sakinin QR okutunca gördüğü, giriş gerektirmeyen sayfa
-import { QrSiteTakipView, QrSiteLanding, QrTakipYonlendirme } from './Satis.jsx';
+//   • DEĞİŞTİ: sakinin gördüğü sayfa artık WordPress'te (QR_SITE_LANDING_URL, ?yer=);
+//     QrSiteLanding Satis.jsx'te duruyor ama buradan kullanılmıyor.
+import { QrSiteTakipView, QrTakipYonlendirme } from './Satis.jsx';
+import { QR_SITE_LANDING_URL } from './qrSiteSema.js'; // YENİ
 import { MaterialListView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView } from './OperasyonAracMalzeme.jsx';
 import { AddInfoView, ComplaintsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, SahaRaporlamasiView, SirketIletisimView } from './OperasyonInsanKaynaklari.jsx';
 import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
@@ -95,6 +97,22 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
 // OperasyonIsler.jsx, OperasyonPersonel.jsx, OperasyonAracMalzeme.jsx,
 // OperasyonInsanKaynaklari.jsx. Eski dosya, geri dönüş ihtimaline karşı
 // Operasyon_yedek.jsx adıyla (hiçbir yerden import edilmeden) saklanıyor.
+
+// ============================================================================
+// YENİ (kullanıcı talebi): ESKİ AFİŞLER — "?qr=<yerId>" → WordPress sayfası
+// ----------------------------------------------------------------------------
+// Daha önce basılmış asansör afişlerindeki QR'lar sembol-crm.vercel.app/?qr=<id>
+// adresini açar. Sayfa WordPress'e taşındığı için (sembol-nakliyat-pro/?yer=)
+// bu adres, oturum / Firebase beklenmeden ve ilk render'dan ÖNCE (modül
+// yüklenirken) yeni sayfaya yönlendirilir. replace: geri tuşu döngüye girmez.
+// "?qrt=" (reklam QR yönlendirmesi) bundan etkilenmez.
+// NOT: Asıl yönlendirme sunucudadır (vercel.json → api/qr-yonlendir.js, 302);
+// bu blok yalnızca yedektir (ör. önizleme / yerel geliştirme).
+// ============================================================================
+const ESKI_QR_SITE_ID = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('qr') : null;
+if (ESKI_QR_SITE_ID && !new URLSearchParams(window.location.search).get('qrt')) {
+  window.location.replace(`${QR_SITE_LANDING_URL}?yer=${encodeURIComponent(ESKI_QR_SITE_ID)}`);
+}
 
   // ============================================================================
   // YENİ: MARKA LOGOSU BİLEŞENİ
@@ -7077,10 +7095,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     if (qrtParams?.get('qrt')) {
       return <QrTakipYonlendirme kampanyaId={qrtParams.get('qrt')} siteIpucu={qrtParams.get('s') || 'sembolevdeneve'} firebaseUser={firebaseUser} logoUrl={appBranding?.logoUrl || ''} hedefParam={qrtParams.get('u') || ''} />;
     }
-    const qrSiteParam = qrtParams ? qrtParams.get('qr') : null;
-    if (qrSiteParam) {
-      return <QrSiteLanding siteId={qrSiteParam} firebaseUser={firebaseUser} />;
-    }
+    // DEĞİŞTİ: "?qr=" artık dosya başında WordPress sayfasına yönlendirilir;
+    // yönlendirme tamamlanana kadar giriş ekranı bir an görünmesin diye boş döner.
+    if (ESKI_QR_SITE_ID) return null;
 
     if (!isAuthenticated) {
       return <LoginScreen onLogin={handleLogin} error={loginError} appBranding={appBranding} />;

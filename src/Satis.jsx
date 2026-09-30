@@ -11,6 +11,8 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
 import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
 // YENİ (kullanıcı talebi): depolama tekliflerinin Teklif Detayı satırları (siteden gelen ham alanlardan)
 import { teklifDetayiAlanlardan, eskiTeklifMetni } from './teklifDetay.js';
+// YENİ: QR Site Takip şeması — /api/qr-site ile ortak (sabitler, telefon kuralı, WordPress sayfa adresi)
+import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
 import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari } from './fiyatSema.js';
 
@@ -7046,7 +7048,8 @@ export const SahaPortfoyView = ({ personnelList = [], currentUser, addSystemLog,
 //   • QrTalepSatiri       → tek bir talep (lead) satırı
 //   • QrSiteKarti         → yer kartı (istatistik rozetleri)
 //   • QrSiteTakipView     → YÖNETİM EKRANI (App.jsx'ten açılır)
-//   • QrSiteLanding       → HERKESE AÇIK SAYFA (?qr=<yerId> ile açılır)
+//   • QrSiteLanding       → ESKİ herkese açık sayfa (DEĞİŞTİ: artık WordPress'te,
+//                           sembolevdeneve.com/sembol-nakliyat-pro/?yer=<yerId> + api/qr-site.js)
 //
 // FIRESTORE KOLEKSİYONLARI (artifacts/{appId}/public/data/...):
 //   • qrSiteler        → yerler (ad, tür, adres, temsilci, taramaSayisi ...)
@@ -7065,7 +7068,10 @@ export const QR_SITE_TURLERI = ['Site', 'Bina', 'İş Yeri', 'Malikane', 'Diğer
 // (companyPhone). Şahsi numara (personalPhone) hiçbir koşulda kullanılmaz.
 // Personelin şirket hattı girilmemişse afişteki merkez numarası gösterilir.
 // ============================================================================
-export const QR_SIRKET_TELEFONU = '0554 726 16 61';
+// DEĞİŞTİ: QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize
+// ve QR_SITE_LANDING_URL src/qrSiteSema.js'e taşındı (api/qr-site.js ile ortak);
+// eski import'lar bozulmasın diye buradan da dışa verilir.
+export { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize };
 export const qrTemsilciSirketTelefonu = (temsilci) => {
   const sirketHatti = String(temsilci?.companyPhone || '').trim();
   return sirketHatti || QR_SIRKET_TELEFONU;
@@ -7073,12 +7079,6 @@ export const qrTemsilciSirketTelefonu = (temsilci) => {
 
 // Talep durum akışı: Yeni → Arandı → Keşif Planlandı → İş Alındı / Alamadık
 export const QR_TALEP_DURUMLARI = ['Yeni', 'Arandı', 'Ulaşılamadı', 'Keşif Planlandı', 'İş Alındı', 'Alamadık'];
-
-// Sakinin seçebileceği hizmet türleri (bilgi formunda, isteğe bağlı)
-export const QR_HIZMETLER = ['Evden Eve Nakliyat', 'Asansörlü Taşıma', 'Depolama', 'Ofis Taşıma', 'Diğer'];
-
-// Randevu saat dilimleri (keşif formu)
-export const QR_RANDEVU_SAATLERI = ['09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00'];
 
 // Durum rozet renkleri (Tailwind)
 const QR_DURUM_STIL = {
@@ -7119,26 +7119,13 @@ const qrTrhSaat = (iso) => {
 // "2026-09-30" → "30.09.2026"
 const qrTarihGoster = (t) => t ? t.split('-').reverse().join('.') : '—';
 
-// Telefonu WhatsApp/tel formatına çevirir (0555... → 90555...)
-export const qrTelefonNormalize = (ham) => {
-  let tel = String(ham || '').replace(/\D/g, '');
-  if (!tel) return '';
-  if (tel.startsWith('0')) tel = '90' + tel.substring(1);
-  else if (!tel.startsWith('90')) tel = '90' + tel;
-  return tel;
-};
-// Basit Türkiye cep telefonu doğrulaması (10-11 hane, 5 ile başlayan)
-const qrTelefonGecerliMi = (ham) => {
-  const tel = String(ham || '').replace(/\D/g, '');
-  const yalın = tel.startsWith('90') ? tel.substring(2) : tel.startsWith('0') ? tel.substring(1) : tel;
-  return yalın.length === 10 && yalın.startsWith('5');
-};
+// DEĞİŞTİ: qrTelefonNormalize / qrTelefonGecerliMi src/qrSiteSema.js'ten gelir (API ile aynı kural)
 
 // Sakinin QR ile açacağı herkese açık bağlantı
-export const qrSiteBaglantisi = (siteId) => {
-  if (typeof window === 'undefined') return `?qr=${siteId}`;
-  return `${window.location.origin}${window.location.pathname}?qr=${siteId}`;
-};
+// DEĞİŞTİ: Sayfa WordPress'e taşındı (sembol-nakliyat-pro). Adres artık
+// window.location'a bağlı değil — CRM preview/localhost'tan açılsa bile QR
+// doğru adrese gider. Parametre bilerek "yer" ("qr" sitedeki reklam QR takibine ait).
+export const qrSiteBaglantisi = (siteId) => `${QR_SITE_LANDING_URL}?yer=${encodeURIComponent(siteId)}`;
 
 // Koleksiyon kısayolları
 const qrSiteKoleksiyonu = () => collection(db, 'artifacts', appId, 'public', 'data', 'qrSiteler');
@@ -7612,7 +7599,7 @@ export const QrSiteTakipView = ({ personnelList = [], currentUser, addSystemLog,
           <ol className="list-decimal ml-5 space-y-0.5 text-[13px]">
             <li>"Yeni Yer + QR Oluştur" ile siteyi/binayı, adresini ve müşteri temsilcisini kaydedin.</li>
             <li>Oluşan QR'ı PNG/SVG indirip afişe yerleştirin, asansöre asın.</li>
-            <li>Sakin QR'ı okutunca giriş gerektirmeyen sayfa açılır: "Hemen Bilgi Al" veya "Keşif İçin Çağırın".</li>
+            <li>Sakin QR'ı okutunca sembolevdeneve.com'daki giriş gerektirmeyen sayfa açılır: "Hemen Bilgi Al" veya "Keşif İçin Çağırın".</li>{/* DEĞİŞTİ: sayfa WordPress'e taşındı */}
             <li>Talepler anında burada belirir; temsilci arar, durumu günceller, sonucu takip edersiniz.</li>
           </ol>
         </div>
@@ -7692,6 +7679,11 @@ export const QrSiteTakipView = ({ personnelList = [], currentUser, addSystemLog,
   );
 };
 
+// ============================================================================
+// ESKİ: artık kullanılmıyor, WordPress sayfasına taşındı (sembol-nakliyat-pro)
+// Yeni akış: QR → sembolevdeneve.com/sembol-nakliyat-pro/?yer=<yerId> → /api/qr-site.
+// App.jsx eski "?qr=<yerId>" bağlantılarını yeni adrese yönlendirir; bu
+// bileşen ve QrLandingKabuk yalnızca geri dönüş gerekirse diye tutuluyor.
 // ============================================================================
 // HERKESE AÇIK SAYFA — sakinin QR ile açtığı ekran (giriş gerekmez)
 // ============================================================================
