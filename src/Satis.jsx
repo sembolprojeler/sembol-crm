@@ -4117,7 +4117,14 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // eşleştirilir. Görünürlükten bağımsız TÜM kayıtlar taranır ki "bu müşteriyle
   // daha önce konuşuldu" bilgisi kaçmasın.
   const gecmisIndeksi = useMemo(() => musteriGecmisiIndeksle(jobs, kayitlar, telefonTeklifleri), [jobs, kayitlar, telefonTeklifleri]);
-  const havuzGecmisi = (k) => musteriGecmisiBul(gecmisIndeksi, k.iletisim, k.id);
+  const havuzGecmisi = (k) => {
+    const g = musteriGecmisiBul(gecmisIndeksi, k.iletisim, k.id);
+    if (!g) return null;
+    // DEĞİŞTİ (kullanıcı talebi): bu talepten açılmış telefon görüşmesi "geçmiş" sayılmaz
+    const telefon = g.telefon.filter(t => t.havuzKayitId !== k.id && t.id !== k.telefonTeklifId);
+    const s = { ...g, telefon, toplam: g.isler.length + g.havuz.length + telefon.length };
+    return s.toplam ? s : null;
+  };
 
   // ------------------------------------------------------- YARDIMCILAR ---
   const hareketliGuncelle = async (kayit, degisiklik, islemMetni) => {
@@ -5173,6 +5180,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                       </span>
                     )}
                     <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/25">{detayKayit.durum || 'Yeni'}</span>
+                    {/* YENİ (kullanıcı talebi): NUMARA SORGUSU — bu numara sistemde kayıtlı mı, kimin portföyünde? */}
+                    <TTGecmisRozetleri gecmis={havuzGecmisi(detayKayit)} kullanici={kullaniciAdi} hedefId="havuz-detay-gecmis" />
                   </div>
                   {/* YENİ: mevcut satışçı — canlı kayıttan okunur, başka kullanıcı Kaydet'le devralırsa pencere açıkken bile güncellenir */}
                   {(() => {
@@ -5217,7 +5226,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-4 bg-neutral-50">
               {/* YENİ (kullanıcı talebi): MÜŞTERİ GEÇMİŞİ — telefon numarasıyla eşleşen
                   eski işler, havuz talepleri ve telefon görüşmeleri */}
-              {(() => { const g = havuzGecmisi(detayKayit); return g ? <MusteriGecmisiKutusu gecmis={g} ad={detayKayit.musteriAdi} /> : null; })()}
+              {(() => { const g = havuzGecmisi(detayKayit); return g ? <div id="havuz-detay-gecmis"><MusteriGecmisiKutusu gecmis={g} ad={detayKayit.musteriAdi} /></div> : null; })()}
               {/* TAŞINDI (kullanıcı talebi): "Telefon Görüşme Formu" artık alt çubuktaki
                   "Fiyat Hesapla" butonu (eski "Kayıt Aç"ın yerinde). */}
               {detayKayit.telefonTeklifId && (
@@ -9343,6 +9352,63 @@ const ttIsDurumu = (j) => {
   if (j.status === 'in-progress') return { ad: 'Devam ediyor', renk: 'bg-amber-100 text-amber-800' };
   return { ad: 'Kayıt var', renk: 'bg-neutral-200 text-neutral-700' };
 };
+// ============================================================================
+// YENİ (kullanıcı talebi): NUMARA SORGUSU — GEÇMİŞ ÖZETİ (Teklife Bak başlığı)
+// Numaradan bulunan geçmişin en önemli satırları kısa rozetlere çevrilir:
+//   • Başka satışçının telefon görüşmesinde / portföyünde → "Erman Kadir Erişir · 1 hafta önce görüştü"
+//   • Kendi görüşmeniz → "Siz · 3 gün önce görüştünüz"
+//   • İş kaydı → "3 yıl önce taşındı" / "Kayıtlı işi var · 05.10.2026"
+//   • Önceki havuz talebi → "2 ay önce teklif istedi · Vehbi Çirgin"
+// ============================================================================
+const ttGecmisOzeti = (g, kullanici = '') => {
+  if (!g) return [];
+  const ozet = [];
+  const sure = (tarih) => { const x = ttGoreliSure(tarih); return x === 'bugün' ? 'bugün' : x; };
+  // Telefon görüşmeleri — satışçı bazında en yenisi
+  const sahipler = new Map();
+  g.telefon.forEach(t => { const sh = ttSahibi(t) || 'Atanmamış'; if (!sahipler.has(sh)) sahipler.set(sh, t); });
+  sahipler.forEach((t, sh) => {
+    const benim = kullanici && sh === kullanici;
+    ozet.push({
+      tur: 'telefon', oncelik: benim ? 2 : 1,
+      metin: benim ? `Siz · ${sure(t.iletisimTarihi)} görüştünüz` : `${sh} · ${sure(t.iletisimTarihi)} görüştü`,
+      baslik: `${benim ? 'Sizin' : `${sh} adlı satışçının`} telefon görüşmesinde kayıtlı · ${ttTrTarih(t.iletisimTarihi)} · ${t.hizmetTipi} · durum: ${ttDurumBul(t.durum).etiket}`,
+      cls: benim ? 'bg-emerald-500 text-white' : 'bg-yellow-300 text-neutral-900',
+    });
+  });
+  // İş kayıtları — tamamlanan (en yeni) ve bekleyen/gelecek
+  const tasindi = g.isler.find(j => j.status === 'completed');
+  if (tasindi) ozet.push({ tur: 'is', oncelik: 0, metin: `${sure(tasindi.date)} taşındı`, baslik: `${ttTrTarih(tasindi.date)} · ${tasindi.type || 'Nakliye'} · ${tasindi.customerName || ''}`, cls: 'bg-neutral-900 text-white' });
+  const bekleyen = g.isler.find(j => j.status !== 'completed' && j.status !== 'cancelled');
+  if (bekleyen) ozet.push({ tur: 'is', oncelik: 0, metin: `Kayıtlı işi var · ${ttTrTarih(bekleyen.date)}`, baslik: `${bekleyen.type || 'Nakliye'} · ${bekleyen.customerName || ''}`, cls: 'bg-blue-600 text-white' });
+  // Önceki havuz talepleri — en yenisi
+  const talep = g.havuz[0];
+  if (talep) ozet.push({ tur: 'havuz', oncelik: 3, metin: `${sure(talep.createdAt)} teklif istedi${talep.atanan ? ` · ${talep.atanan}` : ''}`, baslik: `${g.havuz.length} önceki talep · son: ${ttTrTarih(talep.createdAt)} · ${talep.hizmetTipi || 'Nakliye'} · ${talep.durum || 'Yeni'}`, cls: 'bg-white text-orange-700' });
+  return ozet.sort((a, b) => a.oncelik - b.oncelik);
+};
+// Başlıktaki rozet satırı — tıklayınca aşağıdaki geçmiş kutusuna kaydırır
+const TTGecmisRozetleri = ({ gecmis, kullanici, hedefId }) => {
+  const ozet = ttGecmisOzeti(gecmis, kullanici);
+  const git = () => document.getElementById(hedefId)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (!ozet.length) {
+    return <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/15 text-white/90 flex items-center gap-1" title="Numara sorgulandı: iş kaydı, havuz talebi veya telefon görüşmesi bulunamadı"><CheckCircle className="w-3 h-3" /> Geçmiş kaydı yok</span>;
+  }
+  const gorunen = ozet.slice(0, 3);
+  return (
+    <>
+      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-red-600 text-white flex items-center gap-1 animate-pulse" title="Bu numaranın sistemde kaydı var"><History className="w-3 h-3" /> Geçmiş {gecmis.toplam}</span>
+      {gorunen.map((o, i) => (
+        <button key={i} type="button" onClick={git} title={`${o.baslik} — ayrıntı için tıklayın`}
+          className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm hover:opacity-90 flex items-center gap-1 ${o.cls}`}>
+          {o.tur === 'telefon' ? <PhoneCall className="w-3 h-3" /> : o.tur === 'is' ? <Truck className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
+          {o.metin}
+        </button>
+      ))}
+      {ozet.length > gorunen.length && <button type="button" onClick={git} className="text-[10px] font-black px-2 py-0.5 rounded-full bg-white/20 text-white">+{ozet.length - gorunen.length}</button>}
+    </>
+  );
+};
+
 const MusteriGecmisiKutusu = ({ gecmis, ad = '', kompakt = false }) => {
   const [acik, setAcik] = useState(!kompakt);
   if (!gecmis) return null;
