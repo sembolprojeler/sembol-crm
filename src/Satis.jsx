@@ -95,6 +95,28 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
   // Bu seçeneklerden biri seçiliyse firma toplaması yapılacak demektir (materyal hesabı için)
   const ESYA_COMPANY_PACKING = ['Toplama Yapılacaktır', 'Sadece Mutfak Toplama', 'Sadece Kıyafet Toplama'];
 
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): YÜKLEME / BOŞALTMA MESAFESİ — sayı kutusu yerine SEÇİM
+  // Araç yanaşıyor · 50 m · 100 m · 150 m · 200 m (Telefon Görüşmesi ile aynı değerler;
+  // kayıtta yine sayı olarak saklanır: 0 / 50 / 100 / 150 / 200, birim "Metre").
+  // Listede olmayan eski bir değer (ör. 20 m) kaybolmasın diye ayrıca gösterilir.
+  // ==========================================================================
+  const KAYIT_MESAFE_SECENEKLERI = [
+    { v: '0', ad: 'Araç yanaşıyor' }, { v: '50', ad: '50 m' }, { v: '100', ad: '100 m' }, { v: '150', ad: '150 m' }, { v: '200', ad: '200 m' },
+  ];
+  const KayitMesafeSecimi = ({ deger, birim, onSec, className }) => {
+    const d = deger === null || deger === undefined ? '' : String(deger);
+    const listede = d === '' || KAYIT_MESAFE_SECENEKLERI.some(o => o.v === d);
+    return (
+      <select value={d} onChange={e => onSec(e.target.value)} className={className}>
+        <option value="">Seçin…</option>
+        {KAYIT_MESAFE_SECENEKLERI.map(o => <option key={o.v} value={o.v}>{o.ad}</option>)}
+        {!listede && <option value={d}>{d} {birim === 'Adım' ? 'adım' : 'm'} (eski kayıt)</option>}
+      </select>
+    );
+  };
+  const KAYIT_MESAFE_CLS = 'w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white text-xs md:text-sm font-bold';
+
   export const AddJobView = ({
     type, formData, setFormData, handleInputChange, handleProvinceChange,
     handleDepoChange, toggleDepoDirection, handleAddJob, editingJobId, handleSwapAddresses
@@ -169,7 +191,32 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
     const labelCls = "block text-xs md:text-sm font-bold text-neutral-700 mb-1";
 
     return (
-      <div className="max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in">
+      <div className={`max-w-4xl mx-auto bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in ${type === 'Depo' ? 'kayit-depo-mavi' : ''}`}>
+        {/* ==================================================================
+            YENİ (kullanıcı talebi): DEPO KAYDINDA FORMUN RENKLERİ MAVİ
+            Formdaki kırmızı sınıflar (başlık şeritleri, ikon rozetleri, seçili
+            buton yazıları, odak çerçeveleri, kaydet butonu) kodlarına dokunmadan
+            YALNIZCA Depo kaydında mavi karşılıklarıyla gösterilir.
+            Nakliye ve Asansör kayıtları kırmızı kalır.
+            ================================================================== */}
+        {type === 'Depo' && (
+          <style>{`
+            .kayit-depo-mavi .text-red-600 { color: #2563eb !important; }
+            .kayit-depo-mavi .text-red-700 { color: #1d4ed8 !important; }
+            .kayit-depo-mavi .bg-red-50 { background-color: #eff6ff !important; }
+            .kayit-depo-mavi .bg-red-100, .kayit-depo-mavi .hover\:bg-red-100:hover { background-color: #dbeafe !important; }
+            .kayit-depo-mavi .bg-red-600 { background-color: #2563eb !important; }
+            .kayit-depo-mavi .hover\:bg-red-700:hover { background-color: #1d4ed8 !important; }
+            .kayit-depo-mavi .border-red-100 { border-color: #dbeafe !important; }
+            .kayit-depo-mavi .border-red-200 { border-color: #bfdbfe !important; }
+            .kayit-depo-mavi .border-red-400 { border-color: #60a5fa !important; }
+            .kayit-depo-mavi .border-red-600\/20 { border-color: rgb(37 99 235 / 0.2) !important; }
+            .kayit-depo-mavi .ring-red-200 { --tw-ring-color: #bfdbfe !important; }
+            .kayit-depo-mavi .focus\:ring-red-600:focus { --tw-ring-color: #2563eb !important; }
+            .kayit-depo-mavi .shadow-red-600\/30 { --tw-shadow-color: rgb(37 99 235 / 0.3) !important; }
+            .kayit-depo-mavi .from-red-600\/10 { --tw-gradient-from: rgb(37 99 235 / 0.1) !important; }
+          `}</style>
+        )}
         <div className="flex justify-between items-center mb-6 border-b border-neutral-200 pb-4">
           {/* Sayfa ana başlığı: "Detaylı" ibaresi kaldırıldı, tek satırda görünür (whitespace-nowrap) */}
           <h2 className="text-[17px] md:text-[22px] font-black text-black flex items-center gap-2 whitespace-nowrap overflow-hidden">
@@ -417,6 +464,10 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                   )}
                   <div className="min-w-0">
                     <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Açısı' : 'Yükleme Mesafesi'}</label>
+                    {type !== 'Asansör' ? (
+                      <KayitMesafeSecimi deger={formData.fromDistance} birim={formData.fromDistanceUnit} className={KAYIT_MESAFE_CLS}
+                        onSec={v => setFormData(prev => ({ ...prev, fromDistance: v, fromDistanceUnit: 'Metre' }))} />
+                    ) : (
                     <div className="flex gap-1">
                       {/* Sayı kutusu: 3 hane tam gözükecek genişlikte (min-w) */}
                       <input type="number" name="fromDistance" value={formData.fromDistance} onChange={handleInputChange} placeholder="20" className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" />
@@ -426,6 +477,7 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                         <option value="Adım">A</option>
                       </select>
                     </div>
+                    )}
                   </div>
                   <div className="min-w-0 relative">
                     <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Eşya Durumu'}</label>
@@ -567,6 +619,10 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                     )}
                     <div className="min-w-0">
                       <label className={labelCls}>{type === 'Asansör' ? 'Kurulum Açısı' : 'Yükleme Mesafesi'}</label>
+                      {type !== 'Asansör' ? (
+                        <KayitMesafeSecimi deger={addr.distance} birim={addr.distanceUnit} className={KAYIT_MESAFE_CLS}
+                          onSec={v => setFormData(prev => ({ ...prev, extraLoadingAddresses: prev.extraLoadingAddresses.map(a => a.id === addr.id ? { ...a, distance: v, distanceUnit: 'Metre' } : a) }))} />
+                      ) : (
                       <div className="flex gap-1">
                         <input 
                           type="number" 
@@ -584,6 +640,7 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                           <option value="Adım">A</option>
                         </select>
                       </div>
+                      )}
                     </div>
                     <div className="min-w-0">
                       <label className={labelCls}>{type === 'Asansör' ? 'Kime Kurulacak' : 'Eşya Durumu'}</label>
@@ -732,13 +789,9 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                   </div>
                   <div className="min-w-0">
                     <label className={labelCls}>Boşaltma Mesafesi</label>
-                    <div className="flex gap-1">
-                      <input type="number" name="toDistance" value={formData.toDistance} onChange={handleInputChange} placeholder="15" className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" />
-                      <select name="toDistanceUnit" value={formData.toDistanceUnit} onChange={handleInputChange} className="w-11 shrink-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-xs md:text-sm text-center">
-                        <option value="Metre">M</option>
-                        <option value="Adım">A</option>
-                      </select>
-                    </div>
+                    {/* DEĞİŞTİ (kullanıcı talebi): seçim listesi */}
+                    <KayitMesafeSecimi deger={formData.toDistance} birim={formData.toDistanceUnit} className={KAYIT_MESAFE_CLS}
+                      onSec={v => setFormData(prev => ({ ...prev, toDistance: v, toDistanceUnit: 'Metre' }))} />
                   </div>
                   {/* YENİ: TESLİM ŞEKLİ (eski adı Duvar Montajı) — çoklu seçim yapılabilen açılır pencere */}
                   <div className="min-w-0 relative">
@@ -864,23 +917,9 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                     </div>
                     <div>
                       <label className={labelCls}>Boşaltma Mesafesi</label>
-                      <div className="flex gap-1.5 md:gap-2">
-                        <input 
-                          type="number" 
-                          value={addr.distance} 
-                          onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distance: e.target.value } : a) }))} 
-                          placeholder="15" 
-                          className="w-full min-w-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none text-xs md:text-sm" 
-                        />
-                        <select 
-                          value={addr.distanceUnit} 
-                          onChange={(e) => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distanceUnit: e.target.value } : a) }))} 
-                          className="w-11 shrink-0 p-2 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 outline-none bg-white font-bold text-xs md:text-sm text-center"
-                        >
-                          <option value="Metre">M</option>
-                          <option value="Adım">A</option>
-                        </select>
-                      </div>
+                      {/* DEĞİŞTİ (kullanıcı talebi): seçim listesi */}
+                      <KayitMesafeSecimi deger={addr.distance} birim={addr.distanceUnit} className={KAYIT_MESAFE_CLS}
+                        onSec={v => setFormData(prev => ({ ...prev, extraUnloadingAddresses: prev.extraUnloadingAddresses.map(a => a.id === addr.id ? { ...a, distance: v, distanceUnit: 'Metre' } : a) }))} />
                     </div>
                   </div>
                 </div>
@@ -9880,19 +9919,20 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
     switch (bolumId) {
       case 'musteri': return (
         <div className="space-y-4">
-          {/* Hizmet seçimi — canlı renkli büyük kartlar */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          {/* Hizmet seçimi — canlı renkli kartlar
+              DEĞİŞTİ (kullanıcı talebi): kartlar ~%30 küçültüldü (dolgu, ikon, yazı boyutu) */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5">
             {TT_HIZMETLER.map(h => {
               const secili = form.hizmetTipi === h.id;
               return (
                 <button key={h.id} type="button" onClick={() => hizmetSec(h.id)}
-                  className={`p-3 rounded-2xl border-2 text-left transition ${secili ? h.stil.secili : h.stil.pasif}`}>
-                  <span className="flex items-center gap-2">
-                    <h.Ikon className="w-5 h-5" />
-                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${secili ? 'bg-white/20' : h.stil.acik + ' border'}`}>{h.marka}</span>
+                  className={`px-2.5 py-2 rounded-xl border-2 text-left transition ${secili ? h.stil.secili : h.stil.pasif}`}>
+                  <span className="flex items-center gap-1.5">
+                    <h.Ikon className="w-3.5 h-3.5" />
+                    <span className={`text-[8px] font-black px-1 py-px rounded ${secili ? 'bg-white/20' : h.stil.acik + ' border'}`}>{h.marka}</span>
                   </span>
-                  <span className="block text-sm font-black mt-1.5">{h.ad}</span>
-                  <span className={`block text-[10px] font-bold ${secili ? 'text-white/80' : 'text-neutral-500'}`}>{h.alt}</span>
+                  <span className="block text-xs font-black mt-1 leading-tight">{h.ad}</span>
+                  <span className={`block text-[9px] font-bold leading-tight truncate ${secili ? 'text-white/80' : 'text-neutral-500'}`} title={h.alt}>{h.alt}</span>
                 </button>
               );
             })}
@@ -10062,7 +10102,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           const tamam = no > 0 && ttAdimTamam(form, soruId);
           return (
             <div id={soruId ? `tt-soru-${soruId}` : undefined} className={cls}>
-              <label className="flex items-center gap-1.5 text-xs font-black text-neutral-800 mb-1" title={no ? soruAdimlari[no - 1].baslik : ''}>
+              <label className="flex items-center gap-1.5 text-xs font-black text-neutral-800 mb-1 whitespace-nowrap overflow-hidden" title={no ? soruAdimlari[no - 1].baslik : ''}>
                 {no > 0 && <span className={`w-4 h-4 rounded-full text-[9px] flex items-center justify-center shrink-0 ${tamam ? 'bg-green-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>{tamam ? '✓' : no}</span>}
                 {etiket}
               </label>
@@ -10101,17 +10141,20 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           {alan(guzergahSoru, 'İl · İlçe · Açık Adres',
             <TTIlIlce il={form[`${r}Il`]} ilce={form[`${r}Ilce`]} adres={form[`${r}Adres`]} halka={S.halka} onIl={d(`${r}Il`)} onIlce={d(`${r}Ilce`)} onAdres={d(`${r}Adres`)} />)}
         </>);
-        const tarihAlani = (etiket) => alan('tarih', etiket, (
-          <div className="space-y-2">
-            <input type="date" value={form.tasinmaTarihi} onChange={e => d('tasinmaTarihi')(e.target.value)} className={kSec} />
-            <div className="flex flex-wrap gap-1">
-              {['Bu hafta', 'Hafta sonu', 'Ay başı', 'Ay ortası', 'Ay sonu', '10 gün içinde', 'Belirsiz'].map(n => (
-                <button key={n} type="button" onClick={() => d('tasinmaNotu')(form.tasinmaNotu === n ? '' : n)}
-                  className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition ${form.tasinmaNotu === n ? S.secili : S.pasif}`}>{n}</button>
-              ))}
-            </div>
-          </div>
-        ));
+        // DEĞİŞTİ (kullanıcı talebi): hızlı tarih seçenekleri (Bu hafta, Ay sonu…) düğme yerine
+        // AÇILIR LİSTE; tarih ve tercih iki ayrı sütun olarak aynı satırda durur.
+        const TARIH_TERCIHLERI = ['Bu hafta', 'Hafta sonu', 'Ay başı', 'Ay ortası', 'Ay sonu', '10 gün içinde', 'Belirsiz'];
+        const tarihAlani = (etiket) => (<>
+          {alan('tarih', etiket, <input type="date" value={form.tasinmaTarihi} onChange={e => d('tasinmaTarihi')(e.target.value)} className={kSec} />)}
+          {alan(null, 'Tarih Tercihi', (
+            <select value={form.tasinmaNotu || ''} onChange={e => d('tasinmaNotu')(e.target.value)} className={kSec}>
+              <option value="">Tarih tercihi seçin…</option>
+              {TARIH_TERCIHLERI.map(n => <option key={n} value={n}>{n}</option>)}
+              {/* Eski kayıtlardaki serbest not kaybolmasın */}
+              {form.tasinmaNotu && !TARIH_TERCIHLERI.includes(form.tasinmaNotu) && <option value={form.tasinmaNotu}>{form.tasinmaNotu}</option>}
+            </select>
+          ))}
+        </>);
         // Yükleme ↔ boşaltma adreslerini yer değiştir (kayıt ekranındaki ⇅ düğmesi gibi)
         const adresleriDegistir = () => setForm(f => {
           const x = { ...f };
@@ -10122,9 +10165,9 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
         if (form.hizmetTipi === 'Nakliye') return (
           <div className="space-y-4">
             {kart('Taşınma Bilgileri', Truck, KIRMIZI, (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {alan('oda', 'Daire Tipi', secim('odaSayisi', TT_ODA_SECENEKLERI, 'Ev tipi seçin…'))}
-                {alan('toplama', 'Eşya Durumu (küçük eşya toplama)', secim('toplama', TT_TOPLAMA, 'Seçin…'))}
+                {alan('toplama', 'Eşya Durumu', secim('toplama', TT_TOPLAMA, 'Küçük eşya toplama…'))}
                 {tarihAlani('Taşınma Tarihi')}
               </div>
             ))}
@@ -10139,7 +10182,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
         if (form.hizmetTipi === 'Depo') return (
           <div className="space-y-4">
             {kart('Depo Bilgileri', Package, MAVI, (<>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {alan('cins', 'Eşya Cinsi', secim('esyaCinsi', TT_ESYA_CINSI, 'Seçin…'))}
                 {alan('boyut', 'Depo Boyutu (kaç+1)', secim('depoBoyutu', TT_DEPO_BOYUTLARI.map(b => ({ id: b.id,
                   ad: `${b.id} Depo${b.m3 ? ` · ${b.m3} m³` : ''}${ttDepoAylik(form.sube, b.id) && b.aylik ? ` · ${ttTl(ttDepoAylik(form.sube, b.id))} +KDV/ay` : ' · video ile'}` })), 'Depo boyutu seçin…'))}
@@ -10151,7 +10194,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
             </>))}
             {kart(form.nakliyeIstiyor === 'Firma' ? 'Yükleme Bilgileri (Eşyaların Alınacağı Adres)' : 'Eşyaların Bulunduğu Yer', ArrowUpRight, MAVI, (<>
               {adresAlanlari('yuk', 'konum', form.nakliyeIstiyor === 'Firma')}
-              {form.nakliyeIstiyor === 'Firma' && alan('toplama', 'Eşya Durumu (küçük eşya toplama)', secim('toplama', TT_TOPLAMA, 'Seçin…'), 'sm:max-w-sm')}
+              {form.nakliyeIstiyor === 'Firma' && alan('toplama', 'Eşya Durumu', secim('toplama', TT_TOPLAMA, 'Küçük eşya toplama…'), 'sm:max-w-sm')}
               {form.nakliyeIstiyor !== 'Firma' && <p className="text-[11px] font-bold text-neutral-500">Firma alımı seçilirse kat, taşıma şekli, mesafe ve toplama soruları burada açılır.</p>}
             </>))}
           </div>
@@ -10159,7 +10202,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
         return (
           <div className="space-y-4">
             {kart('Depo Bilgileri (Çıkış)', Package, MOR, (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {alan('cikisDepo', 'Eşyaların Bulunduğu Depo', secim('sube', DEPO_LOCATIONS.map(x => x.name), 'Depo seçin…'))}
                 {alan('cikisDepo', 'Depo Boyutu', secim('depoBoyutu', TT_DEPO_BOYUTLARI.map(b => ({ id: b.id, ad: `${b.id}${b.m3 ? ` · ${b.m3} m³` : ''}` })), 'Seçin…'))}
                 {tarihAlani('Çıkış Tarihi')}
