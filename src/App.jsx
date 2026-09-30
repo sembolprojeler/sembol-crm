@@ -4086,6 +4086,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [password, setPassword] = useState('');
     const [rememberMe, setRememberMe] = useState(false);
     const [googleBekliyor, setGoogleBekliyor] = useState(false);
+    // YENİ: "Google ile giriş nasıl yapılır?" kutusu varsayılan kapalı
+    const [duyuruAcik, setDuyuruAcik] = useState(false);
     const sifreKapali = sifreGirisiKapaliMi(googleGecisBitis);
 
     React.useEffect(() => {
@@ -4109,21 +4111,22 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     };
 
     return (
-      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4 animate-in fade-in">
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4 overflow-y-auto animate-in fade-in">
         <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
-          <div className="bg-neutral-50 p-8 flex flex-col items-center border-b border-neutral-200">
+          <div className="bg-neutral-50 px-6 py-5 flex flex-col items-center border-b border-neutral-200">
             <MarkaLogo
               logoUrl={appBranding?.logoUrl}
-              className="max-w-[80%] w-auto object-contain mb-2 drop-shadow-sm"
-              style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
+              className="max-w-[80%] w-auto object-contain drop-shadow-sm"
+              // DEĞİŞTİ: giriş kartı sıkılaştırıldı — logo ~60px, logoSize ayarı en fazla 64px'e kadar büyütür (oran korunur)
+              style={{ height: `${Math.min(64, 60 * ((appBranding?.logoSize || 100) / 100))}px` }}
               fallback={(
-                <div className="flex flex-col items-center mb-2">
-                  <div className="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg">S</div>
+                <div className="flex flex-col items-center">
+                  <div className="w-14 h-14 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg">S</div>
                   <h1 className="text-2xl font-black text-black tracking-widest mt-2">SEMBOL</h1>
                 </div>
               )}
             />
-            <p className="text-red-600 text-xs font-bold mt-1 tracking-[0.2em] bg-red-50 px-3 py-1 rounded-full border border-red-100">OPERASYON MERKEZİ</p>
+            <p className="text-red-600 text-xs font-bold mt-3 tracking-[0.2em] bg-red-50 px-3 py-1 rounded-full border border-red-100">OPERASYON MERKEZİ</p>
           </div>
           
           {/* ================================================================
@@ -4135,7 +4138,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               handleSubmit içindeki e.preventDefault() sayfa yenilenmesini
               engeller; "required" alan denetimleri de artık çalışır.
               ================================================================ */}
-          <form onSubmit={handleSubmit} className="p-8 space-y-6">
+          <form onSubmit={handleSubmit} className="p-6 space-y-4">
             {error && (
               <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100">
                 <AlertTriangle className="w-5 h-5 shrink-0" /> {error}
@@ -4143,7 +4146,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             )}
 
             <div>
-              <label className="block text-sm font-bold text-neutral-700 mb-2">E-Posta veya Ad Soyad</label>
+              <label className="block text-sm font-bold text-neutral-700 mb-1.5">E-Posta veya Ad Soyad</label>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400"><User className="w-5 h-5" /></span>
                 <input 
@@ -4158,7 +4161,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             </div>
             
             <div>
-              <label className="block text-sm font-bold text-neutral-700 mb-2">Şifre</label>
+              <label className="block text-sm font-bold text-neutral-700 mb-1.5">Şifre</label>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400"><Lock className="w-5 h-5" /></span>
                 <input 
@@ -4172,7 +4175,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               </div>
             </div>
             
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex items-center gap-2">
               <input 
                 type="checkbox" 
                 id="remember" 
@@ -4187,13 +4190,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             
             {/* DEĞİŞTİ: type="button" + onClick yerine type="submit" — Enter
                 tuşu da bu butonu tetikler, tıklama davranışı aynen korunur */}
-            <button type="submit" className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg mt-4">
+            <button type="submit" className="w-full bg-red-600 text-white font-black py-3.5 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg">
               Sisteme Giriş Yap
             </button>
 
             {/* DEĞİŞTİ (kullanıcı talebi): Google ile Giriş artık EN ALTTA, "veya" ayracının altında — eşleştirme personel kaydındaki googleUid ile.
                 Uygulama içi tarayıcıda (WhatsApp vb.) buton yerine "Chrome/Safari'de aç" uyarısı çıkar. */}
-            {googleAktif && (<>
+            {googleAktif && (<div className="space-y-3">
             <div className="flex items-center gap-3 text-xs font-bold text-neutral-400">
               <div className="flex-1 h-px bg-neutral-200" /> veya <div className="flex-1 h-px bg-neutral-200" />
             </div>
@@ -4202,7 +4205,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               type="button"
               disabled={googleBekliyor}
               onClick={async () => { setGoogleBekliyor(true); try { await onGoogleLogin(rememberMe); } finally { setGoogleBekliyor(false); } }}
-              className="w-full flex items-center justify-center gap-3 bg-white border-2 border-neutral-300 text-neutral-800 font-black py-3.5 rounded-xl hover:bg-neutral-50 hover:border-neutral-400 transition disabled:opacity-60"
+              className="w-full flex items-center justify-center gap-3 bg-white border-2 border-neutral-300 text-neutral-800 font-black py-3 rounded-xl hover:bg-neutral-50 hover:border-neutral-400 transition disabled:opacity-60"
             >
               {googleBekliyor ? <Loader2 className="w-5 h-5 animate-spin" /> : (
                 <svg className="w-5 h-5" viewBox="0 0 48 48" aria-hidden="true">
@@ -4218,16 +4221,25 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
             {/* DEĞİŞTİ (kullanıcı talebi): Duyuru artık kartın içinde, Google butonunun hemen altında.
                 Metin Uygulama Ayarları'ndan gelir, boşsa gizli. "Not:" ile başlayan satırlar daha küçük/soluk. */}
+            {/* DEĞİŞTİ: açılır-kapanır, varsayılan kapalı */}
             {girisDuyurusu.trim() && (
-              <div className="p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">
-                <p className="text-sm font-black mb-1.5">ℹ️ Google ile giriş nasıl yapılır?</p>
-                {girisDuyurusu.trim().split('\n').map((satir, i) => (
-                  satir.trim().startsWith('Not:')
-                    ? <p key={i} className="text-xs font-medium text-amber-800/70 mt-2">{satir}</p>
-                    : satir.trim()
-                      ? <p key={i} className="text-sm font-medium">{satir}</p>
-                      : null
-                ))}
+              <div className="px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">
+                <button type="button" onClick={() => setDuyuruAcik(v => !v)} aria-expanded={duyuruAcik}
+                  className="w-full flex items-center justify-between gap-2 text-left text-sm font-black">
+                  <span>ℹ️ Google ile giriş nasıl yapılır?</span>
+                  <span className="text-xs shrink-0" aria-hidden="true">{duyuruAcik ? '▴' : '▾'}</span>
+                </button>
+                {duyuruAcik && (
+                  <div className="mt-1.5">
+                    {girisDuyurusu.trim().split('\n').map((satir, i) => (
+                      satir.trim().startsWith('Not:')
+                        ? <p key={i} className="text-[11px] font-medium text-amber-800/70 leading-snug mt-1.5">{satir}</p>
+                        : satir.trim()
+                          ? <p key={i} className="text-xs font-medium leading-snug">{satir}</p>
+                          : null
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -4241,7 +4253,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               </p>
             ) : null}
 
-            </>)}
+            </div>)}
           </form>
         </div>
       </div>
