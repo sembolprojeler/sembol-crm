@@ -9788,7 +9788,31 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
   const [hata, setHata] = useState('');
   const ilerleZamanlayici = useRef(null);
 
-  const adimlar = ttAdimListesi(form);
+  // DEĞİŞTİ (kullanıcı talebi): 1-7 arası sorular AYRI AYRI adım değil, kayıt ekranına
+  // benzer TEK SAYFADA toplanır. Soru listesi (ttAdimListesi) aynen korunur; yalnızca
+  // soldaki kontrol listesi, numaralar ve tamamlandı (✓) işaretleri için kullanılır.
+  const soruAdimlari = ttAdimListesi(form).filter(a => a.soru);
+  const soruNumarasi = (id) => soruAdimlari.findIndex(a => a.id === id) + 1;
+  const adimlar = [
+    { id: 'musteri', baslik: 'Müşteri & Hizmet' },
+    { id: 'sorular', baslik: `Görüşme Soruları (${soruAdimlari.length} soru · tek sayfa)` },
+    { id: 'sonuc', baslik: 'Fiyat, Video & Takip' },
+  ];
+  // "Sorular" sayfası, içindeki tüm sorular cevaplanınca tamamlanmış sayılır
+  const adimTamamMi = (id) => (id === 'sorular' ? soruAdimlari.every(a => ttAdimTamam(form, a.id)) : ttAdimTamam(form, id));
+  // DEĞİŞTİ (kullanıcı talebi): adım adım ilerleme yok — tüm bölümler TEK SAYFADA alt alta.
+  // Menüdeki tıklamalar sayfayı ilgili bölüme / soruya kaydırır.
+  const soruyaGit = (id) => document.getElementById(`tt-soru-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const bolumeGit = (id) => document.getElementById(`tt-bolum-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  const sayfaRef = useRef(null);
+  // Kaydırdıkça hangi bölümde olunduğu (soldaki menüde vurgulanır)
+  const kaydirmaTakip = () => {
+    const kap = sayfaRef.current;
+    if (!kap) return;
+    let aktif = 0;
+    adimlar.forEach((a, i) => { const el = document.getElementById(`tt-bolum-${a.id}`); if (el && el.offsetTop - kap.offsetTop <= kap.scrollTop + 120) aktif = i; });
+    if (aktif !== adimIdx) setAdimIdx(aktif);
+  };
   const adim = adimlar[Math.min(adimIdx, adimlar.length - 1)];
   const sorular = adimlar.filter(a => a.soru);
   const soruNo = sorular.findIndex(a => a === adim) + 1;
@@ -9800,7 +9824,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
 
   // Alan güncelleyiciler
   const d = (alan) => (v) => setForm(f => ({ ...f, [alan]: v }));
-  const git = (i) => { clearTimeout(ilerleZamanlayici.current); setAdimIdx(Math.max(0, Math.min(i, adimlar.length - 1))); };
+  const git = (i) => { clearTimeout(ilerleZamanlayici.current); const a = adimlar[Math.max(0, Math.min(i, adimlar.length - 1))]; if (a) bolumeGit(a.id); };
   const ileri = () => git(adimIdx + 1);
   const geri = () => git(adimIdx - 1);
   // Seç + (adım tamamlandıysa) kısa bir gecikmeyle otomatik sonraki soruya geç — satışçıyı hızlandırır
@@ -9852,8 +9876,8 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
   );
   const rollerIzgara = roller.length > 1 ? 'grid grid-cols-1 md:grid-cols-2 gap-3' : 'grid grid-cols-1 gap-3 max-w-xl';
 
-  const adimIcerigi = () => {
-    switch (adim.id) {
+  const adimIcerigi = (bolumId = adim.id) => {   // DEĞİŞTİ: bölüm kimliği parametre olarak alınır
+    switch (bolumId) {
       case 'musteri': return (
         <div className="space-y-4">
           {/* Hizmet seçimi — canlı renkli büyük kartlar */}
@@ -10029,6 +10053,122 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           </div>
         </div>
       );
+      case 'sorular': {
+        // Kayıt ekranı düzeni: açılır listeler + başlıklı bilgi kartları.
+        // Değerler kayıt ekranıyla aynı (Daire Tipi, Kat, Taşıma Şekli, Mesafe, Eşya Durumu, İl/İlçe).
+        const kSec = `w-full px-3 py-2.5 rounded-xl border border-neutral-300 bg-white text-sm font-bold text-neutral-900 outline-none focus:ring-2 ${S.halka}`;
+        const alan = (soruId, etiket, icerik, cls = '') => {
+          const no = soruNumarasi(soruId);
+          const tamam = no > 0 && ttAdimTamam(form, soruId);
+          return (
+            <div id={soruId ? `tt-soru-${soruId}` : undefined} className={cls}>
+              <label className="flex items-center gap-1.5 text-xs font-black text-neutral-800 mb-1" title={no ? soruAdimlari[no - 1].baslik : ''}>
+                {no > 0 && <span className={`w-4 h-4 rounded-full text-[9px] flex items-center justify-center shrink-0 ${tamam ? 'bg-green-600 text-white' : 'bg-neutral-200 text-neutral-600'}`}>{tamam ? '✓' : no}</span>}
+                {etiket}
+              </label>
+              {icerik}
+            </div>
+          );
+        };
+        const secim = (alanAdi, secenekler, ilk) => (
+          <select value={form[alanAdi] || ''} onChange={e => d(alanAdi)(e.target.value)} className={kSec}>
+            <option value="">{ilk}</option>
+            {secenekler.map(o => (typeof o === 'string' ? <option key={o} value={o}>{o}</option> : <option key={o.id} value={o.id}>{o.ad}</option>))}
+          </select>
+        );
+        // Bilgi kartı — kayıt ekranındaki "YÜKLEME BİLGİLERİ (1. ADRES)" başlığı gibi
+        const kart = (baslik, Ikon, renk, icerik) => (
+          <div className={`rounded-2xl border ${renk.kenar} bg-white overflow-hidden`}>
+            <div className={`px-4 py-2.5 flex items-center gap-2 border-b ${renk.baslik}`}>
+              <span className={`w-7 h-7 rounded-lg flex items-center justify-center text-white ${renk.ikon}`}><Ikon className="w-4 h-4" /></span>
+              <span className="text-xs font-black uppercase tracking-wide text-neutral-900">{baslik}</span>
+            </div>
+            <div className="p-4 space-y-3">{icerik}</div>
+          </div>
+        );
+        const KIRMIZI = { kenar: 'border-red-100', baslik: 'bg-red-50/60 border-red-100', ikon: 'bg-red-600' };
+        const MAVI = { kenar: 'border-blue-100', baslik: 'bg-blue-50/60 border-blue-100', ikon: 'bg-blue-600' };
+        const MOR = { kenar: 'border-violet-100', baslik: 'bg-violet-50/60 border-violet-100', ikon: 'bg-violet-600' };
+        // Adres kartı (yükleme / boşaltma / teslim): Kat · Taşıma Şekli · Mesafe, İl/İlçe, Açık adres
+        const adresAlanlari = (r, guzergahSoru, nakliyeSorulari = true) => (<>
+          {nakliyeSorulari && (
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {alan('kat', 'Kat', secim(`${r}Kat`, FLOORS, 'Kat seçin…'))}
+              {alan('asansor', 'Taşıma Şekli', secim(`${r}Tasima`, TT_TASIMA.map(o => ({ id: o.id, ad: o.id })), 'Seçin…'))}
+              {alan('yanasma', r === 'yuk' ? 'Yükleme Mesafesi' : 'Boşaltma Mesafesi', secim(`${r}Mesafe`, TT_YANASMA, 'Araç yanaşıyor mu?'))}
+            </div>
+          )}
+          {alan(guzergahSoru, 'İl · İlçe · Açık Adres',
+            <TTIlIlce il={form[`${r}Il`]} ilce={form[`${r}Ilce`]} adres={form[`${r}Adres`]} halka={S.halka} onIl={d(`${r}Il`)} onIlce={d(`${r}Ilce`)} onAdres={d(`${r}Adres`)} />)}
+        </>);
+        const tarihAlani = (etiket) => alan('tarih', etiket, (
+          <div className="space-y-2">
+            <input type="date" value={form.tasinmaTarihi} onChange={e => d('tasinmaTarihi')(e.target.value)} className={kSec} />
+            <div className="flex flex-wrap gap-1">
+              {['Bu hafta', 'Hafta sonu', 'Ay başı', 'Ay ortası', 'Ay sonu', '10 gün içinde', 'Belirsiz'].map(n => (
+                <button key={n} type="button" onClick={() => d('tasinmaNotu')(form.tasinmaNotu === n ? '' : n)}
+                  className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition ${form.tasinmaNotu === n ? S.secili : S.pasif}`}>{n}</button>
+              ))}
+            </div>
+          </div>
+        ));
+        // Yükleme ↔ boşaltma adreslerini yer değiştir (kayıt ekranındaki ⇅ düğmesi gibi)
+        const adresleriDegistir = () => setForm(f => {
+          const x = { ...f };
+          ['Il', 'Ilce', 'Adres', 'Kat', 'Tasima', 'Mesafe'].forEach(k => { x[`yuk${k}`] = f[`bos${k}`]; x[`bos${k}`] = f[`yuk${k}`]; });
+          return x;
+        });
+
+        if (form.hizmetTipi === 'Nakliye') return (
+          <div className="space-y-4">
+            {kart('Taşınma Bilgileri', Truck, KIRMIZI, (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {alan('oda', 'Daire Tipi', secim('odaSayisi', TT_ODA_SECENEKLERI, 'Ev tipi seçin…'))}
+                {alan('toplama', 'Eşya Durumu (küçük eşya toplama)', secim('toplama', TT_TOPLAMA, 'Seçin…'))}
+                {tarihAlani('Taşınma Tarihi')}
+              </div>
+            ))}
+            {kart('Yükleme Bilgileri (Mevcut Ev)', ArrowUpRight, KIRMIZI, adresAlanlari('yuk', 'guzergah'))}
+            <div className="flex justify-center -my-2 relative z-10">
+              <button type="button" onClick={adresleriDegistir} title="Yükleme ve boşaltma adreslerini yer değiştir"
+                className="w-9 h-9 rounded-full bg-neutral-900 text-white flex items-center justify-center shadow-lg hover:bg-black"><ArrowUpDown className="w-4 h-4" /></button>
+            </div>
+            {kart('Boşaltma Bilgileri (Yeni Ev)', MapPin, KIRMIZI, adresAlanlari('bos', 'guzergah'))}
+          </div>
+        );
+        if (form.hizmetTipi === 'Depo') return (
+          <div className="space-y-4">
+            {kart('Depo Bilgileri', Package, MAVI, (<>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {alan('cins', 'Eşya Cinsi', secim('esyaCinsi', TT_ESYA_CINSI, 'Seçin…'))}
+                {alan('boyut', 'Depo Boyutu (kaç+1)', secim('depoBoyutu', TT_DEPO_BOYUTLARI.map(b => ({ id: b.id,
+                  ad: `${b.id} Depo${b.m3 ? ` · ${b.m3} m³` : ''}${ttDepoAylik(form.sube, b.id) && b.aylik ? ` · ${ttTl(ttDepoAylik(form.sube, b.id))} +KDV/ay` : ' · video ile'}` })), 'Depo boyutu seçin…'))}
+                {alan(null, 'Kiralama Süresi', secim('kiralamaSuresi', TT_KIRALAMA, 'Seçin…'))}
+                {alan(null, 'Şube Tercihi', secim('sube', TT_SUBELER, 'Seçin…'))}
+                {alan('nakliye', 'Eşyalar depoya nasıl ulaşsın?', secim('nakliyeIstiyor', TT_NAKLIYE_TERCIHI, 'Seçin…'))}
+                {tarihAlani('Depoya Giriş Tarihi')}
+              </div>
+            </>))}
+            {kart(form.nakliyeIstiyor === 'Firma' ? 'Yükleme Bilgileri (Eşyaların Alınacağı Adres)' : 'Eşyaların Bulunduğu Yer', ArrowUpRight, MAVI, (<>
+              {adresAlanlari('yuk', 'konum', form.nakliyeIstiyor === 'Firma')}
+              {form.nakliyeIstiyor === 'Firma' && alan('toplama', 'Eşya Durumu (küçük eşya toplama)', secim('toplama', TT_TOPLAMA, 'Seçin…'), 'sm:max-w-sm')}
+              {form.nakliyeIstiyor !== 'Firma' && <p className="text-[11px] font-bold text-neutral-500">Firma alımı seçilirse kat, taşıma şekli, mesafe ve toplama soruları burada açılır.</p>}
+            </>))}
+          </div>
+        );
+        return (
+          <div className="space-y-4">
+            {kart('Depo Bilgileri (Çıkış)', Package, MOR, (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {alan('cikisDepo', 'Eşyaların Bulunduğu Depo', secim('sube', DEPO_LOCATIONS.map(x => x.name), 'Depo seçin…'))}
+                {alan('cikisDepo', 'Depo Boyutu', secim('depoBoyutu', TT_DEPO_BOYUTLARI.map(b => ({ id: b.id, ad: `${b.id}${b.m3 ? ` · ${b.m3} m³` : ''}` })), 'Seçin…'))}
+                {tarihAlani('Çıkış Tarihi')}
+              </div>
+            ))}
+            {kart('Boşaltma Bilgileri (Teslim Adresi)', MapPin, MOR, adresAlanlari('bos', 'guzergah'))}
+          </div>
+        );
+      }
       case 'sonuc': return (
         <div className="space-y-4">
           <div>
@@ -10160,13 +10300,13 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           <button type="button" onClick={onKapat} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center shrink-0"><X className="w-5 h-5" /></button>
         </div>
         {/* İlerleme çubuğu */}
-        <div className="shrink-0 h-1.5 bg-neutral-100"><div className={`h-full transition-all ${S.serit}`} style={{ width: `${Math.round(((adimIdx + 1) / adimlar.length) * 100)}%` }} /></div>
+        <div className="shrink-0 h-1.5 bg-neutral-100"><div className={`h-full transition-all ${S.serit}`} style={{ width: `${Math.round((soruAdimlari.filter(x => ttAdimTamam(form, x.id)).length / Math.max(1, soruAdimlari.length)) * 100)}%` }} /></div>
         {/* Mobil adım çipleri */}
         <div className="lg:hidden shrink-0 flex gap-1.5 overflow-x-auto px-3 py-2 border-b border-neutral-100">
           {adimlar.map((a, i) => (
             <button key={a.id + i} type="button" onClick={() => git(i)}
-              className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-black border ${i === adimIdx ? S.secili : ttAdimTamam(form, a.id) ? 'bg-green-50 text-green-800 border-green-200' : 'bg-white text-neutral-500 border-neutral-200'}`}>
-              {a.soru ? `${sorular.indexOf(a) + 1}.` : ''} {a.id === 'musteri' ? 'Müşteri' : a.id === 'sonuc' ? 'Sonuç' : a.baslik.split(' ').slice(0, 2).join(' ')}
+              className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-black border ${i === adimIdx ? S.secili : adimTamamMi(a.id) ? 'bg-green-50 text-green-800 border-green-200' : 'bg-white text-neutral-500 border-neutral-200'}`}>
+              {a.id === 'musteri' ? 'Müşteri' : a.id === 'sonuc' ? 'Sonuç' : `Sorular (${soruAdimlari.filter(x => ttAdimTamam(form, x.id)).length}/${soruAdimlari.length})`}
             </button>
           ))}
         </div>
@@ -10175,28 +10315,49 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           {/* SOL: soru listesi (masaüstü) */}
           <nav className="hidden lg:block border-r border-neutral-100 overflow-y-auto p-3 space-y-1 bg-neutral-50">
             {adimlar.map((a, i) => {
-              const tamam = ttAdimTamam(form, a.id);
+              const tamam = adimTamamMi(a.id);
               const aktif = i === adimIdx;
               return (
-                <button key={a.id + i} type="button" onClick={() => git(i)}
+                <React.Fragment key={a.id + i}>
+                <button type="button" onClick={() => git(i)}
                   className={`w-full text-left px-2.5 py-2 rounded-xl text-[11px] font-black flex items-start gap-2 transition ${aktif ? S.secili : 'text-neutral-600 hover:bg-white'}`}>
                   <span className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] shrink-0 ${aktif ? 'bg-white/25' : tamam ? 'bg-green-600 text-white' : 'bg-neutral-200 text-neutral-500'}`}>
                     {tamam && !aktif ? '✓' : a.soru ? sorular.indexOf(a) + 1 : a.id === 'musteri' ? '•' : '₺'}
                   </span>
                   <span className="leading-snug">{a.baslik}{a.ek && <span className={`block text-[9px] ${aktif ? 'text-white/70' : 'text-neutral-400'}`}>nakliye sorusu</span>}</span>
                 </button>
+                {/* YENİ: tek sayfadaki soruların kontrol listesi — tıklayınca o soruya kaydırır */}
+                {a.id === 'sorular' && (
+                  <div className="ml-4 pl-2 border-l-2 border-neutral-200 space-y-0.5 py-1">
+                    {soruAdimlari.map((q, qi) => {
+                      const qTamam = ttAdimTamam(form, q.id);
+                      return (
+                        <button key={q.id} type="button" onClick={() => soruyaGit(q.id)}
+                          className="w-full text-left px-1.5 py-1 rounded-lg text-[10px] font-bold flex items-start gap-1.5 text-neutral-600 hover:bg-white">
+                          <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] shrink-0 ${qTamam ? 'bg-green-600 text-white' : 'bg-neutral-200 text-neutral-500'}`}>{qTamam ? '✓' : qi + 1}</span>
+                          <span className="leading-snug">{q.baslik}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                </React.Fragment>
               );
             })}
           </nav>
 
-          {/* ORTA: aktif soru */}
-          <div className="overflow-y-auto overscroll-contain p-4 md:p-6">
-            <div className="max-w-3xl">
-              <p className={`text-[11px] font-black uppercase tracking-wider ${S.yazi}`}>
-                {adim.soru ? `Soru ${soruNo} / ${sorular.length}` : adim.id === 'musteri' ? 'Başlangıç' : 'Son adım'}
-              </p>
-              <h4 className="text-xl md:text-2xl font-black text-neutral-900 mt-0.5 mb-4">{adim.baslik}</h4>
-              {adimIcerigi()}
+          {/* ORTA: TÜM BÖLÜMLER TEK SAYFADA — aşağı doğru kaydırılır (kullanıcı talebi) */}
+          <div ref={sayfaRef} onScroll={kaydirmaTakip} className="overflow-y-auto overscroll-contain p-4 md:p-6 scroll-smooth">
+            <div className="max-w-5xl space-y-8 pb-10">
+              {adimlar.map((a, i) => (
+                <section key={a.id} id={`tt-bolum-${a.id}`} className={`scroll-mt-4 ${i > 0 ? 'pt-6 border-t-2 border-dashed border-neutral-200' : ''}`}>
+                  <p className={`text-[11px] font-black uppercase tracking-wider ${S.yazi}`}>
+                    {i + 1}. Bölüm{a.id === 'sorular' ? ` · ${soruAdimlari.filter(x => ttAdimTamam(form, x.id)).length} / ${soruAdimlari.length} soru cevaplandı` : ''}
+                  </p>
+                  <h4 className="text-xl md:text-2xl font-black text-neutral-900 mt-0.5 mb-4">{a.baslik}</h4>
+                  {adimIcerigi(a.id)}
+                </section>
+              ))}
             </div>
           </div>
 
@@ -10219,15 +10380,9 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           </aside>
         </div>
 
-        {/* ALT ÇUBUK — Geri · İleri · Kaydet (Kaydet her adımda kullanılabilir) */}
+        {/* ALT ÇUBUK — DEĞİŞTİ (kullanıcı talebi): tek sayfa olduğu için Geri / Sonraki yok */}
         <div className="shrink-0 px-3 md:px-5 py-3 border-t border-neutral-200 bg-white flex items-center gap-2">
-          <button type="button" onClick={geri} disabled={adimIdx === 0}
-            className="px-4 py-2.5 rounded-xl bg-neutral-100 text-sm font-black text-neutral-700 disabled:opacity-40 flex items-center gap-1"><ChevronLeft className="w-4 h-4" /> Geri</button>
-          {adimIdx < adimlar.length - 1 && (
-            <button type="button" onClick={ileri} className={`px-5 py-2.5 rounded-xl text-white text-sm font-black flex items-center gap-1 shadow-lg ${S.dugme}`}>
-              {ttAdimTamam(form, adim.id) || adim.id === 'musteri' ? 'Sonraki' : 'Atla'} <ChevronRight className="w-4 h-4" />
-            </button>
-          )}
+          <p className="text-[11px] font-black text-neutral-500 shrink-0">{soruAdimlari.filter(x => ttAdimTamam(form, x.id)).length} / {soruAdimlari.length} soru</p>
           <p className="flex-1 text-xs font-bold text-red-600 truncate">{hata}</p>
           <button type="button" onClick={kaydet} disabled={kaydediliyor}
             className="px-5 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-black flex items-center gap-1.5 shadow-lg shadow-green-600/30 disabled:opacity-60">
