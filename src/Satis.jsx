@@ -3968,7 +3968,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   jobs = [],
   // YENİ (kullanıcı talebi): kenar çubuğundaki "+" kısayolundan gelen istek
   // { hizmet: 'Nakliye' | 'Depo', no } → Telefon Teklifleri açılır ve sihirbaz başlar
-  hizliGorusme = null, onHizliGorusmeKullanildi }) => {
+  hizliGorusme = null, onHizliGorusmeKullanildi,
+  // YENİ (kullanıcı talebi): satış personelinin "Portföyüm" butonu → Telefon Görüşmesi sekmesi açılır
+  telefonPortfoyIstegi = null, onTelefonPortfoyKullanildi }) => {
   // ---------------------------------------------------------------- STATE ---
   // DEĞİŞTİ (kullanıcı talebi): Havuz açılınca ilk sekme artık "Hızlı Teklifler" ('web')
   const [aktifKanal, setAktifKanal] = useState('web');
@@ -4016,6 +4018,13 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     setTelefonTeklifAcik(true);
     onHizliGorusmeKullanildi?.();
   }, [hizliGorusme]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // YENİ: "Portföyüm" isteği → Telefon Görüşmesi (kişiye özel alan) sekmesi
+  useEffect(() => {
+    if (!telefonPortfoyIstegi) return;
+    setTelefonTeklifAcik(true);
+    onTelefonPortfoyKullanildi?.();
+  }, [telefonPortfoyIstegi]); // eslint-disable-line react-hooks/exhaustive-deps
   // ======================================================================
   // YENİ (kullanıcı talebi): QR TAKİP — site seçicinin altındaki düğme ile
   // açılan sayfa. Kampanyalar ve taramalar burada dinlenir ki Havuz
