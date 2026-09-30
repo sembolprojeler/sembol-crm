@@ -45,9 +45,9 @@ if (typeof Node === 'function' && Node.prototype && !Node.prototype.__sembolCevi
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { MapPin, Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
-import { signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where, documentId } from 'firebase/firestore';
-import { db, appId, auth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, malzemeIhtiyaclari, useMalzemeTahminTablosu, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
+import { signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
+import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where, documentId, deleteField } from 'firebase/firestore';
+import { db, appId, auth, googleAuth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, malzemeIhtiyaclari, useMalzemeTahminTablosu, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
   // YENİ: Resmi Ayarları ekranının kullandığı veri ve yardımcılar.
   // Sözleşme PDF'i ve WhatsApp mesajları da aynı kaynaktan okuyacağı için
   // bu tanımlar shared.jsx içinde tek noktada tutuluyor.
@@ -113,6 +113,93 @@ const ESKI_QR_SITE_ID = typeof window !== 'undefined' ? new URLSearchParams(wind
 if (ESKI_QR_SITE_ID && !new URLSearchParams(window.location.search).get('qrt')) {
   window.location.replace(`${QR_SITE_LANDING_URL}?yer=${encodeURIComponent(ESKI_QR_SITE_ID)}`);
 }
+
+// ============================================================================
+// YENİ (kullanıcı talebi): GOOGLE HESAP BAĞLAMA — ORTAK YARDIMCILAR
+// ----------------------------------------------------------------------------
+// • Eşleştirme e-postaya göre DEĞİL, Google oturumunun uid'sine göre yapılır
+//   (personel kaydındaki googleUid alanı).
+// • KADEMELİ GEÇİŞ: Google'ı bağlayan personel şifreyle girmeye devam edebilir.
+// • settings/girisAyarlari:
+//     googleGirisGoster (varsayılan true) — kapalıyken Google'a dair her şey gizli
+//     girisDuyurusu — giriş ekranı duyurusu (boşsa gizli)
+//     googleGecisBitis (YYYY-MM-DD, varsayılan boş) — bu tarihten SONRA şifreli
+//     giriş herkese kapanır; boşken hiçbir şey kapanmaz.
+// • Süper yöneticiler (Sistem Yöneticisi / Firma Sahibi / rütbesi Müdür)
+//   kilitlenmesin diye şifreyle girişe her zaman devam edebilir.
+// ============================================================================
+// DEĞİŞTİ: rütbesi "Müdür" olanlar da süper yönetici sayılır.
+const superYoneticiMi = (p) => p?.fullName === 'Sistem Yöneticisi' || p?.position === 'Firma Sahibi' || p?.rank === 'Müdür';
+// YENİ: Giriş ekranı duyurusu — ayar hiç kaydedilmemişse bu metin gösterilir, boş kaydedilirse gizlenir.
+// YENİ (güvenlik): Google ile girişte e-posta eşleşmesiyle OTOMATİK bağlamaya izin verilen alan adları.
+// Bunların dışındaki (ör. @gmail.com) hesaplar yalnızca şifreli girişten sonra elle bağlanabilir.
+const OTOMATIK_BAGLAMA_ALAN_ADLARI = ['sembolevdeneve.com', 'depoevim.com'];
+const otomatikBaglamaAlanAdiMi = (eposta) => {
+  const alan = String(eposta || '').trim().toLowerCase().split('@')[1] || '';
+  return OTOMATIK_BAGLAMA_ALAN_ADLARI.includes(alan);
+};
+const VARSAYILAN_GIRIS_DUYURUSU = "Bundan sonra CRM'e kullandığınız aktif bir Google hesabınızla da (cep telefonunuza bağlı Gmail adresiniz olabilir) girebilirsiniz. Her zamanki gibi kullanıcı adı ve şifrenizle girin, açılan pencerede 'Google Hesabımı Bağla'ya basın. İsterseniz 'Bağlamadan Devam Et' de diyebilirsiniz. Ama Google ile de girebilmek için önce 1 kez bu işlemi yapmanız gerekiyor.\n\nNot: CRM'i WhatsApp içinden değil, Chrome veya Safari'den açın.";
+// YENİ: WhatsApp / Instagram / Facebook gibi uygulama içi tarayıcılar Google açılır penceresini engeller.
+const uygulamaIciTarayiciMi = () => {
+  if (typeof navigator === 'undefined') return false;
+  return /WhatsApp|Instagram|FBAN|FBAV|FB_IAB|FBIOS|Messenger|Line\/|MicroMessenger/i.test(navigator.userAgent || '');
+};
+// YENİ: Firebase Google hatalarını anlaşılır Türkçe mesaja çevirir.
+const googleHataMesaji = (e) => {
+  switch (e?.code) {
+    case 'auth/popup-blocked': return 'Google penceresi tarayıcı tarafından engellendi. Adres çubuğundaki açılır pencere uyarısından izin verip tekrar deneyin.';
+    case 'auth/popup-closed-by-user': return 'Google penceresi kapatıldı, işlem tamamlanmadı. Tekrar deneyip hesabınızı seçin.';
+    case 'auth/network-request-failed': return 'İnternet bağlantısı kurulamadı. Bağlantınızı kontrol edip tekrar deneyin.';
+    case 'auth/unauthorized-domain': return 'Bu adres Google girişi için henüz yetkilendirilmedi. Lütfen yöneticinize bildirin.';
+    case 'auth/operation-not-allowed': return 'Google ile giriş sistemde henüz açılmadı. Lütfen yöneticinize bildirin.';
+    case 'auth/too-many-requests': return 'Çok fazla deneme yapıldı. Birkaç dakika bekleyip tekrar deneyin.';
+    default: return 'Google ile işlem yapılamadı. Sayfayı Chrome veya Safari’de açıp tekrar deneyin.';
+  }
+};
+const bugunYerelTarih = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+const sifreGirisiKapaliMi = (bitis) => !!bitis && bugunYerelTarih() > bitis;
+const tarihGoster = (ymd) => {
+  if (!ymd) return '';
+  const [y, m, g] = String(ymd).split('-');
+  return y && m && g ? `${g}.${m}.${y}` : String(ymd);
+};
+// Google hesabı seçtirir. Hata olursa (kapatma dahil) Türkçe mesajlı hata fırlatır;
+// yalnızca üst üste tıklamadan doğan iptalde null döner.
+const googleHesabiSec = async () => {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  try {
+    const sonuc = await signInWithPopup(googleAuth, provider);
+    return sonuc.user;
+  } catch (e) {
+    if (e?.code === 'auth/cancelled-popup-request') return null;
+    console.error('Google hatası:', e);
+    const hata = new Error(googleHataMesaji(e));
+    hata.code = e?.code;
+    throw hata;
+  }
+};
+// YENİ: Uygulama içi tarayıcıda Google butonu yerine gösterilen uyarı + bağlantıyı kopyala
+const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
+  const [kopyalandi, setKopyalandi] = useState(false);
+  const kopyala = async () => {
+    const url = window.location.origin + window.location.pathname;
+    try { await navigator.clipboard.writeText(url); }
+    catch (e) { window.prompt('Bağlantıyı kopyalayın:', url); }
+    setKopyalandi(true); setTimeout(() => setKopyalandi(false), 2500);
+  };
+  return (
+    <div className={`p-4 rounded-xl border-2 border-amber-300 bg-amber-50 text-amber-900 ${className}`}>
+      <p className="text-sm font-black mb-2">Google ile giriş için bu sayfayı Chrome veya Safari'de açın.</p>
+      <button type="button" onClick={kopyala} className="w-full py-2.5 bg-black text-white text-sm font-black rounded-xl hover:bg-neutral-800 transition flex items-center justify-center gap-2">
+        {kopyalandi ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />} {kopyalandi ? 'Kopyalandı — tarayıcıya yapıştırın' : 'Bağlantıyı Kopyala'}
+      </button>
+    </div>
+  );
+};
 
   // ============================================================================
   // YENİ: MARKA LOGOSU BİLEŞENİ
@@ -1218,12 +1305,17 @@ if (ESKI_QR_SITE_ID && !new URLSearchParams(window.location.search).get('qrt')) 
     </div>
   );
 
-  const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, positionModules, moduleCatalog }) => {
+  const UserListView = ({ personnelList, onUpdate, onDelete, positions, ranks, positionModules, moduleCatalog, onGoogleKaldir }) => {
     const [editingUser, setEditingUser] = useState(null);
     // YENİ: Arama + pozisyon/yaka filtresi + alfabetik sıralama
     const [searchQuery, setSearchQuery] = useState('');
     const [filterPosition, setFilterPosition] = useState('Tümü');
     const [filterCollar, setFilterCollar] = useState('Tümü');
+    // YENİ (kullanıcı talebi): Google bağlantı filtresi — Tümü / Bağlayanlar / Bağlamayanlar
+    const [filterGoogle, setFilterGoogle] = useState('Tümü');
+    // Sayaç yalnızca aktif (pasif olmayan) kullanıcıları sayar
+    const aktifKullanicilar = personnelList.filter(p => p.employmentStatus !== 'Pasif');
+    const googleBaglayanSayisi = aktifKullanicilar.filter(p => p.googleUid).length;
 
     // YENİ: Kişiye Özel Modül Yetkileri'nde görünen sayfa listesi artık kodda sabit
     // değil; "Modül Görüntüleme" sayfasından yönetilen ANA ŞEMA'dan (Firebase:
@@ -1249,12 +1341,13 @@ if (ESKI_QR_SITE_ID && !new URLSearchParams(window.location.search).get('qrt')) 
         const matchQuery = !q || (p.fullName || '').toLocaleLowerCase('tr-TR').includes(q) || (p.email || '').toLocaleLowerCase('tr-TR').includes(q);
         const matchPosition = filterPosition === 'Tümü' || p.position === filterPosition;
         const matchCollar = filterCollar === 'Tümü' || (p.collarType || 'Mavi Yaka') === filterCollar;
-        return matchQuery && matchPosition && matchCollar;
+        const matchGoogle = filterGoogle === 'Tümü' || (filterGoogle === 'Bağlayanlar' ? !!p.googleUid : !p.googleUid);
+        return matchQuery && matchPosition && matchCollar && matchGoogle;
       })
       .sort((a, b) => (a.fullName || '').localeCompare((b.fullName || ''), 'tr-TR'));
 
     return (
-      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6 animate-in fade-in max-w-5xl mx-auto">
+      <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-4 md:p-6 animate-in fade-in w-full">
         <h2 className="text-xl font-bold text-black mb-6 flex items-center gap-2 border-b border-neutral-200 pb-4">
           <Users className="w-6 h-6 text-red-600" /> Mevcut Kullanıcılar ve Yetkileri
         </h2>
@@ -1283,45 +1376,80 @@ if (ESKI_QR_SITE_ID && !new URLSearchParams(window.location.search).get('qrt')) 
           </select>
         </div>
 
+        {/* YENİ (kullanıcı talebi): Google bağlama sayacı + filtre */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <p className="text-sm font-bold text-neutral-700">
+            Google bağlayan: <span className="text-green-700 font-black">{googleBaglayanSayisi}</span> / {aktifKullanicilar.length}
+            <span className="text-xs text-neutral-400 font-medium"> (aktif kullanıcı)</span>
+          </p>
+          <div className="flex gap-1 p-1 bg-neutral-100 rounded-xl w-max">
+            {['Tümü', 'Bağlayanlar', 'Bağlamayanlar'].map(f => (
+              <button key={f} type="button" onClick={() => setFilterGoogle(f)}
+                className={`px-3 py-1.5 text-xs font-bold rounded-lg transition ${filterGoogle === f ? 'bg-black text-white' : 'text-neutral-600 hover:bg-white'}`}>
+                {f}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="overflow-x-auto">
           <table className="w-full text-left text-sm">
+            {/* DEĞİŞTİ: hücre boşlukları azaltıldı (p-4 → px-3 py-3); e-posta sütunları kırılmaz.
+                Ad ve İşlemler hücrelerindeki flex, tablo düzenini bozmasın diye içteki div'e taşındı. */}
             <thead className="bg-black text-white">
               <tr>
-                <th className="p-4 font-bold rounded-tl-xl">Ad Soyad</th>
-                <th className="p-4 font-bold">Kullanıcı Adı / E-Posta</th>
-                <th className="p-4 font-bold">Pozisyon / Rütbe</th>
-                <th className="p-4 font-bold text-center">Durum</th>
-                <th className="p-4 font-bold rounded-tr-xl text-center">İşlemler</th>
+                <th className="px-3 py-3 font-bold rounded-tl-xl whitespace-nowrap">Ad Soyad</th>
+                <th className="px-3 py-3 font-bold whitespace-nowrap">Kullanıcı Adı / E-Posta</th>
+                <th className="px-3 py-3 font-bold whitespace-nowrap">Pozisyon / Rütbe</th>
+                <th className="px-3 py-3 font-bold whitespace-nowrap">Google</th>
+                <th className="px-3 py-3 font-bold text-center whitespace-nowrap">Durum</th>
+                <th className="px-3 py-3 font-bold rounded-tr-xl text-center whitespace-nowrap">İşlemler</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-100">
               {filteredSortedPersonnel.map(person => (
                 <tr key={person.id} className="hover:bg-neutral-50 transition">
-                  <td className="p-4 font-bold text-black flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
-                      {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover" alt="Profil"/> : <User className="w-4 h-4 text-neutral-400"/>}
+                  <td className="px-3 py-3 font-bold text-black">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center overflow-hidden shrink-0 border border-neutral-300">
+                        {person.profileImage ? <img src={person.profileImage} className="w-full h-full object-cover" alt="Profil"/> : <User className="w-4 h-4 text-neutral-400"/>}
+                      </div>
+                      <span className="whitespace-nowrap">{person.fullName}</span>
                     </div>
-                    {person.fullName}
                   </td>
-                  <td className="p-4 text-neutral-600 font-medium">{person.email}</td>
-                  <td className="p-4 text-neutral-600">{person.position} <span className="text-xs text-neutral-400">({person.rank})</span></td>
-                  <td className="p-4 text-center">
-                    <span className={`px-2 py-1 rounded-lg text-xs font-bold ${person.employmentStatus === 'Aktif' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                  <td className="px-3 py-3 text-neutral-600 font-medium whitespace-nowrap">{person.email}</td>
+                  <td className="px-3 py-3 text-neutral-600">{person.position} <span className="text-xs text-neutral-400">({person.rank})</span></td>
+                  {/* YENİ (kullanıcı talebi): Google bağlantı durumu — e-posta tek satır, tarih altında */}
+                  <td className="px-3 py-3">
+                    {person.googleUid ? (
+                      <div>
+                        <p className="text-xs font-bold text-green-700 whitespace-nowrap">{person.googleEmail || 'Bağlı'}</p>
+                        {person.googleBaglamaTarihi && <p className="text-[10px] text-neutral-400 font-medium whitespace-nowrap">{new Date(person.googleBaglamaTarihi).toLocaleDateString('tr-TR')}</p>}
+                      </div>
+                    ) : (
+                      <span className="px-2 py-1 rounded-lg text-xs font-bold bg-neutral-100 text-neutral-500 whitespace-nowrap">Bağlanmadı</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 text-center">
+                    {/* DÜZELTME: boş durum "Aktif" sayılır ve yeşil görünür; yalnızca Pasif kırmızı */}
+                    <span className={`px-2 py-1 rounded-lg text-xs font-bold ${person.employmentStatus === 'Pasif' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
                       {person.employmentStatus || 'Aktif'}
                     </span>
                   </td>
-                  <td className="p-4 flex items-center justify-center gap-2">
-                    <button onClick={() => setEditingUser(person)} className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition" title="Düzenle ve Özel Yetki Ver">
-                      Düzenle & Yetkilendir
-                    </button>
-                    <button onClick={() => { if(window.confirm('Bu kullanıcıyı sistemden silmek istediğinize emin misiniz?')) onDelete(person.id); }} className="p-2 text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition" title="Sil"><X className="w-4 h-4"/></button>
+                  <td className="px-3 py-3">
+                    <div className="flex items-center justify-center gap-2">
+                      <button onClick={() => setEditingUser(person)} className="px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition whitespace-nowrap" title="Düzenle ve Özel Yetki Ver">
+                        Düzenle & Yetkilendir
+                      </button>
+                      <button onClick={() => { if(window.confirm('Bu kullanıcıyı sistemden silmek istediğinize emin misiniz?')) onDelete(person.id); }} className="p-2 text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition" title="Sil"><X className="w-4 h-4"/></button>
+                    </div>
                   </td>
                 </tr>
               ))}
               {filteredSortedPersonnel.length === 0 && (
                 <tr>
-                  <td colSpan="5" className="p-6 text-center text-neutral-500">
-                    {searchQuery.trim() || filterPosition !== 'Tümü' || filterCollar !== 'Tümü' ? 'Aramanıza uygun kullanıcı bulunamadı.' : 'Kayıtlı kullanıcı bulunamadı.'}
+                  <td colSpan="6" className="p-6 text-center text-neutral-500">
+                    {searchQuery.trim() || filterPosition !== 'Tümü' || filterCollar !== 'Tümü' || filterGoogle !== 'Tümü' ? 'Aramanıza uygun kullanıcı bulunamadı.' : 'Kayıtlı kullanıcı bulunamadı.'}
                   </td>
                 </tr>
               )}
@@ -1371,6 +1499,35 @@ if (ESKI_QR_SITE_ID && !new URLSearchParams(window.location.search).get('qrt')) 
                         {ranks.map(r => <option key={r} value={r}>{r}</option>)}
                       </select>
                     </div>
+                  </div>
+
+                  {/* YENİ (kullanıcı talebi): Google bağlantısı — yönetici kaldırabilir (sistem kaydına düşer) */}
+                  <div className="p-4 rounded-xl border border-neutral-200 bg-neutral-50 flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-neutral-500 mb-0.5">Google Hesabı</p>
+                      {editingUser.googleUid ? (
+                        <p className="text-sm font-bold text-green-700 break-all">
+                          {editingUser.googleEmail || 'Bağlı'}
+                          {editingUser.googleBaglamaTarihi && <span className="text-xs text-neutral-400 font-medium"> · {new Date(editingUser.googleBaglamaTarihi).toLocaleString('tr-TR')}</span>}
+                        </p>
+                      ) : (
+                        <p className="text-sm font-bold text-neutral-500">Bağlanmadı</p>
+                      )}
+                    </div>
+                    {editingUser.googleUid && onGoogleKaldir && (
+                      <button type="button"
+                        onClick={async () => {
+                          if (!window.confirm(`${editingUser.fullName} kullanıcısının Google bağlantısı kaldırılsın mı? Kişi yeniden bağlayana kadar Google ile giremez.`)) return;
+                          try {
+                            await onGoogleKaldir(editingUser);
+                            const { googleUid, googleEmail, googleBaglamaTarihi, ...kalan } = editingUser;
+                            setEditingUser(kalan);
+                          } catch (e) { alert('Google bağlantısı kaldırılamadı: ' + (e?.message || e)); }
+                        }}
+                        className="shrink-0 px-3 py-2 text-xs font-bold text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 transition">
+                        Google bağlantısını kaldır
+                      </button>
+                    )}
                   </div>
 
                   <div className="mt-6">
@@ -2656,7 +2813,30 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     );
   };
 
-  const AppSettingsView = ({ db, appId, addSystemLog, appBranding }) => {
+  const AppSettingsView = ({ db, appId, addSystemLog, appBranding, girisAyarlari = {} }) => {
+    // YENİ (kullanıcı talebi): Google ile giriş ayarları (settings/girisAyarlari)
+    const googleGecisBitis = girisAyarlari.googleGecisBitis || '';
+    const googleGirisGoster = girisAyarlari.googleGirisGoster !== false;
+    const [gecisBitis, setGecisBitis] = useState(googleGecisBitis);
+    const [duyuru, setDuyuru] = useState(girisAyarlari.girisDuyurusu ?? VARSAYILAN_GIRIS_DUYURUSU);
+    const [gecisMesaj, setGecisMesaj] = useState('');
+    useEffect(() => { setGecisBitis(googleGecisBitis); }, [googleGecisBitis]);
+    useEffect(() => { setDuyuru(girisAyarlari.girisDuyurusu ?? VARSAYILAN_GIRIS_DUYURUSU); }, [girisAyarlari.girisDuyurusu]);
+    const girisAyariYaz = async (alanlar, logBaslik, logDetay, mesaj) => {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'girisAyarlari'), {
+        ...alanlar, updatedAt: new Date().toISOString()
+      }, { merge: true });
+      if (addSystemLog) addSystemLog(logBaslik, logDetay);
+      setGecisMesaj(mesaj);
+      setTimeout(() => setGecisMesaj(''), 3000);
+    };
+    const handleGecisKaydet = () => girisAyariYaz({ googleGecisBitis: gecisBitis || '' }, 'Google Geçiş Tarihi Güncellendi',
+      gecisBitis ? `Kullanıcı adı/şifre girişi ${tarihGoster(gecisBitis)} tarihinden sonra kapanacak.` : 'Google geçiş bitiş tarihi kaldırıldı (şifreli giriş açık).', 'Geçiş tarihi kaydedildi!');
+    const handleDuyuruKaydet = () => girisAyariYaz({ girisDuyurusu: duyuru.trim() }, 'Giriş Duyurusu Güncellendi',
+      duyuru.trim() ? 'Giriş ekranı duyuru metni değiştirildi.' : 'Giriş ekranı duyurusu kaldırıldı.', 'Duyuru kaydedildi!');
+    const handleGoogleGosterDegistir = () => girisAyariYaz({ googleGirisGoster: !googleGirisGoster }, 'Google ile Giriş Ayarı',
+      !googleGirisGoster ? 'Google ile giriş gösterimi AÇILDI.' : 'Google ile giriş gösterimi KAPATILDI (buton, duyuru ve uyarı kutusu gizlendi).',
+      !googleGirisGoster ? 'Google ile giriş açıldı.' : 'Google ile giriş gizlendi.');
     const [logoPreview, setLogoPreview] = useState(appBranding?.logoUrl || '');
     const [logoSize, setLogoSize] = useState(appBranding?.logoSize || 100);
     const [isUploading, setIsUploading] = useState(false);
@@ -2779,6 +2959,68 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               <Save className="w-5 h-5" /> Logo Ayarlarını Kaydet
             </button>
           </div>
+        </div>
+
+        {/* YENİ (kullanıcı talebi): Google ile girişe geçiş bitiş tarihi */}
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="text-lg font-bold text-black mb-1 flex items-center gap-2 border-b border-neutral-200 pb-4">
+            <Key className="w-5 h-5 text-red-600" /> Google ile Giriş
+          </h3>
+          {gecisMesaj && (
+            <div className="mt-4 p-3 bg-green-50 text-green-700 rounded-xl font-bold text-sm border border-green-200 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5" /> {gecisMesaj}
+            </div>
+          )}
+
+          {/* YENİ: Ana anahtar — kapalıyken Google butonu, duyuru ve sarı kutu gizlenir, geçiş tarihi uygulanmaz */}
+          <label className="mt-4 flex items-center justify-between gap-4 p-4 rounded-xl border border-neutral-200 bg-neutral-50 cursor-pointer">
+            <div>
+              <p className="text-sm font-bold text-black">Google ile girişi göster</p>
+              <p className="text-xs text-neutral-500 font-medium">Kapalıyken giriş ekranı ve uygulama Google öncesi haline döner.</p>
+            </div>
+            <div className="relative inline-flex items-center shrink-0">
+              <input type="checkbox" className="sr-only peer" checked={googleGirisGoster} onChange={handleGoogleGosterDegistir} />
+              <div className="w-11 h-6 bg-neutral-300 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-green-600"></div>
+            </div>
+          </label>
+
+          {/* YENİ: Giriş ekranı duyurusu */}
+          <div className="mt-5">
+            <label className="block text-sm font-bold text-black mb-1">Giriş ekranı duyurusu (ℹ️ Google ile giriş nasıl yapılır?)</label>
+            <p className="text-xs text-neutral-500 font-medium mb-2">Giriş kartında Google butonunun altında görünür. "Not:" ile başlayan satırlar daha küçük gösterilir. Boş kaydedilirse gizlenir.</p>
+            <textarea value={duyuru} onChange={e => setDuyuru(e.target.value)} rows={6}
+              className="w-full p-3 border border-neutral-300 rounded-xl bg-white text-sm font-medium outline-none focus:ring-2 focus:ring-red-600" />
+            <div className="flex flex-col sm:flex-row gap-3 mt-2">
+              <button type="button" onClick={() => setDuyuru(VARSAYILAN_GIRIS_DUYURUSU)}
+                className="px-4 py-2.5 bg-neutral-100 text-neutral-700 text-sm font-bold rounded-xl hover:bg-neutral-200 transition">
+                Varsayılan metin
+              </button>
+              <button type="button" onClick={handleDuyuruKaydet}
+                className="flex-1 px-4 py-2.5 bg-red-600 text-white text-sm font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2">
+                <Save className="w-4 h-4" /> Duyuruyu Kaydet
+              </button>
+            </div>
+          </div>
+
+          <p className="text-sm font-bold text-black mt-6 mb-1">Geçiş bitiş tarihi</p>
+          <p className="text-sm text-neutral-500 mb-3">
+            Seçilen tarihten <b>sonra</b> kullanıcı adı / şifre ile giriş herkes için kapanır; personel yalnızca bağladığı
+            Google hesabıyla girebilir. Süper yöneticiler (Sistem Yöneticisi / Firma Sahibi / rütbesi Müdür) kilitlenmesin diye şifreyle girmeye devam edebilir.
+            <b> Boş bırakılırsa hiçbir şey kapanmaz.</b>
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input type="date" value={gecisBitis} onChange={e => setGecisBitis(e.target.value)}
+              className="flex-1 p-3 border border-neutral-300 rounded-xl bg-white font-bold outline-none focus:ring-2 focus:ring-red-600" />
+            <button type="button" onClick={handleGecisKaydet}
+              className="px-6 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 transition flex justify-center items-center gap-2">
+              <Save className="w-5 h-5" /> Kaydet
+            </button>
+          </div>
+          {googleGecisBitis && (
+            <p className="text-xs font-bold text-neutral-500 mt-3">
+              {!googleGirisGoster ? 'Google ile giriş gizli olduğu için bu tarih şu an uygulanmıyor.' : sifreGirisiKapaliMi(googleGecisBitis) ? 'Şifreli giriş şu an KAPALI (süper yöneticiler hariç).' : `Şifreli giriş ${tarihGoster(googleGecisBitis)} gününün sonuna kadar açık.`}
+            </p>
+          )}
         </div>
       </div>
     );
@@ -3438,9 +3680,17 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   </td>
                   <td className="p-4">
                     {p.lastLogin ? (
-                      <span className="bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border border-green-100 font-bold flex items-center gap-1.5 w-max">
-                        <Clock className="w-4 h-4 shrink-0" /> {p.lastLogin}
-                      </span>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="bg-green-50 text-green-700 px-3 py-1.5 rounded-lg border border-green-100 font-bold flex items-center gap-1.5 w-max">
+                          <Clock className="w-4 h-4 shrink-0" /> {p.lastLogin}
+                        </span>
+                        {/* YENİ (kullanıcı talebi): giriş yöntemi */}
+                        {p.lastLoginYontem && (
+                          <span className={`px-2 py-1 rounded-lg text-xs font-black border ${p.lastLoginYontem === 'Google' ? 'bg-blue-50 text-blue-700 border-blue-100' : 'bg-neutral-100 text-neutral-600 border-neutral-200'}`}>
+                            {p.lastLoginYontem}
+                          </span>
+                        )}
+                      </div>
                     ) : (
                       <span className="bg-neutral-100 text-neutral-500 px-3 py-1.5 rounded-lg border border-neutral-200 font-bold flex items-center gap-1.5 w-max">
                         <Clock className="w-4 h-4 shrink-0" /> Henüz Giriş Yapmadı
@@ -3622,7 +3872,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     );
   };
 
-  const ProfileSettingsView = ({ currentUser, handleUpdatePersonnel, showMySpecialTasks, tasks, handleUpdateTaskStatus, showMyComplaint, db, appId, addSystemLog }) => {
+  const ProfileSettingsView = ({ currentUser, handleUpdatePersonnel, showMySpecialTasks, tasks, handleUpdateTaskStatus, showMyComplaint, db, appId, addSystemLog, googleAktif = false, onGoogleBagla, googleBaglaniyor = false }) => {
     const [editForm, setEditForm] = useState({ 
       personalPhone: currentUser?.personalPhone || '', 
       password: currentUser?.password || '', 
@@ -3742,6 +3992,35 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
          </div>
       </div>
 
+      {/* YENİ (kullanıcı talebi): Google hesabı — bağla / bağlı hesap */}
+      {googleAktif && (
+        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-6">
+          <h3 className="text-lg font-black text-black mb-4 flex items-center gap-2 border-b border-neutral-200 pb-3">
+            <Key className="w-5 h-5 text-red-600" /> Google Hesabı
+          </h3>
+          {currentUser?.googleUid ? (
+            <div className="p-4 rounded-xl bg-green-50 border border-green-200">
+              <p className="text-sm font-black text-green-800 flex items-center gap-2"><CheckCircle className="w-5 h-5 shrink-0" /> Bağlı hesap</p>
+              <p className="text-sm font-bold text-green-700 mt-1 break-all">{currentUser.googleEmail || '—'}</p>
+              {currentUser.googleBaglamaTarihi && (
+                <p className="text-xs text-green-700/70 font-medium mt-0.5">Bağlanma: {new Date(currentUser.googleBaglamaTarihi).toLocaleString('tr-TR')}</p>
+              )}
+              <p className="text-xs text-neutral-500 font-medium mt-2">Bağlantıyı değiştirmek için yöneticinize başvurun.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-sm text-neutral-600 font-medium">Google hesabını bağlarsan giriş ekranında "Google ile Giriş Yap" butonunu kullanabilirsin. Bir kez bağlaman yeterli.</p>
+              {uygulamaIciTarayiciMi() ? <UygulamaIciTarayiciUyarisi /> : (
+                <button type="button" onClick={onGoogleBagla} disabled={googleBaglaniyor}
+                  className="w-full py-3 bg-black text-white font-black rounded-xl hover:bg-neutral-800 transition disabled:opacity-60 flex items-center justify-center gap-2">
+                  {googleBaglaniyor ? <Loader2 className="w-5 h-5 animate-spin" /> : <Key className="w-5 h-5" />} Google Hesabımı Bağla
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* YENİ: "Özel Görevlerim" artık sol menüde ayrı bir bölüm değil, Profilim
           sayfasının bir parçası. Yeni/bitmemiş görev sayısı sol menüdeki
           "Profilim" yazısının yanında yanıp sönen ışıkla da gösteriliyor. */}
@@ -3800,16 +4079,23 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     );
   };
 
-  const LoginScreen = ({ onLogin, error, appBranding }) => {
+  // DEĞİŞTİ: googleAktif=false iken ekran Google öncesi haline döner (buton + duyuru gizli).
+  // googleGecisBitis burada "etkin" tarihtir (anahtar kapalıysa boş gelir).
+  const LoginScreen = ({ onLogin, onGoogleLogin, error, appBranding, googleAktif = false, googleGecisBitis = '', girisDuyurusu = '' }) => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [rememberMe, setRememberMe] = useState(false);
+    const [googleBekliyor, setGoogleBekliyor] = useState(false);
+    // YENİ: "Google ile giriş nasıl yapılır?" kutusu varsayılan kapalı
+    const [duyuruAcik, setDuyuruAcik] = useState(false);
+    const sifreKapali = sifreGirisiKapaliMi(googleGecisBitis);
 
     React.useEffect(() => {
       try {
         const savedUser = localStorage.getItem('sembol_crm_user');
         if (savedUser) {
           const parsed = JSON.parse(savedUser);
+          if (parsed.google) { setRememberMe(true); return; }
           if (parsed.email) setEmail(parsed.email);
           if (parsed.password) setPassword(parsed.password);
           setRememberMe(true);
@@ -3825,21 +4111,22 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     };
 
     return (
-      <div className="min-h-screen bg-black flex items-center justify-center p-4 animate-in fade-in">
+      <div className="min-h-screen bg-black flex flex-col items-center justify-center p-4 overflow-y-auto animate-in fade-in">
         <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden">
-          <div className="bg-neutral-50 p-8 flex flex-col items-center border-b border-neutral-200">
+          <div className="bg-neutral-50 px-6 py-5 flex flex-col items-center border-b border-neutral-200">
             <MarkaLogo
               logoUrl={appBranding?.logoUrl}
-              className="max-w-[80%] w-auto object-contain mb-2 drop-shadow-sm"
-              style={{ height: `${96 * ((appBranding?.logoSize || 100) / 100)}px` }}
+              className="max-w-[80%] w-auto object-contain drop-shadow-sm"
+              // DEĞİŞTİ: giriş kartı sıkılaştırıldı — logo ~60px, logoSize ayarı en fazla 64px'e kadar büyütür (oran korunur)
+              style={{ height: `${Math.min(64, 60 * ((appBranding?.logoSize || 100) / 100))}px` }}
               fallback={(
-                <div className="flex flex-col items-center mb-2">
-                  <div className="w-20 h-20 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg">S</div>
+                <div className="flex flex-col items-center">
+                  <div className="w-14 h-14 bg-red-600 flex items-center justify-center rounded-2xl font-black text-white text-4xl shadow-lg">S</div>
                   <h1 className="text-2xl font-black text-black tracking-widest mt-2">SEMBOL</h1>
                 </div>
               )}
             />
-            <p className="text-red-600 text-xs font-bold mt-1 tracking-[0.2em] bg-red-50 px-3 py-1 rounded-full border border-red-100">OPERASYON MERKEZİ</p>
+            <p className="text-red-600 text-xs font-bold mt-3 tracking-[0.2em] bg-red-50 px-3 py-1 rounded-full border border-red-100">OPERASYON MERKEZİ</p>
           </div>
           
           {/* ================================================================
@@ -3851,15 +4138,15 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               handleSubmit içindeki e.preventDefault() sayfa yenilenmesini
               engeller; "required" alan denetimleri de artık çalışır.
               ================================================================ */}
-          <form onSubmit={handleSubmit} className="p-8 space-y-6">
+          <form onSubmit={handleSubmit} className="p-6 space-y-4">
             {error && (
               <div className="bg-red-50 text-red-600 p-3 rounded-xl text-sm font-bold flex items-center gap-2 border border-red-100">
                 <AlertTriangle className="w-5 h-5 shrink-0" /> {error}
               </div>
             )}
-            
+
             <div>
-              <label className="block text-sm font-bold text-neutral-700 mb-2">E-Posta veya Ad Soyad</label>
+              <label className="block text-sm font-bold text-neutral-700 mb-1.5">E-Posta veya Ad Soyad</label>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400"><User className="w-5 h-5" /></span>
                 <input 
@@ -3874,7 +4161,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             </div>
             
             <div>
-              <label className="block text-sm font-bold text-neutral-700 mb-2">Şifre</label>
+              <label className="block text-sm font-bold text-neutral-700 mb-1.5">Şifre</label>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400"><Lock className="w-5 h-5" /></span>
                 <input 
@@ -3888,7 +4175,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               </div>
             </div>
             
-            <div className="flex items-center gap-2 mt-2">
+            <div className="flex items-center gap-2">
               <input 
                 type="checkbox" 
                 id="remember" 
@@ -3903,9 +4190,70 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             
             {/* DEĞİŞTİ: type="button" + onClick yerine type="submit" — Enter
                 tuşu da bu butonu tetikler, tıklama davranışı aynen korunur */}
-            <button type="submit" className="w-full bg-red-600 text-white font-black py-4 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg mt-4">
+            <button type="submit" className="w-full bg-red-600 text-white font-black py-3.5 rounded-xl hover:bg-red-700 transition shadow-lg shadow-red-600/30 text-lg">
               Sisteme Giriş Yap
             </button>
+
+            {/* DEĞİŞTİ (kullanıcı talebi): Google ile Giriş artık EN ALTTA, "veya" ayracının altında — eşleştirme personel kaydındaki googleUid ile.
+                Uygulama içi tarayıcıda (WhatsApp vb.) buton yerine "Chrome/Safari'de aç" uyarısı çıkar. */}
+            {googleAktif && (<div className="space-y-3">
+            <div className="flex items-center gap-3 text-xs font-bold text-neutral-400">
+              <div className="flex-1 h-px bg-neutral-200" /> veya <div className="flex-1 h-px bg-neutral-200" />
+            </div>
+            {uygulamaIciTarayiciMi() ? <UygulamaIciTarayiciUyarisi /> : (
+            <button
+              type="button"
+              disabled={googleBekliyor}
+              onClick={async () => { setGoogleBekliyor(true); try { await onGoogleLogin(rememberMe); } finally { setGoogleBekliyor(false); } }}
+              className="w-full flex items-center justify-center gap-3 bg-white border-2 border-neutral-300 text-neutral-800 font-black py-3 rounded-xl hover:bg-neutral-50 hover:border-neutral-400 transition disabled:opacity-60"
+            >
+              {googleBekliyor ? <Loader2 className="w-5 h-5 animate-spin" /> : (
+                <svg className="w-5 h-5" viewBox="0 0 48 48" aria-hidden="true">
+                  <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/>
+                  <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+                  <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+                  <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/>
+                </svg>
+              )}
+              Google ile Giriş Yap
+            </button>
+            )}
+
+            {/* DEĞİŞTİ (kullanıcı talebi): Duyuru artık kartın içinde, Google butonunun hemen altında.
+                Metin Uygulama Ayarları'ndan gelir, boşsa gizli. "Not:" ile başlayan satırlar daha küçük/soluk. */}
+            {/* DEĞİŞTİ: açılır-kapanır, varsayılan kapalı */}
+            {girisDuyurusu.trim() && (
+              <div className="px-3 py-2.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900">
+                <button type="button" onClick={() => setDuyuruAcik(v => !v)} aria-expanded={duyuruAcik}
+                  className="w-full flex items-center justify-between gap-2 text-left text-sm font-black">
+                  <span>ℹ️ Google ile giriş nasıl yapılır?</span>
+                  <span className="text-xs shrink-0" aria-hidden="true">{duyuruAcik ? '▴' : '▾'}</span>
+                </button>
+                {duyuruAcik && (
+                  <div className="mt-1.5">
+                    {girisDuyurusu.trim().split('\n').map((satir, i) => (
+                      satir.trim().startsWith('Not:')
+                        ? <p key={i} className="text-[11px] font-medium text-amber-800/70 leading-snug mt-1.5">{satir}</p>
+                        : satir.trim()
+                          ? <p key={i} className="text-xs font-medium leading-snug">{satir}</p>
+                          : null
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {sifreKapali ? (
+              <p className="text-xs text-neutral-500 font-bold text-center">
+                Kullanıcı adı / şifre ile giriş {tarihGoster(googleGecisBitis)} itibarıyla kapatıldı (yalnızca süper yöneticiler).
+              </p>
+            ) : googleGecisBitis ? (
+              <p className="text-xs text-neutral-500 font-bold text-center">
+                {tarihGoster(googleGecisBitis)} tarihinden sonra yalnızca Google ile giriş yapılabilecek.
+              </p>
+            ) : null}
+
+            </div>)}
           </form>
         </div>
       </div>
@@ -3939,6 +4287,19 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       try { return !!localStorage.getItem('sembol_crm_user'); } catch (e) { return false; }
     }, []);
     const [oturumDenendi, setOturumDenendi] = useState(false);
+    // YENİ (kullanıcı talebi): Google hesap bağlama / Google ile giriş
+    const [girisAyarlari, setGirisAyarlari] = useState({ googleGecisBitis: '', googleGirisGoster: true, girisDuyurusu: VARSAYILAN_GIRIS_DUYURUSU });
+    // YENİ: "Google ile girişi göster" kapalıyken Google'a dair her şey gizlenir ve geçiş tarihi uygulanmaz
+    const googleAktif = girisAyarlari.googleGirisGoster !== false;
+    const etkinGecisBitis = googleAktif ? girisAyarlari.googleGecisBitis : '';
+    // YENİ: Elle yapılan şifreli girişten sonra açılan "Google hesabını bağla" penceresi
+    // ("Beni Hatırla" ile otomatik açılan oturumlarda açılmaz) ve bağlama sonrası kısa onay mesajı
+    const [googleBaglaPenceresi, setGoogleBaglaPenceresi] = useState(false);
+    const [googleOnayMesaji, setGoogleOnayMesaji] = useState('');
+    const [googleKullanici, setGoogleKullanici] = useState(null);
+    const [googleAuthHazir, setGoogleAuthHazir] = useState(false);
+    const [googleBaglaniyor, setGoogleBaglaniyor] = useState(false);
+    useEffect(() => onAuthStateChanged(googleAuth, (u) => { setGoogleKullanici(u); setGoogleAuthHazir(true); }), []);
     const [currentUser, setCurrentUser] = useState(null);
 
     // ========================================================================
@@ -5121,21 +5482,46 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         try { localStorage.setItem('sembol_crm_branding', JSON.stringify(yeni)); } catch (e) {}
       }, console.error));
 
+      // YENİ (kullanıcı talebi): Google'a geçiş bitiş tarihi (Uygulama Ayarları)
+      unsubs.push(onSnapshot(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'girisAyarlari'), docSnap => {
+        const v = docSnap.exists() ? docSnap.data() : {};
+        setGirisAyarlari({
+          googleGecisBitis: v.googleGecisBitis || '',
+          // YENİ: anahtar varsayılan AÇIK; duyuru hiç kaydedilmemişse varsayılan metin, boş kaydedilmişse gizli
+          googleGirisGoster: v.googleGirisGoster !== false,
+          girisDuyurusu: typeof v.girisDuyurusu === 'string' ? v.girisDuyurusu : VARSAYILAN_GIRIS_DUYURUSU,
+          yuklendi: true
+        });
+      }, (e) => { console.error(e); setGirisAyarlari(p => ({ ...p, yuklendi: true })); }));
+
       return () => unsubs.forEach(unsub => unsub());
     }, [firebaseUser, currentUser?.id]);   // DEĞİŞTİ: bildirimler kullanıcıya göre çekildiği için kullanıcı değişince yenilenir
 
     useEffect(() => {
-      if (personnelList.length > 0 && !isAuthenticated) {
+      // YENİ: Google oturumu ve giriş ayarları da hazır olmadan karar verilmez
+      if (personnelList.length > 0 && !isAuthenticated && !oturumDenendi && googleAuthHazir && girisAyarlari.yuklendi) {
         try {
           const savedUser = localStorage.getItem('sembol_crm_user');
           if (savedUser) {
             const parsed = JSON.parse(savedUser);
-            const parsedInput = (parsed.email || '').trim().toLocaleLowerCase('tr-TR');
-            const user = personnelList.find(p => {
-              const pEmail = (p.email || '').trim().toLocaleLowerCase('tr-TR');
-              const pName = (p.fullName || '').trim().toLocaleLowerCase('tr-TR');
-              return (pEmail === parsedInput || pName === parsedInput) && p.password === parsed.password;
-            });
+            let user = null;
+            if (parsed.google) {
+              // YENİ: "Beni Hatırla" + Google — kalıcı Google oturumunun uid'si ile eşleşir
+              user = googleKullanici ? personnelList.find(p => p.googleUid && p.googleUid === googleKullanici.uid) : null;
+            } else {
+              const parsedInput = (parsed.email || '').trim().toLocaleLowerCase('tr-TR');
+              user = personnelList.find(p => {
+                const pEmail = (p.email || '').trim().toLocaleLowerCase('tr-TR');
+                const pName = (p.fullName || '').trim().toLocaleLowerCase('tr-TR');
+                return (pEmail === parsedInput || pName === parsedInput) && p.password === parsed.password;
+              });
+              // YENİ: Geçiş süresi dolmuşsa şifreyle otomatik giriş yok (süper yöneticiler hariç).
+              // Google'ı bağlamış olmak şifreli girişi ENGELLEMEZ (kademeli geçiş).
+              if (user && !superYoneticiMi(user) && sifreGirisiKapaliMi(etkinGecisBitis)) {
+                user = null;
+                try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
+              }
+            }
             if (user && user.employmentStatus !== 'Pasif') {
               setCurrentUser(user);
               setIsAuthenticated(true);
@@ -5145,7 +5531,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         // YENİ: Oturum geri yükleme denemesi bitti (başarılı ya da değil)
         setOturumDenendi(true);
       }
-    }, [personnelList, isAuthenticated]); 
+    }, [personnelList, isAuthenticated, googleAuthHazir, googleKullanici, girisAyarlari]);
 
     useEffect(() => {
       if (isAuthenticated && currentUser && personnelList.length > 0) {
@@ -5153,7 +5539,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         if (updatedUser) {
           if (updatedUser.employmentStatus === 'Pasif') {
              setCurrentUser(updatedUser);
-          } else if (JSON.stringify(updatedUser.permissions) !== JSON.stringify(currentUser.permissions) || updatedUser.employmentStatus !== currentUser.employmentStatus) {
+          } else if (JSON.stringify(updatedUser.permissions) !== JSON.stringify(currentUser.permissions) || updatedUser.employmentStatus !== currentUser.employmentStatus || (updatedUser.googleUid || '') !== (currentUser.googleUid || '')) { // YENİ: Google bağlantısı değişince üstteki uyarı kutusu güncellensin
              setCurrentUser(updatedUser);
           }
         } else {
@@ -5361,8 +5747,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
     const handleUpdatePersonnel = async (updatedUser) => {
       if (!firebaseUser) return;
-      const { id, ...data } = updatedUser;
-      
+      // YENİ: Google bağlantı alanları yalnızca bağlama/kaldırma işlemleriyle yazılır;
+      // eski (bayat) bir form nesnesi kaydedilince kaldırılmış bağlantı geri gelmesin.
+      const { id, googleUid, googleEmail, googleBaglamaTarihi, googleBaglamaYontemi, ...data } = updatedUser;
+
       const oldUser = personnelList.find(p => p.id === id);
       if (oldUser && oldUser.employmentStatus !== 'Pasif' && data.employmentStatus === 'Pasif') {
           data.passiveDate = new Date().toISOString();
@@ -5382,6 +5770,50 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', id));
       if(person) addSystemLog('Personel Silindi', `${person.fullName} sistemden kaldırıldı.`);
       if (currentUser && currentUser.id === id) handleLogout();
+    };
+
+    // YENİ (kullanıcı talebi): Yönetici, personelin Google bağlantısını kaldırır
+    const handleGoogleBaglantiKaldir = async (person) => {
+      if (!firebaseUser || !person?.id) return;
+      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(person.id)), {
+        googleUid: deleteField(), googleEmail: deleteField(), googleBaglamaTarihi: deleteField(), googleBaglamaYontemi: deleteField()
+      });
+      addSystemLog('Google Bağlantısı Kaldırıldı', `${person.fullName} kullanıcısının Google hesabı bağlantısı kaldırıldı (${person.googleEmail || 'e-posta yok'}).`);
+    };
+
+    // YENİ (kullanıcı talebi): Oturumdaki personel kendi Google hesabını bağlar (uid ile).
+    // Başarılıysa true döner; bağlama penceresi kapanır ve kısa onay mesajı görünür.
+    const handleGoogleBagla = async () => {
+      if (!firebaseUser || !currentUser?.id || googleBaglaniyor) return false;
+      setGoogleBaglaniyor(true);
+      try {
+        const gUser = await googleHesabiSec();
+        if (!gUser) return false;
+        // Aynı Google hesabı başka bir personele bağlı mı? (liste yerine doğrudan sunucuya sorulur)
+        const cakisma = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'personnelList'), where('googleUid', '==', gUser.uid), limit(2)));
+        const baskasi = cakisma.docs.find(d => String(d.id) !== String(currentUser.id));
+        if (baskasi) {
+          alert(`Bu Google hesabı (${gUser.email || ''}) zaten başka bir CRM kullanıcısına (${baskasi.data().fullName || 'bilinmiyor'}) bağlı. Farklı bir Google hesabı seçin ya da yöneticinize başvurun.`);
+          try { await signOut(googleAuth); } catch (e) {}
+          return false;
+        }
+        const alanlar = { googleUid: gUser.uid, googleEmail: gUser.email || '', googleBaglamaTarihi: new Date().toISOString(), googleBaglamaYontemi: 'manuel' };
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(currentUser.id)), alanlar);
+        setCurrentUser(prev => ({ ...prev, ...alanlar }));
+        addSystemLog('Google Hesabı Bağlandı', `${currentUser.fullName} Google hesabını bağladı (${alanlar.googleEmail}).`);
+        // Kademeli geçiş: "Beni Hatırla" ile kayıtlı şifreli giriş aynen kalır; Google oturumu yalnızca
+        // uid'yi okumak için açılmıştı, kapatılır.
+        try { await signOut(googleAuth); } catch (e) {}
+        setGoogleBaglaPenceresi(false);
+        setGoogleOnayMesaji('Google hesabın bağlandı ✓');
+        setTimeout(() => setGoogleOnayMesaji(''), 3500);
+        return true;
+      } catch (e) {
+        alert(e?.message || googleHataMesaji(e));
+        return false;
+      } finally {
+        setGoogleBaglaniyor(false);
+      }
     };
 
     const handleUpdateModuleAccess = async (userId, modulesData) => {
@@ -7041,20 +7473,125 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
            return;
         }
 
+        // YENİ (kullanıcı talebi): Geçiş tarihi dolduysa şifreli giriş herkese kapalıdır
+        // (süper yöneticiler kilitlenmesin diye hariç). Tarih boşsa hiçbir şey kapanmaz.
+        // Google'ı bağlamış personel şifreyle girmeye DEVAM EDEBİLİR (kademeli geçiş).
+        if (!superYoneticiMi(user) && sifreGirisiKapaliMi(etkinGecisBitis)) {
+          setLoginError(`Kullanıcı adı / şifre ile giriş ${tarihGoster(etkinGecisBitis)} itibarıyla kapatıldı. Google ile Giriş Yap'ı kullan; Google hesabın bağlı değilse yöneticine başvur.`);
+          return;
+        }
+
         setCurrentUser(user); setIsAuthenticated(true); setLoginError('');
+        // YENİ (kullanıcı talebi): Elle yapılan şifreli girişte, Google bağlı değilse bağlama penceresi açılır.
+        // ("Beni Hatırla" ile otomatik açılan oturum bu fonksiyondan geçmez, pencere de açılmaz.)
+        setGoogleBaglaPenceresi(googleAktif && !user.googleUid);
         if (rememberMe) try { localStorage.setItem('sembol_crm_user', JSON.stringify({ email, password })); } catch (e) { }
         else try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
 
-        try {
-          const nowStr = new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
-          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(user.id)), {
-            lastLogin: nowStr
-          });
-        } catch (err) { console.error("Son giriş tarihi güncellenemedi:", err); }
+        await girisKaydet(user, 'Şifre');
       } else setLoginError('Kullanıcı adı / E-posta veya şifre hatalı.');
     };
 
+    // YENİ (kullanıcı talebi): Giriş kaydı — son giriş + yöntem (Google / Şifre).
+    // Kullanıcı Hareketleri'nde görünür; ayrıca sistem kaydına da düşer.
+    const girisKaydet = async (user, yontem) => {
+      const nowStr = new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' });
+      try {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(user.id)), { lastLogin: nowStr, lastLoginYontem: yontem });
+      } catch (err) { console.error("Son giriş tarihi güncellenemedi:", err); }
+      try {
+        // addSystemLog oturumdaki kullanıcıyı henüz göremediği için kayıt doğrudan yazılır
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'systemLogs'), {
+          action: 'Sisteme Giriş', details: `${user.fullName} sisteme giriş yaptı (Yöntem: ${yontem}).`,
+          user: user.fullName, yontem,
+          createdAt: new Date().toISOString(), timestamp: nowStr
+        });
+      } catch (err) { console.error("Giriş kaydı yazılamadı:", err); }
+    };
+
+    // YENİ (kullanıcı talebi): GOOGLE İLE GİRİŞ
+    //  1) Google oturumunun uid'si personel kaydındaki googleUid ile eşleşirse giriş.
+    //  2) YEDEK: eşleşmezse, Google e-postası doğrulanmışsa (email_verified) VE şirket alan
+    //     adındaysa (OTOMATIK_BAGLAMA_ALAN_ADLARI), e-posta
+    //     büyük/küçük harf ve boşluk duyarsız karşılaştırılır. TEK bir aktif personelle
+    //     eşleşir ve o kişinin googleUid'si boşsa otomatik bağlanır ('otomatik-eposta').
+    //     Birden fazla eşleşme varsa ya da kişi başka bir Google hesabına bağlıysa bağlanmaz.
+    //  3) Hâlâ eşleşme yoksa Google oturumu kapatılır ve yönlendirme mesajı gösterilir.
+    const handleGoogleLogin = async (rememberMe) => {
+      if (!personnelList || personnelList.length === 0) {
+        setLoginError('Sistem hazırlanıyor, lütfen 1-2 saniye sonra tekrar deneyin.');
+        return;
+      }
+      let gUser;
+      try {
+        gUser = await googleHesabiSec();
+      } catch (e) {
+        setLoginError(e?.message || googleHataMesaji(e));
+        return;
+      }
+      if (!gUser) return;
+      let user = personnelList.find(p => p.googleUid && p.googleUid === gUser.uid);
+      const cikisYap = async () => { try { await signOut(googleAuth); } catch (e) {} };
+      let otomatikBaglanacak = false;
+      // GÜVENLİK: Personel kayıtlarındaki e-postaların çoğu uydurma olabilir (başkasına ait
+      // bir Gmail adresi). Otomatik bağlama YALNIZCA şirket alan adlarındaki Google hesapları için.
+      if (!user && gUser.emailVerified && gUser.email && otomatikBaglamaAlanAdiMi(gUser.email)) {
+        const epostaNorm = (v) => String(v || '').replace(/\s+/g, '').toLowerCase();
+        const gEposta = epostaNorm(gUser.email);
+        const adaylar = personnelList.filter(p => p.employmentStatus !== 'Pasif' && epostaNorm(p.email) === gEposta);
+        if (adaylar.length === 1 && !adaylar[0].googleUid) {
+          // Bu Google hesabı sunucuda başka birine bağlı mı? (liste bayat olabilir)
+          try {
+            const cakisma = await getDocs(query(collection(db, 'artifacts', appId, 'public', 'data', 'personnelList'), where('googleUid', '==', gUser.uid), limit(1)));
+            if (cakisma.empty) { user = adaylar[0]; otomatikBaglanacak = true; }
+          } catch (e) { console.error('Google e-posta eşleştirme kontrolü yapılamadı:', e); }
+        }
+      }
+      if (!user) {
+        await cikisYap();
+        setLoginError("Bu Google hesabı henüz CRM'e bağlı değil. Önce kullanıcı adı ve şifrenle giriş yap, açılan pencereden 'Google Hesabımı Bağla'ya bas.");
+        return;
+      }
+      if (user.employmentStatus === 'Pasif') {
+        await cikisYap();
+        setLoginError('Hesabınız pasife alınmıştır. Sisteme erişim yetkiniz bulunmuyor.');
+        return;
+      }
+      if (user.permissions && user.permissions.canView === false) {
+        await cikisYap();
+        setLoginError('Sisteme giriş yetkiniz kapatılmıştır. Lütfen yöneticinizle iletişime geçin.');
+        return;
+      }
+      if (otomatikBaglanacak) {
+        const alanlar = { googleUid: gUser.uid, googleEmail: gUser.email || '', googleBaglamaTarihi: new Date().toISOString(), googleBaglamaYontemi: 'otomatik-eposta' };
+        try {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'personnelList', String(user.id)), alanlar);
+          user = { ...user, ...alanlar };
+          // addSystemLog oturumdaki kullanıcıyı henüz göremediği için kayıt doğrudan yazılır
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'systemLogs'), {
+            action: 'Google Hesabı Bağlandı', details: `${user.fullName} Google hesabı e-posta eşleşmesiyle otomatik bağlandı (${alanlar.googleEmail}).`,
+            user: user.fullName, createdAt: new Date().toISOString(),
+            timestamp: new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
+          });
+        } catch (e) {
+          console.error('Otomatik Google bağlama hatası:', e);
+          await cikisYap();
+          setLoginError('Google hesabı bağlanamadı. İnternet bağlantını kontrol edip tekrar dene.');
+          return;
+        }
+      }
+      setCurrentUser(user); setIsAuthenticated(true); setLoginError('');
+      setGoogleBaglaPenceresi(false);
+      // Beni Hatırla: Google oturumu cihazda kalır, açılışta uid ile doğrulanır
+      if (rememberMe) try { localStorage.setItem('sembol_crm_user', JSON.stringify({ google: true })); } catch (e) {}
+      else { try { localStorage.removeItem('sembol_crm_user'); } catch (e) {} await cikisYap(); }
+      await girisKaydet(user, 'Google');
+    };
+
     const handleLogout = () => {
+      // YENİ: Google oturumu da kapatılır (sonraki kişi otomatik girmesin)
+      signOut(googleAuth).catch(() => {});
+      setGoogleBaglaPenceresi(false);
       setIsAuthenticated(false); setCurrentUser(null); setActiveTab('dashboard'); setIsSidebarOpen(false);
       // YENİ: Çıkışta saklanan aktif sekme temizlenir; sonraki girişte anasayfadan başlanır
       try { sessionStorage.removeItem('sembolAktifSekme'); } catch (e) {}
@@ -7100,7 +7637,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     if (ESKI_QR_SITE_ID) return null;
 
     if (!isAuthenticated) {
-      return <LoginScreen onLogin={handleLogin} error={loginError} appBranding={appBranding} />;
+      return <LoginScreen onLogin={handleLogin} onGoogleLogin={handleGoogleLogin} error={loginError} appBranding={appBranding} googleAktif={googleAktif && !!girisAyarlari.yuklendi} googleGecisBitis={etkinGecisBitis} girisDuyurusu={girisAyarlari.girisDuyurusu || ""} />;
     }
 
     if (currentUser?.employmentStatus === 'Pasif') {
@@ -8521,7 +9058,39 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         )}
 
         <main ref={mainScrollRef} className="flex-1 w-full p-4 md:p-8 mt-16 md:mt-0 overflow-y-auto relative">
-          <div className="max-w-6xl mx-auto">
+          {/* DEĞİŞTİ: Kullanıcı Yönetimi ekranı tam genişlik kullanır; diğer sayfalar max-w-6xl kalır */}
+          <div className={activeTab === 'userList' ? 'w-full' : 'max-w-6xl mx-auto'}>
+            {/* YENİ (kullanıcı talebi): Elle yapılan şifreli girişten sonra "Google hesabını bağla" penceresi.
+                "Bağlamadan Devam Et" yalnızca pencereyi kapatır; bir sonraki şifreli girişte yine açılır. */}
+            {googleBaglaPenceresi && googleAktif && currentUser && !currentUser.googleUid && (
+              <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[120] flex items-center justify-center p-4">
+                <div className="bg-white w-full max-w-sm rounded-3xl shadow-2xl p-6 animate-in zoom-in-95">
+                  <div className="w-14 h-14 mx-auto mb-4 rounded-2xl bg-neutral-100 flex items-center justify-center">
+                    <Key className="w-7 h-7 text-black" />
+                  </div>
+                  <h3 className="text-xl font-black text-black text-center mb-2">Google hesabını bağla</h3>
+                  <p className="text-sm text-neutral-600 font-medium text-center mb-6">
+                    Bir kez bağlarsan bundan sonra şifre yazmadan, Google hesabınla tek dokunuşla girebilirsin. Şifrenle girmeye de devam edebilirsin.
+                  </p>
+                  {uygulamaIciTarayiciMi() ? <UygulamaIciTarayiciUyarisi /> : (
+                    <button type="button" onClick={handleGoogleBagla} disabled={googleBaglaniyor}
+                      className="w-full py-4 bg-black text-white text-base font-black rounded-2xl hover:bg-neutral-800 transition disabled:opacity-60 flex items-center justify-center gap-2">
+                      {googleBaglaniyor ? <Loader2 className="w-5 h-5 animate-spin" /> : <Key className="w-5 h-5" />} Google Hesabımı Bağla
+                    </button>
+                  )}
+                  <button type="button" onClick={() => setGoogleBaglaPenceresi(false)} disabled={googleBaglaniyor}
+                    className="w-full mt-3 py-2 text-sm font-bold text-neutral-500 hover:text-black transition disabled:opacity-60">
+                    Bağlamadan Devam Et
+                  </button>
+                </div>
+              </div>
+            )}
+            {/* YENİ: Bağlama sonrası kısa onay mesajı */}
+            {googleOnayMesaji && (
+              <div className="fixed top-4 left-1/2 -translate-x-1/2 z-[130] px-5 py-3 bg-green-600 text-white text-sm font-black rounded-2xl shadow-xl flex items-center gap-2 animate-in fade-in">
+                <CheckCircle className="w-5 h-5" /> {googleOnayMesaji}
+              </div>
+            )}
             {showGlobalSearch && (
               <div className="hidden md:block relative mb-6">
                 <div className="relative">
@@ -8655,7 +9224,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               onViewCustomer={showCustomers ? ((job) => { setViewingCariKey(normalizeCariPhone(job.customerPhone)); setActiveTab('customerProfile'); }) : null}
               /* YENİ: Ekspertiz Takvimi — beyaz yaka listesi, "Kayıt Aç" köprüsü ve sistem günlüğü */
               personnelList={personnelList} onKayitAc={showSatisMusteriKayit ? havuzdanKayitAc : null} addSystemLog={addSystemLog} />}
-            {activeTab === 'profileSettings' && showProfileSettings && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} showMySpecialTasks={showMySpecialTasks} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} showMyComplaint={showMyComplaint} db={db} appId={appId} addSystemLog={addSystemLog} />}
+            {activeTab === 'profileSettings' && showProfileSettings && <ProfileSettingsView currentUser={currentUser} handleUpdatePersonnel={handleUpdatePersonnel} showMySpecialTasks={showMySpecialTasks} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} showMyComplaint={showMyComplaint} db={db} appId={appId} addSystemLog={addSystemLog} googleAktif={googleAktif} onGoogleBagla={handleGoogleBagla} googleBaglaniyor={googleBaglaniyor} />}
             {activeTab === 'myAssignedJobs' && <MyAssignedJobsView currentUser={currentUser} jobs={visibleJobs} handleOpenEndJobModal={handleOpenEndJobModal} markNotificationsAsRead={markNotificationsAsRead} />}
             {activeTab === 'mySpecialTasks' && showMySpecialTasks && <MyTasksView currentUser={currentUser} tasks={tasks} handleUpdateTaskStatus={handleUpdateTaskStatus} />}
             
@@ -9536,7 +10105,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             }
             
             {activeTab === 'userList' && showAuth && (
-              <div className="max-w-5xl mx-auto">
+              <div className="w-full">
                 {/* YENİ: Mevcut Kullanıcılar / İzinler Yönetimi / Modül Görüntüleme / Pozisyonlar /
                     Rütbeler artık aynı sayfada sekme olarak bir arada; ayrı sol menü öğeleri kaldırıldı. */}
                 <div className="flex flex-wrap gap-2 mb-4 bg-neutral-100 p-1.5 rounded-xl">
@@ -9561,7 +10130,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     <Star className="w-4 h-4" /> Rütbeler
                   </button>
                 </div>
-                {kullaniciYonetimSekme === 'kullanicilar' && <UserListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} onDelete={handleDeletePersonnel} positions={positions} ranks={ranks} positionModules={positionModules} moduleCatalog={moduleCatalog} />}
+                {kullaniciYonetimSekme === 'kullanicilar' && <UserListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} onDelete={handleDeletePersonnel} onGoogleKaldir={handleGoogleBaglantiKaldir} positions={positions} ranks={ranks} positionModules={positionModules} moduleCatalog={moduleCatalog} />}
                 {kullaniciYonetimSekme === 'izinler' && <PermissionsView personnelList={personnelList} handleUpdatePermissions={handleUpdatePermissions} positions={positions} />}
                 {kullaniciYonetimSekme === 'modul' && <ModuleAccessView moduleCatalog={moduleCatalog} addSystemLog={addSystemLog} />}
                 {kullaniciYonetimSekme === 'pozisyonlar' && <PositionsView positions={positions} onAddPosition={handleAddPosition} onDeletePosition={handleDeletePosition} onUpdatePosition={handleUpdatePosition} />}
@@ -9579,7 +10148,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'systemLogs' && showSystemFiles && <SystemLogsView logs={systemLogs} />}
             {activeTab === 'userActivities' && showSystemFiles && <UserActivitiesView personnelList={personnelList} />}
             {activeTab === 'companyPasswords' && showSystemFiles && <CompanyPasswordsView passwords={companyPasswords} db={db} appId={appId} addSystemLog={addSystemLog} />}
-            {activeTab === 'appSettings' && showSystemFiles && <AppSettingsView db={db} appId={appId} addSystemLog={addSystemLog} appBranding={appBranding} />}
+            {activeTab === 'appSettings' && showSystemFiles && <AppSettingsView db={db} appId={appId} addSystemLog={addSystemLog} appBranding={appBranding} girisAyarlari={girisAyarlari} />}
             {/* YENİ: Resmi Ayarları — sözleşme maddeleri ve şirket IBAN yönetimi.
                 Uygulama Ayarları ile aynı yetkiye (systemFiles) bağlıdır. */}
             {activeTab === 'resmiAyarlar' && showSystemFiles && <ResmiAyarlarView db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}

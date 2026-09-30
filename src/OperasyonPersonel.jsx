@@ -2014,7 +2014,10 @@ export const CalismaProgramiBolumu = ({ program, guncelle, yakaTipi }) => {
                     <div className="flex flex-col gap-1">
                       {person.personalPhone && <span className="flex items-center gap-1.5"><Phone className="w-3 h-3 text-neutral-400"/> {person.personalPhone}</span>}
                       {person.companyPhone && <span className="flex items-center gap-1.5"><Briefcase className="w-3 h-3 text-neutral-400"/> Şirket: {person.companyPhone}</span>}
-                      {person.email && <span className="flex items-center gap-1.5"><Mail className="w-3 h-3 text-neutral-400"/> {person.email}</span>}
+                      {person.email && <span className="flex items-center gap-1.5"><Mail className="w-3 h-3 text-neutral-400"/> {person.email}
+                        {/* YENİ: Google hesabı bağlıysa küçük yeşil rozet; değilse hiçbir şey gösterilmez */}
+                        {person.googleUid && <span className="px-1.5 py-0.5 rounded-md bg-green-100 text-green-700 text-[10px] font-black whitespace-nowrap" title={person.googleEmail || ''}>Google ✓</span>}
+                      </span>}
                       {person.startDate && <span className="flex items-center gap-1.5"><CalendarDays className="w-3 h-3 text-neutral-400"/> Başlama: {person.startDate}</span>}
                       {person.setcard && <span className="flex items-center gap-1.5"><CreditCard className="w-3 h-3 text-neutral-400"/> SetCard: {person.setcard}</span>}
                       {!person.personalPhone && !person.companyPhone && !person.email && !person.startDate && <span className="text-neutral-400 italic">Bilgi Yok</span>}
