@@ -7513,11 +7513,24 @@ export const QrSiteTakipView = ({ personnelList = [], currentUser, addSystemLog,
   const [durumFiltre, setDurumFiltre] = useState('Tümü');
   const [turFiltre, setTurFiltre] = useState('Tümü');
 
-  // Müşteri temsilcisi adayları: önce Satış Personeli, yoksa tüm aktif personel
+  // Müşteri temsilcisi adayları: Satış Personeli (satış destek) + Pazarlama personeli.
+  // İkisi de yoksa tüm aktif personel listelenir (eski davranış korunur).
+  // DEĞİŞTİ (kullanıcı talebi): Pazarlama pozisyonunda kayıtlı personel de eklendi.
+  // Pozisyon adı İK'da farklı yazılmış olabilir ("Pazarlama", "Saha Pazarlama",
+  // "Pazarlama Personeli" …) — adında "pazarlama" geçen her pozisyon kabul edilir.
   const temsilciler = useMemo(() => {
     const aktif = personnelList.filter(p => p.employmentStatus !== 'Pasif');
-    const satis = aktif.filter(p => normalizePozisyon(p.position) === 'Satış Personeli');
-    return satis.length ? satis : aktif;
+    // Pozisyonun pazarlama olup olmadığını büyük/küçük harf ve Türkçe karakterden bağımsız kontrol eder
+    const pazarlamaMi = (p) => String(p.position || '').toLocaleLowerCase('tr-TR').includes('pazarlama');
+    const satisMi = (p) => normalizePozisyon(p.position) === 'Satış Personeli';
+    // Ada göre alfabetik sıralama (Türkçe)
+    const adSirala = (x, y) => String(x.fullName || '').localeCompare(String(y.fullName || ''), 'tr');
+    const satis = aktif.filter(satisMi).sort(adSirala);
+    // Satış Personeli zaten listede olduğu için pazarlamada tekrar gösterilmez
+    const pazarlama = aktif.filter(p => !satisMi(p) && pazarlamaMi(p)).sort(adSirala);
+    // Sıra: önce satış destek, ardından pazarlama personeli
+    const adaylar = [...satis, ...pazarlama];
+    return adaylar.length ? adaylar : aktif;
   }, [personnelList]);
 
   // Yer bazında istatistikler
