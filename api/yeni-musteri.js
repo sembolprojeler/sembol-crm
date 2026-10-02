@@ -55,6 +55,8 @@
 
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { PAID_ADS_DEGERLERI, pazarlamaOku, reklamKaynagiKarar } from './_lib/pazarlama.js';
+import { AI_KAYNAK_ETIKETLERI } from '../src/aiKaynakSema.js';
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGIN || 'https://www.sembolevdeneve.com,https://www.depoevim.com')
   .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
@@ -138,16 +140,20 @@ const KAYNAK_ETIKETLERI = {
   google_altsayfa: { ad: 'Google Altsayfa Ziyaretçisi', reklamMetni: 'Google\'da aratıp bir alt sayfaya düşerek ' },
   direkt_giris: { ad: 'Direkt Giriş Ziyaretçisi', reklamMetni: 'adres çubuğuna doğrudan yazarak ' },
   diger_site: { ad: 'Diğer Site Ziyaretçisi', reklamMetni: 'başka bir siteden yönlendirilerek ' },
+  // YENİ: yapay zeka kaynakları — src/aiKaynakSema.js tablosundan üretilir
+  // (ör. "ChatGPT Reklam Ziyaretçisi" / "ChatGPT üzerinden organik olarak ").
+  ...Object.fromEntries(Object.entries(AI_KAYNAK_ETIKETLERI).map(([kod, e]) => [kod, {
+    ad: `${e.ad} Ziyaretçisi`,
+    reklamMetni: e.reklam ? `${e.platform} reklamlarından ` : `${e.platform} üzerinden organik olarak `,
+  }])),
 };
 
-// yeni-musteri.js ve submit-lead.js'in KABUL ETTİĞİ tüm geçerli değerler —
-// submit-lead.js'teki REKLAM_KAYNAGI_DEGERLERI ile BİREBİR aynı olmalı.
-const REKLAM_KAYNAGI_DEGERLERI = ['google_ads', 'facebook_ads', 'facebook_organik', 'instagram_ads', 'instagram_organik', 'google_anasayfa', 'google_altsayfa', 'direkt_giris', 'diger_site'];
-// QR eşleşmesi bunların ÜZERİNE YAZMAZ (bkz. aşağıdaki musteriAdi/reklamKaynagi
-// hesaplaması) — genuine bir ödemeli reklam tıklamasıysa QR izi bulunsa bile
-// reklam etiketi korunur; diğer tüm (organik/direkt/google anasayfa-altsayfa/
-// diğer site) kategorilerin üzerine QR izi kazanır.
-const PAID_ADS_DEGERLERI = ['google_ads', 'facebook_ads', 'instagram_ads'];
+// Geçerli değerler (REKLAM_KAYNAGI_DEGERLERI) ve QR'ın üzerine yazamadığı
+// ödemeli reklamlar (PAID_ADS_DEGERLERI) submit-lead.js ile ORTAK —
+// api/_lib/pazarlama.js'ten import edildi. Ödemeli reklam tıklamasıysa QR izi
+// bulunsa bile reklam etiketi korunur; diğer tüm (organik/direkt/google
+// anasayfa-altsayfa/diğer site/yapay zeka organik) kategorilerin üzerine QR
+// izi kazanır.
 
 // Site → satış ekibinin göreceği okunaklı etiket.
 const SITE_ETIKET = {
@@ -180,9 +186,15 @@ export default async function handler(req, res) {
 
     const suAnkiTarih = new Date().toISOString();
     const kanalTipi = (crmData.islem || '').includes('WhatsApp') ? 'whatsapp' : 'telefon';
-    const kaynakGecerliMi = REKLAM_KAYNAGI_DEGERLERI.includes(crmData.kaynak);
-    const kaynakBilgi = kaynakGecerliMi ? KAYNAK_ETIKETLERI[crmData.kaynak] : undefined;
-    const kaynakOdemeliReklamMi = kaynakGecerliMi && PAID_ADS_DEGERLERI.includes(crmData.kaynak);
+    // YENİ (yapay zeka kaynakları): sitenin gönderdiği "kaynak" ile sunucunun
+    // UTM/referrer sınıflandırması submit-lead.js ile AYNI kuralla birleştirilir.
+    // Bu uç OpenAI'a dönüşüm BİLDİRMEZ (tıklama bir teklif değildir).
+    const pazarlama = pazarlamaOku(crmData);
+    const kaynakKarari = reklamKaynagiKarar(crmData.kaynak, pazarlama);
+    const kaynak = kaynakKarari.reklamKaynagi;
+    const kaynakGecerliMi = kaynakKarari.karar !== 'varsayilan';
+    const kaynakBilgi = kaynakGecerliMi ? KAYNAK_ETIKETLERI[kaynak] : undefined;
+    const kaynakOdemeliReklamMi = kaynakGecerliMi && PAID_ADS_DEGERLERI.includes(kaynak);
     // YENİ (QR TAKİP): QR izi varsa ziyaretçi "QR Ziyaretçisi" olarak açılır —
     // ödemeli bir reklam tıklaması DEĞİLSE QR izi kazanır (direkt/organik/google
     // anasayfa-altsayfa/diğer site gibi "zayıf" kategorilerin üzerine yazar).
@@ -212,7 +224,9 @@ export default async function handler(req, res) {
       sonMesaj: `${siteEtiket} sitesinden ${qrKazaniyorMu ? `QR (${qrIzi.qrKodu}) üzerinden ` : (kaynakBilgi ? kaynakBilgi.reklamMetni : '')}tıklama geldi`,
       // submit-lead.js ile AYNI alan adı — Satis.jsx artık Ads/Organik
       // sayımını metin eşleştirme yerine doğrudan bu alandan yapıyor.
-      reklamKaynagi: qrKazaniyorMu ? 'qr' : (kaynakGecerliMi ? crmData.kaynak : 'direkt_giris'),
+      reklamKaynagi: qrKazaniyorMu ? 'qr' : kaynak,
+      kaynakKarari: kaynakKarari.karar,
+      ...(Object.keys(pazarlama).length ? { pazarlama } : {}),
       // "google_anasayfa"/"google_altsayfa"/"diger_site" kategorilerinde hangi
       // sayfaya düşüldüğü ve (varsa) hangi dış sitenin yönlendirdiği —
       // site-tiklama-takip-*.txt bunu document.referrer + location.pathname'den
@@ -220,7 +234,7 @@ export default async function handler(req, res) {
       inisSayfasi: String(crmData.inisSayfasi || '').trim(),
       digerSiteAdi: String(crmData.digerSiteAdi || '').trim(),
       // YENİ (QR TAKİP): iz alanları — Satis.jsx qrKodu ile kampanyaya bağlar
-      ...(qrKazaniyorMu ? { oncekiReklamKaynagi: kaynakGecerliMi ? crmData.kaynak : 'direkt_giris', qrKodu: qrIzi.qrKodu, utmSource: qrIzi.utmSource, utmMedium: qrIzi.utmMedium, utmCampaign: qrIzi.utmCampaign, sayfaUrl: qrIzi.sayfaUrl, qrIziZamani: qrIzi.qrIziZamani } : {}),
+      ...(qrKazaniyorMu ? { oncekiReklamKaynagi: kaynak, qrKodu: qrIzi.qrKodu, utmSource: qrIzi.utmSource, utmMedium: qrIzi.utmMedium, utmCampaign: qrIzi.utmCampaign, sayfaUrl: qrIzi.sayfaUrl, qrIziZamani: qrIzi.qrIziZamani } : {}),
       // Bu alan sayesinde Satis.jsx (istenirse) gerçek isim/telefon verilmiş
       // kayıtlarla salt tıklama bildirimlerini ayırt edebilir; iletisim alanına
       // güvenmek zorunda kalmaz.

@@ -11,6 +11,8 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
 import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
 // YENİ (kullanıcı talebi): depolama tekliflerinin Teklif Detayı satırları (siteden gelen ham alanlardan)
 import { teklifDetayiAlanlardan, eskiTeklifMetni } from './teklifDetay.js';
+// YENİ: Yapay zeka kaynak şeması — /api/submit-lead ve /api/yeni-musteri ile ortak (etiketler, kutular)
+import { AI_KAYNAK_ETIKETLERI, AI_ISTATISTIK_KUTULARI, aiKaynakMi } from './aiKaynakSema.js';
 // YENİ: QR Site Takip şeması — /api/qr-site ile ortak (sabitler, telefon kuralı, WordPress sayfa adresi)
 import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
@@ -3072,7 +3074,8 @@ const KaynakIstatistikPaneli = ({ gruplar, kanalAd, onKapat }) => (
     {/* Platform kartları: mobilde tek sütun, geniş ekranda 2-3 sütun */}
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
       {gruplar.map(grup => (
-        <div key={grup.ad} className={`bg-white/10 border ${grup.kenar} rounded-2xl backdrop-blur-sm p-3 md:p-4`}>
+        // "genis" grup (Yapay Zeka, 7 kutu) satırın tamamını kaplar
+        <div key={grup.ad} className={`bg-white/10 border ${grup.kenar} rounded-2xl backdrop-blur-sm p-3 md:p-4 ${grup.genis ? 'md:col-span-2 xl:col-span-3' : ''}`}>
           {/* Kart başlığı: büyük logo + platform adı */}
           <div className="flex items-center gap-3 pb-3 mb-3 border-b border-white/15">
             <span className="w-11 h-11 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
@@ -3081,8 +3084,8 @@ const KaynakIstatistikPaneli = ({ gruplar, kanalAd, onKapat }) => (
             <p className="text-sm md:text-base font-black uppercase text-white tracking-wide">{grup.ad}</p>
           </div>
 
-          {/* Alt kategori hücreleri — hücre sayısı kadar sütun (1, 2 veya 3) */}
-          <div className={`grid gap-2 ${grup.hucreler.length >= 3 ? 'grid-cols-3' : grup.hucreler.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {/* Alt kategori hücreleri — hücre sayısı kadar sütun (1, 2 veya 3); 3'ten fazlası (Yapay Zeka) ekran genişliğine göre 2 / 4 / 7 sütun */}
+          <div className={`grid gap-2 ${grup.hucreler.length > 3 ? 'grid-cols-2 sm:grid-cols-4 xl:grid-cols-7' : grup.hucreler.length === 3 ? 'grid-cols-3' : grup.hucreler.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {grup.hucreler.map(h => (
               <div key={h.ad} className="bg-black/20 rounded-xl px-2.5 py-2 min-w-0">
                 <p className={`text-[11px] md:text-xs font-black uppercase truncate ${h.renk}`} title={h.ad}>{h.ad}</p>
@@ -3983,6 +3986,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // YENİ: Zaman filtresi — varsayılan "Tüm Zamanlar" (sekme değişince sıfırlanmaz)
   const [zamanFiltre, setZamanFiltre] = useState('Tüm Zamanlar');
   const [hesapFiltre, setHesapFiltre] = useState('Tümü');
+  // YENİ (kullanıcı talebi): Kaynak filtresi — 'Tümü' | KAYNAK_FILTRELERI id'si
+  const [kaynakFiltre, setKaynakFiltre] = useState('Tümü');
   // Hangi şirketin verisini görüyoruz: "sembolevdeneve" | "depoevim". Sadece
   // depoevim'den gelen kayıtlarda hesapId==='depoevim' işaretli olduğu için,
   // geri kalan HER ŞEY (gerçek telefon/whatsapp hesapları, Instagram, Gmail,
@@ -4510,7 +4515,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     // YENİ (kullanıcı talebi): Hızlı Teklifler'de yalnızca kimsenin almadığı talepler
     && (aktifKanal !== 'web' || alinanlariGoster || !havuzdanAlindiMi(k)));
   const kanalKayitlari = aktifKanal === 'web' ? mukerrerleriGizle(kanalKayitlariHam) : kanalKayitlariHam;
-  const filtreli = kanalKayitlari.filter(k => {
+  // Kaynak filtresi, kaynak koşulları (OZET_GRUPLARI) aşağıda tanımlandığı için
+  // orada uygulanır → "filtreli".
+  const filtreliKaynakHaric = kanalKayitlari.filter(k => {
     if (durumFiltre !== 'Tümü' && (k.durum || 'Yeni') !== durumFiltre) return false;
     if (hizmetFiltre !== 'Tümü' && (k.hizmetTipi || 'Nakliye') !== hizmetFiltre) return false;
     if (hesapFiltre !== 'Tümü' && k.hesapId !== hesapFiltre) return false;
@@ -4613,6 +4620,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     google_altsayfa: { ad: 'Google Altsayfa', renk: 'bg-orange-100 text-orange-700' },
     direkt_giris: { ad: 'Direkt Giriş', renk: 'bg-neutral-100 text-neutral-600' },
     diger_site: { ad: 'Diğer Site', renk: 'bg-purple-100 text-purple-700' },
+    // YENİ: ChatGPT Reklam / ChatGPT Organik / Gemini Organik … (src/aiKaynakSema.js)
+    ...AI_KAYNAK_ETIKETLERI,
   };
   const reklamKaynagiEtiket = (k) => {
     // YENİ (kullanıcı talebi): QR'dan gelen form "Organik" değil, QR adıyla görünür
@@ -4631,6 +4640,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     if (reklamKaynagiEsit(k, 'google_altsayfa')) return REKLAM_KAYNAGI_ETIKETLERI.google_altsayfa;
     if (reklamKaynagiEsit(k, 'direkt_giris')) return REKLAM_KAYNAGI_ETIKETLERI.direkt_giris;
     if (reklamKaynagiEsit(k, 'diger_site')) return REKLAM_KAYNAGI_ETIKETLERI.diger_site;
+    if (aiKaynakMi(k.reklamKaynagi)) return REKLAM_KAYNAGI_ETIKETLERI[k.reklamKaynagi];
     // DÜZELTME: QR'dan geldiği kesin ama henüz bir kampanyaya bağlanamamış kayıt
     // (ör. kampanya sonradan silinmiş/kodu değişmiş) "Organik" DEĞİL, QR görünür.
     if (!k.qrEslesmeYok && reklamKaynagiEsit(k, 'qr')) return { ad: `QR${k.qrKodu ? ` (${k.qrKodu})` : ''}`, renk: 'bg-amber-50 text-amber-700 border border-amber-200' };
@@ -4650,7 +4660,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     && !reklamKaynagiEsit(k, 'google_anasayfa')
     && !reklamKaynagiEsit(k, 'google_altsayfa')
     && !reklamKaynagiEsit(k, 'direkt_giris')
-    && !reklamKaynagiEsit(k, 'diger_site');
+    && !reklamKaynagiEsit(k, 'diger_site')
+    && !aiKaynakMi(k.reklamKaynagi);
   // Her kaynak için { bugun, buAy, tumu } sayıları
   const kaynakSayilari = (kosul) => ({
     bugun: aktifKanalBugun.filter(kosul).length,
@@ -4663,29 +4674,45 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // QR eşleşmesi olan kayıtlar yalnızca QR grubunda sayılır.
   const qrDegil = (deger) => (k) => !k.qrKampanyaId && reklamKaynagiEsit(k, deger);
   // DEĞİŞTİ: logo artık (boyutSinifi) => JSX fonksiyonu; panel logoyu büyük çizebilsin diye
+  // DEĞİŞTİ: her hücre sayım koşulunu ("kosul") da taşır — aynı koşul aşağıdaki
+  // Kaynak filtresinde kullanılır, sayılar ile filtre hiçbir zaman ayrışmaz.
   const OZET_GRUPLARI = [
     { ad: 'Google', logo: (c) => <GoogleLogo className={c} />, kenar: 'border-yellow-400/40', hucreler: [
-      { ad: 'Ads', renk: 'text-green-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'google_ads')) },
-      { ad: 'Ana Sayfa', renk: 'text-yellow-400', sayilar: kaynakSayilari(qrDegil('google_anasayfa')) },
-      { ad: 'Alt Sayfa', renk: 'text-orange-400', sayilar: kaynakSayilari(qrDegil('google_altsayfa')) },
+      { ad: 'Ads', renk: 'text-green-400', kosul: k => reklamKaynagiEsit(k, 'google_ads') },
+      { ad: 'Ana Sayfa', renk: 'text-yellow-400', kosul: qrDegil('google_anasayfa') },
+      { ad: 'Alt Sayfa', renk: 'text-orange-400', kosul: qrDegil('google_altsayfa') },
     ] },
     { ad: 'Facebook', logo: (c) => <FacebookLogo className={c} />, kenar: 'border-sky-400/40', hucreler: [
-      { ad: 'Ads', renk: 'text-sky-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'facebook_ads')) },
-      { ad: 'Organik', renk: 'text-indigo-300', sayilar: kaynakSayilari(qrDegil('facebook_organik')) },
+      { ad: 'Ads', renk: 'text-sky-400', kosul: k => reklamKaynagiEsit(k, 'facebook_ads') },
+      { ad: 'Organik', renk: 'text-indigo-300', kosul: qrDegil('facebook_organik') },
     ] },
     { ad: 'Instagram', logo: (c) => <InstagramLogo className={c} />, kenar: 'border-pink-400/40', hucreler: [
-      { ad: 'Ads', renk: 'text-pink-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'instagram_ads')) },
-      { ad: 'Organik', renk: 'text-rose-300', sayilar: kaynakSayilari(qrDegil('instagram_organik')) },
+      { ad: 'Ads', renk: 'text-pink-400', kosul: k => reklamKaynagiEsit(k, 'instagram_ads') },
+      { ad: 'Organik', renk: 'text-rose-300', kosul: qrDegil('instagram_organik') },
     ] },
     { ad: 'QR', logo: (c) => <QrCode className={`${c} text-amber-400`} />, kenar: 'border-amber-400/40', hucreler: [
-      { ad: 'QR Takip', renk: 'text-amber-400', sayilar: kaynakSayilari(k => !!k.qrKampanyaId || (!k.qrEslesmeYok && reklamKaynagiEsit(k, 'qr'))) },
+      { ad: 'QR Takip', renk: 'text-amber-400', kosul: k => !!k.qrKampanyaId || (!k.qrEslesmeYok && reklamKaynagiEsit(k, 'qr')) },
     ] },
     { ad: 'Diğer', logo: (c) => <Globe className={`${c} text-neutral-300`} />, kenar: 'border-white/20', hucreler: [
-      { ad: 'Direkt Giriş', renk: 'text-neutral-300', sayilar: kaynakSayilari(qrDegil('direkt_giris')) },
-      { ad: 'Diğer Site', renk: 'text-purple-400', sayilar: kaynakSayilari(qrDegil('diger_site')) },
-      { ad: 'Eski Kayıt', renk: 'text-neutral-500', sayilar: kaynakSayilari(k => reklamKaynagiEskiKayit(k)) },
+      { ad: 'Direkt Giriş', renk: 'text-neutral-300', kosul: qrDegil('direkt_giris') },
+      { ad: 'Diğer Site', renk: 'text-purple-400', kosul: qrDegil('diger_site') },
+      { ad: 'Eski Kayıt', renk: 'text-neutral-500', kosul: k => reklamKaynagiEskiKayit(k) },
     ] },
-  ];
+    // YENİ: YAPAY ZEKA — kutular src/aiKaynakSema.js tablosundan üretilir (yeni
+    // platform/reklam eklenince kutu kendiliğinden çıkar). Reklam kutuları diğer
+    // "Ads" hücreleri gibi QR eşleşmesinden bağımsız sayılır.
+    { ad: 'Yapay Zeka', logo: (c) => <Sparkles className={`${c} text-fuchsia-300`} />, kenar: 'border-fuchsia-400/40', genis: true,
+      hucreler: AI_ISTATISTIK_KUTULARI.map(x => ({ ad: x.ad, renk: x.renk, kosul: x.reklam ? (k => reklamKaynagiEsit(k, x.kod)) : qrDegil(x.kod) })) },
+  ].map(g => ({ ...g, hucreler: g.hucreler.map(h => ({ ...h, sayilar: kaynakSayilari(h.kosul) })) }));
+
+  // YENİ (kullanıcı talebi): KAYNAK FİLTRESİ — seçenekler istatistik gruplarından
+  // üretilir: "Google (Tümü)", "Google · Ads", … "Yapay Zeka · ChatGPT Ads".
+  const KAYNAK_FILTRELERI = OZET_GRUPLARI.flatMap(g => [
+    ...(g.hucreler.length > 1 ? [{ id: `${g.ad}::*`, grup: g.ad, ad: `${g.ad} (Tümü)`, kosul: k => g.hucreler.some(h => h.kosul(k)) }] : []),
+    ...g.hucreler.map(h => ({ id: `${g.ad}::${h.ad}`, grup: g.ad, ad: g.hucreler.length > 1 ? `${g.ad} · ${h.ad}` : h.ad, kosul: h.kosul })),
+  ]);
+  const seciliKaynakFiltresi = KAYNAK_FILTRELERI.find(f => f.id === kaynakFiltre);
+  const filtreli = seciliKaynakFiltresi ? filtreliKaynakHaric.filter(seciliKaynakFiltresi.kosul) : filtreliKaynakHaric;
 
   // ================================================================ RENDER ===
   // YENİ (kullanıcı talebi): QR Takip sayfası — seçili site için, havuzun yerine
@@ -4990,6 +5017,17 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               {t}
             </button>
           ))}
+          {/* YENİ (kullanıcı talebi): KAYNAK FİLTRESİ — istatistik gruplarından üretilir */}
+          <span className="text-[10px] font-black text-neutral-400 uppercase ml-1 shrink-0">Kaynak:</span>
+          <select value={kaynakFiltre} onChange={e => setKaynakFiltre(e.target.value)}
+            className={`px-2 py-1 rounded-lg text-[10px] font-black border outline-none shrink-0 ${kaynakFiltre !== 'Tümü' ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200'}`}>
+            <option value="Tümü">Tümü</option>
+            {OZET_GRUPLARI.map(g => (
+              <optgroup key={g.ad} label={g.ad}>
+                {KAYNAK_FILTRELERI.filter(f => f.grup === g.ad).map(f => <option key={f.id} value={f.id}>{f.ad}</option>)}
+              </optgroup>
+            ))}
+          </select>
         </div>
 
         {/* YENİ (kullanıcı talebi): ZAMAN FİLTRESİ — yeni satırda, Tüm Zamanlar varsayılan */}
