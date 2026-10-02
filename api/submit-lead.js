@@ -45,6 +45,9 @@
 //                            (CRM hangi "artifacts/{appId}/..." yoluna yazıyorsa
 //                            bu fonksiyon da aynı yola yazmalı)
 //   ALLOWED_ORIGIN         → örn. https://www.sembolevdeneve.com
+//   OPENAI_PIXEL_ID, OPENAI_CONVERSIONS_KEY, OPENAI_CAPI_TEST,
+//   OPENAI_DONUSUM_SITELERI → (opsiyonel) ChatGPT reklam dönüşüm bildirimi,
+//                            bkz. api/_lib/openaiDonusum.js
 //
 // NOT: Bu, App.jsx içindeki "firebaseConfig" (apiKey, authDomain vb.) ile
 // AYNI şey DEĞİLDİR. O config tarayıcı (client) tarafı içindir ve CRM'e giriş
@@ -68,7 +71,9 @@
 
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { waitUntil } from '@vercel/functions';
 import { PAID_ADS_DEGERLERI, pazarlamaOku, reklamKaynagiKarar } from './_lib/pazarlama.js';
+import { openaiAyarlari, donusumGonderilmeli, olayGonder } from './_lib/openaiDonusum.js';
 
 // Birden fazla site bu endpoint'e istek atabiliyor (sembolevdeneve.com ve
 // depoevim.com) — ALLOWED_ORIGINS ortam değişkenine virgülle ayrılmış liste
@@ -556,9 +561,10 @@ function buildGuzergah(wizardType, body) {
   };
 }
 
-// Testler sahte Firestore verebilsin diye uç bir "fabrika"dan üretilir;
-// Vercel'in kullandığı varsayılan dışa aktarım gerçek bağımlılıkları kullanır.
-export function handlerOlustur({ getDb: dbAl = getDb } = {}) {
+// Testler sahte Firestore / fetch / waitUntil / ortam verebilsin diye uç bir
+// "fabrika"dan üretilir; Vercel'in kullandığı varsayılan dışa aktarım gerçek
+// bağımlılıkları kullanır.
+export function handlerOlustur({ getDb: dbAl = getDb, waitUntil: arkaPlanda = waitUntil, fetch: fetchFn = globalThis.fetch, env = process.env } = {}) {
   return async function handler(req, res) {
     // ---- CORS: wizardlar, CRM'den FARKLI alan adlarından (sembolevdeneve.com / depoevim.com) çağırıyor ----
     applyCors(req, res);
@@ -724,6 +730,20 @@ export function handlerOlustur({ getDb: dbAl = getDb } = {}) {
       // sayesinde satış ekibinin CRM'de yaptığı değişiklikler korunur.
 
       await ref.set(kayit, { merge: true });
+
+      // YENİ: OpenAI dönüşüm bildirimi — yalnızca ChatGPT reklamından gelen,
+      // TAMAMLANMIŞ (completed / callback_requested) teklifte ve daha önce
+      // başarıyla bildirilmemişse; ayarlı olmayan sitede / ortam eksikse sessizce
+      // atlanır. Kayıt yazıldıktan SONRA waitUntil ile arka planda gider, yanıtı
+      // geciktirmez. Sonuç kayda "openaiDonusum" olarak yazılır.
+      const openaiAyar = donusumGonderilmeli({ status: body.status, reklamKaynagi: kayit.reklamKaynagi, onceki })
+        ? openaiAyarlari(env, kayit.hesapId) : null;
+      if (openaiAyar) {
+        arkaPlanda(olayGonder({ ayar: openaiAyar, belgeId: ref.id, sourceUrl: pazarlama.landingUrl, fetchFn })
+          .then(openaiDonusum => ref.set({ openaiDonusum }, { merge: true }))
+          .catch(err => console.error('[submit-lead] OpenAI dönüşüm sonucu yazılamadı:', err && err.message)));
+      }
+
       res.status(200).json({ ok: true });
     } catch (err) {
       console.error('[submit-lead] Firestore yazma hatası:', err);

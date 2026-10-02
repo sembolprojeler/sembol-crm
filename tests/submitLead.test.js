@@ -7,7 +7,7 @@ process.env.FIRESTORE_APP_ID = 'test-app';
 const { handlerOlustur } = await import('../api/submit-lead.js');
 
 async function gonder(db, body) {
-  const handler = handlerOlustur({ getDb: () => db });
+  const handler = handlerOlustur({ getDb: () => db, env: {}, waitUntil: () => {} });
   const res = sahteYanit();
   await handler(sahteIstek(body), res);
   assert.equal(res.kod, 200, JSON.stringify(res.govde));
