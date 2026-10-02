@@ -4988,9 +4988,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
       {/* DURUM / HİZMET / KAYNAK / ZAMAN FİLTRELERİ
           DEĞİŞTİ (kullanıcı talebi): yatay kaydırma kaldırıldı — taşan öğeler alt
           satıra geçer. 1. satır: Durum butonları (tablodaki durum rozetleriyle AYNI
-          renk, seçili olan koyu halkalı); mobilde (<768px) sayılı açılır liste.
-          2. satır: Hizmet + Kaynak açılır listeleri, Zaman butonları, en sağda
-          "Alınanlar" düğmesi ve (seçili filtre varsa) "Filtreleri temizle".
+          renk, seçili olan koyu halkalı; mobilde (<768px) sayılı açılır liste) ve
+          en sağda kırmızı "Alınanları da göster" düğmesi.
+          2. satır: Hizmet + Kaynak açılır listeleri, Zaman butonları ve
+          (seçili filtre varsa) en sağda "Filtreleri temizle".
           Filtre mantığı DEĞİŞMEDİ, yalnızca yerleşim. */}
       {(() => {
         // Durum filtresinde yalnızca "Müşteriyle Görüşme Durumu" penceresindeki
@@ -5021,6 +5022,14 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               </button>
             );
           })}
+          {/* DEĞİŞTİ (kullanıcı talebi): havuz dışına çıkmış (satışçıya geçmiş)
+              talepleri de listele — Durum satırının en sağında, kırmızı */}
+          {aktifKanal === 'web' && (
+            <button type="button" onClick={() => setAlinanlariGoster(v => !v)}
+              className={`ml-auto px-2.5 py-1 rounded-lg text-[11px] font-black border transition flex items-center gap-1 whitespace-nowrap ${alinanlariGoster ? 'bg-red-600 text-white border-red-600 hover:bg-red-700' : 'bg-white text-red-600 border-red-300 hover:bg-red-50'}`}>
+              <Eye className="w-3 h-3" /> {alinanlariGoster ? 'Alınanlar gösteriliyor' : 'Alınanları da göster'}
+            </button>
+          )}
         </div>
 
         <div className="w-full flex flex-wrap items-center gap-x-3 gap-y-2 pt-2 border-t border-neutral-100">
@@ -5052,21 +5061,12 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               </button>
             ))}
           </div>
-          <div className="ml-auto flex items-center gap-3">
-            {/* havuz dışına çıkmış (satışçıya geçmiş) talepleri de listele */}
-            {aktifKanal === 'web' && (
-              <button type="button" onClick={() => setAlinanlariGoster(v => !v)}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition flex items-center gap-1 whitespace-nowrap ${alinanlariGoster ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
-                <Eye className="w-3 h-3" /> {alinanlariGoster ? 'Alınanlar gösteriliyor' : 'Alınanları da göster'}
-              </button>
-            )}
-            {filtreVar && (
-              <button type="button" onClick={() => { setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setKaynakFiltre('Tümü'); setZamanFiltre('Tüm Zamanlar'); }}
-                className="text-[11px] font-bold text-neutral-500 underline underline-offset-2 hover:text-neutral-900 whitespace-nowrap">
-                Filtreleri temizle
-              </button>
-            )}
-          </div>
+          {filtreVar && (
+            <button type="button" onClick={() => { setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setKaynakFiltre('Tümü'); setZamanFiltre('Tüm Zamanlar'); }}
+              className="ml-auto text-[11px] font-bold text-neutral-500 underline underline-offset-2 hover:text-neutral-900 whitespace-nowrap">
+              Filtreleri temizle
+            </button>
+          )}
         </div>
       </div>
         );
