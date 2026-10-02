@@ -917,13 +917,14 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
   const ekspertizTarihGoster = (t) => t ? t.split('-').reverse().join('.') : '—';
   const ekspertizZaman = (iso) => iso ? new Date(iso).toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' }) : '';
   // DEĞİŞTİ (kullanıcı talebi): Gün hücresi arka planı RANDEVU TAKVİMİYLE AYNI
-  // doluluk mantığını kullanır: 0 boş, 1-3 müsait, 4 yoğun (kırmızı),
-  // 5+ dolu (siyah). Asansör keşifleri kapasiteye dahil edilmez — tıpkı
+  // doluluk mantığını kullanır: 0 boş, 1-3 müsait, 4-5 yoğun (kırmızı),
+  // 6+ dolu (siyah). Asansör keşifleri kapasiteye dahil edilmez — tıpkı
   // randevu takviminde asansör işlerinin ayrı satırda sayılması gibi.
   const ekspertizKapasiteRengi = (sayi) => {
     if (sayi === 0) return 'bg-white border-neutral-200 hover:bg-neutral-50';
     if (sayi <= 3) return 'bg-neutral-50 border-neutral-300 hover:bg-neutral-100';
-    if (sayi === 4) return 'bg-red-50 border-red-200 hover:bg-red-100';
+    // REVİZE: Yoğun eşiği 4 → 4-5 (5 iş artık siyah değil, kırmızı)
+    if (sayi <= 5) return 'bg-red-50 border-red-200 hover:bg-red-100';
     return 'bg-black border-black text-white hover:bg-neutral-900';
   };
 
@@ -1337,8 +1338,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
               <div className="hidden sm:flex items-center gap-2 text-[10px] font-bold text-neutral-500 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-1">
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-white border border-neutral-300" /> Boş (0)</span>
                 <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-neutral-300" /> Müsait (1-3)</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-600" /> Yoğun (4)</span>
-                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-black" /> Dolu (5+)</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-red-600" /> Yoğun (4-5)</span>
+                <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-black" /> Dolu (6 ve +)</span>
               </div>
             </div>
           </div>
@@ -1359,7 +1360,7 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
               const asansorKesifler = l.filter(k => k.hizmetTipi === 'Asansör');
               const secili = t === secilenGun;
               const buGun = t === bugun;
-              const dolu = anaKesifler.length >= 5;   // siyah hücre
+              const dolu = anaKesifler.length >= 6;   // REVİZE: siyah hücre artık 6+ keşifte
               return (
                 <button key={t} type="button" onClick={() => setSecilenGun(t)} onDoubleClick={() => formuAc(null, t)}
                   title={(h.disariAy ? `${h.ayEtiketi} ayı — ` : '') + (l.length ? `${l.length} ekspertiz — çift tık: bu güne ekle` : 'Çift tık: bu güne ekspertiz ekle')}
@@ -1938,7 +1939,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
     const getCapacityColor = (coreJobCount) => {
       if (coreJobCount === 0) return 'bg-white border-neutral-200 hover:bg-neutral-50';
       if (coreJobCount <= 3) return 'bg-neutral-50 border-neutral-300 hover:bg-neutral-100';
-      if (coreJobCount === 4) return 'bg-red-50 border-red-200 hover:bg-red-100';
+      // REVİZE: Yoğun = 4-5 iş (kırmızı), Dolu = 6+ iş (siyah)
+      if (coreJobCount <= 5) return 'bg-red-50 border-red-200 hover:bg-red-100';
       return 'bg-black border-black text-white hover:bg-neutral-900';
     };
 
@@ -2018,8 +2020,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
               <div className="flex flex-wrap gap-2 text-[10px] font-bold bg-neutral-50 p-1.5 rounded-xl border border-neutral-200">
                 <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-white border border-neutral-300"></div> Boş (0)</div>
                 <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-neutral-300"></div> Müsait (1-3)</div>
-                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-600"></div> Yoğun (4)</div>
-                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-black"></div> Dolu (5+)</div>
+                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-red-600"></div> Yoğun (4-5)</div>
+                <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-black"></div> Dolu (6 ve +)</div>
               </div>
             </div>
           )}
@@ -2037,7 +2039,7 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
             const asansorJobs = !isMaviYaka && item ? item.jobs.filter(j => j.type === 'Asansör' && j.status !== 'cancelled') : [];
             const dayPuan = isMaviYaka && item ? parseFloat(myPuantaj[item.day]) || 0 : 0;
             const isToday = item && item.date === today.toISOString().split('T')[0];
-            const isFull = !isMaviYaka && coreJobs.length >= 5;
+            const isFull = !isMaviYaka && coreJobs.length >= 6; // REVİZE: siyah hücre (beyaz yazı) 6+ işte
 
             let cellClass = 'bg-transparent border-transparent';
             if (item) {
