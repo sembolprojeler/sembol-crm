@@ -4985,69 +4985,92 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         </div>
       )}
 
-      {/* DURUM + HİZMET FİLTRELERİ
-          DEĞİŞTİ (kullanıcı talebi): Durum satırı TEK SATIRA sığar (taşarsa yatay
-          kaydırılır) ve her durum butonu, tablodaki durum rozetleriyle AYNI
-          renktedir; seçili olan koyu halka (ring) ile belli olur. */}
+      {/* DURUM / HİZMET / KAYNAK / ZAMAN FİLTRELERİ
+          DEĞİŞTİ (kullanıcı talebi): yatay kaydırma kaldırıldı — taşan öğeler alt
+          satıra geçer. 1. satır: Durum butonları (tablodaki durum rozetleriyle AYNI
+          renk, seçili olan koyu halkalı); mobilde (<768px) sayılı açılır liste.
+          2. satır: Hizmet + Kaynak açılır listeleri, Zaman butonları, en sağda
+          "Alınanlar" düğmesi ve (seçili filtre varsa) "Filtreleri temizle".
+          Filtre mantığı DEĞİŞMEDİ, yalnızca yerleşim. */}
+      {(() => {
+        // Durum filtresinde yalnızca "Müşteriyle Görüşme Durumu" penceresindeki
+        // seçenekler (aynı sıra ve etiketlerle) + Tümü ve Yeni gösterilir.
+        const durumSecenekleri = ['Tümü', 'Yeni', ...GORUSME_DURUMU_SECENEKLERI.map(x => x.id)];
+        const durumEtiketi = (d) => GORUSME_DURUMU_SECENEKLERI.find(x => x.id === d)?.etiket || d;
+        const filtreVar = durumFiltre !== 'Tümü' || hizmetFiltre !== 'Tümü' || kaynakFiltre !== 'Tümü' || zamanFiltre !== 'Tüm Zamanlar';
+        const acilirSinif = (secili) => `px-2 py-1 rounded-lg text-[11px] font-black border outline-none ${secili ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`;
+        const baslikSinif = 'text-[10px] font-black text-neutral-400 uppercase';
+        return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 space-y-2">
-        <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-0.5">
-          <span className="text-[10px] font-black text-neutral-400 uppercase shrink-0">Durum:</span>
-          {/* DEĞİŞTİ (kullanıcı talebi): Durum filtresinde yalnızca "Müşteriyle
-              Görüşme Durumu" penceresindeki seçenekler (aynı sıra ve etiketlerle)
-              + Tümü ve Yeni (henüz görüşülmemiş kayıtlar) gösterilir. Diğer
-              durumlar (örn. "Görüşme Sağlandı") çubuktan kaldırıldı; DURUMLAR
-              listesi ve kayıtlar aynen duruyor, yalnızca çubuk daraltıldı. */}
-          {['Tümü', 'Yeni', ...GORUSME_DURUMU_SECENEKLERI.map(x => x.id)].map(d => {
-            const etiket = GORUSME_DURUMU_SECENEKLERI.find(x => x.id === d)?.etiket || d;
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={baslikSinif}>Durum:</span>
+          {/* Mobil: sayılı açılır liste */}
+          <select value={durumFiltre} onChange={e => setDurumFiltre(e.target.value)} className={`md:hidden ${acilirSinif(durumFiltre !== 'Tümü')}`}>
+            {durumSecenekleri.map(d => <option key={d} value={d}>{durumEtiketi(d)} ({durumSayaclari[d] ?? 0})</option>)}
+          </select>
+          {/* Masaüstü: renkli butonlar */}
+          {durumSecenekleri.map(d => {
             const secili = durumFiltre === d;
             const renk = d === 'Tümü'
               ? (secili ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400')
               : durumRenk(d);
             return (
               <button key={d} type="button" onClick={() => setDurumFiltre(d)}
-                className={`px-2 py-1 rounded-lg text-[10px] font-black border transition shrink-0 ${renk} ${secili && d !== 'Tümü' ? 'ring-2 ring-neutral-900 ring-offset-1' : ''} ${!secili && d !== 'Tümü' ? 'opacity-80 hover:opacity-100' : ''}`}>
-                {etiket} <span className="opacity-60">({durumSayaclari[d] ?? 0})</span>
+                className={`hidden md:inline-block px-2 py-1 rounded-lg text-[10px] font-black border transition whitespace-nowrap ${renk} ${secili && d !== 'Tümü' ? 'ring-2 ring-neutral-900 ring-offset-1' : ''} ${!secili && d !== 'Tümü' ? 'opacity-80 hover:opacity-100' : ''}`}>
+                {durumEtiketi(d)} <span className="opacity-60">({durumSayaclari[d] ?? 0})</span>
               </button>
             );
           })}
-          <span className="text-[10px] font-black text-neutral-400 uppercase ml-1 shrink-0">Hizmet:</span>
-          {['Tümü', 'Nakliye', 'Depo', 'Asansör'].map(t => (
-            <button key={t} type="button" onClick={() => setHizmetFiltre(t)}
-              className={`px-2 py-1 rounded-lg text-[10px] font-black border transition shrink-0 ${hizmetFiltre === t ? (t === 'Nakliye' ? 'bg-red-600 text-white border-red-600' : t === 'Depo' ? 'bg-blue-600 text-white border-blue-600' : t === 'Asansör' ? 'bg-green-600 text-white border-green-600' : 'bg-neutral-900 text-white border-neutral-900') : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
-              {t}
-            </button>
-          ))}
-          {/* YENİ (kullanıcı talebi): KAYNAK FİLTRESİ — istatistik gruplarından üretilir */}
-          <span className="text-[10px] font-black text-neutral-400 uppercase ml-1 shrink-0">Kaynak:</span>
-          <select value={kaynakFiltre} onChange={e => setKaynakFiltre(e.target.value)}
-            className={`px-2 py-1 rounded-lg text-[10px] font-black border outline-none shrink-0 ${kaynakFiltre !== 'Tümü' ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200'}`}>
-            <option value="Tümü">Tümü</option>
-            {OZET_GRUPLARI.map(g => (
-              <optgroup key={g.ad} label={g.ad}>
-                {KAYNAK_FILTRELERI.filter(f => f.grup === g.ad).map(f => <option key={f.id} value={f.id}>{f.ad}</option>)}
-              </optgroup>
-            ))}
-          </select>
         </div>
 
-        {/* YENİ (kullanıcı talebi): ZAMAN FİLTRESİ — yeni satırda, Tüm Zamanlar varsayılan */}
-        <div className="w-full flex flex-wrap items-center gap-1.5 pt-2 border-t border-neutral-100">
-          <span className="text-[10px] font-black text-neutral-400 uppercase flex items-center gap-1"><CalendarDays className="w-3 h-3" /> Zaman:</span>
-          {ZAMAN_FILTRELERI.map(z => (
-            <button key={z} type="button" onClick={() => setZamanFiltre(z)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${zamanFiltre === z ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
-              {z}
-            </button>
-          ))}
-          {/* YENİ: havuz dışına çıkmış (satışçıya geçmiş) talepleri de listele */}
-          {aktifKanal === 'web' && (
-            <button type="button" onClick={() => setAlinanlariGoster(v => !v)}
-              className={`ml-auto px-2.5 py-1 rounded-lg text-[11px] font-black border transition flex items-center gap-1 ${alinanlariGoster ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
-              <Eye className="w-3 h-3" /> {alinanlariGoster ? 'Alınanlar gösteriliyor' : 'Alınanları da göster'}
-            </button>
-          )}
+        <div className="w-full flex flex-wrap items-center gap-x-3 gap-y-2 pt-2 border-t border-neutral-100">
+          <label className="flex items-center gap-1.5">
+            <span className={baslikSinif}>Hizmet:</span>
+            <select value={hizmetFiltre} onChange={e => setHizmetFiltre(e.target.value)} className={acilirSinif(hizmetFiltre !== 'Tümü')}>
+              {['Tümü', 'Nakliye', 'Depo', 'Asansör'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+          {/* KAYNAK FİLTRESİ — istatistik gruplarından üretilir */}
+          <label className="flex items-center gap-1.5">
+            <span className={baslikSinif}>Kaynak:</span>
+            <select value={kaynakFiltre} onChange={e => setKaynakFiltre(e.target.value)} className={acilirSinif(kaynakFiltre !== 'Tümü')}>
+              <option value="Tümü">Tümü</option>
+              {OZET_GRUPLARI.map(g => (
+                <optgroup key={g.ad} label={g.ad}>
+                  {KAYNAK_FILTRELERI.filter(f => f.grup === g.ad).map(f => <option key={f.id} value={f.id}>{f.ad}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          {/* ZAMAN FİLTRESİ — Tüm Zamanlar varsayılan */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`${baslikSinif} flex items-center gap-1`}><CalendarDays className="w-3 h-3" /> Zaman:</span>
+            {ZAMAN_FILTRELERI.map(z => (
+              <button key={z} type="button" onClick={() => setZamanFiltre(z)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition whitespace-nowrap ${zamanFiltre === z ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+                {z}
+              </button>
+            ))}
+          </div>
+          <div className="ml-auto flex items-center gap-3">
+            {/* havuz dışına çıkmış (satışçıya geçmiş) talepleri de listele */}
+            {aktifKanal === 'web' && (
+              <button type="button" onClick={() => setAlinanlariGoster(v => !v)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition flex items-center gap-1 whitespace-nowrap ${alinanlariGoster ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+                <Eye className="w-3 h-3" /> {alinanlariGoster ? 'Alınanlar gösteriliyor' : 'Alınanları da göster'}
+              </button>
+            )}
+            {filtreVar && (
+              <button type="button" onClick={() => { setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setKaynakFiltre('Tümü'); setZamanFiltre('Tüm Zamanlar'); }}
+                className="text-[11px] font-bold text-neutral-500 underline underline-offset-2 hover:text-neutral-900 whitespace-nowrap">
+                Filtreleri temizle
+              </button>
+            )}
+          </div>
         </div>
       </div>
+        );
+      })()}
 
       {/* ====================================================================
           DEĞİŞTİ: "Hızlı Teklifler" sekmesinde gün ayraçlı yeni tablo
