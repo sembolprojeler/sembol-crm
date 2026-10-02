@@ -45,6 +45,9 @@
 //                            (CRM hangi "artifacts/{appId}/..." yoluna yazıyorsa
 //                            bu fonksiyon da aynı yola yazmalı)
 //   ALLOWED_ORIGIN         → örn. https://www.sembolevdeneve.com
+//   OPENAI_PIXEL_ID, OPENAI_CONVERSIONS_KEY, OPENAI_CAPI_TEST,
+//   OPENAI_DONUSUM_SITELERI → (opsiyonel) ChatGPT reklam dönüşüm bildirimi,
+//                            bkz. api/_lib/openaiDonusum.js
 //
 // NOT: Bu, App.jsx içindeki "firebaseConfig" (apiKey, authDomain vb.) ile
 // AYNI şey DEĞİLDİR. O config tarayıcı (client) tarafı içindir ve CRM'e giriş
@@ -68,6 +71,9 @@
 
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { waitUntil } from '@vercel/functions';
+import { PAID_ADS_DEGERLERI, pazarlamaOku, reklamKaynagiKarar } from './_lib/pazarlama.js';
+import { openaiAyarlari, donusumGonderilmeli, olayGonder } from './_lib/openaiDonusum.js';
 
 // Birden fazla site bu endpoint'e istek atabiliyor (sembolevdeneve.com ve
 // depoevim.com) — ALLOWED_ORIGINS ortam değişkenine virgülle ayrılmış liste
@@ -216,11 +222,12 @@ const KANAL_BY_WIZARD = {
 // site-geneli tıklama takibindeki isimlendirmeyle BİREBİR aynı olsun diye).
 // Bu listede olmayan (ör. çok eski wizard sürümünden hiç gelmeyen ya da
 // bozuk bir) değer artık güvenli şekilde 'direkt_giris' sayılır.
-const REKLAM_KAYNAGI_DEGERLERI = ['google_ads', 'facebook_ads', 'facebook_organik', 'instagram_ads', 'instagram_organik', 'google_anasayfa', 'google_altsayfa', 'direkt_giris', 'diger_site'];
-// Bu dördü "ödemeli reklam" sayılır — QR eşleşmesi bunların ÜZERİNE YAZMAZ
-// (aşağıdaki qrIzi bloğuna bakın), ama diğer tüm (organik/direkt/google
-// anasayfa-altsayfa/diğer site) kategorilerin üzerine QR izi kazanır.
-const PAID_ADS_DEGERLERI = ['google_ads', 'facebook_ads', 'instagram_ads'];
+// GÜNCELLEME (yapay zeka kaynakları): REKLAM_KAYNAGI_DEGERLERI ve
+// PAID_ADS_DEGERLERI artık api/_lib/pazarlama.js'te (yukarıda import edildi) —
+// src/aiKaynakSema.js'teki chatgpt_ads / chatgpt_organik / gemini_organik …
+// değerleri de geçerli. Ödemeli reklamlar (google/facebook/instagram_ads +
+// chatgpt_ads) üzerine QR izi YAZMAZ (aşağıdaki qrIzi bloğuna bakın); diğer tüm
+// kategorilerin üzerine QR izi kazanır.
 
 // Satış ekibinin "Hesap" sütununda göreceği site etiketi — yeni-musteri.js'te
 // (tıklama bildirimleri) kullanılan "depoevim"/"sembolevdeneve" değerleriyle
@@ -554,161 +561,195 @@ function buildGuzergah(wizardType, body) {
   };
 }
 
-export default async function handler(req, res) {
-  // ---- CORS: wizardlar, CRM'den FARKLI alan adlarından (sembolevdeneve.com / depoevim.com) çağırıyor ----
-  applyCors(req, res);
+// Testler sahte Firestore / fetch / waitUntil / ortam verebilsin diye uç bir
+// "fabrika"dan üretilir; Vercel'in kullandığı varsayılan dışa aktarım gerçek
+// bağımlılıkları kullanır.
+export function handlerOlustur({ getDb: dbAl = getDb, waitUntil: arkaPlanda = waitUntil, fetch: fetchFn = globalThis.fetch, env = process.env } = {}) {
+  return async function handler(req, res) {
+    // ---- CORS: wizardlar, CRM'den FARKLI alan adlarından (sembolevdeneve.com / depoevim.com) çağırıyor ----
+    applyCors(req, res);
 
-  if (req.method === 'OPTIONS') { res.status(204).end(); return; }
-  if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
+    if (req.method === 'OPTIONS') { res.status(204).end(); return; }
+    if (req.method !== 'POST') { res.status(405).json({ error: 'Method not allowed' }); return; }
 
-  if (!FIRESTORE_APP_ID) {
-    console.error('[submit-lead] FIRESTORE_APP_ID ortam değişkeni tanımlı değil.');
-    res.status(500).json({ error: 'Sunucu yapılandırma hatası' });
-    return;
-  }
-
-  let body = req.body;
-  if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch { body = {}; }
-  }
-  body = body || {};
-
-  const leadId = String(body.leadId || '').trim();
-  if (!leadId) { res.status(400).json({ error: 'leadId zorunlu' }); return; }
-
-  const wizardType = resolveWizardType(body.source);
-
-  try {
-    const db = getDb();
-    // artifacts/{appId}/public/data/havuzKayitlari/{leadId}
-    // — CRM'in (Satis.jsx → Müşteri Havuzu) okuduğu yolun BİREBİR aynısı.
-    const ref = db
-      .collection('artifacts').doc(FIRESTORE_APP_ID)
-      .collection('public').doc('data')
-      .collection('havuzKayitlari').doc(leadId);
-
-    const nowIso = new Date().toISOString();
-    const existingSnap = await ref.get();
-
-    const kayit = {
-      kanal: KANAL_BY_WIZARD[wizardType] || 'web',
-      musteriAdi: String(body.fullName || '').trim(),
-      iletisim: String(body.phone || '').trim(),
-      hesapId: SITE_BY_WIZARD[wizardType] || 'sembolevdeneve',
-      hizmetTipi: HIZMET_TIPI_BY_WIZARD[wizardType] || 'Nakliye',
-      sonMesaj: buildSonMesaj(wizardType, body),
-      kaynak: `web-sihirbaz-${wizardType}`,
-      wizardKaynagi: body.source || '',
-      // Ziyaretçi Google reklamından mı (gclid/utm_source=google&utm_medium=cpc),
-      // Meta (Facebook/Instagram) reklamından mı (fbclid/utm_source=facebook
-      // veya instagram), organik Google/Facebook/Instagram'dan mı yoksa direkt
-      // mi geldi — wizard sayfa yüklenirken URL'den/referrer'dan okuyup
-      // gönderiyor (bkz. wizard dosyasındaki REKLAM_KAYNAGI / snwKaynakOkuTam).
-      // Eski wizard sürümleri bu alanı hiç göndermez, o yüzden varsayılan
-      // 'direkt_giris'; tanınmayan bir değer de güvenli şekilde 'direkt_giris'
-      // sayılır (eskiden bu iki durumda da 'organik' kovasına düşerdi).
-      reklamKaynagi: REKLAM_KAYNAGI_DEGERLERI.includes(body.reklamKaynagi) ? body.reklamKaynagi : 'direkt_giris',
-      // "google_anasayfa"/"google_altsayfa"/"diger_site" kategorilerinde HANGİ
-      // sayfaya düşüldüğü ve (varsa) HANGİ dış sitenin yönlendirdiği — wizard
-      // bunu document.referrer + location.pathname'den hesaplayıp gönderiyor.
-      // Boşsa CRM tarafında hiç gösterilmez.
-      inisSayfasi: String(body.inisSayfasi || '').trim(),
-      digerSiteAdi: String(body.digerSiteAdi || '').trim(),
-
-      // Wizard'ın kendi akış durumu (partial/completed/callback_requested).
-      // DİKKAT: CRM'in satış-hattı durumu olan "durum" alanıyla KARIŞTIRILMAMALI —
-      // o alana sadece ilk oluşturmada dokunuyoruz (aşağıda).
-      wizardDurumu: body.status || 'partial',
-      wizardGuncelleme: body.updatedAt || nowIso,
-
-      fiyatTahminiMin: body.priceMin || null,
-      fiyatTahminiMax: body.priceMax || null,
-      fotograflar: Array.isArray(body.photoUrls) ? body.photoUrls : [],
-      kvkkOnay: !!body.kvkkConsent,
-      geriAramaTalebi: !!body.callbackRequested,
-
-      guzergah: buildGuzergah(wizardType, body),
-      paketlemeTercihi: body.paketleme || '',
-      kirilacakEsya: body.kirilacak || '',
-      ambalajTalebi: body.ambalaj || '',
-      // depoevimDepolama "moveDate" değil "baslangicTarihi" gönderiyor — diğer
-      // wizard'lar baslangicTarihi hiç göndermediği için bu satır onları etkilemez.
-      tasinmaTarihi: body.moveDate || body.baslangicTarihi || '',
-      tarihEsnek: !!body.dateFlexible,
-      ozelEsyalar: Array.isArray(body.specialItems) ? body.specialItems : [],
-      // YENİ (kullanıcı talebi): depolama sihirbazlarının ham alanları — Teklif
-      // Detayı kartı bu kayıtlarda satırları buradan üretir (src/teklifDetay.js).
-      ...(TEKLIF_ALANLARI_BY_WIZARD[wizardType] ? { teklifAlanlari: teklifAlanlariAl(wizardType, body) } : {}),
-
-      updatedAt: nowIso,
-    };
-
-    // YENİ (QR TAKİP): QR/UTM izi varsa kayda yaz. Reklam kaynağı ödemeli bir
-    // reklam DEĞİLSE (google_ads/facebook_ads/instagram_ads) 'qr' olarak
-    // işaretlenir — Google/Meta reklamıysa o etiket korunur. DÜZELTME: eskiden
-    // sadece tam olarak 'organik' değerinin üzerine yazılıyordu; artık
-    // google_anasayfa/google_altsayfa/facebook_organik/instagram_organik/
-    // direkt_giris/diger_site kategorilerinin de üzerine yazar, aksi halde
-    // QR'dan gelip "Google Anasayfa" ya da "Direkt Giriş" sayılan ziyaretçiler
-    // yanlışlıkla QR kampanyasına bağlanmazdı.
-    // QR izi yine de ayrı alanlarda durur — CRM kampanyayı qrKodu ile bağlar.
-    // QR kararı TARAYICIDA verilir (sembol-qr-takip.js sürüm 3): QR izi yalnızca
-    // bu ziyaret QR'lı bir adresle başladıysa vardır — siteye QR'sız her yeni
-    // girişte (Google, direkt, sosyal medya, reklam) iz silinir. Bu yüzden iz
-    // geldiyse ziyaret QR'dandır ve sihirbazın hesapladığı kaynağın üzerine yazar.
-    // DİKKAT: sihirbazın kaynağına bakılarak QR ELENMEZ — telefon kamerası QR'ı
-    // Google Lens / Google uygulaması üzerinden açınca önceki sayfa google.com
-    // görünür ve sihirbaz ziyareti "Google Anasayfa/Altsayfa" sayar; QR yine de
-    // doğru kaynaktır. Yalnızca ödemeli reklam etiketi korunur.
-    const qrIzi = qrIziniCoz(body, req);
-    const qrGercekMi = !!qrIzi && String(qrIzi.utmSource).toLowerCase() === 'qr';
-    if (qrGercekMi && !PAID_ADS_DEGERLERI.includes(kayit.reklamKaynagi)) {
-      kayit.qrKodu = qrIzi.qrKodu;
-      kayit.utmSource = qrIzi.utmSource;
-      kayit.utmMedium = qrIzi.utmMedium;
-      kayit.utmCampaign = qrIzi.utmCampaign;
-      kayit.sayfaUrl = qrIzi.sayfaUrl;
-      kayit.qrIziZamani = qrIzi.qrIziZamani;
-      // QR'dan önceki asıl kaynak saklanır — CRM'de "Bağı kaldır (QR değil)"
-      // seçilirse kayıt bu değere geri döner.
-      kayit.oncekiReklamKaynagi = kayit.reklamKaynagi;
-      kayit.reklamKaynagi = 'qr';
-    } else if (qrGercekMi) {
-      // Yalnızca bilgi amaçlı (CRM bununla eşleştirme YAPMAZ).
-      kayit.yoksayilanQrIzi = { qrKodu: qrIzi.qrKodu, qrIziZamani: qrIzi.qrIziZamani };
+    if (!FIRESTORE_APP_ID) {
+      console.error('[submit-lead] FIRESTORE_APP_ID ortam değişkeni tanımlı değil.');
+      res.status(500).json({ error: 'Sunucu yapılandırma hatası' });
+      return;
     }
 
-    if (!existingSnap.exists) {
-      // İlk kayıt — Müşteri Havuzu'nun beklediği satış-hattı alanlarını burada açıyoruz.
-      // depoevimSiparis İSTİSNA: bu bir "olası müşteri" değil, ödemesi zaten
-      // tamamlanmış kesin bir sipariş — satış ekibini "yeni takip gerekiyor"
-      // diye yanıltmamak için doğrudan "İşi Aldık" durumunda açılıyor.
-      kayit.durum = wizardType === 'depoevimSiparis' ? 'İşi Aldık' : 'Yeni';
-      kayit.atanan = '';
-      kayit.notlar = [];
-      kayit.hareketler = [{
-        tarih: nowIso, kullanici: wizardType === 'depoevimSiparis' ? 'WooCommerce' : 'Web Sihirbazı',
-        islem: wizardType === 'depoevimSiparis'
-          ? `WooCommerce üzerinden ödemesi tamamlanmış yeni sipariş (#${body.siparisNo || '-'})`
-          : `Web sitesinden yeni teklif talebi alındı (${WIZARD_ETIKET[wizardType] || 'Web Formu'})${qrIzi ? ` — QR: ${qrIzi.qrKodu}` : ''}`,
-      }];
-      kayit.createdAt = nowIso;
-    } else if (body.status === 'completed' || body.status === 'callback_requested') {
-      // Sadece anlamlı kilometre taşlarında hareket geçmişine bir satır ekliyoruz;
-      // her debounce'lu ara-kayıtta hareketler listesini şişirmiyoruz.
-      const onceki = existingSnap.data() || {};
-      const not = body.status === 'completed'
-        ? 'Müşteri formu tamamladı'
-        : 'Müşteri "Beni Siz Arayın" talebinde bulundu';
-      kayit.hareketler = [...(onceki.hareketler || []), { tarih: nowIso, kullanici: 'Web Sihirbazı', islem: not }];
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch { body = {}; }
     }
-    // Not: durum/atanan/notlar/hareketler burada listede YOK ise, merge:true
-    // sayesinde satış ekibinin CRM'de yaptığı değişiklikler korunur.
+    body = body || {};
 
-    await ref.set(kayit, { merge: true });
-    res.status(200).json({ ok: true });
-  } catch (err) {
-    console.error('[submit-lead] Firestore yazma hatası:', err);
-    res.status(500).json({ error: 'Kayıt sırasında hata oluştu' });
-  }
+    const leadId = String(body.leadId || '').trim();
+    if (!leadId) { res.status(400).json({ error: 'leadId zorunlu' }); return; }
+
+    const wizardType = resolveWizardType(body.source);
+
+    try {
+      const db = dbAl();
+      // artifacts/{appId}/public/data/havuzKayitlari/{leadId}
+      // — CRM'in (Satis.jsx → Müşteri Havuzu) okuduğu yolun BİREBİR aynısı.
+      const ref = db
+        .collection('artifacts').doc(FIRESTORE_APP_ID)
+        .collection('public').doc('data')
+        .collection('havuzKayitlari').doc(leadId);
+
+      const nowIso = new Date().toISOString();
+      const existingSnap = await ref.get();
+      const onceki = existingSnap.exists ? (existingSnap.data() || {}) : {};
+
+      // YENİ (yapay zeka kaynakları): UTM / referrer / iniş adresi izi. Yalnızca
+      // dolu alanlar yazılır (merge:true — sonraki ara kayıt eski izi silmez);
+      // sınıflandırma, önceki kayıttaki iz ile bu gönderimdeki iz birleştirilerek
+      // yapılır (bkz. api/_lib/pazarlama.js → reklamKaynagiKarar).
+      const yeniPazarlama = pazarlamaOku(body);
+      const pazarlama = { ...(onceki.pazarlama || {}), ...yeniPazarlama };
+      const kaynakKarari = reklamKaynagiKarar(body.reklamKaynagi, pazarlama);
+
+      const kayit = {
+        kanal: KANAL_BY_WIZARD[wizardType] || 'web',
+        musteriAdi: String(body.fullName || '').trim(),
+        iletisim: String(body.phone || '').trim(),
+        hesapId: SITE_BY_WIZARD[wizardType] || 'sembolevdeneve',
+        hizmetTipi: HIZMET_TIPI_BY_WIZARD[wizardType] || 'Nakliye',
+        sonMesaj: buildSonMesaj(wizardType, body),
+        kaynak: `web-sihirbaz-${wizardType}`,
+        wizardKaynagi: body.source || '',
+        // Ziyaretçi Google reklamından mı (gclid/utm_source=google&utm_medium=cpc),
+        // Meta (Facebook/Instagram) reklamından mı (fbclid/utm_source=facebook
+        // veya instagram), organik Google/Facebook/Instagram'dan mı yoksa direkt
+        // mi geldi — wizard sayfa yüklenirken URL'den/referrer'dan okuyup
+        // gönderiyor (bkz. wizard dosyasındaki REKLAM_KAYNAGI / snwKaynakOkuTam).
+        // Eski wizard sürümleri bu alanı hiç göndermez, o yüzden varsayılan
+        // 'direkt_giris'; tanınmayan bir değer de güvenli şekilde 'direkt_giris'
+        // sayılır (eskiden bu iki durumda da 'organik' kovasına düşerdi).
+        // YENİ: tarayıcının değeri sunucunun yapay zeka sınıflandırmasıyla
+        // birleştirilir (ödemeli reklam > tarayıcı > sunucu tahmini);
+        // kaynakKarari hangi kuralın kazandığını tutar.
+        reklamKaynagi: kaynakKarari.reklamKaynagi,
+        kaynakKarari: kaynakKarari.karar,
+        ...(Object.keys(yeniPazarlama).length ? { pazarlama: yeniPazarlama } : {}),
+        // "google_anasayfa"/"google_altsayfa"/"diger_site" kategorilerinde HANGİ
+        // sayfaya düşüldüğü ve (varsa) HANGİ dış sitenin yönlendirdiği — wizard
+        // bunu document.referrer + location.pathname'den hesaplayıp gönderiyor.
+        // Boşsa CRM tarafında hiç gösterilmez.
+        inisSayfasi: String(body.inisSayfasi || '').trim(),
+        digerSiteAdi: String(body.digerSiteAdi || '').trim(),
+
+        // Wizard'ın kendi akış durumu (partial/completed/callback_requested).
+        // DİKKAT: CRM'in satış-hattı durumu olan "durum" alanıyla KARIŞTIRILMAMALI —
+        // o alana sadece ilk oluşturmada dokunuyoruz (aşağıda).
+        wizardDurumu: body.status || 'partial',
+        wizardGuncelleme: body.updatedAt || nowIso,
+
+        fiyatTahminiMin: body.priceMin || null,
+        fiyatTahminiMax: body.priceMax || null,
+        fotograflar: Array.isArray(body.photoUrls) ? body.photoUrls : [],
+        kvkkOnay: !!body.kvkkConsent,
+        geriAramaTalebi: !!body.callbackRequested,
+
+        guzergah: buildGuzergah(wizardType, body),
+        paketlemeTercihi: body.paketleme || '',
+        kirilacakEsya: body.kirilacak || '',
+        ambalajTalebi: body.ambalaj || '',
+        // depoevimDepolama "moveDate" değil "baslangicTarihi" gönderiyor — diğer
+        // wizard'lar baslangicTarihi hiç göndermediği için bu satır onları etkilemez.
+        tasinmaTarihi: body.moveDate || body.baslangicTarihi || '',
+        tarihEsnek: !!body.dateFlexible,
+        ozelEsyalar: Array.isArray(body.specialItems) ? body.specialItems : [],
+        // YENİ (kullanıcı talebi): depolama sihirbazlarının ham alanları — Teklif
+        // Detayı kartı bu kayıtlarda satırları buradan üretir (src/teklifDetay.js).
+        ...(TEKLIF_ALANLARI_BY_WIZARD[wizardType] ? { teklifAlanlari: teklifAlanlariAl(wizardType, body) } : {}),
+
+        updatedAt: nowIso,
+      };
+
+      // YENİ (QR TAKİP): QR/UTM izi varsa kayda yaz. Reklam kaynağı ödemeli bir
+      // reklam DEĞİLSE (google_ads/facebook_ads/instagram_ads) 'qr' olarak
+      // işaretlenir — Google/Meta reklamıysa o etiket korunur. DÜZELTME: eskiden
+      // sadece tam olarak 'organik' değerinin üzerine yazılıyordu; artık
+      // google_anasayfa/google_altsayfa/facebook_organik/instagram_organik/
+      // direkt_giris/diger_site kategorilerinin de üzerine yazar, aksi halde
+      // QR'dan gelip "Google Anasayfa" ya da "Direkt Giriş" sayılan ziyaretçiler
+      // yanlışlıkla QR kampanyasına bağlanmazdı.
+      // QR izi yine de ayrı alanlarda durur — CRM kampanyayı qrKodu ile bağlar.
+      // QR kararı TARAYICIDA verilir (sembol-qr-takip.js sürüm 3): QR izi yalnızca
+      // bu ziyaret QR'lı bir adresle başladıysa vardır — siteye QR'sız her yeni
+      // girişte (Google, direkt, sosyal medya, reklam) iz silinir. Bu yüzden iz
+      // geldiyse ziyaret QR'dandır ve sihirbazın hesapladığı kaynağın üzerine yazar.
+      // DİKKAT: sihirbazın kaynağına bakılarak QR ELENMEZ — telefon kamerası QR'ı
+      // Google Lens / Google uygulaması üzerinden açınca önceki sayfa google.com
+      // görünür ve sihirbaz ziyareti "Google Anasayfa/Altsayfa" sayar; QR yine de
+      // doğru kaynaktır. Yalnızca ödemeli reklam etiketi korunur.
+      const qrIzi = qrIziniCoz(body, req);
+      const qrGercekMi = !!qrIzi && String(qrIzi.utmSource).toLowerCase() === 'qr';
+      if (qrGercekMi && !PAID_ADS_DEGERLERI.includes(kayit.reklamKaynagi)) {
+        kayit.qrKodu = qrIzi.qrKodu;
+        kayit.utmSource = qrIzi.utmSource;
+        kayit.utmMedium = qrIzi.utmMedium;
+        kayit.utmCampaign = qrIzi.utmCampaign;
+        kayit.sayfaUrl = qrIzi.sayfaUrl;
+        kayit.qrIziZamani = qrIzi.qrIziZamani;
+        // QR'dan önceki asıl kaynak saklanır — CRM'de "Bağı kaldır (QR değil)"
+        // seçilirse kayıt bu değere geri döner.
+        kayit.oncekiReklamKaynagi = kayit.reklamKaynagi;
+        kayit.reklamKaynagi = 'qr';
+      } else if (qrGercekMi) {
+        // Yalnızca bilgi amaçlı (CRM bununla eşleştirme YAPMAZ).
+        kayit.yoksayilanQrIzi = { qrKodu: qrIzi.qrKodu, qrIziZamani: qrIzi.qrIziZamani };
+      }
+
+      if (!existingSnap.exists) {
+        // İlk kayıt — Müşteri Havuzu'nun beklediği satış-hattı alanlarını burada açıyoruz.
+        // depoevimSiparis İSTİSNA: bu bir "olası müşteri" değil, ödemesi zaten
+        // tamamlanmış kesin bir sipariş — satış ekibini "yeni takip gerekiyor"
+        // diye yanıltmamak için doğrudan "İşi Aldık" durumunda açılıyor.
+        kayit.durum = wizardType === 'depoevimSiparis' ? 'İşi Aldık' : 'Yeni';
+        kayit.atanan = '';
+        kayit.notlar = [];
+        kayit.hareketler = [{
+          tarih: nowIso, kullanici: wizardType === 'depoevimSiparis' ? 'WooCommerce' : 'Web Sihirbazı',
+          islem: wizardType === 'depoevimSiparis'
+            ? `WooCommerce üzerinden ödemesi tamamlanmış yeni sipariş (#${body.siparisNo || '-'})`
+            : `Web sitesinden yeni teklif talebi alındı (${WIZARD_ETIKET[wizardType] || 'Web Formu'})${qrIzi ? ` — QR: ${qrIzi.qrKodu}` : ''}`,
+        }];
+        kayit.createdAt = nowIso;
+      } else if (body.status === 'completed' || body.status === 'callback_requested') {
+        // Sadece anlamlı kilometre taşlarında hareket geçmişine bir satır ekliyoruz;
+        // her debounce'lu ara-kayıtta hareketler listesini şişirmiyoruz.
+        const not = body.status === 'completed'
+          ? 'Müşteri formu tamamladı'
+          : 'Müşteri "Beni Siz Arayın" talebinde bulundu';
+        kayit.hareketler = [...(onceki.hareketler || []), { tarih: nowIso, kullanici: 'Web Sihirbazı', islem: not }];
+      }
+      // Not: durum/atanan/notlar/hareketler burada listede YOK ise, merge:true
+      // sayesinde satış ekibinin CRM'de yaptığı değişiklikler korunur.
+
+      await ref.set(kayit, { merge: true });
+
+      // YENİ: OpenAI dönüşüm bildirimi — yalnızca ChatGPT reklamından gelen,
+      // TAMAMLANMIŞ (completed / callback_requested) teklifte ve daha önce
+      // başarıyla bildirilmemişse; ayarlı olmayan sitede / ortam eksikse sessizce
+      // atlanır. Kayıt yazıldıktan SONRA waitUntil ile arka planda gider, yanıtı
+      // geciktirmez. Sonuç kayda "openaiDonusum" olarak yazılır.
+      const openaiAyar = donusumGonderilmeli({ status: body.status, reklamKaynagi: kayit.reklamKaynagi, onceki })
+        ? openaiAyarlari(env, kayit.hesapId) : null;
+      if (openaiAyar) {
+        arkaPlanda(olayGonder({ ayar: openaiAyar, belgeId: ref.id, sourceUrl: pazarlama.landingUrl, fetchFn })
+          .then(openaiDonusum => ref.set({ openaiDonusum }, { merge: true }))
+          .catch(err => console.error('[submit-lead] OpenAI dönüşüm sonucu yazılamadı:', err && err.message)));
+      }
+
+      res.status(200).json({ ok: true });
+    } catch (err) {
+      console.error('[submit-lead] Firestore yazma hatası:', err);
+      res.status(500).json({ error: 'Kayıt sırasında hata oluştu' });
+    }
+  };
 }
+
+export default handlerOlustur();

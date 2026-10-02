@@ -11,6 +11,8 @@ import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normali
 import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
 // YENİ (kullanıcı talebi): depolama tekliflerinin Teklif Detayı satırları (siteden gelen ham alanlardan)
 import { teklifDetayiAlanlardan, eskiTeklifMetni } from './teklifDetay.js';
+// YENİ: Yapay zeka kaynak şeması — /api/submit-lead ve /api/yeni-musteri ile ortak (etiketler, kutular)
+import { AI_KAYNAK_ETIKETLERI, AI_ISTATISTIK_KUTULARI, aiKaynakMi } from './aiKaynakSema.js';
 // YENİ: QR Site Takip şeması — /api/qr-site ile ortak (sabitler, telefon kuralı, WordPress sayfa adresi)
 import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
@@ -3072,7 +3074,8 @@ const KaynakIstatistikPaneli = ({ gruplar, kanalAd, onKapat }) => (
     {/* Platform kartları: mobilde tek sütun, geniş ekranda 2-3 sütun */}
     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
       {gruplar.map(grup => (
-        <div key={grup.ad} className={`bg-white/10 border ${grup.kenar} rounded-2xl backdrop-blur-sm p-3 md:p-4`}>
+        // "genis" grup (Yapay Zeka, 7 kutu) satırın tamamını kaplar
+        <div key={grup.ad} className={`bg-white/10 border ${grup.kenar} rounded-2xl backdrop-blur-sm p-3 md:p-4 ${grup.genis ? 'md:col-span-2 xl:col-span-3' : ''}`}>
           {/* Kart başlığı: büyük logo + platform adı */}
           <div className="flex items-center gap-3 pb-3 mb-3 border-b border-white/15">
             <span className="w-11 h-11 rounded-xl bg-white/10 flex items-center justify-center shrink-0">
@@ -3081,8 +3084,8 @@ const KaynakIstatistikPaneli = ({ gruplar, kanalAd, onKapat }) => (
             <p className="text-sm md:text-base font-black uppercase text-white tracking-wide">{grup.ad}</p>
           </div>
 
-          {/* Alt kategori hücreleri — hücre sayısı kadar sütun (1, 2 veya 3) */}
-          <div className={`grid gap-2 ${grup.hucreler.length >= 3 ? 'grid-cols-3' : grup.hucreler.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          {/* Alt kategori hücreleri — hücre sayısı kadar sütun (1, 2 veya 3); 3'ten fazlası (Yapay Zeka) ekran genişliğine göre 2 / 4 / 7 sütun */}
+          <div className={`grid gap-2 ${grup.hucreler.length > 3 ? 'grid-cols-2 sm:grid-cols-4 xl:grid-cols-7' : grup.hucreler.length === 3 ? 'grid-cols-3' : grup.hucreler.length === 2 ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {grup.hucreler.map(h => (
               <div key={h.ad} className="bg-black/20 rounded-xl px-2.5 py-2 min-w-0">
                 <p className={`text-[11px] md:text-xs font-black uppercase truncate ${h.renk}`} title={h.ad}>{h.ad}</p>
@@ -3983,6 +3986,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // YENİ: Zaman filtresi — varsayılan "Tüm Zamanlar" (sekme değişince sıfırlanmaz)
   const [zamanFiltre, setZamanFiltre] = useState('Tüm Zamanlar');
   const [hesapFiltre, setHesapFiltre] = useState('Tümü');
+  // YENİ (kullanıcı talebi): Kaynak filtresi — 'Tümü' | KAYNAK_FILTRELERI id'si
+  const [kaynakFiltre, setKaynakFiltre] = useState('Tümü');
   // Hangi şirketin verisini görüyoruz: "sembolevdeneve" | "depoevim". Sadece
   // depoevim'den gelen kayıtlarda hesapId==='depoevim' işaretli olduğu için,
   // geri kalan HER ŞEY (gerçek telefon/whatsapp hesapları, Instagram, Gmail,
@@ -4510,7 +4515,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     // YENİ (kullanıcı talebi): Hızlı Teklifler'de yalnızca kimsenin almadığı talepler
     && (aktifKanal !== 'web' || alinanlariGoster || !havuzdanAlindiMi(k)));
   const kanalKayitlari = aktifKanal === 'web' ? mukerrerleriGizle(kanalKayitlariHam) : kanalKayitlariHam;
-  const filtreli = kanalKayitlari.filter(k => {
+  // Kaynak filtresi, kaynak koşulları (OZET_GRUPLARI) aşağıda tanımlandığı için
+  // orada uygulanır → "filtreli".
+  const filtreliKaynakHaric = kanalKayitlari.filter(k => {
     if (durumFiltre !== 'Tümü' && (k.durum || 'Yeni') !== durumFiltre) return false;
     if (hizmetFiltre !== 'Tümü' && (k.hizmetTipi || 'Nakliye') !== hizmetFiltre) return false;
     if (hesapFiltre !== 'Tümü' && k.hesapId !== hesapFiltre) return false;
@@ -4613,6 +4620,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     google_altsayfa: { ad: 'Google Altsayfa', renk: 'bg-orange-100 text-orange-700' },
     direkt_giris: { ad: 'Direkt Giriş', renk: 'bg-neutral-100 text-neutral-600' },
     diger_site: { ad: 'Diğer Site', renk: 'bg-purple-100 text-purple-700' },
+    // YENİ: ChatGPT Reklam / ChatGPT Organik / Gemini Organik … (src/aiKaynakSema.js)
+    ...AI_KAYNAK_ETIKETLERI,
   };
   const reklamKaynagiEtiket = (k) => {
     // YENİ (kullanıcı talebi): QR'dan gelen form "Organik" değil, QR adıyla görünür
@@ -4631,6 +4640,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     if (reklamKaynagiEsit(k, 'google_altsayfa')) return REKLAM_KAYNAGI_ETIKETLERI.google_altsayfa;
     if (reklamKaynagiEsit(k, 'direkt_giris')) return REKLAM_KAYNAGI_ETIKETLERI.direkt_giris;
     if (reklamKaynagiEsit(k, 'diger_site')) return REKLAM_KAYNAGI_ETIKETLERI.diger_site;
+    if (aiKaynakMi(k.reklamKaynagi)) return REKLAM_KAYNAGI_ETIKETLERI[k.reklamKaynagi];
     // DÜZELTME: QR'dan geldiği kesin ama henüz bir kampanyaya bağlanamamış kayıt
     // (ör. kampanya sonradan silinmiş/kodu değişmiş) "Organik" DEĞİL, QR görünür.
     if (!k.qrEslesmeYok && reklamKaynagiEsit(k, 'qr')) return { ad: `QR${k.qrKodu ? ` (${k.qrKodu})` : ''}`, renk: 'bg-amber-50 text-amber-700 border border-amber-200' };
@@ -4650,7 +4660,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     && !reklamKaynagiEsit(k, 'google_anasayfa')
     && !reklamKaynagiEsit(k, 'google_altsayfa')
     && !reklamKaynagiEsit(k, 'direkt_giris')
-    && !reklamKaynagiEsit(k, 'diger_site');
+    && !reklamKaynagiEsit(k, 'diger_site')
+    && !aiKaynakMi(k.reklamKaynagi);
   // Her kaynak için { bugun, buAy, tumu } sayıları
   const kaynakSayilari = (kosul) => ({
     bugun: aktifKanalBugun.filter(kosul).length,
@@ -4663,29 +4674,45 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // QR eşleşmesi olan kayıtlar yalnızca QR grubunda sayılır.
   const qrDegil = (deger) => (k) => !k.qrKampanyaId && reklamKaynagiEsit(k, deger);
   // DEĞİŞTİ: logo artık (boyutSinifi) => JSX fonksiyonu; panel logoyu büyük çizebilsin diye
+  // DEĞİŞTİ: her hücre sayım koşulunu ("kosul") da taşır — aynı koşul aşağıdaki
+  // Kaynak filtresinde kullanılır, sayılar ile filtre hiçbir zaman ayrışmaz.
   const OZET_GRUPLARI = [
     { ad: 'Google', logo: (c) => <GoogleLogo className={c} />, kenar: 'border-yellow-400/40', hucreler: [
-      { ad: 'Ads', renk: 'text-green-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'google_ads')) },
-      { ad: 'Ana Sayfa', renk: 'text-yellow-400', sayilar: kaynakSayilari(qrDegil('google_anasayfa')) },
-      { ad: 'Alt Sayfa', renk: 'text-orange-400', sayilar: kaynakSayilari(qrDegil('google_altsayfa')) },
+      { ad: 'Ads', renk: 'text-green-400', kosul: k => reklamKaynagiEsit(k, 'google_ads') },
+      { ad: 'Ana Sayfa', renk: 'text-yellow-400', kosul: qrDegil('google_anasayfa') },
+      { ad: 'Alt Sayfa', renk: 'text-orange-400', kosul: qrDegil('google_altsayfa') },
     ] },
     { ad: 'Facebook', logo: (c) => <FacebookLogo className={c} />, kenar: 'border-sky-400/40', hucreler: [
-      { ad: 'Ads', renk: 'text-sky-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'facebook_ads')) },
-      { ad: 'Organik', renk: 'text-indigo-300', sayilar: kaynakSayilari(qrDegil('facebook_organik')) },
+      { ad: 'Ads', renk: 'text-sky-400', kosul: k => reklamKaynagiEsit(k, 'facebook_ads') },
+      { ad: 'Organik', renk: 'text-indigo-300', kosul: qrDegil('facebook_organik') },
     ] },
     { ad: 'Instagram', logo: (c) => <InstagramLogo className={c} />, kenar: 'border-pink-400/40', hucreler: [
-      { ad: 'Ads', renk: 'text-pink-400', sayilar: kaynakSayilari(k => reklamKaynagiEsit(k, 'instagram_ads')) },
-      { ad: 'Organik', renk: 'text-rose-300', sayilar: kaynakSayilari(qrDegil('instagram_organik')) },
+      { ad: 'Ads', renk: 'text-pink-400', kosul: k => reklamKaynagiEsit(k, 'instagram_ads') },
+      { ad: 'Organik', renk: 'text-rose-300', kosul: qrDegil('instagram_organik') },
     ] },
     { ad: 'QR', logo: (c) => <QrCode className={`${c} text-amber-400`} />, kenar: 'border-amber-400/40', hucreler: [
-      { ad: 'QR Takip', renk: 'text-amber-400', sayilar: kaynakSayilari(k => !!k.qrKampanyaId || (!k.qrEslesmeYok && reklamKaynagiEsit(k, 'qr'))) },
+      { ad: 'QR Takip', renk: 'text-amber-400', kosul: k => !!k.qrKampanyaId || (!k.qrEslesmeYok && reklamKaynagiEsit(k, 'qr')) },
     ] },
     { ad: 'Diğer', logo: (c) => <Globe className={`${c} text-neutral-300`} />, kenar: 'border-white/20', hucreler: [
-      { ad: 'Direkt Giriş', renk: 'text-neutral-300', sayilar: kaynakSayilari(qrDegil('direkt_giris')) },
-      { ad: 'Diğer Site', renk: 'text-purple-400', sayilar: kaynakSayilari(qrDegil('diger_site')) },
-      { ad: 'Eski Kayıt', renk: 'text-neutral-500', sayilar: kaynakSayilari(k => reklamKaynagiEskiKayit(k)) },
+      { ad: 'Direkt Giriş', renk: 'text-neutral-300', kosul: qrDegil('direkt_giris') },
+      { ad: 'Diğer Site', renk: 'text-purple-400', kosul: qrDegil('diger_site') },
+      { ad: 'Eski Kayıt', renk: 'text-neutral-500', kosul: k => reklamKaynagiEskiKayit(k) },
     ] },
-  ];
+    // YENİ: YAPAY ZEKA — kutular src/aiKaynakSema.js tablosundan üretilir (yeni
+    // platform/reklam eklenince kutu kendiliğinden çıkar). Reklam kutuları diğer
+    // "Ads" hücreleri gibi QR eşleşmesinden bağımsız sayılır.
+    { ad: 'Yapay Zeka', logo: (c) => <Sparkles className={`${c} text-fuchsia-300`} />, kenar: 'border-fuchsia-400/40', genis: true,
+      hucreler: AI_ISTATISTIK_KUTULARI.map(x => ({ ad: x.ad, renk: x.renk, kosul: x.reklam ? (k => reklamKaynagiEsit(k, x.kod)) : qrDegil(x.kod) })) },
+  ].map(g => ({ ...g, hucreler: g.hucreler.map(h => ({ ...h, sayilar: kaynakSayilari(h.kosul) })) }));
+
+  // YENİ (kullanıcı talebi): KAYNAK FİLTRESİ — seçenekler istatistik gruplarından
+  // üretilir: "Google (Tümü)", "Google · Ads", … "Yapay Zeka · ChatGPT Ads".
+  const KAYNAK_FILTRELERI = OZET_GRUPLARI.flatMap(g => [
+    ...(g.hucreler.length > 1 ? [{ id: `${g.ad}::*`, grup: g.ad, ad: `${g.ad} (Tümü)`, kosul: k => g.hucreler.some(h => h.kosul(k)) }] : []),
+    ...g.hucreler.map(h => ({ id: `${g.ad}::${h.ad}`, grup: g.ad, ad: g.hucreler.length > 1 ? `${g.ad} · ${h.ad}` : h.ad, kosul: h.kosul })),
+  ]);
+  const seciliKaynakFiltresi = KAYNAK_FILTRELERI.find(f => f.id === kaynakFiltre);
+  const filtreli = seciliKaynakFiltresi ? filtreliKaynakHaric.filter(seciliKaynakFiltresi.kosul) : filtreliKaynakHaric;
 
   // ================================================================ RENDER ===
   // YENİ (kullanıcı talebi): QR Takip sayfası — seçili site için, havuzun yerine
@@ -4958,58 +4985,92 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         </div>
       )}
 
-      {/* DURUM + HİZMET FİLTRELERİ
-          DEĞİŞTİ (kullanıcı talebi): Durum satırı TEK SATIRA sığar (taşarsa yatay
-          kaydırılır) ve her durum butonu, tablodaki durum rozetleriyle AYNI
-          renktedir; seçili olan koyu halka (ring) ile belli olur. */}
+      {/* DURUM / HİZMET / KAYNAK / ZAMAN FİLTRELERİ
+          DEĞİŞTİ (kullanıcı talebi): yatay kaydırma kaldırıldı — taşan öğeler alt
+          satıra geçer. 1. satır: Durum butonları (tablodaki durum rozetleriyle AYNI
+          renk, seçili olan koyu halkalı); mobilde (<768px) sayılı açılır liste.
+          2. satır: Hizmet + Kaynak açılır listeleri, Zaman butonları, en sağda
+          "Alınanlar" düğmesi ve (seçili filtre varsa) "Filtreleri temizle".
+          Filtre mantığı DEĞİŞMEDİ, yalnızca yerleşim. */}
+      {(() => {
+        // Durum filtresinde yalnızca "Müşteriyle Görüşme Durumu" penceresindeki
+        // seçenekler (aynı sıra ve etiketlerle) + Tümü ve Yeni gösterilir.
+        const durumSecenekleri = ['Tümü', 'Yeni', ...GORUSME_DURUMU_SECENEKLERI.map(x => x.id)];
+        const durumEtiketi = (d) => GORUSME_DURUMU_SECENEKLERI.find(x => x.id === d)?.etiket || d;
+        const filtreVar = durumFiltre !== 'Tümü' || hizmetFiltre !== 'Tümü' || kaynakFiltre !== 'Tümü' || zamanFiltre !== 'Tüm Zamanlar';
+        const acilirSinif = (secili) => `px-2 py-1 rounded-lg text-[11px] font-black border outline-none ${secili ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`;
+        const baslikSinif = 'text-[10px] font-black text-neutral-400 uppercase';
+        return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 space-y-2">
-        <div className="flex items-center gap-1.5 overflow-x-auto whitespace-nowrap pb-0.5">
-          <span className="text-[10px] font-black text-neutral-400 uppercase shrink-0">Durum:</span>
-          {/* DEĞİŞTİ (kullanıcı talebi): Durum filtresinde yalnızca "Müşteriyle
-              Görüşme Durumu" penceresindeki seçenekler (aynı sıra ve etiketlerle)
-              + Tümü ve Yeni (henüz görüşülmemiş kayıtlar) gösterilir. Diğer
-              durumlar (örn. "Görüşme Sağlandı") çubuktan kaldırıldı; DURUMLAR
-              listesi ve kayıtlar aynen duruyor, yalnızca çubuk daraltıldı. */}
-          {['Tümü', 'Yeni', ...GORUSME_DURUMU_SECENEKLERI.map(x => x.id)].map(d => {
-            const etiket = GORUSME_DURUMU_SECENEKLERI.find(x => x.id === d)?.etiket || d;
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className={baslikSinif}>Durum:</span>
+          {/* Mobil: sayılı açılır liste */}
+          <select value={durumFiltre} onChange={e => setDurumFiltre(e.target.value)} className={`md:hidden ${acilirSinif(durumFiltre !== 'Tümü')}`}>
+            {durumSecenekleri.map(d => <option key={d} value={d}>{durumEtiketi(d)} ({durumSayaclari[d] ?? 0})</option>)}
+          </select>
+          {/* Masaüstü: renkli butonlar */}
+          {durumSecenekleri.map(d => {
             const secili = durumFiltre === d;
             const renk = d === 'Tümü'
               ? (secili ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400')
               : durumRenk(d);
             return (
               <button key={d} type="button" onClick={() => setDurumFiltre(d)}
-                className={`px-2 py-1 rounded-lg text-[10px] font-black border transition shrink-0 ${renk} ${secili && d !== 'Tümü' ? 'ring-2 ring-neutral-900 ring-offset-1' : ''} ${!secili && d !== 'Tümü' ? 'opacity-80 hover:opacity-100' : ''}`}>
-                {etiket} <span className="opacity-60">({durumSayaclari[d] ?? 0})</span>
+                className={`hidden md:inline-block px-2 py-1 rounded-lg text-[10px] font-black border transition whitespace-nowrap ${renk} ${secili && d !== 'Tümü' ? 'ring-2 ring-neutral-900 ring-offset-1' : ''} ${!secili && d !== 'Tümü' ? 'opacity-80 hover:opacity-100' : ''}`}>
+                {durumEtiketi(d)} <span className="opacity-60">({durumSayaclari[d] ?? 0})</span>
               </button>
             );
           })}
-          <span className="text-[10px] font-black text-neutral-400 uppercase ml-1 shrink-0">Hizmet:</span>
-          {['Tümü', 'Nakliye', 'Depo', 'Asansör'].map(t => (
-            <button key={t} type="button" onClick={() => setHizmetFiltre(t)}
-              className={`px-2 py-1 rounded-lg text-[10px] font-black border transition shrink-0 ${hizmetFiltre === t ? (t === 'Nakliye' ? 'bg-red-600 text-white border-red-600' : t === 'Depo' ? 'bg-blue-600 text-white border-blue-600' : t === 'Asansör' ? 'bg-green-600 text-white border-green-600' : 'bg-neutral-900 text-white border-neutral-900') : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
-              {t}
-            </button>
-          ))}
         </div>
 
-        {/* YENİ (kullanıcı talebi): ZAMAN FİLTRESİ — yeni satırda, Tüm Zamanlar varsayılan */}
-        <div className="w-full flex flex-wrap items-center gap-1.5 pt-2 border-t border-neutral-100">
-          <span className="text-[10px] font-black text-neutral-400 uppercase flex items-center gap-1"><CalendarDays className="w-3 h-3" /> Zaman:</span>
-          {ZAMAN_FILTRELERI.map(z => (
-            <button key={z} type="button" onClick={() => setZamanFiltre(z)}
-              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${zamanFiltre === z ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
-              {z}
-            </button>
-          ))}
-          {/* YENİ: havuz dışına çıkmış (satışçıya geçmiş) talepleri de listele */}
-          {aktifKanal === 'web' && (
-            <button type="button" onClick={() => setAlinanlariGoster(v => !v)}
-              className={`ml-auto px-2.5 py-1 rounded-lg text-[11px] font-black border transition flex items-center gap-1 ${alinanlariGoster ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
-              <Eye className="w-3 h-3" /> {alinanlariGoster ? 'Alınanlar gösteriliyor' : 'Alınanları da göster'}
-            </button>
-          )}
+        <div className="w-full flex flex-wrap items-center gap-x-3 gap-y-2 pt-2 border-t border-neutral-100">
+          <label className="flex items-center gap-1.5">
+            <span className={baslikSinif}>Hizmet:</span>
+            <select value={hizmetFiltre} onChange={e => setHizmetFiltre(e.target.value)} className={acilirSinif(hizmetFiltre !== 'Tümü')}>
+              {['Tümü', 'Nakliye', 'Depo', 'Asansör'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+          {/* KAYNAK FİLTRESİ — istatistik gruplarından üretilir */}
+          <label className="flex items-center gap-1.5">
+            <span className={baslikSinif}>Kaynak:</span>
+            <select value={kaynakFiltre} onChange={e => setKaynakFiltre(e.target.value)} className={acilirSinif(kaynakFiltre !== 'Tümü')}>
+              <option value="Tümü">Tümü</option>
+              {OZET_GRUPLARI.map(g => (
+                <optgroup key={g.ad} label={g.ad}>
+                  {KAYNAK_FILTRELERI.filter(f => f.grup === g.ad).map(f => <option key={f.id} value={f.id}>{f.ad}</option>)}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          {/* ZAMAN FİLTRESİ — Tüm Zamanlar varsayılan */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className={`${baslikSinif} flex items-center gap-1`}><CalendarDays className="w-3 h-3" /> Zaman:</span>
+            {ZAMAN_FILTRELERI.map(z => (
+              <button key={z} type="button" onClick={() => setZamanFiltre(z)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition whitespace-nowrap ${zamanFiltre === z ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+                {z}
+              </button>
+            ))}
+          </div>
+          <div className="ml-auto flex items-center gap-3">
+            {/* havuz dışına çıkmış (satışçıya geçmiş) talepleri de listele */}
+            {aktifKanal === 'web' && (
+              <button type="button" onClick={() => setAlinanlariGoster(v => !v)}
+                className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition flex items-center gap-1 whitespace-nowrap ${alinanlariGoster ? 'bg-neutral-900 text-white border-neutral-900' : 'bg-white text-neutral-500 border-neutral-200 hover:border-neutral-400'}`}>
+                <Eye className="w-3 h-3" /> {alinanlariGoster ? 'Alınanlar gösteriliyor' : 'Alınanları da göster'}
+              </button>
+            )}
+            {filtreVar && (
+              <button type="button" onClick={() => { setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setKaynakFiltre('Tümü'); setZamanFiltre('Tüm Zamanlar'); }}
+                className="text-[11px] font-bold text-neutral-500 underline underline-offset-2 hover:text-neutral-900 whitespace-nowrap">
+                Filtreleri temizle
+              </button>
+            )}
+          </div>
         </div>
       </div>
+        );
+      })()}
 
       {/* ====================================================================
           DEĞİŞTİ: "Hızlı Teklifler" sekmesinde gün ayraçlı yeni tablo
