@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'; // DÜZELTME: QR Takip için useRef eklendi
-import { QrCode, Download, Copy, Check, ChevronUp, Sparkles, ExternalLink, Filter, Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe, CreditCard, PhoneCall } from 'lucide-react';
+import { CalendarClock, CalendarPlus, QrCode, Download, Copy, Check, ChevronUp, Sparkles, ExternalLink, Filter, Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe, CreditCard, PhoneCall } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs, getDoc, increment, orderBy, limit } from 'firebase/firestore';
 import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul,
   // YENİ: Müşteri Havuzu'nda "Atanan Satışçı" listesini yalnızca Satış Personeli
@@ -17,6 +17,244 @@ import { AI_KAYNAK_ETIKETLERI, AI_ISTATISTIK_KUTULARI, aiKaynakMi } from './aiKa
 import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
 import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari } from './fiyatSema.js';
+
+// ============================================================================
+// YENİ (kullanıcı talebi): ESNEK MÜŞTERİ — alternatif taşınma günleri
+// ----------------------------------------------------------------------------
+// Kayıt ekranında (AddJobView) "Esnek Müşteri" butonu ile müşterinin randevu
+// tarihi dışında da taşınabileceği günler seçilir. Hiç gün seçmeden yalnızca
+// "esnek" olarak işaretlemek de mümkündür.
+//
+// İşe yazılan alanlar (App.jsx > handleAddJob formData'yı olduğu gibi kaydeder):
+//   esnekMusteri : boolean            → müşteri esnek mi
+//   esnekTarihler: ['YYYY-MM-DD', …]  → alternatif günler (sıralı, tekrarsız; boş olabilir)
+//
+// Bu alanlar olmayan eski kayıtlar "esnek değil" sayılır — hiçbir veri bozulmaz.
+// OperasyonIsler.jsx takvimdeki kare nokta ve iş kartı rozeti için
+// esnekMi / esnekAciklama / EsnekTarihRozeti'yi BURADAN import eder.
+// ============================================================================
+
+// ------------------------------------------------------------ YARDIMCILAR ---
+
+// 'YYYY-MM-DD' metnini YEREL saatle Date'e çevirir.
+// (new Date('2026-10-03') UTC kabul eder ve Türkiye saatinde güne kayma yaratabilir.)
+const esnekYerelTarih = (s) => {
+  const [y, m, d] = String(s || '').split('-').map(Number);
+  return y && m && d ? new Date(y, m - 1, d) : null;
+};
+
+// Bugünün tarihi 'YYYY-MM-DD' (yerel saat) — geçmiş günlerin seçilmesini engellemek için
+const esnekBugunMetni = () => {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+};
+
+// Uzun gün adı: "3 Ekim 2026 Cumartesi"
+export const esnekGunUzun = (s) => {
+  const t = esnekYerelTarih(s);
+  return t ? t.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric', weekday: 'long' }) : String(s || '');
+};
+
+// Kısa gün adı (kart rozetinde yer kaplamasın diye): "3 Eki Cmt"
+export const esnekGunKisa = (s) => {
+  const t = esnekYerelTarih(s);
+  return t ? t.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', weekday: 'short' }) : String(s || '');
+};
+
+// Geçerli, tekrarsız ve sıralı tarih listesi
+const esnekTarihTemizle = (liste) =>
+  [...new Set((Array.isArray(liste) ? liste : []).filter(s => esnekYerelTarih(s)))].sort();
+
+// Kayıt esnek mi? (eski kayıtlarda alan yok → false)
+export const esnekMi = (job) => job?.esnekMusteri === true;
+
+// İş için esnek tarih listesi (her zaman dizi döner)
+export const esnekTarihleri = (job) => esnekTarihTemizle(job?.esnekTarihler);
+
+// Okunabilir açıklama:
+//   "3 Ekim 2026 Cumartesi, 4 Ekim 2026 Pazar günlerinde de taşınabilir"
+//   Gün seçilmemişse: "Esnek müşteri — taşınma günü değişebilir"
+export const esnekAciklama = (job) => {
+  if (!esnekMi(job)) return '';
+  const gunler = esnekTarihleri(job);
+  if (!gunler.length) return 'Esnek müşteri — taşınma günü değişebilir';
+  return `${gunler.map(esnekGunUzun).join(', ')} ${gunler.length > 1 ? 'günlerinde' : 'gününde'} de taşınabilir`;
+};
+
+// ------------------------------------------------------ KAYIT EKRANI BUTONU ---
+// Bireysel / Kurumsal seçicisinin SAĞINA yerleşir. Tıklayınca gün seçme penceresi açılır.
+// formData / setFormData doğrudan AddJobView'den gelir (App.jsx'teki form durumu).
+export const EsnekMusteriButonu = ({ formData, setFormData }) => {
+  const [acik, setAcik] = useState(false);
+  // Pencere içindeki taslak liste — "Kaydet"e basılana kadar forma yazılmaz
+  const [taslak, setTaslak] = useState([]);
+  const [secilenGun, setSecilenGun] = useState('');
+  const [uyari, setUyari] = useState('');
+
+  const aktif = esnekMi(formData);
+  const gunSayisi = esnekTarihleri(formData).length;
+  const anaTarih = formData?.date || ''; // Randevu tarihi (alternatif olarak eklenemez)
+
+  // Pencereyi mevcut değerlerle aç
+  const pencereAc = () => {
+    setTaslak(esnekTarihleri(formData));
+    setSecilenGun('');
+    setUyari('');
+    setAcik(true);
+  };
+
+  // Seçilen günü taslak listeye ekle (geçmiş gün, randevu günü ve tekrar engellenir)
+  const gunEkle = () => {
+    if (!secilenGun) return setUyari('Önce bir gün seçin.');
+    if (secilenGun < esnekBugunMetni()) return setUyari('Geçmiş bir gün eklenemez.');
+    if (secilenGun === anaTarih) return setUyari('Bu gün zaten randevu tarihi — alternatif olarak eklenemez.');
+    if (taslak.includes(secilenGun)) return setUyari('Bu gün zaten listede.');
+    setTaslak(esnekTarihTemizle([...taslak, secilenGun]));
+    setSecilenGun('');
+    setUyari('');
+  };
+
+  // Esnek olarak kaydet (gün listesi boş olabilir: "sadece belirtmek")
+  const kaydet = () => {
+    setFormData({ ...formData, esnekMusteri: true, esnekTarihler: esnekTarihTemizle(taslak) });
+    setAcik(false);
+  };
+
+  // Esnekliği tamamen kaldır
+  const kaldir = () => {
+    setFormData({ ...formData, esnekMusteri: false, esnekTarihler: [] });
+    setAcik(false);
+  };
+
+  return (
+    <>
+      {/* type="button": form içinde olduğu için tıklayınca kaydı GÖNDERMEMELİ */}
+      <button
+        type="button"
+        onClick={pencereAc}
+        title={aktif ? esnekAciklama(formData) : 'Müşteri başka günlerde de taşınabiliyorsa işaretleyin'}
+        className={`w-full md:w-auto px-4 md:px-5 py-2.5 text-xs md:text-sm font-bold rounded-xl border transition flex items-center justify-center gap-2 ${
+          aktif
+            ? 'bg-amber-400 border-amber-500 text-black shadow-sm hover:bg-amber-300'
+            : 'bg-white border-neutral-300 text-neutral-600 hover:border-amber-400 hover:text-amber-700'
+        }`}
+      >
+        <CalendarClock className="w-4 h-4" />
+        Esnek Müşteri
+        {/* Aktifse seçilen gün sayısı rozeti */}
+        {aktif && (
+          <span className="text-[10px] font-black bg-black text-amber-300 px-1.5 py-0.5 rounded-md">
+            {gunSayisi ? `${gunSayisi} gün` : 'Tarihsiz'}
+          </span>
+        )}
+      </button>
+
+      {/* ----------------------------------------------- GÜN SEÇME PENCERESİ --- */}
+      {acik && (
+        <div className="fixed inset-0 z-[100] bg-black/50 flex items-center justify-center p-4" onClick={() => setAcik(false)}>
+          <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+            {/* Başlık */}
+            <div className="bg-black text-white px-5 py-3.5 flex items-center justify-between">
+              <span className="font-black flex items-center gap-2"><CalendarClock className="w-5 h-5 text-amber-400" /> Esnek Müşteri</span>
+              <button type="button" onClick={() => setAcik(false)} className="p-1 hover:bg-white/10 rounded-lg"><X className="w-5 h-5" /></button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <p className="text-xs font-bold text-neutral-500">
+                Müşterinin randevu günü dışında taşınabileceği günleri ekleyin. Gün eklemeden de kaydedebilirsiniz; kayıt yalnızca "esnek" olarak işaretlenir.
+              </p>
+
+              {/* Gün seçimi + Ekle */}
+              <div>
+                <label className="text-[10px] font-black uppercase text-neutral-500">Alternatif Gün</label>
+                <div className="flex gap-2 mt-1">
+                  <input
+                    type="date"
+                    value={secilenGun}
+                    min={esnekBugunMetni()}
+                    onChange={e => { setSecilenGun(e.target.value); setUyari(''); }}
+                    // Enter tuşu dış formu (kaydı) göndermesin; günü listeye eklesin
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); gunEkle(); } }}
+                    className="flex-1 p-2.5 border border-neutral-300 rounded-xl text-sm font-bold outline-none focus:border-amber-500"
+                  />
+                  <button type="button" onClick={gunEkle} className="px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-black font-black text-sm flex items-center gap-1.5">
+                    <CalendarPlus className="w-4 h-4" /> Ekle
+                  </button>
+                </div>
+                {uyari && <p className="text-[11px] font-bold text-red-600 mt-1.5">{uyari}</p>}
+              </div>
+
+              {/* Eklenen günler */}
+              <div className="space-y-1.5 max-h-56 overflow-y-auto">
+                {taslak.length === 0 ? (
+                  <div className="text-center text-xs font-bold text-neutral-400 py-4 border border-dashed border-neutral-300 rounded-xl">
+                    Gün eklenmedi — "esnek" olarak kaydedilecek
+                  </div>
+                ) : taslak.map(g => (
+                  <div key={g} className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                    <span className="text-sm font-bold text-neutral-800">{esnekGunUzun(g)}</span>
+                    <button type="button" onClick={() => setTaslak(taslak.filter(x => x !== g))} title="Günü çıkar" className="p-1 text-neutral-400 hover:text-red-600">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Önizleme: kayıtta görünecek metin */}
+              {taslak.length > 0 && (
+                <p className="text-xs font-bold text-amber-800 bg-amber-100/60 rounded-lg px-3 py-2">
+                  {esnekAciklama({ esnekMusteri: true, esnekTarihler: taslak })}
+                </p>
+              )}
+            </div>
+
+            {/* Alt butonlar */}
+            <div className="border-t border-neutral-200 px-5 py-3.5 flex items-center justify-between gap-2">
+              {/* Yalnızca kayıt zaten esnekse "kaldır" gösterilir */}
+              {aktif ? (
+                <button type="button" onClick={kaldir} className="text-xs font-black text-red-600 hover:underline">Esnekliği Kaldır</button>
+              ) : <span />}
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setAcik(false)} className="px-4 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 font-bold text-sm">Vazgeç</button>
+                <button type="button" onClick={kaydet} className="px-4 py-2 rounded-xl bg-black hover:bg-neutral-800 text-white font-black text-sm flex items-center gap-1.5">
+                  <Check className="w-4 h-4" /> Kaydet
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+// Formda butonun altında gösterilen özet satırı (esnek değilse hiçbir şey çizmez)
+export const EsnekOzetSatiri = ({ formData }) => {
+  if (!esnekMi(formData)) return null;
+  return (
+    <p className="text-xs font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 mb-4 flex items-start gap-2">
+      <CalendarClock className="w-4 h-4 shrink-0 mt-px" /> {esnekAciklama(formData)}
+    </p>
+  );
+};
+
+// ------------------------------------------------------- İŞ KARTI ROZETİ ---
+// Takvimin altındaki iş listesinde müşteri adının yanında görünür.
+// En fazla 2 gün kısa adla yazılır, fazlası "+N"; tam liste üzerine gelince görünür.
+export const EsnekTarihRozeti = ({ job }) => {
+  if (!esnekMi(job)) return null;
+  const gunler = esnekTarihleri(job);
+  const gorunen = gunler.slice(0, 2).map(esnekGunKisa).join(' · ');
+  return (
+    <span
+      title={esnekAciklama(job)}
+      className="text-[9px] px-1.5 py-0.5 rounded font-black uppercase tracking-wider bg-amber-400 text-black shadow-sm flex items-center gap-1"
+    >
+      <CalendarClock className="w-3 h-3" />
+      Esnek{gorunen ? `: ${gorunen}` : ''}{gunler.length > 2 ? ` +${gunler.length - 2}` : ''}
+    </span>
+  );
+};
 
   // ============================================================================
   // YENİ: Ortak Bölüm Başlığı Bileşeni (SectionHeader)
@@ -263,7 +501,10 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
           <div className="bg-neutral-50 p-3 md:p-4 rounded-2xl border border-neutral-200 shadow-sm">
             <SectionHeader icon={Users} title="Müşteri ve Randevu Bilgileri" />
             
-            <div className="flex bg-neutral-200/60 p-1 rounded-xl mb-5 w-full md:w-fit border border-neutral-300">
+            {/* YENİ: Bireysel/Kurumsal seçici + sağında Esnek Müşteri butonu aynı satırda
+                (mobilde alt alta). Alt boşluk (mb-5) seçiciden bu sarmalayıcıya taşındı. */}
+            <div className="flex flex-col md:flex-row md:items-center gap-2 md:gap-3 mb-5">
+            <div className="flex bg-neutral-200/60 p-1 rounded-xl w-full md:w-fit border border-neutral-300">
               <button 
                 type="button"
                 onClick={() => setFormData({...formData, customerType: 'Bireysel'})}
@@ -279,6 +520,11 @@ import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GR
                 <Briefcase className="w-4 h-4" /> Kurumsal Müşteri
               </button>
             </div>
+              {/* YENİ: Esnek Müşteri — tıklayınca alternatif günler seçilir */}
+              <EsnekMusteriButonu formData={formData} setFormData={setFormData} />
+            </div>
+            {/* YENİ: Esnekse "… günlerinde de taşınabilir" özeti */}
+            <EsnekOzetSatiri formData={formData} />
 
             <div className="space-y-4">
               {/* SATIR 1: Ad Soyad + TC Kimlik No (mobilde de yan yana) */}
