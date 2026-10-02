@@ -1,4 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+// YENİ (kullanıcı talebi): Esnek Müşteri — takvimde kare nokta ve iş kartında rozet
+// (Tanımlar Satis.jsx içinde — ayrı dosya yok; Satis.jsx bu dosyayı import etmediği için döngü oluşmaz)
+import { esnekMi, esnekAciklama, EsnekTarihRozeti } from './Satis.jsx';
 import { Truck, Calendar, XCircle, MapPin, Phone, FileText, CheckCircle, Clock, PlusCircle, ClipboardList, ClipboardCheck, Shield, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Briefcase, Car, Wallet, CheckSquare, GripVertical, Activity, ArrowUpRight, Landmark, CreditCard, DollarSign, ArrowRightLeft, UserPlus, Camera, Edit, Ban, LogOut, Mail, Bell, User, Loader2, MessageSquareText, MessageCircle, Send, Package, History, Save, Search, Key, BarChart, Eye, EyeOff, FolderOpen, Shirt, Smartphone, Award, Zap, Scale, BookOpen, Wrench, Sparkles, Headphones, ArrowDown, Trash2, QrCode, LogIn, Keyboard, Download, RefreshCw , Copy} from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, query, getDoc, getDocs, where, orderBy, limit } from 'firebase/firestore';
 import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCalisan, normalizePozisyon, belgeListesiNormalize, HasarCozumBelgeleri, isVideoUrl, MediaCaptureMenu, TUTANAK_TEMPLATES, generateContractPDF, generatePersonnelDocPDF, calculateMaterials, malzemeEkAdi, getIhbarSuresiBilgisi, SayfalamaBar,
@@ -2090,7 +2093,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                                   job.isSpecial ? 
                                     <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className="w-2 h-2 shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
                                   :
-                                    <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className={`w-2 h-2 shrink-0 rounded-full ${job.type === 'Depo' ? 'bg-blue-600' : 'bg-red-600'}`}></div>
+                                    // DEĞİŞTİ: Esnek müşteride nokta YUVARLAK değil KARE (aynı 8px alan, yalnızca biçim farkı)
+                                    <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})${esnekMi(job) ? ` — ${esnekAciklama(job)}` : ''}`} className={`w-2 h-2 shrink-0 ${esnekMi(job) ? 'rounded-[1px]' : 'rounded-full'} ${job.type === 'Depo' ? 'bg-blue-600' : 'bg-red-600'}`}></div>
                                 ))}
                             </div>
                             
@@ -2108,7 +2112,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                                   return job.isSpecial ?
                                     <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-1.5 h-1.5 shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
                                   :
-                                    <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type}${isAnadolu ? '' : ' - Avrupa/Diğer'})`} className={`w-1.5 h-1.5 shrink-0 rounded-full ${isAnadolu ? 'bg-green-500' : 'bg-green-800'}`}></div>;
+                                    // DEĞİŞTİ: Esnek asansör işi de kare görünür
+                                    <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type}${isAnadolu ? '' : ' - Avrupa/Diğer'})${esnekMi(job) ? ` — ${esnekAciklama(job)}` : ''}`} className={`w-1.5 h-1.5 shrink-0 ${esnekMi(job) ? 'rounded-[1px]' : 'rounded-full'} ${isAnadolu ? 'bg-green-500' : 'bg-green-800'}`}></div>;
                                 })}
                             </div>
                           </>
@@ -2191,6 +2196,8 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                           {job.status === 'completed' ? 'Tamamlandı' : job.status === 'in-progress' ? 'Sürüyor' : job.status === 'cancelled' ? 'İptal' : 'Bekliyor'}
                         </span>
                         <span className="text-[10px] font-black text-neutral-600 flex items-center gap-1 ml-1"><Clock className="w-3 h-3" /> {job.time}</span>
+                        {/* YENİ: Esnek tarih etiketi (esnek değilse görünmez) */}
+                        <EsnekTarihRozeti job={job} />
                       </div>
                       {/* DEĞİŞTİ: Devam gününde de işin gerçek fiyatı görünür (ciroya girmez) */}
                       {(job.price || gosterFiyat > 0) && (
