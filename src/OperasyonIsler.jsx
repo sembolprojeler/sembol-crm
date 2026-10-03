@@ -23,6 +23,61 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
   isMaviYakaPersonel, denetimKaydiniTemizle } from './shared.jsx';
 import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from './OperasyonPersonel.jsx';
 
+// ============================================================================
+// YENİ (kullanıcı talebi): TAKVİM İŞ SİMGELERİ
+// ----------------------------------------------------------------------------
+// Takvim hücrelerindeki yuvarlak noktaların yerine iş türüne göre simge:
+//   Nakliye → Ev · Depo → Depo binası (kepenkli) · Asansör → Vinç
+// Renkler eskisiyle aynı (kırmızı / mavi / yeşil); ESNEK müşteride simge TURUNCU.
+// Tüm simgeler AYNI boyuttadır (TAKVIM_SIMGE_BOYUT). Küçük boyutta net görünsün
+// diye çizgi değil DOLGULU özel SVG kullanılır; renk "currentColor" ile verilir.
+// ============================================================================
+const TAKVIM_SIMGE_BOYUT = 'w-2.5 h-2.5'; // 10px — üç simge ve özel iş yıldızı için ortak boyut
+
+// Simge çizimleri (12×12 alanda)
+const TAKVIM_SIMGE_CIZIMLERI = {
+  // Ev: üçgen çatı + gövde, ortada kapı boşluğu
+  Nakliye: <path d="M6 0.8 L11.6 5.6 H10 V11.2 H7.2 V7.6 H4.8 V11.2 H2 V5.6 H0.4 Z" />,
+  // Depo: beşik çatılı bina, önünde çizgili kepenk
+  Depo: (
+    <>
+      <path fillRule="evenodd" d="M0.4 4.6 L6 0.8 L11.6 4.6 V11.2 H0.4 Z M3 6 V11.2 H9 V6 Z" />
+      <rect x="3" y="6.9" width="6" height="0.8" />
+      <rect x="3" y="8.5" width="6" height="0.8" />
+      <rect x="3" y="10.1" width="6" height="0.8" />
+    </>
+  ),
+  // Vinç: kule + uzun kol, uçta halat ve kanca bloğu
+  'Asansör': (
+    <>
+      <path d="M3.3 0.2 L4.6 2 H2 Z" />
+      <rect x="2.5" y="1.9" width="1.6" height="8.8" />
+      <rect x="0.6" y="2" width="11" height="1.3" />
+      <rect x="9.3" y="3.3" width="0.6" height="3.4" />
+      <rect x="8.6" y="6.6" width="2" height="1.6" rx="0.3" />
+      <rect x="0.8" y="10.4" width="5" height="1.2" />
+    </>
+  ),
+};
+
+// İşin simge rengi: esnek → turuncu; değilse türün eski rengi
+// (asansörde İstanbul Anadolu açık yeşil, Avrupa/diğer koyu yeşil — eskisi gibi)
+export const takvimSimgeRengi = (job) => {
+  if (esnekMi(job)) return 'text-orange-500';
+  if (job?.type === 'Depo') return 'text-blue-600';
+  if (job?.type === 'Asansör') return job.fromProvince === 'İstanbul (Anadolu)' ? 'text-green-500' : 'text-green-800';
+  return 'text-red-600';
+};
+
+// Tek simge. tur: 'Nakliye' | 'Depo' | 'Asansör' (bilinmeyen tür Nakliye sayılır)
+export const TakvimIsSimgesi = ({ tur, renk, title, className = '' }) => (
+  <svg viewBox="0 0 12 12" fill="currentColor" aria-hidden={title ? undefined : true}
+    className={`${TAKVIM_SIMGE_BOYUT} shrink-0 ${renk} ${className}`}>
+    {title && <title>{title}</title>}
+    {TAKVIM_SIMGE_CIZIMLERI[tur] || TAKVIM_SIMGE_CIZIMLERI.Nakliye}
+  </svg>
+);
+
 
   // ==========================================================================
   // YENİ (kullanıcı talebi): İŞE BAŞLAMA TARİHİNDEN ÖNCE LİSTELERDE ÇIKMASIN
@@ -2016,9 +2071,11 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
           ) : (
             <div className="flex flex-col gap-2 items-end">
               <div className="flex flex-wrap gap-2 text-[10px] font-bold bg-neutral-50 p-1.5 rounded-xl border border-neutral-200">
-                <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-red-600"></div> Nakliye</div>
-                <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-blue-600"></div> Depo</div>
-                <div className="flex items-center gap-1"><div className="w-2.5 h-2.5 rounded-full bg-green-500"></div> Asansör</div>
+                {/* DEĞİŞTİ (kullanıcı talebi): Lejant da yeni simgelerle; Esnek (turuncu) eklendi */}
+                <div className="flex items-center gap-1"><TakvimIsSimgesi tur="Nakliye" renk="text-red-600" /> Nakliye</div>
+                <div className="flex items-center gap-1"><TakvimIsSimgesi tur="Depo" renk="text-blue-600" /> Depo</div>
+                <div className="flex items-center gap-1"><TakvimIsSimgesi tur="Asansör" renk="text-green-500" /> Asansör</div>
+                <div className="flex items-center gap-1"><TakvimIsSimgesi tur="Nakliye" renk="text-orange-500" /> Esnek</div>
               </div>
               <div className="flex flex-wrap gap-2 text-[10px] font-bold bg-neutral-50 p-1.5 rounded-xl border border-neutral-200">
                 <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-white border border-neutral-300"></div> Boş (0)</div>
@@ -2088,20 +2145,27 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                           <>
                             {/* NAKLİYE/DEPO NOKTALARI: grid-cols-3 ile her satırda KESİN 3 nokta, 2 satır = en fazla 6. */}
                             {/* Örn. 4 iş: üstte 3 nokta, altta 1 nokta. Alan sabit yükseklikte (h-[18px]) => tüm günler eşit. */}
-                            <div className="grid grid-cols-3 gap-0.5 w-fit content-start h-[18px] overflow-hidden">
+                            {/* DEĞİŞTİ: 10px simgeler için alan 18px → 22px (2 satır × 10px + 2px boşluk) */}
+                            <div className="grid grid-cols-3 gap-0.5 w-fit content-start h-[22px] overflow-hidden">
                                 {coreJobs.slice(0, 6).map(job => (
                                   job.isSpecial ? 
-                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className="w-2 h-2 shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
+                                    // DEĞİŞTİ: Özel iş yıldızı da simgelerle aynı boyutta
+                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className={`${TAKVIM_SIMGE_BOYUT} shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm`} />
                                   :
-                                    // DEĞİŞTİ: Esnek müşteride nokta YUVARLAK değil KARE (aynı 8px alan, yalnızca biçim farkı)
-                                    <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})${esnekMi(job) ? ` — ${esnekAciklama(job)}` : ''}`} className={`w-2 h-2 shrink-0 ${esnekMi(job) ? 'rounded-[1px]' : 'rounded-full'} ${job.type === 'Depo' ? 'bg-blue-600' : 'bg-red-600'}`}></div>
+                                    // DEĞİŞTİ (kullanıcı talebi): Yuvarlak nokta yerine iş türü simgesi
+                                    // (Nakliye = ev, Depo = depo). Esnek müşteride kare kaldırıldı → turuncu simge.
+                                    <TakvimIsSimgesi key={job.id}
+                                      tur={job.type === 'Depo' ? 'Depo' : 'Nakliye'}
+                                      renk={takvimSimgeRengi(job)}
+                                      title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})${esnekMi(job) ? ` — ${esnekAciklama(job)}` : ''}`} />
                                 ))}
                             </div>
                             
                             {/* ASANSÖR NOKTALARI: Asansör işi OLMASA BİLE bu satır her zaman render edilir (hiza sabit). */}
                             {/* SARI AYRAÇ ÇİZGİSİ her zaman sabit gösterilir (asansör işi olsa da olmasa da). */}
                             {/* En fazla 4 yeşil nokta. İstanbul (Anadolu) = açık yeşil ve önce; Avrupa/diğer il = KOYU yeşil ve en sonda. */}
-                            <div className="flex flex-nowrap gap-0.5 mt-auto pt-1 w-full items-center h-[12px] overflow-hidden border-t border-yellow-400">
+                            {/* DEĞİŞTİ: 10px vinç simgesi için satır yüksekliği 12px → 16px */}
+                            <div className="flex flex-nowrap gap-0.5 mt-auto pt-1 w-full items-center h-[16px] overflow-hidden border-t border-yellow-400">
                                 {[...asansorJobs].sort((a, b) => {
                                   // İstanbul (Anadolu) işleri önce (0), Avrupa/diğer iller sonra (1)
                                   const aRank = a.fromProvince === 'İstanbul (Anadolu)' ? 0 : 1;
@@ -2110,10 +2174,14 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
                                 }).slice(0, 4).map(job => {
                                   const isAnadolu = job.fromProvince === 'İstanbul (Anadolu)';
                                   return job.isSpecial ?
-                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className="w-1.5 h-1.5 shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm" />
+                                    // DEĞİŞTİ: Yıldız da diğer simgelerle aynı boyutta
+                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className={`${TAKVIM_SIMGE_BOYUT} shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm`} />
                                   :
-                                    // DEĞİŞTİ: Esnek asansör işi de kare görünür
-                                    <div key={job.id} title={`${job.customerName} - ${job.team} (${job.type}${isAnadolu ? '' : ' - Avrupa/Diğer'})${esnekMi(job) ? ` — ${esnekAciklama(job)}` : ''}`} className={`w-1.5 h-1.5 shrink-0 ${esnekMi(job) ? 'rounded-[1px]' : 'rounded-full'} ${isAnadolu ? 'bg-green-500' : 'bg-green-800'}`}></div>;
+                                    // DEĞİŞTİ (kullanıcı talebi): Yuvarlak nokta yerine VİNÇ simgesi (renkler aynı;
+                                    // Anadolu açık yeşil, Avrupa/diğer koyu yeşil). Esnekse turuncu.
+                                    <TakvimIsSimgesi key={job.id} tur="Asansör"
+                                      renk={takvimSimgeRengi(job)}
+                                      title={`${job.customerName} - ${job.team} (${job.type}${isAnadolu ? '' : ' - Avrupa/Diğer'})${esnekMi(job) ? ` — ${esnekAciklama(job)}` : ''}`} />;
                                 })}
                             </div>
                           </>
