@@ -27,12 +27,13 @@ import { computeAllAutoSkills, SkillScoreBadge, PersonPositionRankIcons } from '
 // YENİ (kullanıcı talebi): TAKVİM İŞ SİMGELERİ
 // ----------------------------------------------------------------------------
 // Takvim hücrelerindeki yuvarlak noktaların yerine iş türüne göre simge:
-//   Nakliye → Ev · Depo → Depo binası (kepenkli) · Asansör → Vinç
+//   Nakliye → Ev · Depo → Depo binası (kepenkli) · Asansör → Asansör düğmesi (▲▼)
 // Renkler eskisiyle aynı (kırmızı / mavi / yeşil); ESNEK müşteride simge TURUNCU.
 // Tüm simgeler AYNI boyuttadır (TAKVIM_SIMGE_BOYUT). Küçük boyutta net görünsün
 // diye çizgi değil DOLGULU özel SVG kullanılır; renk "currentColor" ile verilir.
 // ============================================================================
-const TAKVIM_SIMGE_BOYUT = 'w-2.5 h-2.5'; // 10px — üç simge ve özel iş yıldızı için ortak boyut
+// DEĞİŞTİ: %10 büyütüldü (10px → 11px)
+const TAKVIM_SIMGE_BOYUT = 'w-[11px] h-[11px]'; // üç simge ve özel iş yıldızı için ortak boyut
 
 // Simge çizimleri (12×12 alanda)
 const TAKVIM_SIMGE_CIZIMLERI = {
@@ -47,17 +48,9 @@ const TAKVIM_SIMGE_CIZIMLERI = {
       <rect x="3" y="10.1" width="6" height="0.8" />
     </>
   ),
-  // Vinç: kule + uzun kol, uçta halat ve kanca bloğu
-  'Asansör': (
-    <>
-      <path d="M3.3 0.2 L4.6 2 H2 Z" />
-      <rect x="2.5" y="1.9" width="1.6" height="8.8" />
-      <rect x="0.6" y="2" width="11" height="1.3" />
-      <rect x="9.3" y="3.3" width="0.6" height="3.4" />
-      <rect x="8.6" y="6.6" width="2" height="1.6" rx="0.3" />
-      <rect x="0.8" y="10.4" width="5" height="1.2" />
-    </>
-  ),
+  // DEĞİŞTİ (kullanıcı talebi): Vinç yerine ASANSÖR simgesi —
+  // yuvarlatılmış kare kabin düğmesi, içinde boşluk olarak yukarı ▲ ve aşağı ▼ ok
+  'Asansör': <path fillRule="evenodd" d="M2 0.6 H10 A1.4 1.4 0 0 1 11.4 2 V10 A1.4 1.4 0 0 1 10 11.4 H2 A1.4 1.4 0 0 1 0.6 10 V2 A1.4 1.4 0 0 1 2 0.6 Z M6 2.1 L8.9 5.2 H3.1 Z M3.1 6.8 H8.9 L6 9.9 Z" />,
 };
 
 // İşin simge rengi: esnek → turuncu; değilse türün eski rengi
@@ -69,14 +62,59 @@ export const takvimSimgeRengi = (job) => {
   return 'text-red-600';
 };
 
+// ----------------------------------------------------------------------------
+// YENİ (kullanıcı talebi): ÖZEL (YILDIZLI) İŞ GÖRÜNÜMÜ
+// Yıldız simgesi yerine işin KENDİ simgesi gösterilir; ALTIN renkte, nabız gibi
+// parlayan bir hale ve köşesinde göz kırpan küçük bir yıldız parıltısı ile.
+// Animasyonlar Tailwind ayarı gerektirmesin diye CSS bir kez <head>'e eklenir.
+// ----------------------------------------------------------------------------
+const TAKVIM_OZEL_CSS = `
+@keyframes takvimAltinParla {
+  0%, 100% { filter: drop-shadow(0 0 1px rgba(250,204,21,.9)) drop-shadow(0 0 2px rgba(250,204,21,.5)); }
+  50%      { filter: drop-shadow(0 0 2px rgba(255,215,0,1))   drop-shadow(0 0 5px rgba(250,204,21,.95)); }
+}
+@keyframes takvimYildizKirp {
+  0%, 55%, 100% { transform: scale(0) rotate(0deg);  opacity: 0; }
+  70%           { transform: scale(1) rotate(45deg); opacity: 1; }
+  85%           { transform: scale(.6) rotate(90deg); opacity: .8; }
+}
+.takvim-altin-simge { color: #F5B700; animation: takvimAltinParla 1.8s ease-in-out infinite; }
+.takvim-altin-parilti { animation: takvimYildizKirp 2.4s ease-in-out infinite; transform-origin: center; }
+@media (prefers-reduced-motion: reduce) {
+  .takvim-altin-simge { animation: none; filter: drop-shadow(0 0 2px rgba(250,204,21,.9)); }
+  .takvim-altin-parilti { animation: none; opacity: 1; transform: none; }
+}`;
+// Tarayıcıda yalnızca bir kez eklenir (Vercel derlemesinde document yoksa atlanır)
+if (typeof document !== 'undefined' && !document.getElementById('takvim-ozel-css')) {
+  const stil = document.createElement('style');
+  stil.id = 'takvim-ozel-css';
+  stil.textContent = TAKVIM_OZEL_CSS;
+  document.head.appendChild(stil);
+}
+
 // Tek simge. tur: 'Nakliye' | 'Depo' | 'Asansör' (bilinmeyen tür Nakliye sayılır)
-export const TakvimIsSimgesi = ({ tur, renk, title, className = '' }) => (
-  <svg viewBox="0 0 12 12" fill="currentColor" aria-hidden={title ? undefined : true}
-    className={`${TAKVIM_SIMGE_BOYUT} shrink-0 ${renk} ${className}`}>
-    {title && <title>{title}</title>}
-    {TAKVIM_SIMGE_CIZIMLERI[tur] || TAKVIM_SIMGE_CIZIMLERI.Nakliye}
-  </svg>
-);
+// DEĞİŞTİ: ozel=true → altın renk + parlama + küçük yıldız parıltısı (renk prop'u yok sayılır).
+// Boyut DEĞİŞMEZ: parıltı simgenin içine bindirilir, ek yer kaplamaz.
+export const TakvimIsSimgesi = ({ tur, renk, title, className = '', ozel = false }) => {
+  const svg = (
+    <svg viewBox="0 0 12 12" fill="currentColor" aria-hidden={title ? undefined : true}
+      className={`${TAKVIM_SIMGE_BOYUT} shrink-0 ${ozel ? 'takvim-altin-simge' : renk} ${className}`}>
+      {title && <title>{title}</title>}
+      {TAKVIM_SIMGE_CIZIMLERI[tur] || TAKVIM_SIMGE_CIZIMLERI.Nakliye}
+    </svg>
+  );
+  if (!ozel) return svg;
+  return (
+    <span className={`relative inline-flex ${TAKVIM_SIMGE_BOYUT} shrink-0`} title={title}>
+      {svg}
+      {/* Küçük 4 köşeli yıldız parıltısı — sağ üst köşede göz kırpar (simge alanının içinde: kesilmez) */}
+      <svg viewBox="0 0 10 10" aria-hidden="true"
+        className="takvim-altin-parilti absolute -top-px right-0 w-[6px] h-[6px] pointer-events-none">
+        <path d="M5 0 L6 4 L10 5 L6 6 L5 10 L4 6 L0 5 L4 4 Z" fill="#FFFBEB" stroke="#F5B700" strokeWidth="0.6" />
+      </svg>
+    </span>
+  );
+};
 
 
   // ==========================================================================
@@ -2076,6 +2114,8 @@ export const TakvimIsSimgesi = ({ tur, renk, title, className = '' }) => (
                 <div className="flex items-center gap-1"><TakvimIsSimgesi tur="Depo" renk="text-blue-600" /> Depo</div>
                 <div className="flex items-center gap-1"><TakvimIsSimgesi tur="Asansör" renk="text-green-500" /> Asansör</div>
                 <div className="flex items-center gap-1"><TakvimIsSimgesi tur="Nakliye" renk="text-orange-500" /> Esnek</div>
+                {/* YENİ: Özel (yıldızlı) iş — altın, parlayan simge */}
+                <div className="flex items-center gap-1"><TakvimIsSimgesi tur="Nakliye" ozel /> Özel</div>
               </div>
               <div className="flex flex-wrap gap-2 text-[10px] font-bold bg-neutral-50 p-1.5 rounded-xl border border-neutral-200">
                 <div className="flex items-center gap-1"><div className="w-2 h-2 rounded-full bg-white border border-neutral-300"></div> Boş (0)</div>
@@ -2110,12 +2150,13 @@ export const TakvimIsSimgesi = ({ tur, renk, title, className = '' }) => (
                }
             }
 
+            // DEĞİŞTİ: 11px simgeler sonrası içerik ~78px — tüm günler (boş, komşu ay, puan görünümü) eşit kalsın diye min-h 64px → 80px
             return (
               <div 
                 key={index} 
                 onClick={() => item && setSelectedDate(item.date)}
                 title={item?.disariAy ? `${item.ayEtiketi} ayı — komşu ayın günü` : undefined}
-                className={`min-h-[64px] p-1.5 rounded-xl border transition cursor-pointer flex flex-col overflow-hidden ${cellClass} ${item && selectedDate === item.date ? 'ring-2 ring-red-600 ring-offset-1' : ''} ${isToday ? 'today-pulse-ring' : ''} ${item?.disariAy ? 'opacity-45 border-dashed saturate-50 hover:opacity-80' : ''}`}
+                className={`min-h-[80px] p-1.5 rounded-xl border transition cursor-pointer flex flex-col overflow-hidden ${cellClass} ${item && selectedDate === item.date ? 'ring-2 ring-red-600 ring-offset-1' : ''} ${isToday ? 'today-pulse-ring' : ''} ${item?.disariAy ? 'opacity-45 border-dashed saturate-50 hover:opacity-80' : ''}`}
               >
                 {item && (
                   <>
@@ -2145,12 +2186,14 @@ export const TakvimIsSimgesi = ({ tur, renk, title, className = '' }) => (
                           <>
                             {/* NAKLİYE/DEPO NOKTALARI: grid-cols-3 ile her satırda KESİN 3 nokta, 2 satır = en fazla 6. */}
                             {/* Örn. 4 iş: üstte 3 nokta, altta 1 nokta. Alan sabit yükseklikte (h-[18px]) => tüm günler eşit. */}
-                            {/* DEĞİŞTİ: 10px simgeler için alan 18px → 22px (2 satır × 10px + 2px boşluk) */}
-                            <div className="grid grid-cols-3 gap-0.5 w-fit content-start h-[22px] overflow-hidden">
+                            {/* DEĞİŞTİ: 11px simgeler için alan 24px (2 satır × 11px + 2px boşluk) — taşma/kesilme olmaz */}
+                            <div className="grid grid-cols-3 gap-0.5 w-fit content-start h-[24px] overflow-hidden">
                                 {coreJobs.slice(0, 6).map(job => (
                                   job.isSpecial ? 
-                                    // DEĞİŞTİ: Özel iş yıldızı da simgelerle aynı boyutta
-                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type || 'Nakliye'})`} className={`${TAKVIM_SIMGE_BOYUT} shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm`} />
+                                    // DEĞİŞTİ (kullanıcı talebi): Yıldız YOK — işin kendi simgesi, altın renkte parlayarak
+                                    <TakvimIsSimgesi key={job.id} ozel
+                                      tur={job.type === 'Depo' ? 'Depo' : 'Nakliye'}
+                                      title={`★ Özel iş — ${job.customerName} - ${job.team} (${job.type || 'Nakliye'})${esnekMi(job) ? ` — ${esnekAciklama(job)}` : ''}`} />
                                   :
                                     // DEĞİŞTİ (kullanıcı talebi): Yuvarlak nokta yerine iş türü simgesi
                                     // (Nakliye = ev, Depo = depo). Esnek müşteride kare kaldırıldı → turuncu simge.
@@ -2164,8 +2207,8 @@ export const TakvimIsSimgesi = ({ tur, renk, title, className = '' }) => (
                             {/* ASANSÖR NOKTALARI: Asansör işi OLMASA BİLE bu satır her zaman render edilir (hiza sabit). */}
                             {/* SARI AYRAÇ ÇİZGİSİ her zaman sabit gösterilir (asansör işi olsa da olmasa da). */}
                             {/* En fazla 4 yeşil nokta. İstanbul (Anadolu) = açık yeşil ve önce; Avrupa/diğer il = KOYU yeşil ve en sonda. */}
-                            {/* DEĞİŞTİ: 10px vinç simgesi için satır yüksekliği 12px → 16px */}
-                            <div className="flex flex-nowrap gap-0.5 mt-auto pt-1 w-full items-center h-[16px] overflow-hidden border-t border-yellow-400">
+                            {/* DEĞİŞTİ: 11px asansör simgesi için satır yüksekliği 17px (1px çizgi + 4px boşluk + 11px simge + 1px pay) */}
+                            <div className="flex flex-nowrap gap-0.5 mt-auto pt-1 w-full items-center h-[17px] overflow-hidden border-t border-yellow-400">
                                 {[...asansorJobs].sort((a, b) => {
                                   // İstanbul (Anadolu) işleri önce (0), Avrupa/diğer iller sonra (1)
                                   const aRank = a.fromProvince === 'İstanbul (Anadolu)' ? 0 : 1;
@@ -2174,10 +2217,11 @@ export const TakvimIsSimgesi = ({ tur, renk, title, className = '' }) => (
                                 }).slice(0, 4).map(job => {
                                   const isAnadolu = job.fromProvince === 'İstanbul (Anadolu)';
                                   return job.isSpecial ?
-                                    // DEĞİŞTİ: Yıldız da diğer simgelerle aynı boyutta
-                                    <Star key={job.id} title={`${job.customerName} - ${job.team} (${job.type})`} className={`${TAKVIM_SIMGE_BOYUT} shrink-0 text-yellow-500 fill-yellow-500 drop-shadow-sm`} />
+                                    // DEĞİŞTİ (kullanıcı talebi): Yıldız YOK — altın renkte parlayan asansör simgesi
+                                    <TakvimIsSimgesi key={job.id} ozel tur="Asansör"
+                                      title={`★ Özel iş — ${job.customerName} - ${job.team} (${job.type})${esnekMi(job) ? ` — ${esnekAciklama(job)}` : ''}`} />
                                   :
-                                    // DEĞİŞTİ (kullanıcı talebi): Yuvarlak nokta yerine VİNÇ simgesi (renkler aynı;
+                                    // DEĞİŞTİ (kullanıcı talebi): Yuvarlak nokta yerine ASANSÖR simgesi (renkler aynı;
                                     // Anadolu açık yeşil, Avrupa/diğer koyu yeşil). Esnekse turuncu.
                                     <TakvimIsSimgesi key={job.id} tur="Asansör"
                                       renk={takvimSimgeRengi(job)}
