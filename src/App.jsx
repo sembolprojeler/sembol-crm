@@ -279,21 +279,33 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
   // ============================================================================
 
   // ############################################################################
-  // YENİ (kullanıcı talebi): EĞLENCE — SEMBOL YILANI 🐍
+  // YENİ (kullanıcı talebi): EĞLENCE — SEMBOL KAMYONU 🚛 (yılan oyunu, v2)
   // ----------------------------------------------------------------------------
   // Sol menüdeki "Eğlence" bölümünün tek oyunu. Personel boş vakitte oynar,
   // herkes AYLIK skor tablosunda yarışır:
   //   • Skorlar Firestore'a yazılır: .../oyunSkorlari/yilan_{YYYY-AA}_{personelId}
   //     Kişi başına AY BAŞINA TEK belge, yalnızca kendi rekorunda güncellenir.
   //   • Tablo her ayın 1'inde kendiliğinden sıfırlanır (belge adı ay içerdiği için
-  //     yeni ay = boş tablo; silme işlemi gerekmez, eski aylar tarihçe olarak kalır).
+  //     yeni ay = boş tablo; eski aylar tarihçe olarak kalır).
   //   • En iyi 10 listelenir, 1. "Ayın Şampiyonu" tacıyla ayrıca gösterilir.
-  // Oyun: klasik yılan — yön tuşları / WASD, mobilde kaydırma ve ekran okları.
-  // Nakliye temalı: yem 📦 koli, her 5 kolide bir ⭐ bonus "bahşiş" çıkar.
+  //
+  // v2 DEĞİŞİKLİKLERİ (kullanıcı talebi):
+  //   • Yılan artık KIRMIZI KAMYON: baş = kabinli çekici (yöne döner), gövde =
+  //     ince uzun dorse, son halka = arka kapak. Köşeli, kamyon hissi veren çizim.
+  //   • DUVARDAN GEÇİŞ: kenardan çıkan kamyon karşı kenardan girer (çarpma yok;
+  //     tek ölüm nedeni kendi dorsesine çarpmak).
+  //   • ENGELLER: puan arttıkça sahaya ev eşyaları çıkar — 🧊 buzdolabı,
+  //     🛋️ koltuk, 🌀 çamaşır makinesi, 📺 televizyon, 🛏️ yatak. Çarpan kaybeder.
+  //     Her 8 puanda SEVİYE atlar: +1 engel ve hız artışı; yeni engeller
+  //     kamyonun önüne 2 saniye "kurulum" yanıp sönmesiyle gelir (haksız ölüm olmaz).
+  //   • ⭐ bonus bahşiş artık SÜRELİDİR: 7 kamyon-adımı içinde alınmazsa koliye döner.
+  //   • Ekran okları büyütüldü (64px, tüm alan tıklanabilir) — mobilde rahat oyun.
   // ############################################################################
   const YILAN_IZGARA = 17;            // 17×17 oyun alanı
-  const YILAN_BASLANGIC_HIZ = 170;    // ms/adım — her kolide hafif hızlanır
-  const YILAN_MIN_HIZ = 70;
+  const YILAN_BASLANGIC_HIZ = 175;    // ms/adım — her kolide hafif hızlanır
+  const YILAN_MIN_HIZ = 75;
+  const YILAN_SEVIYE_PUANI = 8;       // her 8 puanda yeni seviye (+1 engel, hız)
+  const YILAN_ENGELLER = ['🧊', '🛋️', '🌀', '📺', '🛏️']; // buzdolabı, koltuk, çamaşır mak., TV, yatak
   const yilanAyAnahtari = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const YILAN_AY_ADLARI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 
@@ -334,35 +346,70 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
     // Oyun durumu ref'lerde tutulur (her adımda yeniden render edilmez; yalnızca çizim için state)
     const [oyunDurum, setOyunDurum] = useState('hazir'); // hazir | oynaniyor | bitti
     const [skor, setSkor] = useState(0);
+    const [seviye, setSeviye] = useState(1);
+    const [olumNedeni, setOlumNedeni] = useState('');
     const [kare, setKare] = useState(0); // çizimi tetikleyen sayaç
-    const yilanRef = useRef([]);   // [{x,y}, ...] baş = ilk eleman
+    const kamyonRef = useRef([]);  // [{x,y}, ...] baş = çekici kabini
     const yonRef = useRef({ x: 1, y: 0 });
-    const sonYonRef = useRef({ x: 1, y: 0 }); // bir adımda tek dönüş (kendi üstüne katlanmayı önler)
-    const yemRef = useRef({ x: 10, y: 8, tur: 'koli' });
+    const sonYonRef = useRef({ x: 1, y: 0 }); // bir adımda tek dönüş (katlanmayı önler)
+    const yemRef = useRef({ x: 10, y: 8, tur: 'koli', omur: 0 });
+    const engellerRef = useRef([]); // [{x,y,tip,kurulum}] kurulum>0 iken zararsız (yanıp söner)
     const skorRef = useRef(0);
+    const seviyeRef = useRef(1);
     const koliSayacRef = useRef(0);
     const hizRef = useRef(YILAN_BASLANGIC_HIZ);
     const zamanlayiciRef = useRef(null);
     const dokunusRef = useRef(null);
 
-    const yeniYem = (yilan) => {
-      // Boş bir kare bul; her 5. yem bonus yıldız (3 puan)
-      let x, y;
-      do { x = Math.floor(Math.random() * YILAN_IZGARA); y = Math.floor(Math.random() * YILAN_IZGARA); }
-      while (yilan.some(p => p.x === x && p.y === y));
+    const doluMu = (x, y, kamyon) =>
+      kamyon.some(p => p.x === x && p.y === y) ||
+      engellerRef.current.some(e => e.x === x && e.y === y) ||
+      (yemRef.current && yemRef.current.x === x && yemRef.current.y === y);
+
+    // Boş VE kamyonun başından uzak bir kare bul (engel dibine yem/engel gelmesin)
+    const bosKare = (kamyon, enAzUzaklik = 0) => {
+      const bas = kamyon[0];
+      for (let i = 0; i < 300; i++) {
+        const x = Math.floor(Math.random() * YILAN_IZGARA);
+        const y = Math.floor(Math.random() * YILAN_IZGARA);
+        // Duvardan geçiş olduğu için uzaklık da sarmalı (torus) hesaplanır
+        const dx = Math.min(Math.abs(x - bas.x), YILAN_IZGARA - Math.abs(x - bas.x));
+        const dy = Math.min(Math.abs(y - bas.y), YILAN_IZGARA - Math.abs(y - bas.y));
+        if (!doluMu(x, y, kamyon) && dx + dy >= enAzUzaklik) return { x, y };
+      }
+      return null;
+    };
+
+    const yeniYem = (kamyon) => {
+      // Her 5. yem bonus yıldız (3 puan, SÜRELİ: 7 adımda kaybolur → koli olur)
       const bonus = koliSayacRef.current > 0 && koliSayacRef.current % 5 === 0;
-      yemRef.current = { x, y, tur: bonus ? 'bonus' : 'koli' };
+      const yer = bosKare(kamyon, 2) || { x: 0, y: 0 };
+      yemRef.current = { ...yer, tur: bonus ? 'bonus' : 'koli', omur: bonus ? 7 : 0 };
+    };
+
+    // Seviyeye uygun sayıda engel kur (eksikleri "kurulum" modunda ekler)
+    const engelleriTamamla = (kamyon) => {
+      const hedef = Math.min(seviyeRef.current - 1, 10); // 1. seviyede engel yok, sonra +1
+      while (engellerRef.current.length < hedef) {
+        const yer = bosKare(kamyon, 4); // başa en az 4 adım uzağa kurulur
+        if (!yer) break;
+        engellerRef.current.push({ ...yer, tip: YILAN_ENGELLER[engellerRef.current.length % YILAN_ENGELLER.length], kurulum: 12 }); // ~2 sn zararsız
+      }
     };
 
     const oyunuBaslat = () => {
-      yilanRef.current = [{ x: 8, y: 8 }, { x: 7, y: 8 }, { x: 6, y: 8 }];
+      kamyonRef.current = [{ x: 8, y: 8 }, { x: 7, y: 8 }, { x: 6, y: 8 }];
       yonRef.current = { x: 1, y: 0 }; sonYonRef.current = { x: 1, y: 0 };
-      skorRef.current = 0; koliSayacRef.current = 0; hizRef.current = YILAN_BASLANGIC_HIZ;
-      setSkor(0); yeniYem(yilanRef.current); setOyunDurum('oynaniyor');
+      skorRef.current = 0; seviyeRef.current = 1; koliSayacRef.current = 0; hizRef.current = YILAN_BASLANGIC_HIZ;
+      engellerRef.current = [];
+      setSkor(0); setSeviye(1); setOlumNedeni('');
+      yeniYem(kamyonRef.current);
+      setOyunDurum('oynaniyor');
     };
 
-    const oyunuBitir = () => {
+    const oyunuBitir = (neden) => {
       clearTimeout(zamanlayiciRef.current);
+      setOlumNedeni(neden);
       setOyunDurum('bitti');
       rekorKaydet(skorRef.current);
     };
@@ -371,25 +418,50 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
     useEffect(() => {
       if (oyunDurum !== 'oynaniyor') return;
       const adim = () => {
-        const yilan = yilanRef.current;
+        const kamyon = kamyonRef.current;
         const yon = yonRef.current;
         sonYonRef.current = yon;
-        const bas = { x: yilan[0].x + yon.x, y: yilan[0].y + yon.y };
-        // Duvar ya da kendine çarpma → oyun biter
-        if (bas.x < 0 || bas.y < 0 || bas.x >= YILAN_IZGARA || bas.y >= YILAN_IZGARA || yilan.some(p => p.x === bas.x && p.y === bas.y)) { oyunuBitir(); return; }
-        const yeni = [bas, ...yilan];
+        // DEĞİŞTİ (kullanıcı talebi): DUVARDAN GEÇİŞ — karşı kenardan devam eder
+        const bas = {
+          x: (kamyon[0].x + yon.x + YILAN_IZGARA) % YILAN_IZGARA,
+          y: (kamyon[0].y + yon.y + YILAN_IZGARA) % YILAN_IZGARA,
+        };
+        // Kendi dorsesine çarpma
+        if (kamyon.some(p => p.x === bas.x && p.y === bas.y)) { oyunuBitir('Kendi dorsene çarptın!'); return; }
+        // Kurulumu bitmiş engele çarpma
+        const engel = engellerRef.current.find(e => e.x === bas.x && e.y === bas.y);
+        if (engel && engel.kurulum <= 0) {
+          const ad = { '🧊': 'buzdolabına', '🛋️': 'koltuğa', '🌀': 'çamaşır makinesine', '📺': 'televizyona', '🛏️': 'yatağa' }[engel.tip] || 'eşyaya';
+          oyunuBitir(`Kamyonu ${ad} çarptın!`); return;
+        }
+        const yeni = [bas, ...kamyon];
         const yem = yemRef.current;
         if (bas.x === yem.x && bas.y === yem.y) {
-          // Yem yendi: koli 1 puan, bonus yıldız 3 puan; kuyruk kesilmez (büyür)
+          // Yem yendi: koli 1 puan, bonus yıldız 3 puan; dorse uzar
           skorRef.current += yem.tur === 'bonus' ? 3 : 1;
           koliSayacRef.current += 1;
           setSkor(skorRef.current);
           hizRef.current = Math.max(YILAN_MIN_HIZ, hizRef.current - 3); // her yemde hafif hızlanır
+          // SEVİYE: her YILAN_SEVIYE_PUANI puanda bir — yeni engel + ek hız
+          const yeniSeviye = Math.floor(skorRef.current / YILAN_SEVIYE_PUANI) + 1;
+          if (yeniSeviye > seviyeRef.current) {
+            seviyeRef.current = yeniSeviye;
+            setSeviye(yeniSeviye);
+            hizRef.current = Math.max(YILAN_MIN_HIZ, hizRef.current - 6);
+            engelleriTamamla(yeni);
+          }
           yeniYem(yeni);
         } else {
-          yeni.pop(); // yem yoksa kuyruk kısalır (sabit uzunluk)
+          yeni.pop(); // yem yoksa dorse aynı uzunlukta kalır
+          // Bonus yıldızın süresi işler; dolarsa normal koliye döner (yer değişmez)
+          if (yem.tur === 'bonus') {
+            yem.omur -= 1;
+            if (yem.omur <= 0) yemRef.current = { ...yem, tur: 'koli', omur: 0 };
+          }
         }
-        yilanRef.current = yeni;
+        // Engel kurulum sayaçları azalır (yanıp sönme biter, engel "sertleşir")
+        engellerRef.current.forEach(e => { if (e.kurulum > 0) e.kurulum -= 1; });
+        kamyonRef.current = yeni;
         setKare(k => k + 1);
         zamanlayiciRef.current = setTimeout(adim, hizRef.current);
       };
@@ -399,8 +471,8 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
 
     // Yön değişimi (geri dönüş yasak)
     const yonVer = (x, y) => {
-      const s = sonYonRef.current;
-      if (x === -s.x && y === -s.y) return;
+      const sY = sonYonRef.current;
+      if (x === -sY.x && y === -sY.y) return;
       yonRef.current = { x, y };
     };
 
@@ -428,23 +500,29 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
     };
 
     // ------------------------------------------------------------ ÇİZİM ---
-    const yilan = yilanRef.current;
+    const kamyon = kamyonRef.current;
     const yem = yemRef.current;
     const hucreYuzde = 100 / YILAN_IZGARA;
     const madalya = ['🥇', '🥈', '🥉'];
     const sampiyon = skorlar[0];
+    const sonHalka = kamyon.length - 1;
+    // Kabin yönü (derece) — baş her zaman gidiş yönüne bakar
+    const kabinAci = sonYonRef.current.x === 1 ? 0 : sonYonRef.current.x === -1 ? 180 : sonYonRef.current.y === 1 ? 90 : -90;
+    // DEĞİŞTİ (kullanıcı talebi): büyük, rahat ekran okları için ortak sınıf (64px)
+    const okSinif = "w-16 h-16 rounded-2xl bg-neutral-100 active:bg-red-100 active:scale-95 transition font-black text-red-700 text-2xl flex items-center justify-center shadow-sm border border-neutral-200 select-none";
 
     return (
       <div className="max-w-5xl mx-auto animate-in fade-in space-y-4" data-kare={kare}>
         {/* BAŞLIK */}
-        <div className="bg-gradient-to-r from-emerald-600 via-green-600 to-teal-600 rounded-2xl p-5 text-white shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="bg-gradient-to-r from-red-600 via-rose-600 to-orange-600 rounded-2xl p-5 text-white shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2">🐍 Sembol Yılanı</h2>
-            <p className="text-white/85 text-xs font-bold mt-1">Kolileri topla, duvara ve kendine çarpma! Her 5 kolide ⭐ bonus bahşiş: 3 puan. {ayEtiketi} sonunda tablo sıfırlanır.</p>
+            <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2">🚛 Sembol Kamyonu</h2>
+            <p className="text-white/85 text-xs font-bold mt-1">Kolileri topla! Duvarlar açık: kenardan çıkan karşıdan girer. Puan arttıkça sahaya buzdolabı, koltuk, çamaşır makinesi çıkar — onlara ve kendi dorsene çarpma! Her 5 kolide ⭐ süreli bonus: 3 puan. {ayEtiketi} sonunda tablo sıfırlanır.</p>
           </div>
           <div className="flex gap-2 shrink-0">
-            <div className="bg-white/15 rounded-xl px-4 py-2 text-center"><p className="text-[9px] font-black uppercase tracking-wider text-white/70">Skor</p><p className="text-2xl font-black font-mono">{skor}</p></div>
-            <div className="bg-white/15 rounded-xl px-4 py-2 text-center"><p className="text-[9px] font-black uppercase tracking-wider text-white/70">Aylık Rekorum</p><p className="text-2xl font-black font-mono">{benimRekor}{benimSira ? <span className="text-xs font-black text-amber-300 ml-1">#{benimSira}</span> : ''}</p></div>
+            <div className="bg-white/15 rounded-xl px-3 py-2 text-center"><p className="text-[9px] font-black uppercase tracking-wider text-white/70">Skor</p><p className="text-2xl font-black font-mono">{skor}</p></div>
+            <div className="bg-white/15 rounded-xl px-3 py-2 text-center"><p className="text-[9px] font-black uppercase tracking-wider text-white/70">Seviye</p><p className="text-2xl font-black font-mono">{seviye}</p></div>
+            <div className="bg-white/15 rounded-xl px-3 py-2 text-center"><p className="text-[9px] font-black uppercase tracking-wider text-white/70">Aylık Rekorum</p><p className="text-2xl font-black font-mono">{benimRekor}{benimSira ? <span className="text-xs font-black text-amber-300 ml-1">#{benimSira}</span> : ''}</p></div>
           </div>
         </div>
 
@@ -452,54 +530,84 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
           {/* ------------------------------------------------ OYUN ALANI --- */}
           <div className="lg:col-span-3 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
             <div
-              className="relative w-full max-w-[440px] mx-auto aspect-square rounded-xl overflow-hidden select-none touch-none bg-gradient-to-br from-emerald-50 to-teal-50 border-2 border-emerald-200"
-              style={{ backgroundImage: 'linear-gradient(rgba(16,185,129,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,.06) 1px, transparent 1px)', backgroundSize: `${hucreYuzde}% ${hucreYuzde}%` }}
+              className="relative w-full max-w-[440px] mx-auto aspect-square rounded-xl overflow-hidden select-none touch-none bg-gradient-to-br from-neutral-100 to-stone-200 border-2 border-neutral-300"
+              style={{ backgroundImage: 'linear-gradient(rgba(0,0,0,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,.05) 1px, transparent 1px)', backgroundSize: `${hucreYuzde}% ${hucreYuzde}%` }}
               onTouchStart={dokunBasla} onTouchEnd={dokunBit}
             >
+              {/* Açık duvarlar: kenarlarda kesikli "geçiş" şeridi */}
+              <div className="absolute inset-0 pointer-events-none border-2 border-dashed border-emerald-400/60 rounded-xl"></div>
+
+              {/* Engeller (ev eşyaları) — kurulumda yanıp söner, sonra sabitlenir */}
+              {oyunDurum !== 'hazir' && engellerRef.current.map((e2, i) => (
+                <div key={`e${i}`} className={`absolute flex items-center justify-center leading-none ${e2.kurulum > 0 ? 'animate-pulse opacity-50' : ''}`}
+                  style={{ left: `${e2.x * hucreYuzde}%`, top: `${e2.y * hucreYuzde}%`, width: `${hucreYuzde}%`, height: `${hucreYuzde}%`, fontSize: '15px' }}>
+                  <span className="drop-shadow-sm">{e2.tip}</span>
+                </div>
+              ))}
+
               {/* Yem */}
               {oyunDurum !== 'hazir' && (
-                <div className="absolute flex items-center justify-center text-[13px] leading-none transition-none" style={{ left: `${yem.x * hucreYuzde}%`, top: `${yem.y * hucreYuzde}%`, width: `${hucreYuzde}%`, height: `${hucreYuzde}%` }}>
+                <div className={`absolute flex items-center justify-center text-[13px] leading-none ${yem.tur === 'bonus' ? 'animate-pulse' : ''}`} style={{ left: `${yem.x * hucreYuzde}%`, top: `${yem.y * hucreYuzde}%`, width: `${hucreYuzde}%`, height: `${hucreYuzde}%` }}>
                   {yem.tur === 'bonus' ? '⭐' : '📦'}
                 </div>
               )}
-              {/* Yılan */}
-              {yilan.map((p, i) => (
-                <div key={i} className={`absolute ${i === 0 ? 'bg-emerald-700 rounded-md z-10' : 'bg-emerald-500 rounded-sm'}`}
-                  style={{ left: `${p.x * hucreYuzde + 0.35}%`, top: `${p.y * hucreYuzde + 0.35}%`, width: `${hucreYuzde - 0.7}%`, height: `${hucreYuzde - 0.7}%`, opacity: i === 0 ? 1 : Math.max(0.45, 1 - i * 0.02) }}>
-                  {i === 0 && <span className="absolute inset-0 flex items-center justify-center text-[8px] text-white">{sonYonRef.current.x === 1 ? '▸' : sonYonRef.current.x === -1 ? '◂' : sonYonRef.current.y === 1 ? '▾' : '▴'}</span>}
-                </div>
-              ))}
+
+              {/* KAMYON — baş: kabinli çekici (yöne döner), gövde: dorse, son: arka kapak */}
+              {kamyon.map((p2, i) => {
+                const stil = { left: `${p2.x * hucreYuzde + 0.3}%`, top: `${p2.y * hucreYuzde + 0.3}%`, width: `${hucreYuzde - 0.6}%`, height: `${hucreYuzde - 0.6}%` };
+                if (i === 0) {
+                  // Çekici: SVG — kırmızı kabin + ön cam + farlar, gidiş yönüne döner
+                  return (
+                    <div key={i} className="absolute z-10" style={stil}>
+                      <svg viewBox="0 0 12 12" className="w-full h-full drop-shadow" style={{ transform: `rotate(${kabinAci}deg)` }}>
+                        <rect x="0" y="2" width="8.5" height="8" rx="1.2" fill="#b91c1c" />
+                        <rect x="8" y="3" width="3.6" height="6" rx="1" fill="#dc2626" />
+                        <rect x="8.6" y="3.8" width="1.7" height="4.4" rx="0.6" fill="#bfdbfe" />
+                        <circle cx="11.3" cy="4.2" r="0.7" fill="#fde047" />
+                        <circle cx="11.3" cy="7.8" r="0.7" fill="#fde047" />
+                      </svg>
+                    </div>
+                  );
+                }
+                // Dorse: köşeli kırmızı kasa; sonda arka kapak çizgileri
+                return (
+                  <div key={i} className="absolute bg-red-600 border border-red-800/60 rounded-[2px]" style={{ ...stil, opacity: Math.max(0.6, 1 - i * 0.015) }}>
+                    {i === sonHalka && <span className="absolute inset-0 flex items-center justify-center gap-[1.5px]"><span className="w-[2px] h-2/3 bg-red-900/70 rounded"></span><span className="w-[2px] h-2/3 bg-red-900/70 rounded"></span></span>}
+                  </div>
+                );
+              })}
+
               {/* Başlat / bitti perdesi */}
               {oyunDurum !== 'oynaniyor' && (
                 <div className="absolute inset-0 z-20 bg-black/55 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 text-white p-4 text-center">
                   {oyunDurum === 'bitti' ? (
                     <>
                       <p className="text-3xl">💥</p>
-                      <p className="font-black text-lg">Oyun Bitti!</p>
-                      <p className="font-bold text-sm text-white/80">Skorun: <span className="font-mono text-amber-300 text-lg">{skor}</span>{skor > 0 && skor >= benimRekor ? ' — Yeni aylık rekorun! 🎉' : ''}</p>
+                      <p className="font-black text-lg">Kaza! {olumNedeni}</p>
+                      <p className="font-bold text-sm text-white/80">Skorun: <span className="font-mono text-amber-300 text-lg">{skor}</span> · Seviye {seviye}{skor > 0 && skor >= benimRekor ? ' — Yeni aylık rekorun! 🎉' : ''}</p>
                     </>
                   ) : (
                     <>
-                      <p className="text-3xl">🐍</p>
-                      <p className="font-black text-lg">Sembol Yılanı</p>
-                      <p className="font-bold text-xs text-white/75">Yön tuşları / WASD · Mobilde parmağını kaydır</p>
+                      <p className="text-3xl">🚛</p>
+                      <p className="font-black text-lg">Sembol Kamyonu</p>
+                      <p className="font-bold text-xs text-white/75">Yön tuşları / WASD · Mobilde kaydır ya da okları kullan<br />Duvarlar açık — kendi dorsene ve eşyalara çarpma!</p>
                     </>
                   )}
-                  <button type="button" onClick={oyunuBaslat} className="mt-1 px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-black shadow-lg">
+                  <button type="button" onClick={oyunuBaslat} className="mt-1 px-6 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black shadow-lg">
                     {oyunDurum === 'bitti' ? 'Tekrar Oyna' : 'Başla'}
                   </button>
                 </div>
               )}
             </div>
 
-            {/* Mobil yön okları (dokunmatikte kaydırmaya ek kolaylık) */}
-            <div className="mt-3 grid grid-cols-3 gap-1.5 w-40 mx-auto lg:hidden">
-              <span />
-              <button type="button" onClick={() => yonVer(0, -1)} className="py-2.5 rounded-xl bg-neutral-100 active:bg-emerald-100 font-black text-emerald-700">▲</button>
-              <span />
-              <button type="button" onClick={() => yonVer(-1, 0)} className="py-2.5 rounded-xl bg-neutral-100 active:bg-emerald-100 font-black text-emerald-700">◀</button>
-              <button type="button" onClick={() => yonVer(0, 1)} className="py-2.5 rounded-xl bg-neutral-100 active:bg-emerald-100 font-black text-emerald-700">▼</button>
-              <button type="button" onClick={() => yonVer(1, 0)} className="py-2.5 rounded-xl bg-neutral-100 active:bg-emerald-100 font-black text-emerald-700">▶</button>
+            {/* DEĞİŞTİ (kullanıcı talebi): BÜYÜK mobil yön okları (64px, rahat basılır) */}
+            <div className="mt-4 flex flex-col items-center gap-1.5 lg:hidden">
+              <button type="button" onClick={() => yonVer(0, -1)} className={okSinif}>▲</button>
+              <div className="flex gap-1.5">
+                <button type="button" onClick={() => yonVer(-1, 0)} className={okSinif}>◀</button>
+                <button type="button" onClick={() => yonVer(0, 1)} className={okSinif}>▼</button>
+                <button type="button" onClick={() => yonVer(1, 0)} className={okSinif}>▶</button>
+              </div>
             </div>
           </div>
 
@@ -533,21 +641,30 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
                 <p className="p-4 text-xs font-bold text-neutral-400 text-center">Bu ay henüz kimse oynamadı.</p>
               ) : (
                 <div className="divide-y divide-neutral-100">
-                  {skorlar.slice(0, 10).map((s, i) => {
-                    const ben = String(s.personelId) === String(currentUser?.id);
+                  {skorlar.slice(0, 10).map((s2, i) => {
+                    const ben = String(s2.personelId) === String(currentUser?.id);
                     return (
-                      <div key={s.personelId} className={`flex items-center gap-3 px-4 py-2.5 ${ben ? 'bg-emerald-50' : ''}`}>
+                      <div key={s2.personelId} className={`flex items-center gap-3 px-4 py-2.5 ${ben ? 'bg-red-50' : ''}`}>
                         <span className="w-7 text-center font-black text-sm shrink-0">{madalya[i] || `${i + 1}.`}</span>
                         <div className="w-8 h-8 rounded-full bg-neutral-200 overflow-hidden shrink-0 flex items-center justify-center text-sm">
-                          {s.foto ? <img src={s.foto} alt="" className="w-full h-full object-cover" /> : '🐍'}
+                          {s2.foto ? <img src={s2.foto} alt="" className="w-full h-full object-cover" /> : '🚛'}
                         </div>
-                        <p className={`flex-1 min-w-0 truncate text-sm font-bold ${ben ? 'text-emerald-800' : 'text-neutral-800'}`}>{s.ad}{ben ? ' (Sen)' : ''}</p>
-                        <p className="font-black font-mono text-sm">{s.skor}</p>
+                        <p className={`flex-1 min-w-0 truncate text-sm font-bold ${ben ? 'text-red-800' : 'text-neutral-800'}`}>{s2.ad}{ben ? ' (Sen)' : ''}</p>
+                        <p className="font-black font-mono text-sm">{s2.skor}</p>
                       </div>
                     );
                   })}
                 </div>
               )}
+            </div>
+
+            {/* Nasıl oynanır? */}
+            <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm p-4 text-xs font-bold text-neutral-600 space-y-1.5">
+              <p className="font-black text-neutral-900 text-sm mb-1">📖 Nasıl Oynanır?</p>
+              <p>📦 Koli = 1 puan · ⭐ Bonus bahşiş = 3 puan (acele et, kısa süre kalır!)</p>
+              <p>🧱 Duvarlar açık: kenardan çıkınca karşı kenardan devam edersin.</p>
+              <p>🧊🛋️🌀 Her {YILAN_SEVIYE_PUANI} puanda seviye atlar: sahaya yeni eşya iner ve kamyon hızlanır. Yeni eşya yanıp sönerken zararsızdır.</p>
+              <p>💥 Kendi dorsene ya da eşyalara çarpınca oyun biter.</p>
             </div>
           </div>
         </div>
@@ -9392,7 +9509,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     onClick={() => { setActiveTab('oyunYilan'); setIsSidebarOpen(false); }}
                     className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'oyunYilan' ? 'bg-purple-600 text-white shadow-md' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'}`}
                   >
-                    <span className="text-base leading-none">🐍</span> Sembol Yılanı
+                    {/* DEĞİŞTİ (v2): yılan kamyona dönüştü — ad ve simge güncellendi.
+                        Skor anahtarı 'yilan' olarak kaldı: bu ayki skorlar kaybolmaz. */}
+                    <span className="text-base leading-none">🚛</span> Sembol Kamyonu
                   </button>
                 </div>
               )}
