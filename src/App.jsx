@@ -316,7 +316,8 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
   const YILAN_MAKS_ENGEL = 3;         // sahada aynı anda en fazla 3 eşya
   const YILAN_ENGEL_OMRU = 34;        // engel ~bu kadar adım kalır, sonra başka yere taşınır
   const YILAN_BONUS_OMRU = 16;        // ⭐ bonusun süresi (adım)
-  const YILAN_ENGELLER = ['🧊', '🛋️', '🌀', '📺', '🛏️']; // buzdolabı, koltuk, çamaşır mak., TV, yatak
+  // DEĞİŞTİ (kullanıcı talebi): eşya listesi — koltuk, televizyon, masa, yatak, kitaplık, dolap
+  const YILAN_ENGELLER = ['🛋️', '📺', '🪑', '🛏️', '📚', '🚪'];
   const yilanAyAnahtari = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const YILAN_AY_ADLARI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
 
@@ -448,7 +449,8 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
         // Kurulumu bitmiş engele çarpma
         const engel = engellerRef.current.find(e => e.x === bas.x && e.y === bas.y);
         if (engel && engel.kurulum <= 0) {
-          const ad = { '🧊': 'buzdolabına', '🛋️': 'koltuğa', '🌀': 'çamaşır makinesine', '📺': 'televizyona', '🛏️': 'yatağa' }[engel.tip] || 'eşyaya';
+          // DEĞİŞTİ: kaza mesajları yeni eşya listesine göre
+          const ad = { '🛋️': 'koltuğa', '📺': 'televizyona', '🪑': 'masaya', '🛏️': 'yatağa', '📚': 'kitaplığa', '🚪': 'dolaba' }[engel.tip] || 'eşyaya';
           oyunuBitir(`Kamyonu ${ad} çarptın!`); return;
         }
         const yeni = [bas, ...kamyon];
@@ -550,7 +552,7 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
         <div className="bg-gradient-to-r from-red-600 via-rose-600 to-orange-600 rounded-2xl p-5 text-white shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2">🚛 Sembol Kamyonu</h2>
-            <p className="text-white/85 text-xs font-bold mt-1">Kolileri topla! Duvarlar açık: kenardan çıkan karşıdan girer. Puan arttıkça sahaya buzdolabı, koltuk, çamaşır makinesi çıkar — onlara ve kendi dorsene çarpma! Her 5 kolide ⭐ süreli bonus: 3 puan. {ayEtiketi} sonunda tablo sıfırlanır.</p>
+            <p className="text-white/85 text-xs font-bold mt-1">Kolileri topla! Duvarlar açık: kenardan çıkan karşıdan girer. Puan arttıkça sahaya koltuk, televizyon, masa gibi eşyalar çıkar — onlara ve kendi dorsene çarpma! Her 5 kolide ⭐ süreli bonus: 3 puan. {ayEtiketi} sonunda tablo sıfırlanır.</p>
           </div>
           <div className="flex gap-2 shrink-0">
             <div className="bg-white/15 rounded-xl px-3 py-2 text-center"><p className="text-[9px] font-black uppercase tracking-wider text-white/70">Skor</p><p className="text-2xl font-black font-mono">{skor}</p></div>
@@ -696,7 +698,7 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
               <p className="font-black text-neutral-900 text-sm mb-1">📖 Nasıl Oynanır?</p>
               <p>📦 Koli = 1 puan · ⭐ Bonus bahşiş = 3 puan (acele et, kısa süre kalır!)</p>
               <p>🧱 Duvarlar açık: kenardan çıkınca karşı kenardan devam edersin.</p>
-              <p>🧊🛋️🌀 Her {YILAN_SEVIYE_PUANI} puanda seviye atlar: kamyon biraz hızlanır ve sahaya yeni eşya iner (en fazla {YILAN_MAKS_ENGEL} tane). Eşyalar sabit durmaz: bir süre sonra kalkar, başka yerde kurulur. Yanıp sönen eşya zararsızdır.</p>
+              <p>🛋️📺🪑🛏️📚🚪 (koltuk, televizyon, masa, yatak, kitaplık, dolap) Her {YILAN_SEVIYE_PUANI} puanda seviye atlar: kamyon biraz hızlanır ve sahaya yeni eşya iner (en fazla {YILAN_MAKS_ENGEL} tane). Eşyalar sabit durmaz: bir süre sonra kalkar, başka yerde kurulur. Yanıp sönen eşya zararsızdır.</p>
               <p>💥 Kendi dorsene ya da eşyalara çarpınca oyun biter.</p>
             </div>
           </div>
