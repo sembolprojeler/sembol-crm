@@ -277,6 +277,284 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
   // dokunmanıza gerek yok. db ve appId zaten './shared.jsx' üzerinden modül
   // seviyesinde import edildiği için ekstra prop göndermenize gerek kalmadı.
   // ============================================================================
+
+  // ############################################################################
+  // YENİ (kullanıcı talebi): EĞLENCE — SEMBOL YILANI 🐍
+  // ----------------------------------------------------------------------------
+  // Sol menüdeki "Eğlence" bölümünün tek oyunu. Personel boş vakitte oynar,
+  // herkes AYLIK skor tablosunda yarışır:
+  //   • Skorlar Firestore'a yazılır: .../oyunSkorlari/yilan_{YYYY-AA}_{personelId}
+  //     Kişi başına AY BAŞINA TEK belge, yalnızca kendi rekorunda güncellenir.
+  //   • Tablo her ayın 1'inde kendiliğinden sıfırlanır (belge adı ay içerdiği için
+  //     yeni ay = boş tablo; silme işlemi gerekmez, eski aylar tarihçe olarak kalır).
+  //   • En iyi 10 listelenir, 1. "Ayın Şampiyonu" tacıyla ayrıca gösterilir.
+  // Oyun: klasik yılan — yön tuşları / WASD, mobilde kaydırma ve ekran okları.
+  // Nakliye temalı: yem 📦 koli, her 5 kolide bir ⭐ bonus "bahşiş" çıkar.
+  // ############################################################################
+  const YILAN_IZGARA = 17;            // 17×17 oyun alanı
+  const YILAN_BASLANGIC_HIZ = 170;    // ms/adım — her kolide hafif hızlanır
+  const YILAN_MIN_HIZ = 70;
+  const yilanAyAnahtari = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  const YILAN_AY_ADLARI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+
+  const EglenceYilanView = ({ currentUser }) => {
+    // ---------------------------------------------------------- SKORLAR ---
+    const ay = yilanAyAnahtari();
+    const ayEtiketi = `${YILAN_AY_ADLARI[new Date().getMonth()]} ${new Date().getFullYear()}`;
+    const [skorlar, setSkorlar] = useState([]);
+    useEffect(() => {
+      // Yalnızca BU AYIN skorları dinlenir (belge adı ay ile başlar)
+      const q = query(
+        collection(db, 'artifacts', appId, 'public', 'data', 'oyunSkorlari'),
+        where('ay', '==', ay), where('oyun', '==', 'yilan')
+      );
+      const unsub = onSnapshot(q, snap => {
+        const liste = snap.docs.map(d => d.data());
+        liste.sort((a, b) => (b.skor - a.skor) || String(a.tarih || '').localeCompare(String(b.tarih || ''))); // eşitlikte önce yapan üstte
+        setSkorlar(liste);
+      }, err => console.error('Oyun skorları yüklenemedi:', err));
+      return () => unsub();
+    }, [ay]);
+    const benimRekor = skorlar.find(s => String(s.personelId) === String(currentUser?.id))?.skor || 0;
+    const benimSira = skorlar.findIndex(s => String(s.personelId) === String(currentUser?.id)) + 1;
+
+    // Oyun bitince rekoru yaz (kişi başı ay başına tek belge; yalnızca daha yüksekse)
+    const rekorKaydet = async (skor) => {
+      if (!currentUser?.id || skor <= 0 || skor <= benimRekor) return;
+      try {
+        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'oyunSkorlari', `yilan_${ay}_${currentUser.id}`), {
+          oyun: 'yilan', ay, personelId: String(currentUser.id),
+          ad: currentUser.fullName || 'Bilinmeyen', foto: currentUser.profileImage || '',
+          skor, tarih: new Date().toISOString(),
+        });
+      } catch (err) { console.error('Skor kaydedilemedi:', err); }
+    };
+
+    // ------------------------------------------------------------ OYUN ---
+    // Oyun durumu ref'lerde tutulur (her adımda yeniden render edilmez; yalnızca çizim için state)
+    const [oyunDurum, setOyunDurum] = useState('hazir'); // hazir | oynaniyor | bitti
+    const [skor, setSkor] = useState(0);
+    const [kare, setKare] = useState(0); // çizimi tetikleyen sayaç
+    const yilanRef = useRef([]);   // [{x,y}, ...] baş = ilk eleman
+    const yonRef = useRef({ x: 1, y: 0 });
+    const sonYonRef = useRef({ x: 1, y: 0 }); // bir adımda tek dönüş (kendi üstüne katlanmayı önler)
+    const yemRef = useRef({ x: 10, y: 8, tur: 'koli' });
+    const skorRef = useRef(0);
+    const koliSayacRef = useRef(0);
+    const hizRef = useRef(YILAN_BASLANGIC_HIZ);
+    const zamanlayiciRef = useRef(null);
+    const dokunusRef = useRef(null);
+
+    const yeniYem = (yilan) => {
+      // Boş bir kare bul; her 5. yem bonus yıldız (3 puan)
+      let x, y;
+      do { x = Math.floor(Math.random() * YILAN_IZGARA); y = Math.floor(Math.random() * YILAN_IZGARA); }
+      while (yilan.some(p => p.x === x && p.y === y));
+      const bonus = koliSayacRef.current > 0 && koliSayacRef.current % 5 === 0;
+      yemRef.current = { x, y, tur: bonus ? 'bonus' : 'koli' };
+    };
+
+    const oyunuBaslat = () => {
+      yilanRef.current = [{ x: 8, y: 8 }, { x: 7, y: 8 }, { x: 6, y: 8 }];
+      yonRef.current = { x: 1, y: 0 }; sonYonRef.current = { x: 1, y: 0 };
+      skorRef.current = 0; koliSayacRef.current = 0; hizRef.current = YILAN_BASLANGIC_HIZ;
+      setSkor(0); yeniYem(yilanRef.current); setOyunDurum('oynaniyor');
+    };
+
+    const oyunuBitir = () => {
+      clearTimeout(zamanlayiciRef.current);
+      setOyunDurum('bitti');
+      rekorKaydet(skorRef.current);
+    };
+
+    // Oyun döngüsü — setTimeout zinciri (hız değişebildiği için setInterval değil)
+    useEffect(() => {
+      if (oyunDurum !== 'oynaniyor') return;
+      const adim = () => {
+        const yilan = yilanRef.current;
+        const yon = yonRef.current;
+        sonYonRef.current = yon;
+        const bas = { x: yilan[0].x + yon.x, y: yilan[0].y + yon.y };
+        // Duvar ya da kendine çarpma → oyun biter
+        if (bas.x < 0 || bas.y < 0 || bas.x >= YILAN_IZGARA || bas.y >= YILAN_IZGARA || yilan.some(p => p.x === bas.x && p.y === bas.y)) { oyunuBitir(); return; }
+        const yeni = [bas, ...yilan];
+        const yem = yemRef.current;
+        if (bas.x === yem.x && bas.y === yem.y) {
+          // Yem yendi: koli 1 puan, bonus yıldız 3 puan; kuyruk kesilmez (büyür)
+          skorRef.current += yem.tur === 'bonus' ? 3 : 1;
+          koliSayacRef.current += 1;
+          setSkor(skorRef.current);
+          hizRef.current = Math.max(YILAN_MIN_HIZ, hizRef.current - 3); // her yemde hafif hızlanır
+          yeniYem(yeni);
+        } else {
+          yeni.pop(); // yem yoksa kuyruk kısalır (sabit uzunluk)
+        }
+        yilanRef.current = yeni;
+        setKare(k => k + 1);
+        zamanlayiciRef.current = setTimeout(adim, hizRef.current);
+      };
+      zamanlayiciRef.current = setTimeout(adim, hizRef.current);
+      return () => clearTimeout(zamanlayiciRef.current);
+    }, [oyunDurum]);
+
+    // Yön değişimi (geri dönüş yasak)
+    const yonVer = (x, y) => {
+      const s = sonYonRef.current;
+      if (x === -s.x && y === -s.y) return;
+      yonRef.current = { x, y };
+    };
+
+    // Klavye — oyun sekmesi açıkken sayfa kaydırmasını da engeller
+    useEffect(() => {
+      const tus = (e) => {
+        const k = e.key.toLowerCase();
+        const esle = { arrowup: [0, -1], w: [0, -1], arrowdown: [0, 1], s: [0, 1], arrowleft: [-1, 0], a: [-1, 0], arrowright: [1, 0], d: [1, 0] };
+        if (esle[k]) { e.preventDefault(); if (oyunDurum === 'oynaniyor') yonVer(...esle[k]); }
+        else if ((k === ' ' || k === 'enter') && oyunDurum !== 'oynaniyor') { e.preventDefault(); oyunuBaslat(); }
+      };
+      window.addEventListener('keydown', tus);
+      return () => window.removeEventListener('keydown', tus);
+    }, [oyunDurum]);
+
+    // Mobil kaydırma
+    const dokunBasla = (e) => { const t = e.touches[0]; dokunusRef.current = { x: t.clientX, y: t.clientY }; };
+    const dokunBit = (e) => {
+      const b = dokunusRef.current; if (!b) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - b.x, dy = t.clientY - b.y;
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return; // kısa dokunuş = yön değil
+      if (Math.abs(dx) > Math.abs(dy)) yonVer(dx > 0 ? 1 : -1, 0); else yonVer(0, dy > 0 ? 1 : -1);
+      dokunusRef.current = null;
+    };
+
+    // ------------------------------------------------------------ ÇİZİM ---
+    const yilan = yilanRef.current;
+    const yem = yemRef.current;
+    const hucreYuzde = 100 / YILAN_IZGARA;
+    const madalya = ['🥇', '🥈', '🥉'];
+    const sampiyon = skorlar[0];
+
+    return (
+      <div className="max-w-5xl mx-auto animate-in fade-in space-y-4" data-kare={kare}>
+        {/* BAŞLIK */}
+        <div className="bg-gradient-to-r from-emerald-600 via-green-600 to-teal-600 rounded-2xl p-5 text-white shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h2 className="text-xl sm:text-2xl font-black flex items-center gap-2">🐍 Sembol Yılanı</h2>
+            <p className="text-white/85 text-xs font-bold mt-1">Kolileri topla, duvara ve kendine çarpma! Her 5 kolide ⭐ bonus bahşiş: 3 puan. {ayEtiketi} sonunda tablo sıfırlanır.</p>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            <div className="bg-white/15 rounded-xl px-4 py-2 text-center"><p className="text-[9px] font-black uppercase tracking-wider text-white/70">Skor</p><p className="text-2xl font-black font-mono">{skor}</p></div>
+            <div className="bg-white/15 rounded-xl px-4 py-2 text-center"><p className="text-[9px] font-black uppercase tracking-wider text-white/70">Aylık Rekorum</p><p className="text-2xl font-black font-mono">{benimRekor}{benimSira ? <span className="text-xs font-black text-amber-300 ml-1">#{benimSira}</span> : ''}</p></div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start">
+          {/* ------------------------------------------------ OYUN ALANI --- */}
+          <div className="lg:col-span-3 bg-white rounded-2xl border border-neutral-200 shadow-sm p-4">
+            <div
+              className="relative w-full max-w-[440px] mx-auto aspect-square rounded-xl overflow-hidden select-none touch-none bg-gradient-to-br from-emerald-50 to-teal-50 border-2 border-emerald-200"
+              style={{ backgroundImage: 'linear-gradient(rgba(16,185,129,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(16,185,129,.06) 1px, transparent 1px)', backgroundSize: `${hucreYuzde}% ${hucreYuzde}%` }}
+              onTouchStart={dokunBasla} onTouchEnd={dokunBit}
+            >
+              {/* Yem */}
+              {oyunDurum !== 'hazir' && (
+                <div className="absolute flex items-center justify-center text-[13px] leading-none transition-none" style={{ left: `${yem.x * hucreYuzde}%`, top: `${yem.y * hucreYuzde}%`, width: `${hucreYuzde}%`, height: `${hucreYuzde}%` }}>
+                  {yem.tur === 'bonus' ? '⭐' : '📦'}
+                </div>
+              )}
+              {/* Yılan */}
+              {yilan.map((p, i) => (
+                <div key={i} className={`absolute ${i === 0 ? 'bg-emerald-700 rounded-md z-10' : 'bg-emerald-500 rounded-sm'}`}
+                  style={{ left: `${p.x * hucreYuzde + 0.35}%`, top: `${p.y * hucreYuzde + 0.35}%`, width: `${hucreYuzde - 0.7}%`, height: `${hucreYuzde - 0.7}%`, opacity: i === 0 ? 1 : Math.max(0.45, 1 - i * 0.02) }}>
+                  {i === 0 && <span className="absolute inset-0 flex items-center justify-center text-[8px] text-white">{sonYonRef.current.x === 1 ? '▸' : sonYonRef.current.x === -1 ? '◂' : sonYonRef.current.y === 1 ? '▾' : '▴'}</span>}
+                </div>
+              ))}
+              {/* Başlat / bitti perdesi */}
+              {oyunDurum !== 'oynaniyor' && (
+                <div className="absolute inset-0 z-20 bg-black/55 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 text-white p-4 text-center">
+                  {oyunDurum === 'bitti' ? (
+                    <>
+                      <p className="text-3xl">💥</p>
+                      <p className="font-black text-lg">Oyun Bitti!</p>
+                      <p className="font-bold text-sm text-white/80">Skorun: <span className="font-mono text-amber-300 text-lg">{skor}</span>{skor > 0 && skor >= benimRekor ? ' — Yeni aylık rekorun! 🎉' : ''}</p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-3xl">🐍</p>
+                      <p className="font-black text-lg">Sembol Yılanı</p>
+                      <p className="font-bold text-xs text-white/75">Yön tuşları / WASD · Mobilde parmağını kaydır</p>
+                    </>
+                  )}
+                  <button type="button" onClick={oyunuBaslat} className="mt-1 px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-white font-black shadow-lg">
+                    {oyunDurum === 'bitti' ? 'Tekrar Oyna' : 'Başla'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Mobil yön okları (dokunmatikte kaydırmaya ek kolaylık) */}
+            <div className="mt-3 grid grid-cols-3 gap-1.5 w-40 mx-auto lg:hidden">
+              <span />
+              <button type="button" onClick={() => yonVer(0, -1)} className="py-2.5 rounded-xl bg-neutral-100 active:bg-emerald-100 font-black text-emerald-700">▲</button>
+              <span />
+              <button type="button" onClick={() => yonVer(-1, 0)} className="py-2.5 rounded-xl bg-neutral-100 active:bg-emerald-100 font-black text-emerald-700">◀</button>
+              <button type="button" onClick={() => yonVer(0, 1)} className="py-2.5 rounded-xl bg-neutral-100 active:bg-emerald-100 font-black text-emerald-700">▼</button>
+              <button type="button" onClick={() => yonVer(1, 0)} className="py-2.5 rounded-xl bg-neutral-100 active:bg-emerald-100 font-black text-emerald-700">▶</button>
+            </div>
+          </div>
+
+          {/* ------------------------------------------------ SKOR TABLOSU --- */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* Ayın şampiyonu */}
+            <div className="bg-gradient-to-br from-amber-400 via-yellow-400 to-amber-500 rounded-2xl p-4 shadow-lg text-black">
+              <p className="text-[10px] font-black uppercase tracking-widest flex items-center gap-1.5">👑 {ayEtiketi} Şampiyonu</p>
+              {sampiyon ? (
+                <div className="flex items-center gap-3 mt-2">
+                  <div className="w-12 h-12 rounded-full bg-white/60 border-2 border-white overflow-hidden shrink-0 flex items-center justify-center text-xl">
+                    {sampiyon.foto ? <img src={sampiyon.foto} alt="" className="w-full h-full object-cover" /> : '🏆'}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-black text-lg truncate">{sampiyon.ad}</p>
+                    <p className="font-black font-mono text-sm">{sampiyon.skor} puan</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="font-bold text-sm mt-2">Henüz skor yok — ilk şampiyon sen ol! 🏆</p>
+              )}
+            </div>
+
+            {/* En iyi 10 */}
+            <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
+              <div className="px-4 py-3 bg-neutral-900 text-white flex items-center justify-between">
+                <p className="font-black text-sm">🏆 Aylık En İyi 10</p>
+                <p className="text-[10px] font-bold text-white/60">Her ayın 1'inde sıfırlanır</p>
+              </div>
+              {skorlar.length === 0 ? (
+                <p className="p-4 text-xs font-bold text-neutral-400 text-center">Bu ay henüz kimse oynamadı.</p>
+              ) : (
+                <div className="divide-y divide-neutral-100">
+                  {skorlar.slice(0, 10).map((s, i) => {
+                    const ben = String(s.personelId) === String(currentUser?.id);
+                    return (
+                      <div key={s.personelId} className={`flex items-center gap-3 px-4 py-2.5 ${ben ? 'bg-emerald-50' : ''}`}>
+                        <span className="w-7 text-center font-black text-sm shrink-0">{madalya[i] || `${i + 1}.`}</span>
+                        <div className="w-8 h-8 rounded-full bg-neutral-200 overflow-hidden shrink-0 flex items-center justify-center text-sm">
+                          {s.foto ? <img src={s.foto} alt="" className="w-full h-full object-cover" /> : '🐍'}
+                        </div>
+                        <p className={`flex-1 min-w-0 truncate text-sm font-bold ${ben ? 'text-emerald-800' : 'text-neutral-800'}`}>{s.ad}{ben ? ' (Sen)' : ''}</p>
+                        <p className="font-black font-mono text-sm">{s.skor}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const DashboardView = ({ jobs, allJobs, personnelList, currentUser, setViewingImage, transactions,
     // YENİ (kullanıcı talebi): Şikayeti "İnceleniyor" durumuna alınan personelin
     // anasayfasında bildirim kartı göstermek için şikayet listesi ve kapatma
@@ -4561,6 +4839,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [isCustomerSubMenuOpen, setIsCustomerSubMenuOpen] = useState(false);
     const [isJobSubMenuOpen, setIsJobSubMenuOpen] = useState(false);
     const [isAuthSubMenuOpen, setIsAuthSubMenuOpen] = useState(false);
+    // YENİ: Eğlence alt menüsünün açık/kapalı durumu
+    const [isEglenceSubMenuOpen, setIsEglenceSubMenuOpen] = useState(false);
     const [isFinanceSubMenuOpen, setIsFinanceSubMenuOpen] = useState(false);
     const [isSystemFilesSubMenuOpen, setIsSystemFilesSubMenuOpen] = useState(false);
     const [isTodoSubMenuOpen, setIsTodoSubMenuOpen] = useState(false);
@@ -9093,6 +9373,31 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             )}
 
 
+            {/* ================================================================
+                YENİ (kullanıcı talebi): EĞLENCE 🎮 — personelin boş vakitte
+                oynadığı oyunlar. Alt menüde oyun adı listelenir; tıklanınca
+                oyun sayfası açılır. Herkes görebilir (yetki gerekmez).
+                ================================================================ */}
+            <div className="space-y-1">
+              <button
+                onClick={() => setIsEglenceSubMenuOpen(v => !v)}
+                className="w-full py-3 px-4 font-bold transition flex justify-between items-center gap-3 rounded-2xl bg-gradient-to-r from-fuchsia-600 via-purple-600 to-indigo-600 text-white shadow-lg shadow-purple-600/30 hover:brightness-110"
+              >
+                <span className="flex items-center gap-3 min-w-0"><Sparkles className="w-5 h-5 shrink-0" /> <span className="whitespace-nowrap truncate">Eğlence</span></span>
+                {isEglenceSubMenuOpen ? <ChevronUp className="w-4 h-4 shrink-0" /> : <ChevronDown className="w-4 h-4 shrink-0" />}
+              </button>
+              {isEglenceSubMenuOpen && (
+                <div className="pl-4 space-y-1 animate-in fade-in slide-in-from-top-1">
+                  <button
+                    onClick={() => { setActiveTab('oyunYilan'); setIsSidebarOpen(false); }}
+                    className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'oyunYilan' ? 'bg-purple-600 text-white shadow-md' : 'text-neutral-400 hover:bg-neutral-800 hover:text-white'}`}
+                  >
+                    <span className="text-base leading-none">🐍</span> Sembol Yılanı
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* NOT: "Şikayet Bildirim" ayrı bir sol menü öğesi olmaktan çıkarıldı;
                 artık "Özel Görevlerim" gibi "Profilim" sayfasının içinde bir bölüm
                 olarak gösteriliyor (bkz. ProfileSettingsView). Sayfa rotası
@@ -9663,6 +9968,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'mesaiTakip' && showPersonnel && <MesaiTakipView personnelList={personnelList} currentUser={currentUser} jobs={jobs} onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} />}
             {activeTab === 'complaints' && showPersonnel && <ComplaintsView complaints={complaints} updateComplaintStatus={handleUpdateComplaintStatus} deleteComplaint={handleDeleteComplaint} />}
             {/* YENİ (kullanıcı talebi): ŞİRKET İLETİŞİMİ SAYFASI — herkese açık rehber */}
+            {/* YENİ: EĞLENCE > Sembol Yılanı sayfası */}
+            {activeTab === 'oyunYilan' && <EglenceYilanView currentUser={currentUser} />}
+
             {activeTab === 'sirketIletisim' && (
               <SirketIletisimView companyContacts={companyContacts} personnelList={personnelList} canManageContacts={canManageContacts} onYonet={() => setShowContactsManageModal(true)} />
             )}
