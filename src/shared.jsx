@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FileText, CheckCircle, Camera, Upload, Copy, FolderOpen, X } from 'lucide-react';
+import { FileText, CheckCircle, Camera, Upload, Copy, FolderOpen, X, Video, Loader2, Play } from 'lucide-react'; // YENİ: Video, Loader2, Play — kamera ayrımı ve küçük resimler
   // --- FIREBASE BAĞLANTISI (CANLI / PRODUCTION MODU) ---
   // NOT: Önceki önizleme sürümünde burada bellek içi (in-memory) sahte bir
   // Firestore + Auth katmanı vardı. Canlıya alma kapsamında bu sahte katman
@@ -32,12 +32,6 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
 
   export const app = initializeApp(firebaseConfig);
   export const auth = getAuth(app);
-  // YENİ (kullanıcı talebi): GOOGLE HESAP BAĞLAMA / GOOGLE İLE GİRİŞ
-  // Google oturumu AYRI bir Firebase uygulama örneğinde açılır. Böylece
-  // Firestore'un kullandığı ana (anonim) oturum hiç değişmez; Google ile
-  // giriş yapıldığında tüm canlı dinleyiciler yeniden başlayıp baştan
-  // okuma yapmaz. Buradan yalnızca Google hesabının uid'si okunur.
-  export const googleAuth = getAuth(initializeApp(firebaseConfig, 'googleGiris'));
   // ==========================================================================
   // KALICI YEREL ÖNBELLEK (IndexedDB)
   // AMAÇ: "Tüm geçmiş her zaman görünsün" isteğini, Firestore okuma faturasını
@@ -537,6 +531,82 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
     return /\.(mp4|mov|webm|avi|3gp|mkv|m4v)(\?.*)?$/i.test(url);
   };
 
+  // --- YENİ (kullanıcı talebi): YÜKLENEN FOTOĞRAF / VİDEO KÜÇÜK RESİMLERİ ---
+  // Eskiden yüklenen görseller yalnızca uzun bir bağlantı metni olarak görünüyordu.
+  // Artık eklendiği yerde 64×64 küçük resim olarak görünür; dokununca tam boyutu yeni
+  // sekmede açılır. Liste elemanları:
+  //   'Yükleniyor...'  → dönen yükleniyor simgesi
+  //   http(s) bağlantı → fotoğraf (ya da video: oynat simgeli ilk kare)
+  //   diğer metin      → yükleme başarısız olup yalnızca dosya adı kalmış: dosya simgesi
+  const MEDYA_YUKLENIYOR = 'Yükleniyor...';
+  const medyaBaglantiMi = (v) => typeof v === 'string' && /^https?:\/\//i.test(v);
+
+  export const MedyaKucukResim = ({ url, onSil, ton = 'notr' }) => {
+    const [hata, setHata] = useState(false); // görsel açılamazsa dosya simgesine düş
+    const cerceve = ton === 'kirmizi' ? 'border-red-300 bg-white' : 'border-neutral-300 bg-neutral-50';
+
+    // Yükleniyor
+    if (url === MEDYA_YUKLENIYOR) {
+      return (
+        <div className={`w-16 h-16 rounded-lg border ${cerceve} flex flex-col items-center justify-center shrink-0`} title="Yükleniyor...">
+          <Loader2 className="w-5 h-5 text-neutral-400 animate-spin" />
+          <span className="text-[8px] font-bold text-neutral-400 mt-0.5">Yükleniyor</span>
+        </div>
+      );
+    }
+
+    const baglanti = medyaBaglantiMi(url);
+    const video = baglanti && isVideoUrl(url);
+    return (
+      <div className={`relative w-16 h-16 rounded-lg border ${cerceve} shrink-0 group`}>
+        {baglanti ? (
+          <a href={url} target="_blank" rel="noopener noreferrer" className="block w-full h-full rounded-lg overflow-hidden" title="Tam boyutu aç">
+            {video ? (
+              <>
+                {/* #t=0.1 → iOS/Android'de siyah yerine ilk kare görünsün */}
+                <video src={`${url}#t=0.1`} muted playsInline preload="metadata" className="w-full h-full object-cover pointer-events-none" />
+                <span className="absolute inset-0 flex items-center justify-center bg-black/25 rounded-lg">
+                  <Play className="w-5 h-5 text-white fill-white drop-shadow" />
+                </span>
+              </>
+            ) : hata ? (
+              <span className="w-full h-full flex items-center justify-center"><FileText className="w-6 h-6 text-neutral-400" /></span>
+            ) : (
+              <img src={url} alt="Yüklenen görsel" loading="lazy" onError={() => setHata(true)} className="w-full h-full object-cover" />
+            )}
+          </a>
+        ) : (
+          // Bağlantı değil (yükleme başarısız, yalnızca dosya adı var)
+          <div className="w-full h-full flex flex-col items-center justify-center p-1" title={String(url || '')}>
+            <FileText className="w-5 h-5 text-neutral-400" />
+            <span className="text-[8px] font-bold text-neutral-500 w-full truncate text-center">{String(url || '')}</span>
+          </div>
+        )}
+        {/* Sil düğmesi — sağ üst köşe (yükleme sürerken gösterilmez) */}
+        {onSil && (
+          <button type="button" onClick={onSil} title="Kaldır"
+            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-600 text-white flex items-center justify-center shadow ring-2 ring-white hover:bg-red-700">
+            <X className="w-3 h-3" />
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // Küçük resim listesi — items: url dizisi · onSil(index): kaldırma işlevi
+  export const MedyaKucukResimListesi = ({ items, onSil, ton }) => {
+    const liste = Array.isArray(items) ? items : [];
+    if (!liste.length) return null;
+    return (
+      <div className="flex flex-wrap gap-2.5 pt-1.5">
+        {liste.map((url, idx) => (
+          <MedyaKucukResim key={`${idx}-${url}`} url={url} ton={ton}
+            onSil={onSil && url !== MEDYA_YUKLENIYOR ? () => onSil(idx) : undefined} />
+        ))}
+      </div>
+    );
+  };
+
   // --- YENİ: CARİ PROFİL EŞLEŞTİRME YARDIMCI FONKSİYONLARI ---
   export const normalizeCariName = (name) => (name || '').toString().trim().toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ');
   export const normalizeCariPhone = (phone) => (phone || '').toString().replace(/\D/g, '');
@@ -574,6 +644,7 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
   export const MediaCaptureMenu = ({ onChange, disabled, buttonLabel, buttonClassName, compact = false, multiple = false }) => {
     const [isOpen, setIsOpen] = useState(false);
     const cameraInputRef = React.useRef(null);
+    const videoCameraInputRef = React.useRef(null); // YENİ: video kamerası için ayrı alan (Android düzeltmesi)
     const galleryInputRef = React.useRef(null);
     const fileInputRef = React.useRef(null);
 
@@ -610,9 +681,17 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
                 <button type="button" onClick={() => setIsOpen(false)} className="text-neutral-400 hover:text-black transition"><X className="w-5 h-5" /></button>
               </div>
 
+              {/* DÜZELTME (Android): "Şimdi Çek" tek düğmeyken accept="image/*,video/*" idi.
+                  Android Chrome / Samsung Internet, capture ile BİRDEN FAZLA dosya türü görünce
+                  kamerayı doğrudan açmıyor, galeri/dosya seçiciyi gösteriyordu.
+                  Artık iki ayrı düğme: her biri TEK türle → kamera doğrudan açılır (iOS'ta da çalışır). */}
               <button type="button" onClick={() => handlePick(cameraInputRef)} className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold text-black hover:bg-neutral-50 transition border-b border-neutral-100 text-left">
                 <Camera className="w-5 h-5 text-red-600 shrink-0" />
-                <span className="flex-1">Şimdi Çek<span className="block text-[10px] font-bold text-neutral-400">Kamerayı aç (fotoğraf / video)</span></span>
+                <span className="flex-1">Fotoğraf Çek<span className="block text-[10px] font-bold text-neutral-400">Kamera doğrudan açılır</span></span>
+              </button>
+              <button type="button" onClick={() => handlePick(videoCameraInputRef)} className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold text-black hover:bg-neutral-50 transition border-b border-neutral-100 text-left">
+                <Video className="w-5 h-5 text-orange-600 shrink-0" />
+                <span className="flex-1">Video Çek<span className="block text-[10px] font-bold text-neutral-400">Kamera video modunda açılır</span></span>
               </button>
               <button type="button" onClick={() => handlePick(galleryInputRef)} className="w-full flex items-center gap-3 px-4 py-3.5 text-sm font-bold text-black hover:bg-neutral-50 transition border-b border-neutral-100 text-left">
                 <FolderOpen className="w-5 h-5 text-blue-600 shrink-0" />
@@ -630,8 +709,10 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
           </div>
         )}
 
-        {/* Kamera çekimi doğası gereği tek seferde tek kare verir; 'multiple' burada zararsızdır. */}
-        <input ref={cameraInputRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
+        {/* DÜZELTME (Android): kamera alanları TEK dosya türü kabul eder — aksi halde Android
+            capture'ı yok sayıp seçici açıyor. Kamera tek seferde tek kare/klip verir. */}
+        <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
+        <input ref={videoCameraInputRef} type="file" accept="video/*" capture="environment" className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
         {/* Galeriden: fotoğraf ve video; 'multiple' ile tek seferde birden fazla seçilebilir. */}
         <input ref={galleryInputRef} type="file" accept="image/*,video/*" multiple={multiple} className="hidden" disabled={disabled} onChange={(e) => { onChange(e); e.target.value = ''; }} />
         {/* Dosyadan: PDF, Word, Excel, PowerPoint, metin, arşiv, görsel ve video dosyaları */}
