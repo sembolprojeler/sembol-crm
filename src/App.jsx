@@ -47,7 +47,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapPin, Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where, documentId, deleteField } from 'firebase/firestore';
-import { db, appId, auth, googleAuth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, MedyaKucukResimListesi, calculateMaterials, malzemeIhtiyaclari, useMalzemeTahminTablosu, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
+import { db, appId, auth, googleAuth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, MedyaKucukResimListesi, personelNumarasiylaOlustur, personelNoAta, kullanilanPersonelNolari, personelNoGecerliMi, PersonelNoRozeti, calculateMaterials, malzemeIhtiyaclari, useMalzemeTahminTablosu, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
   // YENİ: Resmi Ayarları ekranının kullandığı veri ve yardımcılar.
   // Sözleşme PDF'i ve WhatsApp mesajları da aynı kaynaktan okuyacağı için
   // bu tanımlar shared.jsx içinde tek noktada tutuluyor.
@@ -638,7 +638,11 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
         <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-neutral-200">
           <div className="flex items-center gap-3 w-full lg:w-auto min-w-0">
             <div className="min-w-0">
-              <h2 className="text-lg md:text-xl font-black text-black whitespace-nowrap overflow-hidden text-ellipsis">Hoş Geldiniz, {currentUser?.fullName}</h2>
+              {/* DEĞİŞTİ (kullanıcı talebi): ad soyadın yanında renkli Personel No rozeti */}
+              <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                <h2 className="text-lg md:text-xl font-black text-black whitespace-nowrap overflow-hidden text-ellipsis min-w-0">Hoş Geldiniz, {currentUser?.fullName}</h2>
+                <PersonelNoRozeti no={currentUser?.personelNo} />
+              </div>
               <p className="text-neutral-500 font-medium text-xs whitespace-nowrap overflow-hidden text-ellipsis">Sistemdeki genel operasyon özetini aşağıdan takip edebilirsiniz.</p>
             </div>
             {isMaviYaka && (
@@ -4146,7 +4150,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             )}
 
             <div>
-              <label className="block text-sm font-bold text-neutral-700 mb-1.5">E-Posta veya Ad Soyad</label>
+              {/* DEĞİŞTİ (kullanıcı talebi): Personel Numarası ile de giriş yapılabilir */}
+              <label className="block text-sm font-bold text-neutral-700 mb-1.5">Personel No, E-Posta veya Ad Soyad</label>
               <div className="relative">
                 <span className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400"><User className="w-5 h-5" /></span>
                 <input 
@@ -4155,9 +4160,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   value={email} 
                   onChange={(e) => setEmail(e.target.value)} 
                   className="w-full pl-11 pr-4 py-3 border border-neutral-300 rounded-xl focus:ring-2 focus:ring-red-600 focus:border-red-600 outline-none transition font-medium" 
-                  placeholder="Örn: Ahmet Öztürk" 
+                  placeholder="Örn: 48213 veya Ahmet Öztürk" 
                 />
               </div>
+              {/* YENİ: bilgilendirme satırı */}
+              <p className="mt-1.5 text-[11px] font-bold text-violet-700 flex items-center gap-1.5">
+                <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-gradient-to-r from-indigo-600 to-fuchsia-600 text-white text-[9px] font-black">#</span>
+                5 haneli Personel Numaranız ile de giriş yapabilirsiniz.
+              </p>
             </div>
             
             <div>
@@ -5540,7 +5550,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               user = personnelList.find(p => {
                 const pEmail = (p.email || '').trim().toLocaleLowerCase('tr-TR');
                 const pName = (p.fullName || '').trim().toLocaleLowerCase('tr-TR');
-                return (pEmail === parsedInput || pName === parsedInput) && p.password === parsed.password;
+                // YENİ: "Beni Hatırla" personel numarasıyla kaydedildiyse de eşleşir
+                const pNo = String(p.personelNo || '').trim();
+                const noEslesti = personelNoGecerliMi(pNo) && pNo === parsedInput.replace(/\s+/g, '');
+                return (pEmail === parsedInput || pName === parsedInput || noEslesti) && p.password === parsed.password;
               });
               // YENİ: Geçiş süresi dolmuşsa şifreyle otomatik giriş yok (süper yöneticiler hariç).
               // Google'ı bağlamış olmak şifreli girişi ENGELLEMEZ (kademeli geçiş).
@@ -5560,13 +5573,39 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       }
     }, [personnelList, isAuthenticated, googleAuthHazir, googleKullanici, girisAyarlari]);
 
+    // ==========================================================================
+    // YENİ (kullanıcı talebi): MEVCUT PERSONELE PERSONEL NUMARASI ATAMA
+    // Numarası olmayan her personele (eski kayıtlar) oturum açıldığında bir kez,
+    // sırayla benzersiz 5 haneli numara atanır. İşlem transaction ile yapıldığı için
+    // aynı anda birden fazla cihaz çalıştırsa da kimseye iki numara verilmez.
+    // Sonraki açılışlarda eksik kalmadığı için hiçbir şey yapmaz.
+    // ==========================================================================
+    const personelNoGocuYapildiRef = useRef(false);
+    useEffect(() => {
+      if (!isAuthenticated || !firebaseUser || !personnelList.length || personelNoGocuYapildiRef.current) return;
+      const eksikler = personnelList.filter(p => p?.id && !personelNoGecerliMi(p.personelNo));
+      if (!eksikler.length) return;
+      personelNoGocuYapildiRef.current = true; // oturum başına bir kez
+      (async () => {
+        const kullanilan = kullanilanPersonelNolari(personnelList);
+        for (const p of eksikler) {
+          try {
+            const no = await personelNoAta(db, appId, p.id, { kullanilanlar: kullanilan });
+            if (no) kullanilan.add(no); // sonraki kişi bu numarayı seçmesin
+          } catch (err) {
+            console.error(`Personel numarası atanamadı (${p.fullName}):`, err);
+          }
+        }
+      })();
+    }, [isAuthenticated, firebaseUser, personnelList]);
+
     useEffect(() => {
       if (isAuthenticated && currentUser && personnelList.length > 0) {
         const updatedUser = personnelList.find(p => p.id === currentUser.id);
         if (updatedUser) {
           if (updatedUser.employmentStatus === 'Pasif') {
              setCurrentUser(updatedUser);
-          } else if (JSON.stringify(updatedUser.permissions) !== JSON.stringify(currentUser.permissions) || updatedUser.employmentStatus !== currentUser.employmentStatus || (updatedUser.googleUid || '') !== (currentUser.googleUid || '')) { // YENİ: Google bağlantısı değişince üstteki uyarı kutusu güncellensin
+          } else if (JSON.stringify(updatedUser.permissions) !== JSON.stringify(currentUser.permissions) || updatedUser.employmentStatus !== currentUser.employmentStatus || (updatedUser.googleUid || '') !== (currentUser.googleUid || '') || (updatedUser.personelNo || '') !== (currentUser.personelNo || '')) { // YENİ: Google bağlantısı değişince üstteki uyarı kutusu güncellensin · YENİ: Personel No atanınca rozet görünsün
              setCurrentUser(updatedUser);
           }
         } else {
@@ -5741,12 +5780,17 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       }
     };
 
+    // DEĞİŞTİ (kullanıcı talebi): Yeni personele 5 haneli BENZERSİZ Personel Numarası atanır.
+    // Formda gösterilen numara öneri olarak gönderilir; o arada başkası aldıysa yenisi verilir.
+    // Dönen değer: atanan numara (form başarı mesajında gösterir).
     const handleAddPersonnel = async (newPersonnel) => {
-      if (!firebaseUser) return;
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelList'), {
-        ...newPersonnel, permissions: { canView: true, canEdit: false }, createdAt: new Date().toISOString()
-      });
-      addSystemLog('Personel Eklendi', `${newPersonnel.fullName} sisteme eklendi.`);
+      if (!firebaseUser) return null;
+      const { personelNo: onerilenNo, ...veri } = newPersonnel;
+      const { personelNo } = await personelNumarasiylaOlustur(db, appId, {
+        ...veri, permissions: { canView: true, canEdit: false }, createdAt: new Date().toISOString()
+      }, { onerilenNo, kullanilanlar: kullanilanPersonelNolari(personnelList) });
+      addSystemLog('Personel Eklendi', `${newPersonnel.fullName} sisteme eklendi (Personel No: ${personelNo}).`);
+      return personelNo;
     };
 
     // YENİ: Personel Başvuru bölümünden bir aday kadroya alındığında çağrılır.
@@ -5754,7 +5798,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // eksik alanlar (IBAN, maaş vb.) daha sonra personel profili üzerinden tamamlanabilir.
     const handleHireCandidate = async (cand) => {
       if (!firebaseUser) return;
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'personnelList'), {
+      // DEĞİŞTİ: Kadroya alınan adaya da otomatik benzersiz Personel Numarası atanır
+      await personelNumarasiylaOlustur(db, appId, {
         fullName: cand.fullName || '',
         personalPhone: cand.phone || '',
         collarType: cand.collarType || 'Mavi Yaka',
@@ -5768,7 +5813,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         ozlukEkstra: (cand.belgeler || []).map(b => ({ id: b.id || Date.now().toString(), label: b.label, url: b.url })), // YENİ: aday belgeleri özlük dosyasına aktarılır
         permissions: { canView: true, canEdit: false },
         createdAt: new Date().toISOString()
-      });
+      }, { kullanilanlar: kullanilanPersonelNolari(personnelList) });
       addSystemLog('Aday Kadroya Alındı', `${cand.fullName} (${cand.position}) aday takip sisteminden kadroya alındı.`);
     };
 
@@ -7493,7 +7538,10 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       const user = personnelList.find(p => {
         const pEmail = normalizeStr(p.email);
         const pName = normalizeStr(p.fullName);
-        return (pEmail === loginInput || pName === loginInput) && String(p.password) === String(password);
+        // YENİ (kullanıcı talebi): 5 haneli Personel Numarası ile de giriş yapılabilir
+        const pNo = String(p.personelNo || '').trim();
+        const noEslesti = personelNoGecerliMi(pNo) && pNo === loginInput.replace(/\s+/g, '');
+        return (pEmail === loginInput || pName === loginInput || noEslesti) && String(p.password) === String(password);
       });
 
       if (user) {
@@ -7523,7 +7571,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
         else try { localStorage.removeItem('sembol_crm_user'); } catch (e) {}
 
         await girisKaydet(user, 'Şifre');
-      } else setLoginError('Kullanıcı adı / E-posta veya şifre hatalı.');
+      } else setLoginError('Personel numarası / E-posta / Ad Soyad veya şifre hatalı.'); // DEĞİŞTİ: personel no eklendi
     };
 
     // YENİ (kullanıcı talebi): Giriş kaydı — son giriş + yöntem (Google / Şifre).
@@ -9589,7 +9637,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             
             {/* YENİ: Personel Başvuru (Aday Takip) sayfası */}
             {activeTab === 'personelBasvuru' && showPersonnel && <PersonelBasvuruView positions={positions} currentUser={currentUser} onHire={handleHireCandidate} addSystemLog={addSystemLog} setViewingImage={setViewingImage} />}
-            {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} />}
+            {activeTab === 'addPersonnel' && showPersonnel && <AddPersonnelView onAdd={handleAddPersonnel} positions={positions} ranks={ranks} personnelList={personnelList} />}
             {activeTab === 'personnelList' && showPersonnel && <PersonnelListView personnelList={personnelList} onUpdate={handleUpdatePersonnel} positions={positions} ranks={ranks} title="Personel Listesi" onViewProfile={(id) => { setViewingPersonnelProfileId(id); setActiveTab('personnelProfile'); }} pendingEditPersonnelId={pendingEditPersonnelId} setPendingEditPersonnelId={setPendingEditPersonnelId} onAddClick={() => setActiveTab('addPersonnel')} />}
             {activeTab === 'personnelProfile' && showPersonnel && <PersonnelProfileView personId={viewingPersonnelProfileId} personnelList={personnelList} jobs={jobs} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} onBack={() => setActiveTab('personnelList')} setActiveTab={setActiveTab} setPendingEditPersonnelId={setPendingEditPersonnelId} allPersonnelActions={allPersonnelActions} vehicles={vehicles} currentUser={currentUser} allMesaiRecords={allMesaiRecords} />}
             {activeTab === 'ozlukDosyalari' && showPersonnel && <OzlukDosyalariView personnelList={personnelList} db={db} appId={appId} addSystemLog={addSystemLog} setViewingImage={setViewingImage} currentUser={currentUser} />}
