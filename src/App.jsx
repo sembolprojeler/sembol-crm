@@ -302,9 +302,20 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
   //   • Ekran okları büyütüldü (64px, tüm alan tıklanabilir) — mobilde rahat oyun.
   // ############################################################################
   const YILAN_IZGARA = 17;            // 17×17 oyun alanı
-  const YILAN_BASLANGIC_HIZ = 175;    // ms/adım — her kolide hafif hızlanır
-  const YILAN_MIN_HIZ = 75;
-  const YILAN_SEVIYE_PUANI = 8;       // her 8 puanda yeni seviye (+1 engel, hız)
+  // DEĞİŞTİ (kullanıcı talebi — oyun kolaylaştırıldı):
+  //   • Başlangıç daha yavaş (175→195 ms) ve en yüksek hız daha ölçülü (75→95 ms)
+  //   • Hızlanma puana değil SEVİYEYE bağlı: koli başına hızlanma kaldırıldı
+  //   • Seviye artık her 12 puanda bir (8→12) — oyun zamana yayıldı
+  //   • Dorse her kolide değil, 2 kolide 1 uzar — kamyon yavaş büyür
+  //   • En fazla 3 engel; engeller sabit durmaz, süre dolunca yer değiştirir
+  //   • ⭐ bonus süresi 7 adımdan 16 adıma çıktı
+  const YILAN_BASLANGIC_HIZ = 195;    // ms/adım
+  const YILAN_MIN_HIZ = 95;           // hız tavanı (daha küçük ms = daha hızlı)
+  const YILAN_SEVIYE_HIZ_ADIMI = 10;  // her seviyede ms bu kadar düşer
+  const YILAN_SEVIYE_PUANI = 12;      // her 12 puanda yeni seviye
+  const YILAN_MAKS_ENGEL = 3;         // sahada aynı anda en fazla 3 eşya
+  const YILAN_ENGEL_OMRU = 34;        // engel ~bu kadar adım kalır, sonra başka yere taşınır
+  const YILAN_BONUS_OMRU = 16;        // ⭐ bonusun süresi (adım)
   const YILAN_ENGELLER = ['🧊', '🛋️', '🌀', '📺', '🛏️']; // buzdolabı, koltuk, çamaşır mak., TV, yatak
   const yilanAyAnahtari = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   const YILAN_AY_ADLARI = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
@@ -384,16 +395,22 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
       // Her 5. yem bonus yıldız (3 puan, SÜRELİ: 7 adımda kaybolur → koli olur)
       const bonus = koliSayacRef.current > 0 && koliSayacRef.current % 5 === 0;
       const yer = bosKare(kamyon, 2) || { x: 0, y: 0 };
-      yemRef.current = { ...yer, tur: bonus ? 'bonus' : 'koli', omur: bonus ? 7 : 0 };
+      yemRef.current = { ...yer, tur: bonus ? 'bonus' : 'koli', omur: bonus ? YILAN_BONUS_OMRU : 0 }; // DEĞİŞTİ: bonus süresi uzatıldı
     };
 
     // Seviyeye uygun sayıda engel kur (eksikleri "kurulum" modunda ekler)
     const engelleriTamamla = (kamyon) => {
-      const hedef = Math.min(seviyeRef.current - 1, 10); // 1. seviyede engel yok, sonra +1
+      // DEĞİŞTİ: en fazla YILAN_MAKS_ENGEL (3) eşya — 2. seviyede 1, 3.'te 2, sonra hep 3
+      const hedef = Math.min(seviyeRef.current - 1, YILAN_MAKS_ENGEL);
       while (engellerRef.current.length < hedef) {
         const yer = bosKare(kamyon, 4); // başa en az 4 adım uzağa kurulur
         if (!yer) break;
-        engellerRef.current.push({ ...yer, tip: YILAN_ENGELLER[engellerRef.current.length % YILAN_ENGELLER.length], kurulum: 12 }); // ~2 sn zararsız
+        engellerRef.current.push({
+          ...yer,
+          tip: YILAN_ENGELLER[Math.floor(Math.random() * YILAN_ENGELLER.length)], // rastgele eşya
+          kurulum: 12,                 // ~2 sn zararsız (yanıp söner)
+          omur: YILAN_ENGEL_OMRU + Math.floor(Math.random() * 10), // hepsi aynı anda taşınmasın
+        });
       }
     };
 
@@ -437,17 +454,18 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
         const yeni = [bas, ...kamyon];
         const yem = yemRef.current;
         if (bas.x === yem.x && bas.y === yem.y) {
-          // Yem yendi: koli 1 puan, bonus yıldız 3 puan; dorse uzar
+          // Yem yendi: koli 1 puan, bonus yıldız 3 puan
           skorRef.current += yem.tur === 'bonus' ? 3 : 1;
           koliSayacRef.current += 1;
           setSkor(skorRef.current);
-          hizRef.current = Math.max(YILAN_MIN_HIZ, hizRef.current - 3); // her yemde hafif hızlanır
-          // SEVİYE: her YILAN_SEVIYE_PUANI puanda bir — yeni engel + ek hız
+          // DEĞİŞTİ: dorse HER kolide değil 2 KOLİDE 1 uzar (tek sayılarda kuyruk kesilir)
+          if (koliSayacRef.current % 2 === 1) yeni.pop();
+          // DEĞİŞTİ: koli başına hızlanma KALDIRILDI — hız yalnızca seviye atlayınca artar
           const yeniSeviye = Math.floor(skorRef.current / YILAN_SEVIYE_PUANI) + 1;
           if (yeniSeviye > seviyeRef.current) {
             seviyeRef.current = yeniSeviye;
             setSeviye(yeniSeviye);
-            hizRef.current = Math.max(YILAN_MIN_HIZ, hizRef.current - 6);
+            hizRef.current = Math.max(YILAN_MIN_HIZ, YILAN_BASLANGIC_HIZ - (yeniSeviye - 1) * YILAN_SEVIYE_HIZ_ADIMI);
             engelleriTamamla(yeni);
           }
           yeniYem(yeni);
@@ -461,6 +479,21 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
         }
         // Engel kurulum sayaçları azalır (yanıp sönme biter, engel "sertleşir")
         engellerRef.current.forEach(e => { if (e.kurulum > 0) e.kurulum -= 1; });
+        // YENİ (kullanıcı talebi): engeller sabit durmaz — ömrü dolan eşya kaldırılır
+        // ve kamyondan uzak boş bir kareye yeniden "kurulum" modunda taşınır
+        engellerRef.current.forEach(e => {
+          if (e.kurulum > 0) return;        // kurulum bitmeden ömür işlemez
+          e.omur -= 1;
+          if (e.omur <= 0) {
+            const yer = bosKare(yeni, 4);
+            if (yer) {
+              e.x = yer.x; e.y = yer.y;
+              e.tip = YILAN_ENGELLER[Math.floor(Math.random() * YILAN_ENGELLER.length)];
+              e.kurulum = 12;               // yeni yerinde yine ~2 sn zararsız
+              e.omur = YILAN_ENGEL_OMRU + Math.floor(Math.random() * 10);
+            } else e.omur = 10;             // boş yer yoksa az sonra tekrar dene
+          }
+        });
         kamyonRef.current = yeni;
         setKare(k => k + 1);
         zamanlayiciRef.current = setTimeout(adim, hizRef.current);
@@ -663,7 +696,7 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
               <p className="font-black text-neutral-900 text-sm mb-1">📖 Nasıl Oynanır?</p>
               <p>📦 Koli = 1 puan · ⭐ Bonus bahşiş = 3 puan (acele et, kısa süre kalır!)</p>
               <p>🧱 Duvarlar açık: kenardan çıkınca karşı kenardan devam edersin.</p>
-              <p>🧊🛋️🌀 Her {YILAN_SEVIYE_PUANI} puanda seviye atlar: sahaya yeni eşya iner ve kamyon hızlanır. Yeni eşya yanıp sönerken zararsızdır.</p>
+              <p>🧊🛋️🌀 Her {YILAN_SEVIYE_PUANI} puanda seviye atlar: kamyon biraz hızlanır ve sahaya yeni eşya iner (en fazla {YILAN_MAKS_ENGEL} tane). Eşyalar sabit durmaz: bir süre sonra kalkar, başka yerde kurulur. Yanıp sönen eşya zararsızdır.</p>
               <p>💥 Kendi dorsene ya da eşyalara çarpınca oyun biter.</p>
             </div>
           </div>
