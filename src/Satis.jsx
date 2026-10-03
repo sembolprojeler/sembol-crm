@@ -12157,14 +12157,34 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
         </div>
       )}
 
-      {/* FİLTRELER — DEĞİŞTİ (kullanıcı talebi): tüm seçenekler TEK SATIRDA, açılır düğmelerle */}
-      <div className="bg-white rounded-2xl border border-neutral-200 p-2.5 flex flex-col lg:flex-row lg:items-center gap-2 relative z-20">
-        <div className="relative flex-1 min-w-[200px]">
+      {/* FİLTRELER — DEĞİŞTİ (kullanıcı talebi): açılır düğmelerle.
+          DÜZELTME (kullanıcı talebi): tek satıra sığmayıp kartın dışına TAŞIYORDU.
+          Yeni düzen: 1. satır arama + Excel / Telefon Görüşmesi Ekle, 2. satır filtreler.
+          Filtreler sığmazsa kart içinde alt satıra kayar — hiçbir ekran genişliğinde taşmaz. */}
+      <div className="bg-white rounded-2xl border border-neutral-200 p-2.5 flex flex-col gap-2 relative z-20">
+        {/* 1. SATIR: arama kutusu (kalan genişliği doldurur) + işlem düğmeleri */}
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
+        <div className="relative flex-1 min-w-0">
           <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
           <input value={arama} onChange={e => setArama(e.target.value)} placeholder="Ad, telefon (0'lı/0'sız), ilçe, açıklama veya satışçı ara…"
             className="w-full pl-9 pr-3 py-2 rounded-xl border border-neutral-200 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-neutral-900/20" />
         </div>
-        <div className="flex flex-wrap lg:flex-nowrap gap-1.5">
+        {/* YENİ: başlık gizliyken düğmeler burada (aynı işlevler)
+            DEĞİŞTİ: filtrelerin sağından arama kutusunun sağına taşındı (taşma düzeltmesi) */}
+        {!istatistikGoster && (
+          <div className="flex gap-1.5 shrink-0">
+            {(currentUser?.position || '').includes('Firma Sahibi') && (
+              <button type="button" onClick={() => ttCsvIndir(liste)} className="px-3 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-xs font-black flex items-center gap-1.5 whitespace-nowrap"><Download className="w-4 h-4" /> Excel</button>
+            )}
+            <button type="button" onClick={() => setForm({ baslangic: null, hizmet: 'Nakliye' })}
+              className="flex-1 sm:flex-none justify-center px-4 py-2 rounded-xl text-white text-xs font-black flex items-center gap-1.5 shadow-lg bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30 whitespace-nowrap">
+              <PlusCircle className="w-4 h-4" /> Telefon Görüşmesi Ekle
+            </button>
+          </div>
+        )}
+        </div>
+        {/* 2. SATIR: filtreler — DEĞİŞTİ: lg:flex-nowrap kaldırıldı, sığmayan alt satıra kayar */}
+        <div className="flex flex-wrap gap-1.5">
           <TTFiltreAcilir baslik="Kaynak" deger={kaynakFiltre} onSec={setKaynakFiltre} secenekler={[
             { id: 'Tümü', ad: 'Tüm Görüşmeler', sayi: gorunur.length },
             ...TT_KAYNAKLAR.map(k => ({ id: k.id, ad: k.ad, sayi: gorunur.filter(t => ttKaynakTuru(t) === k.id).length, nokta: k.id === 'havuz' ? 'bg-orange-500' : 'bg-emerald-600' })),
@@ -12193,18 +12213,6 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
               className="px-2.5 py-2 rounded-xl text-[11px] font-black text-red-600 hover:bg-red-50 flex items-center gap-1 whitespace-nowrap"><X className="w-3.5 h-3.5" /> Temizle</button>
           )}
         </div>
-        {/* YENİ: başlık gizliyken düğmeler burada (aynı işlevler) */}
-        {!istatistikGoster && (
-          <div className="flex gap-1.5 lg:ml-1 shrink-0">
-            {(currentUser?.position || '').includes('Firma Sahibi') && (
-              <button type="button" onClick={() => ttCsvIndir(liste)} className="px-3 py-2 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-xs font-black flex items-center gap-1.5 whitespace-nowrap"><Download className="w-4 h-4" /> Excel</button>
-            )}
-            <button type="button" onClick={() => setForm({ baslangic: null, hizmet: 'Nakliye' })}
-              className="px-4 py-2 rounded-xl text-white text-xs font-black flex items-center gap-1.5 shadow-lg bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/30 whitespace-nowrap">
-              <PlusCircle className="w-4 h-4" /> Telefon Görüşmesi Ekle
-            </button>
-          </div>
-        )}
       </div>
 
       {/* LİSTE */}
