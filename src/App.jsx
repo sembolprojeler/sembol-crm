@@ -47,7 +47,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapPin, Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where, documentId, deleteField } from 'firebase/firestore';
-import { db, appId, auth, googleAuth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, MedyaKucukResimListesi, personelNumarasiylaOlustur, personelNoAta, kullanilanPersonelNolari, personelNoGecerliMi, PersonelNoRozeti, calculateMaterials, malzemeIhtiyaclari, useMalzemeTahminTablosu, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
+import { db, appId, auth, googleAuth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, malzemeIhtiyaclari, useMalzemeTahminTablosu, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
   // YENİ: Resmi Ayarları ekranının kullandığı veri ve yardımcılar.
   // Sözleşme PDF'i ve WhatsApp mesajları da aynı kaynaktan okuyacağı için
   // bu tanımlar shared.jsx içinde tek noktada tutuluyor.
@@ -74,7 +74,7 @@ import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJ
   useEkspertizBekleyenSayilari,
   // YENİ: Zil rozetine eklenecek — BANA atanmış, henüz yapılmamış keşif sayısı
   useBanaAtananEkspertizSayisi } from './OperasyonIsler.jsx';
-import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir, useBugunQrEksikSayisi } from './OperasyonPersonel.jsx';
+import { IzinTahtasiView, PuantajTahtasiView, AddPersonnelView, PersonnelListView, PersonnelProfileView, OzlukDosyalariView, PersonelTahtasiView, MesaiOnayButonlari, MesaiTakipView, MesaiTakipMenuButonu, CalismaProgramiBolumu, mesaiOnerileriHesapla, gunlukQrKayitlariGetir, useBugunQrEksikSayisi , MedyaKucukResimListesi, personelNumarasiylaOlustur, personelNoAta, kullanilanPersonelNolari, personelNoGecerliMi, PersonelNoRozeti } from './OperasyonPersonel.jsx';
 // YENİ (kullanıcı talebi): QR SİTE TAKİP — asansör afişi QR reklam modülü
 //   • QrSiteTakipView : yönetim ekranı (Saha Portföy'deki butondan açılır) — Satis.jsx içinde
 //   • DEĞİŞTİ: sakinin gördüğü sayfa artık WordPress'te (QR_SITE_LANDING_URL, ?yer=);
@@ -3945,6 +3945,22 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                <label className="block text-sm font-bold text-neutral-700">Profil Fotoğrafını Değiştir</label>
                <MediaCaptureMenu onChange={handleImageUpload} disabled={isUploading} compact buttonLabel="Fotoğraf Seç" buttonClassName="cursor-pointer px-4 py-2 bg-white border border-neutral-300 rounded-xl flex items-center justify-center gap-2 hover:bg-neutral-50 transition w-full sm:w-fit shadow-sm" />
              </div>
+           </div>
+
+           {/* YENİ (kullanıcı talebi): PERSONEL NUMARAM — renkli, değiştirilemez.
+               Numara henüz atanmadıysa (ilk girişte otomatik atanır) bilgi notu görünür. */}
+           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-gradient-to-r from-indigo-50 via-violet-50 to-fuchsia-50 border border-violet-200">
+             <div>
+               <p className="text-[11px] font-black uppercase tracking-wider text-violet-700">Personel Numaram (Değiştirilemez)</p>
+               <p className="text-xs font-bold text-neutral-500 mt-0.5">Sisteme bu 5 haneli numara ve şifrenizle de giriş yapabilirsiniz.</p>
+             </div>
+             {personelNoGecerliMi(currentUser.personelNo) ? (
+               <span className="self-start sm:self-auto text-2xl font-black font-mono tracking-[0.3em] px-4 py-1.5 rounded-xl bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 text-white shadow-md">
+                 {currentUser.personelNo}
+               </span>
+             ) : (
+               <span className="self-start sm:self-auto text-xs font-black px-3 py-2 rounded-xl bg-white border border-violet-200 text-violet-700">Numaranız atanıyor…</span>
+             )}
            </div>
 
            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
