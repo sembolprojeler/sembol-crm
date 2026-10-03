@@ -47,7 +47,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapPin, Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where, documentId, deleteField } from 'firebase/firestore';
-import { db, appId, auth, googleAuth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, malzemeIhtiyaclari, useMalzemeTahminTablosu, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
+import { db, appId, auth, googleAuth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, MedyaKucukResimListesi, calculateMaterials, malzemeIhtiyaclari, useMalzemeTahminTablosu, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
   // YENİ: Resmi Ayarları ekranının kullandığı veri ve yardımcılar.
   // Sözleşme PDF'i ve WhatsApp mesajları da aynı kaynaktan okuyacağı için
   // bu tanımlar shared.jsx içinde tek noktada tutuluyor.
@@ -7283,7 +7283,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       setEndJobError('');
       setEndJobKaydediliyor(false); // Mükerrer-önleme kilidi her açılışta sıfırlanır
       setEndJobData({ 
-        paymentMethod: 'Banka', // DEĞİŞTİ: varsayılan Banka — listede de ilk seçenek damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], deliveryImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '',
+        // DÜZELTME (hata: "Cannot read properties of undefined (reading 'trim')"):
+        // Önceki "// DEĞİŞTİ: varsayılan Banka…" açıklaması bu satırın ORTASINA yazılmıştı;
+        // "//" sonrası satır sonuna kadar yorum sayıldığı için hasar/kasa/teslim alanlarının
+        // varsayılanları HİÇ atanmıyordu. "Hasar var" seçilince damageDetails tanımsız kalıp
+        // ekran çöküyordu. Açıklama kendi satırına alındı, varsayılanlar yeniden etkin.
+        // DEĞİŞTİ: varsayılan Banka — listede de ilk seçenek
+        paymentMethod: 'Banka',
+        damageStatus: 'Hasarsız teslim edildi', damageDetails: '', damageImages: [], truckImages: [], deliveryImages: [], truckStatus: 'Herhangi bir sorun yok', truckIssueDetails: '', customerSatisfaction: 'Herhangi bir işlem yapmadı.', enteredCode: '',
         elevatorSetup: 'Evet', elevatorSetupReason: '', elevatorImages: [], elevatorIssue: 'Hayır', elevatorIssueReason: '', vehicleIssue: 'Hayır', vehicleIssueReason: '',
         // YENİ: İş zaten sonlandırılmışsa (düzenleme modu) önceki sonlandırma bilgilerini forma doldur.
         // Yeni/devam eden işlerde job.endJobDetails boş olduğu için varsayılanlar aynen kalır.
@@ -10824,15 +10831,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       <div>
                         <label className="block text-sm font-bold text-black mb-1">Asansör Kurulum Fotoğrafı</label>
                         <div className="flex flex-col gap-2">
-                          {(endJobData.elevatorImages || []).map((img, idx) => (
-                            <div key={'eimg'+idx} className="flex items-center gap-2 bg-neutral-50 p-2 rounded-xl border border-neutral-200">
-                              <Camera className="w-4 h-4 text-neutral-500 shrink-0" />
-                              <span className="text-sm font-medium text-neutral-600 flex-1 truncate">{img}</span>
-                              {img !== 'Yükleniyor...' && (
-                                <button type="button" onClick={() => setEndJobData(prev => ({...prev, elevatorImages: prev.elevatorImages.filter((_, i) => i !== idx)}))} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"><X className="w-4 h-4"/></button>
-                              )}
-                            </div>
-                          ))}
+                          {/* DEĞİŞTİ (kullanıcı talebi): bağlantı metni yerine KÜÇÜK RESİM; dokununca tam boyut açılır */}
+                          <MedyaKucukResimListesi items={endJobData.elevatorImages}
+                            onSil={(idx) => setEndJobData(prev => ({...prev, elevatorImages: (prev.elevatorImages || []).filter((_, i) => i !== idx)}))} />
                           <MediaCaptureMenu multiple onChange={(e) => handleFileUpload(e, 'elevator')} buttonLabel="Fotoğraf / Video Ekle" buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2" />
                         </div>
                       </div>
@@ -10923,15 +10924,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       <div>
                         <label className="block text-sm font-bold text-black mb-1">Kamyon Kasası Fotoğrafı / Videosu (İş Sonu)</label>
                         <div className="flex flex-col gap-2">
-                          {(endJobData.truckImages || []).map((img, idx) => (
-                            <div key={'timg'+idx} className="flex items-center gap-2 bg-neutral-50 p-2 rounded-xl border border-neutral-200">
-                              <Camera className="w-4 h-4 text-neutral-500 shrink-0" />
-                              <span className="text-sm font-medium text-neutral-600 flex-1 truncate">{img}</span>
-                              {img !== 'Yükleniyor...' && (
-                                <button type="button" onClick={() => setEndJobData(prev => ({...prev, truckImages: prev.truckImages.filter((_, i) => i !== idx)}))} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"><X className="w-4 h-4"/></button>
-                              )}
-                            </div>
-                          ))}
+                          {/* DEĞİŞTİ (kullanıcı talebi): bağlantı metni yerine KÜÇÜK RESİM; dokununca tam boyut açılır */}
+                          <MedyaKucukResimListesi items={endJobData.truckImages}
+                            onSil={(idx) => setEndJobData(prev => ({...prev, truckImages: (prev.truckImages || []).filter((_, i) => i !== idx)}))} />
                           {/* YENİ: multiple → birden fazla fotoğraf/video aynı anda; "Şimdi Çek" doğrudan kamerayı açar (iOS/Android) */}
                           <MediaCaptureMenu multiple onChange={(e) => handleFileUpload(e, 'truck')} buttonLabel="Yeni Görsel Ekle" buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2" />
                         </div>
@@ -10941,15 +10936,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       <div>
                         <label className="block text-sm font-bold text-black mb-1">Teslim Edilen Yerin Fotoğrafı / Videosu (İş Sonu)</label>
                         <div className="flex flex-col gap-2">
-                          {(endJobData.deliveryImages || []).map((img, idx) => (
-                            <div key={'dlvimg'+idx} className="flex items-center gap-2 bg-neutral-50 p-2 rounded-xl border border-neutral-200">
-                              <Camera className="w-4 h-4 text-neutral-500 shrink-0" />
-                              <span className="text-sm font-medium text-neutral-600 flex-1 truncate">{img}</span>
-                              {img !== 'Yükleniyor...' && (
-                                <button type="button" onClick={() => setEndJobData(prev => ({...prev, deliveryImages: (prev.deliveryImages || []).filter((_, i) => i !== idx)}))} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition"><X className="w-4 h-4"/></button>
-                              )}
-                            </div>
-                          ))}
+                          {/* DEĞİŞTİ (kullanıcı talebi): bağlantı metni yerine KÜÇÜK RESİM; dokununca tam boyut açılır */}
+                          <MedyaKucukResimListesi items={endJobData.deliveryImages}
+                            onSil={(idx) => setEndJobData(prev => ({...prev, deliveryImages: (prev.deliveryImages || []).filter((_, i) => i !== idx)}))} />
                           <MediaCaptureMenu multiple onChange={(e) => handleFileUpload(e, 'delivery')} buttonLabel="Yeni Görsel Ekle" buttonClassName="cursor-pointer w-full bg-neutral-100 hover:bg-neutral-200 border border-neutral-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2" />
                         </div>
                       </div>
@@ -10957,28 +10946,23 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       {endJobData.damageStatus === 'Hasar var' && (
                         <div className="bg-red-50 p-4 rounded-xl border border-red-200">
                           <label className="block text-sm font-bold text-red-900 mb-1">Hasar Detayı (Müşteriye de iletilecek)</label>
-                          <textarea required value={endJobData.damageDetails} onChange={e => setEndJobData({...endJobData, damageDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl outline-none resize-none h-16 text-sm mb-3" placeholder="Hasar hakkında detaylı bilgi..."></textarea>
+                          <textarea required value={endJobData.damageDetails || ''} onChange={e => setEndJobData({...endJobData, damageDetails: e.target.value})} className="w-full p-3 border border-red-300 rounded-xl outline-none resize-none h-16 text-sm mb-3" placeholder="Hasar hakkında detaylı bilgi..."></textarea>
                           
                           <label className="block text-sm font-bold text-red-900 mb-1 mt-2">Hasar Fotoğrafı</label>
                           <div className="flex flex-col gap-2 mb-3">
-                            {(endJobData.damageImages || []).map((img, idx) => (
-                              <div key={'dimg'+idx} className="flex items-center gap-2 bg-white p-2 rounded-xl border border-red-200">
-                                <Camera className="w-4 h-4 text-red-500 shrink-0" />
-                                <span className="text-sm font-medium text-red-600 flex-1 truncate">{img}</span>
-                                {img !== 'Yükleniyor...' && (
-                                  <button type="button" onClick={() => setEndJobData(prev => ({...prev, damageImages: prev.damageImages.filter((_, i) => i !== idx)}))} className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition"><X className="w-4 h-4"/></button>
-                                )}
-                              </div>
-                            ))}
+                            {/* DEĞİŞTİ (kullanıcı talebi): bağlantı metni yerine KÜÇÜK RESİM; dokununca tam boyut açılır */}
+                            <MedyaKucukResimListesi items={endJobData.damageImages} ton="kirmizi"
+                              onSil={(idx) => setEndJobData(prev => ({...prev, damageImages: (prev.damageImages || []).filter((_, i) => i !== idx)}))} />
                             <MediaCaptureMenu multiple onChange={(e) => handleFileUpload(e, 'damage')} buttonLabel="Yeni Hasar Fotoğrafı Ekle" buttonClassName="cursor-pointer w-full bg-white hover:bg-neutral-50 border border-red-300 border-dashed rounded-xl p-3 text-center transition flex justify-center items-center gap-2 text-red-600" />
                           </div>
                           
-                          {endJobData.damageDetails.trim().length > 0 && (
+                          {/* DÜZELTME: alan tanımsızsa çökmesin */}
+                          {(endJobData.damageDetails || '').trim().length > 0 && (
                             <div className="flex flex-col sm:flex-row gap-2 animate-in fade-in">
                               <button
                                 type="button"
                                 onClick={() => {
-                                  let phone = jobToEnd.customerPhone.replace(/\D/g, '');
+                                  let phone = String(jobToEnd.customerPhone || '').replace(/\D/g, ''); // DÜZELTME: telefon boşsa çökmesin
                                   if (phone.startsWith('0')) phone = '90' + phone.substring(1);
                                   else if (!phone.startsWith('90')) phone = '90' + phone;
                                   const msg = `Sayın *${jobToEnd.customerName}*,\n\nSembol Nakliyat olarak taşıma işleminizi tamamlamış bulunmaktayız. Ekibimiz tarafından teslimat sırasında aşağıdaki durum tutanak altına alınarak operasyon merkezimize raporlanmıştır:\n\n⚠️ *Hasar / Sorun Bildirimi:*\n_${endJobData.damageDetails}_\n\nMüşteri memnuniyeti bizim için en öncelikli konudur. Konuyla ilgili operasyon sorumlumuz en kısa sürede sizinle iletişime geçerek sürecin takibini sağlayacaktır.\n\nAnlayışınız için teşekkür ederiz.\n*Sembol Nakliyat Yönetimi*`;
@@ -10992,7 +10976,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  let phone = jobToEnd.customerPhone.replace(/\D/g, '');
+                                  let phone = String(jobToEnd.customerPhone || '').replace(/\D/g, ''); // DÜZELTME: telefon boşsa çökmesin
                                   const msg = `Sayın ${jobToEnd.customerName},\nSembol Nakliyat olarak isinizi tamamladik. Ekibimiz tarafindan bir hasar durumu (${endJobData.damageDetails}) raporlanmistir. Operasyon sorumlumuz sizinle iletisime gececektir.`;
                                   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
                                   const separator = isIOS ? '&' : '?';
@@ -11025,7 +11009,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       <button
                         type="button"
                         onClick={() => {
-                          let phone = jobToEnd.customerPhone.replace(/\D/g, '');
+                          let phone = String(jobToEnd.customerPhone || '').replace(/\D/g, ''); // DÜZELTME: telefon boşsa çökmesin
                           if (phone.startsWith('0')) phone = '90' + phone.substring(1);
                           else if (!phone.startsWith('90')) phone = '90' + phone;
                           
@@ -11047,7 +11031,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       <button
                         type="button"
                         onClick={() => {
-                          let phone = jobToEnd.customerPhone.replace(/\D/g, '');
+                          let phone = String(jobToEnd.customerPhone || '').replace(/\D/g, ''); // DÜZELTME: telefon boşsa çökmesin
                           
                           let reviewLink = "https://g.page/r/CY7qIJg9osoKEBM/review";
                           let msgBody = `Sayın ${jobToEnd.customerName},\nSembol Nakliyat olarak tasima isleminizi tamamladik. Bizi tercih ettiginiz icin tesekkur ederiz.\n\nHizmetimizden memnun kaldiysaniz asagidaki linkten bize kisa bir yorum birakabilirsiniz. Yorumlariniz bizim icin cok degerlidir.\n\nLink: ${reviewLink}\n\nYeni adresinizde mutluluklar dileriz.`;
