@@ -15320,20 +15320,172 @@ export const kartEkstresiAyristir = (sayfalar) => {
   return { kalemler: kalemler.filter(k => k.tutar != null && k.tutar > 0), meta };
 };
 
+// ---------------------------------------------------------------- ÇOK BANKALI AYRIŞTIRICI
+// YENİ (kullanıcı talebi): Garanti BBVA (Bonus Business), Kuveyt Türk ve Enpara
+// ekstreleri. Albaraka ayrıştırıcısına (kartEkstresiAyristir) DOKUNULMAZ; banka
+// PDF metninden tanınır ve uygun ayrıştırıcıya yönlendirilir (kartEkstresiOku).
+// Çıktı şekli Albaraka ile AYNIDIR: { kalemler:[{tarih, aciklama, tutar, taksit,
+// kartSahibi, notlar}], meta:{banka, kartNo, kesimTarihi, sonOdeme, donemBorcu,
+// devirBakiye, harcamaToplami} } — yükleme penceresi ve kayıt akışı değişmez.
+//
+// Ortak kurallar (üç banka):
+//   • İşlem satırı = satırın EN SOLUNDAKİ parça tarih olan satır
+//     ("03 Eylül 2026" ya da "03/09/2026"). Üst bilgi satırlarında tarih solda
+//     olmadığından ("Hesap Kesim Tarihi 01/10/2026") karışmaz.
+//   • Tutar = satırdaki EN SAĞDAKİ saf tutar parçası (Garanti'de soldaki Bonus
+//     sütunu, Kuveyt'te sağdaki "0.00" ALTIN puanı tutar sayılmaz).
+//   • Alacak satırları: Garanti "1.784,50+" (artı SONDA), Kuveyt "-45,50 TL",
+//     Enpara "- 158.700,00 TL". Bunlardan ÖDEME / FAİZ İADESİ olanlar atlanır
+//     (harcama değildir); işyeri İADESİ olanlar NEGATİF kalem olarak tutulur —
+//     böylece okunan toplam bankanın "Dönem Harcamaları" ile birebir tutar.
+//   • Taksit: "3.Taksit" + "x3=" (Garanti) · "İşlemin 1 / 3 Taksidi" (Kuveyt) ·
+//     "1/3" (Enpara) → "1/3"; asıl işlem tutarı notlara yazılır.
+//   • harcamaToplami: özet tablosunda "Dönem Harcamaları" (Garanti, Kuveyt) ya da
+//     "Harcamalar ve yansıyan taksitler" (Enpara) başlığının altındaki değer.
+const GE_AYLAR = { ocak: 1, şubat: 2, subat: 2, mart: 3, nisan: 4, mayıs: 5, mayis: 5, haziran: 6, temmuz: 7, ağustos: 8, agustos: 8, eylül: 9, eylul: 9, ekim: 10, kasım: 11, kasim: 11, aralık: 12, aralik: 12 };
+// "03 Eylül 2026" ya da "03/09/2026" → "2026-09-03"
+const geTarih = (s) => {
+  const t = String(s || '').trim();
+  let m = t.match(/^(\d{1,2})\s+([A-Za-zÇĞİÖŞÜçğıöşü]+)\s+(\d{4})$/);
+  if (m) { const ay = GE_AYLAR[m[2].toLocaleLowerCase('tr-TR')]; return ay ? `${m[3]}-${String(ay).padStart(2, '0')}-${m[1].padStart(2, '0')}` : null; }
+  m = t.match(/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/);
+  return m ? `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}` : null;
+};
+// Saf tutar parçası: "1.000,00" · "3.103,81 TL" · "-45,50 TL" · "- 158.700,00 TL" · "1.784,50+"
+const GE_TUTAR = /^([+-]?)\s*(\d{1,3}(?:\.\d{3})*,\d{2})\s*(?:TL)?\s*(\+?)$/;
+const geTutar = (s) => {
+  const m = String(s || '').trim().match(GE_TUTAR);
+  if (!m) return null;
+  const deger = parseFloat(m[2].replace(/\./g, '').replace(',', '.'));
+  return { deger, alacak: m[1] === '-' || m[3] === '+' };
+};
+// Metin içindeki ilk tutar (meta satırları için)
+const geIlkTutar = (metin) => { const m = String(metin).match(/(\d{1,3}(?:\.\d{3})*,\d{2})/); return m ? parseFloat(m[1].replace(/\./g, '').replace(',', '.')) : null; };
+const geMetinTarih = (metin) => { const m = String(metin).match(/(\d{1,2}[./]\d{1,2}[./]\d{4})|(\d{1,2}\s+[A-Za-zÇĞİÖŞÜçğıöşü]+\s+\d{4})/); return m ? geTarih(m[0]) : null; };
+
+// Ödeme / faiz iadesi (harcama DEĞİL → atlanır). Diğer alacaklar işyeri iadesidir.
+const GE_ODEME = /ÖDEME|ODEME|TEŞEKKÜR|TESEKKUR|FA[İI]Z [İI]ADE|NAK[İI]T [İI]ADE|DEV[İI]R/i;
+
+// Banka tanıma (ilk sayfaların metni)
+export const ekstreBankasiniBul = (metin) => {
+  const t = String(metin || '');
+  if (/albaraka/i.test(t)) return 'Albaraka';
+  if (/KUVEYT\s*T[ÜU]RK|kuveytturk/i.test(t)) return 'Kuveyt Türk';
+  if (/enpara/i.test(t)) return 'Enpara';
+  if (/Garanti|BONUS BUSINESS|Bonus Business|BonusFla/i.test(t)) return 'Garanti BBVA';
+  return '';
+};
+
+export const kartEkstresiAyristirGenel = (sayfalar, banka) => {
+  const kalemler = [];
+  const meta = { banka };
+  let kartSahibi = '';
+  let ozetBaslik = null; // { x } harcama toplamı başlığının konumu
+  const ozetDeseni = banka === 'Enpara' ? /^Harcamalar ve/i : /Dönem Harcamaları/i;
+
+  for (const sayfa of sayfalar) {
+    // Yukarıdan aşağı; her satırın parçaları soldan sağa
+    const satirlar = [...sayfa.satirlar].sort((a, b) => b.y - a.y).map(s => ({ ...s, parcalar: [...s.parcalar].sort((a, b) => a.x - b.x) }));
+    for (let si = 0; si < satirlar.length; si++) {
+      const s = satirlar[si];
+      const metin = s.parcalar.map(p => p.s).join(' ').replace(/\s+/g, ' ').trim();
+
+      // ---------------- META ----------------
+      if (!meta.kartNo) { const m = metin.match(/(?:Kart Numarası|Kart No\b[^\d]*|Kart numarası)\s*\/?\s*(?:Card Number)?\s*([\d*]{4}[\d* ]{6,}\d{4})/i); if (m) meta.kartNo = m[1].replace(/\s+/g, ' ').trim(); }
+      if (!meta.kesimTarihi && /Hesap Kesim Tarihi|Ekstre tarihi/i.test(metin) && !/Sonraki|Bir Sonraki|önceki/i.test(metin)) { const t = geMetinTarih(metin); if (t) meta.kesimTarihi = t; }
+      if (!meta.sonOdeme && /Son Ödeme Tarihi|Son ödeme tarihi/i.test(metin) && !/Sonraki Son|Bir sonraki/i.test(metin)) { const t = geMetinTarih(metin.replace(/^.*?(Son Ödeme Tarihi|Son ödeme tarihi)/i, '')); if (t) meta.sonOdeme = t; }
+      if (meta.donemBorcu == null && /^(Toplam Borcunuz|Dönem Borcunuz|Ekstre borcu)\b/i.test(metin)) { const v = geIlkTutar(metin); if (v != null) meta.donemBorcu = v; }
+      if (meta.devirBakiye == null && /ÖNCEKİ DÖNEMDEN DEVİR|Bir önceki ekstre bakiyeniz/i.test(metin)) { const v = geIlkTutar(metin); if (v != null) meta.devirBakiye = v; }
+      // Kuveyt: özet tablosunda "Devreden Bakiye" başlığı, değeri bir alt satırda
+      const devirP = s.parcalar.find(p => /^Devreden Bakiye$/i.test(p.s.trim()));
+      if (devirP && meta.devirBakiye == null) {
+        const alt = satirlar.slice(si + 1, si + 3).find(a => a.parcalar.filter(p => geTutar(p.s)).length >= 2);
+        if (alt) { const ad = alt.parcalar.filter(p => geTutar(p.s)).sort((x, y) => Math.abs(x.x - devirP.x) - Math.abs(y.x - devirP.x))[0]; meta.devirBakiye = geTutar(ad.s).deger; }
+      }
+      if (!kartSahibi) { const m = metin.match(/^Sayın\s+(.+)$/) || metin.match(/Ad soyad\s+(.+)$/i); if (m) kartSahibi = m[1].trim(); }
+
+      // Harcama toplamı: başlık satırı → altındaki ilk "çok tutarlı" satırda başlığa en yakın değer
+      const baslikP = s.parcalar.find(p => ozetDeseni.test(p.s.trim()));
+      if (baslikP && meta.harcamaToplami == null) ozetBaslik = { x: baslikP.x, y: s.y };
+      if (ozetBaslik && meta.harcamaToplami == null && s.y < ozetBaslik.y && ozetBaslik.y - s.y < 60) {
+        const tutarlar = s.parcalar.map(p => ({ p, t: geTutar(p.s) })).filter(o => o.t);
+        if (tutarlar.length >= 3) {
+          tutarlar.sort((a, b) => Math.abs(a.p.x - ozetBaslik.x) - Math.abs(b.p.x - ozetBaslik.x));
+          meta.harcamaToplami = tutarlar[0].t.deger;
+          ozetBaslik = null;
+        }
+      }
+
+      // Kart bölümü başlıkları (ek kart / devir kart) → sonraki satırların kart sahibi
+      let m;
+      if ((m = metin.match(/^DEVİR KART\s+(.+?)\s*\/\s*([\d* ]+)$/))) { kartSahibi = m[1].trim(); continue; }
+
+      // ---------------- İŞLEM SATIRI ----------------
+      const ilk = s.parcalar[0];
+      const tarih = ilk ? geTarih(ilk.s) : null;
+      if (!tarih) continue;
+      // En sağdaki saf tutar = işlem tutarı
+      const tutarAdaylari = s.parcalar.map(p => ({ p, t: geTutar(p.s) })).filter(o => o.t && o.p !== ilk);
+      if (!tutarAdaylari.length) continue;
+      const secilen = tutarAdaylari.reduce((a, b) => (b.p.x > a.p.x ? b : a));
+      const tutarX = secilen.p.x;
+
+      // Açıklama, taksit ve notlar — tarih ile tutar arasındaki parçalardan
+      let taksit = ''; const notlar = []; const aciklamaParcalari = [];
+      for (const p of s.parcalar) {
+        if (p === ilk || p === secilen.p || p.x > tutarX) continue;
+        const t = p.s.trim();
+        if (!t) continue;
+        let mm;
+        if (geTutar(t)) continue;                                                       // bonus vb. ikincil sayılar
+        if ((mm = t.match(/x(\d+)=[\d.,]+\s+(\d+)\.Taksit/i))) { taksit = `${mm[2]}/${mm[1]}`; notlar.push(`Taksitli işlem: ${t}`); continue; }  // Garanti
+        if ((mm = t.match(/^([\d.,]+ TL)\s+İşlemin\s+(\d+)\s*\/\s*(\d+)\s+Taksidi/i))) { taksit = `${mm[2]}/${mm[3]}`; notlar.push(`Asıl işlem tutarı: ${mm[1]}`); continue; } // Kuveyt
+        if (/Türk Lirası$/i.test(t)) { notlar.push(`İşlem tutarı: ${t}`); continue; }  // Kuveyt döviz satırı
+        if (/^\d+\/\d+$/.test(t)) { taksit = t; continue; }                              // Enpara taksit sütunu
+        if (/^0[.,]00$/.test(t)) continue;                                               // puan sütunu
+        aciklamaParcalari.push(t);
+      }
+      let aciklama = aciklamaParcalari.join(' ');
+      // Enpara: "TR (4.575,00 TL)" → asıl işlem tutarı nota
+      aciklama = aciklama.replace(/\((\d{1,3}(?:\.\d{3})*,\d{2}) TL\)/g, (_, v) => { notlar.push(`Asıl işlem tutarı: ${v} TL`); return ''; });
+      aciklama = aciklama.replace(/\s+\b(TR|TUR)\b\s*$/i, '').replace(/\s+/g, ' ').trim();
+
+      // Alacak satırı: ödeme/faiz iadesi atlanır, işyeri iadesi negatif kalem olur
+      if (secilen.t.alacak) {
+        if (GE_ODEME.test(aciklama) || !aciklama) continue;
+        kalemler.push({ tarih, aciklama: `${aciklama} (İade)`, tutar: -secilen.t.deger, taksit, kartSahibi, notlar });
+        continue;
+      }
+      kalemler.push({ tarih, aciklama, tutar: secilen.t.deger, taksit, kartSahibi, notlar });
+    }
+  }
+  return { kalemler: kalemler.filter(k => k.tutar != null && k.tutar !== 0), meta };
+};
+
 // PDF dosyası → sayfalar (pdf.js) → ayrıştır
+// DEĞİŞTİ (kullanıcı talebi): banka PDF metninden tanınır →
+//   Garanti BBVA / Kuveyt Türk / Enpara → kartEkstresiAyristirGenel
+//   Albaraka (ve tanınmayanlar)          → kartEkstresiAyristir (ESKİSİ GİBİ)
+// Tanınmayan bir banka Albaraka okuyucusundan boş dönerse genel okuyucu da denenir.
 export const kartEkstresiPdfOku = async (dosya) => {
   const pdfjs = await ekstrePdfJsYukle();
   const veri = new Uint8Array(await dosya.arrayBuffer());
   const belge = await pdfjs.getDocument({ data: veri }).promise;
   const sayfalar = [];
+  let bankaMetni = ''; // ilk iki sayfanın düz metni — banka tanıma için
   for (let p = 1; p <= belge.numPages; p++) {
     const sayfa = await belge.getPage(p); const tc = await sayfa.getTextContent();
     const ogeler = tc.items.filter(i => i.str && i.str.trim()).map(i => ({ s: i.str, x: i.transform[4], y: Math.round(i.transform[5]) }));
+    if (p <= 2) bankaMetni += ' ' + ogeler.map(o => o.s).join(' ');
     const gruplar = [];
     for (const o of ogeler) { const g = gruplar.find(g => Math.abs(g.y - o.y) <= 2); if (g) g.parcalar.push(o); else gruplar.push({ y: o.y, parcalar: [o] }); }
     sayfalar.push({ satirlar: gruplar });
   }
-  return kartEkstresiAyristir(sayfalar);
+  const banka = ekstreBankasiniBul(bankaMetni);
+  if (banka === 'Garanti BBVA' || banka === 'Kuveyt Türk' || banka === 'Enpara') return kartEkstresiAyristirGenel(sayfalar, banka);
+  const sonuc = kartEkstresiAyristir(sayfalar); // Albaraka — değişmedi
+  if (!banka && !sonuc.kalemler.length) { const genel = kartEkstresiAyristirGenel(sayfalar, ''); if (genel.kalemler.length) return genel; }
+  return sonuc;
 };
 
 // ---------------------------------------------------------------- KATEGORİ MOTORU
@@ -15353,7 +15505,8 @@ export const EKSTRE_VARSAYILAN_KURALLAR = [
   [/GOOGLE\*ADS|FACEBK|FB\.ME|META PLATFORMS|SAHIBINDEN|INSTAGRAM|TIKTOK|LINKEDIN/, 'Reklam'],
   [/TASIT V\.|TASIT VERGI|NAKIL VASITALARI|VERGI DAIRESI|V\.D\.|VERASET|HARCLA|\bSGK\b|\bGIB\b|BELEDIYE/, 'Vergi'],
   [/\bHGS\b|\bOGS\b|YAKIT|PETROL|OPET|SHELL|\bBP\b|TOTAL|AYTEMIZ|LASTIK|OTO |SIGORTA|MUAYENE|TUVTURK|OTOPARK|ISPARK/, 'Araç'],
-  [/S\/SET|MODOGLU|ENERJI|ELEKTRIK|ISKI|IGDAS|DOGALGAZ|TURKCELL|VODAFONE|TURK TELEKOM|SUPERONLINE|FATURA|\bSU\b/, 'Fatura'],
+  // DEĞİŞTİ: Garanti/Kuveyt/Enpara ekstrelerindeki kısaltmalar eklendi (AESAŞ elektrik, TRKCLL, TTNET, TTLKOM, TÜRKNET)
+  [/S\/SET|MODOGLU|ENERJI|ELEKTRIK|ISKI|IGDAS|DOGALGAZ|TURKCELL|TRKCLL|VODAFONE|TURK TELEKOM|TTNET|TTLKOM|TURKNE|SUPERONLINE|AESAS|FATURA|\bSU\b/, 'Fatura'],
   [/PARASUT|MUHASEBE|MALI MUSAVIR|NOTER/, 'Muhasebe'],
   [/GOOGLE\*WORKSPACE|GOOGLE\*CLOUD|APPLE\.COM|ADOBE|VERCEL|ANTHROPIC|OPENAI|FIGENSOFT|USEFIXIE|SER ACQUISITION|MICROSOFT|CANVA|ZOOM|NOTION|OFIS|OFFICE|KIRTASIYE|ATOM 1|TEKNOSA|MEDIAMARKT|VATAN BILG/, 'Ofis'],
   [/HEPSIBURADA|TRENDYOL|AMAZON|\bN11\b|ANPA|GROSS|MIGROS|CARREFOUR|\bBIM\b|A101|\bSOK\b|UCUZLUK|PAZARI|CARSI|MARKET|KOCTAS|BAUHAUS|IKEA|METRO/, 'Malzeme'],
@@ -15514,7 +15667,7 @@ export const KartEkstreYukleModal = ({ defter, kategoriler = [], kurallar = {}, 
           <label className="flex items-center gap-3 bg-amber-50 border-2 border-dashed border-amber-300 hover:border-amber-500 rounded-xl p-3 cursor-pointer">
             <Upload className="w-5 h-5 text-amber-600 shrink-0" />
             <div className="min-w-0 flex-1">
-              <div className="text-xs font-black text-black">{okunuyor ? 'PDF okunuyor…' : dosyaAdi || 'Ekstre PDF dosyasını seç (Albaraka "Kredi Kartı Ekstreniz")'}</div>
+              <div className="text-xs font-black text-black">{okunuyor ? 'PDF okunuyor…' : dosyaAdi || 'Ekstre PDF dosyasını seç (Albaraka · Garanti BBVA · Kuveyt Türk · Enpara)' /* DEĞİŞTİ: desteklenen bankalar */}</div>
               <div className="text-[10px] font-bold text-neutral-500">Dosya tarayıcıda okunur, sunucuya gönderilmez. Ödeme satırları (+) harcama sayılmaz.</div>
             </div>
             <input type="file" accept="application/pdf,.pdf" className="hidden" onChange={dosyaSec} disabled={okunuyor} />
