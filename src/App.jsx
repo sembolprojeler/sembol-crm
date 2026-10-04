@@ -666,29 +666,59 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
               )}
             </div>
 
-            {/* En iyi 10 */}
+            {/* DEĞİŞTİ (kullanıcı talebi): TÜM OYUNCULAR listelenir.
+                • İlk 10 "Aylık En İyi 10" bölümünde madalyalı/vurgulu görünür.
+                • 11. ve sonrası "Diğer Oyuncular" bölümünde sırasıyla devam eder.
+                • Başlıkta bu ay puan yapan toplam oyuncu sayısı yazar. */}
             <div className="bg-white rounded-2xl border border-neutral-200 shadow-sm overflow-hidden">
-              <div className="px-4 py-3 bg-neutral-900 text-white flex items-center justify-between">
-                <p className="font-black text-sm">🏆 Aylık En İyi 10</p>
-                <p className="text-[10px] font-bold text-white/60">Her ayın 1'inde sıfırlanır</p>
+              <div className="px-4 py-3 bg-neutral-900 text-white flex items-center justify-between gap-2">
+                <p className="font-black text-sm">🏆 Aylık Sıralama <span className="text-white/60 font-bold text-xs">· {skorlar.length} oyuncu</span></p>
+                <p className="text-[10px] font-bold text-white/60 text-right">Her ayın 1'inde sıfırlanır</p>
               </div>
               {skorlar.length === 0 ? (
                 <p className="p-4 text-xs font-bold text-neutral-400 text-center">Bu ay henüz kimse oynamadı.</p>
               ) : (
-                <div className="divide-y divide-neutral-100">
-                  {skorlar.slice(0, 10).map((s2, i) => {
-                    const ben = String(s2.personelId) === String(currentUser?.id);
-                    return (
-                      <div key={s2.personelId} className={`flex items-center gap-3 px-4 py-2.5 ${ben ? 'bg-red-50' : ''}`}>
-                        <span className="w-7 text-center font-black text-sm shrink-0">{madalya[i] || `${i + 1}.`}</span>
-                        <div className="w-8 h-8 rounded-full bg-neutral-200 overflow-hidden shrink-0 flex items-center justify-center text-sm">
-                          {s2.foto ? <img src={s2.foto} alt="" className="w-full h-full object-cover" /> : '🚛'}
+                <div>
+                  {/* İLK 10 */}
+                  <p className="px-4 pt-2.5 pb-1 text-[10px] font-black uppercase tracking-widest text-amber-600 bg-amber-50/60">⭐ Aylık En İyi 10</p>
+                  <div className="divide-y divide-neutral-100">
+                    {skorlar.slice(0, 10).map((s2, i) => {
+                      const ben = String(s2.personelId) === String(currentUser?.id);
+                      return (
+                        <div key={s2.personelId} className={`flex items-center gap-3 px-4 py-2.5 ${ben ? 'bg-red-50' : ''}`}>
+                          <span className="w-7 text-center font-black text-sm shrink-0">{madalya[i] || `${i + 1}.`}</span>
+                          <div className="w-8 h-8 rounded-full bg-neutral-200 overflow-hidden shrink-0 flex items-center justify-center text-sm">
+                            {s2.foto ? <img src={s2.foto} alt="" className="w-full h-full object-cover" /> : '🚛'}
+                          </div>
+                          <p className={`flex-1 min-w-0 truncate text-sm font-bold ${ben ? 'text-red-800' : 'text-neutral-800'}`}>{s2.ad}{ben ? ' (Sen)' : ''}</p>
+                          <p className="font-black font-mono text-sm">{s2.skor}</p>
                         </div>
-                        <p className={`flex-1 min-w-0 truncate text-sm font-bold ${ben ? 'text-red-800' : 'text-neutral-800'}`}>{s2.ad}{ben ? ' (Sen)' : ''}</p>
-                        <p className="font-black font-mono text-sm">{s2.skor}</p>
+                      );
+                    })}
+                  </div>
+
+                  {/* 11. VE SONRASI — tüm diğer oyuncular */}
+                  {skorlar.length > 10 && (
+                    <>
+                      <p className="px-4 pt-3 pb-1 text-[10px] font-black uppercase tracking-widest text-neutral-500 bg-neutral-50 border-t border-neutral-200">Diğer Oyuncular · {skorlar.length - 10} kişi</p>
+                      <div className="divide-y divide-neutral-100 max-h-80 overflow-y-auto">
+                        {skorlar.slice(10).map((s2, j) => {
+                          const i = j + 10;
+                          const ben = String(s2.personelId) === String(currentUser?.id);
+                          return (
+                            <div key={s2.personelId} className={`flex items-center gap-3 px-4 py-2 ${ben ? 'bg-red-50' : ''}`}>
+                              <span className="w-7 text-center font-black text-xs text-neutral-500 shrink-0">{i + 1}.</span>
+                              <div className="w-7 h-7 rounded-full bg-neutral-200 overflow-hidden shrink-0 flex items-center justify-center text-xs">
+                                {s2.foto ? <img src={s2.foto} alt="" className="w-full h-full object-cover" /> : '🚛'}
+                              </div>
+                              <p className={`flex-1 min-w-0 truncate text-xs font-bold ${ben ? 'text-red-800' : 'text-neutral-700'}`}>{s2.ad}{ben ? ' (Sen)' : ''}</p>
+                              <p className="font-black font-mono text-xs text-neutral-700">{s2.skor}</p>
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
+                    </>
+                  )}
                 </div>
               )}
             </div>
