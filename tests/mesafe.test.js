@@ -108,10 +108,10 @@ test('ev tipi kademesi: aşılan EN YÜKSEK kademe, 0 km her mesafede, tam eşit
   assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 1000 }, '1+0'), null);        // %0
   assert.equal(mesafeOdaFarkiKalemi({ ...MO, odaKademeleri: [] }, { toplamKm: 1000 }, '3+1'), null);
 });
-test('ev tipi farkı uzun yol yüzdesinin tabanına girer (toplamın üzerine)', () => {
+test('sıra: mesafe → geçiş → uzun yol farkı → EN SON ev tipi farkı (ev tipi uzun yol tabanına girmez)', () => {
   const rota = { toplamKm: 1000, gecisler: {} };
   const k = [{ ad: 'taban', tutar: 35000 }, ...mesafeKalemleri(MO, rota), mesafeOdaFarkiKalemi(MO, rota, '3+1')];
-  assert.equal(mesafeIscilikKalemi(MO, rota, k).tutar, Math.round((35000 + 15000 + 3000) * 0.2));
+  assert.equal(mesafeIscilikKalemi(MO, rota, k).tutar, Math.round((35000 + 15000) * 0.2)); // ev tipi (3.000) hariç
 });
 test('ev tipi kademeleri şemada: varsayılan, eski tek satır göçü, ekle/sil, doğrulama', () => {
   const d = fiyatEksikleriDoldur({ mesafe: { kmUcreti: 15 } });
@@ -141,9 +141,19 @@ test('km oranları %100 üstü: ev tipi %120 ve uzun yol %150 doğru hesaplanır
   const oda = mesafeOdaFarkiKalemi(M2, rota, '4+1');
   assert.equal(oda.tutar, 18000);                                   // 15.000 × %120
   const k = [{ ad: 'taban', tutar: 42000 }, ...mesafeKalemleri(M2, rota), oda];
-  assert.equal(mesafeIscilikKalemi(M2, rota, k).tutar, Math.round((42000 + 15000 + 18000) * 1.5)); // %150 × toplam
+  assert.equal(mesafeIscilikKalemi(M2, rota, k).tutar, Math.round((42000 + 15000) * 1.5)); // %150 × toplam (ev tipi hariç)
   const v = fiyatEksikleriDoldur({}); v.mesafe.kademeler = [{ km: 200, yuzde: 250, ek: 0 }];
   assert.equal(fiyatDogrula(v).hatalar.filter(h => h.yol[0] === 'mesafe').length, 0);
   const g = fiyatEksikleriDoldur({}); g.genel = { acilisOraniEve: 120, acilisOraniDepo: 25 };
   assert.ok(fiyatDogrula(g).hatalar.some(h => h.yol.join('.') === 'genel.acilisOraniEve'));
+});
+
+test('ekran örneği: 1.171,5 km · 4+1 · Osmangazi×2 + Anadolu Otoyolu×2 · %35 kademe · %40 ev tipi', () => {
+  const MX = { ...MESAFE_VARSAYILAN, kmUcreti: 15, kademeler: [{ km: 1000, yuzde: 35, ek: 0 }],
+    gecis: { ...MESAFE_VARSAYILAN.gecis, kopruOsmangazi: 4805, otoyolAnadolu: 675 }, odaKademeleri: [{ km: 1000, yuzde: Y(0, 0, 0, 0, 40) }] };
+  const rota = { toplamKm: 1171.5, gecisler: { kopruOsmangazi: 2, otoyolAnadolu: 2 } };
+  const k = [{ ad: 'taban', tutar: 42000 }, ...mesafeKalemleri(MX, rota)];
+  k.push(mesafeIscilikKalemi(MX, rota, k)); k.push(mesafeOdaFarkiKalemi(MX, rota, '4+1'));
+  assert.deepEqual(k.map(x => x.tutar), [42000, 17580, 9610, 1350, 24689, 7032]);
+  assert.equal(k.reduce((t, x) => t + x.tutar, 0), 102261);
 });
