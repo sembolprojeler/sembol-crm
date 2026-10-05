@@ -9055,25 +9055,25 @@ const TT_PENDIK_IL_KM = {
 //   4 nokta: Pendik → İstanbul'daki yükleme (≈ Pendik) → il merkezi → Pendik
 //   toplam km = 2 × (Pendik → il merkezi)
 //   fiyat = şehir içi taban (oda) + toplam km × km ücreti
-//           + ev tipine göre km farkı (km tutarı × ev tipi %)
 //           + bir uzun yol kademesi aşılırsa (aşılan EN YÜKSEK kademe):
 //             Trakya illerinde Boğaz köprüsü (gidiş + dönüş), kademenin sabit eki,
 //             kademenin yüzdesi (TOPLAMIN üzerine)
+//           + EN SON ev tipine göre km farkı (km tutarı × ev tipi %)
 //   → 1.000 ₺'ye yukarı yuvarlanır (ortalama fiyat)
 // Ek hizmetler (toplama, merdiven, dış cephe, yürüme) bu fiyata DAHİL DEĞİLDİR;
 // görüşmede eskisi gibi ayrıca eklenir.
 const TT_TRAKYA_ILLERI = ['Edirne', 'Kırklareli', 'Tekirdağ'];
 const ttIlFiyatiKmIle = (taban, km, il, M, odaK = '') => {
+  // DEĞİŞTİ (kullanıcı talebi): sıra — 1) mesafe · 2) geçiş · 3) uzun yol farkı · 4) EN SON ev tipi farkı
   let f = taban + km * (Number(M.kmUcreti) || 0);
-  // YENİ: ev tipine göre km farkı
-  const odaFarki = odaK ? mesafeOdaFarkiKalemi(M, { toplamKm: km }, odaK) : null;
-  if (odaFarki) f += odaFarki.tutar;
   const kademe = mesafeAktifKademe(M, km); // aşılan en yüksek uzun yol kademesi
   if (kademe) {
     if (TT_TRAKYA_ILLERI.includes(il)) f += 2 * (Number(M.gecis?.kopruFsm) || 0);
     f += Number(kademe.ek) || 0;
-    f += Math.round(f * (Number(kademe.yuzde) || 0) / 100); // DEĞİŞTİ: yüzde TOPLAMIN üzerine
+    f += Math.round(f * (Number(kademe.yuzde) || 0) / 100); // yüzde TOPLAMIN üzerine (ev tipi farkı hariç)
   }
+  const odaFarki = odaK ? mesafeOdaFarkiKalemi(M, { toplamKm: km }, odaK) : null;
+  if (odaFarki) f += odaFarki.tutar; // en son
   return Math.ceil(f / 1000) * 1000;
 };
 // Verilen fiyat tablosundan (taslak) yeni ilEve / ilDepo tablolarını üretir.
@@ -9321,17 +9321,19 @@ const ttMesafeUygula = (f, kalemler, uyarilar, odaK = '') => { // DEĞİŞTİ: o
     uyarilar.push(f.rota?.hata ? `Km hesaplanamadı (${f.rota.hata}) — şimdilik eski liste fiyatı gösteriliyor.` : 'Km bazlı fiyat için yükleme ve boşaltma il/ilçesini seçin — km hesaplanınca fiyat güncellenir.');
     return { uygulandi: false, esikAsildi: false };
   }
-  mesafeKalemleri(TT_MESAFE, f.rota).forEach(k => kalemler.push(k));
-  // YENİ (kullanıcı talebi): ev tipine göre km farkı (büyük ev → daha çok araç / ekip / yakıt)
+  mesafeKalemleri(TT_MESAFE, f.rota).forEach(k => kalemler.push(k)); // mesafe + geçiş ücretleri (+ sabit ek)
+  // DEĞİŞTİ (kullanıcı talebi): ev tipine göre km farkı burada EKLENMEZ — sıralama:
+  //   1) mesafe · 2) geçiş ücretleri · 3) uzun yol farkı · 4) EN SON ev tipi farkı
+  // (bkz. ttMesafeIscilikEkle). Ev tipi farkı uzun yol yüzdesinin tabanına girmez.
   const odaFarki = odaK ? mesafeOdaFarkiKalemi(TT_MESAFE, f.rota, odaK) : null;
-  if (odaFarki) kalemler.push(odaFarki);
-  return { uygulandi: true, esikAsildi: mesafeEsikAsildi(TT_MESAFE, f.rota.toplamKm) };
+  return { uygulandi: true, esikAsildi: mesafeEsikAsildi(TT_MESAFE, f.rota.toplamKm), odaFarki };
 };
-// Uzun yol farkı (kademe %) — TÜM kalemler eklendikten SONRA çağrılır (toplamın üzerine)
+// Uzun yol farkı (kademe %) — tüm kalemler eklendikten SONRA (toplamın üzerine), ardından EN SON ev tipi farkı
 const ttMesafeIscilikEkle = (f, km, kalemler) => {
   if (!km.uygulandi) return;
   const k = mesafeIscilikKalemi(TT_MESAFE, f.rota, kalemler);
   if (k) kalemler.push(k);
+  if (km.odaFarki) kalemler.push(km.odaFarki); // DEĞİŞTİ (kullanıcı talebi): ev tipi farkı en son
 };
 
 const ttFiyatHesapla = (fHam) => {
@@ -13031,10 +13033,10 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                 { ad: `2+1 toplama (${listeAdi} sekmesinden)`, tutar: toplama },
                 ...mesafeKalemleri(M, { toplamKm, gecisler }),
               ];
-              const oda = mesafeOdaFarkiKalemi(M, { toplamKm }, '2+1'); // YENİ: ev tipi farkı
-              if (oda) kalemler.push(oda);
-              const isc = mesafeIscilikKalemi(M, { toplamKm }, kalemler);
+              const isc = mesafeIscilikKalemi(M, { toplamKm }, kalemler); // uzun yol farkı
               if (isc) kalemler.push(isc);
+              const oda = mesafeOdaFarkiKalemi(M, { toplamKm }, '2+1'); // DEĞİŞTİ: ev tipi farkı EN SON
+              if (oda) kalemler.push(oda);
               return { kalemler, toplam: kalemler.reduce((t, k) => t + k.tutar, 0) };
             };
             const ornekler = [
@@ -13108,7 +13110,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                         </button>
                       </div>
                     )}
-                    <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">%100'ün üstü girilebilir (en fazla %1000). Yüzde, işin <b>TOPLAM</b> maliyetinin (taban + ek hizmetler + km + geçişler + ev tipi farkı + sabit ek) üzerine eklenir. Örnek: 200 km → %15 · 400 km → %25 + 3.000 ₺. 300 km'lik işte 1. kademe, 500 km'lik işte 2. kademe uygulanır (tam eşit = aşmaz). En küçük kademe aşılınca köprü / geçiş ücretleri de eklenir; altında Avrupa Yakası ekstrası eskisi gibi uygulanır. Kaydedince kademeler küçükten büyüğe sıralanır.</p>
+                    <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">%100'ün üstü girilebilir (en fazla %1000). Yüzde, işin <b>TOPLAM</b> maliyetinin (taban + ek hizmetler + km + geçişler + sabit ek) üzerine eklenir; ev tipi farkı bu toplama girmez, en son ayrıca eklenir. Örnek: 200 km → %15 · 400 km → %25 + 3.000 ₺. 300 km'lik işte 1. kademe, 500 km'lik işte 2. kademe uygulanır (tam eşit = aşmaz). En küçük kademe aşılınca köprü / geçiş ücretleri de eklenir; altında Avrupa Yakası ekstrası eskisi gibi uygulanır. Kaydedince kademeler küçükten büyüğe sıralanır.</p>
                   </div>
                 </div>
 
@@ -13150,7 +13152,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                       </button>
                     </div>
                   )}
-                  <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">Örnek: 0 km → 3+1 %10 · 600 km → 3+1 %20. 300 km'lik 3+1 işte %10, 1.000 km'lik işte %20 uygulanır (tam eşit = aşmaz; 0 km kademesi her mesafede geçerli). Depo işlerinde depo boyutu ev tipi yerine geçer. Uzun yol kademelerinden bağımsızdır; ikisi birlikte uygulanabilir. Kaydedince kademeler küçükten büyüğe sıralanır.</p>
+                  <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">Örnek: 0 km → 3+1 %10 · 600 km → 3+1 %20. 300 km'lik 3+1 işte %10, 1.000 km'lik işte %20 uygulanır (tam eşit = aşmaz; 0 km kademesi her mesafede geçerli). Depo işlerinde depo boyutu ev tipi yerine geçer. Uzun yol kademelerinden bağımsızdır; ikisi birlikte uygulanabilir. Sistem fiyatında EN SON eklenir (uzun yol farkından sonra). Kaydedince kademeler küçükten büyüğe sıralanır.</p>
                 </div>
 
                 {/* GEÇİŞLER */}
