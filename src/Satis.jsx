@@ -16,7 +16,8 @@ import { AI_KAYNAK_ETIKETLERI, AI_ISTATISTIK_KUTULARI, aiKaynakMi } from './aiKa
 // YENİ: QR Site Takip şeması — /api/qr-site ile ortak (sabitler, telefon kuralı, WordPress sayfa adresi)
 import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
-import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari } from './fiyatSema.js';
+import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari,
+  MESAFE_VARSAYILAN, MESAFE_GECISLERI, mesafeModuAcik, mesafeEsikAsildi, mesafeKalemleri, mesafeIscilikKalemi, ilceMerkezAdresi, fiyatEksikleriDoldur } from './fiyatSema.js'; // YENİ: km bazlı fiyat
 
 // ============================================================================
 // YENİ (kullanıcı talebi): ESNEK MÜŞTERİ — alternatif taşınma günleri
@@ -9020,11 +9021,14 @@ const TT_DEPO_KIRA = (() => {
 // YENİ (kullanıcı talebi): açılış fiyatı oranı (taban + %X) — Fiyat Tablosu'ndan
 // değiştirilebilir, Sembol ve DepoEvim için ayrı. Varsayılan %25.
 const TT_FIYAT_GENEL = { acilisOraniEve: 25, acilisOraniDepo: 25 };
+// YENİ (kullanıcı talebi): km bazlı fiyat ayarları — Fiyat Tablosu'ndan (Firestore) üzerine yazılır
+const TT_MESAFE = JSON.parse(JSON.stringify(MESAFE_VARSAYILAN));
 const ttFiyatTablolari = () => ({
   genel: TT_FIYAT_GENEL,
   sehirIciEve: FL_SEHIR_ICI_EVE, sehirIciDepo: FL_SEHIR_ICI_DEPO,
   sehirlerArasiEkEve: FL_SEHIRLER_ARASI_EK, sehirlerArasiEkDepo: FL_SEHIRLER_ARASI_EK_DEPO,
   ilEve: FL_IL_EVDEN_EVE, ilDepo: FL_IL_EVDEN_DEPOYA, depoKira: TT_DEPO_KIRA,
+  mesafe: TT_MESAFE, // YENİ
 });
 // PDF fiyatlarının kopyası — "Varsayılana Dön" için
 const TT_FIYAT_VARSAYILAN = JSON.parse(JSON.stringify(ttFiyatTablolari()));
@@ -9232,6 +9236,28 @@ const ttIsAdresleri = (f) => {
 // Şehirler arası: 81 il tablosu + şehirler arası ekler.
 // Depo: aylık ücret × ödenecek ay (kampanya) + KDV ayrıca gösterilir.
 // ============================================================================
+// ============================================================================
+// YENİ (kullanıcı talebi): KM BAZLI FİYAT — 4 NOKTA / 3 ETAP
+// Mod açık ve rota hesaplanmışsa: km × km ücreti; toplam km eşiği (200) AŞARSA
+// geçişler + sabit ek + işçilik farkı (%15 × taban + ek hizmetler). Rota yoksa
+// eski hesap çalışır ve uyarı verilir. Dönen: { uygulandi, esikAsildi }
+// ============================================================================
+const ttMesafeUygula = (f, kalemler, uyarilar) => {
+  if (!mesafeModuAcik(TT_MESAFE)) return { uygulandi: false, esikAsildi: false };
+  if (!(Number(f.rota?.toplamKm) > 0)) {
+    uyarilar.push(f.rota?.hata ? `Km hesaplanamadı (${f.rota.hata}) — şimdilik eski liste fiyatı gösteriliyor.` : 'Km bazlı fiyat için yükleme ve boşaltma il/ilçesini seçin — km hesaplanınca fiyat güncellenir.');
+    return { uygulandi: false, esikAsildi: false };
+  }
+  mesafeKalemleri(TT_MESAFE, f.rota).forEach(k => kalemler.push(k));
+  return { uygulandi: true, esikAsildi: mesafeEsikAsildi(TT_MESAFE, f.rota.toplamKm) };
+};
+// Eşik üstü işçilik farkı — ek hizmetler eklendikten SONRA çağrılır
+const ttMesafeIscilikEkle = (f, km, kalemler) => {
+  if (!km.uygulandi) return;
+  const k = mesafeIscilikKalemi(TT_MESAFE, f.rota, kalemler);
+  if (k) kalemler.push(k);
+};
+
 const ttFiyatHesapla = (fHam) => {
   const f = ttNormalize(fHam || {});
   const kalemler = [];
@@ -9274,9 +9300,12 @@ const ttFiyatHesapla = (fHam) => {
     const L = depoListesi ? FL_SEHIR_ICI_DEPO : FL_SEHIR_ICI_EVE;
     const liste = depoListesi ? 'Şehir İçi Evden Depoya' : 'Şehir İçi Evden Eve';
     kalemler.push({ ad: `${odaK} nakliye taban fiyatı (Anadolu)`, tutar: L.taban[odaK] });
+    // YENİ (kullanıcı talebi): km bazlı mod — km × ücret (eşik üstünde geçişler + ek)
+    const km = ttMesafeUygula(f, kalemler, uyarilar);
     // Avrupa Yakası ekstra: adreslerden biri (depo şubesi dahil) Avrupa ise BİR kez eklenir
     // DEĞİŞTİ (kullanıcı talebi): il + ilçe + şube kontrolü (ttAvrupaAdresVarMi)
-    if (ttAvrupaAdresVarMi(f)) ttAvrupaEkstraEkle(L, odaK, kalemler, uyarilar);
+    // DEĞİŞTİ: km modunda eşik ÜSTÜNDE eklenmez (köprü ücretleri devreye girer)
+    if (!km.esikAsildi && ttAvrupaAdresVarMi(f)) ttAvrupaEkstraEkle(L, odaK, kalemler, uyarilar);
     if (f.toplama === 'Firma') kalemler.push({ ad: `${odaK} toplama hizmeti`, tutar: L.toplama[odaK] });
     adresler.forEach(a => {
       const kat = ttKatNo(a.kat);
@@ -9293,6 +9322,7 @@ const ttFiyatHesapla = (fHam) => {
     });
     if (f.odaSayisi === 'Villa') uyarilar.push('5+1 / villa: 4+1 fiyatı baz alındı — video ile netleştirin.');
     if (f.odaSayisi === 'Ofis') uyarilar.push('Kurumsal ofis taşıma: teklif dosyası + KDV ister, Mehmet Bey\'e aktarın.');
+    ttMesafeIscilikEkle(f, km, kalemler); // YENİ: eşik üstü işçilik farkı (%15)
     const toplam = kalemler.reduce((s, k) => s + (k.tutar || 0), 0);
     if (f.videoDurumu !== 'Alındı' && f.videoDurumu !== 'Keşif Yapıldı') uyarilar.push('Video/fotoğraf gelmeden fiyat kesinleşmez — mutlaka isteyin.');
     return { tur: 'sehirIci', liste, kalemler, nakliyeToplam: toplam, depo, uyarilar, bilgiler };
@@ -9305,6 +9335,17 @@ const ttFiyatHesapla = (fHam) => {
   // Tablo Pendik çıkışlıdır: İstanbul dışındaki il(ler) baz alınır
   const disIller = [...new Set([f.hizmetTipi === 'Depodan Çıkış' ? null : f.yukIl, f.hizmetTipi === 'Depo' ? null : f.bosIl].filter(il => il && !ttIstanbulMu(il)))];
   const adaylar = disIller.map(il => ({ il, fiyat: T[il]?.[sutun] })).filter(x => x.fiyat);
+  // YENİ (kullanıcı talebi): km bazlı mod — rota varsa 81 il tablosu KULLANILMAZ:
+  // taban (oda, Anadolu listesi) + km × ücret (+ eşik üstü geçiş/ek/işçilik farkı)
+  const kmKalem = []; const kmUyari = [];
+  const km = ttMesafeUygula(f, kmKalem, kmUyari);
+  kmUyari.forEach(u => uyarilar.push(u));
+  if (km.uygulandi) {
+    kalemler.push({ ad: `${odaK} nakliye taban fiyatı`, tutar: (depoListesi ? FL_SEHIR_ICI_DEPO : FL_SEHIR_ICI_EVE).taban[odaK] });
+    kmKalem.forEach(k => kalemler.push(k));
+    bilgiler.push('Km bazlı fiyat: ilçe merkezleri arası Google rotası (4 nokta / 3 etap) kullanıldı; 81 il tablosu devre dışı.');
+    if (!km.esikAsildi && ttAvrupaAdresVarMi(f)) ttAvrupaEkstraEkle(depoListesi ? FL_SEHIR_ICI_DEPO : FL_SEHIR_ICI_EVE, odaK, kalemler, uyarilar);
+  } else {
   if (adaylar.length === 0) {
     uyarilar.push(`${disIller.join(', ') || 'Seçilen il'} için listede fiyat bulunamadı.`);
     return { tur: 'eksik', liste, kalemler, nakliyeToplam: 0, depo, uyarilar, bilgiler };
@@ -9315,6 +9356,7 @@ const ttFiyatHesapla = (fHam) => {
   // YENİ (kullanıcı talebi): şehirler arası işte de İstanbul tarafındaki adres Avrupa
   // Yakası ise (ya da depo şubesi Avrupa'daysa) Avrupa ekstrası eklenir
   if (ttAvrupaAdresVarMi(f)) ttAvrupaEkstraEkle(depoListesi ? FL_SEHIR_ICI_DEPO : FL_SEHIR_ICI_EVE, odaK, kalemler, uyarilar);
+  }
   const E = depoListesi ? FL_SEHIRLER_ARASI_EK_DEPO : FL_SEHIRLER_ARASI_EK;   // DEĞİŞTİ: listeye özel ekler
   if (f.toplama === 'Firma') kalemler.push({ ad: `${odaK} toplama hizmeti`, tutar: E.toplama[odaK] });
   adresler.forEach(a => {
@@ -9335,6 +9377,7 @@ const ttFiyatHesapla = (fHam) => {
   if (f.odaSayisi === 'Ofis') uyarilar.push('Kurumsal ofis taşıma: teklif dosyası + KDV ister, Mehmet Bey\'e aktarın.');
   bilgiler.push('Pendik çıkışlı ortalama bedel. %10 iskonto için Mehmet Bey\'e danışın. Eşya araca yüklendikten sonra %50 ödeme alınır.');
   if (f.videoDurumu !== 'Alındı' && f.videoDurumu !== 'Keşif Yapıldı') uyarilar.push('Video/fotoğraf gelmeden fiyat kesinleşmez — mutlaka isteyin.');
+  ttMesafeIscilikEkle(f, km, kalemler); // YENİ: eşik üstü işçilik farkı (%15)
   const toplam = kalemler.reduce((s, k) => s + (k.tutar || 0), 0);
   return { tur: 'sehirlerArasi', liste, kalemler, nakliyeToplam: toplam, depo, uyarilar, bilgiler };
 };
@@ -9624,6 +9667,129 @@ const TTSecimKarti = ({ secili, onClick, baslik, alt, stil, Ikon = null }) => (
 );
 
 // İl + ilçe seçici — iller önceliklidir (İstanbul, Kocaeli, Bursa, İzmir, Ankara)
+// ############################################################################
+// YENİ (kullanıcı talebi): KM HESABI — 4 NOKTA / 3 ETAP (İLÇE MERKEZLERİ)
+// ----------------------------------------------------------------------------
+// Adres ELLE girilmez: il / ilçe seçimi eskisi gibi kalır, km ilçe merkezleri
+// arasından hesaplanır. Noktalar:
+//   1) Hareket merkezi (Pendik) · 2) Yükleme ilçesi · 3) Boşaltma ilçesi · 4) Hareket merkezi
+// Depo işlerinde yükleme/boşaltma yerine şubenin ilçesi girer.
+// Km sunucudaki /api/mesafe ucundan gelir (Google Routes API, önbellekli).
+// ############################################################################
+const TT_MESAFE_API = '/api/mesafe';
+// Hizmete göre 4 nokta → [{ ad, adres }] · eksik seçim varsa null
+const ttRotaNoktalari = (f) => {
+  const merkez = { ad: 'Hareket merkezi (Pendik)', adres: TT_MESAFE.cikisAdresi || MESAFE_VARSAYILAN.cikisAdresi };
+  const ilce = (il, ilceAdi, ad) => { const adres = ilceMerkezAdresi(il, ilceAdi); return adres ? { ad, adres, eksikIlce: !ilceAdi } : null; };
+  const sube = () => { const d = DEPO_LOCATIONS.find(x => x.name === f.sube) || DEPO_LOCATIONS[0]; return { ad: d.name, adres: ilceMerkezAdresi(d.province, d.district) }; };
+  let A = null, B = null;
+  if (f.hizmetTipi === 'Nakliye') { A = ilce(f.yukIl, f.yukIlce, 'Yükleme'); B = ilce(f.bosIl, f.bosIlce, 'Boşaltma'); }
+  else if (f.hizmetTipi === 'Depo') { if (f.nakliyeIstiyor !== 'Firma') return null; A = ilce(f.yukIl, f.yukIlce, 'Yükleme'); B = sube(); }
+  else { A = sube(); B = ilce(f.bosIl, f.bosIlce, 'Boşaltma'); }
+  if (!A || !B) return null;
+  return [merkez, A, B, merkez];
+};
+// Sunucudan km iste
+const ttRotaHesapla = async (noktalar, kullanici) => {
+  const r = await fetch(TT_MESAFE_API, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kullaniciId: kullanici?.id, sifre: kullanici?.password, noktalar: noktalar.map(n => n.adres) }),
+  });
+  let j; try { j = await r.json(); } catch { j = {}; }
+  if (!r.ok) throw new Error(j.error || `Km servisi hatası (${r.status})`);
+  // Etaplara ekran adlarını ekle
+  j.etaplar = (j.etaplar || []).map((e, i) => ({ ...e, ad: `${noktalar[i].ad} → ${noktalar[i + 1].ad}` }));
+  return { ...j, hesaplanan: new Date().toISOString() };
+};
+
+// Güzergah & km kartı — 4 nokta, 3 etap, toplam km, eşik durumu, geçişler (±), kalem özeti
+const TTRotaKarti = ({ form, setForm, kullanici }) => {
+  const [hesaplaniyor, setHesaplaniyor] = useState(false);
+  if (!mesafeModuAcik(TT_MESAFE)) return null; // mod kapalıyken görünmez (eski sistem)
+  const rota = form.rota;
+  const noktalar = ttRotaNoktalari(form);
+  const tekrar = async () => {
+    if (!noktalar) return;
+    setHesaplaniyor(true);
+    const imza = JSON.stringify(noktalar.map(n => n.adres));
+    try { const r = await ttRotaHesapla(noktalar, kullanici); setForm(f => ({ ...f, rota: { ...r, imza } })); }
+    catch (e) { setForm(f => ({ ...f, rota: { hata: e.message, imza } })); }
+    finally { setHesaplaniyor(false); }
+  };
+  const gecisDegis = (id, fark) => setForm(f => {
+    const g = { ...(f.rota?.gecisler || {}) };
+    g[id] = Math.max(0, (g[id] || 0) + fark);
+    if (!g[id]) delete g[id];
+    return { ...f, rota: { ...(f.rota || {}), gecisler: g } };
+  });
+  const km = Number(rota?.toplamKm) || 0;
+  const esik = Number(TT_MESAFE.esikKm) || 0;
+  const asildi = mesafeEsikAsildi(TT_MESAFE, km);
+  const kalemler = mesafeKalemleri(TT_MESAFE, rota);
+  return (
+    <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/40 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-[11px] font-black uppercase text-emerald-900 flex items-center gap-1.5"><MapPin className="w-4 h-4" /> Güzergah & Km (4 nokta · ilçe merkezleri)</p>
+        {noktalar && <button type="button" onClick={tekrar} disabled={hesaplaniyor} className="px-2.5 py-1 rounded-lg bg-neutral-900 text-white text-[10px] font-black flex items-center gap-1 disabled:opacity-50">{hesaplaniyor ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Yeniden hesapla</button>}
+      </div>
+      {/* 4 nokta */}
+      {noktalar ? (
+        <div className="flex flex-wrap items-center gap-1 text-[10px] font-bold">
+          {noktalar.map((n, i) => (
+            <React.Fragment key={i}>
+              <span className={`px-2 py-1 rounded-lg ${i === 0 || i === 3 ? 'bg-neutral-900 text-white' : 'bg-white border border-emerald-200 text-emerald-900'}`}>{i + 1}. {n.adres.replace(', Türkiye', '')}</span>
+              {i < 3 && <span className="text-emerald-700">→</span>}
+            </React.Fragment>
+          ))}
+        </div>
+      ) : <p className="text-[10px] font-bold text-neutral-500">Km hesabı için yükleme ve boşaltma il/ilçesini seçin (depo işlerinde şube otomatik eklenir).</p>}
+      {noktalar?.some(n => n.eksikIlce) && <p className="text-[10px] font-bold text-amber-800">İlçe seçilmedi — il merkezi baz alındı. Daha doğru km için ilçeyi seçin.</p>}
+      {hesaplaniyor && !rota?.etaplar && <p className="text-[10px] font-bold text-neutral-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Km hesaplanıyor…</p>}
+      {rota?.hata && <p className="text-[10px] font-bold text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">Km hesaplanamadı: {rota.hata}</p>}
+      {/* 3 etap */}
+      {(rota?.etaplar || []).length > 0 && (
+        <div className="rounded-xl border border-emerald-200 bg-white divide-y divide-neutral-100">
+          {rota.etaplar.map((e, i) => (
+            <div key={i} className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+              <span className="font-bold text-neutral-700">{i + 1}. etap · {e.ad}</span>
+              <span className="font-black text-neutral-900">{Number(e.km).toLocaleString('tr-TR')} km {e.dk ? <span className="text-neutral-400 font-bold">· {e.dk} dk</span> : null}</span>
+            </div>
+          ))}
+          <div className={`flex items-center justify-between px-3 py-2 text-xs ${asildi ? 'bg-amber-100' : 'bg-emerald-100'}`}>
+            <span className={`font-black ${asildi ? 'text-amber-900' : 'text-emerald-900'}`}>Toplam {asildi ? `· ${esik} km eşiği AŞILDI` : `· ${esik} km eşiği altında`}</span>
+            <span className={`font-black ${asildi ? 'text-amber-900' : 'text-emerald-900'}`}>{km.toLocaleString('tr-TR')} km</span>
+          </div>
+        </div>
+      )}
+      {/* Geçişler — yalnızca eşik üstünde fiyata girer */}
+      {km > 0 && (
+        <div>
+          <p className="text-[10px] font-black uppercase text-neutral-500 mb-1">Ücretli geçişler {asildi ? '(rotadan tespit edildi — ± ile düzeltin)' : `(${esik} km altında fiyata eklenmez)`}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {MESAFE_GECISLERI.map(g => {
+              const n = rota?.gecisler?.[g.ic] || 0;
+              return (
+                <span key={g.ic} className={`inline-flex items-center gap-1 rounded-lg border px-1.5 py-1 text-[10px] font-bold ${n ? (asildi ? 'bg-amber-100 border-amber-300 text-amber-900' : 'bg-neutral-100 border-neutral-300 text-neutral-500 line-through') : 'bg-white border-neutral-200 text-neutral-500'}`} title={`${ttTl(TT_MESAFE.gecis?.[g.ic] || 0)} / geçiş`}>
+                  <button type="button" onClick={() => gecisDegis(g.ic, -1)} className="w-4 h-4 rounded bg-black/5 hover:bg-black/10 font-black leading-none">−</button>
+                  <span>{g.etiket.split(' · ')[0].split(' (')[0]}{n ? ` ×${n}` : ''}</span>
+                  <button type="button" onClick={() => gecisDegis(g.ic, +1)} className="w-4 h-4 rounded bg-black/5 hover:bg-black/10 font-black leading-none">+</button>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {/* Km kalemleri özeti (işçilik farkı fiyat kartında görünür) */}
+      {kalemler.length > 0 && (
+        <div className="rounded-xl bg-neutral-900 text-white px-3 py-2 text-[11px] space-y-0.5">
+          {kalemler.map((k, i) => <div key={i} className="flex justify-between gap-2"><span className="text-white/80">{k.ad}</span><span className="font-black">{ttTl(k.tutar)}</span></div>)}
+          {asildi && Number(TT_MESAFE.iscilikYuzde) > 0 && <div className="text-[10px] text-amber-300 font-bold pt-0.5">+ %{TT_MESAFE.iscilikYuzde} uzun yol işçilik farkı (taban + ek hizmetler üzerinden) sistem fiyatına eklenir.</div>}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const TTIlIlce = ({ il, ilce, adres, onIl, onIlce, onAdres, halka = '' }) => {
   const ilceler = ttIlceler(il);
   const secimCls = `w-full px-3 py-2.5 rounded-xl border border-neutral-300 bg-white text-sm font-bold text-neutral-900 outline-none focus:ring-2 ${halka}`;
@@ -10087,6 +10253,7 @@ const ttBosForm = (hizmetTipi = 'Nakliye') => ({
   odaSayisi: '', esyaCinsi: '',
   yukIl: 'İstanbul (Anadolu)', yukIlce: '', yukAdres: '', yukKat: '', yukTasima: '', yukMesafe: '',
   bosIl: 'İstanbul (Anadolu)', bosIlce: '', bosAdres: '', bosKat: '', bosTasima: '', bosMesafe: '',
+  rota: null, // YENİ: 4 noktalı km hesabı (ilçe merkezleri)
   toplama: '', depoBoyutu: '', kiralamaSuresi: '1', sube: 'Farketmez', nakliyeIstiyor: '',
   tasinmaTarihi: '', tasinmaNotu: '', videoDurumu: 'Paylaşmadı',
   verilenFiyat: '', takipTarihi: '', durum: 'Yeni', aciklama: '', havuzKayitId: '',
@@ -10242,7 +10409,7 @@ const ttHavuzdanTeklifVerisi = (k, kullanici) => {
   };
 };
 
-const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', gecmisIndeksi = null, gonderen = '', onKaydet, onKapat, onWhatsappKaydi = null }) => {
+const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', gecmisIndeksi = null, gonderen = '', onKaydet, onKapat, onWhatsappKaydi = null, currentUser = null }) => { // DEĞİŞTİ: currentUser (km servisi doğrulaması)
   const [waSablon, setWaSablon] = useState(null);          // YENİ: açık WhatsApp şablonu
   const [notSablonAcik, setNotSablonAcik] = useState(false); // YENİ (kullanıcı talebi): hazır not şablonları kapalı başlar
   const [form, setForm] = useState(() => ({ ...ttBosForm(varsayilanHizmet), ...(baslangic ? ttNormalize(baslangic) : {}), surum: 2 }));
@@ -10288,6 +10455,20 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
 
   // Alan güncelleyiciler
   const d = (alan) => (v) => setForm(f => ({ ...f, [alan]: v }));
+  // YENİ (kullanıcı talebi): il/ilçe veya şube değişince 4 noktalı km OTOMATİK hesaplanır
+  // (mod açıkken). Aynı noktalar için tekrar istek atılmaz (imza). Nokta eksilirse rota silinir.
+  useEffect(() => {
+    if (!mesafeModuAcik(TT_MESAFE)) return undefined;
+    const noktalar = ttRotaNoktalari(form);
+    if (!noktalar) { if (form.rota) setForm(f => ({ ...f, rota: null })); return undefined; }
+    const imza = JSON.stringify(noktalar.map(n => n.adres));
+    if (form.rota?.imza === imza) return undefined;
+    const z = setTimeout(async () => {
+      try { const r = await ttRotaHesapla(noktalar, currentUser); setForm(f => ({ ...f, rota: { ...r, imza } })); }
+      catch (e) { setForm(f => ({ ...f, rota: { hata: e.message, imza } })); }
+    }, 500);
+    return () => clearTimeout(z);
+  }, [form.yukIl, form.yukIlce, form.bosIl, form.bosIlce, form.sube, form.hizmetTipi, form.nakliyeIstiyor]); // eslint-disable-line react-hooks/exhaustive-deps
   const git = (i) => { clearTimeout(ilerleZamanlayici.current); const a = adimlar[Math.max(0, Math.min(i, adimlar.length - 1))]; if (a) bolumeGit(a.id); };
   const ileri = () => git(adimIdx + 1);
   const geri = () => git(adimIdx - 1);
@@ -10393,18 +10574,24 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
         </div>
       );
       case 'guzergah': return (
-        <div className={rollerIzgara}>
-          {roller.map(r => rolKutusu(r, <>
-              <TTIlIlce il={form[`${r}Il`]} ilce={form[`${r}Ilce`]} adres={form[`${r}Adres`]} halka={S.halka}
-                onIl={d(`${r}Il`)} onIlce={d(`${r}Ilce`)} onAdres={d(`${r}Adres`)} />
-            </>))}
+        <div className="space-y-3">{/* DEĞİŞTİ: altına 4 noktalı km kartı eklendi */}
+          <div className={rollerIzgara}>
+            {roller.map(r => rolKutusu(r, <>
+                <TTIlIlce il={form[`${r}Il`]} ilce={form[`${r}Ilce`]} adres={form[`${r}Adres`]} halka={S.halka}
+                  onIl={d(`${r}Il`)} onIlce={d(`${r}Ilce`)} onAdres={d(`${r}Adres`)} />
+              </>))}
+          </div>
+          <TTRotaKarti form={form} setForm={setForm} kullanici={currentUser} />
         </div>
       );
       case 'konum': return (
-        <div className={rollerIzgara}>
-          {rolKutusu('yuk', <>
-            <TTIlIlce il={form.yukIl} ilce={form.yukIlce} adres={form.yukAdres} halka={S.halka} onIl={d('yukIl')} onIlce={d('yukIlce')} onAdres={d('yukAdres')} />
-          </>)}
+        <div className="space-y-3">{/* DEĞİŞTİ: altına 4 noktalı km kartı eklendi */}
+          <div className={rollerIzgara}>
+            {rolKutusu('yuk', <>
+              <TTIlIlce il={form.yukIl} ilce={form.yukIlce} adres={form.yukAdres} halka={S.halka} onIl={d('yukIl')} onIlce={d('yukIlce')} onAdres={d('yukAdres')} />
+            </>)}
+          </div>
+          <TTRotaKarti form={form} setForm={setForm} kullanici={currentUser} />
         </div>
       );
       case 'kat': return (
@@ -12277,7 +12464,7 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
 
       {/* PENCERELER */}
       {form && (
-        <TelefonTeklifFormu key={form.baslangic?.id || form.hizmet} baslangic={form.baslangic} varsayilanHizmet={form.hizmet}
+        <TelefonTeklifFormu key={form.baslangic?.id || form.hizmet} baslangic={form.baslangic} varsayilanHizmet={form.hizmet} currentUser={currentUser}
           gecmisIndeksi={gecmisIndeksi} gonderen={kullanici} onKaydet={kaydet} onKapat={() => setForm(null)}
           onWhatsappKaydi={(ad) => { const id = form.baslangic?.id; const c = id && (teklifler.find(x => x.id === id) || form.baslangic); if (c) guncelle(c, {}, `WhatsApp mesajı açıldı: ${ad}`); }} />
       )}
@@ -12355,6 +12542,9 @@ const TT_FT_SEKMELER = [
     secili: 'bg-blue-600 text-white border-blue-600', pasif: 'bg-white text-blue-700 border-blue-200 hover:border-blue-400', baslikCls: 'bg-blue-600' },
   { id: 'kira', ad: 'Kiralık Depo', marka: 'DEPOEVİM', alt: 'Şube bazlı aylık depo kirası', Ikon: Wallet,
     secili: 'bg-sky-600 text-white border-sky-600', pasif: 'bg-white text-sky-700 border-sky-200 hover:border-sky-400', baslikCls: 'bg-sky-600' },
+  // YENİ (kullanıcı talebi): km bazlı fiyat ayarları (iki nakliye listesi için ortak)
+  { id: 'mesafe', ad: 'Km & Güzergah', marka: 'SEMBOL + DEPOEVİM', alt: 'Km ücreti · 200 km eşiği · köprü / feribot', Ikon: MapPin,
+    secili: 'bg-emerald-600 text-white border-emerald-600', pasif: 'bg-white text-emerald-700 border-emerald-200 hover:border-emerald-400', baslikCls: 'bg-emerald-600' },
 ];
 const ttYolAl = (o, yol) => yol.reduce((x, k) => (x == null ? x : x[k]), o);
 const ttYolYaz = (o, yol, v) => {
@@ -12401,7 +12591,19 @@ const ttFiyatApiGonder = async (govde) => {
   return j;
 };
 const TT_WOO_UYARI = 'WooCommerce mağazasındaki ürün fiyatlarını da güncellemeyi unutma.';
-const ttFarkDeger = (f, v) => (v == null || v === '' ? '—' : f.yol[0] === 'genel' ? `%${v}` : ttTl(v));
+const ttFarkDeger = (f, v) => {
+  if (v == null || v === '') return '—';
+  if (f.yol[0] === 'genel') return `%${v}`;
+  // YENİ: km bazlı fiyat hücreleri
+  if (f.yol[0] === 'mesafe') {
+    if (f.yol[1] === 'modu') return Number(v) === 1 ? 'Açık' : 'Kapalı';
+    if (f.yol[1] === 'cikisAdresi') return String(v);
+    if (f.yol[1] === 'kmUcreti') return `${Number(v).toLocaleString('tr-TR')} ₺/km`;
+    if (f.yol[1] === 'esikKm') return `${Number(v).toLocaleString('tr-TR')} km`;
+    if (f.yol[1] === 'iscilikYuzde') return `%${v}`;
+  }
+  return ttTl(v);
+};
 const ttTarihKisa = (iso) => (iso ? new Date(iso).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }) : '');
 
 const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
@@ -12419,7 +12621,8 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
   const [gecmisDetay, setGecmisDetay] = useState(null);
   // DEĞİŞTİ (kullanıcı talebi): tek kaynak Firestore — pencere belgeyi OLDUĞU GİBİ gösterir
   const kayitli = fiyatBilgi?.veri || null;
-  const veri = duzenle && taslak ? taslak : (kayitli || ttFiyatTablolari());
+  // DEĞİŞTİ: eski kayıtlarda 'mesafe' yoktur → görüntüde varsayılanlarla doldurulur
+  const veri = fiyatEksikleriDoldur(duzenle && taslak ? taslak : (kayitli || ttFiyatTablolari()), kayitli);
   const aktifSekme = TT_FT_SEKMELER.find(x => x.id === sekme);
   const degis = (yol, v) => setTaslak(t => ttYolYaz(t, yol, v));
 
@@ -12432,7 +12635,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
     return m;
   }, [dogrulama]);
 
-  const duzenlemeyiAc = () => { setTaslak(JSON.parse(JSON.stringify(kayitli))); setDuzenle(true); setMesaj(null); setGecmisAcik(false); };
+  const duzenlemeyiAc = () => { setTaslak(fiyatEksikleriDoldur(kayitli, kayitli)); setDuzenle(true); setMesaj(null); setGecmisAcik(false); }; // DEĞİŞTİ: km hücreleri dolu gelir
   const kaydetIste = () => {
     if (dogrulama.hatalar.length) {
       setMesaj({ tur: 'hata', metin: `${dogrulama.hatalar.length} hücrede hatalı değer var (kırmızı kutular) — boş, sıfır veya sayı olmayan değer kaydedilemez. İlk hata: ${dogrulama.hatalar[0].etiket} → ${dogrulama.hatalar[0].mesaj}` });
@@ -12458,7 +12661,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
       setMesaj({ tur: 'hata', metin: `Kaydedilemedi: ${e?.message || ''}${e?.hatalar?.length ? ` (${e.hatalar[0].etiket} → ${e.hatalar[0].mesaj})` : ''}` });
     } finally { setKaydediliyor(false); }
   };
-  const varsayilanaDon = () => { setTaslak(JSON.parse(JSON.stringify(TT_FIYAT_VARSAYILAN))); setMesaj({ tur: 'uyari', metin: 'PDF (Eylül 2026) fiyatları yüklendi — kalıcı olması için Kaydet\'e basın.' }); };
+  const varsayilanaDon = () => { setTaslak({ ...JSON.parse(JSON.stringify(TT_FIYAT_VARSAYILAN)), mesafe: taslak?.mesafe || veri.mesafe }); setMesaj({ tur: 'uyari', metin: 'PDF (Eylül 2026) fiyatları yüklendi (Km & Güzergah ayarlarına dokunulmadı) — kalıcı olması için Kaydet\'e basın.' }); }; // DEĞİŞTİ
 
   // YENİ (kullanıcı talebi): geçmiş listesi — yalnızca açılınca okunur (son 20 kayıt)
   const gecmisiAc = async () => {
@@ -12520,7 +12723,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
         </div>
         {/* SEKMELER: Sembol · Depo nakliye · Kiralık depo */}
         <div className="shrink-0 px-4 md:px-5 pt-3 space-y-2">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">{/* DEĞİŞTİ: 4. sekme (Km & Güzergah) */}
             {TT_FT_SEKMELER.map(x => (
               <button key={x.id} type="button" onClick={() => setSekme(x.id)}
                 className={`px-3 py-2.5 rounded-2xl border-2 text-left transition flex items-center gap-2.5 ${sekme === x.id ? x.secili + ' shadow-lg' : x.pasif}`}>
@@ -12533,7 +12736,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
               </button>
             ))}
           </div>
-          {sekme !== 'kira' && (
+          {sekme !== 'kira' && sekme !== 'mesafe' && (
             <div className="flex gap-1.5">
               {[['sehirIci', 'Şehir İçi (İstanbul)'], ['sehirlerArasi', 'Şehirler Arası (81 İl)']].map(([id, ad]) => (
                 <button key={id} type="button" onClick={() => setKapsam(id)}
@@ -12592,7 +12795,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
           {/* DEĞİŞTİ (kullanıcı talebi): FİYAT ARALIĞI YÜZDESİ (eski adı: açılış fiyatı oranı).
               Toplam nakliye fiyatı TABAN'dır; müşteriye TABAN – TABAN × (1 + yüzde/100) aralığı
               gösterilir. Yüzde kalemlere değil TOPLAMA uygulanır; üst sınır 500 ₺'ye yukarı yuvarlanır. */}
-          {sekme !== 'kira' && (() => {
+          {sekme !== 'kira' && sekme !== 'mesafe' && (() => {
             const yol = ['genel', aktifSekme.oran];
             const oran = Number(ttYolAl(veri, yol));
             const ornekTaban = Number(ttYolAl(veri, [aktifSekme.sehirIci, 'taban', '2+1'])) || 0;
@@ -12665,6 +12868,102 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
               </div>
             </div>
           )}
+          {/* ================= YENİ (kullanıcı talebi): KM & GÜZERGAH SEKMESİ ================= */}
+          {sekme === 'mesafe' && (() => {
+            const M = veri.mesafe || {};
+            const acik = Number(M.modu) === 1;
+            const hucre = (yol) => {
+              const d = ttYolAl(veri, yol);
+              return <TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => degis(yol, v)} degisti={d !== ttYolAl(kayitli, yol)} durum={durumlar.get(fiyatYolAnahtari(yol))} />;
+            };
+            const satir = (etiket, aciklama, yol, i, sonEk = '') => (
+              <div className={`flex items-center justify-between gap-2 px-3 py-2 ${i % 2 ? 'bg-neutral-50' : 'bg-white'}`}>
+                <span className="text-xs font-bold text-neutral-700">{etiket}<span className="block text-[10px] text-neutral-400">{aciklama}</span></span>
+                <span className="flex items-center gap-1">{hucre(yol)}{sonEk && <span className="text-[10px] font-black text-neutral-500">{sonEk}</span>}</span>
+              </div>
+            );
+            // Canlı örnekler (kullanıcının örneği): 2+1 ev · Kadıköy → İnegöl
+            const ornek = (toplamKm, gecisler) => {
+              const taban = Number(ttYolAl(veri, ['sehirIciEve', 'taban', '2+1'])) || 0;
+              const kalemler = [{ ad: '2+1 nakliye taban', tutar: taban }, ...mesafeKalemleri(M, { toplamKm, gecisler })];
+              const isc = mesafeIscilikKalemi(M, { toplamKm }, kalemler);
+              if (isc) kalemler.push(isc);
+              return { kalemler, toplam: kalemler.reduce((t, k) => t + k.tutar, 0) };
+            };
+            const ornekler = [
+              { baslik: `Pendik → Kadıköy (15) → İnegöl (100) → Pendik (85) = 200 km · eşik altı`, ...ornek(200, { kopruOsmangazi: 2 }) },
+              { baslik: `Aynı iş 260 km olsaydı · ${Number(M.esikKm) || 200} km eşiği aşılır`, ...ornek(260, { kopruOsmangazi: 2 }) },
+            ];
+            return (
+              <div className="space-y-3">
+                {/* MOD */}
+                <div className={`rounded-2xl border-2 p-3 flex flex-col md:flex-row md:items-center gap-3 ${acik ? 'border-emerald-400 bg-emerald-50' : 'border-neutral-300 bg-white'}`}>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[11px] font-black uppercase text-neutral-900">Km Bazlı Fiyat Modu</p>
+                    <p className="text-[11px] font-bold text-neutral-600">Açıkken sistem fiyatı: <b>taban (oda sayısı) + toplam km × km ücreti + ek hizmetler</b>. Km, seçilen <b>ilçe merkezleri</b> arasından 4 noktayla hesaplanır: <b>hareket merkezi → yükleme → boşaltma → hareket merkezi</b>. Toplam km <b>eşiği aşarsa</b> köprü/otoyol/feribot ücretleri, sabit ek maliyet ve işçilik farkı (%) eklenir. 81 il tablosu bu modda kullanılmaz. Kapalıyken eski liste sistemi çalışır.</p>
+                  </div>
+                  {duzenle ? (
+                    <div className="flex gap-1.5 shrink-0">
+                      {[[1, 'AÇIK'], [0, 'KAPALI']].map(([v, ad]) => (
+                        <button key={v} type="button" onClick={() => degis(['mesafe', 'modu'], v)} className={`px-4 py-2 rounded-xl text-xs font-black border-2 ${Number(M.modu) === v ? (v ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-neutral-900 text-white border-neutral-900') : 'bg-white text-neutral-600 border-neutral-300'}`}>{ad}</button>
+                      ))}
+                    </div>
+                  ) : <span className={`shrink-0 px-4 py-2 rounded-xl text-sm font-black ${acik ? 'bg-emerald-600 text-white' : 'bg-neutral-200 text-neutral-700'}`}>{acik ? 'AÇIK' : 'KAPALI'}</span>}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {/* HAREKET MERKEZİ + KM */}
+                  <div className="rounded-2xl border border-neutral-200 overflow-hidden bg-white">
+                    <div className="px-3 py-2 text-[11px] font-black text-white tracking-wide bg-emerald-600">HAREKET MERKEZİ VE KM ÜCRETİ</div>
+                    <div className="px-3 py-2">
+                      <p className="text-xs font-bold text-neutral-700">Hareket merkezi (1. ve 4. nokta)</p>
+                      {duzenle ? (
+                        <input value={M.cikisAdresi || ''} onChange={e => degis(['mesafe', 'cikisAdresi'], e.target.value)} className={`mt-1 w-full px-3 py-2 rounded-lg border text-sm font-bold outline-none focus:ring-2 focus:ring-yellow-400 ${durumlar.get(fiyatYolAnahtari(['mesafe', 'cikisAdresi'])) ? 'border-red-500 bg-red-50' : 'border-neutral-300'}`} placeholder="İlçe, İl, Türkiye" />
+                      ) : <p className="text-sm font-black text-neutral-900">{M.cikisAdresi}</p>}
+                      <p className="text-[10px] font-bold text-neutral-400 mt-0.5">"İlçe, İl, Türkiye" biçiminde yazın — ilçe merkezi baz alınır.</p>
+                    </div>
+                    {satir('Km ücreti', '3 etabın TOPLAM km\'sine uygulanır (yakıt, aşınma, şoför)', ['mesafe', 'kmUcreti'], 1, '₺/km')}
+                  </div>
+                  {/* EŞİK KURALLARI */}
+                  <div className="rounded-2xl border border-neutral-200 overflow-hidden bg-white">
+                    <div className="px-3 py-2 text-[11px] font-black text-white tracking-wide bg-emerald-600">UZUN YOL KURALLARI (EŞİK AŞILINCA)</div>
+                    {satir('Uzun yol eşiği', 'Toplam km bunu AŞARSA aşağıdakiler eklenir (tam eşit = eklenmez)', ['mesafe', 'esikKm'], 0, 'km')}
+                    {satir('İşçilik farkı', 'Taban + ek hizmetlerin üzerine yüzde olarak eklenir', ['mesafe', 'iscilikYuzde'], 1, '%')}
+                    {satir('Sabit ek maliyet', 'Konaklama, harcırah vb. — kullanılmıyorsa 0', ['mesafe', 'uzunYolEk'], 2)}
+                    <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">Eşik altında köprü ücreti alınmaz; Avrupa Yakası ekstrası eskisi gibi uygulanır.</p>
+                  </div>
+                </div>
+
+                {/* GEÇİŞLER */}
+                <div className="rounded-2xl border border-neutral-200 overflow-hidden bg-white">
+                  <div className="px-3 py-2 text-[11px] font-black text-white tracking-wide bg-emerald-600">ÜCRETLİ GEÇİŞLER (KAMYON · GEÇİŞ BAŞINA · EŞİK AŞILINCA)</div>
+                  <div className="grid grid-cols-1 md:grid-cols-2">
+                    {MESAFE_GECISLERI.map((g, i) => (
+                      <div key={g.ic} className={`flex items-center justify-between gap-2 px-3 py-2 ${i % 2 ? 'bg-neutral-50' : 'bg-white'}`}>
+                        <span className="text-xs font-bold text-neutral-700">{g.etiket}
+                          {ttYolAl(veri, ['mesafe', 'gecis', g.ic]) === MESAFE_VARSAYILAN.gecis[g.ic] && <span className="ml-1 text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300">tahmini</span>}
+                        </span>{hucre(['mesafe', 'gecis', g.ic])}
+                      </div>
+                    ))}
+                  </div>
+                  <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">Google rotasında görünen geçiş otomatik işaretlenir; gidiş ve dönüş ayrı sayılır. Satışçı görüşme ekranından ± ile düzeltebilir.</p>
+                </div>
+
+                {/* CANLI ÖRNEKLER */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {ornekler.map((o, oi) => (
+                    <div key={oi} className="rounded-2xl bg-neutral-900 text-white p-3">
+                      <p className="text-[11px] font-black text-emerald-300">Örnek {oi + 1} — 2+1 ev · {o.baslik}</p>
+                      <div className="mt-1 text-[11px] space-y-0.5">
+                        {o.kalemler.map((k, i) => <div key={i} className="flex justify-between gap-2"><span className="text-white/80">{k.ad}</span><span className="font-black">{ttTl(k.tutar)}</span></div>)}
+                        <div className="flex justify-between border-t border-white/20 pt-1 mt-1 text-sm font-black"><span>Sistem fiyatı (taban)</span><span>{ttTl(o.toplam)}</span></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
           {sekme === 'kira' && (
             <div className="space-y-3">
               <p className="text-[11px] font-bold text-neutral-500">Aylık depo kirası şube bazlıdır. Fiyatlar <b>+KDV</b> girilir; KDV dahil tutar (%{Math.round(TT_KDV * 100)}) otomatik hesaplanır. "Genel" satırı şube farketmez seçildiğinde ve web sitesinde kullanılır.</p>
