@@ -10653,7 +10653,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {activeTab === 'advancedReporting' && showFinance && <AdvancedReportingView jobs={jobs} />}
             {/* DEĞİŞİKLİK: currentUser eklendi — avans ve maaş ödemeleri deftere
                 yazılırken "işlemi kim yaptı" bilgisinin kayda geçmesi için gerekli. */}
-            {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelListMuhasebe} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
+            {activeTab === 'personelMuhasebe' && showFinance && <PersonelMuhasebeView personnelList={personnelListMuhasebe} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} jobs={jobs} /* DEĞİŞTİ: prim hesabında o ayki iş sayısı */ />}
             {activeTab === 'personelOdeme' && showFinance && <PersonelOdemeView personnelList={personnelListMuhasebe} transactions={transactions} db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
             {/* YENİ: Defter — kasa/cari alacak-verecek takibi */}
             {/* YENİ: Defter satırındaki müşteri adı ve araç plakası tıklanabilir oldu.
