@@ -157,3 +157,23 @@ test('ekran örneği: 1.171,5 km · 4+1 · Osmangazi×2 + Anadolu Otoyolu×2 · 
   assert.deepEqual(k.map(x => x.tutar), [42000, 17580, 9610, 1350, 24689, 7032]);
   assert.equal(k.reduce((t, x) => t + x.tutar, 0), 102261);
 });
+
+// ---------------------------------------------------------------- EV TİPİ FARKI: SON TOPLAM ÜZERİNE (YENİ)
+test('ekran örneği 2: 851 km · 1+1 %5 → ev tipi farkı önceki son toplamın (62.798 ₺) %5\'i', () => {
+  const MS = { ...MESAFE_VARSAYILAN, kmUcreti: 15, kademeler: [{ km: 800, yuzde: 40, ek: 0 }],
+    gecis: { ...MESAFE_VARSAYILAN.gecis, kopruFsm: 333, kopruOsmangazi: 4805, otoyolAnadolu: 675, kopruYss: 270 },
+    odaKademeleri: [{ km: 800, yuzde: Y(0, 5, 0, 0, 0) }] };
+  const rota = { toplamKm: 851.3, gecisler: { kopruFsm: 2, kopruOsmangazi: 1, otoyolAnadolu: 2, kopruYss: 1 } };
+  const k = [{ ad: 'taban', tutar: 25000 }, ...mesafeKalemleri(MS, rota)];
+  k.push(mesafeIscilikKalemi(MS, rota, k));
+  assert.equal(k.reduce((t, x) => t + x.tutar, 0), 62798);       // ev tipinden önceki son toplam
+  k.push(mesafeOdaFarkiKalemi(MS, rota, '1+1', k));               // YENİ: kalemler verilir
+  assert.equal(k[k.length - 1].tutar, 3140);                      // 62.798 × %5 = 3.139,9 → 3.140
+  assert.equal(k.reduce((t, x) => t + x.tutar, 0), 65938);
+});
+test('ev tipi farkı (son toplam): listede eski ev tipi kalemi varsa çift sayılmaz; toplam 0 ise kalem yok', () => {
+  const rota = { toplamKm: 1000 };
+  const k = [{ ad: 'taban', tutar: 40000 }, { ad: 'eski', tutar: 999, odaFarki: true }];
+  assert.equal(mesafeOdaFarkiKalemi(MO, rota, '3+1', k).tutar, 8000); // 40.000 × %20
+  assert.equal(mesafeOdaFarkiKalemi(MO, rota, '3+1', []), null);
+});
