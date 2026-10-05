@@ -9023,6 +9023,59 @@ const TT_DEPO_KIRA = (() => {
 const TT_FIYAT_GENEL = { acilisOraniEve: 25, acilisOraniDepo: 25 };
 // YENİ (kullanıcı talebi): km bazlı fiyat ayarları — Fiyat Tablosu'ndan (Firestore) üzerine yazılır
 const TT_MESAFE = JSON.parse(JSON.stringify(MESAFE_VARSAYILAN));
+
+// ============================================================================
+// YENİ (kullanıcı talebi): 81 İL TABLOSUNU KM'YE GÖRE YENİDEN HESAPLAMA
+// ----------------------------------------------------------------------------
+// Pendik hareket merkezinden her il MERKEZİNE karayolu km'si. Kaynak: KGM İller
+// Arası Mesafe Cetveli (2020) + KGM İl-İlçe Mesafe Kitabı (Pendik → İstanbul
+// merkezi 39 km), Pendik'in il merkezine göre konumu hesaba katılarak.
+const TT_PENDIK_IL_KM = {
+  'Adana': 909, 'Adıyaman': 1160, 'Afyonkarahisar': 420, 'Aksaray': 642, 'Amasya': 674, 'Ankara': 415, 'Antalya': 687, 'Ardahan': 1412,
+  'Artvin': 1303, 'Aydın': 673, 'Ağrı': 1472, 'Balıkesir': 390, 'Bartın': 388, 'Batman': 1419, 'Bayburt': 1163, 'Bilecik': 210,
+  'Bingöl': 1276, 'Bitlis': 1465, 'Bolu': 236, 'Burdur': 565, 'Bursa': 220, 'Çanakkale': 341, 'Çankırı': 462, 'Çorum': 608,
+  'Denizli': 617, 'Diyarbakır': 1319, 'Düzce': 201, 'Edirne': 300, 'Elazığ': 1169, 'Erzincan': 1098, 'Erzurum': 1281, 'Eskişehir': 287,
+  'Gaziantep': 1072, 'Giresun': 987, 'Gümüşhane': 1060, 'Hakkari': 1759, 'Hatay': 1100, 'Isparta': 563, 'İzmir': 562, 'Iğdır': 1571,
+  'Kahramanmaraş': 996, 'Karabük': 366, 'Karaman': 740, 'Kars': 1459, 'Kastamonu': 478, 'Kayseri': 735, 'Kilis': 1132, 'Kocaeli': 77,
+  'Konya': 626, 'Kütahya': 321, 'Kırklareli': 250, 'Kırıkkale': 493, 'Kırşehir': 601, 'Malatya': 1070, 'Manisa': 525, 'Mardin': 1398,
+  'Mersin': 903, 'Muğla': 766, 'Muş': 1382, 'Nevşehir': 692, 'Niğde': 764, 'Ordu': 909, 'Osmaniye': 996, 'Rize': 1209,
+  'Sakarya': 124, 'Samsun': 746, 'Siirt': 1506, 'Sinop': 651, 'Sivas': 854, 'Şanlıurfa': 1209, 'Şırnak': 1570, 'Tekirdağ': 182,
+  'Tokat': 750, 'Trabzon': 1101, 'Tunceli': 1151, 'Uşak': 468, 'Van': 1599, 'Yalova': 141, 'Yozgat': 634, 'Zonguldak': 303,
+};
+// Ortalama il fiyatı (Pendik çıkışlı, müşteri İstanbul'da):
+//   4 nokta: Pendik → İstanbul'daki yükleme (≈ Pendik) → il merkezi → Pendik
+//   toplam km = 2 × (Pendik → il merkezi)
+//   fiyat = şehir içi taban (oda) + toplam km × km ücreti
+//           + eşik aşılırsa: Trakya illerinde Boğaz köprüsü (gidiş + dönüş),
+//             sabit uzun yol eki, işçilik farkı (% × taban)
+//   → 1.000 ₺'ye yukarı yuvarlanır (ortalama fiyat)
+// Ek hizmetler (toplama, merdiven, dış cephe, yürüme) bu fiyata DAHİL DEĞİLDİR;
+// görüşmede eskisi gibi ayrıca eklenir.
+const TT_TRAKYA_ILLERI = ['Edirne', 'Kırklareli', 'Tekirdağ'];
+const ttIlFiyatiKmIle = (taban, km, il, M) => {
+  let f = taban + km * (Number(M.kmUcreti) || 0);
+  if (mesafeEsikAsildi(M, km)) {
+    if (TT_TRAKYA_ILLERI.includes(il)) f += 2 * (Number(M.gecis?.kopruFsm) || 0);
+    f += Number(M.uzunYolEk) || 0;
+    f += Math.round(taban * (Number(M.iscilikYuzde) || 0) / 100);
+  }
+  return Math.ceil(f / 1000) * 1000;
+};
+// Verilen fiyat tablosundan (taslak) yeni ilEve / ilDepo tablolarını üretir.
+// Sütunlar: 1+1, 2+1, 3+1, 4+1 (1+0 için 1+1 sütunu kullanılır — eskisi gibi)
+const ttIlTablolariniKmIleHesapla = (veri) => {
+  const M = { ...MESAFE_VARSAYILAN, ...(veri.mesafe || {}), gecis: { ...MESAFE_VARSAYILAN.gecis, ...(veri.mesafe?.gecis || {}) } };
+  const uret = (sehirIci, eskiTablo) => {
+    const out = {};
+    Object.keys(eskiTablo || {}).forEach(il => {
+      const km = TT_PENDIK_IL_KM[il];
+      if (!km) { out[il] = [...eskiTablo[il]]; return; } // tabloda km yoksa eski fiyat korunur
+      out[il] = ['1+1', '2+1', '3+1', '4+1'].map(o => ttIlFiyatiKmIle(Number(sehirIci?.taban?.[o]) || 0, 2 * km, il, M));
+    });
+    return out;
+  };
+  return { ilEve: uret(veri.sehirIciEve, veri.ilEve), ilDepo: uret(veri.sehirIciDepo, veri.ilDepo) };
+};
 const ttFiyatTablolari = () => ({
   genel: TT_FIYAT_GENEL,
   sehirIciEve: FL_SEHIR_ICI_EVE, sehirIciDepo: FL_SEHIR_ICI_DEPO,
@@ -12831,6 +12884,24 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {ttSehirIciBolumleri(aktifSekme.sehirIci).map(b => <TTFiyatBolumu key={b.baslik} bolum={b} veri={veri} kayitli={kayitli} durumlar={durumlar} duzenle={duzenle} onDegis={degis} renk={aktifSekme.baslikCls} />)}
               </div>
+            </div>
+          )}
+          {/* YENİ (kullanıcı talebi): 81 il tablosunu şehir içi taban + km kurallarıyla yeniden üret
+              (Evden Eve VE Eşya Depolama birlikte). Yalnızca düzenleme modunda; Kaydet'e basılana kadar kalıcı değildir. */}
+          {sekme !== 'kira' && sekme !== 'mesafe' && kapsam === 'sehirlerArasi' && duzenle && (
+            <div className="rounded-2xl border-2 border-emerald-300 bg-emerald-50 p-3 flex flex-col md:flex-row md:items-center gap-3">
+              <div className="flex-1 text-[11px] font-bold text-emerald-900">
+                <p className="font-black uppercase">Km'ye göre yeniden hesapla</p>
+                Her il için: <b>şehir içi taban (oda)</b> + <b>2 × (Pendik → il merkezi km) × km ücreti</b>; toplam km eşiği aşarsa işçilik farkı, sabit ek ve Trakya'da Boğaz köprüsü eklenir. Km'ler KGM resmî tablolarından, ayarlar <b>Km & Güzergah</b> sekmesinden alınır. <b>Evden Eve</b> ve <b>Eşya Depolama</b> tabloları birlikte güncellenir; sonuçları kontrol edip <b>Fiyatları Kaydet</b>'e basın.
+              </div>
+              <button type="button" onClick={() => {
+                if (!window.confirm('80 ilin Evden Eve ve Eşya Depolama fiyatları şehir içi taban + km kurallarıyla yeniden hesaplanacak. Devam edilsin mi? (Kaydet\'e basmadan kalıcı olmaz)')) return;
+                const yeni = ttIlTablolariniKmIleHesapla(veri);
+                setTaslak(t => ({ ...t, ilEve: yeni.ilEve, ilDepo: yeni.ilDepo }));
+                setMesaj({ tur: 'uyari', metin: 'Evden Eve ve Eşya Depolama 81 il fiyatları km\'ye göre yeniden hesaplandı (sarı kutular). Kontrol edip Fiyatları Kaydet\'e basın.' });
+              }} className="shrink-0 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black flex items-center gap-1.5">
+                <RefreshCw className="w-4 h-4" /> Km'ye Göre Yeniden Hesapla
+              </button>
             </div>
           )}
           {sekme !== 'kira' && sekme !== 'mesafe' && kapsam === 'sehirlerArasi' && (
