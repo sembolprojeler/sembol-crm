@@ -112,7 +112,7 @@ export const FIYAT_VERI_ANAHTARLARI = ['genel', 'sehirIciEve', 'sehirIciDepo', '
 //   Toplam km bir kademeyi AŞARSA (tam eşit = aşmaz) AŞILAN EN YÜKSEK kademe uygulanır:
 //          + kademenin sabit ek maliyeti
 //          + uzun yol farkı = kademe % × TOPLAM maliyet (DEĞİŞTİ — kullanıcı talebi:
-//            taban + ek hizmetler + km + geçişler + ev tipi farkı + sabit ek; yani her şeyin üzerine)
+//            taban + ek hizmetler + km + geçişler + sabit ek; ev tipi farkı HARİÇ — o en son eklenir)
 //   EV TİPİNE GÖRE KM FARKI (kullanıcı talebi): büyük ev daha çok araç / ekip / yakıt ister.
 //   DEĞİŞTİ: birden fazla kademe eklenip silinebilir — her kademe: { km, yuzde: { '1+0' … '4+1' } }
 //   Toplam km bir kademeyi AŞARSA aşılan EN YÜKSEK kademenin ev tipi yüzdesi km tutarına eklenir
@@ -268,7 +268,7 @@ export const mesafeOdaFarkiKalemi = (M, rota, odaK) => {
   const yuzde = Number(kademe?.yuzde?.[odaK]) || 0;
   if (!km || !kademe || yuzde <= 0) return null;
   const kmTutari = Math.round(km * (Number(M?.kmUcreti) || 0));
-  return { ad: `Ev tipi km farkı (${odaK} · %${yuzde}${esik ? ` · ${esik.toLocaleString('tr-TR')} km üstü` : ''})`, tutar: Math.round(kmTutari * yuzde / 100), km: true };
+  return { ad: `Ev tipi km farkı (${odaK} · %${yuzde}${esik ? ` · ${esik.toLocaleString('tr-TR')} km üstü` : ''})`, tutar: Math.round(kmTutari * yuzde / 100), km: true, odaFarki: true };
 };
 // Uzun yol farkı: kademe % × TOPLAM maliyet (DEĞİŞTİ — kullanıcı talebi: km ve geçişler dahil her şeyin üzerine)
 export const mesafeIscilikKalemi = (M, rota, kalemler) => {
@@ -276,7 +276,8 @@ export const mesafeIscilikKalemi = (M, rota, kalemler) => {
   if (!kademe) return null;
   const yuzde = Number(kademe.yuzde) || 0;
   if (yuzde <= 0) return null;
-  const baz = (kalemler || []).filter(k => !k.uzunYolFarki).reduce((t, k) => t + (Number(k.tutar) || 0), 0);
+  // DEĞİŞTİ (kullanıcı talebi): sıra mesafe → geçiş → uzun yol farkı → ev tipi farkı; ev tipi farkı tabana GİRMEZ
+  const baz = (kalemler || []).filter(k => !k.uzunYolFarki && !k.odaFarki).reduce((t, k) => t + (Number(k.tutar) || 0), 0);
   if (baz <= 0) return null;
   return { ad: `Uzun yol farkı (%${yuzde} · toplam üzerine · ${Number(kademe.km).toLocaleString('tr-TR')} km üstü kademe)`, tutar: Math.round(baz * yuzde / 100), km: true, uzunYolFarki: true };
 };
