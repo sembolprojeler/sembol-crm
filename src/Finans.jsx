@@ -200,6 +200,29 @@ const personelKalanBorc = (hamBorc, tahsilEdilen) =>
 // Otomatik akışların yazdığı `kaynak` değerleri — bunlar muhasebeye zaten işli
 const OTOMATIK_ODEME_KAYNAKLARI = ['Maaş Ödemesi (Oto)', 'Personel Avans', 'Alacak Tahsilatı'];
 
+// ==========================================================================
+// HATA DÜZELTMESİ (kullanıcı bildirimi): "Mehmet Erol'un Kalan Banka'sı
+// Ödemeler'de ₺12.000, Mavi Yaka Maaş tablosunda ₺9.128 görünüyor."
+// --------------------------------------------------------------------------
+// KÖK NEDEN: "Ekip Şefi / Sorumlu" etiketi (ekipSefiId) yalnızca personele
+// yapılan ödemelerde değil, İŞ KAYITLARINDA da kullanılıyor. İş kredi kartıyla
+// tahsil edilince yazılan POS "Kredi Kartı Kesintisi" gideri, işin ekip şefinin
+// etiketini kopyalıyor (Mehmet Erol ₺2.872, Mesut İnan ₺1.139 gibi). Bu gider
+// "ekip şefine elle yapılmış ekstra BANKA ödemesi" sanılıp maaş tablosunda
+// Kalan Banka'dan düşülüyordu. Ödemeler ekranı bunu düşmediği için iki rakam
+// ayrışıyordu.
+// ÇÖZÜM: Personele yapılan ödeme OLMAYAN kayıtlar artık dışlanır:
+//   • işe bağlı kayıtlar (jobId / müşteri / plaka / teslim kodu)
+//   • POS kesintisi, kart ekstresi, kredi, virman, devir, ödeme planı kayıtları
+//   • kredi kartıyla yapılan çıkışlar (maaş / avans kredi kartıyla ödenmez)
+// Ayrıca Ödemeler ekranı da artık GERÇEK ekstra ödemeleri düşer — iki ekran
+// aynı fonksiyonu kullandığı için rakamlar her zaman birebir tutar.
+// ==========================================================================
+const EKSTRA_DISI_KAYNAKLAR = ['Kredi Kartı Kesintisi', 'Kart Ekstresi', 'Kredi Ödemesi', 'Kredi Kullandırımı',
+  'Virman', 'Devir', 'Ödeme Planı', 'Maaştan Kesinti'];
+const EKSTRA_DISI_KATEGORILER = ['Kredi Kartı Kesintisi', 'Kredi Kartı', 'Kredi Taksiti', 'Kredi Kullandırımı',
+  'Virman (Transfer)', 'Devir', 'Taşınan Ödeme', 'Düzenli Ödeme', 'Tahsilat'];
+
 // Bir defter kaydı "elle girilmiş ekstra personel ödemesi" mi?
 const ekstraPersonelOdemesiMi = (i) => {
   if (!i || i.silindi) return false;
@@ -209,8 +232,48 @@ const ekstraPersonelOdemesiMi = (i) => {
   if (i.odemeMahsup || i.alacakMahsup || i.tahsilatKaydi) return false;
   if (i.odemeKalemId || i.alacakKalemId) return false;
   if (i.kaynak && OTOMATIK_ODEME_KAYNAKLARI.includes(i.kaynak)) return false;
+  // YENİ: personele ödeme olmayan kayıtlar (iş gideri, POS kesintisi, kart, kredi, virman…)
+  if (i.kaynak && EKSTRA_DISI_KAYNAKLAR.includes(i.kaynak)) return false;
+  if (i.kategori && EKSTRA_DISI_KATEGORILER.includes(i.kategori)) return false;
+  if (i.posKesintiKaynakId || i.kartEkstresi || i.virman || i.virmanId || i.transferId) return false;
+  if (i.jobId || i.isId || i.teslimKodu || i.musteriAdi || i.plaka || i.aracId) return false; // işe bağlı gider
+  if ((i.odemeYontemi || '') === 'Kredi Kartı') return false; // maaş/avans kredi kartıyla ödenmez
+  // YENİ (kullanıcı talebi): HİÇBİR KESİNTİ / MASRAF personelin maaşını etkilemez.
+  // Kategori, kaynak, etiket veya açıklamada kesinti/komisyon/masraf/hasar/ceza/vergi/POS
+  // geçen kayıtlar (POS kesintisi, banka masrafı, hasar, ceza vb.) personele ödeme DEĞİLDİR.
+  if (ekstraDisiMetinVarMi(i)) return false;
   return true;
 };
+// Kesinti türü kayıtları metinden tanır (Türkçe, büyük/küçük harf duyarsız)
+const EKSTRA_DISI_KELIMELER = ['kesinti', 'komisyon', 'masraf', 'hasar', 'ceza', 'vergi', 'pos ', 'pos-', 'pos•', 'stopaj', 'faiz'];
+const ekstraDisiMetinVarMi = (i) => {
+  const kucuk = (x) => String(x || '').toLocaleLowerCase('tr-TR');
+  const alanlar = [i.kategori, i.kaynak, ...(Array.isArray(i.etiketler) ? i.etiketler : [])].map(kucuk);
+  const aciklama = kucuk(i.aciklama);
+  return EKSTRA_DISI_KELIMELER.some(k => alanlar.some(a => a.includes(k.trim())) || aciklama.startsWith(k.trim()) || aciklama.includes(` ${k.trim()} `));
+};
+// YENİ: hook kullanmadan (elde islemler listesi varken) aynı hesabı yapar — Ödemeler ekranı için
+// { [personId]: { nakit, banka, toplam } } — yalnızca 'YYYY-AA' ayındaki ekstra ödemeler
+const ekstraOdemeHaritasi = (islemler, yil, ay) => {
+  const ayOneki = `${yil}-${String(ay).padStart(2, '0')}`;
+  const harita = {};
+  (islemler || []).forEach(i => {
+    if (!ekstraPersonelOdemesiMi(i)) return;
+    if (!String(i.tarih || '').startsWith(ayOneki)) return;
+    const pid = String(i.ekipSefiId);
+    const tutar = parseFloat(i.tutar) || 0;
+    if (!harita[pid]) harita[pid] = { nakit: 0, banka: 0, toplam: 0, kayitlar: [] };
+    const kanal = (i.odemeYontemi || 'Nakit') === 'Nakit' ? 'nakit' : 'banka';
+    harita[pid][kanal] += tutar;
+    harita[pid].toplam += tutar;
+    // YENİ: döküm — maaş tablosunda hangi defter kaydının maaştan düştüğü gösterilir
+    harita[pid].kayitlar.push({ tarih: i.tarih || '', tutar, kanal, aciklama: i.aciklama || i.kategori || 'Defter ödemesi' });
+  });
+  return harita;
+};
+// Döküm metni (hücre ipucu): "05.09.2026 · Ahmet'e elden · ₺5.000,00"
+const ekstraDokumMetni = (eks, kanal) => ((eks?.kayitlar || []).filter(k => k.kanal === kanal)
+  .map(k => `${String(k.tarih).split('-').reverse().join('.')} · ${k.aciklama} · ₺${paraFmt(k.tutar)}`).join('\n'));
 
 // Seçili maaş ayına ait ekstra ödemeleri kanal bazında canlı döner:
 // { [personId]: { nakit: 0, banka: 0, toplam: 0 } }
@@ -219,21 +282,9 @@ const usePersonelEkstraOdemeler = (yil, ay) => {
   useEffect(() => {
     const ayOneki = `${yil}-${String(ay).padStart(2, '0')}`; // 'YYYY-AA'
     const durdur = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), snap => {
-      const harita = {};
-      snap.docs.forEach(d => {
-        const i = d.data();
-        if (!ekstraPersonelOdemesiMi(i)) return;
-        // Yalnızca görüntülenen maaş ayındaki ödemeler o ayın maaşından düşer
-        if (!String(i.tarih || '').startsWith(ayOneki)) return;
-        const pid = String(i.ekipSefiId);
-        const tutar = parseFloat(i.tutar) || 0;
-        if (!harita[pid]) harita[pid] = { nakit: 0, banka: 0, toplam: 0 };
-        // Nakit ödendiyse nakit kanalından, aksi halde banka kanalından düşer
-        if ((i.odemeYontemi || 'Nakit') === 'Nakit') harita[pid].nakit += tutar;
-        else harita[pid].banka += tutar;
-        harita[pid].toplam += tutar;
-      });
-      setEkstralar(harita);
+      // DEĞİŞTİ: Ödemeler ekranıyla AYNI fonksiyon (ekstraOdemeHaritasi) — iki ekran asla ayrışmaz
+      void ayOneki;
+      setEkstralar(ekstraOdemeHaritasi(snap.docs.map(d => d.data()), yil, ay));
     }, err => console.warn('Ekstra personel ödemeleri okunamadı:', err));
     return () => durdur();
   }, [yil, ay]);
@@ -4130,6 +4181,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                         <span className={`font-black ${bKapandi ? 'text-green-800 line-through opacity-70' : bKismiVar ? 'text-sky-800' : 'text-yellow-900'}`} title={bKismiVar ? `Kısmi: ₺${paraFmt(bDurum.odenen)} ödendi${bEkstra > 0.01 ? ` (₺${paraFmt(bEkstra)} defterden ekstra)` : ''}, ₺${paraFmt(bGoster)} kaldı` : ''}>{bKapandi ? 'Ödendi' : bGoster.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
                         {/* YENİ (kullanıcı talebi): maaştan kesilen şirket borcu — hücrede görünür */}
                         {(c.borcKesintiBanka || 0) > 0.01 && <span className="text-[8px] font-black text-white bg-red-600 rounded px-1 shrink-0" title={`Şirket borcu için maaştan ₺${paraFmt(c.borcKesintiBanka)} kesildi (Finans › Borçlular › Tahsil Et)`}>−₺{paraFmt(c.borcKesintiBanka)} borç</span>}
+                        {/* YENİ (kullanıcı talebi): defterden personele yapılan ekstra ödeme — hangi kayıtlar düştü */}
+                        {bEkstra > 0.01 && !bKapandi && <span className="text-[8px] font-black text-white bg-sky-600 rounded px-1 shrink-0" title={`Defterden bu personele yapılan banka ödemeleri (maaştan düşüldü):\n${ekstraDokumMetni(ekstraOdemeler[person.id], 'banka')}`}>−₺{paraFmt(bEkstra)} defter</span>}
                         <button type="button" onClick={() => handlePaymentToggle(person.id, 'bankaOdendi', 'bankaOdenenTutar', c.bankaKalan)} className={`p-0.5 shrink-0 rounded transition ${bKapandi ? 'text-green-700' : 'text-yellow-600/50 hover:text-yellow-800'}`} title={bKapandi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
                           <CheckCircle className="w-3 h-3" />
                         </button>
@@ -4151,6 +4204,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                         <span className={`font-black ${nKapandi ? 'text-green-900 line-through opacity-70' : nKismiVar ? 'text-sky-800' : 'text-orange-900'}`} title={nKismiVar ? `Kısmi: ₺${paraFmt(nDurum.odenen)} ödendi${nEkstra > 0.01 ? ` (₺${paraFmt(nEkstra)} defterden ekstra)` : ''}, ₺${paraFmt(nGoster)} kaldı` : ''}>{nKapandi ? 'Ödendi' : nGoster.toLocaleString('tr-TR', { maximumFractionDigits: 2 })}</span>
                         {/* YENİ (kullanıcı talebi): maaştan kesilen şirket borcu — hücrede görünür */}
                         {(c.borcKesintiNakit || 0) > 0.01 && <span className="text-[8px] font-black text-white bg-red-600 rounded px-1 shrink-0" title={`Şirket borcu için maaştan ₺${paraFmt(c.borcKesintiNakit)} kesildi (Finans › Borçlular › Tahsil Et)`}>−₺{paraFmt(c.borcKesintiNakit)} borç</span>}
+                        {/* YENİ (kullanıcı talebi): defterden personele yapılan ekstra NAKİT ödeme — hangi kayıtlar düştü */}
+                        {nEkstra > 0.01 && !nKapandi && <span className="text-[8px] font-black text-white bg-sky-600 rounded px-1 shrink-0" title={`Defterden bu personele yapılan nakit ödemeler (maaştan düşüldü):\n${ekstraDokumMetni(ekstraOdemeler[person.id], 'nakit')}`}>−₺{paraFmt(nEkstra)} defter</span>}
                         <button type="button" onClick={() => handlePaymentToggle(person.id, 'nakitOdendi', 'nakitOdenenTutar', c.kalanNakit)} className={`p-0.5 shrink-0 rounded transition ${nKapandi ? 'text-green-800' : 'text-orange-600/50 hover:text-orange-800'}`} title={nKapandi ? 'Ödendi (Gidere işlendi)' : 'Ödenmedi'}>
                           <CheckCircle className="w-3 h-3" />
                         </button>
@@ -10433,8 +10488,9 @@ const nakitYuvarla = (tutar) => {
         const kaynak = maasVeri[mavi ? 'mavi' : 'beyaz'];
         const row = kaynak?.maas?.[personId] || {};
         const hes = maasKisiHesabi(kisi, row, kaynak?.mesai?.[personId], yil, ay);
-        if (kanal === 'banka') return row.bankaOdendi ? 0 : hes.bankaKalan - (parseFloat(row.bankaOdenenTutar) || 0);
-        return row.nakitOdendi ? 0 : hes.kalanNakit - (parseFloat(row.nakitOdenenTutar) || 0);
+        const eks = ekstraOdemeHaritasi(islemler, yil, ay)[String(personId)] || {}; // YENİ: ekstra ödemeler de düşülür
+        if (kanal === 'banka') return row.bankaOdendi ? 0 : hes.bankaKalan - (parseFloat(row.bankaOdenenTutar) || 0) - (eks.banka || 0);
+        return row.nakitOdendi ? 0 : hes.kalanNakit - (parseFloat(row.nakitOdenenTutar) || 0) - (eks.nakit || 0);
       } catch (e) { return null; }
     };
 
@@ -10500,6 +10556,7 @@ const nakitYuvarla = (tutar) => {
       if (!odemeDefteriId || !maasVeri) return [];
       const { yil, ay } = maasKaynakAy;
       if (maasVeri.kaynakAnahtar !== `${yil}_${ay}`) return []; // eski ayın verisi ekrana sızmasın
+      const _ekstraHarita = ekstraOdemeHaritasi(islemler, yil, ay); // YENİ: Maaş Tablosu ile aynı ekstra ödeme düşümü
       const yakalar = [
         { id: 'mavi', ad: 'Mavi Yaka Maaşı', filtre: (p) => p.collarType === 'Mavi Yaka' || (!p.collarType && ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)) },
         { id: 'beyaz', ad: 'Beyaz Yaka Maaşı', filtre: (p) => p.collarType === 'Beyaz Yaka' },
@@ -10523,8 +10580,11 @@ const nakitYuvarla = (tutar) => {
             // (bankaOdendi/nakitOdendi) yalnızca TAM kapanınca atılır; kısmi
             // ödemede tik atılmaz, satır azalmış kalanla açık kalır.
             // ============================================================
-            const bankaKismiOdenen = parseFloat(row.bankaOdenenTutar) || 0;
-            const nakitKismiOdenen = parseFloat(row.nakitOdenenTutar) || 0;
+            // DEĞİŞTİ (kullanıcı bildirimi): Maaş Tablosu ile AYNI — deftere elle girilen gerçek
+            // ekstra personel ödemeleri de (ekstraOdemeHaritasi) kısmi ödenen sayılır
+            const _eks = _ekstraHarita[String(p.id)] || {};
+            const bankaKismiOdenen = (parseFloat(row.bankaOdenenTutar) || 0) + (_eks.banka || 0);
+            const nakitKismiOdenen = (parseFloat(row.nakitOdenenTutar) || 0) + (_eks.nakit || 0);
             // Muhasebede tik ATILMAMIŞ kısımlar hâlâ ödenecek demektir
             const bankaBekleyen = row.bankaOdendi ? 0 : Math.max(0, hes.bankaKalan - bankaKismiOdenen);
             const nakitBekleyen = row.nakitOdendi ? 0 : Math.max(0, hes.kalanNakit - nakitKismiOdenen);
