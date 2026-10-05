@@ -284,6 +284,52 @@ const maasBorcKesintisi = (row) => ({
 // Dört hesap (Maaş Tablosu, Personel Ödemeleri, Ödemeler listesi, Finans
 // Raporu) bu TEK fonksiyonu kullanır — rakamlar asla ayrışmaz.
 // ==========================================================================
+// ==========================================================================
+// YENİ (kullanıcı talebi): ÇALIŞMA PENCERESİ — İŞE GİRİŞ ÖNCESİ / İŞTEN ÇIKIŞ SONRASI
+// --------------------------------------------------------------------------
+// SORUN: Ayın 4'ünde işe başlayan Yüksel Satı'ya mesai tablosunda 1-3. günler
+// "D" işaretlenmişti → hem işe giriş öncesi (3 gün) hem DEVAMSIZLIK (3 gün)
+// sayılıyordu; devamsızlık yeni kuralla bir de saatinden düşüyordu.
+// KURAL: Personelin çalışma penceresi DIŞINDAKİ günlerdeki her işaret (D, R,
+// FM, EM, FG…) maaş hesabında YOK SAYILIR. Bu günler YALNIZCA mesai gününden
+// düşer, devamsızlık sayılmaz:
+//   • İşe giriş öncesi  : startDate'ten önceki günler (mevcut kural, aynen)
+//   • İşten çıkış sonrası: passiveDate (Pasif'e alındığı gün) SONRASI günler —
+//     30 gün esasına göre: ayın 20'sinde çıkan → 20 gün çalışmış sayılır.
+// Ör. ayın 5'inde başlayan, devamsızlığı olmayan personel → 30 − 4 = 26 gün.
+// ==========================================================================
+const _yerelGun = (deger) => {
+  if (!deger) return null;
+  const d = String(deger).length <= 10 ? new Date(String(deger) + 'T00:00:00') : new Date(deger);
+  return isNaN(d.getTime()) ? null : new Date(d.getFullYear(), d.getMonth(), d.getDate());
+};
+const calismaPenceresi = (person, yil, ay) => {
+  const ayGun = new Date(yil, ay, 0).getDate();
+  let ilk = 1, son = ayGun, cikisSonrasiGun = 0;
+  const bas = _yerelGun(person?.startDate);
+  if (bas) {
+    if (bas > new Date(yil, ay - 1, ayGun)) ilk = ayGun + 1;            // bu aydan sonra başlıyor
+    else if (bas >= new Date(yil, ay - 1, 1)) ilk = bas.getDate();      // bu ay başladı
+  }
+  const cik = person?.employmentStatus === 'Pasif' ? _yerelGun(person?.passiveDate) : null;
+  if (cik) {
+    if (cik < new Date(yil, ay - 1, 1)) { son = 0; cikisSonrasiGun = 30; }   // bu aydan önce ayrıldı
+    else if (cik <= new Date(yil, ay - 1, ayGun)) { son = cik.getDate(); cikisSonrasiGun = Math.max(0, 30 - son); }
+  }
+  return { ilk, son, cikisSonrasiGun };
+};
+// Mesai kaydından çalışma penceresi DIŞINDAKİ günleri çıkarır (anahtarlar gün numarasıdır)
+const mesaiKaydiPencere = (record, person, yil, ay) => {
+  const { ilk, son } = calismaPenceresi(person, yil, ay);
+  const out = {};
+  Object.entries(record || {}).forEach(([k, v]) => {
+    const g = parseInt(k, 10);
+    if (!isNaN(g) && String(g) === String(k).trim() && (g < ilk || g > son)) return; // pencere dışı → yok say
+    out[k] = v;
+  });
+  return out;
+};
+
 const devamsizlikDagit = ({ devamsizlik = 0, fazlaGun = 0, saatHavuzu = 0 }) => {
   const D = Math.max(0, parseFloat(devamsizlik) || 0);
   const FG = Math.max(0, parseFloat(fazlaGun) || 0);
@@ -455,7 +501,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     // ------------------------------------------------------------------
     const hesaplaKisiAy = (person, row, mesaiRecord, yil, ay) => {
       let devamsiz = 0, raporSay = 0, ucretsizIzin = 0, toplamMesaiSaati = 0, fazlaGun = 0;
-      Object.values(mesaiRecord || {}).forEach(val => {
+      const _pencere = calismaPenceresi(person, yil, ay); // YENİ: işe giriş öncesi / çıkış sonrası günler yok sayılır
+      Object.values(mesaiKaydiPencere(mesaiRecord, person, yil, ay)).forEach(val => {
         if (typeof val === 'object' && val !== null) {
           if (val.status === 'D') devamsiz++;
           else if (val.status === 'R') raporSay++;
@@ -492,7 +539,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       // dilimlerle toplam saatten, kalanı mesai gününden düşer (bkz. devamsizlikDagit)
       const _prim0 = parseFloat(row.prim) || 0;
       const devD = devamsizlikDagit({ devamsizlik: devamsizlikSayisi, fazlaGun: fazlaGunSayisi, saatHavuzu: toplamMesaiSaati + _prim0 });
-      const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzin - iseGirisGun);
+      const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzin - iseGirisGun - _pencere.cikisSonrasiGun); // YENİ: çıkış sonrası
       // DEĞİŞİKLİK: person.maas yerine gecerliMaas() kullanılır. Bu fonksiyon,
       // ilgili ay deneme süresi içindeyse person.denemeMaasi, değilse person.maas
       // döndürür. Elle girilen satır değeri (row.maas) her ikisini de EZER —
@@ -3414,7 +3461,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     };
 
     const getStatusCounts = (personId) => {
-      const record = mesaiData[personId] || {};
+      // DEĞİŞTİ (kullanıcı talebi): işe giriş öncesi / işten çıkış sonrası günlerdeki işaretler sayılmaz
+      const _kisi = (personnelList || []).find(p => p.id === personId);
+      const record = _kisi ? mesaiKaydiPencere(mesaiData[personId] || {}, _kisi, currentYear, currentMonth) : (mesaiData[personId] || {});
       const counts = { G: 0, FG: 0, D: 0, I: 0, FM_H: 0, EM_H: 0 }; // I: Toplam İzin, FM_H: Fazla Mesai Saati, EM_H: Eksik Mesai Saati
       
       Object.values(record).forEach(val => {
@@ -3891,12 +3940,25 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                     )}
                     {g('izinler') && (
                       <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-blue-50/50">
-                      <input type="number" readOnly value={c.toplamSaat} className="w-full h-6 text-center text-[10px] bg-transparent outline-none rounded font-bold text-blue-600 cursor-not-allowed" placeholder="0" title="Otomatik hesaplanır" />
+                      <input type="number" readOnly value={c.toplamSaat} className="w-full h-6 text-center text-[10px] bg-transparent outline-none rounded font-bold text-blue-600 cursor-not-allowed" placeholder="0" title={devamsizlikDokumMetni(c.devD) || 'Otomatik hesaplanır'} />
+                      {/* YENİ (kullanıcı talebi): devamsızlık nedeniyle saatten düşülen (10'ar saatlik dilimler) */}
+                      {c.devD?.saatDusulen > 0 && (
+                        <div className="text-[8px] font-black text-red-600 text-center leading-tight whitespace-nowrap" title={devamsizlikDokumMetni(c.devD)}>−{c.devD.saatDusulen} sa dev.</div>
+                      )}
                     </td>
                     )}
                     {g('izinler') && (
                       <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-blue-50/50">
                       <input type="number" readOnly value={c.mesaiGunSayisi} className="w-full h-6 text-center text-[10px] bg-transparent outline-none rounded font-bold cursor-not-allowed" title="Mesai tablosundan otomatik hesaplanır" />
+                      {/* YENİ (kullanıcı talebi): mesai gününden neler düştü — devamsızlık / işe giriş / işten çıkış */}
+                      {(c.devD?.gunDusulen > 0 || c.iseGirisGunSayisi > 0 || c.cikisSonrasiGun > 0) && (
+                        <div className="text-[8px] font-black text-center leading-tight whitespace-nowrap"
+                          title={[c.devD?.gunDusulen > 0 && `Devamsızlık: −${c.devD.gunDusulen} gün`, c.iseGirisGunSayisi > 0 && `İşe giriş öncesi: −${c.iseGirisGunSayisi} gün`, c.cikisSonrasiGun > 0 && `İşten çıkış sonrası: −${c.cikisSonrasiGun} gün`].filter(Boolean).join(' · ')}>
+                          {c.devD?.gunDusulen > 0 && <span className="text-red-600">−{c.devD.gunDusulen} dev.</span>}
+                          {c.iseGirisGunSayisi > 0 && <span className="text-neutral-500"> −{c.iseGirisGunSayisi} giriş</span>}
+                          {c.cikisSonrasiGun > 0 && <span className="text-neutral-500"> −{c.cikisSonrasiGun} çıkış</span>}
+                        </div>
+                      )}
                     </td>
                     )}
                     {g('izinler') && (
@@ -4478,7 +4540,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const person = targetPersonnelList.find(p => p.id === personId) || {};
       const row = maasData[personId] || {};
       
-      const record = mesaiData[personId] || {};
+      // DEĞİŞTİ (kullanıcı talebi): işe giriş öncesi / işten çıkış sonrası günlerdeki işaretler yok sayılır
+      const _pencere = calismaPenceresi(person, currentYear, currentMonth);
+      const record = mesaiKaydiPencere(mesaiData[personId] || {}, person, currentYear, currentMonth);
       let devamsiz = 0;
       let raporCount = 0;
       let ucretsizIzinCount = 0;
@@ -4534,7 +4598,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       // 10'ar saatlik tam dilimler, kalanı mesai gününden (bkz. devamsizlikDagit).
       // Rapor, Ücretsiz İzin ve İŞE GİRİŞ günleri eskisi gibi doğrudan Mesai Gün Sayısını eksiltir.
       const devD = devamsizlikDagit({ devamsizlik: devamsizlikSayisi, fazlaGun: fazlaGunSayisi, saatHavuzu: gunlukSaat + (parseFloat(row.prim) || 0) });
-      const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzinSayisi - iseGirisGunSayisi);
+      const cikisSonrasiGun = _pencere.cikisSonrasiGun; // YENİ: işten çıkış sonrası günler (devamsızlık DEĞİL)
+      const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzinSayisi - iseGirisGunSayisi - cikisSonrasiGun);
       const odenecekGun = mesaiGunSayisi;
       
       // DEĞİŞİKLİK: person.maas yerine gecerliMaas() kullanılır. Bu fonksiyon,
@@ -4602,6 +4667,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         nakitAvans, resmiAvans, gunlukSaat, toplamSaat, mesaiGunSayisi, 
         maas, fazlaGunSayisi, devamsizlikSayisi, rapor, ucretsizIzinSayisi, prim, yol, yemek,
         devD, fazlaGunNet: devD.fazlaGunNet, // YENİ: devamsızlık dağılımı (ekranda döküm için)
+        iseGirisGunSayisi, cikisSonrasiGun, // YENİ: mesai gün notu için
         hesaplananBanka, icraKesintisi, bankaKalan,
         mesaiUcreti, primTL, mesaiUcretiSaf, hasarKesinti, primTLNet, toplamAvans, netMaas, maliyet, kalanNakit,
         borcKesintiNakit: borcKesintisi.nakit, borcKesintiBanka: borcKesintisi.banka, // YENİ
@@ -4997,7 +5063,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const calcRow = (personId) => {
       const person = targetPersonnelList.find(p => p.id === personId) || {};
       const row = maasData[personId] || {};
-      const record = mesaiData[personId] || {};
+      // DEĞİŞTİ (kullanıcı talebi): işe giriş öncesi / işten çıkış sonrası günlerdeki işaretler yok sayılır
+      const _pencere = calismaPenceresi(person, currentYear, currentMonth);
+      const record = mesaiKaydiPencere(mesaiData[personId] || {}, person, currentYear, currentMonth);
       
       let devamsiz = 0, raporCount = 0, ucretsizIzinCount = 0;
       let fazlaGunCount = 0, gunlukSaatTop = 0; // YENİ: devamsızlık dağıtımı için fazla gün + günlük saat
@@ -5034,7 +5102,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       // toplam saatten, kalanı mesai gününden düşer — Maaş Tablosu ile birebir aynı (devamsizlikDagit)
       const _fazlaGun = row.fazlaGun !== undefined && row.fazlaGun !== '' ? parseFloat(row.fazlaGun) : fazlaGunCount;
       const devD = devamsizlikDagit({ devamsizlik: devamsizlikSayisi, fazlaGun: _fazlaGun, saatHavuzu: gunlukSaatTop + (parseFloat(row.prim) || 0) });
-      const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzinSayisi - iseGirisGunSayisi);
+      const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzinSayisi - iseGirisGunSayisi - _pencere.cikisSonrasiGun); // YENİ: çıkış sonrası
       const odenecekGun = mesaiGunSayisi;
       
       const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
@@ -5663,7 +5731,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
   // ===========================================================================
   const maasKisiHesabi = (person, row, mesaiRecord, yil, ay) => {
     let devamsiz = 0, raporSay = 0, ucretsizIzin = 0, toplamMesaiSaati = 0, fazlaGun = 0;
-    Object.values(mesaiRecord || {}).forEach(val => {
+    const _pencere = calismaPenceresi(person, yil, ay); // YENİ: işe giriş öncesi / çıkış sonrası günler yok sayılır
+    Object.values(mesaiKaydiPencere(mesaiRecord, person, yil, ay)).forEach(val => {
       if (typeof val === 'object' && val !== null) {
         if (val.status === 'D') devamsiz++;
         else if (val.status === 'R') raporSay++;
@@ -5694,7 +5763,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     }
     // DEĞİŞTİ (kullanıcı talebi): devamsızlık dağıtımı (fazla gün → 10'ar saat → mesai günü)
     const devD = devamsizlikDagit({ devamsizlik: devamsizlikSayisi, fazlaGun: fazlaGunSayisi, saatHavuzu: toplamMesaiSaati + (parseFloat(row.prim) || 0) });
-    const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzin - iseGirisGun);
+    const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzin - iseGirisGun - _pencere.cikisSonrasiGun); // YENİ: çıkış sonrası
     const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : gecerliMaas(person, yil, ay)) || 0;
     const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
     const nakitAvans = parseFloat(row.nakitAvans) || 0;
