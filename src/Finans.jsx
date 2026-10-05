@@ -147,6 +147,28 @@ const icraKalanBorc = (person) =>
 // Bu ay ödenecek icra tutarı: aylık kesinti, kalan borçla sınırlı
 const icraAylikOdenecek = (person, aylikKesinti) =>
   Math.min(Math.max(0, parseFloat(aylikKesinti) || 0), icraKalanBorc(person));
+// ==========================================================================
+// YENİ (kullanıcı talebi): AYLIK İCRA KESİNTİSİ KALAN BORCU AŞAMAZ
+// --------------------------------------------------------------------------
+// Kural: kesinti = banka maaşının 1/4'ü (eskisi gibi) AMA kalan icra borcundan
+// fazla olamaz. Örn. 32.000 banka → 8.000 kesinti; kalan icra 5.500 ise 5.500
+// kesilir, borç biter, sonraki aylarda kesinti 0 olur (Kalan Banka tam ödenir).
+// Bu ayın kesintisi daha önce ödendiyse (tik / Ödemeler) tutar icraOdenenToplam'a
+// eklenmiştir; kalan hesaplanırken bu ayın ödemesi GERİ EKLENİR ki ödeme sonrası
+// kesinti 0'a düşüp tablo bozulmasın (tik açıp kapamak da simetrik kalır).
+// icraToplamBorc girilmemişse (eski kayıtlar) eski kural aynen: 1/4.
+// Dört hesap da (Maaş Tablosu, Personel Ödeme, Ödemeler listesi, Finans Raporu)
+// bu tek fonksiyonu kullanır.
+// ==========================================================================
+const icraKesintisiHesapla = (person, hesaplananBanka, row = {}) => {
+  if (person?.icrasiVar !== 'Evet') return 0;
+  const ham = Math.max(0, (parseFloat(hesaplananBanka) || 0) / 4);
+  const toplam = parseFloat(person?.icraToplamBorc) || 0;
+  if (toplam <= 0) return ham; // toplam icra borcu girilmemiş → eski kural
+  const buAyOdenen = Math.max(0, parseFloat(row?.icraOdenenTutar) || 0);
+  const kalanOnce = Math.max(0, icraKalanBorc(person) + buAyOdenen); // bu ayın ödemesinden ÖNCEKİ kalan
+  return Math.round(Math.min(ham, kalanOnce) * 100) / 100;
+};
 
 // Ham borç ve tahsil edilen tutardan KALAN borcu hesaplar (negatife düşmez)
 const personelKalanBorc = (hamBorc, tahsilEdilen) =>
@@ -431,7 +453,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const yol = parseFloat(row.yol !== undefined && row.yol !== '' ? row.yol : person.yol) || 0;
       const yemek = parseFloat(row.yemek !== undefined && row.yemek !== '' ? row.yemek : person.yemek) || 0;
       const hesaplananBanka = (bankaParasiBase / 30) * mesaiGunSayisi;
-      const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
+      const icraKesintisi = icraKesintisiHesapla(person, hesaplananBanka, row); // DEĞİŞTİ (kullanıcı talebi): kalan icra borcunu aşamaz
       const bankaKalan = hesaplananBanka - icraKesintisi - resmiAvans - maasBorcKesintisi(row).banka; // DEĞİŞTİ: maaştan borç kesintisi
       const toplamSaat = toplamMesaiSaati + (fazlaGunSayisi * 10) - (devamsizlikSayisi * 3) + prim;
       const mesaiUcretiToplam = (maas / 200) * toplamSaat; // prim dahil (orijinal formül)
@@ -4083,6 +4105,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     // Damga değişince (başka sekme / cihazda dağıtım veya geri alma yapıldıysa) primler
     // sunucudan canlı yeniden okunur — eski ekran eski primleri geri YAZAMAZ.
     const primIslemRef = useRef(null);
+    // YENİ (kullanıcı talebi): Defter > Borçlu > "Maaş · Nakit / Banka" ile yapılan borç kesintisinin damgası.
+    // Aynı mantık: damga değişince yalnızca kesinti alanları sunucudan alınır.
+    const kesintiIslemRef = useRef(null);
 
     useEffect(() => {
       const fetchData = async () => {
@@ -4091,6 +4116,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${docPrefix}${currentYear}_${currentMonth}`);
           const snap = await getDoc(docRef);
           primIslemRef.current = snap.exists() ? (snap.data().primIslemZamani || null) : null; // YENİ
+          kesintiIslemRef.current = snap.exists() ? (snap.data().kesintiIslemZamani || null) : null; // YENİ: maaştan borç kesintisi damgası
           if (snap.exists()) {
             setMaasData(snap.data().records || {});
           } else {
@@ -4158,18 +4184,30 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         if (!snap.exists() || snap.metadata.hasPendingWrites) return;
         const d = snap.data() || {};
         const damga = d.primIslemZamani || null;
-        if (!damga || damga === primIslemRef.current) return; // yeni prim işlemi yok
-        primIslemRef.current = damga;
+        const kesintiDamga = d.kesintiIslemZamani || null; // YENİ: maaştan borç kesintisi (Defter > Borçlu)
+        const primDegisti = !!damga && damga !== primIslemRef.current;
+        const kesintiDegisti = !!kesintiDamga && kesintiDamga !== kesintiIslemRef.current;
+        if (!primDegisti && !kesintiDegisti) return; // yeni prim / kesinti işlemi yok
+        if (primDegisti) primIslemRef.current = damga;
+        if (kesintiDegisti) kesintiIslemRef.current = kesintiDamga;
         const sunucu = d.records || {};
         setMaasData(prev => {
           const yeni = { ...prev };
           Object.keys(sunucu).forEach(pId => {
+            const r = { ...(prev[pId] || {}) };
             // yalnızca prim ve kapanış işaretleri sunucudan alınır
-            yeni[pId] = { ...(prev[pId] || {}), prim: sunucu[pId]?.prim ?? 0, kapanisPrimleri: sunucu[pId]?.kapanisPrimleri || {} };
+            if (primDegisti) { r.prim = sunucu[pId]?.prim ?? 0; r.kapanisPrimleri = sunucu[pId]?.kapanisPrimleri || {}; }
+            // YENİ: yalnızca maaştan borç kesintisi alanları sunucudan alınır
+            if (kesintiDegisti) {
+              r.maasKesintiNakit = sunucu[pId]?.maasKesintiNakit ?? '0';
+              r.maasKesintiBanka = sunucu[pId]?.maasKesintiBanka ?? '0';
+              r.borcKesintileri = Array.isArray(sunucu[pId]?.borcKesintileri) ? sunucu[pId].borcKesintileri : [];
+            }
+            yeni[pId] = r;
           });
           return yeni;
         });
-      }, (e) => console.error('Prim canlı eşitleme hatası:', e));
+      }, (e) => console.error('Prim / kesinti canlı eşitleme hatası:', e));
       return () => unsub();
     }, [isDataLoaded, db, appId, docPrefix, currentYear, currentMonth]);
 
@@ -4441,7 +4479,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
       
       const hesaplananBanka = (bankaParasiBase / 30) * odenecekGun;
-      const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
+      const icraKesintisi = icraKesintisiHesapla(person, hesaplananBanka, row); // DEĞİŞTİ (kullanıcı talebi): kalan icra borcunu aşamaz
       const bankaKalan = hesaplananBanka - icraKesintisi - resmiAvans - maasBorcKesintisi(row).banka; // DEĞİŞTİ: maaştan borç kesintisi
 
       const prim = parseFloat(row.prim) || 0;
@@ -4865,7 +4903,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const resmiAvansBekleyen = parseFloat(row.bekleyenResmiAvans) || 0;
       const resmiAvans = resmiAvansOdenen > 0 ? resmiAvansOdenen : resmiAvansBekleyen;
 
-      const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
+      const icraKesintisi = icraKesintisiHesapla(person, hesaplananBanka, row); // DEĞİŞTİ (kullanıcı talebi): kalan icra borcunu aşamaz
       const bankaKalan = hesaplananBanka - icraKesintisi - resmiAvans - maasBorcKesintisi(row).banka; // DEĞİŞTİ: maaştan borç kesintisi
       
       const yol = parseFloat(row.yol !== undefined && row.yol !== '' ? row.yol : person.yol) || 0;
@@ -5499,7 +5537,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const resmiAvans = parseFloat(row.resmiAvans) || 0;
     const prim = parseFloat(row.prim) || 0;
     const hesaplananBanka = (bankaParasiBase / 30) * mesaiGunSayisi;
-    const icraKesintisi = person.icrasiVar === 'Evet' ? (hesaplananBanka / 4) : 0;
+    const icraKesintisi = icraKesintisiHesapla(person, hesaplananBanka, row); // DEĞİŞTİ (kullanıcı talebi): kalan icra borcunu aşamaz
     const borcKesintisi = maasBorcKesintisi(row); // YENİ (kullanıcı talebi): maaştan borç kesintisi
     const bankaKalan = hesaplananBanka - icraKesintisi - resmiAvans - borcKesintisi.banka;
     const toplamSaat = toplamMesaiSaati + (fazlaGunSayisi * 10) - (devamsizlikSayisi * 3) + prim;
@@ -8659,9 +8697,40 @@ const nakitYuvarla = (tutar) => {
       const silinenTahsilatOdemeIds = new Set(islemler
         .filter(i => i.silindi && i.tip === 'giris' && i.tahsilatKaydi && i.odemeId && i.alacakKalemId === kalem.id)
         .map(i => i.odemeId));
-      const tahsilatlar = defterIslemleri(defter?.id)
+      const mahsuplar = defterIslemleri(defter?.id)
         .filter(i => !i.silindi && i.tip === 'cikis' && i.alacakMahsup && i.alacakKalemId === kalem.id)
         .filter(i => !(i.odemeId && silinenTahsilatOdemeIds.has(i.odemeId)));
+      // ======================================================================
+      // HATA DÜZELTMESİ (kullanıcı bildirimi): "Ferhat Arslan'dan 5.000 ₺'yi
+      // maaşının nakitinden kestim; Ödemeler'de düştü ama borçlu listesinde
+      // KISMİ • ₺5.000 alındı yazmıyor."
+      // ----------------------------------------------------------------------
+      // KÖK NEDEN: Borçlunun kalan borcu yalnızca defterdeki MAHSUP kayıtlarından
+      // hesaplanıyordu. Maaştan kesme yolu ise (eski sürümde) elle eklenen
+      // borçlu için mahsup YAZMIYORDU; kesinti yalnızca maaş kaydına
+      // (borcKesintileri) işleniyordu → Ödemeler düşüyor, borçlu düşmüyordu.
+      // ÇÖZÜM: Personel borçlularında maaş kaydındaki borcKesintileri dökümü de
+      // tahsilat sayılır (alacakKalemId bu kaleme bağlı olanlar). Yeni sürüm
+      // mahsup da yazdığı için AYNI odemeId ikinci kez sayılmaz; geri alınmış
+      // (silinmiş) kesintiler de sayılmaz.
+      // ======================================================================
+      const maasKesintileri = [];
+      if (kalem.tur === 'personel') {
+        try {
+          const mahsupIdler = new Set(mahsuplar.map(i => i.odemeId).filter(Boolean));
+          const silinenIdler = new Set(islemler.filter(i => i.silindi && i.alacakMahsup && i.odemeId).map(i => i.odemeId));
+          ['mavi', 'beyaz'].forEach(yaka => {
+            Object.values(maasVeri?.[yaka]?.maas || {}).forEach(row => {
+              (Array.isArray(row?.borcKesintileri) ? row.borcKesintileri : []).forEach(x => {
+                if (!x || x.alacakKalemId !== kalem.id) return;
+                if (x.odemeId && (mahsupIdler.has(x.odemeId) || silinenIdler.has(x.odemeId))) return;
+                maasKesintileri.push({ tutar: x.tutar, taksitNo: x.taksitNo, tarih: x.tarih, odemeId: x.odemeId, maasKesinti: true, kanal: x.kanal });
+              });
+            });
+          });
+        } catch (e) { /* maaş verisi henüz yüklenmemiş olabilir — mahsuplarla devam */ }
+      }
+      const tahsilatlar = [...mahsuplar, ...maasKesintileri];
       const taksitTahsil = {}; const taksitSonTarih = {};
       tahsilatlar.forEach(i => {
         const n = parseInt(i.taksitNo); if (isNaN(n)) return;
@@ -8952,8 +9021,23 @@ const nakitYuvarla = (tutar) => {
       // / maasKesintiBanka), (3) defter geliri yazılmaz — ciro şişmez.
       const tahsilSekli = tahsilModal.tahsilSekli || 'hesap';
       if (tahsilModal.kalem.tur === 'personel' && tahsilSekli.startsWith('maas')) {
-        const personId = tahsilModal.kalem.personId;
-        if (!personId) { alert('Bu borçlu bir personele bağlı değil; maaştan kesilemez. "Hesaba Nakit" seçin.'); return; }
+        // ====================================================================
+        // HATA DÜZELTMESİ (kullanıcı bildirimi: "maaştan kesme çalışmıyor")
+        // --------------------------------------------------------------------
+        // KÖK NEDEN: "Yeni Borçlu → Personel" ile ELLE eklenen borçlularda yalnızca
+        // ad kaydediliyordu, personId HİÇ yazılmıyordu. Bu yüzden maaştan kesme
+        // yolu "personele bağlı değil" uyarısıyla duruyordu; yalnızca otomatik
+        // (profilden gelen) borçlularda çalışıyordu.
+        // ÇÖZÜM: personId yoksa personel adıyla eşleştirilir (Türkçe, büyük/küçük
+        // harf duyarsız). Yeni eklenen borçlulara da artık personId yazılıyor.
+        // ====================================================================
+        const adNormal = (s) => String(s || '').toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
+        const personId = tahsilModal.kalem.personId
+          || (personnelList || []).find(p => adNormal(p.fullName || p.name) === adNormal(tahsilModal.kalem.ad))?.id
+          || null;
+        if (!personId) { alert(`"${tahsilModal.kalem.ad}" adında bir personel bulunamadı; maaştan kesilemez.\n\nBorçlu adını personel listesindeki adla birebir aynı yazın (Düzenle) ya da "Hesaba Nakit" seçin.`); return; }
+        // Elle eklenen borçlu (al_…) mu, profilden gelen otomatik borçlu (oto_personel_…) mu?
+        const otomatikKalem = String(tahsilModal.kalem.id || '').startsWith(OTO_PERSONEL_KALEM_ONEKI);
         setTahsilKaydediliyor(true);
         try {
           // ==================================================================
@@ -8983,26 +9067,49 @@ const nakitYuvarla = (tutar) => {
             setTahsilKaydediliyor(false);
             return;
           }
+          // YENİ (kullanıcı talebi): kesilecek tutar o kanalın kalanını aşıyorsa uyar (eksiye düşer)
+          const kanalKalan = maasKanalKalani(personId, kanal);
+          if (kanalKalan != null && tutar > kanalKalan + 0.01 &&
+              !window.confirm(`${kisi?.fullName || tahsilModal.kalem.ad} için ${AY_ADLARI[mAy - 1]} ${mYil} ${kanalEtiket} şu an ₺${paraFmt(kanalKalan)}.\n\n₺${paraFmt(tutar)} kesilirse ${kanalEtiket} ₺${paraFmt(kanalKalan - tutar)} olur (eksi). Yine de devam edilsin mi?`)) {
+            setTahsilKaydediliyor(false);
+            return;
+          }
           const kesintiAlan = kanal === 'banka' ? 'maasKesintiBanka' : 'maasKesintiNakit';
           const tarih = tahsilModal.tarih || bugunStr();
           const odemeId = `maaskesinti_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
           row[kesintiAlan] = String(Math.round(((parseFloat(row[kesintiAlan]) || 0) + tutar) * 100) / 100);
           row.borcKesintileri = [...(Array.isArray(row.borcKesintileri) ? row.borcKesintileri : []),
-            { odemeId, tarih, tutar, kanal, alacakKalemId: tahsilModal.kalem.id, taksitNo: t.no, by: currentUser?.fullName || 'Sistem' }];
+            { odemeId, tarih, tutar, kanal, alacakKalemId: tahsilModal.kalem.id, alacakDefterId: seciliDefter?.id || null, taksitNo: t.no ?? null, by: currentUser?.fullName || 'Sistem' }];
           recs[personId] = row;
-          await setDoc(mRef, { records: recs, updatedAt: new Date().toISOString() }, { merge: true });
+          // YENİ: kesintiIslemZamani → açık Maaş Tablosu ekranları kesintiyi canlı okur (eski veriyle üzerine yazmaz)
+          await setDoc(mRef, { records: recs, updatedAt: new Date().toISOString(), kesintiIslemZamani: new Date().toISOString() }, { merge: true });
 
-          // Şirket borcunu (maas_yearly borclanma) düş — borçlu listesinin dinlediği yıl (içinde bulunulan yıl)
-          const yRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas_yearly', String(new Date().getFullYear()));
-          const ySnap = await getDoc(yRef);
-          const yRec = ySnap.exists() ? (ySnap.data().records || {}) : {};
-          const mevcutBorc = parseFloat(yRec[personId]?.borclanma) || 0;
-          yRec[personId] = { ...(yRec[personId] || {}), borclanma: String(Math.max(0, mevcutBorc - tutar)) };
-          await setDoc(yRef, { records: yRec }, { merge: true });
-
-          // NOT: borçlu defterine mahsup YAZILMAZ. Personel borçlusu otomatik olarak
-          // borclanma değerinden üretilir; borclanma yukarıda düşüldüğü için "Tüm
-          // Borçlular" listesi zaten güncellenir. Mahsup da yazılsaydı borç İKİ KEZ düşerdi.
+          if (otomatikKalem) {
+            // OTOMATİK borçlu: şirket borcunu (maas_yearly borclanma) düş — borçlu listesinin dinlediği yıl
+            const yRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas_yearly', String(new Date().getFullYear()));
+            const ySnap = await getDoc(yRef);
+            const yRec = ySnap.exists() ? (ySnap.data().records || {}) : {};
+            const mevcutBorc = parseFloat(yRec[personId]?.borclanma) || 0;
+            yRec[personId] = { ...(yRec[personId] || {}), borclanma: String(Math.max(0, mevcutBorc - tutar)) };
+            await setDoc(yRef, { records: yRec }, { merge: true });
+            // NOT: borçlu defterine mahsup YAZILMAZ. Personel borçlusu otomatik olarak
+            // borclanma değerinden üretilir; borclanma yukarıda düşüldüğü için "Tüm
+            // Borçlular" listesi zaten güncellenir. Mahsup da yazılsaydı borç İKİ KEZ düşerdi.
+          } else {
+            // YENİ: ELLE eklenen borçlu — kalan borç mahsup kayıtlarından hesaplanır; bu yüzden
+            // borçlu defterine MAHSUP ÇIKIŞI yazılır (alacak azalır). Para hesaba GİRMEZ,
+            // ciroya / gidere girmez (alacakMahsup). odemeId ile maaş satırındaki kesintiye bağlıdır.
+            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+              tarih, kategori: 'Tahsilat', etiketler: [], odemeId,
+              taksitNo: t.no ?? null, alacakKalemId: tahsilModal.kalem.id,
+              alacakDefterId: seciliDefter.id, kaynak: 'Maaştan Kesinti',
+              kismiOdeme, createdAt: new Date().toISOString(), by: currentUser?.fullName || 'Sistem',
+              tip: 'cikis', tutar, defterId: seciliDefter.id,
+              alacakMahsup: true, maasKesinti: true, kanal, maasDoc: docAdi, personId,
+              odemeYontemi: 'Maaş Kesintisi',
+              aciklama: `${tahsilModal.kalem.ad} ${t.no}. taksit — ${AY_ADLARI[mAy - 1]} ${mYil} maaşının ${kanalEtiket} kısmından kesildi${kismiNot}`,
+            });
+          }
           addSystemLog?.('Personel Borcu Maaştan Kesildi',
             `${tahsilModal.kalem.ad}: ₺${paraFmt(tutar)} borç, ${AY_ADLARI[mAy - 1]} ${mYil} maaşının ${kanalEtiket} kısmından kesilerek tahsil edildi.${kismiOdeme ? ` Kalan borç: ₺${paraFmt(kalacak)}` : ''}`);
           setTahsilModal(null);
@@ -10079,6 +10186,25 @@ const nakitYuvarla = (tutar) => {
       if (!seciliDefterId) setOdemeAyi(bugunStr().slice(0, 7));
     }, [seciliDefterId]);
 
+    // YENİ (kullanıcı talebi): personelin ödenecek maaşındaki bir kanalın (nakit / banka)
+    // ŞU ANKİ kalanı — Ödemeler listesindeki rakamla aynı hesap (kısmi ödenen düşülmüş).
+    // Veri henüz yüklenmediyse / ay uyuşmuyorsa null döner (uyarı gösterilmez).
+    const maasKanalKalani = (personId, kanal) => {
+      try {
+        const { yil, ay } = maasKaynakAy;
+        if (!maasVeri || maasVeri.kaynakAnahtar !== `${yil}_${ay}`) return null;
+        const kisi = (personnelList || []).find(p => p.id === personId);
+        if (!kisi) return null;
+        const maviPoz = ['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'];
+        const mavi = kisi.collarType === 'Mavi Yaka' || (!kisi.collarType && maviPoz.includes(kisi.position));
+        const kaynak = maasVeri[mavi ? 'mavi' : 'beyaz'];
+        const row = kaynak?.maas?.[personId] || {};
+        const hes = maasKisiHesabi(kisi, row, kaynak?.mesai?.[personId], yil, ay);
+        if (kanal === 'banka') return row.bankaOdendi ? 0 : hes.bankaKalan - (parseFloat(row.bankaOdenenTutar) || 0);
+        return row.nakitOdendi ? 0 : hes.kalanNakit - (parseFloat(row.nakitOdenenTutar) || 0);
+      } catch (e) { return null; }
+    };
+
     // YENİ (kullanıcı talebi): personelin KALAN şirket borcu — "Tüm Borçlular" listesiyle aynı:
     // borclanma (maaştan kesintiler zaten düşülmüş) − "Hesaba Nakit" tahsilat mahsupları
     const personelKalanBorcu = (pid) => {
@@ -10101,15 +10227,37 @@ const nakitYuvarla = (tutar) => {
         const mSnap = await getDoc(mRef);
         const recs = mSnap.exists() ? (mSnap.data().records || {}) : {};
         const row = { ...(recs[k.person.id] || {}) };
+        const eskiDokum = Array.isArray(row.borcKesintileri) ? row.borcKesintileri : [];
+        const kaldirilanlar = eskiDokum.filter(x => x.kanal === kanal); // bu kanaldan yapılmış kesintiler
         row[kesintiAlan] = '0';
-        row.borcKesintileri = (Array.isArray(row.borcKesintileri) ? row.borcKesintileri : []).filter(x => x.kanal !== kanal);
+        row.borcKesintileri = eskiDokum.filter(x => x.kanal !== kanal);
         recs[k.person.id] = row;
-        await setDoc(mRef, { records: recs, updatedAt: new Date().toISOString() }, { merge: true });
-        const yRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas_yearly', String(new Date().getFullYear()));
-        const ySnap = await getDoc(yRef);
-        const yRec = ySnap.exists() ? (ySnap.data().records || {}) : {};
-        yRec[k.person.id] = { ...(yRec[k.person.id] || {}), borclanma: String((parseFloat(yRec[k.person.id]?.borclanma) || 0) + tutar) };
-        await setDoc(yRef, { records: yRec }, { merge: true });
+        // YENİ: kesintiIslemZamani → açık Maaş Tablosu ekranları sıfırlanan kesintiyi canlı okur
+        await setDoc(mRef, { records: recs, updatedAt: new Date().toISOString(), kesintiIslemZamani: new Date().toISOString() }, { merge: true });
+        // DEĞİŞTİ: borç geri eklenirken kesintinin KAYNAĞINA bakılır
+        //  • otomatik borçlu (oto_personel_… ya da kaynağı belirsiz eski kayıt) → maas_yearly borclanma'ya geri eklenir
+        //  • elle eklenen borçlu (al_…) → borçlu defterindeki mahsup kaydı silinir (borç kendiliğinden geri gelir)
+        const otoMu = (x) => !x?.alacakKalemId || String(x.alacakKalemId).startsWith(OTO_PERSONEL_KALEM_ONEKI);
+        // Elle eklenen borçluya ait kesintilerin mahsup kayıtları (yeni sürümde yazılır) → silinir
+        const mahsupIdler = new Set(kaldirilanlar.filter(x => !otoMu(x) && x.odemeId).map(x => x.odemeId));
+        const esler = mahsupIdler.size ? islemler.filter(i => !i.silindi && i.alacakMahsup && i.odemeId && mahsupIdler.has(i.odemeId)) : [];
+        const bulunanIdler = new Set(esler.map(i => i.odemeId));
+        for (const i of esler) {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', i.id),
+            { silindi: true, silinmeTarihi: new Date().toISOString(), silen: currentUser?.fullName || 'Sistem', silmeNedeni: 'Maaştan borç kesintisi geri alındı' });
+        }
+        // borclanma'ya geri eklenecek tutar: otomatik borçlu kesintileri + ESKİ sürümde yapılmış
+        // (mahsup kaydı olmayan, ama o zaman borclanma'dan düşülmüş) elle-borçlu kesintileri
+        const geriEklenecek = kaldirilanlar.length
+          ? kaldirilanlar.filter(x => otoMu(x) || !(x.odemeId && bulunanIdler.has(x.odemeId))).reduce((t, x) => t + (parseFloat(x.tutar) || 0), 0)
+          : tutar;
+        if (geriEklenecek > 0) {
+          const yRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas_yearly', String(new Date().getFullYear()));
+          const ySnap = await getDoc(yRef);
+          const yRec = ySnap.exists() ? (ySnap.data().records || {}) : {};
+          yRec[k.person.id] = { ...(yRec[k.person.id] || {}), borclanma: String((parseFloat(yRec[k.person.id]?.borclanma) || 0) + geriEklenecek) };
+          await setDoc(yRef, { records: yRec }, { merge: true });
+        }
         addSystemLog?.('Maaştan Borç Kesintisi Geri Alındı', `${k.person.fullName}: ₺${paraFmt(tutar)} kesinti ${kanal === 'banka' ? 'Kalan Banka' : 'Kalan Nakit'}'ten kaldırıldı, şirket borcuna geri eklendi.`);
       } catch (e) { console.error('Kesinti geri alınamadı:', e); alert('Geri alma başarısız. Lütfen tekrar deneyin.'); }
     };
@@ -10238,7 +10386,7 @@ const nakitYuvarla = (tutar) => {
         ).map(p => {
           const row = (veriKaynagi?.maas || {})[p.id] || {};
           const hes = maasKisiHesabi(p, row, (veriKaynagi?.mesai || {})[p.id], yil, ay);
-          const icraAylik = icraAylikOdenecek(p, hes.icraKesintisi);   // aylık kesinti, kalanla sınırlı
+          const icraAylik = hes.icraKesintisi; // DEĞİŞTİ: kesinti artık hesap içinde kalan borçla (bu ayın ödemesi dahil) sınırlı — kısmi ödeme sonrası aylık tutar küçülmez
           const kismiOdenen = parseFloat(row.icraOdenenTutar) || 0;     // bu ay ödenmiş kısım
           const bekleyen = row.icraOdendi ? 0 : Math.max(0, icraAylik - kismiOdenen);
           return { person: p, bekleyen, kismiOdenen, icraAylik, icraKalan: icraKalanBorc(p),
@@ -14806,7 +14954,7 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                           .slice(0, 20)
                           .map(p => (
                             <button key={p.id} type="button"
-                              onClick={() => { setAlacakForm({ ...alacakForm, ad: p.fullName || p.name }); setBorcluAramaP(''); }}
+                              onClick={() => { setAlacakForm({ ...alacakForm, ad: p.fullName || p.name, personId: p.id }); setBorcluAramaP(''); }} /* DÜZELTME: personId de kaydedilir → maaştan kesme çalışır */
                               className="w-full text-left px-3 py-2 text-sm font-bold text-neutral-700 hover:bg-purple-50 flex items-center gap-2">
                               <User className="w-3.5 h-3.5 text-purple-600" /> {p.fullName || p.name}
                               <span className="text-[10px] font-medium text-neutral-400">{p.position}</span>
@@ -14979,11 +15127,26 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                         </button>
                       ))}
                     </div>
-                    {(tahsilModal.tahsilSekli || 'hesap').startsWith('maas') && (
-                      <p className="text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg p-2 mt-1.5">
-                        Bu tutar personelin <b>{AY_ADLARI[maasKaynakAy.ay - 1]} {maasKaynakAy.yil} maaşının {tahsilModal.tahsilSekli === 'maas_banka' ? 'Kalan Banka' : 'Kalan Nakit'}</b> kısmından kesilecek (Ödemeler'deki "{AY_ADLARI[maasKaynakAy.ay - 1]} {maasKaynakAy.yil} maaşı" satırı). Kasaya para girişi olmaz; şirket borcu düşer, Kalan {tahsilModal.tahsilSekli === 'maas_banka' ? 'Banka' : 'Nakit'} aynı tutarda azalır.
-                      </p>
-                    )}
+                    {(tahsilModal.tahsilSekli || 'hesap').startsWith('maas') && (() => {
+                      // YENİ: kanalın ŞU ANKİ kalanı ve kesinti sonrası kalan gösterilir (personel adla da eşleşir)
+                      const adNormal = (s) => String(s || '').toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ').trim();
+                      const pid = tahsilModal.kalem.personId || (personnelList || []).find(p => adNormal(p.fullName || p.name) === adNormal(tahsilModal.kalem.ad))?.id || null;
+                      const kanal = tahsilModal.tahsilSekli === 'maas_banka' ? 'banka' : 'nakit';
+                      const kanalAd = kanal === 'banka' ? 'Kalan Banka' : 'Kalan Nakit';
+                      const kalan = pid ? maasKanalKalani(pid, kanal) : null;
+                      const tutarS = parseFloat(tahsilModal.tutar) || 0;
+                      return (
+                        <div className="text-[11px] font-bold text-purple-700 bg-purple-50 border border-purple-200 rounded-lg p-2 mt-1.5 space-y-1">
+                          <p>Bu tutar personelin <b>{AY_ADLARI[maasKaynakAy.ay - 1]} {maasKaynakAy.yil} maaşının {kanalAd}</b> kısmından kesilecek (Ödemeler'deki "{AY_ADLARI[maasKaynakAy.ay - 1]} {maasKaynakAy.yil} maaşı" satırı). Kasaya para girişi olmaz; borç düşer, {kanalAd} aynı tutarda azalır.</p>
+                          {!pid && <p className="text-red-700">⚠ Bu ad personel listesinde bulunamadı — maaştan kesilemez. Borçlu adını personel adıyla aynı yazın.</p>}
+                          {pid && kalan != null && (
+                            <p className={tutarS > kalan + 0.01 ? 'text-red-700' : 'text-purple-900'}>
+                              {kanalAd} şu an <b>₺{paraFmt(kalan)}</b> → kesinti sonrası <b>₺{paraFmt(kalan - tutarS)}</b>{tutarS > kalan + 0.01 ? ' (eksiye düşer — onay istenir)' : ''}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
