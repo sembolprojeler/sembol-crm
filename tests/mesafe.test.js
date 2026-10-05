@@ -95,23 +95,38 @@ test('kademe ekle / sil kaydedilir, sıralanır ve fark sayılır; aynı km hata
   assert.ok(fiyatDogrula(cift, t1).hatalar.some(h => h.mesaj.includes('Aynı km')));
 });
 
-// ---------------------------------------------------------------- EV TİPİNE GÖRE KM FARKI
-const MO = { ...M, kmUcreti: 15, kademeler: [{ km: 800, yuzde: 20, ek: 0 }], odaFarki: { esikKm: 400, yuzde: { '1+0': 0, '1+1': 5, '2+1': 10, '3+1': 20, '4+1': 30 } } };
-test('ev tipi farkı: km tutarı × ev tipi %, başlangıç km aşılınca', () => {
-  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 1000 }, '3+1').tutar, 3000);   // 15.000 × %20
-  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 1000 }, '4+1').tutar, 4500);   // 15.000 × %30
-  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 1000 }, '1+0'), null);         // %0
-  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 400 }, '3+1'), null);          // tam eşit = aşmaz
-  assert.equal(mesafeOdaFarkiKalemi({ ...MO, odaFarki: { ...MO.odaFarki, esikKm: 0 } }, { toplamKm: 50 }, '3+1').tutar, 150);
+// ---------------------------------------------------------------- EV TİPİNE GÖRE KM FARKI (KADEMELİ)
+const Y = (a, b, c, d, e) => ({ '1+0': a, '1+1': b, '2+1': c, '3+1': d, '4+1': e });
+const MO = { ...M, kmUcreti: 15, kademeler: [{ km: 800, yuzde: 20, ek: 0 }],
+  odaKademeleri: [{ km: 0, yuzde: Y(0, 0, 5, 10, 15) }, { km: 600, yuzde: Y(0, 5, 10, 20, 30) }] };
+test('ev tipi kademesi: aşılan EN YÜKSEK kademe, 0 km her mesafede, tam eşit aşmaz', () => {
+  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 300 }, '3+1').tutar, 450);    // 4.500 × %10
+  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 600 }, '3+1').tutar, 900);    // 600 = aşmaz → 1. kademe
+  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 1000 }, '3+1').tutar, 3000);  // 15.000 × %20
+  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 1000 }, '4+1').tutar, 4500);  // 15.000 × %30
+  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 1000 }, '1+0'), null);        // %0
+  assert.equal(mesafeOdaFarkiKalemi({ ...MO, odaKademeleri: [] }, { toplamKm: 1000 }, '3+1'), null);
 });
 test('ev tipi farkı uzun yol yüzdesinin tabanına girer (toplamın üzerine)', () => {
   const rota = { toplamKm: 1000, gecisler: {} };
   const k = [{ ad: 'taban', tutar: 35000 }, ...mesafeKalemleri(MO, rota), mesafeOdaFarkiKalemi(MO, rota, '3+1')];
   assert.equal(mesafeIscilikKalemi(MO, rota, k).tutar, Math.round((35000 + 15000 + 3000) * 0.2));
 });
-test('ev tipi farkı şemada: varsayılan 0, %0-100 doğrulanır, eski kayıtta eksikse doldurulur', () => {
-  const d = fiyatEksikleriDoldur({ mesafe: { kmUcreti: 15, esikKm: 800, iscilikYuzde: 20, uzunYolEk: 0 } });
-  assert.deepEqual(d.mesafe.odaFarki, { esikKm: 0, yuzde: { '1+0': 0, '1+1': 0, '2+1': 0, '3+1': 0, '4+1': 0 } });
-  d.mesafe.odaFarki.yuzde['3+1'] = 150;
-  assert.ok(fiyatDogrula(d).hatalar.some(h => h.yol.join('.') === 'mesafe.odaFarki.yuzde.3+1'));
+test('ev tipi kademeleri şemada: varsayılan, eski tek satır göçü, ekle/sil, doğrulama', () => {
+  const d = fiyatEksikleriDoldur({ mesafe: { kmUcreti: 15 } });
+  assert.deepEqual(d.mesafe.odaKademeleri, [{ km: 0, yuzde: Y(0, 0, 0, 0, 0) }]);
+  const eski = { mesafe: { kmUcreti: 15, odaFarki: { esikKm: 400, yuzde: Y(0, 5, 10, 20, 30) } } };
+  assert.deepEqual(fiyatEksikleriDoldur(eski, eski).mesafe.odaKademeleri, [{ km: 400, yuzde: Y(0, 5, 10, 20, 30) }]);
+  const t0 = fiyatTemizle(fiyatEksikleriDoldur({}), null);
+  const ekle = JSON.parse(JSON.stringify(t0)); ekle.mesafe.odaKademeleri.unshift({ km: 600, yuzde: Y(0, 5, 10, 20, 30) });
+  const t1 = fiyatTemizle(ekle, t0);
+  assert.deepEqual(t1.mesafe.odaKademeleri.map(k => k.km), [0, 600]);
+  assert.ok(fiyatFarklari(t0, t1).some(f => f.yol[1] === 'odaKademeleri'));
+  const sil = JSON.parse(JSON.stringify(t1)); sil.mesafe.odaKademeleri = [];
+  assert.deepEqual(fiyatTemizle(sil, t1).mesafe.odaKademeleri, []);
+  const hata = (v) => fiyatDogrula(v, t1).hatalar.filter(h => h.yol[0] === 'mesafe');
+  const cift = JSON.parse(JSON.stringify(t1)); cift.mesafe.odaKademeleri.push({ km: 600, yuzde: Y(0, 0, 0, 0, 0) });
+  assert.ok(hata(cift).some(h => h.mesaj.includes('ev tipi kademesi')));
+  const fazla = JSON.parse(JSON.stringify(t1)); fazla.mesafe.odaKademeleri[1].yuzde['4+1'] = 150;
+  assert.ok(hata(fazla).some(h => h.yol.join('.') === 'mesafe.odaKademeleri.1.yuzde.4+1'));
 });
