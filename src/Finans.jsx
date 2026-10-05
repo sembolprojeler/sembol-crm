@@ -1756,11 +1756,15 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
             setPuantajData(snap.data().records || {});
             setPuantajMeta({
               isClosed: snap.data().isClosed || false,
-              bonusRecords: snap.data().bonusRecords || {}
+              bonusRecords: snap.data().bonusRecords || {},
+              // DÜZELTME (kullanıcı talebi): kapanışta maaşa eklenen primler de okunur.
+              // Önceden okunmadığı için sayfa yenilendikten sonra "Geri Al" primleri
+              // düşemiyor, ikinci kapanışta primler üst üste ekleniyordu.
+              appliedPrims: snap.data().appliedPrims || {}
             });
           } else {
             setPuantajData({});
-            setPuantajMeta({ isClosed: false, bonusRecords: {} });
+            setPuantajMeta({ isClosed: false, bonusRecords: {}, appliedPrims: {} });
           }
         } catch (e) {
           console.error("Puantaj yüklenirken hata:", e);
@@ -2211,7 +2215,13 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       addSystemLog?.('Zirvedekiler Sertifikası', `${ayEtiketi} ${currentYear} • ilk 3 personel sertifikası (A4 PDF) oluşturuldu.`);
     };
 
+    // DÜZELTME (kullanıcı talebi): kapanış primi maaş kaydına KAYNAK İŞARETİYLE yazılır:
+    //   records[pId].kapanisPrimleri = { 'mavi_2026_9': 17.5 }   (anahtar = kapanan puantaj belgesi)
+    // Böylece aynı ay tekrar kapatılırsa prim ÜST ÜSTE EKLENMEZ (önceki tutar değiştirilir) ve
+    // "Geri Al" yalnızca bu kapanıştan gelen tutarı siler — elle girilen prime dokunmaz.
+    const kapanisKaynagi = `${docPrefix}${currentYear}_${currentMonth}`;
     const confirmCloseMonth = async () => {
+       if (puantajMeta.isClosed) { alert('Bu ay zaten kapatılmış. Tekrar kapatmak için önce "Geri Al" yapın.'); return; } // çift tıklama / çift kapanış koruması
        try {
            const puantajRef = doc(db, 'artifacts', appId, 'public', 'data', 'puantaj', `${docPrefix}${currentYear}_${currentMonth}`);
            await setDoc(puantajRef, {
@@ -2240,8 +2250,14 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
 
            Object.keys(monthCloseModalData.nextMonthPrims).forEach(pId => {
                if (!nextMaasRecords[pId]) nextMaasRecords[pId] = {};
-               const existingPrim = parseFloat(nextMaasRecords[pId].prim) || 0;
-               nextMaasRecords[pId].prim = existingPrim + monthCloseModalData.nextMonthPrims[pId];
+               const kayit = nextMaasRecords[pId];
+               const existingPrim = parseFloat(kayit.prim) || 0;
+               const kaynaklar = { ...(kayit.kapanisPrimleri || {}) };
+               const oncekiTutar = parseFloat(kaynaklar[kapanisKaynagi]) || 0; // aynı kapanıştan daha önce eklenen (varsa)
+               const yeniTutar = parseFloat(monthCloseModalData.nextMonthPrims[pId]) || 0;
+               kayit.prim = Math.round((Math.max(0, existingPrim - oncekiTutar) + yeniTutar) * 100) / 100;
+               kaynaklar[kapanisKaynagi] = yeniTutar;
+               kayit.kapanisPrimleri = kaynaklar;
            });
 
            await setDoc(nextMaasRef, { records: nextMaasRecords, updatedAt: new Date().toISOString() }, { merge: true });
@@ -2272,10 +2288,33 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           const nextMaasSnap = await getDoc(nextMaasRef);
           if (nextMaasSnap.exists()) {
               let nextMaasRecords = nextMaasSnap.data().records || {};
-              Object.keys(appliedPrims).forEach(pId => {
-                  if (nextMaasRecords[pId]) {
-                      const existingPrim = parseFloat(nextMaasRecords[pId].prim) || 0;
-                      nextMaasRecords[pId].prim = Math.max(0, existingPrim - (parseFloat(appliedPrims[pId]) || 0));
+              // DÜZELTME (kullanıcı talebi): bu kapanıştan prim almış herkes —
+              // puantaj kaydındaki liste + maaş kaydında bu kapanışın işaretini taşıyanlar
+              const kisiler = new Set(Object.keys(appliedPrims));
+              Object.keys(nextMaasRecords).forEach(pId => { if (nextMaasRecords[pId]?.kapanisPrimleri?.[kapanisKaynagi] != null) kisiler.add(pId); });
+              // İşaretsiz (bu düzeltmeden ÖNCE işlenmiş) primler: kaç kez eklendiği bilinemez →
+              // kullanıcıya prim alanını tamamen sıfırlamak isteyip istemediği sorulur
+              const isaretsizler = [...kisiler].filter(pId => nextMaasRecords[pId] && nextMaasRecords[pId].kapanisPrimleri?.[kapanisKaynagi] == null && (parseFloat(nextMaasRecords[pId].prim) || 0) > 0);
+              const tamamenSifirla = isaretsizler.length > 0 && window.confirm(
+                `${isaretsizler.length} personelin ${nextMonth}/${nextYear} maaşındaki prim, eski sistemle (kaynak işareti olmadan) işlenmiş.\n\n` +
+                `Önceki "Geri Al" hatası yüzünden bu primler birden fazla kez eklenmiş olabilir.\n\n` +
+                `TAMAM → bu personellerin prim alanı tamamen SIFIRLANSIN (elle girdiğiniz prim varsa o da silinir).\n` +
+                `İPTAL → yalnızca bu kapanışın tutarı düşülsün.`);
+              kisiler.forEach(pId => {
+                  const kayit = nextMaasRecords[pId];
+                  if (!kayit) return;
+                  const existingPrim = parseFloat(kayit.prim) || 0;
+                  const isaretliTutar = kayit.kapanisPrimleri?.[kapanisKaynagi];
+                  if (isaretliTutar != null) {
+                      // Yeni sistem: yalnızca bu kapanıştan gelen tutar silinir
+                      kayit.prim = Math.round(Math.max(0, existingPrim - (parseFloat(isaretliTutar) || 0)) * 100) / 100;
+                      const kaynaklar = { ...kayit.kapanisPrimleri };
+                      delete kaynaklar[kapanisKaynagi];
+                      kayit.kapanisPrimleri = kaynaklar;
+                  } else if (tamamenSifirla) {
+                      kayit.prim = 0;
+                  } else {
+                      kayit.prim = Math.round(Math.max(0, existingPrim - (parseFloat(appliedPrims[pId]) || 0)) * 100) / 100;
                   }
               });
               await setDoc(nextMaasRef, { records: nextMaasRecords, updatedAt: new Date().toISOString() }, { merge: true });
