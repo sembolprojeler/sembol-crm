@@ -46,7 +46,8 @@ test('eski kayıt: mesafe yoksa doğrulama hata vermez, varsayılanlar yazılır
   assert.equal(mesafeModuAcik(temiz.mesafe), false);
 });
 test('doğrulama: hatalı değerler yakalanır', () => {
-  const v = fiyatEksikleriDoldur({}); v.mesafe.modu = 2; v.mesafe.kademeler = [{ km: 0, yuzde: 150, ek: -1 }]; v.mesafe.cikisAdresi = ' ';
+  // DEĞİŞTİ: km oranı sınırı artık %1000 (1500 hatalı)
+  const v = fiyatEksikleriDoldur({}); v.mesafe.modu = 2; v.mesafe.kademeler = [{ km: 0, yuzde: 1500, ek: -1 }]; v.mesafe.cikisAdresi = ' ';
   const h = fiyatDogrula(v).hatalar.filter(x => x.yol[0] === 'mesafe').map(x => x.yol.join('.'));
   for (const y of ['mesafe.modu', 'mesafe.kademeler.0.km', 'mesafe.kademeler.0.yuzde', 'mesafe.kademeler.0.ek', 'mesafe.cikisAdresi']) assert.ok(h.includes(y), y);
 });
@@ -127,6 +128,22 @@ test('ev tipi kademeleri şemada: varsayılan, eski tek satır göçü, ekle/sil
   const hata = (v) => fiyatDogrula(v, t1).hatalar.filter(h => h.yol[0] === 'mesafe');
   const cift = JSON.parse(JSON.stringify(t1)); cift.mesafe.odaKademeleri.push({ km: 600, yuzde: Y(0, 0, 0, 0, 0) });
   assert.ok(hata(cift).some(h => h.mesaj.includes('ev tipi kademesi')));
-  const fazla = JSON.parse(JSON.stringify(t1)); fazla.mesafe.odaKademeleri[1].yuzde['4+1'] = 150;
+  // DEĞİŞTİ (kullanıcı talebi): %100 üstü geçerli (ör. %120); sınır %1000
+  const yuz20 = JSON.parse(JSON.stringify(t1)); yuz20.mesafe.odaKademeleri[1].yuzde['4+1'] = 120;
+  assert.equal(hata(yuz20).length, 0);
+  const fazla = JSON.parse(JSON.stringify(t1)); fazla.mesafe.odaKademeleri[1].yuzde['4+1'] = 1500;
   assert.ok(hata(fazla).some(h => h.yol.join('.') === 'mesafe.odaKademeleri.1.yuzde.4+1'));
+});
+
+test('km oranları %100 üstü: ev tipi %120 ve uzun yol %150 doğru hesaplanır; açılış yüzdesi yine 0–100', () => {
+  const M2 = { ...M, kmUcreti: 15, kademeler: [{ km: 800, yuzde: 150, ek: 0 }], odaKademeleri: [{ km: 0, yuzde: Y(0, 0, 0, 0, 120) }] };
+  const rota = { toplamKm: 1000, gecisler: {} };
+  const oda = mesafeOdaFarkiKalemi(M2, rota, '4+1');
+  assert.equal(oda.tutar, 18000);                                   // 15.000 × %120
+  const k = [{ ad: 'taban', tutar: 42000 }, ...mesafeKalemleri(M2, rota), oda];
+  assert.equal(mesafeIscilikKalemi(M2, rota, k).tutar, Math.round((42000 + 15000 + 18000) * 1.5)); // %150 × toplam
+  const v = fiyatEksikleriDoldur({}); v.mesafe.kademeler = [{ km: 200, yuzde: 250, ek: 0 }];
+  assert.equal(fiyatDogrula(v).hatalar.filter(h => h.yol[0] === 'mesafe').length, 0);
+  const g = fiyatEksikleriDoldur({}); g.genel = { acilisOraniEve: 120, acilisOraniDepo: 25 };
+  assert.ok(fiyatDogrula(g).hatalar.some(h => h.yol.join('.') === 'genel.acilisOraniEve'));
 });
