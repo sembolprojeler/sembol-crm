@@ -223,8 +223,28 @@ const EKSTRA_DISI_KAYNAKLAR = ['Kredi Kartı Kesintisi', 'Kart Ekstresi', 'Kredi
 const EKSTRA_DISI_KATEGORILER = ['Kredi Kartı Kesintisi', 'Kredi Kartı', 'Kredi Taksiti', 'Kredi Kullandırımı',
   'Virman (Transfer)', 'Devir', 'Taşınan Ödeme', 'Düzenli Ödeme', 'Tahsilat'];
 
+// ==========================================================================
+// DEĞİŞTİ (kullanıcı talebi): DEFTER KAYITLARI PERSONEL MAAŞINI ETKİLEMEZ
+// --------------------------------------------------------------------------
+// Defterde personele etiketlenmiş (Ekip Şefi / Sorumlu) HİÇBİR gider — banka,
+// nakit ya da kredi kartı; iş gideri, POS kesintisi, masraf, elden ödeme fark
+// etmez — artık Personel Muhasebe ekranındaki Kalan Banka / Kalan Nakit'ten
+// DÜŞMEZ. Maaştan yalnızca şu durumlar düşer (bunlar ayrı alanlarda tutulur,
+// bu fonksiyondan bağımsızdır):
+//   • BORÇLANMA  → Defter › Borçlular › Tahsil Et › "Maaş · Nakit / Banka"
+//                  (maasKesintiNakit / maasKesintiBanka)
+//   • İCRA       → banka maaşının 1/4'ü, kalan icra borcunu aşmadan
+//   • TAHSİL EDİLEMEYEN / şirket borcu → borçlanma üzerinden (maaştan kesme)
+// Ödemeler ekranından yapılan maaş / avans ödemeleri eskisi gibi kendi
+// alanlarına (bankaOdenenTutar, nakitOdenenTutar, nakitAvans, resmiAvans) işler.
+// Eski "ekstra ödeme" mantığı ileride gerekirse diye aşağıda duruyor; bu anahtar
+// true yapılırsa yeniden çalışır.
+// ==========================================================================
+const DEFTER_EKSTRA_ODEME_MAASTAN_DUSER = false;
+
 // Bir defter kaydı "elle girilmiş ekstra personel ödemesi" mi?
 const ekstraPersonelOdemesiMi = (i) => {
+  if (!DEFTER_EKSTRA_ODEME_MAASTAN_DUSER) return false; // DEĞİŞTİ: defter kayıtları maaşı etkilemez
   if (!i || i.silindi) return false;
   if (i.tip !== 'cikis') return false;              // Yalnızca personele ÇIKAN para
   if (!i.ekipSefiId) return false;                  // Personele etiketlenmemişse ilgisiz
