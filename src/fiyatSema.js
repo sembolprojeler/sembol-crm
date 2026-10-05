@@ -147,7 +147,7 @@ export const MESAFE_VARSAYILAN = {
   odaKademeleri: [{ km: 0, yuzde: { '1+0': 0, '1+1': 0, '2+1': 0, '3+1': 0, '4+1': 0 } }],
   gecis: { kopru15Temmuz: 50, kopruFsm: 50, kopruYss: 900, kopruOsmangazi: 1500, kopruCanakkale: 1800, otoyolAnadolu: 500, otoyolAvrupa: 300, otoyolNigde: 400, feribot: 1200 },
 };
-// Hücre türleri: 'fiyat' (>0) · 'tutar0' (≥0) · 'yuzde' (0–100) · 'anahtar' (0/1) · 'metin'
+// Hücre türleri: 'fiyat' (>0) · 'tutar0' (≥0) · 'yuzde' (0–100) · 'yuzdeGenis' (0–1000, km oranları) · 'anahtar' (0/1) · 'metin'
 // DEĞİŞTİ: "kaynak" verisindeki kademe sayısı kadar hücre üretilir (eklenen/silinen satırlar dahil)
 export const MESAFE_HUCRELERI = (kaynak = null) => [
   { yol: ['mesafe', 'modu'], etiket: 'Km Bazlı Fiyat · Mod (1 açık / 0 kapalı)', tur: 'anahtar' },
@@ -155,13 +155,13 @@ export const MESAFE_HUCRELERI = (kaynak = null) => [
   { yol: ['mesafe', 'kmUcreti'], etiket: 'Km Bazlı Fiyat · Km ücreti (₺/km)', tur: 'fiyat' },
   ...mesafeKademeListesi(kaynak?.mesafe).flatMap((_, i) => [
     { yol: ['mesafe', 'kademeler', i, 'km'], etiket: `Km Bazlı Fiyat · ${i + 1}. kademe · eşik (km)`, tur: 'fiyat', kademe: true },
-    { yol: ['mesafe', 'kademeler', i, 'yuzde'], etiket: `Km Bazlı Fiyat · ${i + 1}. kademe · işçilik farkı (%)`, tur: 'yuzde', kademe: true },
+    { yol: ['mesafe', 'kademeler', i, 'yuzde'], etiket: `Km Bazlı Fiyat · ${i + 1}. kademe · işçilik farkı (%)`, tur: 'yuzdeGenis', kademe: true }, // DEĞİŞTİ: %100 üstü girilebilir
     { yol: ['mesafe', 'kademeler', i, 'ek'], etiket: `Km Bazlı Fiyat · ${i + 1}. kademe · sabit ek (₺)`, tur: 'tutar0', kademe: true },
   ]),
   // DEĞİŞTİ: ev tipine göre km farkı — kademe sayısı kadar satır (eklenen / silinen dahil)
   ...mesafeOdaKademeListesi(kaynak?.mesafe).flatMap((_, i) => [
     { yol: ['mesafe', 'odaKademeleri', i, 'km'], etiket: `Km Bazlı Fiyat · Ev tipi ${i + 1}. kademe · km`, tur: 'tutar0', kademe: true },
-    ...FIYAT_ODALAR.map(o => ({ yol: ['mesafe', 'odaKademeleri', i, 'yuzde', o], etiket: `Km Bazlı Fiyat · Ev tipi ${i + 1}. kademe · ${o} (%)`, tur: 'yuzde', kademe: true })),
+    ...FIYAT_ODALAR.map(o => ({ yol: ['mesafe', 'odaKademeleri', i, 'yuzde', o], etiket: `Km Bazlı Fiyat · Ev tipi ${i + 1}. kademe · ${o} (%)`, tur: 'yuzdeGenis', kademe: true })),
   ]),
   ...MESAFE_GECISLERI.map(g => ({ yol: ['mesafe', 'gecis', g.ic], etiket: `Km Bazlı Fiyat · Geçiş · ${g.etiket}`, tur: 'tutar0' })),
 ];
@@ -331,6 +331,11 @@ export const fiyatDogrula = (veriHam, sablon = veriHam) => {
   hucreler.forEach(c => {
     const v = yolAl(veri, c.yol);
     const sayi = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
+    // YENİ (kullanıcı talebi): km tablolarındaki oranlar %100'ü aşabilir (ör. %120) — 0–1000 arası
+    if (c.tur === 'yuzdeGenis') {
+      if (!Number.isInteger(sayi) || sayi < 0 || sayi > 1000) hatalar.push({ yol: c.yol, etiket: c.etiket, mesaj: '0–1000 arası tam sayı olmalı' });
+      return;
+    }
     if (c.tur === 'yuzde') {
       if (!Number.isInteger(sayi) || sayi < 0 || sayi > 100) hatalar.push({ yol: c.yol, etiket: c.etiket, mesaj: '0–100 arası tam sayı olmalı' });
       return;
