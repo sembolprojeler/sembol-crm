@@ -1639,7 +1639,50 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
   //   Hedef 0 girilirse o ölçüm devre dışıdır (çarpanı 1). Tüm ölçümler hedefinde
   //   olduğunda Ay Çarpanı = 1 → eski kural (net puan × 0,5) ile aynı sonuç.
   // ==========================================================================
+  // ==========================================================================
+  // YENİ (kullanıcı talebi — Eylül 2026 puantajından itibaren): YORUM HAVUZU PRİM SİSTEMİ
+  // --------------------------------------------------------------------------
+  // SORUN: Eski kuralda (net puan × 0,5 saat) toplam prim, puan toplamıyla büyür.
+  // Puan ise "yorum × ekipteki kişi sayısı" olduğundan ekipler kalabalıklaşınca
+  // müşteri yorumu artmadan da pasta şişer; yorum patlayınca da kişi başı pay
+  // yalnızca kendi puanı kadar artar. Yönetim istedi: PASTA yorum sayısıyla
+  // orantılı büyüsün, pastaya giren kişi sayısı artınca kişi başı pay sert
+  // düşmesin, yorumdaki başarı herkese yansısın.
+  //
+  // ÇÖZÜM — iki parçalı havuz, puana göre paylaşım:
+  //   Yorum havuzu   = Yorum sayısı (Y) × saat/yorum × yorum ağırlığı (%70)
+  //   Katılım havuzu = 20+ puan alan kişi (N) × saat/kişi × (1 − ağırlık) (%30)
+  //   Başarı çarpanı = (Y ÷ tamamlanan iş) ÷ hedef → [alt, üst] arasında sınırlı
+  //   TOPLAM HAVUZ   = (Yorum havuzu + Katılım havuzu) × Başarı çarpanı
+  //   Kişi primi     = HAVUZ × (kişinin net puanı ÷ 20+ kişilerin net puan toplamı)
+  //                    → en yakın 0,5 saate yuvarlanır; isteğe bağlı kişi alt/üst sınırı
+  //
+  // KALİBRASYON (varsayılanlar): Temmuz 2026 → 149 yorum · 21 kişi · 314,5 saat.
+  //   saat/yorum = 314,5 ÷ 149 = 2,11 · saat/kişi = 314,5 ÷ 21 = 15 · ağırlık %70
+  //   → aynı girdilerle 0,7×149×2,11 + 0,3×21×15 = 314,6 saat (eski sonuçla aynı).
+  //   Haziran 2026 (126 yorum · 18 kişi) → 267 saat (gerçekleşen 274,5 — %3 fark).
+  // ÖRNEKLER (başarı çarpanı 1 iken):
+  //   180 yorum · 27 kişi → 387 saat (kişi başı 14,3 — 15'e yakın: kalabalık + başarı dengelendi)
+  //   180 yorum · 21 kişi → 360 saat (kişi başı 17,2 — aynı ekip daha çok yorum = +%14)
+  //   149 yorum · 27 kişi → 342 saat (kişi başı 12,7 — aynı yorumu daha çok kişi paylaştı = −%16;
+  //                                   tam bölüşümde −%22 olurdu, katılım havuzu yumuşattı)
+  // Tüm katsayılar Fiyat/Hesap ayarlarından (ayarlar/primHesap) yaka bazında
+  // düzenlenir; "sistem: 'puan'" seçilirse eski kural aynen çalışır.
+  // ==========================================================================
   export const PRIM_AYAR_VARSAYILAN = {
+    // --- SİSTEM SEÇİMİ ---
+    sistem: 'havuz',           // 'havuz' = Yorum Havuzu (yeni, varsayılan) · 'puan' = eski kural
+    // --- YORUM HAVUZU (Temmuz 2026'ya göre kalibre: 149 yorum · 21 kişi · 314,5 saat) ---
+    saatPerYorum: 2.11,        // saat / yorum — yorum havuzunun birimi (314,5 ÷ 149)
+    saatPerKisi: 15,           // saat / kişi  — katılım havuzunun birimi (314,5 ÷ 21)
+    yorumAgirligi: 70,         // %  — havuzun yorumdan gelen payı; kalanı kişi sayısından gelir
+    basariHedef: 75,           // %  — yorum ÷ tamamlanan iş hedefi (0 = başarı çarpanı kapalı)
+    basariAlt: 90,             // %  — başarı çarpanının inebileceği en düşük değer
+    basariUst: 115,            // %  — başarı çarpanının çıkabileceği en yüksek değer
+    kisiMinSaat: 0,            // saat — pastaya giren herkese en az bu kadar (0 = kapalı)
+    kisiMaxSaat: 0,            // saat — kişi başı tavan (0 = kapalı)
+    yuvarlama: 0.5,            // saat — kişi primi bu adıma yuvarlanır
+    // --- ESKİ PUAN SİSTEMİ (sistem = 'puan' iken kullanılır) ---
     tabanSaat: 0.5,            // saat / net puan (eski kural)
     hedefYorumIsOrani: 30,     // %  — yorum ÷ tamamlanan iş
     hedefKisiBasiYorum: 10,    // adet — yorum ÷ 20 puan üstü kişi
@@ -1647,8 +1690,67 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     altSinir: 50,              // % — bir çarpanın inebileceği en düşük değer
     ustSinir: 150,             // % — bir çarpanın çıkabileceği en yüksek değer
   };
+  // Küçük yardımcılar (her iki sistemde ortak)
+  const _primSinirla = (x, alt, ust) => Math.min(ust, Math.max(alt, x));
+  const _primYuvarla = (x, adim) => { const a = Number(adim) > 0 ? Number(adim) : 0.5; return Math.round(x / a) * a; };
+  // Çarpan / tutar metinleri (tr-TR)
+  export const primCarpanMetni = (c) => (Number(c) || 1).toFixed(2).replace('.', ',');
+  export const primSaatMetni = (s) => (Number(s) || 0).toLocaleString('tr-TR', { maximumFractionDigits: 1 });
+
+  // YENİ: Yorum Havuzu hesabı — primHesapla, sistem 'havuz' iken buraya yönlenir
+  const primHesaplaHavuz = ({ over20, yorumSayisi, toplamPersonel, isSayisi, A }) => {
+    const Y = Math.max(0, Number(yorumSayisi) || 0);
+    const N = over20.length;
+    const toplamPuan = over20.reduce((t, p) => t + Math.max(0, Number(p.finalScore) || 0), 0);
+    const w = _primSinirla((Number(A.yorumAgirligi) || 0) / 100, 0, 1);
+    const yorumHavuzu = Y * (Number(A.saatPerYorum) || 0) * w;
+    const katilimHavuzu = N * (Number(A.saatPerKisi) || 0) * (1 - w);
+    const havuzHam = yorumHavuzu + katilimHavuzu;
+    // Başarı çarpanı: yorum ÷ iş oranı hedefe göre (hedef 0 = kapalı)
+    const oran = isSayisi > 0 ? (Y / isSayisi) * 100 : null;
+    const hedef = Number(A.basariHedef) || 0;
+    const alt = (Number(A.basariAlt) || 0) / 100, ust = (Number(A.basariUst) || 0) / 100 || 1;
+    const basari = hedef > 0 && oran != null ? Math.round(_primSinirla(oran / hedef, alt, ust) * 100) / 100 : 1;
+    const havuz = N > 0 ? Math.round(havuzHam * basari * 100) / 100 : 0; // pastaya giren yoksa dağıtılacak havuz da yok
+    // Paylaşım: net puan payı × havuz → kişi sınırları → yuvarlama
+    const kMin = Number(A.kisiMinSaat) || 0, kMax = Number(A.kisiMaxSaat) || 0;
+    const prims = {}, paylar = {};
+    over20.forEach(p => {
+      const puan = Math.max(0, Number(p.finalScore) || 0);
+      const pay = toplamPuan > 0 ? puan / toplamPuan : 0;
+      let saat = havuz * pay;
+      if (kMin > 0) saat = Math.max(saat, kMin);
+      if (kMax > 0) saat = Math.min(saat, kMax);
+      prims[p.id] = _primYuvarla(saat, A.yuvarlama);
+      paylar[p.id] = Math.round(pay * 1000) / 10; // %
+    });
+    const dagitilan = Object.values(prims).reduce((t, s) => t + s, 0);
+    const olcumler = [{
+      id: 'basari', ad: 'Başarı çarpanı (Yorum / İş)', gercek: oran, hedef, birim: '%', carpan: basari,
+      aciklama: `${Y} yorum ÷ ${isSayisi} iş${hedef > 0 ? ` · hedef %${hedef} · sınır %${A.basariAlt}–%${A.basariUst}` : ' · kapalı'}`,
+    }];
+    return {
+      sistem: 'havuz', olcumler, ayCarpani: basari, taban: null, prims, ayar: A,
+      havuz: { Y, N, toplamPersonel, isSayisi, toplamPuan, w, yorumHavuzu: Math.round(yorumHavuzu * 100) / 100, katilimHavuzu: Math.round(katilimHavuzu * 100) / 100,
+        havuzHam: Math.round(havuzHam * 100) / 100, basari, havuz, dagitilan: Math.round(dagitilan * 100) / 100, ortalama: N > 0 ? Math.round(havuz / N * 10) / 10 : 0, paylar },
+    };
+  };
+  // Formül metinleri (ekran, PDF ve Excel aynı metni kullanır)
+  export const primFormulMetni = (h) => {
+    if (!h) return 'Net × 0.5';
+    if (h.sistem === 'havuz') return `Havuz ${primSaatMetni(h.havuz?.havuz)} saat × net puan payı`;
+    return `Net × ${h.taban ?? 0.5} × ${primCarpanMetni(h.ayCarpani)}`;
+  };
+  export const primKisiFormulMetni = (h, p) => {
+    if (!h || !p) return '';
+    if (h.sistem === 'havuz') return `${primSaatMetni(p.finalScore)} ÷ ${primSaatMetni(h.havuz?.toplamPuan)} puan = %${primSaatMetni(h.havuz?.paylar?.[p.id])} pay`;
+    return `${p.finalScore} Net × ${h.taban ?? 0.5} × ${primCarpanMetni(h.ayCarpani)}`;
+  };
+
   export const primHesapla = ({ over20 = [], yorumSayisi = 0, toplamPersonel = 0, isSayisi = 0, ayar = PRIM_AYAR_VARSAYILAN }) => {
     const A = { ...PRIM_AYAR_VARSAYILAN, ...(ayar || {}) };
+    // YENİ: varsayılan sistem Yorum Havuzu; 'puan' seçilirse aşağıdaki eski kural aynen çalışır
+    if ((A.sistem || 'havuz') !== 'puan') return primHesaplaHavuz({ over20, yorumSayisi, toplamPersonel, isSayisi, A });
     const alt = (Number(A.altSinir) || 0) / 100, ust = (Number(A.ustSinir) || 0) / 100 || 1;
     const N = over20.length;
     const carpan = (gercek, hedef) => {
@@ -1672,7 +1774,51 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const taban = Number(A.tabanSaat) || 0;
     const prims = {};
     over20.forEach(p => { prims[p.id] = Math.round(p.finalScore * taban * ayCarpani * 2) / 2; }); // en yakın 0,5 saate yuvarla
-    return { olcumler, ayCarpani, taban, prims, ayar: A };
+    return { sistem: 'puan', olcumler, ayCarpani, taban, prims, ayar: A }; // DEĞİŞTİ: sistem etiketi eklendi
+  };
+
+  // ==========================================================================
+  // YENİ: YORUM HAVUZU ÖZETİ — kapanış penceresinde havuzun nasıl oluştuğunu gösterir
+  // ==========================================================================
+  const PrimHavuzOzeti = ({ h }) => {
+    if (!h || h.sistem !== 'havuz' || !h.havuz) return null;
+    const H = h.havuz, A = h.ayar || {};
+    const yuzde = (x) => `%${Math.round((Number(x) || 0) * 100)}`;
+    return (
+      <div className="bg-white rounded-xl border border-blue-200 overflow-hidden mb-3">
+        <div className="px-3 py-2 bg-blue-100 text-[10px] font-black uppercase text-blue-900 flex items-center justify-between">
+          <span>Yorum Havuzu — pasta nasıl oluşuyor?</span>
+          <span className="font-bold normal-case text-blue-700">Yeni sistem · Eylül 2026'dan itibaren</span>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 p-3">
+          <div className="bg-blue-50 p-3 rounded-xl border border-blue-200">
+            <p className="text-[10px] font-bold text-neutral-500 mb-0.5">Yorum havuzu</p>
+            <p className="text-lg font-black text-blue-700 leading-tight">{primSaatMetni(H.yorumHavuzu)} sa</p>
+            <p className="text-[10px] font-medium text-neutral-400 mt-0.5">{H.Y} yorum × {A.saatPerYorum} sa × {yuzde(H.w)}</p>
+          </div>
+          <div className="bg-purple-50 p-3 rounded-xl border border-purple-200">
+            <p className="text-[10px] font-bold text-neutral-500 mb-0.5">Katılım havuzu</p>
+            <p className="text-lg font-black text-purple-700 leading-tight">{primSaatMetni(H.katilimHavuzu)} sa</p>
+            <p className="text-[10px] font-medium text-neutral-400 mt-0.5">{H.N} kişi × {A.saatPerKisi} sa × {yuzde(1 - H.w)}</p>
+          </div>
+          <div className={`p-3 rounded-xl border ${H.basari > 1 ? 'bg-green-50 border-green-200' : H.basari < 1 ? 'bg-red-50 border-red-200' : 'bg-neutral-50 border-neutral-200'}`}>
+            <p className="text-[10px] font-bold text-neutral-500 mb-0.5">Başarı çarpanı</p>
+            <p className={`text-lg font-black leading-tight ${H.basari > 1 ? 'text-green-700' : H.basari < 1 ? 'text-red-700' : 'text-neutral-700'}`}>× {primCarpanMetni(H.basari)}</p>
+            <p className="text-[10px] font-medium text-neutral-400 mt-0.5">{h.olcumler?.[0]?.gercek == null ? 'iş verisi yok' : `yorum/iş %${primSaatMetni(h.olcumler[0].gercek)}${h.olcumler[0].hedef > 0 ? ` · hedef %${h.olcumler[0].hedef}` : ' · kapalı'}`}</p>
+          </div>
+          <div className="bg-blue-600 p-3 rounded-xl border border-blue-700 text-white">
+            <p className="text-[10px] font-bold text-blue-100 mb-0.5">TOPLAM HAVUZ</p>
+            <p className="text-lg font-black leading-tight">{primSaatMetni(H.havuz)} saat</p>
+            <p className="text-[10px] font-medium text-blue-100 mt-0.5">{H.N > 0 ? `kişi başı ort. ${primSaatMetni(H.ortalama)} sa · dağıtılan ${primSaatMetni(H.dagitilan)} sa` : 'pastaya giren kişi yok'}</p>
+          </div>
+        </div>
+        <p className="px-3 py-2 text-[10px] font-bold text-neutral-500 bg-neutral-50">
+          Havuz = (yorum havuzu + katılım havuzu) × başarı çarpanı. Kişi primi = havuz × (kişinin net puanı ÷ {primSaatMetni(H.toplamPuan)} toplam puan), {A.yuvarlama} saate yuvarlanır
+          {Number(A.kisiMinSaat) > 0 ? ` · kişi başı en az ${A.kisiMinSaat} sa` : ''}{Number(A.kisiMaxSaat) > 0 ? ` · en çok ${A.kisiMaxSaat} sa` : ''}.
+          Yorum arttıkça pasta büyür; pastaya giren kişi artınca katılım havuzu kişi başı düşüşü yumuşatır.
+        </p>
+      </div>
+    );
   };
 
   // ==========================================================================
@@ -1712,7 +1858,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
   };
 
   // Görünüm bileşeni
-  export const PrimDagitimOzeti = ({ ozet, taban = 0.5, ayCarpani = 1, hedefAyEtiketi = '', yukleniyor = false }) => {
+  export const PrimDagitimOzeti = ({ ozet, taban = 0.5, ayCarpani = 1, hedefAyEtiketi = '', yukleniyor = false, formulMetni = null, kisiFormul = null }) => { // DEĞİŞTİ: formulMetni / kisiFormul (Yorum Havuzu sistemi için)
     const carpanMetni = (Number(ayCarpani) || 1).toFixed(2).replace('.', ',');
     const satirlar = ozet?.satirlar || [];
     return (
@@ -1734,7 +1880,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         </div>
 
         <p className="text-xs font-bold text-blue-800 mb-2">
-          {hedefAyEtiketi ? `${hedefAyEtiketi} maaşına` : 'Gelecek ay maaşına'} yazılacak primler (Net Puan × {taban} × {carpanMetni} = saat · saat × maaş/200 = ₺):
+          {hedefAyEtiketi ? `${hedefAyEtiketi} maaşına` : 'Gelecek ay maaşına'} yazılacak primler ({formulMetni || `Net Puan × ${taban} × ${carpanMetni}`} = saat · saat × maaş/200 = ₺):
         </p>
 
         {/* Kişi bazında liste */}
@@ -1748,7 +1894,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                 <div key={s.id} className="grid grid-cols-[1.6fr_0.7fr_0.9fr_1fr] gap-2 px-2 py-2 border-b border-neutral-100 last:border-0 items-center">
                   <span className="font-bold text-sm text-neutral-800 truncate">
                     {s.name}
-                    <span className="block text-[10px] font-medium text-neutral-400">{s.finalScore} Net × {taban} × {carpanMetni}</span>
+                    <span className="block text-[10px] font-medium text-neutral-400">{kisiFormul ? kisiFormul(s) : `${s.finalScore} Net × ${taban} × ${carpanMetni}`}</span>
                   </span>
                   <span className="text-right text-sm font-black text-blue-700">{primSaatFmt(s.saat)} sa</span>
                   <span className="text-right text-xs font-bold text-neutral-500" title={`Maaş ${primTl(s.maas)} ÷ 200`}>
@@ -1797,6 +1943,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const [primAyar, setPrimAyar] = useState(PRIM_AYAR_VARSAYILAN);
     const [primAyarAcik, setPrimAyarAcik] = useState(false);
     const [isSayisiElle, setIsSayisiElle] = useState(''); // boş = iş kayıtlarından otomatik
+    const [primSimule, setPrimSimule] = useState({ yorum: '', kisi: '', is: '' }); // YENİ: "Ne olur?" simülatörü (boş = bu ayın değeri)
     const primAyarRef = doc(db, 'artifacts', appId, 'public', 'data', 'ayarlar', 'primHesap');
     useEffect(() => {
       getDoc(primAyarRef).then(snap => { const v = snap.exists() ? snap.data()?.[collarType] : null; if (v) setPrimAyar({ ...PRIM_AYAR_VARSAYILAN, ...v }); }).catch(() => {});
@@ -2175,7 +2322,13 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           <div class="kutu"><span>Toplam Net Puan</span><b>${sayi(toplamNet)}</b></div>
           <div class="kutu"><span>Dağıtılacak Prim</span><b>${sayi(toplamPrim)}</b></div>
         </div>
-        ${monthCloseModalData.primHesap ? `<div class="ozet">
+        ${monthCloseModalData.primHesap?.sistem === 'havuz' ? `<div class="ozet">
+          <div class="kutu"><span>Tamamlanan İş</span><b>${monthCloseModalData.primHesap.isSayisi}</b></div>
+          <div class="kutu"><span>Yorum Havuzu</span><b>${sayi(monthCloseModalData.primHesap.havuz.yorumHavuzu)} sa</b></div>
+          <div class="kutu"><span>Katılım Havuzu</span><b>${sayi(monthCloseModalData.primHesap.havuz.katilimHavuzu)} sa</b></div>
+          <div class="kutu"><span>Başarı Çarpanı</span><b>× ${primCarpanMetni(monthCloseModalData.primHesap.havuz.basari)}</b></div>
+          <div class="kutu"><span>Toplam Havuz</span><b>${sayi(monthCloseModalData.primHesap.havuz.havuz)} sa</b></div>
+        </div>` : monthCloseModalData.primHesap ? `<div class="ozet">
           <div class="kutu"><span>Tamamlanan İş</span><b>${monthCloseModalData.primHesap.isSayisi}</b></div>
           <div class="kutu"><span>Toplam Personel</span><b>${monthCloseModalData.toplamPersonel ?? '—'} kişi</b></div>
           ${monthCloseModalData.primHesap.olcumler.map(o => `<div class="kutu"><span>${esc(o.ad)}</span><b>× ${o.carpan.toFixed(2).replace('.', ',')}</b></div>`).join('')}
@@ -2184,7 +2337,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         <table>
           <thead><tr>
             <th>#</th><th style="text-align:left">Personel</th><th>Ham Puan</th>
-            <th>Bonus</th><th>Net Puan</th><th style="text-align:right">Prim (Net × ${monthCloseModalData.primHesap?.taban ?? 0.5} × ${(monthCloseModalData.primHesap?.ayCarpani ?? 1).toFixed(2).replace('.', ',')})</th>
+            <th>Bonus</th><th>Net Puan</th><th style="text-align:right">Prim (${esc(primFormulMetni(monthCloseModalData.primHesap))})</th>
           </tr></thead>
           <tbody>${satirlar || '<tr><td colspan="6" style="text-align:center;padding:18px">20 puan ve üzeri personel bulunmuyor.</td></tr>'}</tbody>
           <tfoot><tr>
@@ -2194,8 +2347,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           </tr></tfoot>
         </table>
         <p class="kural"><b>Prim kuralı:</b> Ayın ilk üçüne sırasıyla +10 / +5 / +3 bonus puan eklenir.
-        Net puan (ham puan + bonus) × ${monthCloseModalData.primHesap?.taban ?? 0.5} saat × ay çarpanı ${(monthCloseModalData.primHesap?.ayCarpani ?? 1).toFixed(2).replace('.', ',')} (yorum/iş, kişi başı yorum ve katılım oranına göre) ile hesaplanarak gelecek ayın ${esc(collarType)} maaş tablosundaki
-        "PRİM" alanına yazılır.</p>
+        ${monthCloseModalData.primHesap?.sistem === 'havuz'
+          ? `YORUM HAVUZU: Toplam prim havuzu = ${monthCloseModalData.primHesap.havuz.Y} yorum × ${monthCloseModalData.primHesap.ayar.saatPerYorum} saat × %${monthCloseModalData.primHesap.ayar.yorumAgirligi} + ${monthCloseModalData.primHesap.havuz.N} kişi × ${monthCloseModalData.primHesap.ayar.saatPerKisi} saat × %${100 - Number(monthCloseModalData.primHesap.ayar.yorumAgirligi)}, çarpı başarı çarpanı ${primCarpanMetni(monthCloseModalData.primHesap.havuz.basari)} (yorum ÷ iş oranına göre) = ${sayi(monthCloseModalData.primHesap.havuz.havuz)} saat. Her kişinin primi = havuz × (kendi net puanı ÷ ${sayi(monthCloseModalData.primHesap.havuz.toplamPuan)} toplam puan), ${monthCloseModalData.primHesap.ayar.yuvarlama} saate yuvarlanır ve gelecek ayın ${esc(collarType)} maaş tablosundaki "PRİM" alanına yazılır.`
+          : `Net puan (ham puan + bonus) × ${monthCloseModalData.primHesap?.taban ?? 0.5} saat × ay çarpanı ${(monthCloseModalData.primHesap?.ayCarpani ?? 1).toFixed(2).replace('.', ',')} (yorum/iş, kişi başı yorum ve katılım oranına göre) ile hesaplanarak gelecek ayın ${esc(collarType)} maaş tablosundaki "PRİM" alanına yazılır.`}</p>
         <div class="altimza"><div>Hazırlayan</div><div>Onaylayan</div><div>İnsan Kaynakları</div></div>
         <script>window.onload = () => setTimeout(() => window.print(), 400);<\/script>
       </body></html>`;
@@ -2213,7 +2367,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       // karakterler için başa BOM eklenir.
       let csv = 'sep=;\n';
       csv += `${collarType} — ${ayEtiketi} ${currentYear} • 20 Puan Üstü Prim Sıralaması\n\n`;
-      csv += ['Sıra', 'Personel', 'Ham Puan', 'Kazanılan Bonus', 'Net Puan', `Gelecek Ay Primi (Net × ${monthCloseModalData.primHesap?.taban ?? 0.5} × ${(monthCloseModalData.primHesap?.ayCarpani ?? 1).toFixed(2).replace('.', ',')})`].join(';') + '\n';
+      csv += ['Sıra', 'Personel', 'Ham Puan', 'Kazanılan Bonus', 'Net Puan', `Gelecek Ay Primi (${primFormulMetni(monthCloseModalData.primHesap)})`].join(';') + '\n';
       liste.forEach((p, idx) => {
         const prim = monthCloseModalData.nextMonthPrims?.[p.id];
         csv += [
@@ -2356,6 +2510,13 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                  yirmiUstu: monthCloseModalData.over20.length, toplamPersonel: monthCloseModalData.toplamPersonel,
                  olcumler: monthCloseModalData.primHesap.olcumler.map(o => ({ id: o.id, gercek: o.gercek, hedef: o.hedef, carpan: o.carpan })),
                  ayCarpani: monthCloseModalData.primHesap.ayCarpani, ayar: monthCloseModalData.primHesap.ayar,
+                 // YENİ: Yorum Havuzu sistemi — havuzun nasıl oluştuğu da saklanır (Firestore için düz sayılar)
+                 sistem: monthCloseModalData.primHesap.sistem || 'puan',
+                 havuz: monthCloseModalData.primHesap.havuz ? {
+                   yorumHavuzu: monthCloseModalData.primHesap.havuz.yorumHavuzu, katilimHavuzu: monthCloseModalData.primHesap.havuz.katilimHavuzu,
+                   basari: monthCloseModalData.primHesap.havuz.basari, havuz: monthCloseModalData.primHesap.havuz.havuz,
+                   dagitilan: monthCloseModalData.primHesap.havuz.dagitilan, toplamPuan: monthCloseModalData.primHesap.havuz.toplamPuan,
+                 } : null,
                } : null
            }, { merge: true });
 
@@ -2740,7 +2901,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                             <p className="text-[9px] font-bold text-neutral-400 mt-0.5">{isSayisiElle !== '' ? <button type="button" onClick={() => setIsSayisiElle('')} className="underline">otomatiğe dön ({ayinIsSayisi})</button> : 'iş kayıtlarından · düzeltilebilir'}</p>
                         </div>
                     </div>
-                    {monthCloseModalData.primHesap && (
+                    {/* YENİ: Yorum Havuzu sistemi seçiliyse havuz özeti; eski sistemde aşağıdaki ölçüm tablosu */}
+                    {monthCloseModalData.primHesap?.sistem === 'havuz' && <PrimHavuzOzeti h={monthCloseModalData.primHesap} />}
+                    {monthCloseModalData.primHesap && monthCloseModalData.primHesap.sistem !== 'havuz' && (
                       <div className="bg-white rounded-xl border border-blue-200 overflow-hidden mb-3">
                         <div className="grid grid-cols-[1.4fr_1fr_1fr_0.8fr] gap-2 px-3 py-2 bg-blue-100 text-[10px] font-black uppercase text-blue-900">
                           <span>Ölçüm</span><span className="text-right">Gerçekleşen</span><span className="text-right">Hedef</span><span className="text-right">Çarpan</span>
@@ -2761,28 +2924,92 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                       </div>
                     )}
                     {/* YENİ: hesap ayarları (bu yaka için kalıcı kaydedilir) */}
+                    {/* DEĞİŞTİ (kullanıcı talebi): sistem seçimi (Yorum Havuzu / eski puan), havuz katsayıları,
+                        başarı çarpanı, kişi sınırları ve "ne olur?" simülatörü eklendi. Eski alanlar eski sistemde durur. */}
                     <div className="mb-3">
-                      <button type="button" onClick={() => setPrimAyarAcik(a => !a)} className="text-[11px] font-black text-blue-800 underline">{primAyarAcik ? 'Hesap ayarlarını gizle' : 'Hesap ayarlarını düzenle (hedefler, taban saat, sınırlar)'}</button>
-                      {primAyarAcik && (
-                        <div className="mt-2 grid grid-cols-2 sm:grid-cols-3 gap-2 bg-white p-3 rounded-xl border border-blue-200">
-                          {[
-                            ['tabanSaat', 'Taban (saat / net puan)', '0.5'],
-                            ['hedefYorumIsOrani', 'Hedef yorum / iş (%)', '1'],
-                            ['hedefKisiBasiYorum', 'Hedef kişi başı yorum', '1'],
-                            ['hedefKatilim', 'Hedef katılım (%)', '1'],
-                            ['altSinir', 'Çarpan alt sınırı (%)', '5'],
-                            ['ustSinir', 'Çarpan üst sınırı (%)', '5'],
-                          ].map(([k, ad, adim]) => (
-                            <label key={k} className="block">
-                              <span className="block text-[10px] font-black text-neutral-500 mb-0.5">{ad}</span>
-                              <input type="number" step={adim} min="0" value={primAyar[k]} onChange={e => primAyarKaydet({ ...primAyar, [k]: e.target.value === '' ? 0 : Number(e.target.value) })}
-                                className="w-full px-2 py-1.5 rounded-lg border border-neutral-300 text-sm font-black text-right outline-none focus:ring-2 focus:ring-blue-400" />
-                            </label>
-                          ))}
-                          <p className="col-span-2 sm:col-span-3 text-[10px] font-bold text-neutral-400">Hedef 0 = o ölçüm devre dışı (çarpan 1). Tüm ölçümler hedefinde iken sonuç eski kuralla (net puan × 0,5) aynıdır. Ayarlar {collarType} için kaydedilir ve sonraki aylarda da kullanılır.
-                            <button type="button" onClick={() => primAyarKaydet(PRIM_AYAR_VARSAYILAN)} className="ml-1 underline text-blue-700">Varsayılana dön</button></p>
-                        </div>
-                      )}
+                      <button type="button" onClick={() => setPrimAyarAcik(a => !a)} className="text-[11px] font-black text-blue-800 underline">{primAyarAcik ? 'Hesap ayarlarını gizle' : 'Hesap ayarlarını düzenle (sistem, havuz katsayıları, başarı, sınırlar)'}</button>
+                      {primAyarAcik && (() => {
+                        const havuzModu = (primAyar.sistem || 'havuz') !== 'puan';
+                        const alanlar = havuzModu ? [
+                          ['saatPerYorum', 'Saat / yorum (yorum havuzu)', '0.01'],
+                          ['saatPerKisi', 'Saat / kişi (katılım havuzu)', '0.5'],
+                          ['yorumAgirligi', 'Yorum ağırlığı (%) — kalanı kişi', '5'],
+                          ['basariHedef', 'Başarı hedefi: yorum / iş (%) · 0 = kapalı', '1'],
+                          ['basariAlt', 'Başarı çarpanı alt sınır (%)', '5'],
+                          ['basariUst', 'Başarı çarpanı üst sınır (%)', '5'],
+                          ['kisiMinSaat', 'Kişi başı en az saat · 0 = kapalı', '0.5'],
+                          ['kisiMaxSaat', 'Kişi başı en çok saat · 0 = kapalı', '0.5'],
+                          ['yuvarlama', 'Yuvarlama adımı (saat)', '0.25'],
+                        ] : [
+                          ['tabanSaat', 'Taban (saat / net puan)', '0.5'],
+                          ['hedefYorumIsOrani', 'Hedef yorum / iş (%)', '1'],
+                          ['hedefKisiBasiYorum', 'Hedef kişi başı yorum', '1'],
+                          ['hedefKatilim', 'Hedef katılım (%)', '1'],
+                          ['altSinir', 'Çarpan alt sınırı (%)', '5'],
+                          ['ustSinir', 'Çarpan üst sınırı (%)', '5'],
+                        ];
+                        // "Ne olur?" simülatörü: girilen yorum / kişi / iş sayısıyla havuz ve kişi başı ortalama
+                        const simY = primSimule.yorum === '' ? monthCloseModalData.yorumSayisi : Number(primSimule.yorum) || 0;
+                        const simN = primSimule.kisi === '' ? monthCloseModalData.over20.length : Number(primSimule.kisi) || 0;
+                        const simIs = primSimule.is === '' ? isSayisi : Number(primSimule.is) || 0;
+                        const sim = primHesapla({ over20: Array.from({ length: simN }, (_, i) => ({ id: `sim${i}`, finalScore: 29 })), yorumSayisi: simY, toplamPersonel: monthCloseModalData.toplamPersonel, isSayisi: simIs, ayar: primAyar });
+                        const simToplam = Object.values(sim.prims).reduce((t, s) => t + s, 0);
+                        return (
+                          <div className="mt-2 bg-white p-3 rounded-xl border border-blue-200 space-y-3">
+                            {/* Sistem seçimi */}
+                            <div className="flex flex-wrap gap-2">
+                              <button type="button" onClick={() => primAyarKaydet({ ...primAyar, sistem: 'havuz' })}
+                                className={`px-3 py-1.5 rounded-lg text-[11px] font-black border transition ${havuzModu ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50'}`}>
+                                Yorum Havuzu (yeni · önerilen)
+                              </button>
+                              <button type="button" onClick={() => primAyarKaydet({ ...primAyar, sistem: 'puan' })}
+                                className={`px-3 py-1.5 rounded-lg text-[11px] font-black border transition ${!havuzModu ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50'}`}>
+                                Eski sistem: Net puan × 0,5 × ay çarpanı
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                              {alanlar.map(([k, ad, adim]) => (
+                                <label key={k} className="block">
+                                  <span className="block text-[10px] font-black text-neutral-500 mb-0.5">{ad}</span>
+                                  <input type="number" step={adim} min="0" value={primAyar[k] ?? ''} onChange={e => primAyarKaydet({ ...primAyar, [k]: e.target.value === '' ? 0 : Number(e.target.value) })}
+                                    className="w-full px-2 py-1.5 rounded-lg border border-neutral-300 text-sm font-black text-right outline-none focus:ring-2 focus:ring-blue-400" />
+                                </label>
+                              ))}
+                            </div>
+                            {havuzModu ? (
+                              <p className="text-[10px] font-bold text-neutral-400">
+                                Havuz = yorum × saat/yorum × ağırlık + kişi × saat/kişi × (1 − ağırlık), sonra başarı çarpanı (yorum ÷ iş ÷ hedef, sınırlar içinde). Varsayılanlar Temmuz 2026'ya göre kalibre edildi
+                                (149 yorum · 21 kişi → 314,5 saat; eski sistemle aynı). Ayarlar {collarType} için kaydedilir ve sonraki aylarda da kullanılır.
+                                <button type="button" onClick={() => primAyarKaydet({ ...PRIM_AYAR_VARSAYILAN, sistem: 'havuz' })} className="ml-1 underline text-blue-700">Varsayılana dön (Temmuz 2026 kalibrasyonu)</button>
+                              </p>
+                            ) : (
+                              <p className="text-[10px] font-bold text-neutral-400">Hedef 0 = o ölçüm devre dışı (çarpan 1). Tüm ölçümler hedefinde iken sonuç eski kuralla (net puan × 0,5) aynıdır. Ayarlar {collarType} için kaydedilir ve sonraki aylarda da kullanılır.
+                                <button type="button" onClick={() => primAyarKaydet({ ...PRIM_AYAR_VARSAYILAN, sistem: 'puan' })} className="ml-1 underline text-blue-700">Varsayılana dön</button></p>
+                            )}
+                            {/* YENİ: "Ne olur?" — yorum / kişi / iş değişirse havuz ve kişi başı ortalama (eşit puan varsayımıyla) */}
+                            {havuzModu && (
+                              <div className="rounded-xl border border-dashed border-blue-300 p-3 bg-blue-50/50">
+                                <p className="text-[10px] font-black text-blue-800 uppercase mb-2">Ne olur? — senaryo dene (kaydetmez)</p>
+                                <div className="grid grid-cols-3 gap-2 mb-2">
+                                  {[['yorum', 'Yorum sayısı', monthCloseModalData.yorumSayisi], ['kisi', '20+ puan alan kişi', monthCloseModalData.over20.length], ['is', 'Tamamlanan iş', isSayisi]].map(([k, ad, vars]) => (
+                                    <label key={k} className="block">
+                                      <span className="block text-[10px] font-black text-neutral-500 mb-0.5">{ad}</span>
+                                      <input type="number" min="0" placeholder={String(vars)} value={primSimule[k]} onChange={e => setPrimSimule(s => ({ ...s, [k]: e.target.value }))}
+                                        className="w-full px-2 py-1.5 rounded-lg border border-neutral-300 text-sm font-black text-right outline-none focus:ring-2 focus:ring-blue-400 bg-white" />
+                                    </label>
+                                  ))}
+                                </div>
+                                <div className="grid grid-cols-3 gap-2 text-center">
+                                  <div className="bg-white rounded-lg border border-blue-200 p-2"><p className="text-[9px] font-bold text-neutral-500">Havuz</p><p className="text-sm font-black text-blue-700">{primSaatMetni(sim.havuz?.havuz)} sa</p></div>
+                                  <div className="bg-white rounded-lg border border-blue-200 p-2"><p className="text-[9px] font-bold text-neutral-500">Kişi başı ort.</p><p className="text-sm font-black text-blue-700">{simN > 0 ? primSaatMetni(simToplam / simN) : '—'} sa</p></div>
+                                  <div className="bg-white rounded-lg border border-blue-200 p-2"><p className="text-[9px] font-bold text-neutral-500">Başarı çarpanı</p><p className="text-sm font-black text-blue-700">× {primCarpanMetni(sim.havuz?.basari)}</p></div>
+                                </div>
+                                <p className="text-[9px] font-medium text-neutral-400 mt-1.5">Boş bırakılan alan bu ayın değerini kullanır. Kişi başı ortalama eşit puan varsayımıyla hesaplanır; gerçek dağılım net puana göredir.</p>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
 
                     {/* DEĞİŞTİ (kullanıcı talebi): dağıtmadan ÖNCE kişi bazında prim saati, saatlik
@@ -2791,6 +3018,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                       ozet={primDagitimOzeti}
                       taban={monthCloseModalData.primHesap?.taban ?? 0.5}
                       ayCarpani={monthCloseModalData.primHesap?.ayCarpani ?? 1}
+                      formulMetni={primFormulMetni(monthCloseModalData.primHesap)} // YENİ: sisteme göre formül metni
+                      kisiFormul={(s) => primKisiFormulMetni(monthCloseModalData.primHesap, s)} // YENİ: kişi satırı açıklaması
                       hedefAyEtiketi={`${months.find(m => m.val === sonrakiAyNo)?.label || sonrakiAyNo} ${sonrakiYil}`}
                       yukleniyor={sonrakiMaasYukleniyor}
                     />
