@@ -12823,7 +12823,9 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
               </div>
             );
           })()}
-          {sekme !== 'kira' && kapsam === 'sehirIci' && (
+          {/* DEĞİŞTİ (kullanıcı talebi): Km & Güzergah sekmesinde nakliye tabloları GÖSTERİLMEZ —
+              taban, toplama, merdiven, dış cephe, Avrupa ekstra ve yürüme Evden Eve / Eşya Depolama sekmelerinden gelir */}
+          {sekme !== 'kira' && sekme !== 'mesafe' && kapsam === 'sehirIci' && (
             <div className="space-y-3">
               <p className="text-[11px] font-bold text-neutral-500">Nakliye taban fiyatları Anadolu Yakası çıkışlıdır; Avrupa Yakası için ekstra maliyet eklenir. Ek hizmetler taban fiyata ilave edilir.{sekme === 'depo' ? ' Depolama süresi ücreti ayrıca hesaplanır.' : ''}</p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -12831,7 +12833,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
               </div>
             </div>
           )}
-          {sekme !== 'kira' && kapsam === 'sehirlerArasi' && (
+          {sekme !== 'kira' && sekme !== 'mesafe' && kapsam === 'sehirlerArasi' && (
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
               <div className="rounded-2xl border border-neutral-200 bg-white overflow-hidden">
                 <div className={`px-3 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-white ${aktifSekme.baslikCls}`}>
@@ -12882,20 +12884,31 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                 <span className="flex items-center gap-1">{hucre(yol)}{sonEk && <span className="text-[10px] font-black text-neutral-500">{sonEk}</span>}</span>
               </div>
             );
-            // Canlı örnekler (kullanıcının örneği): 2+1 ev · Kadıköy → İnegöl
-            const ornek = (toplamKm, gecisler) => {
-              const taban = Number(ttYolAl(veri, ['sehirIciEve', 'taban', '2+1'])) || 0;
-              const kalemler = [{ ad: '2+1 nakliye taban', tutar: taban }, ...mesafeKalemleri(M, { toplamKm, gecisler })];
+            // DEĞİŞTİ (kullanıcı talebi): örnekler iki nakliye listesinin KENDİ fiyatlarını kullanır.
+            // Km ücreti, geçişler ve işçilik farkı Evden Eve / Eşya Depolama fiyatlarının ÜZERİNE eklenir.
+            const ornek = (liste, listeAdi, toplamKm, gecisler) => {
+              const taban = Number(ttYolAl(veri, [liste, 'taban', '2+1'])) || 0;
+              const toplama = Number(ttYolAl(veri, [liste, 'toplama', '2+1'])) || 0;
+              const kalemler = [
+                { ad: `2+1 nakliye taban (${listeAdi} sekmesinden)`, tutar: taban },
+                { ad: `2+1 toplama (${listeAdi} sekmesinden)`, tutar: toplama },
+                ...mesafeKalemleri(M, { toplamKm, gecisler }),
+              ];
               const isc = mesafeIscilikKalemi(M, { toplamKm }, kalemler);
               if (isc) kalemler.push(isc);
               return { kalemler, toplam: kalemler.reduce((t, k) => t + k.tutar, 0) };
             };
             const ornekler = [
-              { baslik: `Pendik → Kadıköy (15) → İnegöl (100) → Pendik (85) = 200 km · eşik altı`, ...ornek(200, { kopruOsmangazi: 2 }) },
-              { baslik: `Aynı iş 260 km olsaydı · ${Number(M.esikKm) || 200} km eşiği aşılır`, ...ornek(260, { kopruOsmangazi: 2 }) },
+              { baslik: 'SEMBOL · Evden Eve · 2+1 + toplama · 200 km (eşik altı)', ...ornek('sehirIciEve', 'Evden Eve', 200, { kopruOsmangazi: 2 }) },
+              { baslik: `DEPOEVİM · Eşya Depolama · 2+1 + toplama · 260 km (${Number(M.esikKm) || 200} km eşiği aşılır)`, ...ornek('sehirIciDepo', 'Eşya Depolama', 260, { kopruOsmangazi: 2 }) },
             ];
             return (
               <div className="space-y-3">
+                {/* YENİ (kullanıcı talebi): bu sekmenin diğer sekmelerle ilişkisi */}
+                <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-[11px] font-bold text-emerald-900">
+                  Bu sekmede yalnızca <b>km'ye bağlı ek maliyetler</b> girilir. Nakliye taban fiyatı, toplama, merdiven, dış cephe asansörü, Avrupa Yakası ekstrası ve yürüme mesafesi her zamanki gibi
+                  <b> Evden Eve Nakliyat</b> (SEMBOL) ve <b>Eşya Depolama Nakliyesi</b> (DEPOEVİM) sekmelerinden alınır; buradaki km ücreti, geçişler, sabit ek ve işçilik farkı o fiyatların <b>ÜZERİNE</b> eklenir.
+                </div>
                 {/* MOD */}
                 <div className={`rounded-2xl border-2 p-3 flex flex-col md:flex-row md:items-center gap-3 ${acik ? 'border-emerald-400 bg-emerald-50' : 'border-neutral-300 bg-white'}`}>
                   <div className="flex-1 min-w-0">
@@ -12953,7 +12966,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {ornekler.map((o, oi) => (
                     <div key={oi} className="rounded-2xl bg-neutral-900 text-white p-3">
-                      <p className="text-[11px] font-black text-emerald-300">Örnek {oi + 1} — 2+1 ev · {o.baslik}</p>
+                      <p className="text-[11px] font-black text-emerald-300">Örnek {oi + 1} — {o.baslik}</p>
                       <div className="mt-1 text-[11px] space-y-0.5">
                         {o.kalemler.map((k, i) => <div key={i} className="flex justify-between gap-2"><span className="text-white/80">{k.ad}</span><span className="font-black">{ttTl(k.tutar)}</span></div>)}
                         <div className="flex justify-between border-t border-white/20 pt-1 mt-1 text-sm font-black"><span>Sistem fiyatı (taban)</span><span>{ttTl(o.toplam)}</span></div>
