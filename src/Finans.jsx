@@ -1675,6 +1675,111 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     return { olcumler, ayCarpani, taban, prims, ayar: A };
   };
 
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): PRİM DAĞITIM ÖZETİ — "Ayı Kapat ve Onayla"dan ÖNCE
+  // --------------------------------------------------------------------------
+  // Puantaj kapanış penceresinde, primler dağıtılmadan önce şunları gösterir:
+  //   • Kişi bazında: net puan → prim SAATİ → saatlik mesai ücreti → TL karşılığı
+  //   • Toplam: dağıtılacak toplam prim saati ve karşılığı toplam mesai ücreti (₺)
+  //
+  // TL hesabı Maaş Tablosu (MaasView.calcRow) ile BİREBİR aynıdır:
+  //   saatlik ücret = maaş / 200      ·      prim TL = prim saati × saatlik ücret
+  //   maaş = gelecek ayın maaş satırına elle girilmiş "maas" varsa o,
+  //          yoksa gecerliMaas(personel, gelecekYıl, gelecekAy) (deneme maaşı dahil)
+  // Hasar kesintisi varsa Maaş Tablosu bunu ayrıca primden düşer (burada düşülmez).
+  // ==========================================================================
+  // Para ve saat biçimleri (tr-TR)
+  const primTl = (n) => `₺${(Number(n) || 0).toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const primSaatFmt = (n) => (Number(n) || 0).toLocaleString('tr-TR', { maximumFractionDigits: 1 });
+
+  // Saf hesap fonksiyonu — ekranda ve kayıtta aynı sonucu üretmek için tek nokta
+  // liste: [{ id, name, finalScore }] · primler: { [id]: saat }
+  export const primDagitimHesapla = ({ liste = [], primler = {}, personnelList = [], maasKayitlari = {}, yil, ay, gecerliMaas }) => {
+    const satirlar = liste.map(p => {
+      const person = personnelList.find(x => String(x.id) === String(p.id)) || {};
+      const row = maasKayitlari?.[p.id] || {};
+      // Maaş Tablosu ile aynı öncelik: elle girilen satır maaşı > geçerli maaş
+      const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : (gecerliMaas ? gecerliMaas(person, yil, ay) : person.maas)) || 0;
+      const saat = Number(primler?.[p.id]) || 0;
+      const saatlik = maas / 200;                 // saatlik mesai ücreti
+      const tutar = Math.round(saat * saatlik * 100) / 100; // prim TL karşılığı
+      return { id: p.id, name: p.name, finalScore: p.finalScore, saat, maas, saatlik, tutar };
+    });
+    const toplamSaat = satirlar.reduce((t, s) => t + s.saat, 0);
+    const toplamTutar = Math.round(satirlar.reduce((t, s) => t + s.tutar, 0) * 100) / 100;
+    const maassizlar = satirlar.filter(s => s.saat > 0 && s.maas <= 0); // maaşı tanımsız → TL hesaplanamaz
+    return { satirlar, toplamSaat, toplamTutar, maassizlar };
+  };
+
+  // Görünüm bileşeni
+  export const PrimDagitimOzeti = ({ ozet, taban = 0.5, ayCarpani = 1, hedefAyEtiketi = '', yukleniyor = false }) => {
+    const carpanMetni = (Number(ayCarpani) || 1).toFixed(2).replace('.', ',');
+    const satirlar = ozet?.satirlar || [];
+    return (
+      <div className="bg-white p-3 rounded-xl border border-blue-200">
+        {/* Üst özet kutuları: kaç saat prim → kaç TL mesai ücreti → kaç kişiye */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+          <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 text-center">
+            <p className="text-[10px] font-bold text-neutral-500 mb-1">Dağıtılacak Toplam Prim</p>
+            <p className="text-xl font-black text-blue-700">{primSaatFmt(ozet?.toplamSaat)} saat</p>
+          </div>
+          <div className="bg-green-50 p-3 rounded-xl border border-green-200 text-center">
+            <p className="text-[10px] font-bold text-neutral-500 mb-1">Karşılığı Toplam Mesai Ücreti</p>
+            <p className="text-xl font-black text-green-700">{yukleniyor ? '…' : primTl(ozet?.toplamTutar)}</p>
+          </div>
+          <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 text-center">
+            <p className="text-[10px] font-bold text-neutral-500 mb-1">Prim Alacak Personel</p>
+            <p className="text-xl font-black text-purple-700">{satirlar.filter(s => s.saat > 0).length} Kişi</p>
+          </div>
+        </div>
+
+        <p className="text-xs font-bold text-blue-800 mb-2">
+          {hedefAyEtiketi ? `${hedefAyEtiketi} maaşına` : 'Gelecek ay maaşına'} yazılacak primler (Net Puan × {taban} × {carpanMetni} = saat · saat × maaş/200 = ₺):
+        </p>
+
+        {/* Kişi bazında liste */}
+        <div className="max-h-56 overflow-y-auto custom-scrollbar">
+          {satirlar.length > 0 ? (
+            <>
+              <div className="grid grid-cols-[1.6fr_0.7fr_0.9fr_1fr] gap-2 px-2 py-1.5 bg-blue-50 rounded-lg text-[10px] font-black uppercase text-blue-900 sticky top-0">
+                <span>Personel</span><span className="text-right">Prim</span><span className="text-right">Saatlik</span><span className="text-right">Tutar</span>
+              </div>
+              {satirlar.map(s => (
+                <div key={s.id} className="grid grid-cols-[1.6fr_0.7fr_0.9fr_1fr] gap-2 px-2 py-2 border-b border-neutral-100 last:border-0 items-center">
+                  <span className="font-bold text-sm text-neutral-800 truncate">
+                    {s.name}
+                    <span className="block text-[10px] font-medium text-neutral-400">{s.finalScore} Net × {taban} × {carpanMetni}</span>
+                  </span>
+                  <span className="text-right text-sm font-black text-blue-700">{primSaatFmt(s.saat)} sa</span>
+                  <span className="text-right text-xs font-bold text-neutral-500" title={`Maaş ${primTl(s.maas)} ÷ 200`}>
+                    {s.maas > 0 ? primTl(s.saatlik) : <span className="text-red-600">maaş yok</span>}
+                  </span>
+                  <span className="text-right text-sm font-black text-green-600">{yukleniyor ? '…' : primTl(s.tutar)}</span>
+                </div>
+              ))}
+              {/* Alt toplam satırı */}
+              <div className="grid grid-cols-[1.6fr_0.7fr_0.9fr_1fr] gap-2 px-2 py-2 mt-1 bg-green-600 text-white rounded-lg items-center">
+                <span className="text-xs font-black">TOPLAM</span>
+                <span className="text-right text-sm font-black">{primSaatFmt(ozet?.toplamSaat)} sa</span>
+                <span />
+                <span className="text-right text-sm font-black">{yukleniyor ? '…' : primTl(ozet?.toplamTutar)}</span>
+              </div>
+            </>
+          ) : (
+            <p className="text-sm font-medium text-neutral-500 text-center py-4">Bu ay 20 puan ve üzerini geçen personel bulunmuyor.</p>
+          )}
+        </div>
+
+        {(ozet?.maassizlar || []).length > 0 && (
+          <p className="mt-2 text-[10px] font-bold text-red-600">
+            Maaşı tanımlı olmayan {ozet.maassizlar.length} personelin prim TL karşılığı hesaplanamadı: {ozet.maassizlar.map(s => s.name).join(', ')}
+          </p>
+        )}
+        <p className="mt-2 text-[10px] font-bold text-neutral-400">Tutar, Maaş Tablosu'yla aynı formülle hesaplanır (maaş ÷ 200 × prim saati). Hasar kesintisi varsa Maaş Tablosu'nda primden ayrıca düşülür.</p>
+      </div>
+    );
+  };
+
   export const PuantajView = ({ collarType, personnelList, db, appId, addSystemLog, jobs = [] }) => { // DEĞİŞTİ: jobs → o ayki iş sayısı
     const today = new Date();
     const [currentMonth, setCurrentMonth] = useState(today.getMonth() + 1);
@@ -1718,6 +1823,23 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     }, [primAyar, isSayisi, showMonthCloseModal]);
 
     const docPrefix = collarType === 'Mavi Yaka' ? '' : 'beyaz_';
+
+    // YENİ (kullanıcı talebi): primin TL karşılığını kapanıştan ÖNCE göstermek için
+    // gelecek ayın maaş kayıtları okunur (elle girilmiş satır maaşı varsa o kullanılır).
+    const sonrakiAyNo = currentMonth === 12 ? 1 : currentMonth + 1;
+    const sonrakiYil = currentMonth === 12 ? currentYear + 1 : currentYear;
+    const [sonrakiMaasKayitlari, setSonrakiMaasKayitlari] = useState({});
+    const [sonrakiMaasYukleniyor, setSonrakiMaasYukleniyor] = useState(false);
+    useEffect(() => {
+      if (!showMonthCloseModal) return;
+      let iptal = false;
+      setSonrakiMaasYukleniyor(true);
+      getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${docPrefix}${sonrakiYil}_${sonrakiAyNo}`))
+        .then(snap => { if (!iptal) setSonrakiMaasKayitlari(snap.exists() ? (snap.data().records || {}) : {}); })
+        .catch(e => { console.error('Gelecek ay maaş kayıtları okunamadı:', e); if (!iptal) setSonrakiMaasKayitlari({}); })
+        .finally(() => { if (!iptal) setSonrakiMaasYukleniyor(false); });
+      return () => { iptal = true; };
+    }, [showMonthCloseModal, docPrefix, sonrakiYil, sonrakiAyNo, db, appId]);
 
     const months = [
       { val: 1, label: 'Ocak' }, { val: 2, label: 'Şubat' }, { val: 3, label: 'Mart' },
@@ -2248,16 +2370,22 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
            const nextMaasSnap = await getDoc(nextMaasRef);
            let nextMaasRecords = nextMaasSnap.exists() ? nextMaasSnap.data().records : {};
 
-           Object.keys(monthCloseModalData.nextMonthPrims).forEach(pId => {
+           // DEĞİŞTİ (kullanıcı talebi): primler "İLK DEFA dağıtılıyormuş gibi" yazılır.
+           // Mevcut prim değerinin ÜZERİNE EKLENMEZ — gelecek ayın maaş tablosundaki
+           // PRİM alanı doğrudan bu kapanışın hesapladığı saate eşitlenir.
+           // Bu kapanıştan prim almayan personelin (kaydı varsa) primi 0 olur;
+           // böylece geçmiş kapanışlardan kalan / üst üste binmiş tutar kalmaz.
+           const yeniPrimler = monthCloseModalData.nextMonthPrims || {};
+           Object.keys(nextMaasRecords).forEach(pId => {
+               if (yeniPrimler[pId] != null) return; // prim alacaklar aşağıda yazılır
+               nextMaasRecords[pId] = { ...(nextMaasRecords[pId] || {}), prim: 0, kapanisPrimleri: {} };
+           });
+           Object.keys(yeniPrimler).forEach(pId => {
                if (!nextMaasRecords[pId]) nextMaasRecords[pId] = {};
                const kayit = nextMaasRecords[pId];
-               const existingPrim = parseFloat(kayit.prim) || 0;
-               const kaynaklar = { ...(kayit.kapanisPrimleri || {}) };
-               const oncekiTutar = parseFloat(kaynaklar[kapanisKaynagi]) || 0; // aynı kapanıştan daha önce eklenen (varsa)
-               const yeniTutar = parseFloat(monthCloseModalData.nextMonthPrims[pId]) || 0;
-               kayit.prim = Math.round((Math.max(0, existingPrim - oncekiTutar) + yeniTutar) * 100) / 100;
-               kaynaklar[kapanisKaynagi] = yeniTutar;
-               kayit.kapanisPrimleri = kaynaklar;
+               const yeniTutar = parseFloat(yeniPrimler[pId]) || 0;
+               kayit.prim = Math.round(yeniTutar * 100) / 100;          // doğrudan yaz (toplama yok)
+               kayit.kapanisPrimleri = { [kapanisKaynagi]: yeniTutar }; // kaynak işareti (yalnızca bu kapanış)
            });
 
            await setDoc(nextMaasRef, { records: nextMaasRecords, updatedAt: new Date().toISOString() }, { merge: true });
@@ -2275,47 +2403,21 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     // YENİ: AY KAPANIŞINI GERİ AL — kapatmada uygulanan bonus puanları ve gelecek aya
     // eklenen primleri geri alır; ayı tekrar açık (düzenlenebilir) hale getirir.
     const handleUndoCloseMonth = async () => {
-      if (!window.confirm('Bu ayın kapanışını geri almak istediğinize emin misiniz?\n\nVerilen bonus puanlar ve gelecek aya eklenen primler geri alınacak, ay yeniden düzenlenebilir hale gelecek.')) return;
+      // DEĞİŞTİ (kullanıcı talebi): Geri Al, gelecek ayın maaş tablosundaki TÜM primleri 0 ₺ yapar
+      if (!window.confirm(`Bu ayın kapanışını geri almak istediğinize emin misiniz?\n\nVerilen bonus puanlar geri alınacak ve ${sonrakiAyNo}/${sonrakiYil} ${collarType} Maaş Tablosu'ndaki TÜM PRİMLER 0 ₺ yapılacak (elle girilen primler dahil). Ay yeniden düzenlenebilir hale gelecek.`)) return;
       try {
-          const appliedPrims = puantajMeta.appliedPrims || {};
-
-          // 1) Gelecek aydaki maaş primlerinden, kapatmada eklenen tutarları düş
+          // 1) Gelecek ayın maaş tablosunda HERKESİN primi sıfırlanır (toplama/çıkarma yok)
           let nextMonth = currentMonth + 1;
           let nextYear = currentYear;
           if (nextMonth > 12) { nextMonth = 1; nextYear++; }
-          const nextDocId = `${docPrefix}${nextYear}_${nextMonth}`;
+          const nextDocId = `${docPrefix}${nextYear}_${nextMonth}`; // Mavi/Beyaz yaka ayrı belge — yalnızca bu yaka etkilenir
           const nextMaasRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', nextDocId);
           const nextMaasSnap = await getDoc(nextMaasRef);
           if (nextMaasSnap.exists()) {
-              let nextMaasRecords = nextMaasSnap.data().records || {};
-              // DÜZELTME (kullanıcı talebi): bu kapanıştan prim almış herkes —
-              // puantaj kaydındaki liste + maaş kaydında bu kapanışın işaretini taşıyanlar
-              const kisiler = new Set(Object.keys(appliedPrims));
-              Object.keys(nextMaasRecords).forEach(pId => { if (nextMaasRecords[pId]?.kapanisPrimleri?.[kapanisKaynagi] != null) kisiler.add(pId); });
-              // İşaretsiz (bu düzeltmeden ÖNCE işlenmiş) primler: kaç kez eklendiği bilinemez →
-              // kullanıcıya prim alanını tamamen sıfırlamak isteyip istemediği sorulur
-              const isaretsizler = [...kisiler].filter(pId => nextMaasRecords[pId] && nextMaasRecords[pId].kapanisPrimleri?.[kapanisKaynagi] == null && (parseFloat(nextMaasRecords[pId].prim) || 0) > 0);
-              const tamamenSifirla = isaretsizler.length > 0 && window.confirm(
-                `${isaretsizler.length} personelin ${nextMonth}/${nextYear} maaşındaki prim, eski sistemle (kaynak işareti olmadan) işlenmiş.\n\n` +
-                `Önceki "Geri Al" hatası yüzünden bu primler birden fazla kez eklenmiş olabilir.\n\n` +
-                `TAMAM → bu personellerin prim alanı tamamen SIFIRLANSIN (elle girdiğiniz prim varsa o da silinir).\n` +
-                `İPTAL → yalnızca bu kapanışın tutarı düşülsün.`);
-              kisiler.forEach(pId => {
-                  const kayit = nextMaasRecords[pId];
-                  if (!kayit) return;
-                  const existingPrim = parseFloat(kayit.prim) || 0;
-                  const isaretliTutar = kayit.kapanisPrimleri?.[kapanisKaynagi];
-                  if (isaretliTutar != null) {
-                      // Yeni sistem: yalnızca bu kapanıştan gelen tutar silinir
-                      kayit.prim = Math.round(Math.max(0, existingPrim - (parseFloat(isaretliTutar) || 0)) * 100) / 100;
-                      const kaynaklar = { ...kayit.kapanisPrimleri };
-                      delete kaynaklar[kapanisKaynagi];
-                      kayit.kapanisPrimleri = kaynaklar;
-                  } else if (tamamenSifirla) {
-                      kayit.prim = 0;
-                  } else {
-                      kayit.prim = Math.round(Math.max(0, existingPrim - (parseFloat(appliedPrims[pId]) || 0)) * 100) / 100;
-                  }
+              const nextMaasRecords = nextMaasSnap.data().records || {};
+              Object.keys(nextMaasRecords).forEach(pId => {
+                  // prim = 0 · kapanış kaynak işaretleri de temizlenir (boş harita merge'de alanı tamamen değiştirir)
+                  nextMaasRecords[pId] = { ...(nextMaasRecords[pId] || {}), prim: 0, kapanisPrimleri: {} };
               });
               await setDoc(nextMaasRef, { records: nextMaasRecords, updatedAt: new Date().toISOString() }, { merge: true });
           }
@@ -2325,13 +2427,21 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           await setDoc(puantajRef, { bonusRecords: {}, isClosed: false, appliedPrims: {} }, { merge: true });
 
           setPuantajMeta(prev => ({ ...prev, bonusRecords: {}, isClosed: false, appliedPrims: {} }));
-          addSystemLog('Ay Kapanışı Geri Alındı', `${currentMonth}/${currentYear} dönemi ${collarType} kapanışı geri alındı; bonus puanlar ve ${nextMonth}/${nextYear} maaşına eklenen primler iptal edildi.`);
+          addSystemLog('Ay Kapanışı Geri Alındı', `${currentMonth}/${currentYear} dönemi ${collarType} kapanışı geri alındı; bonus puanlar iptal edildi ve ${nextMonth}/${nextYear} maaşındaki tüm primler 0 ₺ yapıldı.`);
       } catch (e) {
           console.error(e);
           alert("Geri alma işlemi sırasında hata oluştu.");
       }
     };
 
+
+    // YENİ (kullanıcı talebi): kapanış penceresi için prim saati → TL dağıtım özeti
+    const primDagitimOzeti = monthCloseModalData ? primDagitimHesapla({
+      liste: monthCloseModalData.over20Sorted || monthCloseModalData.over20 || [],
+      primler: monthCloseModalData.nextMonthPrims || {},
+      personnelList, maasKayitlari: sonrakiMaasKayitlari,
+      yil: sonrakiYil, ay: sonrakiAyNo, gecerliMaas,
+    }) : null;
 
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 md:p-6 animate-in fade-in flex flex-col min-h-[920px] h-[calc(100vh-190px)] relative w-full overflow-hidden">
@@ -2672,22 +2782,21 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                       )}
                     </div>
 
-                    <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar bg-white p-3 rounded-xl border border-blue-200">
-                        <p className="text-xs font-bold text-blue-800 mb-2">Gelecek Ay Primine Yansıyacak Mesai Saatleri (Net Puan × {monthCloseModalData.primHesap?.taban ?? 0.5} × {(monthCloseModalData.primHesap?.ayCarpani ?? 1).toFixed(2).replace('.', ',')}):</p>
-                        {monthCloseModalData.over20.length > 0 ? (monthCloseModalData.over20Sorted || monthCloseModalData.over20).map(p => (
-                            <div key={p.id} className="flex justify-between items-center border-b border-neutral-100 pb-2 last:border-0 last:pb-0">
-                                <span className="font-bold text-sm text-neutral-800">{p.name} <span className="text-[10px] text-neutral-400">({p.finalScore} Net × {monthCloseModalData.primHesap?.taban ?? 0.5} × {(monthCloseModalData.primHesap?.ayCarpani ?? 1).toFixed(2).replace('.', ',')})</span></span>
-                                <span className="font-black text-green-600">{monthCloseModalData.nextMonthPrims[p.id]?.toLocaleString('tr-TR', {maximumFractionDigits: 1})} Prim</span>
-                            </div>
-                        )) : (
-                            <p className="text-sm font-medium text-neutral-500 text-center py-4">Bu ay 20 puan ve üzerini geçen personel bulunmuyor.</p>
-                        )}
-                    </div>
+                    {/* DEĞİŞTİ (kullanıcı talebi): dağıtmadan ÖNCE kişi bazında prim saati, saatlik
+                        mesai ücreti, TL karşılığı ve toplam dağıtılacak tutar gösterilir (PrimDagitimOzeti — bu dosyada, PuantajView'ın üstünde) */}
+                    <PrimDagitimOzeti
+                      ozet={primDagitimOzeti}
+                      taban={monthCloseModalData.primHesap?.taban ?? 0.5}
+                      ayCarpani={monthCloseModalData.primHesap?.ayCarpani ?? 1}
+                      hedefAyEtiketi={`${months.find(m => m.val === sonrakiAyNo)?.label || sonrakiAyNo} ${sonrakiYil}`}
+                      yukleniyor={sonrakiMaasYukleniyor}
+                    />
                 </div>
 
                 <div className="bg-red-50 p-3 rounded-xl border border-red-200 text-xs font-medium text-red-800 flex gap-2">
                     <AlertTriangle className="w-5 h-5 shrink-0" />
-                    <p>Onayladıktan sonra bu ayın puanları kapatılacak ve listedeki prim tutarları gelecek ayın {collarType} Maaş Tablosu'ndaki "PRİM" alanlarına otomatik olarak eklenecektir.</p>
+                    {/* DEĞİŞTİ: primler mevcut değere EKLENMEZ — doğrudan yazılır */}
+                    <p>Onayladıktan sonra bu ayın puanları kapatılacak ve {months.find(m => m.val === sonrakiAyNo)?.label} {sonrakiYil} {collarType} Maaş Tablosu'ndaki "PRİM" alanları bu listeyle <b>yeniden yazılacaktır</b> (ilk kez dağıtılıyormuş gibi; mevcut prim değerlerinin üzerine eklenmez, listede olmayanların primi 0 olur).</p>
                 </div>
 
               </div>
