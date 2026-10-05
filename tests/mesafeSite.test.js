@@ -105,3 +105,72 @@ test('Google anahtarı yoksa 503', async () => {
   await handler({ method: 'POST', headers: { origin: SITE }, body: GOVDE }, res);
   assert.equal(res.kod, 503);
 });
+
+// ---------------------------------------------------------------- YENİ: liste, DepoEvim şubesi, sunucuda fiyat
+const { siteFiyatHesapla, siteListeleri } = await import('../api/mesafe-site.js');
+const { MESAFE_VARSAYILAN, fiyatEksikleriDoldur } = await import('../src/fiyatSema.js');
+const Y = (a, b, c, d, e) => ({ '1+0': a, '1+1': b, '2+1': c, '3+1': d, '4+1': e });
+
+test('GET: il/ilçe listesi İstanbul yakalarıyla başlar, şubeler gelir; Google\'a gidilmez', async () => {
+  const kayit = [];
+  const res = await iste({ db: await dbHazirla(), method: 'GET', etap: sahteEtap(kayit) });
+  assert.equal(res.kod, 200);
+  assert.deepEqual(Object.keys(res.govde.iller).slice(0, 3), ['İstanbul (Anadolu)', 'İstanbul (Avrupa)', 'Adana']);
+  assert.ok(res.govde.iller['Bursa'].includes('İnegöl'));
+  assert.deepEqual(res.govde.subeler[0], { ad: 'Pendik Depoevim', il: 'İstanbul (Anadolu)', ilce: 'Pendik' });
+  assert.equal(kayit.length, 0);
+  assert.equal(siteListeleri().subeler.length, 5);
+});
+
+test('DepoEvim: depoevim.com izinli; boşaltma = seçilen şube; tanınmayan şube → ilk şube (CRM kuralı)', async () => {
+  const res = await iste({ db: await dbHazirla(), origin: 'https://www.depoevim.com', body: { yukIl: 'Bursa', yukIlce: 'İnegöl', sube: 'Başakşehir Depoevim' } });
+  assert.equal(res.kod, 200, JSON.stringify(res.govde));
+  assert.equal(res.govde.noktalar[2], 'Başakşehir, İstanbul, Türkiye');
+  assert.equal(res.govde.sube, 'Başakşehir Depoevim');
+  const res2 = await iste({ db: await dbHazirla(), origin: 'https://depoevim.com', body: { yukIl: 'Bursa', yukIlce: 'İnegöl', sube: 'Farketmez' } });
+  assert.equal(res2.govde.sube, 'Pendik Depoevim');
+});
+
+test('sunucuda fiyat = CRM: ekran örneği 2 (851,3 km · 1+1 %5) → 65.938 ₺', () => {
+  const MS = fiyatEksikleriDoldur({ mesafe: { ...MESAFE_VARSAYILAN, modu: 1, kmUcreti: 15, kademeler: [{ km: 800, yuzde: 40, ek: 0 }],
+    gecis: { ...MESAFE_VARSAYILAN.gecis, kopruFsm: 333, kopruOsmangazi: 4805, otoyolAnadolu: 675, kopruYss: 270 },
+    odaKademeleri: [{ km: 800, yuzde: Y(0, 5, 0, 0, 0) }] } }).mesafe;
+  const rota = { toplamKm: 851.3, gecisler: { kopruFsm: 2, kopruOsmangazi: 1, otoyolAnadolu: 2, kopruYss: 1 } };
+  const f = siteFiyatHesapla(MS, rota, { odaK: '1+1', araToplam: 25000 });
+  assert.equal(f.tabanFiyat, 65938);
+  assert.equal(f.evTipiFarki, 3140);
+  assert.equal(f.kmTutari, 12765);
+  assert.equal(f.kademeKm, 800);
+  assert.equal(f.tabanFiyat, 25000 + f.kmTutari + f.gecisTutari + f.sabitEk + f.uzunYolFarki + f.evTipiFarki);
+});
+
+test('Avrupa ekstrası: kademe aşılmadıysa eklenir (ev tipi farkına dahil), aşıldıysa eklenmez', () => {
+  const M = fiyatEksikleriDoldur({ mesafe: { modu: 1, kmUcreti: 10, kademeler: [{ km: 200, yuzde: 10, ek: 0 }], odaKademeleri: [{ km: 0, yuzde: Y(0, 0, 10, 0, 0) }] } }).mesafe;
+  const kisa = siteFiyatHesapla(M, { toplamKm: 100, gecisler: {} }, { odaK: '2+1', araToplam: 20000, avrupaEkstra: 2000 });
+  assert.equal(kisa.avrupaEkstraUygulandi, true);
+  assert.equal(kisa.tabanFiyat, Math.round((20000 + 1000 + 2000) * 1.1)); // km 1.000 · ev tipi %10 son toplama
+  const uzun = siteFiyatHesapla(M, { toplamKm: 300, gecisler: {} }, { odaK: '2+1', araToplam: 20000, avrupaEkstra: 2000 });
+  assert.equal(uzun.avrupaEkstraUygulandi, false);
+  const ara = Math.round((20000 + 3000) * 1.1); // uzun yol %10
+  assert.equal(uzun.tabanFiyat, ara + Math.round(ara * 0.1));
+});
+
+test('POST + hesap: fiyat cevapta; geçersiz odaK → 400', async () => {
+  const res = await iste({ db: await dbHazirla({ modu: 1, kmUcreti: 100 }), body: { ...GOVDE, hesap: { odaK: '2+1', araToplam: 30000 } } });
+  assert.equal(res.kod, 200, JSON.stringify(res.govde));
+  assert.equal(res.govde.fiyat.kmTutari, 30000); // 300 km × 100 ₺
+  assert.equal(res.govde.fiyat.tabanFiyat, res.govde.fiyat.kmTutari + 30000 + res.govde.fiyat.gecisTutari + res.govde.fiyat.uzunYolFarki + res.govde.fiyat.evTipiFarki);
+  const kotu = await iste({ db: await dbHazirla(), body: { ...GOVDE, hesap: { odaK: '5+1', araToplam: 30000 } } });
+  assert.equal(kotu.kod, 400);
+});
+
+test('şube: sitenin kodları (kartal, umraniye, cekmekoy, basaksehir, farketmez) ve tam ad tanınır', async () => {
+  const { subeBul } = await import('../api/mesafe-site.js');
+  assert.equal(subeBul('kartal').name, 'Kartal Depoevim');
+  assert.equal(subeBul('umraniye').name, 'Ümraniye Depoevim');
+  assert.equal(subeBul('cekmekoy').name, 'Çekmeköy Depoevim');
+  assert.equal(subeBul('basaksehir').name, 'Başakşehir Depoevim');
+  assert.equal(subeBul('Başakşehir Depoevim').name, 'Başakşehir Depoevim');
+  assert.equal(subeBul('farketmez').name, 'Pendik Depoevim');
+  assert.equal(subeBul('').name, 'Pendik Depoevim');
+});
