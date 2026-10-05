@@ -265,6 +265,54 @@ const maasBorcKesintisi = (row) => ({
   banka: Math.max(0, parseFloat(row?.maasKesintiBanka) || 0),
 });
 
+// ==========================================================================
+// YENİ (kullanıcı talebi): DEVAMSIZLIK DAĞITIMI — MAVİ + BEYAZ YAKA, TÜM HESAPLAR
+// --------------------------------------------------------------------------
+// ESKİ KURAL (KALDIRILDI): her devamsızlık günü → mesai gününden 1 gün düşer
+//                          + toplam saatten 3 saat düşer.
+// YENİ KURAL — devamsızlık günleri SIRAYLA şu kaynaklardan karşılanır:
+//   1) FAZLA GÜN   → önce fazla günler sıfırlanır (1 devamsızlık = 1 fazla gün)
+//   2) TOPLAM SAAT → kalan devamsızlık, toplam saatten 10'AR SAAT olarak düşer
+//                    (1 gün = 10 saat). Yalnızca TAM 10 saatlik dilimler kullanılır;
+//                    10 saatin altındaki artık (9, 7, 5 saat…) ELLENMEZ.
+//   3) MESAİ GÜNÜ  → hâlâ kalan devamsızlık 30 günlük mesai gününden düşer.
+// Saat havuzu = günlük mesai saati + prim saati (fazla gün saatleri HARİÇ —
+// fazla gün 1. adımda zaten kullanıldı; iki kez sayılmasın).
+// ÖRNEK (Ahmet Öztürk, 10 gün devamsızlık): fazla gün 2 → 0 (2 gün),
+//   saat havuzu 1 + 12,5 = 13,5 → 1 dilim (1 gün) → 3,5 saat kalır,
+//   kalan 7 gün mesai gününden → 30 − 7 = 23 gün. Toplam saat: 3,5.
+// Dört hesap (Maaş Tablosu, Personel Ödemeleri, Ödemeler listesi, Finans
+// Raporu) bu TEK fonksiyonu kullanır — rakamlar asla ayrışmaz.
+// ==========================================================================
+const devamsizlikDagit = ({ devamsizlik = 0, fazlaGun = 0, saatHavuzu = 0 }) => {
+  const D = Math.max(0, parseFloat(devamsizlik) || 0);
+  const FG = Math.max(0, parseFloat(fazlaGun) || 0);
+  // 1) Fazla günden
+  const fazlaGunKullanilan = Math.min(D, FG);
+  let kalan = D - fazlaGunKullanilan;
+  // 2) Toplam saatten — yalnızca tam 10 saatlik dilimler
+  const havuz = parseFloat(saatHavuzu) || 0;
+  const tamDilim = havuz >= 10 ? Math.floor(havuz / 10) : 0;
+  const saatGun = kalan > 0 ? Math.min(kalan, tamDilim) : 0;
+  kalan = Math.max(0, kalan - saatGun);
+  // 3) Mesai gününden
+  return {
+    devamsizlik: D,
+    fazlaGunKullanilan, fazlaGunNet: FG - fazlaGunKullanilan,
+    saatGun, saatDusulen: Math.round(saatGun * 10 * 100) / 100,
+    gunDusulen: kalan,
+  };
+};
+// Ekranda kısa döküm metni: "2 fazla gün · 1 gün (10 sa) · 7 mesai günü"
+const devamsizlikDokumMetni = (d) => {
+  if (!d || !(d.devamsizlik > 0)) return '';
+  const par = [];
+  if (d.fazlaGunKullanilan > 0) par.push(`${d.fazlaGunKullanilan} fazla gün`);
+  if (d.saatGun > 0) par.push(`${d.saatGun} gün = ${d.saatDusulen} saat`);
+  if (d.gunDusulen > 0) par.push(`${d.gunDusulen} mesai günü`);
+  return `Devamsızlık ${d.devamsizlik} gün → ${par.join(' + ')}`;
+};
+
 const maasKanalDurumu = ({ tamTutar = 0, kismiOdenen = 0, ekstraOdenen = 0, tikAtildi = false }) => {
   const tam = parseFloat(tamTutar) || 0;
   // Ödemeler ekranından biriken kısmi ödeme + deftere elle girilen ekstra ödeme
@@ -440,7 +488,11 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
           }
         }
       }
-      const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzin - iseGirisGun);
+      // DEĞİŞTİ (kullanıcı talebi): devamsızlık önce fazla günden, sonra 10'ar saatlik
+      // dilimlerle toplam saatten, kalanı mesai gününden düşer (bkz. devamsizlikDagit)
+      const _prim0 = parseFloat(row.prim) || 0;
+      const devD = devamsizlikDagit({ devamsizlik: devamsizlikSayisi, fazlaGun: fazlaGunSayisi, saatHavuzu: toplamMesaiSaati + _prim0 });
+      const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzin - iseGirisGun);
       // DEĞİŞİKLİK: person.maas yerine gecerliMaas() kullanılır. Bu fonksiyon,
       // ilgili ay deneme süresi içindeyse person.denemeMaasi, değilse person.maas
       // döndürür. Elle girilen satır değeri (row.maas) her ikisini de EZER —
@@ -455,7 +507,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const hesaplananBanka = (bankaParasiBase / 30) * mesaiGunSayisi;
       const icraKesintisi = icraKesintisiHesapla(person, hesaplananBanka, row); // DEĞİŞTİ (kullanıcı talebi): kalan icra borcunu aşamaz
       const bankaKalan = hesaplananBanka - icraKesintisi - resmiAvans - maasBorcKesintisi(row).banka; // DEĞİŞTİ: maaştan borç kesintisi
-      const toplamSaat = toplamMesaiSaati + (fazlaGunSayisi * 10) - (devamsizlikSayisi * 3) + prim;
+      // DEĞİŞTİ (kullanıcı talebi): eski "devamsızlık × 3 saat" kaldırıldı — yeni dağıtım kuralı
+      const toplamSaat = toplamMesaiSaati + (devD.fazlaGunNet * 10) - devD.saatDusulen + prim;
       const mesaiUcretiToplam = (maas / 200) * toplamSaat; // prim dahil (orijinal formül)
       const primTL = (maas / 200) * prim;                   // primin TL karşılığı (raporda ayrı gösterilir)
       const mesaiUcreti = mesaiUcretiToplam - primTL;       // primden arındırılmış saf mesai ücreti
@@ -3849,11 +3902,21 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                     {g('izinler') && (
                       <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-teal-50/50">
                       <input type="number" value={row.fazlaGun !== undefined ? row.fazlaGun : (c.fazlaGunSayisi || '')} onChange={e => handleCellChange(person.id, 'fazlaGun', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-teal-100 focus:ring-1 focus:ring-teal-400 rounded text-teal-700 font-bold" placeholder="0" title="Manuel düzenlenebilir" />
+                      {/* YENİ (kullanıcı talebi): devamsızlık fazla günü kullandıysa kalan fazla gün gösterilir */}
+                      {c.devD?.fazlaGunKullanilan > 0 && (
+                        <div className="text-[8px] font-black text-red-600 text-center leading-tight" title={devamsizlikDokumMetni(c.devD)}>−{c.devD.fazlaGunKullanilan} dev. → {c.devD.fazlaGunNet}</div>
+                      )}
                     </td>
                     )}
                     {g('izinler') && (
                       <td className="border-r border-neutral-300 px-0.5 py-0.5 bg-red-50/50">
-                      <input type="number" value={row.devamsizlik !== undefined ? row.devamsizlik : (c.devamsizlikSayisi || '')} onChange={e => handleCellChange(person.id, 'devamsizlik', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-red-100 focus:ring-1 focus:ring-red-400 rounded text-red-600 font-bold" placeholder="0" title="Manuel düzenlenebilir" />
+                      <input type="number" value={row.devamsizlik !== undefined ? row.devamsizlik : (c.devamsizlikSayisi || '')} onChange={e => handleCellChange(person.id, 'devamsizlik', e.target.value)} className="w-full h-6 text-center text-[10px] bg-transparent outline-none focus:bg-red-100 focus:ring-1 focus:ring-red-400 rounded text-red-600 font-bold" placeholder="0" title={devamsizlikDokumMetni(c.devD) || 'Manuel düzenlenebilir'} />
+                      {/* YENİ (kullanıcı talebi): devamsızlığın nereden düştüğü — FG: fazla gün · sa: toplam saat · g: mesai günü */}
+                      {c.devD?.devamsizlik > 0 && (
+                        <div className="text-[8px] font-black text-red-500 text-center leading-tight whitespace-nowrap" title={devamsizlikDokumMetni(c.devD)}>
+                          {[c.devD.fazlaGunKullanilan > 0 && `${c.devD.fazlaGunKullanilan}FG`, c.devD.saatGun > 0 && `${c.devD.saatDusulen}sa`, c.devD.gunDusulen > 0 && `${c.devD.gunDusulen}g`].filter(Boolean).join('·')}
+                        </div>
+                      )}
                     </td>
                     )}
                     {g('izinler') && (
@@ -4467,8 +4530,11 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         }
       }
 
-      // Devamsızlık, Rapor, Ücretsiz İzin ve İŞE GİRİŞ günleri doğrudan Mesai Gün Sayısını eksiltir
-      const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzinSayisi - iseGirisGunSayisi);
+      // DEĞİŞTİ (kullanıcı talebi): DEVAMSIZLIK DAĞITIMI — önce fazla gün, sonra toplam saatten
+      // 10'ar saatlik tam dilimler, kalanı mesai gününden (bkz. devamsizlikDagit).
+      // Rapor, Ücretsiz İzin ve İŞE GİRİŞ günleri eskisi gibi doğrudan Mesai Gün Sayısını eksiltir.
+      const devD = devamsizlikDagit({ devamsizlik: devamsizlikSayisi, fazlaGun: fazlaGunSayisi, saatHavuzu: gunlukSaat + (parseFloat(row.prim) || 0) });
+      const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzinSayisi - iseGirisGunSayisi);
       const odenecekGun = mesaiGunSayisi;
       
       // DEĞİŞİKLİK: person.maas yerine gecerliMaas() kullanılır. Bu fonksiyon,
@@ -4487,8 +4553,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const yemek = parseFloat(row.yemek !== undefined && row.yemek !== '' ? row.yemek : person.yemek) || 0;
 
       // Toplam Saat Hesaplama:
-      // Günlük Saat (Fazla/Eksik Mesailer neticesi) + (Fazla Gün * 10) - (Devamsızlık * 3) + PRİM SAATİ
-      const hesaplananToplamSaat = gunlukSaat + (fazlaGunSayisi * 10) - (devamsizlikSayisi * 3) + prim;
+      // DEĞİŞTİ (kullanıcı talebi): Günlük Saat + (KALAN Fazla Gün × 10) − (devamsızlığın saatten
+      // karşılanan 10'ar saatlik dilimleri) + PRİM SAATİ. Eski "− Devamsızlık × 3" KALDIRILDI.
+      const hesaplananToplamSaat = gunlukSaat + (devD.fazlaGunNet * 10) - devD.saatDusulen + prim;
       
       const toplamSaat = hesaplananToplamSaat;
 
@@ -4534,6 +4601,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       return { 
         nakitAvans, resmiAvans, gunlukSaat, toplamSaat, mesaiGunSayisi, 
         maas, fazlaGunSayisi, devamsizlikSayisi, rapor, ucretsizIzinSayisi, prim, yol, yemek,
+        devD, fazlaGunNet: devD.fazlaGunNet, // YENİ: devamsızlık dağılımı (ekranda döküm için)
         hesaplananBanka, icraKesintisi, bankaKalan,
         mesaiUcreti, primTL, mesaiUcretiSaf, hasarKesinti, primTLNet, toplamAvans, netMaas, maliyet, kalanNakit,
         borcKesintiNakit: borcKesintisi.nakit, borcKesintiBanka: borcKesintisi.banka, // YENİ
@@ -4630,6 +4698,85 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       document.body.removeChild(link);
     };
 
+    // ========================================================================
+    // YENİ (kullanıcı talebi): ÇALIŞMA BİLDİR — A4 PDF
+    // ------------------------------------------------------------------------
+    // Yalnızca BANKA PARASI OLAN (sıfırdan büyük) personel listelenir; banka
+    // parası 0 / boş olanlar gösterilmez. Her satırda yalnızca MESAİ GÜN
+    // (30 ya da devamsızlık / rapor / ücretsiz izin / işe giriş düşülmüş hali)
+    // ve RAPOR gün sayısı yazılır. Rakamlar Maaş Tablosu ile birebir aynıdır
+    // (calcRow). Mavi ve Beyaz Yaka için aynı buton çalışır.
+    // Projedeki window.print() deseni kullanılır: "PDF olarak kaydet" seçilir.
+    // ========================================================================
+    const calismaBildirPdf = () => {
+      const esc = (x) => String(x ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+      const sayi = (n) => (Number(n) || 0).toLocaleString('tr-TR', { maximumFractionDigits: 1 });
+      const ayEtiketi = months.find(m => m.val === currentMonth)?.label || currentMonth;
+      // Banka parası olan personel (Maaş Tablosu sırasıyla — alfabetik)
+      const liste = targetPersonnelList
+        .filter(p => (parseFloat(p.bankaParasi) || 0) > 0)
+        .map(p => { const c = calcRow(p.id); return { p, gun: c.mesaiGunSayisi, rapor: parseFloat(c.rapor) || 0 }; });
+      if (liste.length === 0) { alert(`${ayEtiketi} ${currentYear} için banka parası olan ${collarType} personel bulunmuyor.`); return; }
+      const d = new Date();
+      const bugun = `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`;
+      const eksikGunlu = liste.filter(x => x.gun < 30).length;
+      const raporlu = liste.filter(x => x.rapor > 0).length;
+      const satirlar = liste.map((x, i) => `
+        <tr class="${x.gun < 30 ? 'eksik' : ''}">
+          <td class="c">${i + 1}</td>
+          <td class="ad">${esc((x.p.fullName || '').toLocaleUpperCase('tr-TR'))}</td>
+          <td class="c gun">${sayi(x.gun)}</td>
+          <td class="c rapor">${x.rapor > 0 ? sayi(x.rapor) : '—'}</td>
+        </tr>`).join('');
+      const html = `<!DOCTYPE html><html lang="tr"><head><meta charset="utf-8">
+        <title>${esc(collarType)} Çalışma Bildirimi — ${esc(ayEtiketi)} ${currentYear}</title>
+        <style>
+          @page { size: A4 portrait; margin: 14mm 14mm; }
+          * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color: #111; margin: 0; }
+          .baslik { border-bottom: 3px solid #15803d; padding-bottom: 8px; margin-bottom: 12px; }
+          .baslik h1 { font-size: 18px; margin: 0 0 3px; color: #14532d; }
+          .baslik .meta { font-size: 11px; color: #444; }
+          .ozet { display: flex; gap: 8px; margin: 0 0 12px; }
+          .kutu { flex: 1; border: 1px solid #bbf7d0; background: #f0fdf4; border-radius: 4px; padding: 6px 8px; }
+          .kutu span { display: block; font-size: 8.5px; text-transform: uppercase; color: #15803d; letter-spacing: .3px; }
+          .kutu b { font-size: 15px; }
+          table { width: 100%; border-collapse: collapse; }
+          th { background: #dcfce7; border: 1px solid #15803d; padding: 6px; font-size: 10px; text-transform: uppercase; color: #14532d; }
+          td { border: 1px solid #999; padding: 6px 8px; font-size: 11.5px; }
+          td.c { text-align: center; width: 70px; }
+          td.ad { font-weight: bold; }
+          td.gun { font-weight: 900; font-size: 13px; }
+          tr.eksik td.gun { color: #b91c1c; }
+          td.rapor { color: #1d4ed8; font-weight: bold; }
+          tr { page-break-inside: avoid; }
+          .not { font-size: 9.5px; color: #444; margin-top: 8px; }
+          .imza { margin-top: 28px; display: flex; gap: 40px; font-size: 10px; }
+          .imza div { flex: 1; border-top: 1px solid #111; padding-top: 4px; text-align: center; }
+        </style></head><body>
+        <div class="baslik">
+          <h1>${esc(collarType)} — Çalışma Bildirimi</h1>
+          <div class="meta">${esc(ayEtiketi)} ${currentYear} dönemi &nbsp;•&nbsp; Banka maaşı olan personel &nbsp;•&nbsp; Liste tarihi: ${bugun}</div>
+        </div>
+        <div class="ozet">
+          <div class="kutu"><span>Personel</span><b>${liste.length} kişi</b></div>
+          <div class="kutu"><span>30 Günden Az Çalışan</span><b>${eksikGunlu} kişi</b></div>
+          <div class="kutu"><span>Raporlu</span><b>${raporlu} kişi</b></div>
+        </div>
+        <table>
+          <thead><tr><th>#</th><th style="text-align:left">Personel</th><th>Mesai Gün</th><th>Rapor</th></tr></thead>
+          <tbody>${satirlar}</tbody>
+        </table>
+        <p class="not">Mesai gün: 30 günden rapor, ücretsiz izin, işe giriş öncesi günler ve mesai gününe düşen devamsızlık çıkarılmış hâlidir. Kırmızı: 30 günden az.</p>
+        <div class="imza"><div>Hazırlayan</div><div>Onaylayan</div><div>Muhasebe</div></div>
+        <script>window.onload = () => setTimeout(() => window.print(), 400);<\/script>
+      </body></html>`;
+      const w = window.open('', '_blank');
+      if (!w) { alert('Yazdırma penceresi açılamadı. Tarayıcınızın açılır pencere engelini kapatın.'); return; }
+      w.document.open(); w.document.write(html); w.document.close();
+      addSystemLog?.('Çalışma Bildirimi', `${collarType} ${ayEtiketi} ${currentYear} • ${liste.length} personellik çalışma bildirimi (PDF) oluşturuldu.`);
+    };
+
     return (
       <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 md:p-6 animate-in fade-in flex flex-col h-[calc(100vh-190px)] relative w-full overflow-hidden">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 shrink-0 gap-4 w-full">
@@ -4637,6 +4784,11 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
             <DollarSign className="w-5 h-5 md:w-6 md:h-6 text-green-600" /> {collarType} Maaş Tablosu
           </h2>
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+            {/* YENİ (kullanıcı talebi): ÇALIŞMA BİLDİR — banka parası olan personelin mesai gün + rapor listesi (A4 PDF) */}
+            <button onClick={calismaBildirPdf} title="Banka parası olan personelin Mesai Gün ve Rapor listesini A4 PDF olarak indir"
+              className="w-full md:w-auto bg-blue-700 hover:bg-blue-800 text-white px-4 py-2 rounded-lg font-bold flex items-center justify-center gap-2 transition shadow-md text-sm">
+              <FileText className="w-4 h-4" /> Çalışma Bildir
+            </button>
             <select value={currentMonth} onChange={e => setCurrentMonth(parseInt(e.target.value))} className="p-2 border border-neutral-300 rounded-lg outline-none font-bold bg-neutral-50 focus:ring-2 focus:ring-green-600 cursor-pointer flex-1 md:flex-none text-sm">
               {months.map(m => <option key={m.val} value={m.val}>{m.label}</option>)}
             </select>
@@ -4848,11 +5000,17 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       const record = mesaiData[personId] || {};
       
       let devamsiz = 0, raporCount = 0, ucretsizIzinCount = 0;
+      let fazlaGunCount = 0, gunlukSaatTop = 0; // YENİ: devamsızlık dağıtımı için fazla gün + günlük saat
       Object.values(record).forEach(val => {
           let st = typeof val === 'object' && val !== null ? val.status : val;
           if (st === 'D') devamsiz++;
           else if (st === 'R') raporCount++;
           else if (st === 'Üİ') ucretsizIzinCount++;
+          // YENİ (kullanıcı talebi): Maaş Tablosu ile aynı sayım — fazla gün ve saatler
+          else if (st === 'FG') fazlaGunCount++;
+          else if (st === 'FGM') { fazlaGunCount++; if (typeof val === 'object') gunlukSaatTop += saatMetniSayiyaCevir(val.hours); }
+          else if (st === 'FM' && typeof val === 'object') gunlukSaatTop += saatMetniSayiyaCevir(val.hours);
+          else if (st === 'EM' && typeof val === 'object') gunlukSaatTop -= saatMetniSayiyaCevir(val.hours);
       });
 
       const devamsizlikSayisi = row.devamsizlik !== undefined && row.devamsizlik !== '' ? parseFloat(row.devamsizlik) : devamsiz;
@@ -4872,7 +5030,11 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         }
       }
 
-      const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzinSayisi - iseGirisGunSayisi);
+      // DEĞİŞTİ (kullanıcı talebi): devamsızlık önce fazla günden, sonra 10'ar saatlik dilimlerle
+      // toplam saatten, kalanı mesai gününden düşer — Maaş Tablosu ile birebir aynı (devamsizlikDagit)
+      const _fazlaGun = row.fazlaGun !== undefined && row.fazlaGun !== '' ? parseFloat(row.fazlaGun) : fazlaGunCount;
+      const devD = devamsizlikDagit({ devamsizlik: devamsizlikSayisi, fazlaGun: _fazlaGun, saatHavuzu: gunlukSaatTop + (parseFloat(row.prim) || 0) });
+      const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzinSayisi - iseGirisGunSayisi);
       const odenecekGun = mesaiGunSayisi;
       
       const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
@@ -5530,7 +5692,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         for (let d = 1; d <= ayGunSayisi; d++) { if (new Date(yil, ay - 1, d) < baslangic) iseGirisGun++; }
       }
     }
-    const mesaiGunSayisi = Math.max(0, 30 - rapor - devamsizlikSayisi - ucretsizIzin - iseGirisGun);
+    // DEĞİŞTİ (kullanıcı talebi): devamsızlık dağıtımı (fazla gün → 10'ar saat → mesai günü)
+    const devD = devamsizlikDagit({ devamsizlik: devamsizlikSayisi, fazlaGun: fazlaGunSayisi, saatHavuzu: toplamMesaiSaati + (parseFloat(row.prim) || 0) });
+    const mesaiGunSayisi = Math.max(0, 30 - rapor - devD.gunDusulen - ucretsizIzin - iseGirisGun);
     const maas = parseFloat(row.maas !== undefined && row.maas !== '' ? row.maas : gecerliMaas(person, yil, ay)) || 0;
     const bankaParasiBase = parseFloat(person.bankaParasi) || 0;
     const nakitAvans = parseFloat(row.nakitAvans) || 0;
@@ -5540,7 +5704,7 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
     const icraKesintisi = icraKesintisiHesapla(person, hesaplananBanka, row); // DEĞİŞTİ (kullanıcı talebi): kalan icra borcunu aşamaz
     const borcKesintisi = maasBorcKesintisi(row); // YENİ (kullanıcı talebi): maaştan borç kesintisi
     const bankaKalan = hesaplananBanka - icraKesintisi - resmiAvans - borcKesintisi.banka;
-    const toplamSaat = toplamMesaiSaati + (fazlaGunSayisi * 10) - (devamsizlikSayisi * 3) + prim;
+    const toplamSaat = toplamMesaiSaati + (devD.fazlaGunNet * 10) - devD.saatDusulen + prim; // DEĞİŞTİ: eski "× 3 saat" kaldırıldı
     const mesaiUcretiToplam = (maas / 200) * toplamSaat;
     const primTL = (maas / 200) * prim;
     const netMaas = (maas / 30) * mesaiGunSayisi;
