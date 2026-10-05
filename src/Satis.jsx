@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'; // DÜZELTME: QR Takip için useRef eklendi
-import { CalendarClock, CalendarPlus, QrCode, Download, Copy, Check, ChevronUp, Sparkles, ExternalLink, Filter, Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe, CreditCard, PhoneCall } from 'lucide-react';
+import { Calculator, CalendarClock, CalendarPlus, QrCode, Download, Copy, Check, ChevronUp, Sparkles, ExternalLink, Filter, Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe, CreditCard, PhoneCall } from 'lucide-react';
 import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs, getDoc, increment, orderBy, limit } from 'firebase/firestore';
 import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul,
   // YENİ: Müşteri Havuzu'nda "Atanan Satışçı" listesini yalnızca Satış Personeli
@@ -17,7 +17,8 @@ import { AI_KAYNAK_ETIKETLERI, AI_ISTATISTIK_KUTULARI, aiKaynakMi } from './aiKa
 import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
 import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari,
-  MESAFE_VARSAYILAN, MESAFE_GECISLERI, mesafeModuAcik, mesafeEsikAsildi, mesafeKalemleri, mesafeIscilikKalemi, ilceMerkezAdresi, fiyatEksikleriDoldur } from './fiyatSema.js'; // YENİ: km bazlı fiyat
+  MESAFE_VARSAYILAN, MESAFE_GECISLERI, mesafeModuAcik, mesafeEsikAsildi, mesafeKalemleri, mesafeIscilikKalemi, ilceMerkezAdresi, fiyatEksikleriDoldur,
+  mesafeKademeListesi, mesafeAktifKademe, mesafeOdaFarkiKalemi, FIYAT_ODALAR } from './fiyatSema.js'; // YENİ: uzun yol kademeleri + ev tipi farkı // YENİ: km bazlı fiyat
 
 // ============================================================================
 // YENİ (kullanıcı talebi): ESNEK MÜŞTERİ — alternatif taşınma günleri
@@ -4260,6 +4261,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [digerAcik, setDigerAcik] = useState(false);
   // YENİ (kullanıcı talebi): Fiyat Tablosu penceresi + canlı fiyat dinleyicisi
   const [fiyatTablosuAcik, setFiyatTablosuAcik] = useState(false);
+  const [hizliFiyatAcik, setHizliFiyatAcik] = useState(false); // YENİ (kullanıcı talebi): Hızlı Fiyat Hesapla penceresi
   const fiyatBilgi = useFiyatTablosu(true);
   // YENİ: havuzdan "Görüşmeye Bak" ile açılacak telefon görüşmesi
   const [telefonDetayId, setTelefonDetayId] = useState(null);
@@ -5005,6 +5007,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           </div>
           {/* YENİ (kullanıcı talebi): FİYAT TABLOSU — İstatistikleri Gör'ün solunda */}
           <div className="flex flex-wrap justify-end gap-2">
+          {/* YENİ (kullanıcı talebi): HIZLI FİYAT HESAPLA — müşteri bilgisi olmadan fiyat motoru (Fiyat Tablosu'nun solunda) */}
+          <button type="button" onClick={() => setHizliFiyatAcik(true)}
+            className="px-4 py-2 rounded-xl text-xs font-black tracking-wide transition flex items-center gap-2 border bg-yellow-400 text-black border-yellow-300 hover:bg-yellow-300">
+            <Calculator className="w-4 h-4" /> Hızlı Fiyat Hesapla
+          </button>
           <button type="button" onClick={() => setFiyatTablosuAcik(true)}
             className="px-4 py-2 rounded-xl text-xs font-black tracking-wide transition flex items-center gap-2 border bg-white/10 text-emerald-100 border-emerald-400/50 hover:bg-white/20">
             <FileText className="w-4 h-4" /> Fiyat Tablosu
@@ -5887,6 +5894,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
 
       {/* YENİ (kullanıcı talebi): FİYAT TABLOSU PENCERESİ */}
       {fiyatTablosuAcik && <FiyatTablosuPenceresi currentUser={currentUser} fiyatBilgi={fiyatBilgi} onKapat={() => setFiyatTablosuAcik(false)} />}
+      {/* YENİ: Hızlı Fiyat Hesapla — görüşme formunun kayıtsız "hızlı modu" (aynı sorular, aynı fiyat motoru) */}
+      {hizliFiyatAcik && <TelefonTeklifFormu hizli varsayilanHizmet="Nakliye" currentUser={currentUser} onKaydet={() => {}} onKapat={() => setHizliFiyatAcik(false)} />}
 
       {/* YENİ (kullanıcı talebi): PERSONEL TRANSFER PENCERESİ */}
       {transferKayit && (
@@ -9046,31 +9055,38 @@ const TT_PENDIK_IL_KM = {
 //   4 nokta: Pendik → İstanbul'daki yükleme (≈ Pendik) → il merkezi → Pendik
 //   toplam km = 2 × (Pendik → il merkezi)
 //   fiyat = şehir içi taban (oda) + toplam km × km ücreti
-//           + eşik aşılırsa: Trakya illerinde Boğaz köprüsü (gidiş + dönüş),
-//             sabit uzun yol eki, işçilik farkı (% × taban)
+//           + ev tipine göre km farkı (km tutarı × ev tipi %)
+//           + bir uzun yol kademesi aşılırsa (aşılan EN YÜKSEK kademe):
+//             Trakya illerinde Boğaz köprüsü (gidiş + dönüş), kademenin sabit eki,
+//             kademenin yüzdesi (TOPLAMIN üzerine)
 //   → 1.000 ₺'ye yukarı yuvarlanır (ortalama fiyat)
 // Ek hizmetler (toplama, merdiven, dış cephe, yürüme) bu fiyata DAHİL DEĞİLDİR;
 // görüşmede eskisi gibi ayrıca eklenir.
 const TT_TRAKYA_ILLERI = ['Edirne', 'Kırklareli', 'Tekirdağ'];
-const ttIlFiyatiKmIle = (taban, km, il, M) => {
+const ttIlFiyatiKmIle = (taban, km, il, M, odaK = '') => {
   let f = taban + km * (Number(M.kmUcreti) || 0);
-  if (mesafeEsikAsildi(M, km)) {
+  // YENİ: ev tipine göre km farkı
+  const odaFarki = odaK ? mesafeOdaFarkiKalemi(M, { toplamKm: km }, odaK) : null;
+  if (odaFarki) f += odaFarki.tutar;
+  const kademe = mesafeAktifKademe(M, km); // aşılan en yüksek uzun yol kademesi
+  if (kademe) {
     if (TT_TRAKYA_ILLERI.includes(il)) f += 2 * (Number(M.gecis?.kopruFsm) || 0);
-    f += Number(M.uzunYolEk) || 0;
-    f += Math.round(taban * (Number(M.iscilikYuzde) || 0) / 100);
+    f += Number(kademe.ek) || 0;
+    f += Math.round(f * (Number(kademe.yuzde) || 0) / 100); // DEĞİŞTİ: yüzde TOPLAMIN üzerine
   }
   return Math.ceil(f / 1000) * 1000;
 };
 // Verilen fiyat tablosundan (taslak) yeni ilEve / ilDepo tablolarını üretir.
 // Sütunlar: 1+1, 2+1, 3+1, 4+1 (1+0 için 1+1 sütunu kullanılır — eskisi gibi)
 const ttIlTablolariniKmIleHesapla = (veri) => {
-  const M = { ...MESAFE_VARSAYILAN, ...(veri.mesafe || {}), gecis: { ...MESAFE_VARSAYILAN.gecis, ...(veri.mesafe?.gecis || {}) } };
+  const M = { ...MESAFE_VARSAYILAN, ...(veri.mesafe || {}), gecis: { ...MESAFE_VARSAYILAN.gecis, ...(veri.mesafe?.gecis || {}) }, kademeler: mesafeKademeListesi(veri.mesafe),
+    odaFarki: { ...MESAFE_VARSAYILAN.odaFarki, ...(veri.mesafe?.odaFarki || {}), yuzde: { ...MESAFE_VARSAYILAN.odaFarki.yuzde, ...(veri.mesafe?.odaFarki?.yuzde || {}) } } };
   const uret = (sehirIci, eskiTablo) => {
     const out = {};
     Object.keys(eskiTablo || {}).forEach(il => {
       const km = TT_PENDIK_IL_KM[il];
       if (!km) { out[il] = [...eskiTablo[il]]; return; } // tabloda km yoksa eski fiyat korunur
-      out[il] = ['1+1', '2+1', '3+1', '4+1'].map(o => ttIlFiyatiKmIle(Number(sehirIci?.taban?.[o]) || 0, 2 * km, il, M));
+      out[il] = ['1+1', '2+1', '3+1', '4+1'].map(o => ttIlFiyatiKmIle(Number(sehirIci?.taban?.[o]) || 0, 2 * km, il, M, o));
     });
     return out;
   };
@@ -9096,6 +9112,8 @@ const ttDerinUygula = (hedef, kaynak) => {
 const ttFiyatlariUygula = (veri) => {
   const t = ttFiyatTablolari();
   Object.keys(t).forEach(k => { if (veri && veri[k]) ttDerinUygula(t[k], veri[k]); });
+  // YENİ: kademe listesi olmayan eski kayıt → tek eşik (esikKm/iscilikYuzde/uzunYolEk) 1. kademe olur
+  if (veri?.mesafe && !Array.isArray(veri.mesafe.kademeler)) TT_MESAFE.kademeler = JSON.parse(JSON.stringify(mesafeKademeListesi(veri.mesafe)));
   ttFiyatSurumu += 1;
 };
 const ttFiyatBelge = () => doc(db, 'artifacts', appId, 'public', 'data', 'ayarlar', 'fiyatTablosu');
@@ -9295,16 +9313,19 @@ const ttIsAdresleri = (f) => {
 // geçişler + sabit ek + işçilik farkı (%15 × taban + ek hizmetler). Rota yoksa
 // eski hesap çalışır ve uyarı verilir. Dönen: { uygulandi, esikAsildi }
 // ============================================================================
-const ttMesafeUygula = (f, kalemler, uyarilar) => {
+const ttMesafeUygula = (f, kalemler, uyarilar, odaK = '') => { // DEĞİŞTİ: odaK → ev tipine göre km farkı
   if (!mesafeModuAcik(TT_MESAFE)) return { uygulandi: false, esikAsildi: false };
   if (!(Number(f.rota?.toplamKm) > 0)) {
     uyarilar.push(f.rota?.hata ? `Km hesaplanamadı (${f.rota.hata}) — şimdilik eski liste fiyatı gösteriliyor.` : 'Km bazlı fiyat için yükleme ve boşaltma il/ilçesini seçin — km hesaplanınca fiyat güncellenir.');
     return { uygulandi: false, esikAsildi: false };
   }
   mesafeKalemleri(TT_MESAFE, f.rota).forEach(k => kalemler.push(k));
+  // YENİ (kullanıcı talebi): ev tipine göre km farkı (büyük ev → daha çok araç / ekip / yakıt)
+  const odaFarki = odaK ? mesafeOdaFarkiKalemi(TT_MESAFE, f.rota, odaK) : null;
+  if (odaFarki) kalemler.push(odaFarki);
   return { uygulandi: true, esikAsildi: mesafeEsikAsildi(TT_MESAFE, f.rota.toplamKm) };
 };
-// Eşik üstü işçilik farkı — ek hizmetler eklendikten SONRA çağrılır
+// Uzun yol farkı (kademe %) — TÜM kalemler eklendikten SONRA çağrılır (toplamın üzerine)
 const ttMesafeIscilikEkle = (f, km, kalemler) => {
   if (!km.uygulandi) return;
   const k = mesafeIscilikKalemi(TT_MESAFE, f.rota, kalemler);
@@ -9354,7 +9375,7 @@ const ttFiyatHesapla = (fHam) => {
     const liste = depoListesi ? 'Şehir İçi Evden Depoya' : 'Şehir İçi Evden Eve';
     kalemler.push({ ad: `${odaK} nakliye taban fiyatı (Anadolu)`, tutar: L.taban[odaK] });
     // YENİ (kullanıcı talebi): km bazlı mod — km × ücret (eşik üstünde geçişler + ek)
-    const km = ttMesafeUygula(f, kalemler, uyarilar);
+    const km = ttMesafeUygula(f, kalemler, uyarilar, odaK);
     // Avrupa Yakası ekstra: adreslerden biri (depo şubesi dahil) Avrupa ise BİR kez eklenir
     // DEĞİŞTİ (kullanıcı talebi): il + ilçe + şube kontrolü (ttAvrupaAdresVarMi)
     // DEĞİŞTİ: km modunda eşik ÜSTÜNDE eklenmez (köprü ücretleri devreye girer)
@@ -9391,7 +9412,7 @@ const ttFiyatHesapla = (fHam) => {
   // YENİ (kullanıcı talebi): km bazlı mod — rota varsa 81 il tablosu KULLANILMAZ:
   // taban (oda, Anadolu listesi) + km × ücret (+ eşik üstü geçiş/ek/işçilik farkı)
   const kmKalem = []; const kmUyari = [];
-  const km = ttMesafeUygula(f, kmKalem, kmUyari);
+  const km = ttMesafeUygula(f, kmKalem, kmUyari, odaK);
   kmUyari.forEach(u => uyarilar.push(u));
   if (km.uygulandi) {
     kalemler.push({ ad: `${odaK} nakliye taban fiyatı`, tutar: (depoListesi ? FL_SEHIR_ICI_DEPO : FL_SEHIR_ICI_EVE).taban[odaK] });
@@ -9776,9 +9797,15 @@ const TTRotaKarti = ({ form, setForm, kullanici }) => {
     return { ...f, rota: { ...(f.rota || {}), gecisler: g } };
   });
   const km = Number(rota?.toplamKm) || 0;
-  const esik = Number(TT_MESAFE.esikKm) || 0;
-  const asildi = mesafeEsikAsildi(TT_MESAFE, km);
+  // DEĞİŞTİ: tek eşik yerine kademeler — en küçük kademe "eşik", aktif kademe uygulanan
+  const kademe = mesafeAktifKademe(TT_MESAFE, km);
+  const esik = Math.min(...mesafeKademeListesi(TT_MESAFE).map(k => Number(k.km) || Infinity)) || 0;
+  const asildi = !!kademe;
   const kalemler = mesafeKalemleri(TT_MESAFE, rota);
+  // YENİ: ev tipine göre km farkı da kartta görünür (fiyat hesabıyla aynı oda anahtarı)
+  const kartOdaK = ttOdaAnahtari(form.hizmetTipi === 'Nakliye' ? form.odaSayisi : (form.depoBoyutu === 'Özel' ? '4+1' : form.depoBoyutu));
+  const kartOdaFarki = kartOdaK ? mesafeOdaFarkiKalemi(TT_MESAFE, rota, kartOdaK) : null;
+  if (kartOdaFarki) kalemler.push(kartOdaFarki);
   return (
     <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/40 p-3 space-y-2">
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -9809,7 +9836,7 @@ const TTRotaKarti = ({ form, setForm, kullanici }) => {
             </div>
           ))}
           <div className={`flex items-center justify-between px-3 py-2 text-xs ${asildi ? 'bg-amber-100' : 'bg-emerald-100'}`}>
-            <span className={`font-black ${asildi ? 'text-amber-900' : 'text-emerald-900'}`}>Toplam {asildi ? `· ${esik} km eşiği AŞILDI` : `· ${esik} km eşiği altında`}</span>
+            <span className={`font-black ${asildi ? 'text-amber-900' : 'text-emerald-900'}`}>Toplam {asildi ? `· ${Number(kademe.km).toLocaleString('tr-TR')} km kademesi uygulandı` : Number.isFinite(esik) ? `· ${esik} km eşiği altında` : ''}</span>
             <span className={`font-black ${asildi ? 'text-amber-900' : 'text-emerald-900'}`}>{km.toLocaleString('tr-TR')} km</span>
           </div>
         </div>
@@ -9836,7 +9863,7 @@ const TTRotaKarti = ({ form, setForm, kullanici }) => {
       {kalemler.length > 0 && (
         <div className="rounded-xl bg-neutral-900 text-white px-3 py-2 text-[11px] space-y-0.5">
           {kalemler.map((k, i) => <div key={i} className="flex justify-between gap-2"><span className="text-white/80">{k.ad}</span><span className="font-black">{ttTl(k.tutar)}</span></div>)}
-          {asildi && Number(TT_MESAFE.iscilikYuzde) > 0 && <div className="text-[10px] text-amber-300 font-bold pt-0.5">+ %{TT_MESAFE.iscilikYuzde} uzun yol işçilik farkı (taban + ek hizmetler üzerinden) sistem fiyatına eklenir.</div>}
+          {asildi && Number(kademe.yuzde) > 0 && <div className="text-[10px] text-amber-300 font-bold pt-0.5">+ %{kademe.yuzde} uzun yol farkı TOPLAM fiyatın üzerine eklenir · işçilik farkı (taban + ek hizmetler üzerinden) sistem fiyatına eklenir.</div>}
         </div>
       )}
     </div>
@@ -10020,6 +10047,22 @@ const TTFiyatPaneli = ({ form }) => {
         <p className="text-[11px] font-black uppercase tracking-wide flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-yellow-400" /> Sistem Fiyatı</p>
         {h.liste && <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-white/10 text-neutral-300">{h.liste}</span>}
       </div>
+      {/* YENİ (kullanıcı talebi): seçili adreslere göre TOPLAM KM (4 nokta / 3 etap) */}
+      {mesafeModuAcik(TT_MESAFE) && Number(form.rota?.toplamKm) > 0 && (() => {
+        const kademe = mesafeAktifKademe(TT_MESAFE, form.rota.toplamKm);
+        return (
+          <div className="rounded-xl bg-emerald-500/15 border border-emerald-400/30 px-2.5 py-2">
+            <div className="flex items-end justify-between gap-2">
+              <span className="text-[10px] font-black uppercase text-emerald-200 flex items-center gap-1"><MapPin className="w-3 h-3" /> Toplam güzergah</span>
+              <span className="text-lg font-black text-emerald-300 leading-none">{Number(form.rota.toplamKm).toLocaleString('tr-TR')} km</span>
+            </div>
+            {(form.rota.etaplar || []).length > 0 && (
+              <p className="text-[10px] font-bold text-emerald-100/80 mt-1">{form.rota.etaplar.map(e => `${Number(e.km).toLocaleString('tr-TR')}`).join(' + ')} km (3 etap){form.rota.toplamDk ? ` · ~${Math.floor(form.rota.toplamDk / 60)} sa ${form.rota.toplamDk % 60} dk` : ''}</p>
+            )}
+            {kademe && <p className="text-[10px] font-black text-amber-300 mt-0.5">{Number(kademe.km).toLocaleString('tr-TR')} km üstü kademe uygulandı · %{kademe.yuzde}{Number(kademe.ek) ? ` + ${ttTl(kademe.ek)}` : ''}</p>}
+          </div>
+        );
+      })()}
       {h.kalemler.length > 0 && (
         <ul className="space-y-1">
           {h.kalemler.map((k, i) => (
@@ -10462,7 +10505,9 @@ const ttHavuzdanTeklifVerisi = (k, kullanici) => {
   };
 };
 
-const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', gecmisIndeksi = null, gonderen = '', onKaydet, onKapat, onWhatsappKaydi = null, currentUser = null }) => { // DEĞİŞTİ: currentUser (km servisi doğrulaması)
+// DEĞİŞTİ (kullanıcı talebi): hizli=true → "Hızlı Fiyat Hesapla": müşteri bilgisi istenmez, kayıt YAPILMAZ;
+// sorular ve fiyat motoru görüşme formuyla birebir aynıdır (tek kaynak).
+const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', gecmisIndeksi = null, gonderen = '', onKaydet, onKapat, onWhatsappKaydi = null, currentUser = null, hizli = false }) => { // DEĞİŞTİ: currentUser (km servisi doğrulaması)
   const [waSablon, setWaSablon] = useState(null);          // YENİ: açık WhatsApp şablonu
   const [notSablonAcik, setNotSablonAcik] = useState(false); // YENİ (kullanıcı talebi): hazır not şablonları kapalı başlar
   const [form, setForm] = useState(() => ({ ...ttBosForm(varsayilanHizmet), ...(baslangic ? ttNormalize(baslangic) : {}), surum: 2 }));
@@ -10478,10 +10523,10 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
   const soruAdimlari = ttAdimListesi(form).filter(a => a.soru);
   const soruNumarasi = (id) => soruAdimlari.findIndex(a => a.id === id) + 1;
   const adimlar = [
-    { id: 'musteri', baslik: 'Müşteri & Hizmet' },
+    { id: 'musteri', baslik: hizli ? 'Hizmet' : 'Müşteri & Hizmet' },
     { id: 'sorular', baslik: `Görüşme Soruları (${soruAdimlari.length} soru · tek sayfa)` },
     { id: 'sonuc', baslik: 'Fiyat, Video & Takip' },
-  ];
+  ].filter(a => !hizli || a.id !== 'sonuc'); // hızlı modda Sonuç (video / takip / kayıt) bölümü yok
   // "Sorular" sayfası, içindeki tüm sorular cevaplanınca tamamlanmış sayılır
   const adimTamamMi = (id) => (id === 'sorular' ? soruAdimlari.every(a => ttAdimTamam(form, a.id)) : ttAdimTamam(form, id));
   // DEĞİŞTİ (kullanıcı talebi): adım adım ilerleme yok — tüm bölümler TEK SAYFADA alt alta.
@@ -10596,6 +10641,10 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
               );
             })}
           </div>
+          {/* YENİ: hızlı modda müşteri bilgisi alanları gösterilmez */}
+          {hizli ? (
+            <p className="text-[11px] font-bold text-neutral-500 bg-neutral-50 border border-neutral-200 rounded-xl px-3 py-2">Hizmeti seçin, ardından aşağıdaki soruları cevaplayın — sağdaki <b>Sistem Fiyatı</b> anında hesaplanır. Müşteri bilgisi gerekmez, hiçbir şey kaydedilmez.</p>
+          ) : (<>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="block">
               <span className="block text-[10px] font-black uppercase text-neutral-500 mb-1">Müşteri Adı</span>
@@ -10615,6 +10664,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           </p>
           {/* Numara yazılır yazılmaz geçmiş kontrol edilir */}
           {gecmis && <MusteriGecmisiKutusu gecmis={gecmis} ad={form.musteriAdi} />}
+          </>)}
         </div>
       );
       case 'oda': return (
@@ -11018,8 +11068,8 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           <div className="min-w-0 flex items-center gap-3">
             <hz.Ikon className="w-6 h-6 shrink-0" />
             <div className="min-w-0">
-              <h3 className="text-base md:text-lg font-black truncate">{baslangic?.id ? (baslangic.kaynak && !baslangic.updatedAt ? `${baslangic.kaynak} → Telefon Görüşmesi` : 'Görüşmeyi Düzenle') : 'Yeni Telefon Görüşmesi'} — {hz.ad}</h3>
-              <p className="text-[11px] font-bold text-white/80 truncate">{form.musteriAdi || 'Müşteri'}{form.telefon ? ` · ${ttTelGoster(form.telefon)}` : ''}</p>
+              <h3 className="text-base md:text-lg font-black truncate">{hizli ? `Hızlı Fiyat Hesapla — ${hz.ad}` : baslangic?.id ? (baslangic.kaynak && !baslangic.updatedAt ? `${baslangic.kaynak} → Telefon Görüşmesi` : 'Görüşmeyi Düzenle') : 'Yeni Telefon Görüşmesi'} — {hz.ad}</h3>
+              <p className="text-[11px] font-bold text-white/80 truncate">{hizli ? 'Müşteri bilgisi yok · kayıt yapılmaz · yalnızca fiyat' : `${form.musteriAdi || 'Müşteri'}${form.telefon ? ` · ${ttTelGoster(form.telefon)}` : ''}`}</p>
             </div>
           </div>
           <button type="button" onClick={onKapat} className="w-9 h-9 rounded-xl bg-white/15 hover:bg-white/25 flex items-center justify-center shrink-0"><X className="w-5 h-5" /></button>
@@ -11031,7 +11081,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           {adimlar.map((a, i) => (
             <button key={a.id + i} type="button" onClick={() => git(i)}
               className={`shrink-0 px-2.5 py-1 rounded-lg text-[10px] font-black border ${i === adimIdx ? S.secili : adimTamamMi(a.id) ? 'bg-green-50 text-green-800 border-green-200' : 'bg-white text-neutral-500 border-neutral-200'}`}>
-              {a.id === 'musteri' ? 'Müşteri' : a.id === 'sonuc' ? 'Sonuç' : `Sorular (${soruAdimlari.filter(x => ttAdimTamam(form, x.id)).length}/${soruAdimlari.length})`}
+              {a.id === 'musteri' ? (hizli ? 'Hizmet' : 'Müşteri') : a.id === 'sonuc' ? 'Sonuç' : `Sorular (${soruAdimlari.filter(x => ttAdimTamam(form, x.id)).length}/${soruAdimlari.length})`}
             </button>
           ))}
         </div>
@@ -11089,7 +11139,7 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
           {/* SAĞ: fiyat / geçmiş / rehber */}
           <aside className="border-t lg:border-t-0 lg:border-l border-neutral-100 flex flex-col min-h-0 bg-neutral-50 max-h-[40vh] lg:max-h-none">
             <div className="shrink-0 flex gap-1 p-2 border-b border-neutral-100">
-              {[['fiyat', 'Fiyat'], ['gecmis', `Geçmiş${gecmis ? ` (${gecmis.toplam})` : ''}`], ['rehber', 'Rehber']].map(([id, ad]) => (
+              {[['fiyat', 'Fiyat'], ...(hizli ? [] : [['gecmis', `Geçmiş${gecmis ? ` (${gecmis.toplam})` : ''}`]]), ['rehber', 'Rehber']].map(([id, ad]) => (
                 <button key={id} type="button" onClick={() => setPanel(id)}
                   className={`flex-1 py-1.5 rounded-lg text-[11px] font-black transition ${panel === id ? 'bg-neutral-900 text-white' : id === 'gecmis' && gecmis ? 'bg-amber-100 text-amber-800' : 'bg-white text-neutral-600'}`}>{ad}</button>
               ))}
@@ -11099,8 +11149,8 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
               {panel === 'gecmis' && (gecmis ? <MusteriGecmisiKutusu gecmis={gecmis} ad={form.musteriAdi} />
                 : <p className="text-xs font-bold text-neutral-400 text-center py-6">{ttTelGecerli(form.telefon) ? 'Bu numarayla eşleşen geçmiş kayıt yok — yeni müşteri.' : 'Telefon girilince geçmiş kontrol edilir.'}</p>)}
               {panel === 'rehber' && <TTGorusmeRehberi hizmetTipi={form.hizmetTipi} />}
-              {/* YENİ (kullanıcı talebi): panelin altı boş kalmasın — hazır WhatsApp mesajları */}
-              <TTWhatsappHizli t={form} onSec={setWaSablon} />
+              {/* YENİ (kullanıcı talebi): panelin altı boş kalmasın — hazır WhatsApp mesajları (hızlı modda yok) */}
+              {!hizli && <TTWhatsappHizli t={form} onSec={setWaSablon} />}
             </div>
           </aside>
         </div>
@@ -11109,10 +11159,18 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
         <div className="shrink-0 px-3 md:px-5 py-3 border-t border-neutral-200 bg-white flex items-center gap-2">
           <p className="text-[11px] font-black text-neutral-500 shrink-0">{soruAdimlari.filter(x => ttAdimTamam(form, x.id)).length} / {soruAdimlari.length} soru</p>
           <p className="flex-1 text-xs font-bold text-red-600 truncate">{hata}</p>
+          {hizli ? (<>
+            {/* YENİ: hızlı modda kayıt yok — yeni hesap için sıfırla */}
+            <button type="button" onClick={() => setForm({ ...ttBosForm(form.hizmetTipi), surum: 2 })}
+              className="px-4 py-2.5 rounded-xl bg-neutral-100 hover:bg-neutral-200 text-neutral-800 text-sm font-black flex items-center gap-1.5"><RefreshCw className="w-4 h-4" /> Sıfırla</button>
+            <button type="button" onClick={onKapat}
+              className="px-5 py-2.5 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-white text-sm font-black flex items-center gap-1.5"><X className="w-4 h-4" /> Kapat</button>
+          </>) : (
           <button type="button" onClick={kaydet} disabled={kaydediliyor}
             className="px-5 py-2.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-sm font-black flex items-center gap-1.5 shadow-lg shadow-green-600/30 disabled:opacity-60">
             {kaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Kaydet
           </button>
+          )}
         </div>
       </div>
       {waSablon && (
@@ -12610,11 +12668,12 @@ const ttYolYaz = (o, yol, v) => {
 
 // Tek fiyat hücresi — görüntülemede "12.000 ₺", düzenlemede sayı kutusu.
 // YENİ: durum = { tur: 'hata' | 'uyari', mesaj } → kırmızı / turuncu çerçeve
-const TTFiyatHucresi = ({ deger, duzenle, onDegis, degisti = false, durum = null }) => (duzenle ? (
+// DEĞİŞTİ: "birim" — 'tl' (varsayılan) · 'km' · 'yuzde'. Km ve yüzde değerleri artık ₺ ile gösterilmez.
+const TTFiyatHucresi = ({ deger, duzenle, onDegis, degisti = false, durum = null, birim = 'tl' }) => (duzenle ? (
   <input value={deger ?? ''} inputMode="numeric" title={durum?.mesaj || ''}
     onChange={e => { const r = e.target.value.replace(/\D/g, ''); onDegis(r === '' ? '' : Number(r)); }}
     className={`w-28 px-2 py-1 rounded-lg border text-right text-sm font-black outline-none focus:ring-2 focus:ring-yellow-400 ${durum?.tur === 'hata' ? 'border-red-500 border-2 bg-red-50 text-red-700' : durum?.tur === 'uyari' ? 'border-orange-400 border-2 bg-orange-50' : degisti ? 'border-yellow-400 bg-yellow-50' : 'border-neutral-300 bg-white'}`} />
-) : <span className="text-sm font-black text-neutral-900">{ttTl(deger)}</span>);
+) : <span className="text-sm font-black text-neutral-900">{birim === 'km' ? `${Number(deger || 0).toLocaleString('tr-TR')} km` : birim === 'yuzde' ? `%${Number(deger || 0)}` : birim === 'tlkm' ? `${ttTl(deger)}/km` : ttTl(deger)}</span>);
 
 // PDF'teki gibi başlıklı fiyat bölümü
 const TTFiyatBolumu = ({ bolum, veri, kayitli, durumlar, duzenle, onDegis, renk }) => (
@@ -12652,8 +12711,8 @@ const ttFarkDeger = (f, v) => {
     if (f.yol[1] === 'modu') return Number(v) === 1 ? 'Açık' : 'Kapalı';
     if (f.yol[1] === 'cikisAdresi') return String(v);
     if (f.yol[1] === 'kmUcreti') return `${Number(v).toLocaleString('tr-TR')} ₺/km`;
-    if (f.yol[1] === 'esikKm') return `${Number(v).toLocaleString('tr-TR')} km`;
-    if (f.yol[1] === 'iscilikYuzde') return `%${v}`;
+    if (f.yol[1] === 'odaFarki') return f.yol[2] === 'esikKm' ? `${Number(v).toLocaleString('tr-TR')} km` : `%${v}`; // YENİ
+    if (f.yol[1] === 'kademeler') return f.yol[3] === 'km' ? `${Number(v).toLocaleString('tr-TR')} km` : f.yol[3] === 'yuzde' ? `%${v}` : ttTl(v); // YENİ
   }
   return ttTl(v);
 };
@@ -12945,14 +13004,19 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
           {sekme === 'mesafe' && (() => {
             const M = veri.mesafe || {};
             const acik = Number(M.modu) === 1;
+            const kayitliDolu = fiyatEksikleriDoldur(kayitli, kayitli); // DEĞİŞTİ: eski tek eşik → kademe göçüyle karşılaştır
+            // DEĞİŞTİ: birim yoldan çıkarılır — km / % / ₺/km değerleri artık ₺ ile gösterilmez
+            const birimOf = (yol) => (yol[1] === 'kmUcreti' ? 'tlkm'
+              : (yol[1] === 'kademeler' && yol[3] === 'km') || (yol[1] === 'odaFarki' && yol[2] === 'esikKm') ? 'km'
+              : (yol[1] === 'kademeler' && yol[3] === 'yuzde') || (yol[1] === 'odaFarki' && yol[2] === 'yuzde') ? 'yuzde' : 'tl');
             const hucre = (yol) => {
               const d = ttYolAl(veri, yol);
-              return <TTFiyatHucresi deger={d} duzenle={duzenle} onDegis={v => degis(yol, v)} degisti={d !== ttYolAl(kayitli, yol)} durum={durumlar.get(fiyatYolAnahtari(yol))} />;
+              return <TTFiyatHucresi deger={d} duzenle={duzenle} birim={birimOf(yol)} onDegis={v => degis(yol, v)} degisti={d !== ttYolAl(kayitliDolu, yol)} durum={durumlar.get(fiyatYolAnahtari(yol))} />;
             };
             const satir = (etiket, aciklama, yol, i, sonEk = '') => (
               <div className={`flex items-center justify-between gap-2 px-3 py-2 ${i % 2 ? 'bg-neutral-50' : 'bg-white'}`}>
                 <span className="text-xs font-bold text-neutral-700">{etiket}<span className="block text-[10px] text-neutral-400">{aciklama}</span></span>
-                <span className="flex items-center gap-1">{hucre(yol)}{sonEk && <span className="text-[10px] font-black text-neutral-500">{sonEk}</span>}</span>
+                <span className="flex items-center gap-1">{hucre(yol)}{sonEk && duzenle && <span className="text-[10px] font-black text-neutral-500">{sonEk}</span>}</span>
               </div>
             );
             // DEĞİŞTİ (kullanıcı talebi): örnekler iki nakliye listesinin KENDİ fiyatlarını kullanır.
@@ -12965,13 +13029,15 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                 { ad: `2+1 toplama (${listeAdi} sekmesinden)`, tutar: toplama },
                 ...mesafeKalemleri(M, { toplamKm, gecisler }),
               ];
+              const oda = mesafeOdaFarkiKalemi(M, { toplamKm }, '2+1'); // YENİ: ev tipi farkı
+              if (oda) kalemler.push(oda);
               const isc = mesafeIscilikKalemi(M, { toplamKm }, kalemler);
               if (isc) kalemler.push(isc);
               return { kalemler, toplam: kalemler.reduce((t, k) => t + k.tutar, 0) };
             };
             const ornekler = [
               { baslik: 'SEMBOL · Evden Eve · 2+1 + toplama · 200 km (eşik altı)', ...ornek('sehirIciEve', 'Evden Eve', 200, { kopruOsmangazi: 2 }) },
-              { baslik: `DEPOEVİM · Eşya Depolama · 2+1 + toplama · 260 km (${Number(M.esikKm) || 200} km eşiği aşılır)`, ...ornek('sehirIciDepo', 'Eşya Depolama', 260, { kopruOsmangazi: 2 }) },
+              { baslik: `DEPOEVİM · Eşya Depolama · 2+1 + toplama · 260 km (uzun yol kademesi uygulanır)`, ...ornek('sehirIciDepo', 'Eşya Depolama', 260, { kopruOsmangazi: 2 }) },
             ];
             return (
               <div className="space-y-3">
@@ -13010,12 +13076,54 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                   </div>
                   {/* EŞİK KURALLARI */}
                   <div className="rounded-2xl border border-neutral-200 overflow-hidden bg-white">
-                    <div className="px-3 py-2 text-[11px] font-black text-white tracking-wide bg-emerald-600">UZUN YOL KURALLARI (EŞİK AŞILINCA)</div>
-                    {satir('Uzun yol eşiği', 'Toplam km bunu AŞARSA aşağıdakiler eklenir (tam eşit = eklenmez)', ['mesafe', 'esikKm'], 0, 'km')}
-                    {satir('İşçilik farkı', 'Taban + ek hizmetlerin üzerine yüzde olarak eklenir', ['mesafe', 'iscilikYuzde'], 1, '%')}
-                    {satir('Sabit ek maliyet', 'Konaklama, harcırah vb. — kullanılmıyorsa 0', ['mesafe', 'uzunYolEk'], 2)}
-                    <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">Eşik altında köprü ücreti alınmaz; Avrupa Yakası ekstrası eskisi gibi uygulanır.</p>
+                    <div className="px-3 py-2 text-[11px] font-black text-white tracking-wide bg-emerald-600">UZUN YOL KURALLARI (KADEMELİ)</div>
+                    {/* DEĞİŞTİ (kullanıcı talebi): birden fazla eşik — eklenir / silinir.
+                        Toplam km hangi kademeleri AŞARSA, aşılan EN YÜKSEK kademenin işçilik % ve sabit eki uygulanır. */}
+                    <div className="px-3 pt-2 grid grid-cols-[1fr_1fr_1fr_28px] gap-2 text-[10px] font-black uppercase text-neutral-500">
+                      <span>Toplam km aşarsa</span><span>Toplama % artış</span><span>Sabit ek (₺)</span><span />
+                    </div>
+                    {(M.kademeler || []).length === 0 && <p className="px-3 py-2 text-[11px] font-bold text-neutral-400">Kademe yok — uzun yol farkı, köprü ve geçiş ücreti alınmaz.</p>}
+                    {(M.kademeler || []).map((k, i) => (
+                      <div key={i} className={`px-3 py-1.5 grid grid-cols-[1fr_1fr_1fr_28px] gap-2 items-center ${i % 2 ? 'bg-neutral-50' : 'bg-white'}`}>
+                        <span className="flex items-center gap-1">{hucre(['mesafe', 'kademeler', i, 'km'])}{duzenle && <span className="text-[10px] font-black text-neutral-500">km</span>}</span>
+                        <span className="flex items-center gap-1">{hucre(['mesafe', 'kademeler', i, 'yuzde'])}{duzenle && <span className="text-[10px] font-black text-neutral-500">%</span>}</span>
+                        <span>{hucre(['mesafe', 'kademeler', i, 'ek'])}</span>
+                        {duzenle ? (
+                          <button type="button" title="Kademeyi sil" onClick={() => setTaslak(t => ({ ...t, mesafe: { ...t.mesafe, kademeler: (t.mesafe?.kademeler || []).filter((_, j) => j !== i) } }))}
+                            className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 flex items-center justify-center"><Trash2 className="w-3.5 h-3.5" /></button>
+                        ) : <span />}
+                      </div>
+                    ))}
+                    {duzenle && (
+                      <div className="px-3 py-2">
+                        <button type="button" onClick={() => setTaslak(t => {
+                          const liste = [...(t.mesafe?.kademeler || [])].sort((a, b) => Number(a.km) - Number(b.km));
+                          const son = liste[liste.length - 1];
+                          const yeni = { km: (Number(son?.km) || 0) + 200, yuzde: Number(son?.yuzde) || 15, ek: 0 };
+                          return { ...t, mesafe: { ...t.mesafe, kademeler: [...(t.mesafe?.kademeler || []), yeni] } };
+                        })} className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black flex items-center gap-1.5">
+                          <PlusCircle className="w-3.5 h-3.5" /> Kademe Ekle
+                        </button>
+                      </div>
+                    )}
+                    <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">Yüzde, işin <b>TOPLAM</b> maliyetinin (taban + ek hizmetler + km + geçişler + ev tipi farkı + sabit ek) üzerine eklenir. Örnek: 200 km → %15 · 400 km → %25 + 3.000 ₺. 300 km'lik işte 1. kademe, 500 km'lik işte 2. kademe uygulanır (tam eşit = aşmaz). En küçük kademe aşılınca köprü / geçiş ücretleri de eklenir; altında Avrupa Yakası ekstrası eskisi gibi uygulanır. Kaydedince kademeler küçükten büyüğe sıralanır.</p>
                   </div>
+                </div>
+
+                {/* YENİ (kullanıcı talebi): EV TİPİNE GÖRE KM FARKI */}
+                <div className="rounded-2xl border border-neutral-200 overflow-hidden bg-white">
+                  <div className="px-3 py-2 text-[11px] font-black text-white tracking-wide bg-emerald-600">EV TİPİNE GÖRE KM FARKI (KM TUTARINA % ARTIŞ)</div>
+                  <p className="px-3 pt-2 text-[11px] font-bold text-neutral-600">Büyük ev daha çok araç, ekip ve yakıt ister: km tutarı (toplam km × km ücreti) ev tipinin yüzdesi kadar artırılır. Örnek: 1.000 km × 15 ₺ = 15.000 ₺ · 3+1 için %20 → +3.000 ₺. 0 = fark yok.</p>
+                  {satir('Başlangıç mesafesi', 'Toplam km bunu AŞARSA ev tipi farkı uygulanır (0 = her mesafede)', ['mesafe', 'odaFarki', 'esikKm'], 0, 'km')}
+                  <div className="grid grid-cols-1 sm:grid-cols-5">
+                    {FIYAT_ODALAR.map((o, i) => (
+                      <div key={o} className={`flex sm:flex-col items-center justify-between sm:justify-center gap-2 px-3 py-2 ${i % 2 ? 'bg-neutral-50' : 'bg-white'}`}>
+                        <span className="text-xs font-black text-neutral-800">{o}</span>
+                        <span className="flex items-center gap-1">{hucre(['mesafe', 'odaFarki', 'yuzde', o])}{duzenle && <span className="text-[10px] font-black text-neutral-500">%</span>}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">Depo işlerinde depo boyutu (1+0 … 4+1) ev tipi yerine geçer. Uzun yol kademelerinden bağımsızdır; ikisi birlikte uygulanabilir.</p>
                 </div>
 
                 {/* GEÇİŞLER */}
