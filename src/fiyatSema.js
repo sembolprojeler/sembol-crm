@@ -126,12 +126,15 @@ export const FIYAT_VERI_ANAHTARLARI = ['genel', 'sehirIciEve', 'sehirIciDepo', '
 // Ücretli geçişler. "anahtarlar": Google rotasının Türkçe yol tariflerinde bu
 // ifadeler geçiyorsa geçiş otomatik işaretlenir (satışçı ± ile düzeltebilir).
 // Tutarlar KAMYON (2. sınıf) içindir; varsayılanlar tahminidir — düzenleyin.
+// YENİ: "kopruNokta" = köprünün orta noktası [enlem, boylam]. api/mesafe.js artık köprüleri
+// yazıdan değil rota ÇİZGİSİNDEN bulur (bkz. rotaGecisleriGeometri) — "anahtarlar" yalnızca
+// otoyollar ve eski rotaGecisleriBul için kullanılır.
 export const MESAFE_GECISLERI = [
-  { ic: 'kopru15Temmuz',  slug: 'kopru15Temmuz',  etiket: '15 Temmuz Şehitler Köprüsü (O-1)',                        anahtarlar: [/15 temmuz/i, /boğaziçi köprüsü/i, /\bO-1\b/] },
-  { ic: 'kopruFsm',       slug: 'kopruFsm',       etiket: 'Fatih Sultan Mehmet Köprüsü (O-2)',                        anahtarlar: [/fatih sultan mehmet/i, /\bfsm\b/i, /\bO-2\b/] },
-  { ic: 'kopruYss',       slug: 'kopruYss',       etiket: 'Yavuz Sultan Selim Köprüsü · Kuzey Marmara Otoyolu (O-7)', anahtarlar: [/yavuz sultan selim/i, /\byss\b/i, /kuzey marmara/i, /\bO-7\b/] },
-  { ic: 'kopruOsmangazi', slug: 'kopruOsmangazi', etiket: 'Osmangazi Köprüsü · İstanbul–İzmir Otoyolu (O-5)',         anahtarlar: [/osmangazi/i, /\bO-5\b/, /körfez geçiş/i, /izmir otoyolu/i] },
-  { ic: 'kopruCanakkale', slug: 'kopruCanakkale', etiket: '1915 Çanakkale Köprüsü',                                   anahtarlar: [/1915/, /çanakkale köprüsü/i] },
+  { ic: 'kopru15Temmuz',  slug: 'kopru15Temmuz',  etiket: '15 Temmuz Şehitler Köprüsü (O-1)',                        anahtarlar: [/15 temmuz/i, /boğaziçi köprüsü/i, /\bO-1\b/], kopruNokta: [41.0456, 29.0344] },
+  { ic: 'kopruFsm',       slug: 'kopruFsm',       etiket: 'Fatih Sultan Mehmet Köprüsü (O-2)',                        anahtarlar: [/fatih sultan mehmet/i, /\bfsm\b/i, /\bO-2\b/], kopruNokta: [41.0911, 29.0611] },
+  { ic: 'kopruYss',       slug: 'kopruYss',       etiket: 'Yavuz Sultan Selim Köprüsü · Kuzey Marmara Otoyolu (O-7)', anahtarlar: [/yavuz sultan selim/i, /\byss\b/i, /kuzey marmara/i, /\bO-7\b/], kopruNokta: [41.2025, 29.1117] },
+  { ic: 'kopruOsmangazi', slug: 'kopruOsmangazi', etiket: 'Osmangazi Köprüsü · İstanbul–İzmir Otoyolu (O-5)',         anahtarlar: [/osmangazi/i, /\bO-5\b/, /körfez geçiş/i, /izmir otoyolu/i], kopruNokta: [40.7531, 29.5153] },
+  { ic: 'kopruCanakkale', slug: 'kopruCanakkale', etiket: '1915 Çanakkale Köprüsü',                                   anahtarlar: [/1915/, /çanakkale köprüsü/i], kopruNokta: [40.3385, 26.6405] },
   { ic: 'otoyolAnadolu',  slug: 'otoyolAnadolu',  etiket: 'Anadolu Otoyolu (O-4 · İstanbul–Ankara)',                  anahtarlar: [/\bO-4\b/, /anadolu otoyolu/i] },
   { ic: 'otoyolAvrupa',   slug: 'otoyolAvrupa',   etiket: 'Avrupa Otoyolu (O-3 · İstanbul–Edirne)',                   anahtarlar: [/\bO-3\b/, /edirne otoyolu/i, /avrupa otoyolu/i] },
   { ic: 'otoyolNigde',    slug: 'otoyolNigde',    etiket: 'Ankara–Niğde Otoyolu (O-21)',                              anahtarlar: [/\bO-21\b/, /niğde otoyolu/i] },
@@ -238,6 +241,65 @@ export const rotaGecisleriBul = (metinler = [], feribotVar = false) => {
   const bulunan = {};
   MESAFE_GECISLERI.forEach(g => { if (g.anahtarlar.some(re => re.test(metin))) bulunan[g.ic] = 1; });
   if (feribotVar) bulunan.feribot = 1;
+  return bulunan;
+};
+// ============================================================================
+// YENİ (kullanıcı bildirimi): GEÇİŞ TESPİTİ — ROTA ÇİZGİSİNDEN
+// ----------------------------------------------------------------------------
+// SORUN: rotaGecisleriBul yol tariflerindeki TABELA yazılarını da yakalıyordu:
+//   "Kartal/Edirne/Harem Feribot yönündeki rampaya…" → Pendik çıkışlı her işe feribot,
+//   Ankara'daki "Fatih Sultan Mehmet Blv." → FSM Köprüsü, Anadolu yakasındaki O-1
+//   çevre yolu → 15 Temmuz Köprüsü, "…Osmangazi/Havalimanı… tabelalarını takip edin" vb.
+// ÇÖZÜM:
+//   • Köprü: rota çizgisi köprünün orta noktasından ROTA_KOPRU_ESIK_M metre yakından
+//     geçiyorsa kullanılmıştır (ölçüm: geçen rotalar 30–100 m, geçmeyenler ≥ 4,7 km)
+//   • Otoyol: rota özetinde (ana yollar) geçiyorsa ya da o otoyolun ADI geçen adımlarda
+//     en az ROTA_OTOYOL_MIN_KM km yol gidilmişse (kısa bağlantı / tabela sayılmaz)
+//   • Feribot: yalnızca Google'ın FERRY manevrası (yazı aranmaz)
+// yol: [[enlem, boylam], …] (polylineCoz ile) · adimlar: [{ metin, km }]
+// ============================================================================
+export const ROTA_KOPRU_ESIK_M = 300;
+export const ROTA_OTOYOL_MIN_KM = 10;
+// Google "encoded polyline" → [[enlem, boylam], …]
+export const polylineCoz = (s = '') => {
+  const out = []; let i = 0, lat = 0, lng = 0;
+  while (i < s.length) {
+    for (const k of [0, 1]) {
+      let r = 0, sh = 0, b;
+      do { b = s.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32 && i < s.length);
+      const d = (r & 1) ? ~(r >> 1) : (r >> 1);
+      if (k === 0) lat += d; else lng += d;
+    }
+    out.push([lat / 1e5, lng / 1e5]);
+  }
+  return out;
+};
+// Noktanın çizgiye (parça parça) en kısa uzaklığı, metre — kısa mesafede düzlem yaklaşımı
+export const yolaUzaklikM = (yol = [], nokta) => {
+  const [n0, n1] = nokta;
+  const kx = 111320 * Math.cos(n0 * Math.PI / 180), ky = 110540;
+  const xy = ([a, b]) => [(b - n1) * kx, (a - n0) * ky];
+  let en = Infinity;
+  for (let i = 0; i < yol.length; i++) {
+    const [x1, y1] = xy(yol[i]);
+    const [x2, y2] = i + 1 < yol.length ? xy(yol[i + 1]) : [x1, y1];
+    const dx = x2 - x1, dy = y2 - y1, l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, -(x1 * dx + y1 * dy) / l2)) : 0;
+    en = Math.min(en, Math.hypot(x1 + t * dx, y1 + t * dy));
+  }
+  return en;
+};
+// aciklama: Google'ın rota özeti (ör. "Avrupa Otoyolu/O-3/E80") — ana yollar; uzun otoyol adımı
+// bazen yalnızca "E80 yönünde ilerleyin" diye geçtiği için otoyol özetten de tanınır
+export const rotaGecisleriGeometri = ({ yol = [], adimlar = [], feribot = false, aciklama = '' } = {}) => {
+  const bulunan = {};
+  MESAFE_GECISLERI.forEach(g => {
+    if (g.ic === 'feribot') return;
+    if (g.kopruNokta) { if (yol.length && yolaUzaklikM(yol, g.kopruNokta) <= ROTA_KOPRU_ESIK_M) bulunan[g.ic] = 1; return; }
+    const km = adimlar.filter(a => g.anahtarlar.some(re => re.test(a.metin || ''))).reduce((t, a) => t + (Number(a.km) || 0), 0);
+    if (km >= ROTA_OTOYOL_MIN_KM || g.anahtarlar.some(re => re.test(aciklama))) bulunan[g.ic] = 1;
+  });
+  if (feribot) bulunan.feribot = 1;
   return bulunan;
 };
 // Km bazlı kalemler (km + eşik üstü geçişler / sabit ek). rota: { toplamKm, gecisler }

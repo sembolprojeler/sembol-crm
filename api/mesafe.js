@@ -22,7 +22,7 @@
 // ============================================================================
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
-import { rotaGecisleriBul } from '../src/fiyatSema.js';
+import { rotaGecisleriGeometri, polylineCoz } from '../src/fiyatSema.js';
 
 const GOOGLE_KEY = process.env.GOOGLE_MAPS_API_KEY || '';
 const FIRESTORE_APP_ID = process.env.FIRESTORE_APP_ID;
@@ -30,7 +30,8 @@ const ROTA_UCU = 'https://routes.googleapis.com/directions/v2:computeRoutes';
 const ONBELLEK_GUN = 90;
 // DEĞİŞTİ (kullanıcı bildirimi: Pendik → Kartal 10 km yerine 36 km çıkıyordu): önbellek sürümü.
 // v1 kayıtları adresle hesaplanmıştı (yanlış nokta) → artık kullanılmaz, yeniden hesaplanır.
-const ONBELLEK_SURUM = 'v2';
+// v2 kayıtlarındaki geçişler yazıdan bulunmuştu (yanlış köprü / feribot) → v3: rota çizgisinden.
+const ONBELLEK_SURUM = 'v3';
 
 // ============================================================================
 // DÜZELTME (kullanıcı bildirimi): İLÇE MERKEZİ KOORDİNATLARI
@@ -99,26 +100,28 @@ async function googleEtap(nereden, nereye) {
     headers: {
       'Content-Type': 'application/json',
       'X-Goog-Api-Key': GOOGLE_KEY,
-      'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.description,routes.warnings,routes.travelAdvisory.tollInfo,routes.legs.steps.navigationInstruction',
+      'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.description,routes.warnings,routes.travelAdvisory.tollInfo,routes.legs.steps.navigationInstruction,routes.legs.steps.distanceMeters,routes.polyline.encodedPolyline',
     },
     body: JSON.stringify({
       origin: noktaYap(nereden), destination: noktaYap(nereye), // DEĞİŞTİ: ilçe merkezi koordinatı
       travelMode: 'DRIVE', routingPreference: 'TRAFFIC_UNAWARE',
       languageCode: 'tr-TR', units: 'METRIC', regionCode: 'TR', extraComputations: ['TOLLS'],
+      polylineQuality: 'HIGH_QUALITY', // YENİ: köprü tespiti rota çizgisinden yapılır
     }),
   });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new IstekHatasi(502, `Google rota hatası: ${j?.error?.message || r.status}`);
   const rota = j.routes?.[0];
   if (!rota) throw new IstekHatasi(404, `Rota bulunamadı: ${nereden} → ${nereye}`);
-  const adimlar = (rota.legs || []).flatMap(l => l.steps || []).map(st => st.navigationInstruction || {});
-  const metinler = [rota.description || '', ...(rota.warnings || []), ...adimlar.map(a => a.instructions || '')];
-  const feribot = adimlar.some(a => /FERRY/i.test(a.maneuver || ''));
+  // DEĞİŞTİ (kullanıcı bildirimi: tabela yazıları yanlış köprü / feribot ekliyordu): geçişler rota çizgisinden
+  const adimlar = (rota.legs || []).flatMap(l => l.steps || []).map(st => ({
+    metin: st.navigationInstruction?.instructions || '', km: (st.distanceMeters || 0) / 1000, manevra: st.navigationInstruction?.maneuver || '' }));
+  const feribot = adimlar.some(a => /FERRY/i.test(a.manevra));
   const ucret = rota.travelAdvisory?.tollInfo?.estimatedPrice?.find(x => x.currencyCode === 'TRY');
   return {
     km: Math.round((rota.distanceMeters || 0) / 100) / 10,
     dk: Math.round(parseFloat(String(rota.duration || '0').replace('s', '')) / 60),
-    gecisler: rotaGecisleriBul(metinler, feribot),
+    gecisler: rotaGecisleriGeometri({ yol: polylineCoz(rota.polyline?.encodedPolyline || ''), adimlar, feribot, aciklama: rota.description || '' }),
     googleUcret: ucret ? Number(ucret.units || 0) + Number(ucret.nanos || 0) / 1e9 : null,
   };
 }

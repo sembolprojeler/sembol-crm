@@ -9058,7 +9058,7 @@ const TT_PENDIK_IL_KM = {
 //           + bir uzun yol kademesi aşılırsa (aşılan EN YÜKSEK kademe):
 //             Trakya illerinde Boğaz köprüsü (gidiş + dönüş), kademenin sabit eki,
 //             kademenin yüzdesi (TOPLAMIN üzerine)
-//           + EN SON ev tipine göre km farkı (km tutarı × ev tipi %)
+//           + EN SON ev tipine göre km farkı (önceki son toplam × ev tipi %)
 //   → 1.000 ₺'ye yukarı yuvarlanır (ortalama fiyat)
 // Ek hizmetler (toplama, merdiven, dış cephe, yürüme) bu fiyata DAHİL DEĞİLDİR;
 // görüşmede eskisi gibi ayrıca eklenir.
@@ -9072,7 +9072,8 @@ const ttIlFiyatiKmIle = (taban, km, il, M, odaK = '') => {
     f += Number(kademe.ek) || 0;
     f += Math.round(f * (Number(kademe.yuzde) || 0) / 100); // yüzde TOPLAMIN üzerine (ev tipi farkı hariç)
   }
-  const odaFarki = odaK ? mesafeOdaFarkiKalemi(M, { toplamKm: km }, odaK) : null;
+  // DEĞİŞTİ (kullanıcı kararı): ev tipi farkı = önceki SON TOPLAM × ev tipi %
+  const odaFarki = odaK ? mesafeOdaFarkiKalemi(M, { toplamKm: km }, odaK, [{ tutar: f }]) : null;
   if (odaFarki) f += odaFarki.tutar; // en son
   return Math.ceil(f / 1000) * 1000;
 };
@@ -9325,15 +9326,18 @@ const ttMesafeUygula = (f, kalemler, uyarilar, odaK = '') => { // DEĞİŞTİ: o
   // DEĞİŞTİ (kullanıcı talebi): ev tipine göre km farkı burada EKLENMEZ — sıralama:
   //   1) mesafe · 2) geçiş ücretleri · 3) uzun yol farkı · 4) EN SON ev tipi farkı
   // (bkz. ttMesafeIscilikEkle). Ev tipi farkı uzun yol yüzdesinin tabanına girmez.
-  const odaFarki = odaK ? mesafeOdaFarkiKalemi(TT_MESAFE, f.rota, odaK) : null;
-  return { uygulandi: true, esikAsildi: mesafeEsikAsildi(TT_MESAFE, f.rota.toplamKm), odaFarki };
+  // DEĞİŞTİ (kullanıcı kararı): ev tipi farkı son toplam üzerinden hesaplandığı için tutarı
+  // burada değil, tüm kalemler eklendikten sonra ttMesafeIscilikEkle'de hesaplanır (odaK iletilir)
+  return { uygulandi: true, esikAsildi: mesafeEsikAsildi(TT_MESAFE, f.rota.toplamKm), odaK };
 };
 // Uzun yol farkı (kademe %) — tüm kalemler eklendikten SONRA (toplamın üzerine), ardından EN SON ev tipi farkı
 const ttMesafeIscilikEkle = (f, km, kalemler) => {
   if (!km.uygulandi) return;
   const k = mesafeIscilikKalemi(TT_MESAFE, f.rota, kalemler);
   if (k) kalemler.push(k);
-  if (km.odaFarki) kalemler.push(km.odaFarki); // DEĞİŞTİ (kullanıcı talebi): ev tipi farkı en son
+  // DEĞİŞTİ (kullanıcı kararı): ev tipi farkı EN SON — önceki son toplam × ev tipi % (uzun yol farkı dahil)
+  const odaFarki = km.odaK ? mesafeOdaFarkiKalemi(TT_MESAFE, f.rota, km.odaK, kalemler) : null;
+  if (odaFarki) kalemler.push(odaFarki);
 };
 
 const ttFiyatHesapla = (fHam) => {
@@ -9807,8 +9811,8 @@ const TTRotaKarti = ({ form, setForm, kullanici }) => {
   const asildi = !!kademe;
   const kalemler = mesafeKalemleri(TT_MESAFE, rota);
   // YENİ: ev tipine göre km farkı da kartta görünür (fiyat hesabıyla aynı oda anahtarı)
-  const kartOdaK = ttOdaAnahtari(form.hizmetTipi === 'Nakliye' ? form.odaSayisi : (form.depoBoyutu === 'Özel' ? '4+1' : form.depoBoyutu));
-  const kartOdaFarki = kartOdaK ? mesafeOdaFarkiKalemi(TT_MESAFE, rota, kartOdaK) : null;
+  // DEĞİŞTİ (kullanıcı kararı): ev tipi farkı son toplam üzerinden — tutar fiyat hesabındaki kalemin aynısı
+  const kartOdaFarki = ttFiyatHesapla(form).kalemler.find(k => k.odaFarki) || null;
   if (kartOdaFarki) kalemler.push(kartOdaFarki);
   return (
     <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/40 p-3 space-y-2">
@@ -13035,7 +13039,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
               ];
               const isc = mesafeIscilikKalemi(M, { toplamKm }, kalemler); // uzun yol farkı
               if (isc) kalemler.push(isc);
-              const oda = mesafeOdaFarkiKalemi(M, { toplamKm }, '2+1'); // DEĞİŞTİ: ev tipi farkı EN SON
+              const oda = mesafeOdaFarkiKalemi(M, { toplamKm }, '2+1', kalemler); // DEĞİŞTİ: ev tipi farkı EN SON · son toplam × %
               if (oda) kalemler.push(oda);
               return { kalemler, toplam: kalemler.reduce((t, k) => t + k.tutar, 0) };
             };
@@ -13115,10 +13119,11 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                 </div>
 
                 {/* DEĞİŞTİ (kullanıcı talebi): EV TİPİNE GÖRE KM FARKI — uzun yol kuralları gibi KADEMELİ.
-                    Toplam km hangi kademeleri AŞARSA aşılan EN YÜKSEK kademenin ev tipi yüzdesi km tutarına eklenir. */}
+                    Toplam km hangi kademeleri AŞARSA aşılan EN YÜKSEK kademenin ev tipi yüzdesi uygulanır.
+                    DEĞİŞTİ (kullanıcı kararı): yüzde km tutarına değil, ev tipi farkından ÖNCEKİ SON TOPLAMA uygulanır. */}
                 <div className="rounded-2xl border border-neutral-200 overflow-hidden bg-white">
-                  <div className="px-3 py-2 text-[11px] font-black text-white tracking-wide bg-emerald-600">EV TİPİNE GÖRE KM FARKI (KADEMELİ · KM TUTARINA % ARTIŞ)</div>
-                  <p className="px-3 pt-2 text-[11px] font-bold text-neutral-600">Büyük ev daha çok araç, ekip ve yakıt ister: km tutarı (toplam km × km ücreti) ev tipinin yüzdesi kadar artırılır. Örnek: 1.000 km × 15 ₺ = 15.000 ₺ · 3+1 için %20 → +3.000 ₺ · %120 → +18.000 ₺. 0 = fark yok; %100'ün üstü girilebilir (en fazla %1000).</p>
+                  <div className="px-3 py-2 text-[11px] font-black text-white tracking-wide bg-emerald-600">EV TİPİNE GÖRE KM FARKI (KADEMELİ · SON TOPLAMA % ARTIŞ)</div>
+                  <p className="px-3 pt-2 text-[11px] font-bold text-neutral-600">Büyük ev daha çok araç, ekip ve yakıt ister: işin o ana kadarki SON TOPLAMI (taban + ek hizmetler + km + geçişler + sabit ek + uzun yol farkı) ev tipinin yüzdesi kadar artırılır. Örnek: son toplam 62.798 ₺ · 1+1 için %5 → +3.140 ₺ = 65.938 ₺. 0 = fark yok; %100'ün üstü girilebilir (en fazla %1000).</p>
                   <div className="overflow-x-auto">
                     <div className="min-w-[640px]">
                       <div className="px-3 pt-2 grid grid-cols-[1.2fr_repeat(5,1fr)_28px] gap-2 text-[10px] font-black uppercase text-neutral-500">
