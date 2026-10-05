@@ -13108,7 +13108,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                         </button>
                       </div>
                     )}
-                    <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">Yüzde, işin <b>TOPLAM</b> maliyetinin (taban + ek hizmetler + km + geçişler + ev tipi farkı + sabit ek) üzerine eklenir. Örnek: 200 km → %15 · 400 km → %25 + 3.000 ₺. 300 km'lik işte 1. kademe, 500 km'lik işte 2. kademe uygulanır (tam eşit = aşmaz). En küçük kademe aşılınca köprü / geçiş ücretleri de eklenir; altında Avrupa Yakası ekstrası eskisi gibi uygulanır. Kaydedince kademeler küçükten büyüğe sıralanır.</p>
+                    <p className="px-3 py-2 text-[10px] font-bold text-neutral-400">%100'ün üstü girilebilir (en fazla %1000). Yüzde, işin <b>TOPLAM</b> maliyetinin (taban + ek hizmetler + km + geçişler + ev tipi farkı + sabit ek) üzerine eklenir. Örnek: 200 km → %15 · 400 km → %25 + 3.000 ₺. 300 km'lik işte 1. kademe, 500 km'lik işte 2. kademe uygulanır (tam eşit = aşmaz). En küçük kademe aşılınca köprü / geçiş ücretleri de eklenir; altında Avrupa Yakası ekstrası eskisi gibi uygulanır. Kaydedince kademeler küçükten büyüğe sıralanır.</p>
                   </div>
                 </div>
 
@@ -13116,7 +13116,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                     Toplam km hangi kademeleri AŞARSA aşılan EN YÜKSEK kademenin ev tipi yüzdesi km tutarına eklenir. */}
                 <div className="rounded-2xl border border-neutral-200 overflow-hidden bg-white">
                   <div className="px-3 py-2 text-[11px] font-black text-white tracking-wide bg-emerald-600">EV TİPİNE GÖRE KM FARKI (KADEMELİ · KM TUTARINA % ARTIŞ)</div>
-                  <p className="px-3 pt-2 text-[11px] font-bold text-neutral-600">Büyük ev daha çok araç, ekip ve yakıt ister: km tutarı (toplam km × km ücreti) ev tipinin yüzdesi kadar artırılır. Örnek: 1.000 km × 15 ₺ = 15.000 ₺ · 3+1 için %20 → +3.000 ₺. 0 = fark yok.</p>
+                  <p className="px-3 pt-2 text-[11px] font-bold text-neutral-600">Büyük ev daha çok araç, ekip ve yakıt ister: km tutarı (toplam km × km ücreti) ev tipinin yüzdesi kadar artırılır. Örnek: 1.000 km × 15 ₺ = 15.000 ₺ · 3+1 için %20 → +3.000 ₺ · %120 → +18.000 ₺. 0 = fark yok; %100'ün üstü girilebilir (en fazla %1000).</p>
                   <div className="overflow-x-auto">
                     <div className="min-w-[640px]">
                       <div className="px-3 pt-2 grid grid-cols-[1.2fr_repeat(5,1fr)_28px] gap-2 text-[10px] font-black uppercase text-neutral-500">
