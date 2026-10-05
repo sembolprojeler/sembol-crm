@@ -4175,6 +4175,70 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     );
   };
 
+  // ==========================================================================
+  // YENİ (kullanıcı talebi): PERSONEL GÖZÜNDEN GÖR (ÖNİZLEME MODU) — SEÇİM PENCERESİ
+  // --------------------------------------------------------------------------
+  // Yalnızca Müdür / Firma Sahibi / Sistem Yöneticisi (superYoneticiMi) açabilir.
+  // Personel adı, görevi, rütbesi, personel no veya e-postasıyla aranır; seçilen
+  // personelin hesabına (yetkileri, menüleri, ekranları, verileri) birebir geçilir.
+  // Pasif (işten ayrılmış) personel listelenmez — zaten giriş yapamaz.
+  // ==========================================================================
+  const PersonelOnizlemeSecici = ({ personnelList = [], gercekKullaniciId, onSec, onKapat }) => {
+    const [arama, setArama] = useState('');
+    // ESC ile kapanır
+    useEffect(() => {
+      const tus = (e) => { if (e.key === 'Escape') onKapat(); };
+      window.addEventListener('keydown', tus);
+      return () => window.removeEventListener('keydown', tus);
+    }, [onKapat]);
+    const kucuk = (s) => String(s || '').toLocaleLowerCase('tr-TR').trim();
+    const q = kucuk(arama);
+    const liste = personnelList
+      .filter(p => p?.id && String(p.id) !== String(gercekKullaniciId) && p.employmentStatus !== 'Pasif')
+      .filter(p => !q || [p.fullName, p.position, p.rank, p.personelNo, p.email].some(v => kucuk(v).includes(q)))
+      .sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'tr'));
+    return (
+      <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-[140] flex items-center justify-center p-4" onClick={onKapat}>
+        <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl flex flex-col max-h-[85vh] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+          <div className="p-5 border-b border-neutral-200">
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <h3 className="text-lg font-black text-black flex items-center gap-2"><Eye className="w-5 h-5 text-amber-500" /> Personel Gözünden Gör</h3>
+              <button type="button" onClick={onKapat} className="p-2 rounded-xl text-neutral-500 hover:bg-neutral-100"><X className="w-5 h-5" /></button>
+            </div>
+            <p className="text-xs font-medium text-neutral-500 mb-3">Seçtiğiniz personelin hesabına geçersiniz: onun gördüğü menüler, ekranlar ve yetkilerle. Çıkmak için göz butonuna tekrar basın.</p>
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+              <input autoFocus type="text" value={arama} onChange={e => setArama(e.target.value)}
+                placeholder="Personel adı, görevi, rütbesi veya personel no ile ara..."
+                className="w-full pl-9 pr-3 py-3 rounded-xl border border-neutral-300 text-sm font-bold outline-none focus:ring-2 focus:ring-amber-400" />
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+            {liste.length === 0 ? (
+              <p className="text-sm font-medium text-neutral-500 text-center py-8">Aramaya uyan personel bulunamadı.</p>
+            ) : liste.map(p => {
+              const girisKapali = p.permissions && p.permissions.canView === false; // bu kişi normalde giriş yapamaz
+              return (
+                <button key={p.id} type="button" onClick={() => onSec(p)}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-amber-50 text-left transition">
+                  <div className="w-10 h-10 rounded-full bg-neutral-200 flex items-center justify-center font-black text-neutral-600 overflow-hidden shrink-0">
+                    {p.profileImage ? <img src={p.profileImage} alt={p.fullName} className="w-full h-full object-cover" /> : (p.fullName || '?').charAt(0)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-black text-black truncate">{p.fullName}</p>
+                    <p className="text-[11px] font-bold text-neutral-500 truncate">{[p.position, p.rank, p.collarType].filter(Boolean).join(' · ') || '—'}</p>
+                  </div>
+                  {girisKapali && <span className="text-[10px] font-black text-red-600 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full shrink-0">Giriş kapalı</span>}
+                  <Eye className="w-4 h-4 text-amber-500 shrink-0" />
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const NotificationsView = ({ notifications, markNotificationsAsRead, currentUser, canAddInfo, onAddInfo }) => {
     useEffect(() => {
       if (currentUser?.id) {
@@ -4824,6 +4888,15 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [googleBaglaniyor, setGoogleBaglaniyor] = useState(false);
     useEffect(() => onAuthStateChanged(googleAuth, (u) => { setGoogleKullanici(u); setGoogleAuthHazir(true); }), []);
     const [currentUser, setCurrentUser] = useState(null);
+    // YENİ (kullanıcı talebi): PERSONEL GÖZÜNDEN GÖR (ÖNİZLEME MODU)
+    // Önizleme açıkken currentUser = seçilen personel olur (tüm menü / yetki / veri
+    // filtreleri otomatik ona göre çalışır); gerçek oturum sahibi burada saklanır.
+    // Sayfa yenilenirse önizleme biter, "Beni Hatırla" gerçek kullanıcıyla açar.
+    const [onizlemeGercekKullanici, setOnizlemeGercekKullanici] = useState(null);
+    const [onizlemeSeciciAcik, setOnizlemeSeciciAcik] = useState(false);
+    const onizlemeModu = !!onizlemeGercekKullanici;
+    // Butonu yalnızca GERÇEK kullanıcısı Müdür / Firma Sahibi / Sistem Yöneticisi olan görür
+    const onizlemeYetkilisi = superYoneticiMi(onizlemeGercekKullanici || currentUser);
 
     // ========================================================================
     // YENİ: HATIRLATMA BİLDİRİM SAYACI
@@ -6080,6 +6153,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     useEffect(() => {
       if (isAuthenticated && currentUser && personnelList.length > 0) {
         const updatedUser = personnelList.find(p => p.id === currentUser.id);
+        // YENİ (kullanıcı talebi): önizlenen personel silinir / pasife alınırsa oturum
+        // KAPATILMAZ — yalnızca önizlemeden çıkılıp gerçek kullanıcıya dönülür.
+        if (onizlemeModu && (!updatedUser || updatedUser.employmentStatus === 'Pasif')) {
+          const gercek = personnelList.find(p => p.id === onizlemeGercekKullanici.id) || onizlemeGercekKullanici;
+          setOnizlemeGercekKullanici(null);
+          setCurrentUser(gercek);
+          return;
+        }
         if (updatedUser) {
           if (updatedUser.employmentStatus === 'Pasif') {
              setCurrentUser(updatedUser);
@@ -6133,7 +6214,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       if (!firebaseUser) return;
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'systemLogs'), {
         action, details,
-        user: currentUser ? currentUser.fullName : 'Sistem',
+        // DEĞİŞTİ (kullanıcı talebi): önizleme modunda yapılan işlem, gerçek kişi adına iz bırakır
+        user: onizlemeModu && currentUser ? `${onizlemeGercekKullanici.fullName} (önizleme: ${currentUser.fullName})` : (currentUser ? currentUser.fullName : 'Sistem'),
         // YENİ: Sıralamanın metin ayrıştırmasına bağlı kalmaması için makine okunur zaman damgası
         createdAt: new Date().toISOString(),
         timestamp: new Date().toLocaleString('tr-TR', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' })
@@ -6335,6 +6417,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // Başarılıysa true döner; bağlama penceresi kapanır ve kısa onay mesajı görünür.
     const handleGoogleBagla = async () => {
       if (!firebaseUser || !currentUser?.id || googleBaglaniyor) return false;
+      // YENİ: önizlemede yöneticinin Google hesabı, önizlenen personele bağlanmasın
+      if (onizlemeModu) { alert('Önizleme modunda Google hesabı bağlanamaz. Önce önizlemeden çıkın.'); return false; }
       setGoogleBaglaniyor(true);
       try {
         const gUser = await googleHesabiSec();
@@ -6982,11 +7066,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
     const onMarkMessageAsRead = async (msgId) => {
       if (!firebaseUser) return;
+      if (onizlemeModu) return; // YENİ: önizlemede personelin mesajları "okundu" yapılmaz
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'messages', msgId), { read: true });
     };
 
     const markNotificationsAsRead = async (userId) => {
       if (!firebaseUser) return;
+      if (onizlemeModu) return; // YENİ: önizlemede personelin bildirimleri "okundu" yapılmaz
       const unreadNotifs = notifications.filter(n => String(n.userId) === String(userId) && !n.read);
       for (const n of unreadNotifs) {
         await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'notifications', n.id), { read: true });
@@ -8148,7 +8234,32 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       await girisKaydet(user, 'Google');
     };
 
+    // ========================================================================
+    // YENİ (kullanıcı talebi): ÖNİZLEME MODUNA GİR / ÇIK
+    // Giriş: currentUser seçilen personel olur → menüler, yetkiler, ekranlar ve
+    // veriler birebir onun hesabındaki gibi açılır. Çıkış: gerçek kullanıcıya dönülür.
+    // "Beni Hatırla" kaydı (localStorage) DEĞİŞTİRİLMEZ.
+    // ========================================================================
+    const onizlemeyeGir = (personel) => {
+      if (!personel?.id || !onizlemeYetkilisi) return;
+      const gercek = onizlemeGercekKullanici || currentUser;
+      if (String(personel.id) === String(gercek?.id)) { onizlemedenCik(); return; }
+      addSystemLog('Personel Önizleme', `${gercek?.fullName} "${personel.fullName}" kullanıcısının gözünden önizleme başlattı.`);
+      setOnizlemeGercekKullanici(gercek);
+      setCurrentUser(personel);
+      setOnizlemeSeciciAcik(false);
+      setActiveTab('dashboard'); setIsSidebarOpen(false);
+    };
+    const onizlemedenCik = () => {
+      if (!onizlemeGercekKullanici) return;
+      const gercek = personnelList.find(p => p.id === onizlemeGercekKullanici.id) || onizlemeGercekKullanici;
+      setOnizlemeGercekKullanici(null);
+      setCurrentUser(gercek);
+      setActiveTab('dashboard'); setIsSidebarOpen(false);
+    };
+
     const handleLogout = () => {
+      setOnizlemeGercekKullanici(null); // YENİ: çıkışta önizleme de kapanır
       // YENİ: Google oturumu da kapatılır (sonraki kişi otomatik girmesin)
       signOut(googleAuth).catch(() => {});
       setGoogleBaglaPenceresi(false);
@@ -8654,7 +8765,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           </div>
 
           <div className="px-6 py-4 bg-neutral-900/50 border-b border-neutral-800 flex flex-col">
-            <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">Aktif Kullanıcı</span>
+            {/* DEĞİŞTİ (kullanıcı talebi): önizlemede başlık, kimin gözünden bakıldığını söyler */}
+            {onizlemeModu ? (
+              <span className="text-[10px] text-amber-400 font-black uppercase tracking-wider mb-2 flex items-center gap-1"><Eye className="w-3 h-3" /> Önizleme · Personel Gözünden</span>
+            ) : (
+              <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">Aktif Kullanıcı</span>
+            )}
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-3 overflow-hidden">
                 <div className="relative shrink-0">
@@ -8710,6 +8826,24 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     title="Telefon Görüşmesi Ekle"
                   >
                     <Plus className="w-5 h-5" strokeWidth={3} />
+                  </button>
+                )}
+                {/* ==========================================================
+                    YENİ (kullanıcı talebi): PERSONEL GÖZÜNDEN GÖR (göz simgesi)
+                    Yalnızca GERÇEK kullanıcısı Müdür / Firma Sahibi olanlarda görünür
+                    (önizleme sırasında da görünür kalır — çıkış butonu odur).
+                    1. tık → personel seçme / arama penceresi → seçilenin hesabına geçilir
+                    2. tık (önizlemedeyken) → önizlemeden çıkılır, kendi hesabınıza dönülür
+                    ========================================================== */}
+                {onizlemeYetkilisi && (
+                  <button
+                    onClick={() => (onizlemeModu ? onizlemedenCik() : setOnizlemeSeciciAcik(true))}
+                    className={`relative p-2 rounded-xl transition shrink-0 ${onizlemeModu
+                      ? 'bg-amber-500 text-black ring-2 ring-amber-300 animate-pulse'
+                      : 'text-neutral-400 hover:text-white hover:bg-neutral-800'}`}
+                    title={onizlemeModu ? `Önizlemeden çık (${onizlemeGercekKullanici?.fullName} hesabına dön)` : 'Personel gözünden gör — seçtiğiniz personelin ekranını açar'}
+                  >
+                    {onizlemeModu ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                   </button>
                 )}
                 {(currentUser?.position === 'Firma Sahibi' || currentUser?.rank === 'Müdür') ? (
@@ -9670,6 +9804,28 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     Bağlamadan Devam Et
                   </button>
                 </div>
+              </div>
+            )}
+            {/* YENİ (kullanıcı talebi): PERSONEL GÖZÜNDEN GÖR — seçim penceresi */}
+            {onizlemeSeciciAcik && onizlemeYetkilisi && (
+              <PersonelOnizlemeSecici
+                personnelList={personnelList}
+                gercekKullaniciId={(onizlemeGercekKullanici || currentUser)?.id}
+                onSec={onizlemeyeGir}
+                onKapat={() => setOnizlemeSeciciAcik(false)}
+              />
+            )}
+            {/* YENİ (kullanıcı talebi): önizleme açıkken her ekranda görünen çıkış şeridi
+                (mobilde menü kapalıyken de önizlemeden çıkılabilsin diye) */}
+            {onizlemeModu && (
+              <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[135] w-[calc(100%-2rem)] max-w-xl bg-amber-500 text-black rounded-2xl shadow-2xl border-2 border-amber-300 px-4 py-2.5 flex items-center gap-3">
+                <Eye className="w-5 h-5 shrink-0" />
+                <div className="flex-1 min-w-0 leading-tight">
+                  <p className="text-sm font-black truncate">{currentUser?.fullName} gözünden görüntülüyorsunuz</p>
+                  <p className="text-[10px] font-bold text-black/70 truncate">Gerçek hesap: {onizlemeGercekKullanici?.fullName} · Yaptığınız işlemler bu personel adına kaydedilir</p>
+                </div>
+                <button type="button" onClick={() => setOnizlemeSeciciAcik(true)} className="shrink-0 px-2.5 py-1.5 rounded-xl bg-black/10 hover:bg-black/20 text-xs font-black" title="Başka personele geç">Değiştir</button>
+                <button type="button" onClick={onizlemedenCik} className="shrink-0 px-3 py-1.5 rounded-xl bg-black text-white text-xs font-black flex items-center gap-1.5"><EyeOff className="w-4 h-4" /> Çık</button>
               </div>
             )}
             {/* YENİ: Bağlama sonrası kısa onay mesajı */}
