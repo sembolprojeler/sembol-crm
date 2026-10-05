@@ -115,8 +115,9 @@ export const FIYAT_VERI_ANAHTARLARI = ['genel', 'sehirIciEve', 'sehirIciDepo', '
 //            taban + ek hizmetler + km + geçişler + sabit ek; ev tipi farkı HARİÇ — o en son eklenir)
 //   EV TİPİNE GÖRE KM FARKI (kullanıcı talebi): büyük ev daha çok araç / ekip / yakıt ister.
 //   DEĞİŞTİ: birden fazla kademe eklenip silinebilir — her kademe: { km, yuzde: { '1+0' … '4+1' } }
-//   Toplam km bir kademeyi AŞARSA aşılan EN YÜKSEK kademenin ev tipi yüzdesi km tutarına eklenir
-//          ör. 0 km → 3+1 %10 · 600 km → 3+1 %20 → 1.000 km × 15 ₺ = 15.000 ₺ + 3.000 ₺
+//   Toplam km bir kademeyi AŞARSA aşılan EN YÜKSEK kademenin ev tipi yüzdesi uygulanır
+//   DEĞİŞTİ (kullanıcı talebi): yüzde, ev tipi farkından ÖNCEKİ SON TOPLAMA uygulanır
+//          (uzun yol farkı dahil) ör. 62.798 ₺ × 1+1 %5 = 3.140 ₺ → 65.938 ₺
 //   En küçük kademe aşılınca köprü / otoyol / feribot geçiş ücretleri de eklenir.
 //   Hiçbir kademe aşılmazsa: geçiş alınmaz; Avrupa Yakası ekstrası eskisi gibi uygulanır.
 //
@@ -259,16 +260,28 @@ export const mesafeKalemleri = (M, rota) => {
   if (ek > 0) kalemler.push({ ad: `Uzun yol ek maliyeti (${Number(kademe.km).toLocaleString('tr-TR')} km üstü kademe)`, tutar: ek, km: true });
   return kalemler;
 };
-// YENİ (kullanıcı talebi): EV TİPİNE GÖRE KM FARKI — km tutarı × ev tipinin yüzdesi.
+// YENİ (kullanıcı talebi): EV TİPİNE GÖRE KM FARKI — ev tipinin yüzdesi.
 // Toplam km "esikKm"yi AŞARSA uygulanır (0 = her mesafede). odaK: '1+0' … '4+1'
-export const mesafeOdaFarkiKalemi = (M, rota, odaK) => {
+// DEĞİŞTİ (kullanıcı talebi): 4. parametre "kalemler" verilirse yüzde, kendisinden ÖNCEKİ
+// SON TOPLAMA uygulanır (taban + ek hizmetler + km + geçişler + sabit ek + uzun yol farkı).
+//   ör. 62.798 ₺ × %5 = 3.140 ₺
+// "kalemler" verilmezse eski davranış sürer (km tutarı × yüzde) — eski çağrılar bozulmaz.
+export const mesafeOdaFarkiKalemi = (M, rota, odaK, kalemler = null) => {
   const km = Math.round(Number(rota?.toplamKm) || 0);
   const kademe = mesafeAktifOdaKademe(M, km); // DEĞİŞTİ: aşılan en yüksek ev tipi kademesi
   const esik = Number(kademe?.km) || 0;
   const yuzde = Number(kademe?.yuzde?.[odaK]) || 0;
   if (!km || !kademe || yuzde <= 0) return null;
+  const esikMetni = esik ? ` · ${esik.toLocaleString('tr-TR')} km üstü` : '';
+  if (Array.isArray(kalemler)) {
+    // YENİ: önceki tüm kalemlerin toplamı (listede önceden kalmış bir ev tipi kalemi varsa çift sayılmaz)
+    const baz = kalemler.filter(k => k && !k.odaFarki).reduce((t, k) => t + (Number(k.tutar) || 0), 0);
+    if (baz <= 0) return null;
+    return { ad: `Ev tipi farkı (${odaK} · %${yuzde} · son toplam üzerine${esikMetni})`, tutar: Math.round(baz * yuzde / 100), km: true, odaFarki: true };
+  }
+  // Eski davranış (geriye dönük uyumluluk): yalnızca km tutarı × yüzde
   const kmTutari = Math.round(km * (Number(M?.kmUcreti) || 0));
-  return { ad: `Ev tipi km farkı (${odaK} · %${yuzde}${esik ? ` · ${esik.toLocaleString('tr-TR')} km üstü` : ''})`, tutar: Math.round(kmTutari * yuzde / 100), km: true, odaFarki: true };
+  return { ad: `Ev tipi km farkı (${odaK} · %${yuzde}${esikMetni})`, tutar: Math.round(kmTutari * yuzde / 100), km: true, odaFarki: true };
 };
 // Uzun yol farkı: kademe % × TOPLAM maliyet (DEĞİŞTİ — kullanıcı talebi: km ve geçişler dahil her şeyin üzerine)
 export const mesafeIscilikKalemi = (M, rota, kalemler) => {
