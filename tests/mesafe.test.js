@@ -2,9 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MESAFE_VARSAYILAN, mesafeKalemleri, mesafeIscilikKalemi, mesafeEsikAsildi, ilceMerkezAdresi, rotaGecisleriBul,
-  fiyatEksikleriDoldur, fiyatDogrula, fiyatTemizle, fiyatFarklari, mesafeModuAcik } from '../src/fiyatSema.js';
+  fiyatEksikleriDoldur, fiyatDogrula, fiyatTemizle, fiyatFarklari, mesafeModuAcik, mesafeAktifKademe, mesafeKademeListesi, mesafeOdaFarkiKalemi } from '../src/fiyatSema.js';
 
-const M = { ...MESAFE_VARSAYILAN, kmUcreti: 100, esikKm: 200, iscilikYuzde: 15, uzunYolEk: 0, gecis: { ...MESAFE_VARSAYILAN.gecis, kopruOsmangazi: 1500 } };
+const M = { ...MESAFE_VARSAYILAN, kmUcreti: 100, kademeler: [{ km: 200, yuzde: 15, ek: 0 }], gecis: { ...MESAFE_VARSAYILAN.gecis, kopruOsmangazi: 1500 } };
 
 test('kullanıcı örneği: 15 + 100 + 85 = 200 km × 100 ₺ = 20.000 ₺, eşik altı → geçiş yok', () => {
   const k = mesafeKalemleri(M, { toplamKm: 15 + 100 + 85, gecisler: { kopruOsmangazi: 2 } });
@@ -12,15 +12,15 @@ test('kullanıcı örneği: 15 + 100 + 85 = 200 km × 100 ₺ = 20.000 ₺, eşi
   assert.equal(k[0].tutar, 20000);
   assert.equal(mesafeIscilikKalemi(M, { toplamKm: 200 }, [{ ad: 'taban', tutar: 30000 }, ...k]), null); // tam 200 = aşmıyor
 });
-test('200 km aşılınca: geçişler + sabit ek + %15 işçilik (taban + hizmetler üzerinden)', () => {
-  const M2 = { ...M, uzunYolEk: 2000 };
+test('200 km aşılınca: geçişler + sabit ek + %15 uzun yol farkı (toplamın üzerine)', () => {
+  const M2 = { ...M, kademeler: [{ km: 200, yuzde: 15, ek: 2000 }] };
   const k = mesafeKalemleri(M2, { toplamKm: 260, gecisler: { kopruOsmangazi: 2 } });
   assert.equal(k[0].tutar, 26000);                      // 260 × 100
   assert.equal(k[1].tutar, 3000);                       // Osmangazi × 2
   assert.equal(k[2].tutar, 2000);                       // sabit ek
   const hizmetler = [{ ad: 'taban', tutar: 30000 }, { ad: 'toplama', tutar: 10000 }];
   const isc = mesafeIscilikKalemi(M2, { toplamKm: 260 }, [...hizmetler, ...k]);
-  assert.equal(isc.tutar, 6000);                        // %15 × 40.000 (km kalemleri hariç)
+  assert.equal(isc.tutar, Math.round((40000 + 26000 + 3000 + 2000) * 0.15)); // %15 × TOPLAM (km, geçiş, sabit ek dahil)
 });
 test('eşik: tam eşit aşmaz, bir fazlası aşar', () => {
   assert.equal(mesafeEsikAsildi(M, 200), false); assert.equal(mesafeEsikAsildi(M, 201), true);
@@ -42,16 +42,76 @@ test('eski kayıt: mesafe yoksa doğrulama hata vermez, varsayılanlar yazılır
   const eski = { genel: { acilisOraniEve: 25, acilisOraniDepo: 25 } };
   assert.equal(fiyatDogrula(eski).hatalar.filter(h => h.yol[0] === 'mesafe').length, 0);
   const temiz = fiyatTemizle(eski, eski);
-  assert.equal(temiz.mesafe.kmUcreti, 100); assert.equal(temiz.mesafe.esikKm, 200); assert.equal(temiz.mesafe.iscilikYuzde, 15);
+  assert.equal(temiz.mesafe.kmUcreti, 100); assert.deepEqual(temiz.mesafe.kademeler, [{ km: 200, yuzde: 15, ek: 0 }]);
   assert.equal(mesafeModuAcik(temiz.mesafe), false);
 });
 test('doğrulama: hatalı değerler yakalanır', () => {
-  const v = fiyatEksikleriDoldur({}); v.mesafe.modu = 2; v.mesafe.iscilikYuzde = 150; v.mesafe.esikKm = 0; v.mesafe.cikisAdresi = ' ';
+  const v = fiyatEksikleriDoldur({}); v.mesafe.modu = 2; v.mesafe.kademeler = [{ km: 0, yuzde: 150, ek: -1 }]; v.mesafe.cikisAdresi = ' ';
   const h = fiyatDogrula(v).hatalar.filter(x => x.yol[0] === 'mesafe').map(x => x.yol.join('.'));
-  for (const y of ['mesafe.modu', 'mesafe.iscilikYuzde', 'mesafe.esikKm', 'mesafe.cikisAdresi']) assert.ok(h.includes(y), y);
+  for (const y of ['mesafe.modu', 'mesafe.kademeler.0.km', 'mesafe.kademeler.0.yuzde', 'mesafe.kademeler.0.ek', 'mesafe.cikisAdresi']) assert.ok(h.includes(y), y);
 });
 test('farklar: hareket merkezi metin olarak karşılaştırılır', () => {
   const a = fiyatEksikleriDoldur({}); const b = fiyatEksikleriDoldur({}); b.mesafe.cikisAdresi = 'Kartal, İstanbul, Türkiye';
   const f = fiyatFarklari(a, b).filter(x => x.yol[0] === 'mesafe');
   assert.equal(f.length, 1); assert.equal(f[0].yol.join('.'), 'mesafe.cikisAdresi');
+});
+
+// ---------------------------------------------------------------- UZUN YOL KADEMELERİ
+const MK = { ...M, kademeler: [{ km: 200, yuzde: 15, ek: 0 }, { km: 400, yuzde: 25, ek: 3000 }] };
+test('kademe: aşılan EN YÜKSEK kademe uygulanır, tam eşit aşmaz', () => {
+  assert.equal(mesafeAktifKademe(MK, 150), null);
+  assert.equal(mesafeAktifKademe(MK, 200), null);
+  assert.equal(mesafeAktifKademe(MK, 300).km, 200);
+  assert.equal(mesafeAktifKademe(MK, 400).km, 200);
+  assert.equal(mesafeAktifKademe(MK, 500).km, 400);
+});
+test('kademe: 500 km → %25 işçilik + 3.000 ₺ sabit ek + geçişler', () => {
+  const k = mesafeKalemleri(MK, { toplamKm: 500, gecisler: { kopruOsmangazi: 2 } });
+  assert.deepEqual(k.map(x => x.tutar), [50000, 3000, 3000]);
+  assert.equal(mesafeIscilikKalemi(MK, { toplamKm: 500 }, [{ ad: 'taban', tutar: 40000 }, ...k]).tutar, Math.round((40000 + 50000 + 3000 + 3000) * 0.25));
+  assert.equal(mesafeIscilikKalemi(MK, { toplamKm: 300 }, [{ ad: 'taban', tutar: 40000 }]).tutar, 6000);
+});
+test('kademe yoksa uzun yol farkı ve geçiş alınmaz', () => {
+  const M0 = { ...M, kademeler: [] };
+  assert.equal(mesafeEsikAsildi(M0, 5000), false);
+  assert.equal(mesafeKalemleri(M0, { toplamKm: 5000, gecisler: { kopruOsmangazi: 2 } }).length, 1);
+});
+test('eski tek eşikli kayıt (esikKm/iscilikYuzde/uzunYolEk) 1. kademeye taşınır', () => {
+  const eski = { mesafe: { modu: 1, cikisAdresi: 'Pendik, İstanbul, Türkiye', kmUcreti: 15, esikKm: 800, iscilikYuzde: 20, uzunYolEk: 500, gecis: {} } };
+  assert.deepEqual(mesafeKademeListesi(eski.mesafe), [{ km: 800, yuzde: 20, ek: 500 }]);
+  assert.deepEqual(fiyatTemizle(eski, eski).mesafe.kademeler, [{ km: 800, yuzde: 20, ek: 500 }]);
+});
+test('kademe ekle / sil kaydedilir, sıralanır ve fark sayılır; aynı km hata verir', () => {
+  const t0 = fiyatTemizle(fiyatEksikleriDoldur({}), null);
+  const ekle = JSON.parse(JSON.stringify(t0)); ekle.mesafe.kademeler.unshift({ km: 600, yuzde: 30, ek: 0 });
+  const t1 = fiyatTemizle(ekle, t0);
+  assert.deepEqual(t1.mesafe.kademeler.map(k => k.km), [200, 600]);
+  assert.ok(fiyatFarklari(t0, t1).some(f => f.yol[0] === 'mesafe'));
+  const sil = JSON.parse(JSON.stringify(t1)); sil.mesafe.kademeler = [];
+  const t2 = fiyatTemizle(sil, t1);
+  assert.deepEqual(t2.mesafe.kademeler, []);
+  assert.ok(fiyatFarklari(t1, t2).some(f => f.yol[1] === 'kademeler'));
+  const cift = JSON.parse(JSON.stringify(t1)); cift.mesafe.kademeler.push({ km: 600, yuzde: 5, ek: 0 });
+  assert.ok(fiyatDogrula(cift, t1).hatalar.some(h => h.mesaj.includes('Aynı km')));
+});
+
+// ---------------------------------------------------------------- EV TİPİNE GÖRE KM FARKI
+const MO = { ...M, kmUcreti: 15, kademeler: [{ km: 800, yuzde: 20, ek: 0 }], odaFarki: { esikKm: 400, yuzde: { '1+0': 0, '1+1': 5, '2+1': 10, '3+1': 20, '4+1': 30 } } };
+test('ev tipi farkı: km tutarı × ev tipi %, başlangıç km aşılınca', () => {
+  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 1000 }, '3+1').tutar, 3000);   // 15.000 × %20
+  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 1000 }, '4+1').tutar, 4500);   // 15.000 × %30
+  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 1000 }, '1+0'), null);         // %0
+  assert.equal(mesafeOdaFarkiKalemi(MO, { toplamKm: 400 }, '3+1'), null);          // tam eşit = aşmaz
+  assert.equal(mesafeOdaFarkiKalemi({ ...MO, odaFarki: { ...MO.odaFarki, esikKm: 0 } }, { toplamKm: 50 }, '3+1').tutar, 150);
+});
+test('ev tipi farkı uzun yol yüzdesinin tabanına girer (toplamın üzerine)', () => {
+  const rota = { toplamKm: 1000, gecisler: {} };
+  const k = [{ ad: 'taban', tutar: 35000 }, ...mesafeKalemleri(MO, rota), mesafeOdaFarkiKalemi(MO, rota, '3+1')];
+  assert.equal(mesafeIscilikKalemi(MO, rota, k).tutar, Math.round((35000 + 15000 + 3000) * 0.2));
+});
+test('ev tipi farkı şemada: varsayılan 0, %0-100 doğrulanır, eski kayıtta eksikse doldurulur', () => {
+  const d = fiyatEksikleriDoldur({ mesafe: { kmUcreti: 15, esikKm: 800, iscilikYuzde: 20, uzunYolEk: 0 } });
+  assert.deepEqual(d.mesafe.odaFarki, { esikKm: 0, yuzde: { '1+0': 0, '1+1': 0, '2+1': 0, '3+1': 0, '4+1': 0 } });
+  d.mesafe.odaFarki.yuzde['3+1'] = 150;
+  assert.ok(fiyatDogrula(d).hatalar.some(h => h.yol.join('.') === 'mesafe.odaFarki.yuzde.3+1'));
 });
