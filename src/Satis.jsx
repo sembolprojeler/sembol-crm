@@ -13,6 +13,7 @@ import { QrGorsel, qrSvgUret } from './OperasyonPersonel.jsx';
 import { teklifDetayiAlanlardan, eskiTeklifMetni } from './teklifDetay.js';
 // YENİ: Yapay zeka kaynak şeması — /api/submit-lead ve /api/yeni-musteri ile ortak (etiketler, kutular)
 import { AI_KAYNAK_ETIKETLERI, AI_ISTATISTIK_KUTULARI, aiKaynakMi } from './aiKaynakSema.js';
+import { ONCELIKLI_ILLER } from './konumlar.js'; // YENİ: il sırası tek kaynaktan
 // YENİ: QR Site Takip şeması — /api/qr-site ile ortak (sabitler, telefon kuralı, WordPress sayfa adresi)
 import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
@@ -8871,7 +8872,7 @@ const ttHizmetBul = (id) => TT_HIZMETLER.find(h => h.id === id) || TT_HIZMETLER[
 
 // İl listesi: sık aranan iller EN ÜSTTE (kullanıcı talebi), kalanlar alfabetik.
 // Değerler kayıt ekranındaki PROVINCES ile aynıdır ("İstanbul (Anadolu)" vb.).
-const TT_ONCELIKLI_ILLER = ['İstanbul (Anadolu)', 'İstanbul (Avrupa)', 'Kocaeli', 'Bursa', 'İzmir', 'Ankara'];
+const TT_ONCELIKLI_ILLER = ONCELIKLI_ILLER; // DEĞİŞTİ: tek kaynak src/konumlar.js (kayıt ekranı ve sitelerle aynı)
 const TT_DIGER_ILLER = PROVINCES.filter(il => !TT_ONCELIKLI_ILLER.includes(il));
 const ttIlceler = (il) => TURKEY_LOCATIONS[il] || [];
 

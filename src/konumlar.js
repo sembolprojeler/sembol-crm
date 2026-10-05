@@ -91,6 +91,15 @@ export const TURKEY_LOCATIONS = {
   "Zonguldak": ["Alaplı", "Çaycuma", "Devrek", "Ereğli", "Gökçebey", "Kilimli", "Kozlu", "Merkez"]
 };
 
+// YENİ (kullanıcı talebi): il listelerinin SIRASI — CRM'deki tüm il seçicileri ve sitelerin
+// teklif sihirbazları (api/mesafe-site.js) aynı sırayı kullanır:
+// sık kullanılan iller en üstte, kalanlar alfabetik.
+export const ONCELIKLI_ILLER = ['İstanbul (Anadolu)', 'İstanbul (Avrupa)', 'Kocaeli', 'Bursa', 'İzmir', 'Ankara'];
+export const IL_SIRASI = [
+  ...ONCELIKLI_ILLER,
+  ...Object.keys(TURKEY_LOCATIONS).filter(il => !ONCELIKLI_ILLER.includes(il)).sort((a, b) => a.localeCompare(b, 'tr')),
+];
+
 // DEPOEVİM TESİSLERİ
 // YENİ: floor ve transportMethod alanları eklendi. Her tesisin fiziksel
 // durumu farklı olabiliyor (bazısı giriş kat + merdiven, bazısı üst kat +

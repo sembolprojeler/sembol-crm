@@ -1,4 +1,4 @@
-import { TURKEY_LOCATIONS, DEPO_LOCATIONS } from './konumlar.js'; // YENİ: il/ilçe ve depo listesi ayrı dosyada
+import { TURKEY_LOCATIONS, DEPO_LOCATIONS, IL_SIRASI } from './konumlar.js'; // YENİ: il/ilçe ve depo listesi ayrı dosyada
 import React, { useState, useEffect } from 'react';
 import { FileText, CheckCircle, Camera, Upload, Copy, FolderOpen, X, Video } from 'lucide-react'; // YENİ: Video — Android kamera düzeltmesi
   // --- FIREBASE BAĞLANTISI (CANLI / PRODUCTION MODU) ---
@@ -65,9 +65,8 @@ import { getFirestore, initializeFirestore, persistentLocalCache, persistentMult
   // --- YENİDEN EKLENDİ: TÜRKİYE İL/İLÇE, DEPO KONUMLARI, MESAİ DURUM KODLARI ---
     // YENİ: il/ilçe listesi src/konumlar.js'e taşındı (sunucu uçları da okuyabilsin) — buradan aynen dışa aktarılır
     export { TURKEY_LOCATIONS, DEPO_LOCATIONS };
-    const baseProvinces = Object.keys(TURKEY_LOCATIONS).filter(p => p !== "İstanbul (Anadolu)" && p !== "İstanbul (Avrupa)");
-    baseProvinces.sort((a, b) => a.localeCompare(b, 'tr'));
-    export const PROVINCES = ["İstanbul (Anadolu)", "İstanbul (Avrupa)", ...baseProvinces];
+    // DEĞİŞTİ (kullanıcı talebi): İstanbul (Anadolu/Avrupa), Kocaeli, Bursa, İzmir, Ankara en üstte, kalanlar alfabetik
+    export const PROVINCES = IL_SIRASI;
     export const FLOORS = ['Bodrum Kat', 'Giriş Kat', 'Müstakil / Villa', ...Array.from({ length: 30 }, (_, i) => `${i + 1}. Kat`)];
 
     // DEPOEVİM TESİSLERİ → src/konumlar.js (DEPO_LOCATIONS)

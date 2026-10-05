@@ -54,7 +54,7 @@ import { createHash } from 'node:crypto';
 import { getDb, IstekHatasi, etapGetir as etapGetirVarsayilan, anahtarYap, adresKoordinati } from './mesafe.js';
 import { ilceMerkezAdresi, mesafeModuAcik, MESAFE_VARSAYILAN, fiyatEksikleriDoldur, FIYAT_ODALAR,
   mesafeKalemleri, mesafeEsikAsildi, mesafeAktifKademe, mesafeIscilikKalemi, mesafeOdaFarkiKalemi } from '../src/fiyatSema.js';
-import { TURKEY_LOCATIONS, DEPO_LOCATIONS } from '../src/konumlar.js';
+import { TURKEY_LOCATIONS, DEPO_LOCATIONS, IL_SIRASI, ONCELIKLI_ILLER } from '../src/konumlar.js';
 
 const SITE_ORIGINS = ['https://www.sembolevdeneve.com', 'https://sembolevdeneve.com', 'https://www.depoevim.com', 'https://depoevim.com'];
 const FIRESTORE_APP_ID = process.env.FIRESTORE_APP_ID;
@@ -77,13 +77,13 @@ export const siteNoktasi = (il, ilce) => {
   return adres && adresKoordinati(adres) ? adres : null;
 };
 
-// GET cevabı: CRM'deki sırayla — önce İstanbul'un iki yakası, sonra iller alfabetik
+// GET cevabı: CRM'deki sırayla — İstanbul (Anadolu/Avrupa), Kocaeli, Bursa, İzmir, Ankara, sonra alfabetik.
+// "ilSirasi" dizisi de verilir (JSON nesnelerinde sıra korunur ama sitelerin diziyi kullanması daha güvenli).
 export const siteListeleri = () => {
-  const yakalar = ['İstanbul (Anadolu)', 'İstanbul (Avrupa)'];
-  const digerleri = Object.keys(TURKEY_LOCATIONS).filter(il => !yakalar.includes(il)).sort((a, b) => a.localeCompare(b, 'tr'));
   const iller = {};
-  [...yakalar, ...digerleri].forEach(il => { iller[il] = [...TURKEY_LOCATIONS[il]]; });
-  return { iller, subeler: DEPO_LOCATIONS.map(d => ({ ad: d.name, il: d.province, ilce: d.district })) };
+  IL_SIRASI.forEach(il => { iller[il] = [...TURKEY_LOCATIONS[il]]; });
+  return { ilSirasi: [...IL_SIRASI], oncelikliIller: [...ONCELIKLI_ILLER], iller,
+    subeler: DEPO_LOCATIONS.map(d => ({ ad: d.name, il: d.province, ilce: d.district })) };
 };
 // DepoEvim şubesi — tam ad ("Kartal Depoevim") ya da sitenin gönderdiği kod ("kartal",
 // "basaksehir"). CRM ile aynı kural: bulunamazsa / "farketmez" ise ilk şube (Pendik).

@@ -115,7 +115,9 @@ test('GET: il/ilçe listesi İstanbul yakalarıyla başlar, şubeler gelir; Goog
   const kayit = [];
   const res = await iste({ db: await dbHazirla(), method: 'GET', etap: sahteEtap(kayit) });
   assert.equal(res.kod, 200);
-  assert.deepEqual(Object.keys(res.govde.iller).slice(0, 3), ['İstanbul (Anadolu)', 'İstanbul (Avrupa)', 'Adana']);
+  assert.deepEqual(res.govde.ilSirasi.slice(0, 7), ['İstanbul (Anadolu)', 'İstanbul (Avrupa)', 'Kocaeli', 'Bursa', 'İzmir', 'Ankara', 'Adana']);
+  assert.deepEqual(Object.keys(res.govde.iller), res.govde.ilSirasi);
+  assert.equal(res.govde.ilSirasi.length, 82);
   assert.ok(res.govde.iller['Bursa'].includes('İnegöl'));
   assert.deepEqual(res.govde.subeler[0], { ad: 'Pendik Depoevim', il: 'İstanbul (Anadolu)', ilce: 'Pendik' });
   assert.equal(kayit.length, 0);
