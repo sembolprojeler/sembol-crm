@@ -113,9 +113,10 @@ export const FIYAT_VERI_ANAHTARLARI = ['genel', 'sehirIciEve', 'sehirIciDepo', '
 //          + kademenin sabit ek maliyeti
 //          + uzun yol farkı = kademe % × TOPLAM maliyet (DEĞİŞTİ — kullanıcı talebi:
 //            taban + ek hizmetler + km + geçişler + ev tipi farkı + sabit ek; yani her şeyin üzerine)
-//   EV TİPİNE GÖRE KM FARKI (YENİ — kullanıcı talebi): büyük ev daha çok araç / ekip / yakıt
-//   ister; toplam km ev tipi eşiğini AŞARSA km tutarına ev tipinin yüzdesi eklenir
-//          ör. 3+1 · %20 → 1.000 km × 15 ₺ = 15.000 ₺ km + 3.000 ₺ ev tipi farkı
+//   EV TİPİNE GÖRE KM FARKI (kullanıcı talebi): büyük ev daha çok araç / ekip / yakıt ister.
+//   DEĞİŞTİ: birden fazla kademe eklenip silinebilir — her kademe: { km, yuzde: { '1+0' … '4+1' } }
+//   Toplam km bir kademeyi AŞARSA aşılan EN YÜKSEK kademenin ev tipi yüzdesi km tutarına eklenir
+//          ör. 0 km → 3+1 %10 · 600 km → 3+1 %20 → 1.000 km × 15 ₺ = 15.000 ₺ + 3.000 ₺
 //   En küçük kademe aşılınca köprü / otoyol / feribot geçiş ücretleri de eklenir.
 //   Hiçbir kademe aşılmazsa: geçiş alınmaz; Avrupa Yakası ekstrası eskisi gibi uygulanır.
 //
@@ -142,8 +143,8 @@ export const MESAFE_VARSAYILAN = {
   kmUcreti: 100,                            // ₺ / km — 3 etabın TOPLAM km'sine uygulanır
   // DEĞİŞTİ (kullanıcı talebi): tek eşik yerine kademe listesi (Fiyat Tablosu'ndan eklenip silinir)
   kademeler: [{ km: 200, yuzde: 15, ek: 0 }],
-  // YENİ (kullanıcı talebi): ev tipine göre km farkı — km tutarına eklenen yüzde (0 = fark yok)
-  odaFarki: { esikKm: 0, yuzde: { '1+0': 0, '1+1': 0, '2+1': 0, '3+1': 0, '4+1': 0 } },
+  // DEĞİŞTİ (kullanıcı talebi): ev tipine göre km farkı — kademeli (0 = fark yok)
+  odaKademeleri: [{ km: 0, yuzde: { '1+0': 0, '1+1': 0, '2+1': 0, '3+1': 0, '4+1': 0 } }],
   gecis: { kopru15Temmuz: 50, kopruFsm: 50, kopruYss: 900, kopruOsmangazi: 1500, kopruCanakkale: 1800, otoyolAnadolu: 500, otoyolAvrupa: 300, otoyolNigde: 400, feribot: 1200 },
 };
 // Hücre türleri: 'fiyat' (>0) · 'tutar0' (≥0) · 'yuzde' (0–100) · 'anahtar' (0/1) · 'metin'
@@ -157,9 +158,11 @@ export const MESAFE_HUCRELERI = (kaynak = null) => [
     { yol: ['mesafe', 'kademeler', i, 'yuzde'], etiket: `Km Bazlı Fiyat · ${i + 1}. kademe · işçilik farkı (%)`, tur: 'yuzde', kademe: true },
     { yol: ['mesafe', 'kademeler', i, 'ek'], etiket: `Km Bazlı Fiyat · ${i + 1}. kademe · sabit ek (₺)`, tur: 'tutar0', kademe: true },
   ]),
-  // YENİ: ev tipine göre km farkı
-  { yol: ['mesafe', 'odaFarki', 'esikKm'], etiket: 'Km Bazlı Fiyat · Ev tipi farkı · başlangıç (km)', tur: 'tutar0' },
-  ...FIYAT_ODALAR.map(o => ({ yol: ['mesafe', 'odaFarki', 'yuzde', o], etiket: `Km Bazlı Fiyat · Ev tipi farkı · ${o} (%)`, tur: 'yuzde' })),
+  // DEĞİŞTİ: ev tipine göre km farkı — kademe sayısı kadar satır (eklenen / silinen dahil)
+  ...mesafeOdaKademeListesi(kaynak?.mesafe).flatMap((_, i) => [
+    { yol: ['mesafe', 'odaKademeleri', i, 'km'], etiket: `Km Bazlı Fiyat · Ev tipi ${i + 1}. kademe · km`, tur: 'tutar0', kademe: true },
+    ...FIYAT_ODALAR.map(o => ({ yol: ['mesafe', 'odaKademeleri', i, 'yuzde', o], etiket: `Km Bazlı Fiyat · Ev tipi ${i + 1}. kademe · ${o} (%)`, tur: 'yuzde', kademe: true })),
+  ]),
   ...MESAFE_GECISLERI.map(g => ({ yol: ['mesafe', 'gecis', g.ic], etiket: `Km Bazlı Fiyat · Geçiş · ${g.etiket}`, tur: 'tutar0' })),
 ];
 // Kademe listesi — eski kayıtlardaki tek eşik (esikKm / iscilikYuzde / uzunYolEk) ilk kademe olur
@@ -169,6 +172,20 @@ export const mesafeKademeListesi = (M) => {
     return [{ km: Number(M.esikKm) || 200, yuzde: Number(M.iscilikYuzde) || 0, ek: Number(M.uzunYolEk) || 0 }];
   }
   return MESAFE_VARSAYILAN.kademeler;
+};
+// YENİ: ev tipi kademeleri — eski tek satırlık "odaFarki" { esikKm, yuzde } varsa 1. kademe olur
+export const mesafeOdaKademeListesi = (M) => {
+  if (Array.isArray(M?.odaKademeleri)) return M.odaKademeleri;
+  if (M?.odaFarki && typeof M.odaFarki === 'object') return [{ km: Number(M.odaFarki.esikKm) || 0, yuzde: { ...(M.odaFarki.yuzde || {}) } }];
+  return MESAFE_VARSAYILAN.odaKademeleri;
+};
+// Toplam km'nin AŞTIĞI en yüksek ev tipi kademesi (0 km kademesi her mesafede geçerli)
+export const mesafeAktifOdaKademe = (M, km) => {
+  const n = Number(km) || 0;
+  if (n <= 0) return null;
+  return mesafeOdaKademeListesi(M)
+    .filter(k => k && n > (Number(k.km) || 0))
+    .sort((a, b) => (Number(b.km) || 0) - (Number(a.km) || 0))[0] || null;
 };
 // Toplam km'nin AŞTIĞI en yüksek kademe (yoksa null)
 export const mesafeAktifKademe = (M, km) => {
@@ -189,10 +206,16 @@ export const fiyatEksikleriDoldur = (veri, sablon = null) => {
     out.mesafe = out.mesafe || {};
     out.mesafe.kademeler = JSON.parse(JSON.stringify(mesafeKademeListesi(sablon?.mesafe)));
   }
+  // YENİ: ev tipi kademeleri — eski tek satır "odaFarki"dan, o da yoksa şablondan / varsayılandan
+  if (!Array.isArray(out.mesafe.odaKademeleri)) {
+    out.mesafe.odaKademeleri = JSON.parse(JSON.stringify(mesafeOdaKademeListesi(out.mesafe.odaFarki ? out.mesafe : sablon?.mesafe)));
+  }
+  delete out.mesafe.odaFarki;
   MESAFE_HUCRELERI(out).forEach(c => {
     const v = yolAl(out, c.yol);
     if (v !== undefined && v !== null) return;
-    const kaynak = yolAl(sablon, c.yol) ?? yolAl({ mesafe: MESAFE_VARSAYILAN }, c.yol);
+    // DEĞİŞTİ: kademe satırlarında eksik alan 0 olur (yeni eklenen satırlar takılmaz)
+    const kaynak = yolAl(sablon, c.yol) ?? yolAl({ mesafe: MESAFE_VARSAYILAN }, c.yol) ?? (c.kademe ? 0 : undefined);
     let x = out;
     c.yol.slice(0, -1).forEach(k => { if (x[k] == null) x[k] = {}; x = x[k]; });
     x[c.yol[c.yol.length - 1]] = kaynak;
@@ -240,9 +263,10 @@ export const mesafeKalemleri = (M, rota) => {
 // Toplam km "esikKm"yi AŞARSA uygulanır (0 = her mesafede). odaK: '1+0' … '4+1'
 export const mesafeOdaFarkiKalemi = (M, rota, odaK) => {
   const km = Math.round(Number(rota?.toplamKm) || 0);
-  const esik = Number(M?.odaFarki?.esikKm) || 0;
-  const yuzde = Number(M?.odaFarki?.yuzde?.[odaK]) || 0;
-  if (!km || yuzde <= 0 || km <= esik) return null;
+  const kademe = mesafeAktifOdaKademe(M, km); // DEĞİŞTİ: aşılan en yüksek ev tipi kademesi
+  const esik = Number(kademe?.km) || 0;
+  const yuzde = Number(kademe?.yuzde?.[odaK]) || 0;
+  if (!km || !kademe || yuzde <= 0) return null;
   const kmTutari = Math.round(km * (Number(M?.kmUcreti) || 0));
   return { ad: `Ev tipi km farkı (${odaK} · %${yuzde}${esik ? ` · ${esik.toLocaleString('tr-TR')} km üstü` : ''})`, tutar: Math.round(kmTutari * yuzde / 100), km: true };
 };
@@ -302,6 +326,8 @@ export const fiyatDogrula = (veriHam, sablon = veriHam) => {
   // YENİ: aynı km'de iki kademe olamaz
   const kmler = mesafeKademeListesi(veri.mesafe).map(k => Number(k?.km));
   kmler.forEach((km, i) => { if (km > 0 && kmler.indexOf(km) !== i) hatalar.push({ yol: ['mesafe', 'kademeler', i, 'km'], etiket: `Km Bazlı Fiyat · ${i + 1}. kademe`, mesaj: 'Aynı km\'de iki kademe olamaz' }); });
+  const odaKmler = mesafeOdaKademeListesi(veri.mesafe).map(k => Number(k?.km) || 0); // YENİ: ev tipi kademeleri
+  odaKmler.forEach((km, i) => { if (odaKmler.indexOf(km) !== i) hatalar.push({ yol: ['mesafe', 'odaKademeleri', i, 'km'], etiket: `Km Bazlı Fiyat · Ev tipi ${i + 1}. kademe`, mesaj: 'Aynı km\'de iki ev tipi kademesi olamaz' }); });
   hucreler.forEach(c => {
     const v = yolAl(veri, c.yol);
     const sayi = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
@@ -352,6 +378,7 @@ export const fiyatTemizle = (veriHam, sablon = veriHam) => {
   });
   // YENİ: kademeler küçükten büyüğe sıralı saklanır; tüm kademeler silinmişse boş liste kalır
   if (out.mesafe) out.mesafe.kademeler = (out.mesafe.kademeler || []).filter(Boolean).sort((a, b) => a.km - b.km);
+  if (out.mesafe) out.mesafe.odaKademeleri = (out.mesafe.odaKademeleri || []).filter(Boolean).sort((a, b) => a.km - b.km); // YENİ
   return out;
 };
 
@@ -429,5 +456,5 @@ const mesafeCikti = (belge) => {
   const M = fiyatEksikleriDoldur(belge).mesafe;
   const gecis = {}; MESAFE_GECISLERI.forEach(g => { gecis[g.slug] = { etiket: g.etiket, tutar: M.gecis?.[g.ic] ?? null }; });
   return { etiket: 'Km Bazlı Fiyat (4 nokta: hareket merkezi → yükleme → boşaltma → hareket merkezi)', aktif: mesafeModuAcik(M),
-    hareketMerkezi: M.cikisAdresi, kmUcreti: M.kmUcreti, kademeler: mesafeKademeListesi(M), odaFarki: M.odaFarki, gecis };
+    hareketMerkezi: M.cikisAdresi, kmUcreti: M.kmUcreti, kademeler: mesafeKademeListesi(M), odaKademeleri: mesafeOdaKademeListesi(M), gecis };
 };
