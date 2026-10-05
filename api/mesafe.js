@@ -63,7 +63,8 @@ export const adresKoordinati = (adres) => {
 };
 const noktaYap = (adres) => { const k = adresKoordinati(adres); return k ? { location: { latLng: k } } : { address: adres }; };
 
-function getDb() {
+// YENİ: api/mesafe-site.js (sitenin km ucu) de getDb / IstekHatasi / anahtarYap / etapGetir'i kullanır
+export function getDb() {
   if (!getApps().length) {
     initializeApp({ credential: cert({
       projectId: process.env.FIREBASE_PROJECT_ID,
@@ -75,7 +76,7 @@ function getDb() {
 }
 const veriKoku = (db) => db.collection('artifacts').doc(FIRESTORE_APP_ID).collection('public').doc('data');
 
-class IstekHatasi extends Error { constructor(durum, mesaj) { super(mesaj); this.durum = durum; } }
+export class IstekHatasi extends Error { constructor(durum, mesaj) { super(mesaj); this.durum = durum; } }
 
 // CRM girişiyle AYNI kural: şifre doğru, Pasif değil, giriş yetkisi açık
 async function kullaniciDogrula(db, kullaniciId, sifre) {
@@ -87,7 +88,7 @@ async function kullaniciDogrula(db, kullaniciId, sifre) {
 }
 
 // Önbellek anahtarı: Türkçe karaktersiz, küçük harf (ör. "pendik_istanbul_turkiye__kadikoy_istanbul_turkiye")
-const anahtarYap = (s) => String(s || '').toLocaleLowerCase('tr-TR')
+export const anahtarYap = (s) => String(s || '').toLocaleLowerCase('tr-TR')
   .replace(/ı/g, 'i').replace(/ğ/g, 'g').replace(/ü/g, 'u').replace(/ş/g, 's').replace(/ö/g, 'o').replace(/ç/g, 'c')
   .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 180);
 
@@ -123,7 +124,8 @@ async function googleEtap(nereden, nereye) {
 }
 
 // Önbellekli etap
-async function etapGetir(db, nereden, nereye) {
+// YENİ: googleOncesi → Google'a gidilmeden hemen önce çağrılır (site ucu günlük Google limitini burada sayar)
+export async function etapGetir(db, nereden, nereye, googleOncesi = null) {
   const ref = veriKoku(db).collection('mesafeOnbellek').doc(`${ONBELLEK_SURUM}__${anahtarYap(nereden)}__${anahtarYap(nereye)}`); // DEĞİŞTİ: sürümlü anahtar
   const snap = await ref.get();
   if (snap.exists) {
@@ -131,6 +133,7 @@ async function etapGetir(db, nereden, nereye) {
     const yas = (Date.now() - new Date(d.tarih || 0).getTime()) / 86400000;
     if (yas < ONBELLEK_GUN && Number.isFinite(d.km)) return { nereden, nereye, km: d.km, dk: d.dk, gecisler: d.gecisler || {}, googleUcret: d.googleUcret ?? null, onbellek: true };
   }
+  if (googleOncesi) await googleOncesi();
   const e = await googleEtap(nereden, nereye);
   await ref.set({ nereden, nereye, ...e, tarih: new Date().toISOString() }).catch(() => {}); // önbellek yazılamazsa sorun değil
   return { nereden, nereye, ...e, onbellek: false };
