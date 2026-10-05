@@ -2388,7 +2388,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                kayit.kapanisPrimleri = { [kapanisKaynagi]: yeniTutar }; // kaynak işareti (yalnızca bu kapanış)
            });
 
-           await setDoc(nextMaasRef, { records: nextMaasRecords, updatedAt: new Date().toISOString() }, { merge: true });
+           // YENİ: primIslemZamani → açık olan Maaş Tablosu ekranları primleri canlı olarak yeniden okur
+           await setDoc(nextMaasRef, { records: nextMaasRecords, updatedAt: new Date().toISOString(), primIslemZamani: new Date().toISOString() }, { merge: true });
 
            setPuantajMeta(prev => ({...prev, bonusRecords: monthCloseModalData.newBonusRecords, isClosed: true, appliedPrims: monthCloseModalData.nextMonthPrims}));
            setShowMonthCloseModal(false);
@@ -2419,7 +2420,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                   // prim = 0 · kapanış kaynak işaretleri de temizlenir (boş harita merge'de alanı tamamen değiştirir)
                   nextMaasRecords[pId] = { ...(nextMaasRecords[pId] || {}), prim: 0, kapanisPrimleri: {} };
               });
-              await setDoc(nextMaasRef, { records: nextMaasRecords, updatedAt: new Date().toISOString() }, { merge: true });
+              // YENİ: primIslemZamani → açık olan Maaş Tablosu ekranları sıfırlanan primleri canlı okur
+              // (aksi halde başka sekmede açık kalmış eski Maaş Tablosu, otomatik kaydıyla eski primleri GERİ YAZIYORDU)
+              await setDoc(nextMaasRef, { records: nextMaasRecords, updatedAt: new Date().toISOString(), primIslemZamani: new Date().toISOString() }, { merge: true });
           }
 
           // 2) Puantaj meta: bonusları temizle, kapalı durumu ve uygulanan primleri sıfırla
@@ -3847,12 +3850,18 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         : (p.collarType === 'Beyaz Yaka' || (!p.collarType && !['Şoför', 'Taşıma Elemanı', 'Mobilya Ustası', 'Depo Sorumlusu', 'Temizlik Görevlisi'].includes(p.position)));
     }).sort((a, b) => (a.fullName || '').localeCompare(b.fullName || '', 'tr'));
 
+    // YENİ (kullanıcı talebi): puantajdaki "Primleri Dağıt / Geri Al" işleminin damgası.
+    // Damga değişince (başka sekme / cihazda dağıtım veya geri alma yapıldıysa) primler
+    // sunucudan canlı yeniden okunur — eski ekran eski primleri geri YAZAMAZ.
+    const primIslemRef = useRef(null);
+
     useEffect(() => {
       const fetchData = async () => {
         setIsDataLoaded(false);
         try {
           const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${docPrefix}${currentYear}_${currentMonth}`);
           const snap = await getDoc(docRef);
+          primIslemRef.current = snap.exists() ? (snap.data().primIslemZamani || null) : null; // YENİ
           if (snap.exists()) {
             setMaasData(snap.data().records || {});
           } else {
@@ -3900,6 +3909,40 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       }, 1000);
       return () => clearTimeout(timeoutId);
     }, [maasData, yearlyData, docPrefix]);
+
+    // ========================================================================
+    // YENİ (kullanıcı talebi): PUANTAJ PRİMLERİNİ CANLI EŞİTLE
+    // ------------------------------------------------------------------------
+    // Sorun: Maaş Tablosu bir sekmede açıkken puantajda "Geri Al" yapılınca
+    // sunucuda primler 0 oluyordu, ama açık kalan Maaş Tablosu eski primleri
+    // hafızada tutup ilk otomatik kayıtta (ör. hasar kesintisi hesabı) hepsini
+    // GERİ YAZIYORDU — primler sıfırlanmamış görünüyordu.
+    // Çözüm: puantaj her dağıtım / geri almada belgeye "primIslemZamani" yazar.
+    // Bu damga değişince YALNIZCA prim alanları sunucudan alınır; diğer
+    // hücrelere (avans, maaş, ödeme tikleri…) dokunulmaz. Kendi otomatik
+    // kaydımız damgayı değiştirmediği için döngü oluşmaz.
+    // ========================================================================
+    useEffect(() => {
+      if (!isDataLoaded) return;
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'maas', `${docPrefix}${currentYear}_${currentMonth}`);
+      const unsub = onSnapshot(docRef, (snap) => {
+        if (!snap.exists() || snap.metadata.hasPendingWrites) return;
+        const d = snap.data() || {};
+        const damga = d.primIslemZamani || null;
+        if (!damga || damga === primIslemRef.current) return; // yeni prim işlemi yok
+        primIslemRef.current = damga;
+        const sunucu = d.records || {};
+        setMaasData(prev => {
+          const yeni = { ...prev };
+          Object.keys(sunucu).forEach(pId => {
+            // yalnızca prim ve kapanış işaretleri sunucudan alınır
+            yeni[pId] = { ...(prev[pId] || {}), prim: sunucu[pId]?.prim ?? 0, kapanisPrimleri: sunucu[pId]?.kapanisPrimleri || {} };
+          });
+          return yeni;
+        });
+      }, (e) => console.error('Prim canlı eşitleme hatası:', e));
+      return () => unsub();
+    }, [isDataLoaded, db, appId, docPrefix, currentYear, currentMonth]);
 
     // ========================================================================
     // YENİ: MAAŞ / AVANS -> DEFTER ENTEGRASYONU
