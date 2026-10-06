@@ -8,5 +8,8 @@
       "destination": "/api/qr-yonlendir",
       "statusCode": 302
     }
-  ]
+  ],
+  "functions": {
+    "api/whatsapp-webhook.js": { "maxDuration": 60 }
+  }
 }
