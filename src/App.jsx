@@ -8771,8 +8771,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             ) : (
               <span className="text-[10px] text-neutral-500 font-bold uppercase tracking-wider mb-2">Aktif Kullanıcı</span>
             )}
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-3 overflow-hidden">
+            {/* DEĞİŞTİ (kullanıcı talebi): iki satır — üstte fotoğraf + TAM isim, altta butonlar */}
+            <div className="flex flex-col gap-2.5">
+              <div className="flex items-center gap-3 min-w-0">
                 <div className="relative shrink-0">
                   <div className="w-8 h-8 rounded-full bg-neutral-700 flex items-center justify-center text-white font-bold overflow-hidden">
                     {currentUser?.profileImage ? (
@@ -8783,12 +8784,14 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   </div>
                   <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse absolute bottom-0 right-0 border-2 border-neutral-900"></div>
                 </div>
-                <div className="flex flex-col overflow-hidden">
-                  <span className="text-sm font-bold text-white truncate">{currentUser?.fullName}</span>
-                  <span className="text-[10px] text-neutral-400 truncate">{currentUser?.email}</span>
+                <div className="flex flex-col min-w-0 flex-1">
+                  {/* DEĞİŞTİ: isim kesilmez — sığmazsa alt satıra kayar */}
+                  <span className="text-sm font-bold text-white leading-tight break-words" title={currentUser?.fullName}>{currentUser?.fullName}</span>
+                  <span className="text-[10px] text-neutral-400 truncate" title={currentUser?.email}>{currentUser?.email}</span>
                 </div>
               </div>
-              <div className="flex items-center gap-1.5 shrink-0">
+              {/* DEĞİŞTİ: butonlar artık ismin ALTINDA ayrı bir satırda */}
+              <div className="flex items-center gap-1.5 flex-wrap pt-2 border-t border-neutral-800">
                 {/* ========================================================
                     YENİ: YENİ PERSONEL — İŞ KILAVUZU DİKKAT IŞIĞI
                     İşe başlama tarihinden itibaren 1 AY boyunca (30 gün),
