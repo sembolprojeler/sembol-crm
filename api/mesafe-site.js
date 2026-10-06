@@ -64,7 +64,7 @@ const sayi = (v, varsayilan) => { const n = Number(v); return Number.isFinite(n)
 // Türkiye saatine göre saat / gün damgası (gün sınırı gece 00:00 TR)
 const trDamga = (ms) => new Date(ms + 3 * 3600000).toISOString();
 const saatDamgasi = (ms) => trDamga(ms).slice(0, 13).replace(/\D/g, ''); // 2026100514
-const gunDamgasi = (ms) => trDamga(ms).slice(0, 10).replace(/\D/g, '');  // 20261005
+export const gunDamgasi = (ms) => trDamga(ms).slice(0, 10).replace(/\D/g, '');  // 20261005
 
 const istemciIp = (req) => String(req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || '').split(',')[0].trim() || 'bilinmiyor';
 const ipOzeti = (ip) => createHash('sha256').update(`sembol-mesafe-site|${ip}`).digest('hex').slice(0, 20);
@@ -127,9 +127,44 @@ const hesapGirdisi = (h) => {
   return { odaK, araToplam, avrupaEkstra };
 };
 
+// YENİ — ORTAK (site ucu + WhatsApp botu): Fiyat Tablosu'ndaki km ayarları
+export async function kmAyarlariOku(db) {
+  const fiyatSnap = await veriKoku(db).collection('ayarlar').doc('fiyatTablosu').get();
+  return fiyatEksikleriDoldur(fiyatSnap.exists ? fiyatSnap.data() : {}).mesafe;
+}
+
+// YENİ — ORTAK (site ucu + WhatsApp botu): 4 nokta / 3 etap rota + (hesap verildiyse) km fiyatı.
+// Site ucu bunu IP sınırından SONRA çağırır; bot HTTP isteği yapmadan doğrudan çağırır
+// (IP sınırına girmez, Google sorgusunu kendi günlük sayacıyla sayar — googleOncesi).
+// yuk / bos: siteNoktasi() ya da ilceMerkezAdresi() ile üretilmiş ilçe merkezi adresi.
+export async function kmRotaFiyat({ db, M, yuk, bos, sube = null, hesap = null, etapGetir = etapGetirVarsayilan, googleOncesi = null }) {
+  const merkez = String(M.cikisAdresi || '').trim() || MESAFE_VARSAYILAN.cikisAdresi;
+  const noktalar = [merkez, yuk, bos, merkez];
+  const etaplar = [];
+  for (let i = 0; i < noktalar.length - 1; i++) {
+    // Aynı ilçede başlayıp biten etap (ör. Pendik → Pendik) 0 km — /api/mesafe ile aynı kural
+    if (anahtarYap(noktalar[i]) === anahtarYap(noktalar[i + 1])) { etaplar.push({ nereden: noktalar[i], nereye: noktalar[i + 1], km: 0, dk: 0, gecisler: {} }); continue; }
+    etaplar.push(await etapGetir(db, noktalar[i], noktalar[i + 1], googleOncesi));
+  }
+  const gecisler = {};
+  etaplar.forEach(e => Object.keys(e.gecisler || {}).forEach(id => { gecisler[id] = (gecisler[id] || 0) + 1; }));
+  const toplamKm = Math.round(etaplar.reduce((t, e) => t + e.km, 0) * 10) / 10;
+  return {
+    aktif: true,
+    noktalar,
+    etaplar: etaplar.map(e => ({ nereden: e.nereden, nereye: e.nereye, km: e.km, dk: e.dk || 0 })),
+    toplamKm,
+    toplamDk: etaplar.reduce((t, e) => t + (e.dk || 0), 0),
+    gecisler,
+    ...(sube ? { sube: sube.name } : {}),
+    ...(hesap ? { fiyat: siteFiyatHesapla(M, { toplamKm, gecisler }, hesap) } : {}),
+  };
+}
+
 // Sayaç: sınır dolduysa 429 fırlatır, dolmadıysa 1 artırır.
 // (Okuma + yazma atomik değil; aynı anda gelen birkaç istek sınırı birkaç adet aşabilir — kabul edilebilir.)
-async function sayacArtir(db, id, sinir, sureMs, simdi, mesaj) {
+// DEĞİŞTİ: dışa açıldı — WhatsApp botu kendi günlük Google sayacında kullanır
+export async function sayacArtir(db, id, sinir, sureMs, simdi, mesaj) {
   const ref = veriKoku(db).collection('mesafeSiteSayac').doc(id);
   const snap = await ref.get();
   const mevcut = snap.exists ? Number(snap.data()?.sayi) || 0 : 0;
@@ -175,10 +210,8 @@ export function handlerOlustur({ getDb: dbAl = getDb, etapGetir = etapGetirVarsa
 
       const db = dbAl();
       // Km modu, hareket merkezi ve km fiyat ayarları Fiyat Tablosu'ndan (CRM ile aynı belge)
-      const fiyatSnap = await veriKoku(db).collection('ayarlar').doc('fiyatTablosu').get();
-      const M = fiyatEksikleriDoldur(fiyatSnap.exists ? fiyatSnap.data() : {}).mesafe;
+      const M = await kmAyarlariOku(db);
       if (!mesafeModuAcik(M)) { res.status(409).json({ aktif: false, error: 'Km bazlı fiyat kapalı.' }); return; }
-      const merkez = String(M.cikisAdresi || '').trim() || MESAFE_VARSAYILAN.cikisAdresi;
 
       const an = simdi();
       await sayacArtir(db, `ip_${ipOzeti(istemciIp(req))}_${saatDamgasi(an)}`, sayi(env.MESAFE_SITE_IP_SAATLIK, 20), 2 * 3600000, an,
@@ -187,26 +220,7 @@ export function handlerOlustur({ getDb: dbAl = getDb, etapGetir = etapGetirVarsa
       const googleOncesi = () => sayacArtir(db, `google_${gunDamgasi(an)}`, googleSiniri, 2 * 86400000, an,
         'Km hesaplama şu an yoğun, fiyat km\'siz gösteriliyor.');
 
-      const noktalar = [merkez, yuk, bos, merkez];
-      const etaplar = [];
-      for (let i = 0; i < noktalar.length - 1; i++) {
-        // Aynı ilçede başlayıp biten etap (ör. Pendik → Pendik) 0 km — /api/mesafe ile aynı kural
-        if (anahtarYap(noktalar[i]) === anahtarYap(noktalar[i + 1])) { etaplar.push({ nereden: noktalar[i], nereye: noktalar[i + 1], km: 0, dk: 0, gecisler: {} }); continue; }
-        etaplar.push(await etapGetir(db, noktalar[i], noktalar[i + 1], googleOncesi));
-      }
-      const gecisler = {};
-      etaplar.forEach(e => Object.keys(e.gecisler || {}).forEach(id => { gecisler[id] = (gecisler[id] || 0) + 1; }));
-      const toplamKm = Math.round(etaplar.reduce((t, e) => t + e.km, 0) * 10) / 10;
-      res.status(200).json({
-        aktif: true,
-        noktalar,
-        etaplar: etaplar.map(e => ({ nereden: e.nereden, nereye: e.nereye, km: e.km, dk: e.dk || 0 })),
-        toplamKm,
-        toplamDk: etaplar.reduce((t, e) => t + (e.dk || 0), 0),
-        gecisler,
-        ...(sube ? { sube: sube.name } : {}),
-        ...(hesap ? { fiyat: siteFiyatHesapla(M, { toplamKm, gecisler }, hesap) } : {}),
-      });
+      res.status(200).json(await kmRotaFiyat({ db, M, yuk, bos, sube, hesap, etapGetir, googleOncesi }));
     } catch (err) {
       // Google / rota hataları (5xx, 404) ayrıntısıyla müşteriye gösterilmez — günlüğe yazılır
       if (err instanceof IstekHatasi && err.durum < 500 && err.durum !== 404) { res.status(err.durum).json({ error: err.message }); return; }
