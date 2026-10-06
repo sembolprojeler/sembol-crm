@@ -43,6 +43,7 @@
 //                         "google_anasayfa"/"google_altsayfa"/"diger_site"
 //                         kendi etiketiyle, aksi halde "Direkt Giriş Ziyaretçisi"
 //     site:   string    — "depoevim" | "sembolevdeneve" (hangi site)
+//     refKodu?: string  — YENİ, isteğe bağlı: "SB-XXXXX" / "DE-XXXXX" (WhatsApp butonu; bkz. aşağı)
 //   }
 // Yanıt sözleşmesi de AYNEN korundu: { success: true, message } veya
 // { success: false, error, detay }.
@@ -57,6 +58,7 @@ import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { PAID_ADS_DEGERLERI, pazarlamaOku, reklamKaynagiKarar } from './_lib/pazarlama.js';
 import { AI_KAYNAK_ETIKETLERI } from '../src/aiKaynakSema.js';
+import { refBelgeId } from './_lib/lead.js';
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || process.env.ALLOWED_ORIGIN || 'https://www.sembolevdeneve.com,https://www.depoevim.com')
   .split(',').map(function (s) { return s.trim(); }).filter(Boolean);
@@ -212,7 +214,7 @@ export default async function handler(req, res) {
       .collection('public').doc('data')
       .collection('havuzKayitlari');
 
-    await ref.add({
+    const veri = {
       musteriAdi,
       iletisim: 'Tıklama (Bekleniyor)',
       kanal: kanalTipi,
@@ -244,7 +246,27 @@ export default async function handler(req, res) {
       hareketler: [
         { tarih: suAnkiTarih, kullanici: 'Sistem API', islem: `Ziyaretçi ${siteEtiket} sitesinde ${kanalTipi} butonuna tıkladı.` }
       ],
-    });
+    };
+
+    // YENİ (WhatsApp botu): site WhatsApp butonu mesaja "(Ref: SB-XXXXX)" ekler ve aynı kodu
+    // burada "refKodu" olarak gönderir. Tıklama kaydı ref_<kod> belgesine yazılır; bot o kodu
+    // mesajda görünce AYNI belgeyi lead'e çevirir (api/_lib/lead.js → whatsappLeadKaydi).
+    // refKodu yoksa (eski site kodu) davranış AYNEN eskisi gibidir: yeni belge (add).
+    const refKodu = String(crmData.refKodu || '').trim().toUpperCase();
+    if (/^(SB|DE)-[A-Z0-9]{4,10}$/.test(refKodu)) {
+      const belge = ref.doc(refBelgeId(refKodu));
+      const mevcut = await belge.get();
+      if (!mevcut.exists) await belge.set({ ...veri, refKodu });
+      else if ((mevcut.data() || {}).kaynakKarari === 'varsayilan') {
+        // Bot belgeyi tıklamadan ÖNCE açtıysa: yalnızca kaynak / QR izi eklenir, lead verisine dokunulmaz
+        const kaynakAlanlari = {};
+        ['reklamKaynagi', 'kaynakKarari', 'pazarlama', 'inisSayfasi', 'digerSiteAdi', 'oncekiReklamKaynagi', 'qrKodu', 'utmSource', 'utmMedium', 'utmCampaign', 'sayfaUrl', 'qrIziZamani']
+          .forEach(k => { if (veri[k] !== undefined) kaynakAlanlari[k] = veri[k]; });
+        await belge.set({ ...kaynakAlanlari, refKodu }, { merge: true });
+      }
+    } else {
+      await ref.add(veri);
+    }
 
     res.status(200).json({ success: true, message: 'Harika, müşteri CRM havuzuna düştü!' });
   } catch (error) {

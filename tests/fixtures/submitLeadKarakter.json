@@ -1,0 +1,852 @@
+{
+  "evden eve tam": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "Ayşe Yılmaz",
+      "iletisim": "0555 111 22 33",
+      "hesapId": "sembolevdeneve",
+      "hizmetTipi": "Nakliye",
+      "sonMesaj": "[Evden Eve Nakliyat]\nİstanbul (Anadolu)/Kadıköy → Bursa/İnegöl\nTip: 3+1\nKat: 4 → 2\nÇıkış asansör: Merdivenden\nVarış asansör: Dış cephe asansörü kurulması isteniyor\nPaketleme: Firma paketlesin\nKırılacak / hassas eşya var\nAmbalaj malzemesi firma tarafından temin edilecek\nÖzel eşyalar: piyano, akvaryum\nTarih: 2026-11-01\nSistem fiyat tahmini: 30.000 - 37.500 TL\n1 fotoğraf eklendi",
+      "kaynak": "web-sihirbaz-evdenEve",
+      "wizardKaynagi": "web-wizard-fullpage",
+      "reklamKaynagi": "google_ads",
+      "kaynakKarari": "tarayici",
+      "inisSayfasi": "/x",
+      "digerSiteAdi": "",
+      "wizardDurumu": "completed",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": 30000,
+      "fiyatTahminiMax": 37500,
+      "fotograflar": [
+        "u1"
+      ],
+      "kvkkOnay": true,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromCity": "İstanbul (Anadolu)",
+        "fromDistrict": "Kadıköy",
+        "fromFloor": "4",
+        "fromElevator": "merdiven",
+        "toCity": "Bursa",
+        "toDistrict": "İnegöl",
+        "toFloor": "2",
+        "toElevator": "dis_cephe"
+      },
+      "paketlemeTercihi": "firma",
+      "kirilacakEsya": "evet",
+      "ambalajTalebi": "evet",
+      "tasinmaTarihi": "2026-11-01",
+      "tarihEsnek": false,
+      "ozelEsyalar": [
+        "piyano",
+        "akvaryum"
+      ],
+      "updatedAt": "<ZAMAN>",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (Evden Eve Nakliyat)"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "evden eve ara kayıt → tamamlandı (hareket eklenir, durum korunur)": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      },
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "Ali Veli",
+      "iletisim": "1",
+      "hesapId": "sembolevdeneve",
+      "hizmetTipi": "Nakliye",
+      "sonMesaj": "[Evden Eve Nakliyat]\n-/- → -/-\nTip: Villa/Müstakil\nTarih: Esnek",
+      "kaynak": "web-sihirbaz-evdenEve",
+      "wizardKaynagi": "evden-eve-nakliyat",
+      "reklamKaynagi": "direkt_giris",
+      "kaynakKarari": "varsayilan",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "completed",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromCity": "",
+        "fromDistrict": "",
+        "fromFloor": "",
+        "fromElevator": "",
+        "toCity": "",
+        "toDistrict": "",
+        "toFloor": "",
+        "toElevator": ""
+      },
+      "paketlemeTercihi": "",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "",
+      "tarihEsnek": true,
+      "ozelEsyalar": [],
+      "updatedAt": "<ZAMAN>",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (Evden Eve Nakliyat)"
+        },
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Müşteri formu tamamladı"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "geri arama talebi": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      },
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "X",
+      "iletisim": "",
+      "hesapId": "sembolevdeneve",
+      "hizmetTipi": "Nakliye",
+      "sonMesaj": "[Evden Eve Nakliyat]\n-/- → -/-\nTarih: -\nMüşteri \"Beni Siz Arayın\" talebinde bulundu",
+      "kaynak": "web-sihirbaz-evdenEve",
+      "wizardKaynagi": "web-wizard-fullpage",
+      "reklamKaynagi": "direkt_giris",
+      "kaynakKarari": "varsayilan",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "callback_requested",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": true,
+      "guzergah": {
+        "fromCity": "",
+        "fromDistrict": "",
+        "fromFloor": "",
+        "fromElevator": "",
+        "toCity": "",
+        "toDistrict": "",
+        "toFloor": "",
+        "toElevator": ""
+      },
+      "paketlemeTercihi": "",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "",
+      "tarihEsnek": false,
+      "ozelEsyalar": [],
+      "updatedAt": "<ZAMAN>",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (Evden Eve Nakliyat)"
+        },
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Müşteri \"Beni Siz Arayın\" talebinde bulundu"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "parça eşya": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "",
+      "iletisim": "",
+      "hesapId": "sembolevdeneve",
+      "hizmetTipi": "Nakliye",
+      "sonMesaj": "[Parça Eşya Taşıma]\nİzmir/Konak → -/-\nKapsam: Birkaç Parça Eşya\nTarih: Esnek",
+      "kaynak": "web-sihirbaz-parcaEsya",
+      "wizardKaynagi": "web-wizard-parca-esya",
+      "reklamKaynagi": "direkt_giris",
+      "kaynakKarari": "varsayilan",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "partial",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromCity": "İzmir",
+        "fromDistrict": "Konak",
+        "fromFloor": "",
+        "fromElevator": "",
+        "toCity": "",
+        "toDistrict": "",
+        "toFloor": "",
+        "toElevator": ""
+      },
+      "paketlemeTercihi": "",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "esnek",
+      "tarihEsnek": false,
+      "ozelEsyalar": [
+        "yok"
+      ],
+      "updatedAt": "<ZAMAN>",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (Parça Eşya Taşıma)"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "ofis": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "",
+      "iletisim": "",
+      "hesapId": "sembolevdeneve",
+      "hizmetTipi": "Nakliye",
+      "sonMesaj": "[Ofis / İşyeri Taşıma]\n-/- → -/-\nFirma: ACME\nOfis Büyüklüğü: Orta Ölçekli Ofis (11-30 kişilik)\nHizmet Kapsamı: Mobilya sökme-montaj dahil\nEvrak / arşiv kutulama hizmeti isteniyor\nTaşıma mesai saatleri dışında (akşam/hafta sonu) planlanacak\nÖzel ekipmanlar: sunucu\nTarih: -",
+      "kaynak": "web-sihirbaz-ofis",
+      "wizardKaynagi": "ofis-isyeri-tasima",
+      "reklamKaynagi": "direkt_giris",
+      "kaynakKarari": "varsayilan",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "partial",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromCity": "",
+        "fromDistrict": "",
+        "fromFloor": "",
+        "fromElevator": "",
+        "toCity": "",
+        "toDistrict": "",
+        "toFloor": "",
+        "toElevator": ""
+      },
+      "paketlemeTercihi": "kismi",
+      "kirilacakEsya": "evet",
+      "ambalajTalebi": "evet",
+      "tasinmaTarihi": "",
+      "tarihEsnek": false,
+      "ozelEsyalar": [
+        "sunucu"
+      ],
+      "updatedAt": "<ZAMAN>",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (Ofis / İşyeri Taşıma)"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "sembol depolama": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "",
+      "iletisim": "",
+      "hesapId": "sembolevdeneve",
+      "hizmetTipi": "Depo",
+      "sonMesaj": "[Eşya Depolama]\nEşyanın bulunduğu yer: İstanbul (Avrupa)/Bakırcılar\nDepo Hacmi: 2+1 Depo (22 m³)\nBulunduğu Kat: 3\nAsansör: Binada asansör var\nKiralama Süresi: 6 Aylık Peşin (1 ay hediye)\nAlım/Teslim: Firma alım yapacak\nToplama: Kendim toplayacağım\nDepoya Giriş Tarihi: Bu hafta",
+      "kaynak": "web-sihirbaz-depolama",
+      "wizardKaynagi": "web-wizard-depolama",
+      "reklamKaynagi": "direkt_giris",
+      "kaynakKarari": "varsayilan",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "partial",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromCity": "İstanbul (Avrupa)",
+        "fromDistrict": "Bakırcılar",
+        "fromFloor": 3,
+        "fromElevator": "var"
+      },
+      "paketlemeTercihi": "kendim",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "Bu hafta",
+      "tarihEsnek": false,
+      "ozelEsyalar": [],
+      "teklifAlanlari": {
+        "tur": "depolama",
+        "homeSize": "2+1",
+        "fromCity": "İstanbul (Avrupa)",
+        "fromDistrict": "Bakırcılar",
+        "fromFloor": 3,
+        "fromElevator": "var",
+        "sureKiralama": "6",
+        "alimTeslim": "alim",
+        "paketleme": "kendim",
+        "fromYurume": "m50",
+        "moveDate": "Bu hafta",
+        "tarihTercihi": "Bu hafta",
+        "tarihNotu": "",
+        "dateFlexible": "",
+        "fiyatAylik": 4000,
+        "fiyatToplam": 20000,
+        "nakliyeMin": 9000,
+        "nakliyeMax": 11000,
+        "nakliyeEk": 0,
+        "priceMin": "",
+        "priceMax": "",
+        "fiyatVersiyonu": 3
+      },
+      "updatedAt": "<ZAMAN>",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (Eşya Depolama)"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "asansör": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "",
+      "iletisim": "",
+      "hesapId": "sembolevdeneve",
+      "hizmetTipi": "Asansör",
+      "sonMesaj": "[Asansör Kiralama]\nKurulum yeri: İstanbul (Anadolu)/Pendik\nKullanım Amacı: Evden Eve Nakliyat\nKurulum: Çift Taraf\nİş Hacmi: Standart Eşya (3+1 kapasite)\nSüre: Yarım Gün\nAraç Yanaşma: Araç yanaşamıyor / mesafe var\nKat: 9-15. kat (teleskopik asansör)\nTarih: 2026-12-01",
+      "kaynak": "web-sihirbaz-asansor",
+      "wizardKaynagi": "asansor-kiralama-wizard",
+      "reklamKaynagi": "direkt_giris",
+      "kaynakKarari": "varsayilan",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "partial",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromCity": "İstanbul (Anadolu)",
+        "fromDistrict": "Pendik"
+      },
+      "paketlemeTercihi": "",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "2026-12-01",
+      "tarihEsnek": false,
+      "ozelEsyalar": [],
+      "updatedAt": "<ZAMAN>",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (Asansör Kiralama)"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "depoevim anahtar teslim": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "",
+      "iletisim": "",
+      "hesapId": "depoevim",
+      "hizmetTipi": "Depo",
+      "sonMesaj": "[DepoEvim - Eşya Depolama]\nDepo Boyutu: 15 m³ Depo\nKiralama Süresi: Yıllık Peşin (2 ay hediye)\nŞube: Kartal Şubesi\nTeslim Şekli: Anahtar teslim (firma alım yapacak)\nEşyaların Alınacağı Yer: Kocaeli/Gebze\nBaşlangıç Tarihi: 2026-10-20\nAylık Fiyat: 3.500 TL\nToplam Ödenecek (peşin): 35.000 TL\nTahmini Alım/Nakliye Ücreti: 12.000 - 15.000 TL\nSistem fiyat tahmini: 1 - 2 TL",
+      "kaynak": "web-sihirbaz-depoevimDepolama",
+      "wizardKaynagi": "depoevim-esya-depolama-wizard",
+      "reklamKaynagi": "direkt_giris",
+      "kaynakKarari": "varsayilan",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "partial",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": 1,
+      "fiyatTahminiMax": 2,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromDistrict": "Kartal Şubesi"
+      },
+      "paketlemeTercihi": "firma",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "2026-10-20",
+      "tarihEsnek": false,
+      "ozelEsyalar": [],
+      "teklifAlanlari": {
+        "tur": "depoevimDepolama",
+        "depoBoyutu": "15",
+        "kiralamaSuresi": "12",
+        "sube": "kartal",
+        "teslimSekli": "anahtar_teslim",
+        "pickupCity": "Kocaeli",
+        "pickupDistrict": "Gebze",
+        "pickupFloor": "5",
+        "pickupElevator": "yok",
+        "paketleme": "firma",
+        "pickupYurume": "yok",
+        "baslangicTarihi": "2026-10-20",
+        "tarihTercihi": "",
+        "tarihNotu": "",
+        "fiyatAylik": 3500,
+        "fiyatToplam": 35000,
+        "nakliyeMin": 12000,
+        "nakliyeMax": 15000,
+        "nakliyeEk": "",
+        "priceMin": 1,
+        "priceMax": 2,
+        "fiyatVersiyonu": ""
+      },
+      "updatedAt": "<ZAMAN>",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (DepoEvim - Eşya Depolama)"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "depoevim kendim getiririm": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "",
+      "iletisim": "",
+      "hesapId": "depoevim",
+      "hizmetTipi": "Depo",
+      "sonMesaj": "[DepoEvim - Depo Kiralama]\nDepo Boyutu: 10 m³ Depo\nŞube: Şube farketmez\nTeslim Şekli: Müşteri kendi getirecek\nBaşlangıç Tarihi: Esnek",
+      "kaynak": "web-sihirbaz-depoevimDepolama",
+      "wizardKaynagi": "depoevim-esya-depolama-wizard",
+      "reklamKaynagi": "direkt_giris",
+      "kaynakKarari": "varsayilan",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "partial",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromDistrict": "Şube farketmez"
+      },
+      "paketlemeTercihi": "",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "",
+      "tarihEsnek": false,
+      "ozelEsyalar": [],
+      "teklifAlanlari": {
+        "tur": "depoevimDepolama",
+        "depoBoyutu": "10",
+        "kiralamaSuresi": "",
+        "sube": "farketmez",
+        "teslimSekli": "kendim",
+        "pickupCity": "",
+        "pickupDistrict": "",
+        "pickupFloor": "",
+        "pickupElevator": "",
+        "paketleme": "",
+        "pickupYurume": "",
+        "baslangicTarihi": "",
+        "tarihTercihi": "",
+        "tarihNotu": "",
+        "fiyatAylik": "",
+        "fiyatToplam": "",
+        "nakliyeMin": "",
+        "nakliyeMax": "",
+        "nakliyeEk": "",
+        "priceMin": "",
+        "priceMax": "",
+        "fiyatVersiyonu": ""
+      },
+      "updatedAt": "<ZAMAN>",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (DepoEvim - Eşya Depolama)"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "woocommerce siparişi": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "iyzico",
+      "musteriAdi": "",
+      "iletisim": "",
+      "hesapId": "depoevim",
+      "hizmetTipi": "Depo",
+      "sonMesaj": "[DepoEvim - WooCommerce Siparişi]\nSipariş No: #123\nÜrün(ler): 10 m³ Depo\nÖdenen Tutar: 4.200 TL\nÖdeme Yöntemi: iyzico\nAdres: Kartal\nÖdeme başarıyla alındı — bu bir teklif talebi değil, kesinleşmiş sipariş.",
+      "kaynak": "web-sihirbaz-depoevimSiparis",
+      "wizardKaynagi": "depoevim-woocommerce-siparis",
+      "reklamKaynagi": "direkt_giris",
+      "kaynakKarari": "varsayilan",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "completed",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromDistrict": "Kartal"
+      },
+      "paketlemeTercihi": "",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "",
+      "tarihEsnek": false,
+      "ozelEsyalar": [],
+      "updatedAt": "<ZAMAN>",
+      "durum": "İşi Aldık",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "WooCommerce",
+          "islem": "WooCommerce üzerinden ödemesi tamamlanmış yeni sipariş (#123)"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "QR izi (organik üzerine yazar)": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "",
+      "iletisim": "",
+      "hesapId": "sembolevdeneve",
+      "hizmetTipi": "Nakliye",
+      "sonMesaj": "[Evden Eve Nakliyat]\n-/- → -/-\nTarih: -",
+      "kaynak": "web-sihirbaz-evdenEve",
+      "wizardKaynagi": "web-wizard-fullpage",
+      "reklamKaynagi": "qr",
+      "kaynakKarari": "tarayici",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "partial",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromCity": "",
+        "fromDistrict": "",
+        "fromFloor": "",
+        "fromElevator": "",
+        "toCity": "",
+        "toDistrict": "",
+        "toFloor": "",
+        "toElevator": ""
+      },
+      "paketlemeTercihi": "",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "",
+      "tarihEsnek": false,
+      "ozelEsyalar": [],
+      "updatedAt": "<ZAMAN>",
+      "qrKodu": "34NAR385",
+      "utmSource": "qr",
+      "utmMedium": "kamyon",
+      "utmCampaign": "34 NAR 385",
+      "sayfaUrl": "https://www.sembolevdeneve.com/?qr=34nar385",
+      "qrIziZamani": "<ZAMAN>",
+      "oncekiReklamKaynagi": "google_anasayfa",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (Evden Eve Nakliyat) — QR: 34NAR385"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "QR izi ödemeli reklamda yoksayılır": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "",
+      "iletisim": "",
+      "hesapId": "sembolevdeneve",
+      "hizmetTipi": "Nakliye",
+      "sonMesaj": "[Evden Eve Nakliyat]\n-/- → -/-\nTarih: -",
+      "kaynak": "web-sihirbaz-evdenEve",
+      "wizardKaynagi": "web-wizard-fullpage",
+      "reklamKaynagi": "facebook_ads",
+      "kaynakKarari": "tarayici",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "partial",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromCity": "",
+        "fromDistrict": "",
+        "fromFloor": "",
+        "fromElevator": "",
+        "toCity": "",
+        "toDistrict": "",
+        "toFloor": "",
+        "toElevator": ""
+      },
+      "paketlemeTercihi": "",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "",
+      "tarihEsnek": false,
+      "ozelEsyalar": [],
+      "updatedAt": "<ZAMAN>",
+      "yoksayilanQrIzi": {
+        "qrKodu": "BILBORD1",
+        "qrIziZamani": "<ZAMAN>"
+      },
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (Evden Eve Nakliyat) — QR: BILBORD1"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  },
+  "source yok → evden eve": {
+    "cevaplar": [
+      {
+        "kod": 200,
+        "govde": {
+          "ok": true
+        }
+      }
+    ],
+    "kayit": {
+      "kanal": "web",
+      "musteriAdi": "Eski",
+      "iletisim": "",
+      "hesapId": "sembolevdeneve",
+      "hizmetTipi": "Nakliye",
+      "sonMesaj": "[Evden Eve Nakliyat]\n-/- → -/-\nTarih: -",
+      "kaynak": "web-sihirbaz-evdenEve",
+      "wizardKaynagi": "",
+      "reklamKaynagi": "direkt_giris",
+      "kaynakKarari": "varsayilan",
+      "inisSayfasi": "",
+      "digerSiteAdi": "",
+      "wizardDurumu": "partial",
+      "wizardGuncelleme": "<ZAMAN>",
+      "fiyatTahminiMin": null,
+      "fiyatTahminiMax": null,
+      "fotograflar": [],
+      "kvkkOnay": false,
+      "geriAramaTalebi": false,
+      "guzergah": {
+        "fromCity": "",
+        "fromDistrict": "",
+        "fromFloor": "",
+        "fromElevator": "",
+        "toCity": "",
+        "toDistrict": "",
+        "toFloor": "",
+        "toElevator": ""
+      },
+      "paketlemeTercihi": "",
+      "kirilacakEsya": "",
+      "ambalajTalebi": "",
+      "tasinmaTarihi": "",
+      "tarihEsnek": false,
+      "ozelEsyalar": [],
+      "updatedAt": "<ZAMAN>",
+      "durum": "Yeni",
+      "atanan": "",
+      "notlar": [],
+      "hareketler": [
+        {
+          "tarih": "<ZAMAN>",
+          "kullanici": "Web Sihirbazı",
+          "islem": "Web sitesinden yeni teklif talebi alındı (Evden Eve Nakliyat)"
+        }
+      ],
+      "createdAt": "<ZAMAN>"
+    }
+  }
+}
