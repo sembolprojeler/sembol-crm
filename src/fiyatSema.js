@@ -322,26 +322,18 @@ export const mesafeKalemleri = (M, rota) => {
   if (ek > 0) kalemler.push({ ad: `Uzun yol ek maliyeti (${Number(kademe.km).toLocaleString('tr-TR')} km üstü kademe)`, tutar: ek, km: true });
   return kalemler;
 };
-// YENİ (kullanıcı talebi): EV TİPİNE GÖRE KM FARKI — ev tipinin yüzdesi.
-// Toplam km "esikKm"yi AŞARSA uygulanır (0 = her mesafede). odaK: '1+0' … '4+1'
-// DEĞİŞTİ (kullanıcı talebi): 4. parametre "kalemler" verilirse yüzde, kendisinden ÖNCEKİ
-// SON TOPLAMA uygulanır (taban + ek hizmetler + km + geçişler + sabit ek + uzun yol farkı).
-//   ör. 62.798 ₺ × %5 = 3.140 ₺
-// "kalemler" verilmezse eski davranış sürer (km tutarı × yüzde) — eski çağrılar bozulmaz.
-export const mesafeOdaFarkiKalemi = (M, rota, odaK, kalemler = null) => {
+// YENİ (kullanıcı talebi): EV TİPİNE GÖRE KM FARKI — ev tipinin yüzdesi × KM TUTARI.
+// Toplam km, ev tipi kademesini AŞARSA uygulanır. odaK: '1+0' … '4+1'
+// DÜZELTME (2026-10-06): taban YALNIZCA km tutarıdır (referans: CRM Hızlı Fiyat Hesapla).
+// "Son toplam üzerine" seçeneği kaldırıldı — /api/mesafe-site onu kullanıyordu ve sitelerde
+// CRM'den yüksek fiyat çıkıyordu.  ör. 3.309 km × 15 ₺ = 49.635 ₺ × %110 = 54.599 ₺
+export const mesafeOdaFarkiKalemi = (M, rota, odaK) => {
   const km = Math.round(Number(rota?.toplamKm) || 0);
   const kademe = mesafeAktifOdaKademe(M, km); // DEĞİŞTİ: aşılan en yüksek ev tipi kademesi
   const esik = Number(kademe?.km) || 0;
   const yuzde = Number(kademe?.yuzde?.[odaK]) || 0;
   if (!km || !kademe || yuzde <= 0) return null;
   const esikMetni = esik ? ` · ${esik.toLocaleString('tr-TR')} km üstü` : '';
-  if (Array.isArray(kalemler)) {
-    // YENİ: önceki tüm kalemlerin toplamı (listede önceden kalmış bir ev tipi kalemi varsa çift sayılmaz)
-    const baz = kalemler.filter(k => k && !k.odaFarki).reduce((t, k) => t + (Number(k.tutar) || 0), 0);
-    if (baz <= 0) return null;
-    return { ad: `Ev tipi farkı (${odaK} · %${yuzde} · son toplam üzerine${esikMetni})`, tutar: Math.round(baz * yuzde / 100), km: true, odaFarki: true };
-  }
-  // Eski davranış (geriye dönük uyumluluk): yalnızca km tutarı × yüzde
   const kmTutari = Math.round(km * (Number(M?.kmUcreti) || 0));
   return { ad: `Ev tipi km farkı (${odaK} · %${yuzde}${esikMetni})`, tutar: Math.round(kmTutari * yuzde / 100), km: true, odaFarki: true };
 };
@@ -355,6 +347,17 @@ export const mesafeIscilikKalemi = (M, rota, kalemler) => {
   const baz = (kalemler || []).filter(k => !k.uzunYolFarki && !k.odaFarki).reduce((t, k) => t + (Number(k.tutar) || 0), 0);
   if (baz <= 0) return null;
   return { ad: `Uzun yol farkı (%${yuzde} · toplam üzerine · ${Number(kademe.km).toLocaleString('tr-TR')} km üstü kademe)`, tutar: Math.round(baz * yuzde / 100), km: true, uzunYolFarki: true };
+};
+// YENİ — ORTAK SON ADIM (CRM Hızlı Fiyat Hesapla, /api/mesafe-site, WhatsApp botu aynı fonksiyonu kullanır).
+// Diğer tüm kalemler (taban + ek hizmetler + km + geçiş + sabit ek + Avrupa ekstrası) eklendikten
+// SONRA çağrılır; listeye sırayla 1) uzun yol farkı (toplamın %'si) 2) EN SON ev tipi km farkı
+// (km tutarının %'si) eklenir.
+export const mesafeFarklariEkle = (M, rota, kalemler, odaK = '') => {
+  const uzunYolFarki = mesafeIscilikKalemi(M, rota, kalemler);
+  if (uzunYolFarki) kalemler.push(uzunYolFarki);
+  const odaFarki = odaK ? mesafeOdaFarkiKalemi(M, rota, odaK) : null;
+  if (odaFarki) kalemler.push(odaFarki);
+  return { uzunYolFarki, odaFarki };
 };
 
 const ilSirala = (obj) => Object.keys(obj || {}).sort((a, b) => a.localeCompare(b, 'tr'));

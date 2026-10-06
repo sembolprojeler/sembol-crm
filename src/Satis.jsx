@@ -17,8 +17,8 @@ import { AI_KAYNAK_ETIKETLERI, AI_ISTATISTIK_KUTULARI, aiKaynakMi } from './aiKa
 import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
 import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari,
-  MESAFE_VARSAYILAN, MESAFE_GECISLERI, mesafeModuAcik, mesafeEsikAsildi, mesafeKalemleri, mesafeIscilikKalemi, ilceMerkezAdresi, fiyatEksikleriDoldur,
-  mesafeKademeListesi, mesafeAktifKademe, mesafeOdaFarkiKalemi, FIYAT_ODALAR, mesafeOdaKademeListesi } from './fiyatSema.js'; // YENİ: uzun yol kademeleri + ev tipi farkı // YENİ: km bazlı fiyat
+  MESAFE_VARSAYILAN, MESAFE_GECISLERI, mesafeModuAcik, mesafeEsikAsildi, mesafeKalemleri, ilceMerkezAdresi, fiyatEksikleriDoldur,
+  mesafeKademeListesi, mesafeAktifKademe, mesafeOdaFarkiKalemi, FIYAT_ODALAR, mesafeOdaKademeListesi, mesafeFarklariEkle } from './fiyatSema.js'; // YENİ: uzun yol kademeleri + ev tipi farkı // YENİ: km bazlı fiyat
 
 // ============================================================================
 // YENİ (kullanıcı talebi): ESNEK MÜŞTERİ — alternatif taşınma günleri
@@ -9337,15 +9337,13 @@ const ttMesafeUygula = (f, kalemler, uyarilar, odaK = '') => { // DEĞİŞTİ: o
   // DEĞİŞTİ (kullanıcı talebi): ev tipine göre km farkı burada EKLENMEZ — sıralama:
   //   1) mesafe · 2) geçiş ücretleri · 3) uzun yol farkı · 4) EN SON ev tipi farkı
   // (bkz. ttMesafeIscilikEkle). Ev tipi farkı uzun yol yüzdesinin tabanına girmez.
-  const odaFarki = odaK ? mesafeOdaFarkiKalemi(TT_MESAFE, f.rota, odaK) : null;
-  return { uygulandi: true, esikAsildi: mesafeEsikAsildi(TT_MESAFE, f.rota.toplamKm), odaFarki };
+  return { uygulandi: true, esikAsildi: mesafeEsikAsildi(TT_MESAFE, f.rota.toplamKm), odaK };
 };
 // Uzun yol farkı (kademe %) — tüm kalemler eklendikten SONRA (toplamın üzerine), ardından EN SON ev tipi farkı
+// DEĞİŞTİ: /api/mesafe-site ve WhatsApp botu ile ORTAK fonksiyon (fiyatSema.mesafeFarklariEkle)
 const ttMesafeIscilikEkle = (f, km, kalemler) => {
   if (!km.uygulandi) return;
-  const k = mesafeIscilikKalemi(TT_MESAFE, f.rota, kalemler);
-  if (k) kalemler.push(k);
-  if (km.odaFarki) kalemler.push(km.odaFarki); // DEĞİŞTİ (kullanıcı talebi): ev tipi farkı en son
+  mesafeFarklariEkle(TT_MESAFE, f.rota, kalemler, km.odaK);
 };
 
 const ttFiyatHesapla = (fHam) => {
@@ -13045,10 +13043,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                 { ad: `2+1 toplama (${listeAdi} sekmesinden)`, tutar: toplama },
                 ...mesafeKalemleri(M, { toplamKm, gecisler }),
               ];
-              const isc = mesafeIscilikKalemi(M, { toplamKm }, kalemler); // uzun yol farkı
-              if (isc) kalemler.push(isc);
-              const oda = mesafeOdaFarkiKalemi(M, { toplamKm }, '2+1'); // DEĞİŞTİ: ev tipi farkı EN SON
-              if (oda) kalemler.push(oda);
+              mesafeFarklariEkle(M, { toplamKm }, kalemler, '2+1'); // uzun yol farkı, EN SON ev tipi farkı (ortak fonksiyon)
               return { kalemler, toplam: kalemler.reduce((t, k) => t + k.tutar, 0) };
             };
             const ornekler = [

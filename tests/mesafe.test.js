@@ -1,7 +1,7 @@
 // tests/mesafe.test.js — Km bazlı fiyat (4 nokta / 3 etap) birim testleri
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { MESAFE_VARSAYILAN, mesafeKalemleri, mesafeIscilikKalemi, mesafeEsikAsildi, ilceMerkezAdresi, rotaGecisleriBul,
+import { MESAFE_VARSAYILAN, mesafeKalemleri, mesafeIscilikKalemi, mesafeFarklariEkle, mesafeEsikAsildi, ilceMerkezAdresi, rotaGecisleriBul,
   fiyatEksikleriDoldur, fiyatDogrula, fiyatTemizle, fiyatFarklari, mesafeModuAcik, mesafeAktifKademe, mesafeKademeListesi, mesafeOdaFarkiKalemi } from '../src/fiyatSema.js';
 
 const M = { ...MESAFE_VARSAYILAN, kmUcreti: 100, kademeler: [{ km: 200, yuzde: 15, ek: 0 }], gecis: { ...MESAFE_VARSAYILAN.gecis, kopruOsmangazi: 1500 } };
@@ -158,22 +158,23 @@ test('ekran örneği: 1.171,5 km · 4+1 · Osmangazi×2 + Anadolu Otoyolu×2 · 
   assert.equal(k.reduce((t, x) => t + x.tutar, 0), 102261);
 });
 
-// ---------------------------------------------------------------- EV TİPİ FARKI: SON TOPLAM ÜZERİNE (YENİ)
-test('ekran örneği 2: 851 km · 1+1 %5 → ev tipi farkı önceki son toplamın (62.798 ₺) %5\'i', () => {
-  const MS = { ...MESAFE_VARSAYILAN, kmUcreti: 15, kademeler: [{ km: 800, yuzde: 40, ek: 0 }],
-    gecis: { ...MESAFE_VARSAYILAN.gecis, kopruFsm: 333, kopruOsmangazi: 4805, otoyolAnadolu: 675, kopruYss: 270 },
-    odaKademeleri: [{ km: 800, yuzde: Y(0, 5, 0, 0, 0) }] };
-  const rota = { toplamKm: 851.3, gecisler: { kopruFsm: 2, kopruOsmangazi: 1, otoyolAnadolu: 2, kopruYss: 1 } };
-  const k = [{ ad: 'taban', tutar: 25000 }, ...mesafeKalemleri(MS, rota)];
-  k.push(mesafeIscilikKalemi(MS, rota, k));
-  assert.equal(k.reduce((t, x) => t + x.tutar, 0), 62798);       // ev tipinden önceki son toplam
-  k.push(mesafeOdaFarkiKalemi(MS, rota, '1+1', k));               // YENİ: kalemler verilir
-  assert.equal(k[k.length - 1].tutar, 3140);                      // 62.798 × %5 = 3.139,9 → 3.140
-  assert.equal(k.reduce((t, x) => t + x.tutar, 0), 65938);
+// ---------------------------------------------------------------- ORTAK SON ADIM (CRM = site = bot) — 2026-10-06 düzeltmesi
+// Ev tipi farkı YALNIZCA km tutarı üzerinden (CRM Hızlı Fiyat Hesapla ekranı referans)
+const MCRM = { ...MESAFE_VARSAYILAN, kmUcreti: 15, kademeler: [{ km: 200, yuzde: 10, ek: 0 }, { km: 3000, yuzde: 200, ek: 0 }],
+  gecis: { ...MESAFE_VARSAYILAN.gecis, kopruOsmangazi: 4805, otoyolAnadolu: 675 },
+  odaKademeleri: [{ km: 200, yuzde: Y(0, 0, 10, 0, 0) }, { km: 3000, yuzde: Y(0, 0, 110, 0, 0) }] };
+test('mesafeFarklariEkle — CRM örneği: Kadıköy → İnegöl 375,5 km · 2+1 · ara toplam 30.000 → 51.082', () => {
+  const rota = { toplamKm: 375.5, gecisler: { kopruOsmangazi: 2, otoyolAnadolu: 1 } };
+  const k = [{ ad: 'ara toplam', tutar: 30000 }, ...mesafeKalemleri(MCRM, rota)];
+  const { uzunYolFarki, odaFarki } = mesafeFarklariEkle(MCRM, rota, k, '2+1');
+  assert.deepEqual(k.map(x => x.tutar), [30000, 5640, 9610, 675, 4593, 564]);
+  assert.equal(uzunYolFarki.tutar, 4593); assert.equal(odaFarki.tutar, 564); // 5.640 × %10
+  assert.equal(k.reduce((t, x) => t + x.tutar, 0), 51082);
 });
-test('ev tipi farkı (son toplam): listede eski ev tipi kalemi varsa çift sayılmaz; toplam 0 ise kalem yok', () => {
-  const rota = { toplamKm: 1000 };
-  const k = [{ ad: 'taban', tutar: 40000 }, { ad: 'eski', tutar: 999, odaFarki: true }];
-  assert.equal(mesafeOdaFarkiKalemi(MO, rota, '3+1', k).tutar, 8000); // 40.000 × %20
-  assert.equal(mesafeOdaFarkiKalemi(MO, rota, '3+1', []), null);
+test('mesafeFarklariEkle — CRM örneği: Kağızman → Malkara 3.309,1 km · 2+1 · %200 / %110 → ev tipi 54.599', () => {
+  const k = [{ ad: 'ara toplam', tutar: 54500 }, ...mesafeKalemleri(MCRM, { toplamKm: 3309.1, gecisler: {} }), { ad: 'geçiş+ek', tutar: 1890 }];
+  mesafeFarklariEkle(MCRM, { toplamKm: 3309.1 }, k, '2+1');
+  assert.deepEqual(k.slice(-2).map(x => x.tutar), [212050, 54599]); // 49.635 × %110
+  assert.equal(k.reduce((t, x) => t + x.tutar, 0), 372674);
+  assert.equal(mesafeFarklariEkle(MCRM, { toplamKm: 3309.1 }, [], '').odaFarki, null); // oda yoksa ev tipi farkı yok
 });

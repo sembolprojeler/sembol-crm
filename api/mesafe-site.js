@@ -53,7 +53,7 @@
 import { createHash } from 'node:crypto';
 import { getDb, IstekHatasi, etapGetir as etapGetirVarsayilan, anahtarYap, adresKoordinati } from './mesafe.js';
 import { ilceMerkezAdresi, mesafeModuAcik, MESAFE_VARSAYILAN, fiyatEksikleriDoldur, FIYAT_ODALAR,
-  mesafeKalemleri, mesafeEsikAsildi, mesafeAktifKademe, mesafeIscilikKalemi, mesafeOdaFarkiKalemi } from '../src/fiyatSema.js';
+  mesafeKalemleri, mesafeEsikAsildi, mesafeAktifKademe, mesafeFarklariEkle } from '../src/fiyatSema.js';
 import { TURKEY_LOCATIONS, DEPO_LOCATIONS, IL_SIRASI, ONCELIKLI_ILLER } from '../src/konumlar.js';
 
 const SITE_ORIGINS = ['https://www.sembolevdeneve.com', 'https://sembolevdeneve.com', 'https://www.depoevim.com', 'https://depoevim.com'];
@@ -102,10 +102,8 @@ export const siteFiyatHesapla = (M, rota, { odaK, araToplam, avrupaEkstra = 0 })
   const esikAsildi = mesafeEsikAsildi(M, rota.toplamKm);
   const avrupaEkstraUygulandi = !esikAsildi && avrupaEkstra > 0;
   if (avrupaEkstraUygulandi) kalemler.push({ ad: 'Avrupa Yakası ekstra', tutar: Math.round(avrupaEkstra) });
-  const isc = mesafeIscilikKalemi(M, rota, kalemler);
-  if (isc) kalemler.push(isc);
-  const oda = mesafeOdaFarkiKalemi(M, rota, odaK, kalemler);
-  if (oda) kalemler.push(oda);
+  // DÜZELTME (2026-10-06): CRM Hızlı Fiyat Hesapla ile ORTAK fonksiyon — ev tipi farkı km tutarı üzerinden
+  const { uzunYolFarki: isc, odaFarki: oda } = mesafeFarklariEkle(M, rota, kalemler, odaK);
   const topla = (liste) => liste.reduce((t, k) => t + (Number(k.tutar) || 0), 0);
   return {
     tabanFiyat: topla(kalemler),

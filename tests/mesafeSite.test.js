@@ -133,28 +133,34 @@ test('DepoEvim: depoevim.com izinli; boşaltma = seçilen şube; tanınmayan şu
   assert.equal(res2.govde.sube, 'Pendik Depoevim');
 });
 
-test('sunucuda fiyat = CRM: ekran örneği 2 (851,3 km · 1+1 %5) → 65.938 ₺', () => {
-  const MS = fiyatEksikleriDoldur({ mesafe: { ...MESAFE_VARSAYILAN, modu: 1, kmUcreti: 15, kademeler: [{ km: 800, yuzde: 40, ek: 0 }],
-    gecis: { ...MESAFE_VARSAYILAN.gecis, kopruFsm: 333, kopruOsmangazi: 4805, otoyolAnadolu: 675, kopruYss: 270 },
-    odaKademeleri: [{ km: 800, yuzde: Y(0, 5, 0, 0, 0) }] } }).mesafe;
-  const rota = { toplamKm: 851.3, gecisler: { kopruFsm: 2, kopruOsmangazi: 1, otoyolAnadolu: 2, kopruYss: 1 } };
-  const f = siteFiyatHesapla(MS, rota, { odaK: '1+1', araToplam: 25000 });
-  assert.equal(f.tabanFiyat, 65938);
-  assert.equal(f.evTipiFarki, 3140);
-  assert.equal(f.kmTutari, 12765);
-  assert.equal(f.kademeKm, 800);
-  assert.equal(f.tabanFiyat, 25000 + f.kmTutari + f.gecisTutari + f.sabitEk + f.uzunYolFarki + f.evTipiFarki);
+// DÜZELTME 2026-10-06: sunucu CRM Hızlı Fiyat Hesapla ile aynı rakamı vermeli (ev tipi farkı = km tutarı × %)
+const MCRM = () => fiyatEksikleriDoldur({ mesafe: { ...MESAFE_VARSAYILAN, modu: 1, kmUcreti: 15,
+  kademeler: [{ km: 200, yuzde: 10, ek: 0 }, { km: 3000, yuzde: 200, ek: 0 }],
+  gecis: { ...MESAFE_VARSAYILAN.gecis, kopruOsmangazi: 4805, otoyolAnadolu: 675 },
+  odaKademeleri: [{ km: 200, yuzde: Y(0, 0, 10, 0, 0) }, { km: 3000, yuzde: Y(0, 0, 110, 0, 0) }] } }).mesafe;
+test('sunucuda fiyat = CRM: Kadıköy → İnegöl 375,5 km · 2+1 · 30.000 → 51.082', () => {
+  const f = siteFiyatHesapla(MCRM(), { toplamKm: 375.5, gecisler: { kopruOsmangazi: 2, otoyolAnadolu: 1 } }, { odaK: '2+1', araToplam: 30000 });
+  assert.equal(f.kmTutari, 5640); assert.equal(f.gecisTutari, 10285);
+  assert.equal(f.uzunYolFarki, 4593); assert.equal(f.evTipiFarki, 564);
+  assert.equal(f.tabanFiyat, 51082);
+});
+test('sunucuda fiyat = CRM: 3.309,1 km · 2+1 · %200 uzun yol · %110 ev tipi → ev tipi 54.599 (son toplama değil)', () => {
+  const f = siteFiyatHesapla(MCRM(), { toplamKm: 3309.1, gecisler: {} }, { odaK: '2+1', araToplam: 54500 });
+  assert.equal(f.kmTutari, 49635);
+  assert.equal(f.uzunYolFarki, (54500 + 49635) * 2);
+  assert.equal(f.evTipiFarki, 54599);
+  assert.equal(f.kademeKm, 3000);
+  assert.equal(f.tabanFiyat, 54500 + 49635 + f.uzunYolFarki + 54599);
 });
 
-test('Avrupa ekstrası: kademe aşılmadıysa eklenir (ev tipi farkına dahil), aşıldıysa eklenmez', () => {
+test('Avrupa ekstrası: kademe aşılmadıysa eklenir, aşıldıysa eklenmez; ev tipi farkı km tutarından', () => {
   const M = fiyatEksikleriDoldur({ mesafe: { modu: 1, kmUcreti: 10, kademeler: [{ km: 200, yuzde: 10, ek: 0 }], odaKademeleri: [{ km: 0, yuzde: Y(0, 0, 10, 0, 0) }] } }).mesafe;
   const kisa = siteFiyatHesapla(M, { toplamKm: 100, gecisler: {} }, { odaK: '2+1', araToplam: 20000, avrupaEkstra: 2000 });
   assert.equal(kisa.avrupaEkstraUygulandi, true);
-  assert.equal(kisa.tabanFiyat, Math.round((20000 + 1000 + 2000) * 1.1)); // km 1.000 · ev tipi %10 son toplama
+  assert.equal(kisa.tabanFiyat, 20000 + 1000 + 2000 + 100); // ev tipi %10 × km 1.000
   const uzun = siteFiyatHesapla(M, { toplamKm: 300, gecisler: {} }, { odaK: '2+1', araToplam: 20000, avrupaEkstra: 2000 });
   assert.equal(uzun.avrupaEkstraUygulandi, false);
-  const ara = Math.round((20000 + 3000) * 1.1); // uzun yol %10
-  assert.equal(uzun.tabanFiyat, ara + Math.round(ara * 0.1));
+  assert.equal(uzun.tabanFiyat, Math.round((20000 + 3000) * 1.1) + 300);
 });
 
 test('POST + hesap: fiyat cevapta; geçersiz odaK → 400', async () => {
