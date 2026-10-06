@@ -5,7 +5,10 @@ service cloud.firestore {
     // EKLENDİ: Fiyat belgesi ve fiyat geçmişi yalnızca sunucudan (/api/fiyatlar,
     // Admin SDK) yazılır. Admin SDK bu kurallara takılmaz, tarayıcılar takılır.
     function fiyatKorumali(yol) {
-      return string(yol).matches('.*artifacts/[^/]+/public/data/(ayarlar/fiyatTablosu|fiyat_gecmisi/[^/]+)');
+      return string(yol).matches('.*artifacts/[^/]+/public/data/(ayarlar/fiyatTablosu|fiyat_gecmisi/[^/]+)')
+        // YENİ: WhatsApp konuşmaları / mesajları ve WhatsApp durum (token uyarısı) belgeleri
+        // yalnızca sunucudan yazılır (api/whatsapp-webhook, api/whatsapp-send). CRM okur.
+        || string(yol).matches('.*artifacts/[^/]+/public/data/(whatsapp_conversations|whatsapp_durum)/.*');
     }
 
     match /{document=**} {
