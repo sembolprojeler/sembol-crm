@@ -27,7 +27,8 @@ export function getDb() {
 export const veriKoku = (db, appId = process.env.FIRESTORE_APP_ID) => db.collection('artifacts').doc(appId).collection('public').doc('data');
 export const konusmaRef = (db, waId, appId) => veriKoku(db, appId).collection('whatsapp_conversations').doc(String(waId));
 export const mesajlarRef = (db, waId, appId) => konusmaRef(db, waId, appId).collection('messages');
-export const durumRef = (db, appId) => veriKoku(db, appId).collection('whatsapp_durum').doc('token');
+// belge: 'token' (Meta token / kalıcı gönderim hatası) | 'ai' (yapay zeka yapılandırma hatası: anahtar, model, kredi)
+export const durumRef = (db, appId, belge = 'token') => veriKoku(db, appId).collection('whatsapp_durum').doc(belge);
 export const havuzRef = (db, id, appId) => veriKoku(db, appId).collection('havuzKayitlari').doc(String(id));
 
 // "905321234567" → "9053****4567" (loglar için)
@@ -83,6 +84,20 @@ export async function uyariYaz(db, hata, nowIso = new Date().toISOString(), appI
 // Başarılı gönderimden sonra bant kalkar (yalnızca aktifse yazılır)
 export async function uyariTemizle(db, nowIso = new Date().toISOString(), appId) {
   const ref = durumRef(db, appId);
+  const s = await ref.get();
+  if (s.exists && s.data()?.aktif) await ref.set({ aktif: false, cozuldu: nowIso }, { merge: true });
+}
+
+// YENİ (2026-10-07): yapay zeka yapılandırma hatası (anahtar yok / 400-404 / kredi bitti) — yöneticiye bant.
+// Konuşma KİLİTLENMEZ; bot sonraki mesajda yeniden dener.
+export async function aiUyariYaz(db, hata, nowIso = new Date().toISOString(), appId) {
+  await durumRef(db, appId, 'ai').set({
+    aktif: true, tur: 'ai', mesaj: 'Yapay zeka cevap veremiyor (anahtar / model / kredi) — bot müşterilere sabit mesaj gönderiyor',
+    durum: hata?.durum ?? null, metaMesaj: String(hata?.hata || '').slice(0, 300), tarih: nowIso,
+  }, { merge: true });
+}
+export async function aiUyariTemizle(db, nowIso = new Date().toISOString(), appId) {
+  const ref = durumRef(db, appId, 'ai');
   const s = await ref.get();
   if (s.exists && s.data()?.aktif) await ref.set({ aktif: false, cozuldu: nowIso }, { merge: true });
 }

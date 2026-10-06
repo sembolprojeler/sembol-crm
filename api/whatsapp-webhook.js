@@ -15,7 +15,8 @@
 //      lead kaydı (api/_lib/lead.js — sihirbazla aynı biçim), devretme (mode: human)
 //   6) statuses → giden mesajın durumu (sent / delivered / read / failed)
 //   7) Meta 190 / OAuthException ya da kalıcı hata → whatsapp_durum/token uyarısı
-//      (CRM'de yöneticilere kırmızı bant)
+//      (CRM'de yöneticilere kırmızı bant); yapay zeka yapılandırma hatası → whatsapp_durum/ai
+//   8) Yapay zeka hatası konuşmayı KİLİTLEMEZ: sabit mesaj (30 dk'da bir), sonraki mesajda yeniden dener
 //
 // ORTAM DEĞİŞKENLERİ (Vercel, VITE_ öneki YOK):
 //   WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID
@@ -28,14 +29,25 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { waitUntil } from '@vercel/functions';
-import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, gelenMesajiCoz, metaHatasiCoz } from './_lib/whatsapp.js';
+import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, aiUyariYaz, aiUyariTemizle, gelenMesajiCoz, metaHatasiCoz } from './_lib/whatsapp.js';
 import { botCevabiUret } from './_lib/ai.js';
-import { sistemTalimati, kvkkMetni, fiyatRakamlariGecerliMi } from './_lib/botTalimatlari.js';
+import { sistemTalimati, girisMetni, kvkkEkMetni, asistanAdi, fiyatRakamlariGecerliMi } from './_lib/botTalimatlari.js';
 import { botFiyatHesapla, leadFiyati } from './_lib/fiyatHesap.js';
 import { whatsappLeadKaydi, whatsappAlanlariniTemizle, refKoduBul, refKoduTemizle, refBelgeId, leadAcikMi, waTelefonCrm } from './_lib/lead.js';
 
 export const YEDEK_MESAJ = 'Mesajınızı aldık, ekibimiz en kısa sürede dönüş yapacak.';
 const KILIT_SURESI_MS = 90000;
+// Yapay zeka art arda hata verirse müşteriye sabit mesaj en fazla 30 dakikada bir gider
+const YEDEK_ARALIGI_MS = 30 * 60 * 1000;
+// Eski kod (2026-10-06) yapay zeka hatasında konuşmayı bu sebeple personele devrediyordu
+const ESKI_AI_DEVIR_SEBEBI = /yapay zeka/i;
+
+// Hangi markaların aydınlatma linki gönderildi? Eski konuşmalar: kvkkVerildi → eski nötr
+// metin yalnızca Sembol linkini gönderiyordu.
+export function kvkkGonderilenOku(k = {}) {
+  if (k.kvkkGonderilen && typeof k.kvkkGonderilen === 'object') return { ...k.kvkkGonderilen };
+  return k.kvkkVerildi ? { sembol: k.kvkkAydinlatmaTarihi || true } : {};
+}
 const DURUM_SIRASI = { sent: 1, delivered: 2, read: 3 };
 
 // ------------------------------------------------------------------ İMZA
@@ -130,7 +142,8 @@ export function handlerOlustur({
     const snap = await mesajlarRef(db, waId, appId).orderBy('timestamp', 'desc').limit(20).get();
     const mesajlar = snap.docs.map(d => d.data()).reverse();
     const gecmis = mesajlar.map(d => ({ rol: d.from === 'customer' ? 'musteri' : 'asistan', metin: d.text || '' }));
-    const ilkCevap = !konusma.kvkkVerildi;
+    const kvkkGonderilen = kvkkGonderilenOku(konusma);
+    const ilkCevap = !Object.keys(kvkkGonderilen).length;
     const collected = konusma.collected || {};
     let marka = konusma.marka || '';
     let intent = konusma.intent || '';
@@ -140,9 +153,19 @@ export function handlerOlustur({
     let reply, handoff, handoffReason, yeniCollected = collected, fiyat = fiyatOnce, aiHata = null;
     const r1 = await aiUret({ sistem: talimat(marka, collected, fiyatOnce), gecmis, env, fetchFn });
     if (!r1.ok) {
+      // DEĞİŞTİ (2026-10-07): yapay zeka hatası konuşmayı KİLİTLEMEZ (personele devretmez);
+      // müşterinin sonraki mesajında bot yeniden dener. Sabit mesaj 30 dakikada en fazla bir kez.
       aiHata = r1.hata;
-      reply = YEDEK_MESAJ; handoff = true; handoffReason = 'Yapay zeka hatası';
+      const hataAni = iso();
+      console.error('[whatsapp] yapay zeka hatası:', maskele(waId), r1.tur, r1.hata);
+      if (r1.tur === 'yapilandirma') await aiUyariYaz(db, r1, hataAni, appId);
+      if (simdi() - (Date.parse(konusma.sonYedekMesaj || '') || 0) < YEDEK_ARALIGI_MS) {
+        await kRef.set({ botHatasi: { zaman: hataAni, sebep: String(r1.hata || '').slice(0, 300), tur: r1.tur || 'gecici' } }, { merge: true });
+        return;
+      }
+      reply = YEDEK_MESAJ; handoff = false; handoffReason = '';
     } else {
+      await aiUyariTemizle(db, iso(), appId);
       let out = r1.cikti;
       marka = out.marka || marka;
       intent = out.intent && out.intent !== 'diger' ? out.intent : (intent || out.intent);
@@ -169,14 +192,18 @@ export function handlerOlustur({
         handoff = true; handoffReason = fiyat.durum === 'hata' ? 'Fiyat hesaplanamadı' : 'Otomatik fiyatı olmayan hizmet';
       }
     }
-    if (ilkCevap) reply = `${kvkkMetni(marka)}\n\n${reply}`;
+    // KVKK: ilk cevapta tanıtım + aydınlatma linki (marka belli değilse iki marka birden);
+    // marka sonradan belli olduysa ve linki gitmediyse kişisel bilgi istemeden önce BİR KEZ
+    let kvkkYeni = [];
+    if (ilkCevap) { const gm = girisMetni(marka); reply = `${gm.metin}\n\n${reply}`; kvkkYeni = gm.markalar; }
+    else if (marka && !kvkkGonderilen[marka]) { reply = `${kvkkEkMetni(marka)}\n\n${reply}`; kvkkYeni = [marka]; }
 
     // Gönder
     const g = await waMetinGonder({ env, fetchFn, to: waId, metin: reply });
     const nowIso = iso();
     const cikanId = g.wamid || `yerel_${simdi()}`;
     await mesajlarRef(db, waId, appId).doc(cikanId).set({
-      direction: 'out', from: 'bot', agentName: 'SEMBO Asistan', type: 'text', text: reply, timestamp: nowIso, wamid: g.wamid || null,
+      direction: 'out', from: 'bot', agentName: asistanAdi(marka), type: 'text', text: reply, timestamp: nowIso, wamid: g.wamid || null,
       status: g.ok ? 'sent' : 'failed', ...(g.ok ? {} : { hata: { kod: g.hata.kod ?? null, mesaj: g.hata.mesaj || '' } }),
       ...(aiHata ? { aiHata: String(aiHata).slice(0, 300) } : {}),
     });
@@ -184,7 +211,6 @@ export function handlerOlustur({
       console.error('[whatsapp] gönderilemedi', maskele(waId), g.hata.kod, g.hata.mesaj);
       if (g.hata.kalici) await uyariYaz(db, g.hata, nowIso, appId);
     } else await uyariTemizle(db, nowIso, appId);
-    if (aiHata) console.error('[whatsapp] yapay zeka hatası, yedek mesaj gönderildi:', maskele(waId), aiHata);
 
     // Lead: ilk anlamlı bilgi geldiyse (ya da devredildiyse) oluştur / güncelle
     let leadId = konusma.leadId || null;
@@ -197,11 +223,42 @@ export function handlerOlustur({
     await kRef.set({
       collected: yeniCollected, marka, intent, leadId,
       ...(leadId && konusma.refKodu && leadId === refBelgeId(konusma.refKodu) ? { refKullanildi: true } : {}),
-      ...(g.ok && ilkCevap ? { kvkkVerildi: true, kvkkAydinlatmaTarihi: nowIso } : {}),
+      ...(g.ok && kvkkYeni.length ? {
+        kvkkVerildi: true, kvkkGonderilen: { ...kvkkGonderilen, ...Object.fromEntries(kvkkYeni.map(m => [m, nowIso])) },
+        ...(ilkCevap ? { kvkkAydinlatmaTarihi: nowIso } : {}),
+      } : {}),
+      ...(aiHata ? { botHatasi: { zaman: nowIso, sebep: String(aiHata).slice(0, 300), tur: r1.tur || 'gecici' }, ...(g.ok ? { sonYedekMesaj: nowIso } : {}) } : { botHatasi: null }),
       lastMessageAt: nowIso, lastMessagePreview: reply.slice(0, 120), lastBotAt: nowIso,
       ...(fiyat?.durum === 'tamam' ? { sonFiyat: fiyat } : {}),
       ...(handoff ? { mode: 'human', needsAgent: true, handoffReason: handoffReason || '', handoffAt: nowIso } : {}),
     }, { merge: true });
+  }
+
+  // ---- YENİ (2026-10-07): yapay zeka hatası yüzünden personele geçmiş, personelin henüz cevap
+  // yazmadığı konuşma müşterinin yeni mesajında bota döner. Eski kodun yazdığı işaretler:
+  // handoffReason "Yapay zeka hatası" ya da (sebep boşsa) devirdeki bot mesajında aiHata alanı.
+  // Gerçek devretmeler (temsilci isteği, şikayet, ofis …) ve personelin yazdığı konuşmalar AÇILMAZ.
+  async function aiKilidiniAc(db, waId, k) {
+    const devir = k.handoffAt || '';
+    const sebepAi = ESKI_AI_DEVIR_SEBEBI.test(k.handoffReason || '');
+    const mesajlar = (await mesajlarRef(db, waId, appId).orderBy('timestamp', 'desc').limit(50).get()).docs.map(d => d.data());
+    if (mesajlar.some(m => m.from === 'agent' && (!devir || String(m.timestamp) >= devir))) return k;
+    const devirMesaji = mesajlar.find(m => m.from === 'bot' && (!devir || String(m.timestamp) <= devir));
+    if (!sebepAi && !(!k.handoffReason && devirMesaji?.aiHata)) return k;
+    const nowIso = iso();
+    await konusmaRef(db, waId, appId).set({
+      mode: 'bot', needsAgent: false, handoffReason: '', aiKilidiAcildi: nowIso,
+      botHatasi: { zaman: nowIso, sebep: 'Önceki yapay zeka hatası — konuşma bota geri döndü', tur: 'gecici' },
+    }, { merge: true });
+    if (k.leadId) {
+      try {
+        const lRef = havuzRef(db, k.leadId, appId);
+        const l = await lRef.get();
+        if (l.exists) await lRef.set({ hareketler: [...(l.data()?.hareketler || []), { tarih: nowIso, kullanici: 'WhatsApp Bot', islem: 'Bot görüşmeye geri döndü (önceki devir yapay zeka hatasından)' }] }, { merge: true });
+      } catch (err) { console.error('[whatsapp] lead hareketi yazılamadı', maskele(waId), err?.message); }
+    }
+    console.log('[whatsapp] yapay zeka kilidi açıldı', maskele(waId));
+    return { ...k, mode: 'bot', needsAgent: false, handoffReason: '' };
   }
 
   // ---- gelen müşteri mesajı
@@ -227,7 +284,7 @@ export function handlerOlustur({
 
     // 2) Konuşma özeti (okunmamış sayısı, son mesaj, ref → marka)
     const kRef = konusmaRef(db, waId, appId);
-    const konusma = await db.runTransaction(async (t) => {
+    let konusma = await db.runTransaction(async (t) => {
       const s = await t.get(kRef);
       const k = s.exists ? s.data() : {};
       const yeni = {
@@ -242,6 +299,7 @@ export function handlerOlustur({
       t.set(kRef, yeni, { merge: true });
       return { ...k, ...yeni };
     });
+    if (c.botaGitsin && konusma.mode === 'human') konusma = await aiKilidiniAc(db, waId, konusma);
     if (!c.botaGitsin || konusma.mode === 'human' || env.WHATSAPP_BOT_KAPALI === '1') return;
 
     // 3) Peş peşe mesaj: kısa bekleme; bu arada yeni mesaj geldiyse cevabı o verir

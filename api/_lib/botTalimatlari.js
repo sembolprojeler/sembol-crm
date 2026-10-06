@@ -13,25 +13,39 @@
 export const MARKALAR = {
   sembol: {
     ad: 'Sembol Nakliyat',
+    asistan: 'SEMBO Asistan',
+    iyelik: "Sembol Nakliyat'ın",
     site: 'sembolevdeneve.com',
     aydinlatma: 'https://www.sembolevdeneve.com/aydinlatma-metni/',
     telefon: '0216 390 89 99',
   },
   depoevim: {
     ad: 'DepoEvim',
+    asistan: 'DepoEvim Asistanı',
+    iyelik: "DepoEvim'in",
     site: 'depoevim.com',
-    aydinlatma: 'https://www.depoevim.com/aydinlatma-metni',
+    aydinlatma: 'https://www.depoevim.com/aydinlatma-metni/',
     telefon: '0545 240 84 61',
   },
 };
 
-// İlk bot cevabının başına sunucu ekler (marka belli değilse genel metin)
-export function kvkkMetni(marka) {
+// DEĞİŞTİ (2026-10-07): numara iki markada ortak — marka belli değilken NÖTR tanıtım + İKİ aydınlatma linki.
+export const asistanAdi = (marka) => MARKALAR[marka]?.asistan || 'Sembol Nakliyat / DepoEvim Asistanı';
+// İlk bot cevabının başına sunucu ekler. Döner: { metin, markalar: [linki gönderilen markalar] }
+export function girisMetni(marka) {
   const m = MARKALAR[marka];
-  const link = m ? m.aydinlatma : MARKALAR.sembol.aydinlatma;
-  return `Merhaba, ben SEMBO Asistan — ${m ? m.ad : 'Sembol Nakliyat / DepoEvim'} dijital asistanıyım (yapay zeka). `
-    + `Talebinizi değerlendirmek için paylaştığınız bilgiler KVKK kapsamında işlenir: ${link}`;
+  if (m) {
+    return { metin: `Merhaba, ben ${m.asistan}, ${m.iyelik} dijital asistanıyım (yapay zeka). `
+      + `Talebinizi değerlendirmek için paylaştığınız bilgiler KVKK kapsamında işlenir: ${m.aydinlatma}`, markalar: [marka] };
+  }
+  return { metin: `Merhaba, ben Sembol Nakliyat ve DepoEvim'in dijital asistanıyım (yapay zeka). `
+    + `Talebinizi değerlendirmek için paylaştığınız bilgiler KVKK kapsamında işlenir — Sembol Nakliyat: ${MARKALAR.sembol.aydinlatma} · DepoEvim: ${MARKALAR.depoevim.aydinlatma}`,
+  markalar: ['sembol', 'depoevim'] };
 }
+// Marka sonradan belli olduysa ve o markanın linki daha önce gitmediyse cevabın başına BİR KEZ eklenir
+export const kvkkEkMetni = (marka) => `Bilgilendirme: ${MARKALAR[marka].ad} olarak paylaştığınız bilgiler KVKK kapsamında işlenir: ${MARKALAR[marka].aydinlatma}`;
+// Geriye uyumluluk (eski çağrılar): yalnızca metin
+export const kvkkMetni = (marka) => girisMetni(marka).metin;
 
 // --------------------------------------------------------------- MESAİ
 // Hafta içi 09:00–18:00 (Europe/Istanbul). Cumartesi: WHATSAPP_CUMARTESI="09:00-14:00" (boş = kapalı)
@@ -107,8 +121,8 @@ TOPLANACAK ALANLAR (collected içinde TAM bu anahtar ve değerlerle yaz; bilmedi
 Kira fiyatı için: depoBoyutu, kiralamaSuresi, sube, teslimSekli. Alım ücreti için ayrıca alım adresi bilgileri.`;
 
 // --------------------------------------------------------------- ANA TALİMAT
-const ORTAK_KURALLAR = `
-SEN: "SEMBO Asistan" — Sembol Nakliyat ve DepoEvim'in WhatsApp dijital asistanı. Yapay zeka olduğunu gizleme.
+const ORTAK_KURALLAR_SABLON = `
+__KIMLIK__
 ÜSLUP: Türkçe, kısa, sıcak ama kurumsal. WhatsApp'a uygun kısa mesajlar; uzun paragraf yok. HER MESAJDA TEK SORU sor; form gibi hepsini birden sorma. Müşteriye "siz" diye hitap et.
 
 ASLA:
@@ -144,6 +158,14 @@ Marka belli olunca "marka" alanına yaz ve o markanın bilgileriyle devam et.
 ${SEMBOL_BILGI}
 ${DEPOEVIM_BILGI}`;
 
+// Kimlik markaya göre: belirsizken isimsiz nötr asistan, Sembol'de SEMBO Asistan, DepoEvim'de DepoEvim Asistanı
+const KIMLIK = {
+  sembol: `SEN: "SEMBO Asistan" — Sembol Nakliyat'ın WhatsApp dijital asistanı. Yapay zeka olduğunu gizleme.`,
+  depoevim: `SEN: "DepoEvim Asistanı" — DepoEvim'in WhatsApp dijital asistanı (Sembol Nakliyat güvencesi). Yapay zeka olduğunu gizleme.`,
+  '': `SEN: Sembol Nakliyat ve DepoEvim'in ortak WhatsApp dijital asistanı. Marka belli olana kadar kendine özel bir isim verme. Yapay zeka olduğunu gizleme.`,
+};
+const ortakKurallar = (marka) => ORTAK_KURALLAR_SABLON.replace('__KIMLIK__', KIMLIK[marka] || KIMLIK['']);
+
 // Konuşmaya özel bağlam bloğu (her çağrıda yeniden üretilir)
 function fiyatBlogu(fiyat) {
   if (!fiyat) return 'SİSTEM FİYATI: henüz hesaplanmadı (bilgiler eksik). Fiyat söyleme.';
@@ -169,7 +191,7 @@ export function sistemTalimati({ marka = '', collected = {}, fiyat = null, profi
     : marka === 'sembol' ? `MARKA: Sembol Nakliyat\n${SEMBOL_BILGI}\n${SEMBOL_ALANLAR}`
       : `${MARKA_SECIMI}\n${SEMBOL_ALANLAR}\n${DEPOEVIM_ALANLAR}`;
   return [
-    ORTAK_KURALLAR,
+    ortakKurallar(marka),
     markaBlogu,
     '--- KONUŞMA BAĞLAMI ---',
     `ŞU AN: ${z.metin} (Europe/Istanbul) — ${mesai ? 'mesai içi' : 'MESAİ DIŞI: bilgi toplamaya devam et; devredersen ekibin mesai saatinde döneceğini söyle'}.`,
@@ -177,7 +199,7 @@ export function sistemTalimati({ marka = '', collected = {}, fiyat = null, profi
     profilAdi ? `WHATSAPP PROFİL ADI: ${String(profilAdi).slice(0, 60)} (ad soyadı teyit etmeden fullName yazma)` : 'WHATSAPP PROFİL ADI: yok',
     `ŞU ANA KADAR TOPLANAN: ${JSON.stringify(collected)}`,
     fiyatBlogu(fiyat),
-    ilkCevap ? 'Bu, müşteriye ilk cevabın: KVKK bilgilendirmesi ve selam sistem tarafından başa eklenecek; sen tekrar selam verme, doğrudan konuya gir.' : '',
+    ilkCevap ? `Bu, müşteriye ilk cevabın: tanıtım, selam ve KVKK bilgilendirmesi sistem tarafından başa eklenecek; sen tekrar selam verme ve kendini tanıtma, doğrudan konuya gir.${marka ? '' : ' Marka belli değilse ilk sorun: evden eve taşınma mı, eşya depolama / depo kiralama mı?'}` : '',
   ].filter(Boolean).join('\n');
 }
 

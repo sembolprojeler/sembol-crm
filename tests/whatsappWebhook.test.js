@@ -13,6 +13,7 @@ const ENV = { WHATSAPP_APP_SECRET: SECRET, WHATSAPP_VERIFY_TOKEN: 'dogrula', WHA
   FIRESTORE_APP_ID: 'test-app', GEMINI_API_KEY: 'k', WHATSAPP_BIRLESTIRME_MS: '0' };
 const WA = '905321234567';
 
+let SAAT = Date.parse('2026-10-06T08:00:00Z');
 function ortam({ aiCevaplari = [], metaHata = null, fiyat = null, env = {}, db = sahteDb(), bekle } = {}) {
   const gonderilen = [], aiCagrilari = [], arka = [];
   const fetchFn = async (url, ops) => {
@@ -30,7 +31,7 @@ function ortam({ aiCevaplari = [], metaHata = null, fiyat = null, env = {}, db =
   };
   const fiyatHesapla = async (a) => (typeof fiyat === 'function' ? fiyat(a) : fiyat);
   const handler = handlerOlustur({ getDb: () => db, waitUntil: (p) => arka.push(p), fetchFn, env: { ...ENV, ...env }, aiUret, fiyatHesapla,
-    bekle: bekle || (async () => {}), simdi: () => Date.parse('2026-10-06T08:00:00Z') });
+    bekle: bekle || (async () => {}), simdi: () => SAAT });
   return { db, handler, gonderilen, aiCagrilari, bitir: async () => { while (arka.length) await arka.shift(); } };
 }
 const tamam = (o) => ({ ok: true, cikti: { reply: 'Kaç odalı bir ev taşınacak?', collected: {}, handoff: false, handoffReason: '', intent: 'evden_eve', marka: '', ...o } });
@@ -82,17 +83,21 @@ test('ilk mesaj: 200, bot cevabı KVKK ile başlar, konuşma ve mesajlar kaydedi
   assert.equal(res.kod, 200);
   assert.equal(o.gonderilen.length, 1);
   assert.equal(o.gonderilen[0].to, WA);
-  assert.match(o.gonderilen[0].text.body, /^Merhaba, ben SEMBO Asistan/);
-  assert.match(o.gonderilen[0].text.body, /aydinlatma-metni/);
+  // Marka belli değil: nötr tanıtım + İKİ aydınlatma linki
+  assert.match(o.gonderilen[0].text.body, /^Merhaba, ben Sembol Nakliyat ve DepoEvim'in dijital asistanıyım/);
+  assert.doesNotMatch(o.gonderilen[0].text.body, /SEMBO Asistan/);
+  assert.match(o.gonderilen[0].text.body, /sembolevdeneve\.com\/aydinlatma-metni\//);
+  assert.match(o.gonderilen[0].text.body, /depoevim\.com\/aydinlatma-metni\//);
   assert.match(o.gonderilen[0].text.body, /Kaç odalı/);
   const k = konusma(o.db);
   assert.equal(k.profileName, 'Ayşe'); assert.equal(k.phone, '0532 123 45 67'); assert.equal(k.mode, 'bot');
   assert.equal(k.kvkkVerildi, true); assert.equal(k.botKilit, null); assert.equal(k.unreadCount, 1);
+  assert.deepEqual(Object.keys(k.kvkkGonderilen).sort(), ['depoevim', 'sembol']);
   const m = mesajlar(o.db);
   assert.deepEqual(m.map(x => x.from).sort(), ['bot', 'customer']);
   // İkinci mesajda KVKK tekrar edilmez
   await gonder(o, olay({ messages: [mesaj('w2', '2+1')] }));
-  assert.doesNotMatch(o.gonderilen[1].text.body, /SEMBO Asistan/);
+  assert.doesNotMatch(o.gonderilen[1].text.body, /aydinlatma/);
 });
 
 test('tekrar koruması: aynı wamid ikinci kez gelirse bot ikinci kez cevap vermez', async () => {
@@ -169,12 +174,119 @@ test('devretme: mode human olur, sonraki mesajlarda bot susar; lead\'e hareket y
   assert.equal(konusma(o.db).unreadCount, 2);
 });
 
-test('yapay zeka hatası: sabit mesaj gönderilir ve personele devredilir', async () => {
-  const o = ortam({ aiCevaplari: [{ ok: false, hata: 'Geçersiz yapay zeka çıktısı' }] });
+// ---------------------------------------------------------------- YAPAY ZEKA HATASI (2026-10-07: kilitlemez)
+const hataAi = (tur = 'gecici', durum = 429) => ({ ok: false, tur, durum, hata: `Gemini HTTP ${durum}` });
+const kok = (db) => db.collection('artifacts').doc('test-app').collection('public').doc('data');
+const konusmaKur = (db, veri) => kok(db).collection('whatsapp_conversations').doc(WA).set(veri);
+const mesajKur = (db, id, veri) => kok(db).collection('whatsapp_conversations').doc(WA).collection('messages').doc(id).set(veri);
+const yedekDeseni = new RegExp(YEDEK_MESAJ.replace('.', '\\.'));
+
+test('yapay zeka hatası: sabit mesaj gider, konuşma bot modunda kalır, sonraki mesajda bot cevap verir', async () => {
+  SAAT = Date.parse('2026-10-06T08:00:00Z');
+  const o = ortam({ aiCevaplari: [hataAi('yapilandirma', 402), tamam({ reply: 'Kaç oda?' })] });
   await gonder(o, olay({ messages: [mesaj('w1', 'merhaba')] }));
-  assert.match(o.gonderilen[0].text.body, new RegExp(YEDEK_MESAJ.replace('.', '\\.')));
-  const k = konusma(o.db);
-  assert.equal(k.mode, 'human'); assert.equal(k.handoffReason, 'Yapay zeka hatası');
+  assert.match(o.gonderilen[0].text.body, yedekDeseni);
+  let k = konusma(o.db);
+  assert.equal(k.mode, 'bot'); assert.equal(k.needsAgent, false);
+  assert.equal(k.botHatasi.tur, 'yapilandirma');
+  assert.equal(o.db.belge('whatsapp_durum/ai').aktif, true);   // yöneticiye uyarı (kredi bitti)
+  SAAT += 60000;
+  await gonder(o, olay({ messages: [mesaj('w2', 'fiyat alabilir miyim')] }));
+  assert.equal(o.gonderilen.length, 2);
+  assert.equal(o.gonderilen[1].text.body, 'Kaç oda?');
+  k = konusma(o.db);
+  assert.equal(k.botHatasi, null);
+  assert.equal(o.db.belge('whatsapp_durum/ai').aktif, false);
+});
+
+test('yapay zeka art arda hata: sabit mesaj 30 dakikada bir kez, her mesajda yeniden denenir', async () => {
+  SAAT = Date.parse('2026-10-06T08:00:00Z');
+  const o = ortam({ aiCevaplari: [hataAi()] });
+  await gonder(o, olay({ messages: [mesaj('w1', 'merhaba')] }));
+  SAAT += 10 * 60000;
+  await gonder(o, olay({ messages: [mesaj('w2', 'orada mısınız')] }));
+  assert.equal(o.gonderilen.length, 1);                      // 10. dakikada sessiz
+  assert.equal(konusma(o.db).botHatasi.tur, 'gecici');
+  SAAT += 25 * 60000;
+  await gonder(o, olay({ messages: [mesaj('w3', 'alo')] }));
+  assert.equal(o.gonderilen.length, 2);                      // 35. dakikada tekrar
+  assert.equal(o.aiCagrilari.length, 3);
+  assert.equal(konusma(o.db).mode, 'bot');
+});
+
+test('eski kilit: "Yapay zeka hatası" ile devredilmiş, personel yazmamış konuşma yeni mesajda bota döner', async () => {
+  SAAT = Date.parse('2026-10-07T08:00:00Z');
+  const db = sahteDb();
+  const devir = '2026-10-06T19:00:00.000Z';
+  // Eski kodun (2026-10-06, 755062e) yazdığı alanların birebir aynısı
+  await konusmaKur(db, { waId: WA, mode: 'human', needsAgent: true, handoffReason: 'Yapay zeka hatası', handoffAt: devir,
+    kvkkVerildi: true, kvkkAydinlatmaTarihi: devir, leadId: 'L1', collected: {}, unreadCount: 1, lastCustomerWamid: 'eski1' });
+  await mesajKur(db, 'eski1', { direction: 'in', from: 'customer', type: 'text', text: 'merhaba', timestamp: '2026-10-06T18:59:50.000Z' });
+  await mesajKur(db, 'wamid.eskibot', { direction: 'out', from: 'bot', agentName: 'SEMBO Asistan', type: 'text', text: YEDEK_MESAJ, timestamp: devir, status: 'sent', aiHata: 'Gemini HTTP 402: prepayment credits are depleted' });
+  await kok(db).collection('havuzKayitlari').doc('L1').set({ durum: 'Yeni', hareketler: [{ islem: 'Bot görüşmeyi personele devretti: Yapay zeka hatası' }] });
+  const o = ortam({ db, aiCevaplari: [tamam({ reply: 'Kaç odalı bir ev?' })] });
+  await gonder(o, olay({ messages: [mesaj('wYeni', 'evden eve fiyat istiyorum')] }));
+  assert.equal(o.aiCagrilari.length, 1);
+  assert.equal(o.gonderilen[0].text.body, 'Kaç odalı bir ev?');   // eski KVKK (Sembol) gitmiş sayılır; marka yok → ek yok
+  const k = konusma(db);
+  assert.equal(k.mode, 'bot'); assert.equal(k.needsAgent, false); assert.equal(k.handoffReason, '');
+  assert.ok(k.aiKilidiAcildi);
+  assert.match(db.havuz('L1').hareketler.at(-1).islem, /Bot görüşmeye geri döndü/);
+});
+
+test('eski kilit: sebep boş ama devirdeki bot mesajında aiHata varsa da açılır', async () => {
+  const db = sahteDb();
+  const devir = '2026-10-06T19:00:00.000Z';
+  await konusmaKur(db, { waId: WA, mode: 'human', needsAgent: true, handoffAt: devir, kvkkVerildi: true, collected: {} });
+  await mesajKur(db, 'wamid.b', { from: 'bot', text: YEDEK_MESAJ, timestamp: devir, aiHata: 'Gemini HTTP 404' });
+  const o = ortam({ db, aiCevaplari: [tamam()] });
+  await gonder(o, olay({ messages: [mesaj('w1', 'merhaba')] }));
+  assert.equal(konusma(db).mode, 'bot');
+  assert.equal(o.gonderilen.length, 1);
+});
+
+test('gerçek devretme ve personelin cevap yazdığı konuşma AÇILMAZ', async () => {
+  const devir = '2026-10-06T19:00:00.000Z';
+  const db1 = sahteDb();
+  await konusmaKur(db1, { waId: WA, mode: 'human', needsAgent: true, handoffReason: 'Temsilci istedi', handoffAt: devir, kvkkVerildi: true });
+  const o1 = ortam({ db: db1, aiCevaplari: [tamam()] });
+  await gonder(o1, olay({ messages: [mesaj('w1', 'merhaba')] }));
+  assert.equal(konusma(db1).mode, 'human'); assert.equal(o1.aiCagrilari.length, 0);
+  const db2 = sahteDb();
+  await konusmaKur(db2, { waId: WA, mode: 'human', needsAgent: true, handoffReason: 'Yapay zeka hatası', handoffAt: devir, kvkkVerildi: true });
+  await mesajKur(db2, 'wamid.p', { from: 'agent', agentName: 'Ayşe', text: 'Merhaba, ben Ayşe', timestamp: '2026-10-06T19:30:00.000Z' });
+  const o2 = ortam({ db: db2, aiCevaplari: [tamam()] });
+  await gonder(o2, olay({ messages: [mesaj('w1', 'tamam')] }));
+  assert.equal(konusma(db2).mode, 'human'); assert.equal(o2.aiCagrilari.length, 0);
+});
+
+// ---------------------------------------------------------------- MARKA / KVKK (2026-10-07)
+test('ref ile DepoEvim belli: DepoEvim Asistanı tanıtımı + yalnızca DepoEvim linki', async () => {
+  const o = ortam({ aiCevaplari: [tamam({ marka: 'depoevim', intent: 'depolama', reply: 'Hangi depo boyutunu düşünüyorsunuz?' })] });
+  await gonder(o, olay({ messages: [mesaj('w1', 'Depo fiyatı (Ref: DE-AB12C)')] }));
+  const b = o.gonderilen[0].text.body;
+  assert.match(b, /^Merhaba, ben DepoEvim Asistanı, DepoEvim'in dijital asistanıyım/);
+  assert.match(b, /https:\/\/www\.depoevim\.com\/aydinlatma-metni\//);
+  assert.doesNotMatch(b, /sembolevdeneve/);
+  assert.match(o.aiCagrilari[0].sistem, /SEN: "DepoEvim Asistanı"/);
+  assert.deepEqual(Object.keys(konusma(o.db).kvkkGonderilen), ['depoevim']);
+  assert.equal(mesajlar(o.db).find(m => m.from === 'bot').agentName, 'DepoEvim Asistanı');
+});
+
+test('marka sonradan değişirse yeni markanın linki bir kez eklenir', async () => {
+  const o = ortam({ aiCevaplari: [
+    tamam({ marka: 'sembol', reply: 'Kaç odalı?' }),
+    tamam({ marka: 'depoevim', intent: 'depolama', reply: 'Eşyalarınızı hangi şubemizde depolamak istersiniz?' }),
+    tamam({ marka: 'depoevim', intent: 'depolama', reply: 'Adınızı alabilir miyim?' }),
+  ] });
+  await gonder(o, olay({ messages: [mesaj('w1', 'Merhaba (Ref: SB-ABC12)')] }));
+  assert.match(o.gonderilen[0].text.body, /^Merhaba, ben SEMBO Asistan, Sembol Nakliyat'ın/);
+  assert.doesNotMatch(o.gonderilen[0].text.body, /depoevim\.com/);
+  await gonder(o, olay({ messages: [mesaj('w2', 'Aslında eşyalarımı depolatmak istiyorum')] }));
+  assert.match(o.gonderilen[1].text.body, /^Bilgilendirme: DepoEvim olarak paylaştığınız bilgiler KVKK kapsamında işlenir: https:\/\/www\.depoevim\.com\/aydinlatma-metni\//);
+  await gonder(o, olay({ messages: [mesaj('w3', 'Kartal')] }));
+  assert.equal(o.gonderilen[2].text.body, 'Adınızı alabilir miyim?');
+  assert.deepEqual(Object.keys(konusma(o.db).kvkkGonderilen).sort(), ['depoevim', 'sembol']);
 });
 
 test('token hatası (190): mesaj failed, whatsapp_durum/token uyarısı; sesli mesaj işlenir', async () => {
