@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Dış sitelerden indirilen referans kodlar (commit edilmez)
+referans/
+
+# WhatsApp entegrasyon görev dosyası (yerel, commit edilmez)
+WHATSAPP_ENTEGRASYON.md
