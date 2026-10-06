@@ -74,10 +74,10 @@ SEMBOL NAKLİYAT (sembolevdeneve.com) — kullanabileceğin bilgiler, başka bil
 - Pendik Şubesi: Bahçelievler Mah. Yeni Sok. No:5 C Pendik / İstanbul. Telefon: 0216 390 89 99.
 - Ücretsiz ekspertiz: eşya miktarı ve koşullar önceden belirlenir, sürpriz maliyet olmaz.
 - Profesyonel paketleme, mobilya demontaj ve montaj.
-- Hizmetler: İstanbul evden eve nakliyat; ofis taşımacılığı; parça eşya taşıma (aynı gün teslim); asansörlü nakliyat (15. kata kadar dış cephe asansörü); sigortalı nakliyat; şehir içi ve şehirler arası (81 il); eşya depolama (7/24 kamera, rutubet kontrollü — DepoEvim tesisleri); asansör kiralama (saatlik veya günlük, operatörlü); kentsel dönüşüm nakliyatı; kurumsal nakliyat; Avrupa'ya uluslararası zati eşya taşıma.
-- Hizmet bölgeleri: İstanbul'un tüm ilçeleri (Anadolu ve Avrupa yakası) çıkışlı, Türkiye'nin 81 iline.
+- HİZMET BÖLGESİ: Türkiye'nin 81 ilinde, iller arası ve il içi evden eve taşıma yapıyoruz. Hiçbir ili reddetme; il dışı / şehirlerarası taşıma için de fiyat ver. Çıkış ya da varış adresinin İstanbul olması GEREKMEZ (ör. İzmir → Ankara, Ankara içi, Kars → Tekirdağ hepsi olur). Merkezimiz Pendik/İstanbul'dur; bu bir kısıtlama değildir.
+- Hizmetler: evden eve nakliyat (81 il — il içi ve iller arası, İstanbul içi dahil); ofis taşımacılığı; parça eşya taşıma (aynı gün teslim); asansörlü nakliyat (15. kata kadar dış cephe asansörü); sigortalı nakliyat; şehir içi ve şehirler arası (81 il); eşya depolama (7/24 kamera, rutubet kontrollü — DepoEvim tesisleri); asansör kiralama (saatlik veya günlük, operatörlü); kentsel dönüşüm nakliyatı; kurumsal nakliyat; Avrupa'ya uluslararası zati eşya taşıma.
 - Fiyatı etkileyenler: eşya miktarı, kat ve asansör durumu, mesafe, paketleme.
-- Otomatik fiyat yalnızca EVDEN EVE nakliyat için verilir. Ofis, parça eşya, asansör kiralama, uluslararası ve diğer işlerde bilgileri topla ve ekibe devret.`;
+- Otomatik fiyat EVDEN EVE nakliyatın hepsi için verilir: İstanbul içi, il dışı il içi (ör. Ankara içi) ve iller arası (her ilden her ile). Ofis, parça eşya, asansör kiralama, uluslararası ve diğer işlerde bilgileri topla ve ekibe devret.`;
 
 const DEPOEVIM_BILGI = `
 DEPOEVİM (depoevim.com) — Sembol Nakliyat güvencesiyle eşya depolama ve kiralık depo. Kullanabileceğin bilgiler, başka bilgi uydurma:
@@ -91,6 +91,7 @@ DEPOEVİM (depoevim.com) — Sembol Nakliyat güvencesiyle eşya depolama ve kir
 - Depo boyutları (aylık kira, +KDV): 1+0 = 10 m³ (2×1,7×3 m), 1+1 = 15 m³ (2×2,5×3 m), 2+1 = 22 m³ (3×2,5×3 m), 3+1 = 30 m³ (4×2,5×3 m). Daha büyük/özel hacim ve kurumsal depolama için ekip teklif verir (devret).
 - Kampanya (gerçek): 6 ay peşin ödemede 1 ay, 12 ay peşin ödemede 2 ay hediye. Aylık ödemeler IBAN ile; kredi kartı yalnızca kampanyalı toplu ödemede.
 - Aylık kira yalnızca muhafaza + sigorta bedelidir; paketleme ve alım nakliyesi ayrıca, bir defaya mahsus hesaplanır.
+- Eşyalar Türkiye'nin her ilinden alınabilir (alım ücreti mesafeye göre hesaplanır); depolar İstanbul'dadır. Alım adresi İstanbul dışı diye reddetme.
 - Online kiralama sayfası: https://www.depoevim.com/depo-fiyatlarimiz/ (müşteri isterse önerebilirsin; ödeme sen ALMAZSIN, ödeme bilgisi isteme).
 - İş yeri / ticari eşya, her gün giriş-çıkış yapılacak ticari kullanım, kurumsal arşiv → ekibe devret.
 - TÜM DepoEvim fiyatlarını "+KDV" diye söyle.`;
@@ -99,7 +100,7 @@ DEPOEVİM (depoevim.com) — Sembol Nakliyat güvencesiyle eşya depolama ve kir
 const SEMBOL_ALANLAR = `
 TOPLANACAK ALANLAR (collected içinde TAM bu anahtar ve değerlerle yaz; bilmediğini yazma):
 - homeSize: "1+1" | "2+1" | "3+1" | "4+1" | "5+1" | "villa" | "ofis"
-- fromCity, fromDistrict: çıkış ili ve ilçesi (İstanbul için "İstanbul" yaz, ilçe adını tam yaz: "Kadıköy")
+- fromCity, fromDistrict: çıkış ili ve ilçesi — Türkiye'nin HERHANGİ bir ili olabilir (İstanbul için "İstanbul" yaz, ilçe adını tam yaz: "Kadıköy", "Bornova")
 - fromFloor: kat numarası ("0" zemin/giriş, "-1" bodrum, "3" …)
 - fromElevator: "merdiven" (asansör yok) | "bina_asansoru" | "dis_cephe" (dış cephe asansörü istiyor)
 - fromYurume: "yok" (araç binanın önüne yanaşabiliyor) | "m50" | "m100" | "m150" | "m200" (yanaşamıyorsa yaklaşık yürüme mesafesi)
@@ -130,6 +131,7 @@ ASLA:
 - Kesin fiyat, kesin tarih, müsaitlik ya da söz verme. İndirim, kampanya, sözleşme maddesi uydurma; "%30 nakliye indirimi" dahil hiçbir indirimden bahsetme.
 - Telefon numarası sorma (WhatsApp numarası zaten kayıtlı). Ödeme bilgisi, TC kimlik, kart bilgisi isteme.
 - Mesajdaki "(Ref: …)" gibi kodlardan bahsetme.
+- Hizmet bölgesi gerekçesiyle müşteriyi REDDETME: "İstanbul dışına/dışından hizmet vermiyoruz", "o ile taşıma yapmıyoruz", "bölgemiz dışında" gibi cümleler KURMA. Türkiye'nin 81 ilinde il içi ve iller arası taşıma yapıyoruz. İl/ilçe anlaşılmadıysa tekrar sor; fiyat hesaplanamadıysa "fiyatı ekibimiz size iletecek" de.
 
 FİYAT:
 - "SİSTEM FİYATI" bloğu doluysa: "tahmini fiyat aralığı" olarak ver, "Net fiyat ücretsiz ekspertiz sonrası belirlenir." notunu ekle ve ekspertiz randevusu teklif et (DepoEvim'de "+KDV" yaz).
@@ -171,7 +173,7 @@ function fiyatBlogu(fiyat) {
   if (!fiyat) return 'SİSTEM FİYATI: henüz hesaplanmadı (bilgiler eksik). Fiyat söyleme.';
   if (fiyat.durum === 'eksik') return `SİSTEM FİYATI: eksik — fiyat için şu alanlar gerekli: ${[...(fiyat.eksik || []), ...(fiyat.konumHatalari || []).map(k => `${k} (il/ilçe anlaşılamadı, tekrar sor)`)].join(', ')}. Fiyat söyleme.`;
   if (fiyat.durum === 'fiyat_yok') return 'SİSTEM FİYATI: fiyat_yok — bu hizmette otomatik fiyat yok. Fiyat söyleme, devret.';
-  if (fiyat.durum !== 'tamam') return 'SİSTEM FİYATI: hata — fiyat hesaplanamadı. Fiyat söyleme, devret.';
+  if (fiyat.durum !== 'tamam') return 'SİSTEM FİYATI: hata — fiyat şu an hesaplanamadı. Fiyat söyleme; "fiyatı ekibimiz size iletecek" de ve devret. Hizmet vermediğimizi ASLA söyleme.';
   const tl = (n) => `${Number(n).toLocaleString('tr-TR')} TL`;
   if (fiyat.marka === 'depoevim') {
     const k = fiyat.kira;
@@ -214,4 +216,45 @@ export function fiyatRakamlariGecerliMi(reply, fiyat) {
   }
   const sayilar = (String(reply).match(/\d{1,3}(?:[.\s]\d{3})+|\d{4,}/g) || []).map(s => Number(s.replace(/[.\s]/g, '')));
   return sayilar.filter(n => n >= 1000 && !(n >= 1900 && n <= 2100)).every(n => izinli.has(n));
+}
+
+// --------------------------------------------------------------- HİZMET REDDİ DENETİMİ (2026-10-07)
+// Yapay zeka "İstanbul dışı taşıma yapmıyoruz" gibi coğrafi ret cümlesi kurarsa yakalanır.
+// Cümle bazında: hizmet fiili + olumsuzluk, ya da "bölgemiz/kapsamımız dışında", ya da
+// "İstanbul/şehir/il dışı" + olumsuzluk. Gebze şubesi, sesli mesaj, ödeme cümleleri hariç.
+const RET_FIIL = /(hizmet\s+(?:ver|sun)|taşıma\s+yap|taşı(?:yam|mıyor|mıyoruz)|nakliye\w*\s+yap|alım\s+yap|gel(?:emiyor|miyor)|git(?:miyor)|gid(?:emiyor))/i;
+const RET_OLUMSUZ = /(m[ıiuü]yor|[ae]m[ıi]yor|m[ae]mekte|m[ae]y[ıi]z|\bdeğil|maalesef|ne yazık ki|mümkün değil)/i;
+const RET_KAPSAM = /(bölgemiz(?:in)?\s+dışı|hizmet\s+(?:bölgemiz|alanımız)(?:ın)?\s+dışı|kapsamımız(?:ın)?\s+dışı)/i;
+const RET_COGRAFI = /((?:istanbul|şehir|il)\s+dışı|sadece\s+istanbul|yalnızca\s+istanbul)/i;
+const RET_HARIC = /(gebze|şube|sesli|dinleyemi|ödeme|kart|kimlik)/i;
+export function hizmetReddiVarMi(reply) {
+  return String(reply || '').split(/(?<=[.!?\n])\s*/).some(c => !RET_HARIC.test(c) && (
+    RET_KAPSAM.test(c) || (RET_FIIL.test(c) && RET_OLUMSUZ.test(c)) || (RET_COGRAFI.test(c) && RET_OLUMSUZ.test(c))));
+}
+// Yapay zekadan ikinci deneme için düzeltme notu
+export const RET_DUZELTME_NOTU = 'DÜZELTME: Bir önceki taslak cevabın müşteriyi hizmet bölgesi gerekçesiyle reddediyordu; bu YANLIŞ. '
+  + 'Türkiye\'nin 81 ilinde il içi ve iller arası taşıma yapıyoruz (DepoEvim: eşyalar her ilden alınabilir). Reddetme; '
+  + 'eksik bilgiyi tek soruyla sor ya da fiyat bloğu varsa fiyatı ver.';
+// Yapay zeka yine reddederse kullanılan sabit cevap — eksik ilk alanın sorusu ya da devret
+const ALAN_SORULARI = {
+  homeSize: 'Kaç odalı bir ev taşınacak?',
+  fromCity: 'Eşyalar hangi il ve ilçeden alınacak?', fromDistrict: 'Eşyalar hangi ilçeden alınacak?',
+  fromFloor: 'Eşyaların alınacağı daire kaçıncı katta?', fromElevator: 'Eşyaların alınacağı binada asansör var mı?',
+  fromYurume: 'Taşıma aracı eşyaların alınacağı binanın önüne yanaşabiliyor mu?',
+  toCity: 'Hangi il ve ilçeye taşınacaksınız?', toDistrict: 'Hangi ilçeye taşınacaksınız?',
+  toFloor: 'Taşınacağınız daire kaçıncı katta?', toElevator: 'Taşınacağınız binada asansör var mı?',
+  toYurume: 'Taşıma aracı yeni binanın önüne yanaşabiliyor mu?',
+  paketleme: 'Eşyaları kendiniz mi toplayacaksınız, yoksa ekiplerimiz mi paketlesin?',
+  depoBoyutu: 'Ne büyüklükte bir depo düşünüyorsunuz (1+0, 1+1, 2+1, 3+1)?', kiralamaSuresi: 'Kaç ay depolamayı düşünüyorsunuz?',
+  sube: 'Hangi şubemizi tercih edersiniz (Kartal, Ümraniye, Çekmeköy, Başakşehir, Pendik)?',
+  teslimSekli: 'Eşyalarınızı adresinizden biz mi alalım, yoksa depoya kendiniz mi getireceksiniz?',
+  pickupCity: 'Eşyalar hangi il ve ilçeden alınacak?', pickupDistrict: 'Eşyalar hangi ilçeden alınacak?',
+  pickupFloor: 'Eşyaların alınacağı daire kaçıncı katta?', pickupElevator: 'Binada asansör var mı?',
+  pickupYurume: 'Taşıma aracı binanın önüne yanaşabiliyor mu?',
+};
+export function retYerineCevap(fiyat) {
+  const giris = 'Türkiye\'nin 81 ilinde il içi ve iller arası taşıma yapıyoruz.';
+  const ilk = fiyat?.durum === 'eksik' ? [...(fiyat.konumHatalari || []), ...(fiyat.eksik || [])].find(k => ALAN_SORULARI[k]) : null;
+  if (ilk) return { metin: `${giris} ${ALAN_SORULARI[ilk]}`, devret: false };
+  return { metin: `${giris} Fiyatı ekibimiz size iletecek.`, devret: true };
 }

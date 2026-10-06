@@ -31,7 +31,7 @@ import { Buffer } from 'node:buffer';
 import { waitUntil } from '@vercel/functions';
 import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, aiUyariYaz, aiUyariTemizle, gelenMesajiCoz, metaHatasiCoz } from './_lib/whatsapp.js';
 import { botCevabiUret } from './_lib/ai.js';
-import { sistemTalimati, girisMetni, kvkkEkMetni, asistanAdi, fiyatRakamlariGecerliMi } from './_lib/botTalimatlari.js';
+import { sistemTalimati, girisMetni, kvkkEkMetni, asistanAdi, fiyatRakamlariGecerliMi, hizmetReddiVarMi, RET_DUZELTME_NOTU, retYerineCevap } from './_lib/botTalimatlari.js';
 import { botFiyatHesapla, leadFiyati } from './_lib/fiyatHesap.js';
 import { whatsappLeadKaydi, whatsappAlanlariniTemizle, refKoduBul, refKoduTemizle, refBelgeId, leadAcikMi, waTelefonCrm } from './_lib/lead.js';
 
@@ -182,6 +182,22 @@ export function handlerOlustur({
       reply = out.reply;
       handoff = out.handoff;
       handoffReason = out.handoffReason;
+      // YENİ (2026-10-07): coğrafi hizmet reddi ("İstanbul dışı taşıma yapmıyoruz") yakalanır —
+      // bir kez düzeltme notuyla yeniden üretilir; yine ret varsa sabit cevap (soru / fiyat / devret)
+      if (hizmetReddiVarMi(reply)) {
+        console.warn('[whatsapp] cevapta hizmet reddi — yeniden üretiliyor', maskele(waId));
+        const r3 = await aiUret({ sistem: `${talimat(marka, yeniCollected, fiyat)}\n${RET_DUZELTME_NOTU}`, gecmis, env, fetchFn });
+        if (r3.ok && !hizmetReddiVarMi(r3.cikti.reply)) {
+          reply = r3.cikti.reply; handoff = r3.cikti.handoff; handoffReason = r3.cikti.handoffReason;
+          yeniCollected = { ...yeniCollected, ...whatsappAlanlariniTemizle(r3.cikti.collected) };
+        } else if (fiyat?.durum === 'tamam') {
+          reply = fiyatMesaji(fiyat);
+        } else {
+          const y = retYerineCevap(fiyat);
+          reply = y.metin;
+          if (y.devret) { handoff = true; handoffReason = 'Fiyatı ekip iletecek (bot reddetmeye çalıştı)'; }
+        }
+      }
       // Uydurma rakam koruması: cevapta sistemin hesaplamadığı bir tutar varsa sabit metin
       if (!fiyatRakamlariGecerliMi(reply, fiyat)) {
         console.warn('[whatsapp] cevapta sistem dışı tutar — sabit metne çevrildi', maskele(waId));
@@ -197,6 +213,11 @@ export function handlerOlustur({
     let kvkkYeni = [];
     if (ilkCevap) { const gm = girisMetni(marka); reply = `${gm.metin}\n\n${reply}`; kvkkYeni = gm.markalar; }
     else if (marka && !kvkkGonderilen[marka]) { reply = `${kvkkEkMetni(marka)}\n\n${reply}`; kvkkYeni = [marka]; }
+
+    // Fiyat izi (Vercel logu + konuşma belgesi) — numara maskeli
+    const fiyatIzi = fiyat ? { durum: fiyat.durum, kaynak: fiyat.kaynak || '', toplamKm: fiyat.toplamKm ?? null,
+      eksik: [...(fiyat.eksik || []), ...(fiyat.konumHatalari || []).map(k => `${k}?`)], sebep: fiyat.sebep || '' } : null;
+    console.log('[whatsapp] tur', maskele(waId), JSON.stringify({ marka, intent, fiyat: fiyatIzi, handoff: !!handoff }));
 
     // Gönder
     const g = await waMetinGonder({ env, fetchFn, to: waId, metin: reply });
@@ -230,6 +251,7 @@ export function handlerOlustur({
       ...(aiHata ? { botHatasi: { zaman: nowIso, sebep: String(aiHata).slice(0, 300), tur: r1.tur || 'gecici' }, ...(g.ok ? { sonYedekMesaj: nowIso } : {}) } : { botHatasi: null }),
       lastMessageAt: nowIso, lastMessagePreview: reply.slice(0, 120), lastBotAt: nowIso,
       ...(fiyat?.durum === 'tamam' ? { sonFiyat: fiyat } : {}),
+      ...(fiyatIzi ? { sonFiyatDurumu: { ...fiyatIzi, zaman: nowIso } } : {}),
       ...(handoff ? { mode: 'human', needsAgent: true, handoffReason: handoffReason || '', handoffAt: nowIso } : {}),
     }, { merge: true });
   }
