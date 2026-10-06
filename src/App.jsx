@@ -8837,11 +8837,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 {/* ==========================================================
                     YENİ (kullanıcı talebi): HIZLI FİYAT HESAPLA + FİYAT TABLOSU KISAYOLLARI
                     Müşteri Havuzu'ndaki iki butonun aynısını isim altından açar.
-                    Müşteri Havuzu yetkisi olan herkes görür (butonlar oradaki
-                    yetkiyle aynı). Tıklayınca Müşteri Havuzu açılır ve istenen
-                    pencere (hesaplayıcı / fiyat tablosu) kendiliğinden açılır.
+                    DEĞİŞTİ (kullanıcı talebi): YALNIZCA SATIŞ PERSONELİ görür
+                    ("+" Telefon Görüşmesi butonuyla aynı koşul: görevi "Satış"
+                    içeren + Müşteri Havuzu yetkisi olan). Tıklayınca Müşteri
+                    Havuzu açılır ve istenen pencere kendiliğinden açılır.
                     ========================================================== */}
-                {showSatisMusteriHavuzu && (
+                {(currentUser?.position || '').includes('Satış') && showSatisMusteriHavuzu && (
                   <>
                     <button
                       onClick={() => { setFiyatKisayolIstegi({ tip: 'hizliFiyat', no: Date.now() }); setIsSidebarOpen(false); setActiveTab('musteriHavuzu'); }}
