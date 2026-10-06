@@ -44,7 +44,7 @@ if (typeof Node === 'function' && Node.prototype && !Node.prototype.__sembolCevi
 }
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { MapPin, Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2 } from 'lucide-react';
+import { MapPin, Truck, Calendar, Phone, FileText, Upload, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, ChevronDown, ChevronUp, Briefcase, Car, Wallet, BookOpen, CheckSquare, Shield, Activity, ArrowUpRight, UserPlus, Camera, Edit, Ban, LogOut, Lock, Bell, User, Sparkles, Loader2, Copy, MessageSquareText, MessageCircle, Package, Database, Download, Save, Search, Key, ListTodo, Eye, EyeOff, FolderOpen, Scale, QrCode , Landmark, Plus, Trash2, RotateCcw, Building2, Calculator } from 'lucide-react'; // YENİ: Calculator (Hızlı Fiyat kısayolu)
 import { signInAnonymously, signInWithCustomToken, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, setDoc, getDocs, getDocsFromCache, query, orderBy, getDoc, limit, where, documentId, deleteField } from 'firebase/firestore';
 import { db, appId, auth, googleAuth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, callGeminiAPI, isVideoUrl, normalizeCariName, normalizeCariPhone, CopyButton, MediaCaptureMenu, calculateMaterials, malzemeIhtiyaclari, useMalzemeTahminTablosu, generateContractPDF, bildirimDestekleniyorMu, bildirimIzniIste, bildirimGonder,
@@ -5084,6 +5084,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // YENİ (kullanıcı talebi): satış personelinin "Portföyüm" butonu → Müşteri Havuzu'nda
     // Telefon Görüşmesi sekmesini açma isteği (her tıklamada farklı sayı)
     const [telefonPortfoyIstegi, setTelefonPortfoyIstegi] = useState(null);
+    // YENİ (kullanıcı talebi): isim altındaki "Hızlı Fiyat Hesapla" / "Fiyat Tablosu" kısayolları →
+    // Müşteri Havuzu'na { tip: 'hizliFiyat' | 'fiyatTablosu', no } isteği iletilir (her tıklamada yeni no)
+    const [fiyatKisayolIstegi, setFiyatKisayolIstegi] = useState(null);
     const [globalSearchQuery, setGlobalSearchQuery] = useState('');
     const [isSubMenuOpen, setIsSubMenuOpen] = useState(false);
     const [isAddJobSubMenuOpen, setIsAddJobSubMenuOpen] = useState(false);
@@ -8832,6 +8835,31 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   </button>
                 )}
                 {/* ==========================================================
+                    YENİ (kullanıcı talebi): HIZLI FİYAT HESAPLA + FİYAT TABLOSU KISAYOLLARI
+                    Müşteri Havuzu'ndaki iki butonun aynısını isim altından açar.
+                    Müşteri Havuzu yetkisi olan herkes görür (butonlar oradaki
+                    yetkiyle aynı). Tıklayınca Müşteri Havuzu açılır ve istenen
+                    pencere (hesaplayıcı / fiyat tablosu) kendiliğinden açılır.
+                    ========================================================== */}
+                {showSatisMusteriHavuzu && (
+                  <>
+                    <button
+                      onClick={() => { setFiyatKisayolIstegi({ tip: 'hizliFiyat', no: Date.now() }); setIsSidebarOpen(false); setActiveTab('musteriHavuzu'); }}
+                      className="relative p-2 rounded-xl transition shrink-0 bg-yellow-400 text-black hover:bg-yellow-300 shadow-md shadow-yellow-400/30"
+                      title="Hızlı Fiyat Hesapla"
+                    >
+                      <Calculator className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={() => { setFiyatKisayolIstegi({ tip: 'fiyatTablosu', no: Date.now() }); setIsSidebarOpen(false); setActiveTab('musteriHavuzu'); }}
+                      className="relative p-2 rounded-xl transition shrink-0 bg-neutral-800 text-emerald-200 border border-emerald-700 hover:bg-neutral-700"
+                      title="Fiyat Tablosu"
+                    >
+                      <FileText className="w-5 h-5" />
+                    </button>
+                  </>
+                )}
+                {/* ==========================================================
                     YENİ (kullanıcı talebi): PERSONEL GÖZÜNDEN GÖR (göz simgesi)
                     Yalnızca GERÇEK kullanıcısı Müdür / Firma Sahibi olanlarda görünür
                     (önizleme sırasında da görünür kalır — çıkış butonu odur).
@@ -10171,6 +10199,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 hizliGorusme={hizliGorusme} onHizliGorusmeKullanildi={() => setHizliGorusme(null)}
                 /* YENİ (kullanıcı talebi): "Portföyüm" butonu → Telefon Görüşmesi sekmesi */
                 telefonPortfoyIstegi={telefonPortfoyIstegi} onTelefonPortfoyKullanildi={() => setTelefonPortfoyIstegi(null)}
+                /* YENİ (kullanıcı talebi): isim altındaki Hızlı Fiyat / Fiyat Tablosu kısayolu — kullanılınca temizlenir */
+                fiyatKisayolIstegi={fiyatKisayolIstegi} onFiyatKisayolKullanildi={() => setFiyatKisayolIstegi(null)}
                 /* YENİ: Teklife Bak penceresindeki "Kayıt Aç" butonu için */
                 onKayitAc={showSatisMusteriKayit ? havuzdanKayitAc : null} />}
 
