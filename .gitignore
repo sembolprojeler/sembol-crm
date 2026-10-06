@@ -28,3 +28,6 @@ referans/
 
 # WhatsApp entegrasyon görev dosyası (yerel, commit edilmez)
 WHATSAPP_ENTEGRASYON.md
+
+# Ortam değişkenleri (sırlar) — yalnızca .env.example commit edilir
+.env
