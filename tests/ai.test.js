@@ -8,7 +8,7 @@ const CEVAP = { reply: 'Kaç oda?', collected: { fromCity: 'İstanbul' }, handof
 const sahteFetch = (yanit, kayit = []) => async (url, ops) => { kayit.push({ url, ops, govde: JSON.parse(ops.body) }); return { ok: true, status: 200, json: async () => yanit }; };
 
 test('sağlayıcı seçimi env ile: varsayılan gemini, claude seçilebilir, AI_MODEL geçersiz kılar', () => {
-  assert.deepEqual(aiAyarlari({ GEMINI_API_KEY: 'g' }), { saglayici: 'gemini', anahtar: 'g', model: 'gemini-2.5-flash' });
+  assert.deepEqual(aiAyarlari({ GEMINI_API_KEY: 'g' }), { saglayici: 'gemini', anahtar: 'g', model: 'gemini-3.8-flash' });
   assert.equal(aiAyarlari({ AI_PROVIDER: 'claude', ANTHROPIC_API_KEY: 'a' }).saglayici, 'claude');
   assert.equal(aiAyarlari({ AI_PROVIDER: 'claude', AI_MODEL: 'x' }).model, 'x');
 });
@@ -40,7 +40,13 @@ test('Claude: messages API biçimi', async () => {
 test('hata durumları fırlatmaz, ok:false döner (anahtar yok / HTTP hata / geçersiz JSON / şema)', async () => {
   assert.equal((await botCevabiUret({ sistem: 'S', gecmis: [], env: {} })).ok, false);
   const http = async () => ({ ok: false, status: 429, json: async () => ({ error: { message: 'kota' } }) });
-  assert.match((await botCevabiUret({ sistem: 'S', gecmis: [], env: { GEMINI_API_KEY: 'k' }, fetchFn: http })).hata, /429/);
+  const r429 = await botCevabiUret({ sistem: 'S', gecmis: [], env: { GEMINI_API_KEY: 'k' }, fetchFn: http });
+  assert.match(r429.hata, /429/);
+  assert.equal(r429.tur, 'gecici');
+  // Yapılandırma hataları (kredi bitti / model yok / anahtar yok) — yöneticiye uyarı için ayrı tür
+  const kredi = async () => ({ ok: false, status: 402, json: async () => ({ error: { message: 'prepayment credits are depleted' } }) });
+  assert.equal((await botCevabiUret({ sistem: 'S', gecmis: [], env: { GEMINI_API_KEY: 'k' }, fetchFn: kredi })).tur, 'yapilandirma');
+  assert.equal((await botCevabiUret({ sistem: 'S', gecmis: [], env: {} })).tur, 'yapilandirma');
   const bozuk = sahteFetch({ candidates: [{ content: { parts: [{ text: 'merhaba!' }] } }] });
   assert.equal((await botCevabiUret({ sistem: 'S', gecmis: [], env: { GEMINI_API_KEY: 'k' }, fetchFn: bozuk })).ok, false);
   assert.equal(aiCiktisiDogrula({ reply: '' }).ok, false);

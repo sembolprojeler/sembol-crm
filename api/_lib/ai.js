@@ -11,11 +11,12 @@
 //
 // Çıktı ZORUNLU JSON'dur ve aiCiktisiDogrula ile şemaya göre denetlenir:
 //   { reply, collected, handoff, handoffReason, intent, marka }
-// Geçersizse çağıran taraf (whatsapp-webhook) sabit yedek mesajı gönderip
-// konuşmayı personele devreder.
+// Geçersizse çağıran taraf (whatsapp-webhook) sabit yedek mesajı gönderir; konuşma
+// KİLİTLENMEZ, müşterinin sonraki mesajında bot yeniden dener.
 // ============================================================================
 
-export const VARSAYILAN_MODEL = { gemini: 'gemini-2.5-flash', claude: 'claude-sonnet-5-5' };
+// DEĞİŞTİ (2026-10-07): gemini-2.5-flash 404 veriyordu; canlıda doğrulanan model gemini-3.8-flash
+export const VARSAYILAN_MODEL = { gemini: 'gemini-3.8-flash', claude: 'claude-sonnet-5-5' };
 export const NIYETLER = ['evden_eve', 'ofis', 'parca_esya', 'depolama', 'kiralik_depo', 'asansor_kiralama', 'sehirlerarasi', 'diger'];
 
 export function aiAyarlari(env = process.env) {
@@ -27,6 +28,9 @@ export function aiAyarlari(env = process.env) {
 export class AiHatasi extends Error {
   constructor(mesaj, ek = {}) { super(mesaj); this.ek = ek; }
 }
+// Yapılandırma hatası mı (anahtar yok, 400/401/402/403/404 — model adı, kredi, yetki)? Yöneticiye uyarı bandı için.
+// Diğerleri (429, 5xx, zaman aşımı, ağ, geçersiz JSON) geçicidir. İkisinde de konuşma KİLİTLENMEZ.
+const YAPILANDIRMA_DURUMLARI = [400, 401, 402, 403, 404];
 
 // gecmis: [{ rol: 'musteri' | 'asistan', metin }] → sağlayıcıların istediği sırayla
 // (kullanıcıyla başlar, roller dönüşümlü; art arda aynı rol birleştirilir)
@@ -59,8 +63,9 @@ async function geminiCagir({ ayar, sistem, gecmis, fetchFn, ms }) {
     generationConfig: {
       responseMimeType: 'application/json',
       temperature: 0.4,
-      maxOutputTokens: 2048,
-      // 2.5 Flash'ta "düşünme" çıktı bütçesini yiyip JSON'u yarıda kesebiliyor — kısa sohbet cevabı için kapalı
+      // Yeni modellerde "düşünme" çıktı payını kullanır — JSON yarıda kesilmesin diye geniş tutulur
+      maxOutputTokens: 4096,
+      // 2.5 Flash'ta düşünme kapatılabiliyor (kısa sohbet cevabı için gereksiz)
       ...(/2\.5-flash/.test(ayar.model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
     },
   };
@@ -126,17 +131,18 @@ export function aiCiktisiDogrula(o) {
 }
 
 // Tek giriş: sistem talimatı + son mesajlar → doğrulanmış çıktı.
-// Hata / geçersiz JSON → { ok: false, hata } (çağıran yedek davranışa geçer). Asla fırlatmaz.
+// Hata / geçersiz JSON → { ok: false, tur: 'gecici' | 'yapilandirma', hata } (çağıran yedek davranışa geçer). Asla fırlatmaz.
 export async function botCevabiUret({ sistem, gecmis, env = process.env, fetchFn = globalThis.fetch, ms = 20000 }) {
   const ayar = aiAyarlari(env);
-  if (!ayar.anahtar) return { ok: false, hata: `${ayar.saglayici === 'claude' ? 'ANTHROPIC_API_KEY' : 'GEMINI_API_KEY'} tanımlı değil` };
+  if (!ayar.anahtar) return { ok: false, tur: 'yapilandirma', hata: `${ayar.saglayici === 'claude' ? 'ANTHROPIC_API_KEY' : 'GEMINI_API_KEY'} tanımlı değil` };
   try {
     const cagir = ayar.saglayici === 'claude' ? claudeCagir : geminiCagir;
     const metin = await cagir({ ayar, sistem, gecmis: (gecmis || []).slice(-20), fetchFn, ms });
     const d = aiCiktisiDogrula(aiJsonCoz(metin));
-    if (!d.ok) return { ok: false, hata: `Geçersiz yapay zeka çıktısı: ${d.hata}`, ham: String(metin).slice(0, 500) };
+    if (!d.ok) return { ok: false, tur: 'gecici', hata: `Geçersiz yapay zeka çıktısı: ${d.hata}`, ham: String(metin).slice(0, 500) };
     return { ok: true, cikti: d.deger, saglayici: ayar.saglayici, model: ayar.model };
   } catch (err) {
-    return { ok: false, hata: err?.name === 'AbortError' ? 'Yapay zeka zaman aşımı' : String(err?.message || err) };
+    const tur = YAPILANDIRMA_DURUMLARI.includes(err?.ek?.durum) ? 'yapilandirma' : 'gecici';
+    return { ok: false, tur, durum: err?.ek?.durum ?? null, hata: err?.name === 'AbortError' ? 'Yapay zeka zaman aşımı' : String(err?.message || err) };
   }
 }
