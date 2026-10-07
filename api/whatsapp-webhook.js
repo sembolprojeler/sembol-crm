@@ -1,46 +1,112 @@
 // api/whatsapp-webhook.js
 // ============================================================================
-// Sembol CRM — WHATSAPP CLOUD API WEBHOOK + SEMBO ASİSTAN BOTU
+// Sembol CRM — WHATSAPP CLOUD API WEBHOOK + BOT (DepoEvim Asistanı / SEMBO Asistan)
 // ----------------------------------------------------------------------------
 // GET  → Meta webhook doğrulaması (hub.mode=subscribe + hub.verify_token → hub.challenge)
 // POST → Meta olayları:
 //   1) X-Hub-Signature-256 (HMAC-SHA256, App Secret, HAM gövde) doğrulanır; geçersiz → 401
 //   2) Meta'ya HEMEN 200 dönülür; iş waitUntil ile arka planda yapılır
-//   3) Tekrar koruması: mesaj belgesi kimliği = wamid, create() ile yazılır; zaten
+//   3) HAT (2026-10-07): metadata.phone_number_id → WHATSAPP_HATLAR'daki hat (marka, token).
+//      Bilinmeyen hat loglanıp yok sayılır. Her hat TEK markadır (0850 = yalnızca DepoEvim);
+//      aynı müşteri iki hatta yazarsa iki ayrı konuşma olur (api/_lib/whatsapp.js konusmaKimligi).
+//   4) Tekrar koruması: mesaj belgesi kimliği = wamid, create() ile yazılır; zaten
 //      varsa (Meta aynı olayı yeniden gönderdi) işlenmez, bot ikinci kez cevap vermez
-//   4) Peş peşe mesaj kilidi: müşteri art arda yazarsa kısa bir bekleme sonrası
+//   5) Peş peşe mesaj kilidi: müşteri art arda yazarsa kısa bir bekleme sonrası
 //      yalnızca SON mesajın işleyicisi cevap verir (hepsini birlikte okur); bot
 //      cevap yazarken gelen yeni mesajlar için tur tekrarlanır (konuşma başına tek kilit)
-//   5) Bot cevabı (api/_lib/ai.js), fiyat (api/_lib/fiyatHesap.js — yapay zeka hesaplamaz),
-//      lead kaydı (api/_lib/lead.js — sihirbazla aynı biçim), devretme (mode: human)
-//   6) statuses → giden mesajın durumu (sent / delivered / read / failed)
-//   7) Meta 190 / OAuthException ya da kalıcı hata → whatsapp_durum/token uyarısı
+//   6) Bot cevabı (api/_lib/ai.js), fiyat (api/_lib/fiyatHesap.js — yapay zeka hesaplamaz),
+//      lead kaydı (api/_lib/lead.js — sihirbazla aynı biçim)
+//   7) PERSONELE AKTARMA iki türdür (2026-10-07):
+//      • BİLDİR (needsAgent: true, mode "bot" kalır): ekspertiz/randevu, bilgiler tamam, fiyat yok …
+//      • SUSTUR (mode "human"): yalnızca açık temsilci isteği ve şikayet (ya da personel CRM'den yazınca)
+//      Sessiz modda personel yazmadıysa müşteriye en fazla 3 saatte bir sabit bilgi mesajı;
+//      son personel mesajından (yoksa devirden) 24 saat sonra müşterinin yeni mesajında bota döner.
+//   8) Maliyet: konuşma başına günde (Türkiye saati) en fazla 30 bot cevabı
+//   9) DepoEvim hattında depolamasız taşıma talebi: bilgiler toplanır, fiyat VERİLMEZ,
+//      Sembol ekibi için "evden eve" lead'i açılır (konuşmada tasimaLeadId)
+//  10) statuses → giden mesajın durumu (sent / delivered / read / failed)
+//  11) Meta 190 / OAuthException ya da kalıcı hata → whatsapp_durum/token uyarısı
 //      (CRM'de yöneticilere kırmızı bant); yapay zeka yapılandırma hatası → whatsapp_durum/ai
-//   8) Yapay zeka hatası konuşmayı KİLİTLEMEZ: sabit mesaj (30 dk'da bir), sonraki mesajda yeniden dener
+//  12) Yapay zeka hatası konuşmayı KİLİTLEMEZ: sabit mesaj (30 dk'da bir), sonraki mesajda yeniden dener
+//  Her erken çıkışta tek satır log: "[whatsapp] atlandı <maskeli numara> <sebep>"
 //
 // ORTAM DEĞİŞKENLERİ (Vercel, VITE_ öneki YOK):
 //   WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID
+//   WHATSAPP_HATLAR (isteğe bağlı JSON; yoksa WHATSAPP_PHONE_NUMBER_ID tek hat = DepoEvim)
 //   AI_PROVIDER (gemini|claude), GEMINI_API_KEY | ANTHROPIC_API_KEY, AI_MODEL (isteğe bağlı)
 //   FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY, FIRESTORE_APP_ID (mevcut)
 //   İsteğe bağlı: WHATSAPP_BIRLESTIRME_MS (peş peşe mesaj bekleme, varsayılan 4000),
 //   WHATSAPP_CUMARTESI ("09:00-14:00"), WHATSAPP_GUNLUK_GOOGLE (bot km sorgu sınırı, 300),
+//   WHATSAPP_GUNLUK_BOT_CEVABI (konuşma başına günlük bot cevabı, varsayılan 30),
 //   WHATSAPP_GRAPH_VERSION (varsayılan v23.0), WHATSAPP_BOT_KAPALI=1 (bot cevap vermez, yalnızca kaydeder)
 // ============================================================================
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { waitUntil } from '@vercel/functions';
-import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, aiUyariYaz, aiUyariTemizle, gelenMesajiCoz, metaHatasiCoz } from './_lib/whatsapp.js';
+import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, aiUyariYaz, aiUyariTemizle, gelenMesajiCoz, metaHatasiCoz, hatBul, konusmaKimligi } from './_lib/whatsapp.js';
 import { botCevabiUret } from './_lib/ai.js';
-import { sistemTalimati, girisMetni, kvkkEkMetni, asistanAdi, fiyatRakamlariGecerliMi, hizmetReddiVarMi, RET_DUZELTME_NOTU, retYerineCevap } from './_lib/botTalimatlari.js';
+import { sistemTalimati, girisMetni, kvkkEkMetni, asistanAdi, fiyatRakamlariGecerliMi, hizmetReddiVarMi, RET_DUZELTME_NOTU, retYerineCevap, istanbulGunu } from './_lib/botTalimatlari.js';
 import { botFiyatHesapla, leadFiyati } from './_lib/fiyatHesap.js';
 import { whatsappLeadKaydi, whatsappAlanlariniTemizle, refKoduBul, refKoduTemizle, refBelgeId, leadAcikMi, waTelefonCrm } from './_lib/lead.js';
 
 export const YEDEK_MESAJ = 'Mesajınızı aldık, ekibimiz en kısa sürede dönüş yapacak.';
+// Sessiz modda (mode "human") personel henüz yazmadıysa — en fazla 3 saatte bir
+export const SESSIZ_BILGI_MESAJI = 'Mesajınız ekibimize iletildi, mesai saatinde (09:00-18:00) size dönüş yapılacak.';
+// DepoEvim hattında taşıma talebi: lead Sembol'e gider → Sembol aydınlatması bir kez
+export const SEMBOL_TASIMA_KVKK = 'Taşıma talebiniz grubumuzdaki Sembol Nakliyat tarafından karşılanacak. '
+  + 'Kişisel verileriniz Sembol Nakliyat aydınlatma metni kapsamında işlenir: https://www.sembolevdeneve.com/aydinlatma-metni/';
+// Günlük bot cevabı sınırı dolunca — günde bir kez
+export const SINIR_MESAJI = 'Ekibimiz size en kısa sürede dönüş yapacak.';
 const KILIT_SURESI_MS = 90000;
 // Yapay zeka art arda hata verirse müşteriye sabit mesaj en fazla 30 dakikada bir gider
 const YEDEK_ARALIGI_MS = 30 * 60 * 1000;
+const SESSIZ_BILGI_ARALIGI_MS = 3 * 60 * 60 * 1000;
+const OTOMATIK_DONUS_MS = 24 * 60 * 60 * 1000;
 // Eski kod (2026-10-06) yapay zeka hatasında konuşmayı bu sebeple personele devrediyordu
 const ESKI_AI_DEVIR_SEBEBI = /yapay zeka/i;
+
+// --------------------------------------------------------------- DEVİR TÜRÜ (2026-10-07)
+// temsilci | sikayet → bot susar (mode "human"); bildir → needsAgent, bot devam eder.
+// Yapay zeka handoffType vermediyse (ya da eski konuşmanın serbest metin sebebi) metinden çıkarılır;
+// açıkça temsilci / şikayet geçmiyorsa "bildir" sayılır.
+const BOTU_SUSTURAN = ['temsilci', 'sikayet'];
+const TEMSILCI_SEBEBI = /temsilci|insan(?:la|a)?\b|yetkili|canlı destek|müşteri hizmet/i;
+const SIKAYET_SEBEBI = /şikay|şikây|hasar|kırıl|memnun değil/i;
+export function devirTuruBul(handoffType, sebep = '') {
+  if (['temsilci', 'sikayet', 'bildir'].includes(handoffType)) return handoffType;
+  if (SIKAYET_SEBEBI.test(sebep)) return 'sikayet';
+  if (TEMSILCI_SEBEBI.test(sebep)) return 'temsilci';
+  return 'bildir';
+}
+
+// --------------------------------------------------------------- SESSİZ MOD KARARI (saf — rapor betiği de kullanır)
+// mode "human" konuşmaya müşteri yazınca ne olur? mesajlar: son mesajlar (herhangi sırada)
+//  ai_hatasi  : ESKİ devir (devirTuru yok), personel yazmamış, sebep "Yapay zeka hatası" (ya da boş + devir mesajında aiHata) → bota döner, needsAgent kalkar
+//  eski_bildir: ESKİ devir, personel yazmamış, sebepte temsilci / şikayet yok (ekspertiz, randevu, fiyat …) → bota döner, needsAgent kalır
+//  24_saat    : son personel mesajından (yoksa devirden) 24 saat geçti → bota döner, needsAgent korunur
+//  sessiz_personel: personel yazıyor → hiçbir otomatik mesaj yok
+//  sessiz     : personel henüz yazmadı → en fazla 3 saatte bir bilgi mesajı
+// Sebebi boş eski devirler ihtiyaten sessiz kalır (24 saat kuralı açar).
+export function sessizModKarari(k = {}, mesajlar = [], simdiMs = Date.now()) {
+  const devir = k.handoffAt || '';
+  const personelSon = enGec(k.lastAgentAt, ...mesajlar.filter(m => m.from === 'agent').map(m => m.timestamp));
+  const personelYazdi = !!personelSon && (!devir || personelSon >= devir);
+  if (!personelYazdi && !k.devirTuru) {
+    const sebep = k.handoffReason || '';
+    const devirMesaji = [...mesajlar].sort((a, b) => String(b.timestamp).localeCompare(String(a.timestamp)))
+      .find(m => m.from === 'bot' && (!devir || String(m.timestamp) <= devir));
+    if (ESKI_AI_DEVIR_SEBEBI.test(sebep) || (!sebep && devirMesaji?.aiHata)) return { karar: 'ai_hatasi', personelYazdi };
+    if (sebep && devirTuruBul('', sebep) === 'bildir') return { karar: 'eski_bildir', personelYazdi };
+  }
+  const dayanak = enGec(devir, personelSon, k.devralmaAt);
+  if (dayanak && simdiMs - Date.parse(dayanak) >= OTOMATIK_DONUS_MS) return { karar: '24_saat', personelYazdi, dayanak };
+  return { karar: personelYazdi ? 'sessiz_personel' : 'sessiz', personelYazdi, dayanak };
+}
+
+// DepoEvim hattında depolamasız taşıma talepleri → Sembol ekibine lead (fiyat verilmez)
+const TASIMA_NIYETLERI = ['evden_eve', 'sehirlerarasi', 'ofis'];
+// Bu alanlar gelince taşıma ekibi bilgilendirilir (yapay zekaya bırakılmaz)
+const TASIMA_ZORUNLU = ['homeSize', 'fromCity', 'fromDistrict', 'toCity', 'toDistrict'];
 
 // Hangi markaların aydınlatma linki gönderildi? Eski konuşmalar: kvkkVerildi → eski nötr
 // metin yalnızca Sembol linkini gönderiyordu.
@@ -49,6 +115,8 @@ export function kvkkGonderilenOku(k = {}) {
   return k.kvkkVerildi ? { sembol: k.kvkkAydinlatmaTarihi || true } : {};
 }
 const DURUM_SIRASI = { sent: 1, delivered: 2, read: 3 };
+const enGec = (...zamanlar) => zamanlar.filter(Boolean).map(String).sort().at(-1) || '';
+const atlandi = (no, sebep) => console.log('[whatsapp] atlandı', maskele(no), sebep);
 
 // ------------------------------------------------------------------ İMZA
 export function imzaGecerliMi(ham, baslik, secret) {
@@ -97,6 +165,7 @@ export function handlerOlustur({
   const iso = () => new Date(simdi()).toISOString();
   const msAyar = String(env.WHATSAPP_BIRLESTIRME_MS ?? '').trim();
   const birlestirmeMs = msAyar !== '' && Number(msAyar) >= 0 ? Number(msAyar) : 4000;
+  const gunlukSinir = Number(env.WHATSAPP_GUNLUK_BOT_CEVABI) > 0 ? Number(env.WHATSAPP_GUNLUK_BOT_CEVABI) : 30;
 
   async function fiyatGuvenli(db, marka, collected, intent) {
     if (!marka) return null;
@@ -108,8 +177,34 @@ export function handlerOlustur({
     catch (err) { console.error('[whatsapp] fiyat hesaplanamadı:', err?.message); return { durum: 'hata' }; }
   }
 
-  // ---- lead (Müşteri Havuzu) — açık lead güncellenir, iş kapandıysa yeni lead
-  async function leadYaz(db, { waId, konusma, marka, intent, collected, fiyat, handoff, handoffReason }) {
+  // ---- bot mesajı gönderir ve messages'a yazar (hattın numarasından)
+  async function gonderVeKaydet(db, hat, kid, waId, metin, ek = {}) {
+    const g = await waMetinGonder({ env, fetchFn, hat, to: waId, metin });
+    const nowIso = iso();
+    await mesajlarRef(db, kid, appId).doc(g.wamid || `yerel_${simdi()}`).set({
+      direction: 'out', from: 'bot', agentName: asistanAdi(hat.marka), type: 'text', text: metin, timestamp: nowIso, wamid: g.wamid || null,
+      status: g.ok ? 'sent' : 'failed', ...(g.ok ? {} : { hata: { kod: g.hata.kod ?? null, mesaj: g.hata.mesaj || '' } }), ...ek,
+    });
+    if (!g.ok) {
+      console.error('[whatsapp] gönderilemedi', maskele(waId), g.hata.kod, g.hata.mesaj);
+      if (g.hata.kalici) await uyariYaz(db, g.hata, nowIso, appId);
+    } else await uyariTemizle(db, nowIso, appId);
+    return { g, nowIso };
+  }
+
+  // ---- lead'e tek hareket satırı (bota dönüş, günlük sınır …)
+  async function leadHareketiEkle(db, waId, leadId, islem) {
+    if (!leadId) return;
+    try {
+      const lRef = havuzRef(db, leadId, appId);
+      const l = await lRef.get();
+      if (l.exists) await lRef.set({ hareketler: [...(l.data()?.hareketler || []), { tarih: iso(), kullanici: 'WhatsApp Bot', islem }] }, { merge: true });
+    } catch (err) { console.error('[whatsapp] lead hareketi yazılamadı', maskele(waId), err?.message); }
+  }
+
+  // ---- lead (Müşteri Havuzu) — açık lead güncellenir, iş kapandıysa yeni lead.
+  // alan: konuşmadaki kimlik alanı — 'leadId' (hattın markası) | 'tasimaLeadId' (DepoEvim hattından Sembol taşıma talebi)
+  async function leadYaz(db, { hat, kid, waId, konusma, alan, leadMarka, intent, collected, fiyat, kvkkMarkalari = [], hareket, devir }) {
     const nowIso = iso();
     let id = null, onceki = {}, ilkKayit = true;
     const dene = async (aday) => {
@@ -119,39 +214,64 @@ export function handlerOlustur({
       if (!leadAcikMi(d)) return false;
       id = aday; onceki = d; ilkKayit = false; return true;
     };
-    if (konusma.leadId) await dene(konusma.leadId);
-    if (!id && konusma.refKodu && !konusma.refKullanildi) await dene(refBelgeId(konusma.refKodu));
+    // Site ref kodu yalnızca kendi markasının lead'ine bağlanır (SB → Sembol, DE → DepoEvim)
+    const refMarka = konusma.refKodu ? refKoduBul(`(Ref: ${konusma.refKodu})`)?.marka : '';
+    if (konusma[alan]) await dene(konusma[alan]);
+    if (!id && konusma.refKodu && !konusma.refKullanildi && refMarka === leadMarka) await dene(refBelgeId(konusma.refKodu));
     if (!id) { id = `wa_${waId}_${simdi()}`; onceki = {}; ilkKayit = true; }
 
-    const hizmet = intent === 'parca_esya' ? 'parca_esya' : intent === 'asansor_kiralama' ? 'asansor_kiralama' : '';
-    const { kayit } = whatsappLeadKaydi({ marka: marka || 'sembol', hizmet, collected, waId, profilAdi: konusma.profileName || '', onceki, ilkKayit,
-      tamamlandi: fiyat?.durum === 'tamam', fiyat: leadFiyati(fiyat), nowIso });
-    if (handoff) {
-      kayit.hareketler = [...(kayit.hareketler || onceki.hareketler || []), { tarih: nowIso, kullanici: 'WhatsApp Bot', islem: `Bot görüşmeyi personele devretti: ${handoffReason || '-'}` }];
-      kayit.whatsappDevir = { tarih: nowIso, sebep: handoffReason || '' };
-    }
+    const hizmet = ({ parca_esya: 'parca_esya', asansor_kiralama: 'asansor_kiralama', ofis: 'ofis' })[intent] || '';
+    const { kayit } = whatsappLeadKaydi({ marka: leadMarka, hizmet, collected, waId, profilAdi: konusma.profileName || '', onceki, ilkKayit,
+      tamamlandi: fiyat?.durum === 'tamam', fiyat: leadFiyati(fiyat), nowIso, asistan: asistanAdi(hat.marka) });
+    // CRM WhatsApp sekmesi lead'den konuşmayı açabilsin
+    kayit.whatsapp = { ...kayit.whatsapp, konusmaId: kid, hatId: hat.phoneNumberId, hatMarka: hat.marka };
+    // Hangi markaların aydınlatma metni verildi: ['depoevim'] | ['depoevim', 'sembol'] (taşıma talebi)
+    if (kvkkMarkalari.length) kayit.kvkkAydinlatmaMarka = kvkkMarkalari;
+    if (hareket) kayit.hareketler = [...(kayit.hareketler || onceki.hareketler || []), { tarih: nowIso, kullanici: 'WhatsApp Bot', islem: hareket }];
+    if (devir) kayit.whatsappDevir = { tarih: nowIso, sebep: devir.sebep || '', tur: devir.tur };
     await havuzRef(db, id, appId).set(kayit, { merge: true });
     return id;
   }
 
+  // ---- günlük bot cevabı sınırı doldu: günde BİR kez sabit mesaj, personel bilgilendirilir, yapay zeka çağrılmaz
+  async function gunlukSinirDoldu(db, hat, kid, waId, konusma, gun) {
+    if (konusma.sinirMesajiGunu === gun) { atlandi(waId, 'günlük sınır'); return; }
+    atlandi(waId, `günlük sınır (${gunlukSinir}) — bilgi mesajı gönderiliyor`);
+    const { nowIso } = await gonderVeKaydet(db, hat, kid, waId, SINIR_MESAJI, { otomatik: 'gunluk_sinir' });
+    const sebep = `Günlük bot cevabı sınırı doldu (${gunlukSinir})`;
+    await konusmaRef(db, kid, appId).set({
+      sinirMesajiGunu: gun, needsAgent: true, lastMessageAt: nowIso, lastMessagePreview: SINIR_MESAJI, lastBotAt: nowIso,
+      ...(konusma.needsAgent ? {} : { handoffReason: sebep, bildirimAt: nowIso, devirTuru: 'bildir' }),
+    }, { merge: true });
+    if (!konusma.needsAgent) await leadHareketiEkle(db, waId, konusma.leadId || konusma.tasimaLeadId, `Bot personeli bilgilendirdi (bot devam ediyor): ${sebep}`);
+  }
+
   // ---- bir bot turu: son mesajları okur, cevap üretir, gönderir, kaydeder
-  async function botTuru(db, waId) {
-    const kRef = konusmaRef(db, waId, appId);
+  async function botTuru(db, hat, kid, waId) {
+    const kRef = konusmaRef(db, kid, appId);
     const konusma = (await kRef.get()).data() || {};
-    if (konusma.mode === 'human') return;
-    const snap = await mesajlarRef(db, waId, appId).orderBy('timestamp', 'desc').limit(20).get();
+    if (konusma.mode === 'human') { atlandi(waId, 'human mode'); return; }
+    const gun = istanbulGunu(simdi());
+    const gunlukSayi = konusma.botGunluk?.gun === gun ? Number(konusma.botGunluk.sayi) || 0 : 0;
+    if (gunlukSayi >= gunlukSinir) { await gunlukSinirDoldu(db, hat, kid, waId, konusma, gun); return; }
+
+    const snap = await mesajlarRef(db, kid, appId).orderBy('timestamp', 'desc').limit(20).get();
     const mesajlar = snap.docs.map(d => d.data()).reverse();
     const gecmis = mesajlar.map(d => ({ rol: d.from === 'customer' ? 'musteri' : 'asistan', metin: d.text || '' }));
     const kvkkGonderilen = kvkkGonderilenOku(konusma);
     const ilkCevap = !Object.keys(kvkkGonderilen).length;
     const collected = konusma.collected || {};
-    let marka = konusma.marka || '';
+    // Hat tek markalıdır: yapay zekanın "marka" alanı dikkate alınmaz
+    const marka = hat.marka;
     let intent = konusma.intent || '';
-    const fiyatOnce = await fiyatGuvenli(db, marka, collected, intent);
-    const talimat = (m, c, f) => sistemTalimati({ marka: m, collected: c, fiyat: f, profilAdi: konusma.profileName || '', simdiMs: simdi(), env, ilkCevap });
+    const tasimaMi = (niyet) => marka === 'depoevim' && TASIMA_NIYETLERI.includes(niyet);
+    let tasima = tasimaMi(intent);
+    const fiyatOnce = tasima ? null : await fiyatGuvenli(db, marka, collected, intent);
+    const bildirim = konusma.needsAgent ? { sebep: konusma.handoffReason || '' } : null;
+    const talimat = (c, f, t) => sistemTalimati({ marka, collected: c, fiyat: f, profilAdi: konusma.profileName || '', simdiMs: simdi(), env, ilkCevap, bildirim, tasima: t });
 
-    let reply, handoff, handoffReason, yeniCollected = collected, fiyat = fiyatOnce, aiHata = null;
-    const r1 = await aiUret({ sistem: talimat(marka, collected, fiyatOnce), gecmis, env, fetchFn });
+    let reply, handoff, handoffReason, handoffType = '', yeniCollected = collected, fiyat = fiyatOnce, aiHata = null;
+    const r1 = await aiUret({ sistem: talimat(collected, fiyatOnce, tasima), gecmis, env, fetchFn });
     if (!r1.ok) {
       // DEĞİŞTİ (2026-10-07): yapay zeka hatası konuşmayı KİLİTLEMEZ (personele devretmez);
       // müşterinin sonraki mesajında bot yeniden dener. Sabit mesaj 30 dakikada en fazla bir kez.
@@ -161,88 +281,101 @@ export function handlerOlustur({
       if (r1.tur === 'yapilandirma') await aiUyariYaz(db, r1, hataAni, appId);
       if (simdi() - (Date.parse(konusma.sonYedekMesaj || '') || 0) < YEDEK_ARALIGI_MS) {
         await kRef.set({ botHatasi: { zaman: hataAni, sebep: String(r1.hata || '').slice(0, 300), tur: r1.tur || 'gecici' } }, { merge: true });
+        atlandi(waId, 'yedek sessizliği (30 dk)');
         return;
       }
       reply = YEDEK_MESAJ; handoff = false; handoffReason = '';
     } else {
       await aiUyariTemizle(db, iso(), appId);
       let out = r1.cikti;
-      marka = out.marka || marka;
       intent = out.intent && out.intent !== 'diger' ? out.intent : (intent || out.intent);
+      tasima = tasimaMi(intent);
       yeniCollected = { ...collected, ...whatsappAlanlariniTemizle(out.collected) };
-      fiyat = await fiyatGuvenli(db, marka, yeniCollected, intent);
+      fiyat = tasima ? null : await fiyatGuvenli(db, marka, yeniCollected, intent);
       // Fiyat bu turda hesaplanabilir hâle geldiyse (ya da değiştiyse) cevap fiyatla yeniden üretilir
       if (fiyat?.durum === 'tamam' && JSON.stringify(fiyat) !== JSON.stringify(fiyatOnce) && !out.handoff) {
-        const r2 = await aiUret({ sistem: talimat(marka, yeniCollected, fiyat), gecmis, env, fetchFn });
+        const r2 = await aiUret({ sistem: talimat(yeniCollected, fiyat, tasima), gecmis, env, fetchFn });
         if (r2.ok) {
-          out = { ...r2.cikti, handoff: r2.cikti.handoff || out.handoff, handoffReason: r2.cikti.handoffReason || out.handoffReason };
+          out = { ...r2.cikti, handoff: r2.cikti.handoff || out.handoff, handoffReason: r2.cikti.handoffReason || out.handoffReason, handoffType: r2.cikti.handoffType || out.handoffType };
           yeniCollected = { ...yeniCollected, ...whatsappAlanlariniTemizle(r2.cikti.collected) };
         } else out = { ...out, reply: fiyatMesaji(fiyat) };
       }
       reply = out.reply;
       handoff = out.handoff;
       handoffReason = out.handoffReason;
+      handoffType = out.handoffType || '';
       // YENİ (2026-10-07): coğrafi hizmet reddi ("İstanbul dışı taşıma yapmıyoruz") yakalanır —
       // bir kez düzeltme notuyla yeniden üretilir; yine ret varsa sabit cevap (soru / fiyat / devret)
       if (hizmetReddiVarMi(reply)) {
         console.warn('[whatsapp] cevapta hizmet reddi — yeniden üretiliyor', maskele(waId));
-        const r3 = await aiUret({ sistem: `${talimat(marka, yeniCollected, fiyat)}\n${RET_DUZELTME_NOTU}`, gecmis, env, fetchFn });
+        const r3 = await aiUret({ sistem: `${talimat(yeniCollected, fiyat, tasima)}\n${RET_DUZELTME_NOTU}`, gecmis, env, fetchFn });
         if (r3.ok && !hizmetReddiVarMi(r3.cikti.reply)) {
-          reply = r3.cikti.reply; handoff = r3.cikti.handoff; handoffReason = r3.cikti.handoffReason;
+          reply = r3.cikti.reply; handoff = r3.cikti.handoff; handoffReason = r3.cikti.handoffReason; handoffType = r3.cikti.handoffType || '';
           yeniCollected = { ...yeniCollected, ...whatsappAlanlariniTemizle(r3.cikti.collected) };
         } else if (fiyat?.durum === 'tamam') {
           reply = fiyatMesaji(fiyat);
         } else {
           const y = retYerineCevap(fiyat);
           reply = y.metin;
-          if (y.devret) { handoff = true; handoffReason = 'Fiyatı ekip iletecek (bot reddetmeye çalıştı)'; }
+          if (y.devret) { handoff = true; handoffType = 'bildir'; handoffReason = 'Fiyatı ekip iletecek (bot reddetmeye çalıştı)'; }
         }
       }
       // Uydurma rakam koruması: cevapta sistemin hesaplamadığı bir tutar varsa sabit metin
       if (!fiyatRakamlariGecerliMi(reply, fiyat)) {
         console.warn('[whatsapp] cevapta sistem dışı tutar — sabit metne çevrildi', maskele(waId));
         if (fiyat?.durum === 'tamam') reply = fiyatMesaji(fiyat);
-        else { reply = 'Fiyat bilgisini ekibimiz sizinle paylaşacak. ' + YEDEK_MESAJ; handoff = true; handoffReason = handoffReason || 'Fiyat sorusu (otomatik fiyat yok)'; }
+        else {
+          reply = `${tasima ? 'Fiyatı taşıma ekibimiz size iletecek.' : 'Fiyat bilgisini ekibimiz sizinle paylaşacak.'} ${YEDEK_MESAJ}`;
+          if (!handoff) { handoff = true; handoffType = 'bildir'; handoffReason = handoffReason || 'Fiyat sorusu (otomatik fiyat yok)'; }
+        }
       }
       if (fiyat && ['fiyat_yok', 'hata'].includes(fiyat.durum) && !handoff && /fiyat|ücret|ne kadar|kaç para/i.test(gecmis.filter(g => g.rol === 'musteri').slice(-1)[0]?.metin || '')) {
-        handoff = true; handoffReason = fiyat.durum === 'hata' ? 'Fiyat hesaplanamadı' : 'Otomatik fiyatı olmayan hizmet';
+        handoff = true; handoffType = 'bildir'; handoffReason = fiyat.durum === 'hata' ? 'Fiyat hesaplanamadı' : 'Otomatik fiyatı olmayan hizmet';
       }
     }
-    // KVKK: ilk cevapta tanıtım + aydınlatma linki (marka belli değilse iki marka birden);
-    // marka sonradan belli olduysa ve linki gitmediyse kişisel bilgi istemeden önce BİR KEZ
+
+    // Devir türü: yalnızca temsilci / şikayet botu susturur; gerisi "bildir" (bot devam eder)
+    let devirTuru = handoff ? devirTuruBul(handoffType, handoffReason) : null;
+    // DepoEvim hattında taşıma bilgileri tamamlandı → taşıma ekibi bilgilendirilir (bir kez)
+    let tasimaBildirimi = false;
+    if (tasima && !konusma.tasimaBildirildi && TASIMA_ZORUNLU.every(a => yeniCollected[a]) && !BOTU_SUSTURAN.includes(devirTuru)) {
+      devirTuru = 'bildir'; handoffReason = 'Taşıma talebi — taşıma ekibine iletildi'; tasimaBildirimi = true;
+    }
+    const sustur = BOTU_SUSTURAN.includes(devirTuru);
+    const yeniBildirim = devirTuru === 'bildir' && (!konusma.needsAgent || tasimaBildirimi);
+    const sebep = handoffReason || (sustur ? 'Temsilci istedi' : 'Personel bilgilendirildi');
+
+    // KVKK: ilk cevapta tanıtım + hattın markasının aydınlatma linki;
+    // eski konuşmada bu markanın linki gitmediyse BİR KEZ
+    // YENİ (2026-10-07): DepoEvim hattında taşıma talebi anlaşıldığı ilk turda Sembol Nakliyat aydınlatması BİR KEZ
     let kvkkYeni = [];
-    if (ilkCevap) { const gm = girisMetni(marka); reply = `${gm.metin}\n\n${reply}`; kvkkYeni = gm.markalar; }
-    else if (marka && !kvkkGonderilen[marka]) { reply = `${kvkkEkMetni(marka)}\n\n${reply}`; kvkkYeni = [marka]; }
+    if (tasima && !kvkkGonderilen.sembol) { reply = `${SEMBOL_TASIMA_KVKK}\n\n${reply}`; kvkkYeni.push('sembol'); }
+    if (ilkCevap) { const gm = girisMetni(marka); reply = `${gm.metin}\n\n${reply}`; kvkkYeni.push(...gm.markalar); }
+    else if (marka && !kvkkGonderilen[marka]) { reply = `${kvkkEkMetni(marka)}\n\n${reply}`; kvkkYeni.push(marka); }
+    kvkkYeni = [...new Set(kvkkYeni)];
 
     // Fiyat izi (Vercel logu + konuşma belgesi) — numara maskeli
     const fiyatIzi = fiyat ? { durum: fiyat.durum, kaynak: fiyat.kaynak || '', toplamKm: fiyat.toplamKm ?? null,
       eksik: [...(fiyat.eksik || []), ...(fiyat.konumHatalari || []).map(k => `${k}?`)], sebep: fiyat.sebep || '' } : null;
-    console.log('[whatsapp] tur', maskele(waId), JSON.stringify({ marka, intent, fiyat: fiyatIzi, handoff: !!handoff }));
+    console.log('[whatsapp] tur', maskele(waId), JSON.stringify({ hat: hat.marka, intent, tasima, fiyat: fiyatIzi, devir: devirTuru, gunluk: gunlukSayi + 1 }));
 
-    // Gönder
-    const g = await waMetinGonder({ env, fetchFn, to: waId, metin: reply });
-    const nowIso = iso();
-    const cikanId = g.wamid || `yerel_${simdi()}`;
-    await mesajlarRef(db, waId, appId).doc(cikanId).set({
-      direction: 'out', from: 'bot', agentName: asistanAdi(marka), type: 'text', text: reply, timestamp: nowIso, wamid: g.wamid || null,
-      status: g.ok ? 'sent' : 'failed', ...(g.ok ? {} : { hata: { kod: g.hata.kod ?? null, mesaj: g.hata.mesaj || '' } }),
-      ...(aiHata ? { aiHata: String(aiHata).slice(0, 300) } : {}),
-    });
-    if (!g.ok) {
-      console.error('[whatsapp] gönderilemedi', maskele(waId), g.hata.kod, g.hata.mesaj);
-      if (g.hata.kalici) await uyariYaz(db, g.hata, nowIso, appId);
-    } else await uyariTemizle(db, nowIso, appId);
+    const { g, nowIso } = await gonderVeKaydet(db, hat, kid, waId, reply, aiHata ? { aiHata: String(aiHata).slice(0, 300) } : {});
 
-    // Lead: ilk anlamlı bilgi geldiyse (ya da devredildiyse) oluştur / güncelle
-    let leadId = konusma.leadId || null;
-    if (Object.keys(yeniCollected).length || handoff) {
+    // Lead: ilk anlamlı bilgi geldiyse (ya da personel devreye girdiyse) oluştur / güncelle
+    const alan = tasima ? 'tasimaLeadId' : 'leadId';
+    let leadId = konusma[alan] || null;
+    // Aydınlatma metni gönderilmiş markalar (bu turda başarıyla gidenler dahil)
+    const kvkkMarkalari = ['depoevim', 'sembol'].filter(m => kvkkGonderilen[m] || (g.ok && kvkkYeni.includes(m)));
+    if (Object.keys(yeniCollected).length || sustur || yeniBildirim) {
       try {
-        leadId = await leadYaz(db, { waId, konusma, marka, intent, collected: yeniCollected, fiyat, handoff, handoffReason });
+        leadId = await leadYaz(db, { hat, kid, waId, konusma, alan, leadMarka: tasima ? 'sembol' : marka, intent, collected: yeniCollected, fiyat, kvkkMarkalari,
+          hareket: sustur ? `Bot görüşmeyi personele devretti: ${sebep}` : yeniBildirim ? `Bot personeli bilgilendirdi (bot devam ediyor): ${sebep}` : null,
+          devir: sustur || yeniBildirim ? { tur: devirTuru, sebep } : null });
       } catch (err) { console.error('[whatsapp] lead yazılamadı', maskele(waId), err?.message); }
     }
 
     await kRef.set({
-      collected: yeniCollected, marka, intent, leadId,
+      hatId: hat.phoneNumberId, collected: yeniCollected, marka, intent, [alan]: leadId,
       ...(leadId && konusma.refKodu && leadId === refBelgeId(konusma.refKodu) ? { refKullanildi: true } : {}),
       ...(g.ok && kvkkYeni.length ? {
         kvkkVerildi: true, kvkkGonderilen: { ...kvkkGonderilen, ...Object.fromEntries(kvkkYeni.map(m => [m, nowIso])) },
@@ -250,44 +383,67 @@ export function handlerOlustur({
       } : {}),
       ...(aiHata ? { botHatasi: { zaman: nowIso, sebep: String(aiHata).slice(0, 300), tur: r1.tur || 'gecici' }, ...(g.ok ? { sonYedekMesaj: nowIso } : {}) } : { botHatasi: null }),
       lastMessageAt: nowIso, lastMessagePreview: reply.slice(0, 120), lastBotAt: nowIso,
+      botGunluk: { gun, sayi: gunlukSayi + 1 },
       ...(fiyat?.durum === 'tamam' ? { sonFiyat: fiyat } : {}),
       ...(fiyatIzi ? { sonFiyatDurumu: { ...fiyatIzi, zaman: nowIso } } : {}),
-      ...(handoff ? { mode: 'human', needsAgent: true, handoffReason: handoffReason || '', handoffAt: nowIso } : {}),
+      ...(sustur ? { mode: 'human', needsAgent: true, handoffReason: sebep, handoffAt: nowIso, devirTuru, sonOtomatikBilgi: null } : {}),
+      ...(!sustur && yeniBildirim ? { needsAgent: true, handoffReason: sebep, bildirimAt: nowIso, devirTuru: 'bildir' } : {}),
+      ...(tasimaBildirimi ? { tasimaBildirildi: nowIso } : {}),
     }, { merge: true });
   }
 
-  // ---- YENİ (2026-10-07): yapay zeka hatası yüzünden personele geçmiş, personelin henüz cevap
-  // yazmadığı konuşma müşterinin yeni mesajında bota döner. Eski kodun yazdığı işaretler:
-  // handoffReason "Yapay zeka hatası" ya da (sebep boşsa) devirdeki bot mesajında aiHata alanı.
-  // Gerçek devretmeler (temsilci isteği, şikayet, ofis …) ve personelin yazdığı konuşmalar AÇILMAZ.
-  async function aiKilidiniAc(db, waId, k) {
-    const devir = k.handoffAt || '';
-    const sebepAi = ESKI_AI_DEVIR_SEBEBI.test(k.handoffReason || '');
-    const mesajlar = (await mesajlarRef(db, waId, appId).orderBy('timestamp', 'desc').limit(50).get()).docs.map(d => d.data());
-    if (mesajlar.some(m => m.from === 'agent' && (!devir || String(m.timestamp) >= devir))) return k;
-    const devirMesaji = mesajlar.find(m => m.from === 'bot' && (!devir || String(m.timestamp) <= devir));
-    if (!sebepAi && !(!k.handoffReason && devirMesaji?.aiHata)) return k;
+  // ---- sessiz moddan bota dönüş (alanlar konuşmaya yazılır, lead'e hareket)
+  async function botaDondur(db, kid, waId, k, { needsAgent, sebep, hareket, ek = {} }) {
     const nowIso = iso();
-    await konusmaRef(db, waId, appId).set({
-      mode: 'bot', needsAgent: false, handoffReason: '', aiKilidiAcildi: nowIso,
-      botHatasi: { zaman: nowIso, sebep: 'Önceki yapay zeka hatası — konuşma bota geri döndü', tur: 'gecici' },
-    }, { merge: true });
-    if (k.leadId) {
-      try {
-        const lRef = havuzRef(db, k.leadId, appId);
-        const l = await lRef.get();
-        if (l.exists) await lRef.set({ hareketler: [...(l.data()?.hareketler || []), { tarih: nowIso, kullanici: 'WhatsApp Bot', islem: 'Bot görüşmeye geri döndü (önceki devir yapay zeka hatasından)' }] }, { merge: true });
-      } catch (err) { console.error('[whatsapp] lead hareketi yazılamadı', maskele(waId), err?.message); }
+    const alanlar = { mode: 'bot', needsAgent, botaDonus: { zaman: nowIso, sebep }, sonOtomatikBilgi: null, ...ek };
+    await konusmaRef(db, kid, appId).set(alanlar, { merge: true });
+    for (const leadId of new Set([k.leadId, k.tasimaLeadId].filter(Boolean))) await leadHareketiEkle(db, waId, leadId, hareket);
+    console.log('[whatsapp] bota döndü', maskele(waId), sebep);
+    return { ...k, ...alanlar };
+  }
+
+  // ---- mode "human" konuşmaya müşteri yazdı (2026-10-07) — karar: sessizModKarari
+  async function insanModu(db, hat, kid, waId, k) {
+    const kRef = konusmaRef(db, kid, appId);
+    const mesajlar = (await mesajlarRef(db, kid, appId).orderBy('timestamp', 'desc').limit(50).get()).docs.map(d => d.data());
+    const { karar, personelYazdi } = sessizModKarari(k, mesajlar, simdi());
+    if (karar === 'ai_hatasi') {
+      const nowIso = iso();
+      return botaDondur(db, kid, waId, k, { needsAgent: false, sebep: 'eski yapay zeka hatası devri',
+        hareket: 'Bot görüşmeye geri döndü (önceki devir yapay zeka hatasından)',
+        ek: { handoffReason: '', aiKilidiAcildi: nowIso, botHatasi: { zaman: nowIso, sebep: 'Önceki yapay zeka hatası — konuşma bota geri döndü', tur: 'gecici' } } });
     }
-    console.log('[whatsapp] yapay zeka kilidi açıldı', maskele(waId));
-    return { ...k, mode: 'bot', needsAgent: false, handoffReason: '' };
+    if (karar === 'eski_bildir') {
+      return botaDondur(db, kid, waId, k, { needsAgent: true, sebep: `eski bildirim türü devir: ${k.handoffReason}`,
+        hareket: `Bot görüşmeye geri döndü (önceki devir bildirim türündeydi: ${k.handoffReason}) — personel bilgilendirilmiş durumda`,
+        ek: { devirTuru: 'bildir', bildirimAt: k.handoffAt || iso() } });
+    }
+    if (karar === '24_saat') {
+      return botaDondur(db, kid, waId, k, { needsAgent: !!k.needsAgent, sebep: '24 saat',
+        hareket: `Bot görüşmeye geri döndü (${personelYazdi ? 'son personel mesajından' : 'devirden'} bu yana 24 saat geçti)` });
+    }
+    if (karar === 'sessiz_personel') { atlandi(waId, 'human mode (personel yazıyor)'); return k; }
+    const bilgiVer = await db.runTransaction(async (t) => {
+      const g = (await t.get(kRef)).data() || {};
+      if (g.mode !== 'human') return false;
+      const son = enGec(g.handoffAt, g.sonOtomatikBilgi);
+      if (son && simdi() - Date.parse(son) < SESSIZ_BILGI_ARALIGI_MS) return false;
+      t.set(kRef, { sonOtomatikBilgi: iso() }, { merge: true });
+      return true;
+    });
+    if (!bilgiVer) { atlandi(waId, 'human mode'); return k; }
+    const { nowIso } = await gonderVeKaydet(db, hat, kid, waId, SESSIZ_BILGI_MESAJI, { otomatik: 'sessiz_bilgi' });
+    await kRef.set({ lastMessageAt: nowIso, lastMessagePreview: SESSIZ_BILGI_MESAJI, lastBotAt: nowIso }, { merge: true });
+    atlandi(waId, 'human mode — 3 saatlik bilgi mesajı gönderildi');
+    return k;
   }
 
   // ---- gelen müşteri mesajı
-  async function mesajIsle(db, m, profilAdi) {
+  async function mesajIsle(db, hat, m, profilAdi) {
     const waId = String(m.from || '');
     const wamid = String(m.id || '');
     if (!waId || !wamid) return;
+    const kid = konusmaKimligi(hat, waId);
     const c = gelenMesajiCoz(m);
     const ref = c.tip === 'text' || c.tip === 'button' ? refKoduBul(c.metin) : null;
     const metin = ref ? refKoduTemizle(c.metin) : c.metin;
@@ -295,50 +451,55 @@ export function handlerOlustur({
 
     // 1) Tekrar koruması — wamid ile create(); varsa çık
     try {
-      await mesajlarRef(db, waId, appId).doc(wamid).create({
+      await mesajlarRef(db, kid, appId).doc(wamid).create({
         direction: 'in', from: 'customer', type: c.tip, text: metin, timestamp: zaman, alindi: iso(), wamid,
         mediaId: c.mediaId || null, ...(c.konum ? { konum: c.konum } : {}), ...(ref ? { refKodu: ref.kod } : {}),
       });
     } catch (err) {
-      if (err?.code === 6 || /ALREADY_EXISTS/i.test(String(err?.message))) { console.log('[whatsapp] tekrar gelen mesaj atlandı', maskele(waId)); return; }
+      if (err?.code === 6 || /ALREADY_EXISTS/i.test(String(err?.message))) { atlandi(waId, 'tekrar'); return; }
       throw err;
     }
 
-    // 2) Konuşma özeti (okunmamış sayısı, son mesaj, ref → marka)
-    const kRef = konusmaRef(db, waId, appId);
+    // 2) Konuşma özeti (okunmamış sayısı, son mesaj, hat → marka)
+    const kRef = konusmaRef(db, kid, appId);
     let konusma = await db.runTransaction(async (t) => {
       const s = await t.get(kRef);
       const k = s.exists ? s.data() : {};
       const yeni = {
         waId, phone: waTelefonCrm(waId), profileName: profilAdi || k.profileName || '',
+        hatId: hat.phoneNumberId, marka: hat.marka,
         lastMessageAt: zaman, lastMessagePreview: c.ozet || '', lastCustomerMessageAt: zaman, lastCustomerWamid: wamid,
         unreadCount: (Number(k.unreadCount) || 0) + 1,
         mode: k.mode || 'bot',
         ...(s.exists ? {} : { createdAt: iso(), needsAgent: false, collected: {} }),
-        // Ref kodu yalnızca ilk kez (ya da yeni bir ref) gelince bağlanır; marka henüz yoksa ref'ten
-        ...(ref && ref.kod !== k.refKodu ? { refKodu: ref.kod, refKullanildi: false, ...(k.marka ? {} : { marka: ref.marka }) } : {}),
+        // Ref kodu yalnızca ilk kez (ya da yeni bir ref) gelince bağlanır (marka hattan gelir)
+        ...(ref && ref.kod !== k.refKodu ? { refKodu: ref.kod, refKullanildi: false } : {}),
       };
       t.set(kRef, yeni, { merge: true });
       return { ...k, ...yeni };
     });
-    if (c.botaGitsin && konusma.mode === 'human') konusma = await aiKilidiniAc(db, waId, konusma);
-    if (!c.botaGitsin || konusma.mode === 'human' || env.WHATSAPP_BOT_KAPALI === '1') return;
+    if (!c.botaGitsin) { atlandi(waId, `bota gitmeyen mesaj türü (${c.tip})`); return; }
+    if (konusma.mode === 'human') {
+      konusma = await insanModu(db, hat, kid, waId, konusma);
+      if (konusma.mode === 'human') return;
+    }
+    if (env.WHATSAPP_BOT_KAPALI === '1') { atlandi(waId, 'bot kapalı (WHATSAPP_BOT_KAPALI)'); return; }
 
     // 3) Peş peşe mesaj: kısa bekleme; bu arada yeni mesaj geldiyse cevabı o verir
     await bekle(birlestirmeMs);
-    const kilitAlindi = await db.runTransaction(async (t) => {
+    const kilit = await db.runTransaction(async (t) => {
       const k = (await t.get(kRef)).data() || {};
-      if (k.lastCustomerWamid !== wamid) return false;
-      if (k.botKilit && simdi() - Date.parse(k.botKilit.zaman) < KILIT_SURESI_MS) { t.set(kRef, { botTekrar: true }, { merge: true }); return false; }
+      if (k.lastCustomerWamid !== wamid) return 'birleştirme';
+      if (k.botKilit && simdi() - Date.parse(k.botKilit.zaman) < KILIT_SURESI_MS) { t.set(kRef, { botTekrar: true }, { merge: true }); return 'kilit'; }
       t.set(kRef, { botKilit: { wamid, zaman: iso() }, botTekrar: false }, { merge: true });
       return true;
     });
-    if (!kilitAlindi) return;
+    if (kilit !== true) { atlandi(waId, kilit); return; }
 
     // 4) Bot turu; bu sırada yeni mesaj geldiyse (botTekrar) bir tur daha
     try {
       for (let tur = 0; tur < 3; tur++) {
-        await botTuru(db, waId);
+        await botTuru(db, hat, kid, waId);
         const devam = await db.runTransaction(async (t) => {
           const k = (await t.get(kRef)).data() || {};
           if (k.botTekrar && k.mode !== 'human') { t.set(kRef, { botTekrar: false, botKilit: { wamid, zaman: iso() } }, { merge: true }); return true; }
@@ -354,10 +515,10 @@ export function handlerOlustur({
   }
 
   // ---- giden mesaj durumu
-  async function durumIsle(db, s) {
+  async function durumIsle(db, hat, s) {
     const waId = String(s.recipient_id || '');
     if (!waId || !s.id) return;
-    const ref = mesajlarRef(db, waId, appId).doc(String(s.id));
+    const ref = mesajlarRef(db, konusmaKimligi(hat, waId), appId).doc(String(s.id));
     const snap = await ref.get();
     if (!snap.exists) return; // bu sistemden gönderilmemiş mesaj
     const d = snap.data() || {};
@@ -379,11 +540,15 @@ export function handlerOlustur({
       for (const change of entry?.changes || []) {
         if (change?.field !== 'messages') continue;
         const v = change.value || {};
-        // Aynı uygulamaya bağlı başka numaraların olayları işlenmez
-        if (env.WHATSAPP_PHONE_NUMBER_ID && v.metadata?.phone_number_id && String(v.metadata.phone_number_id) !== String(env.WHATSAPP_PHONE_NUMBER_ID)) continue;
+        // Hat yapılandırmada yoksa (aynı uygulamaya bağlı başka numara) mesajlar işlenmez
+        const hat = hatBul(env, v.metadata?.phone_number_id);
+        if (!hat) {
+          (v.messages || []).forEach(m => atlandi(m.from, `bilinmeyen hat (${maskele(v.metadata?.phone_number_id)})`));
+          continue;
+        }
         const profiller = Object.fromEntries((v.contacts || []).map(c => [String(c.wa_id), c.profile?.name || '']));
-        (v.statuses || []).forEach(s => isler.push(durumIsle(db, s)));
-        (v.messages || []).forEach(m => isler.push(mesajIsle(db, m, profiller[String(m.from)] || '')));
+        (v.statuses || []).forEach(s => isler.push(durumIsle(db, hat, s)));
+        (v.messages || []).forEach(m => isler.push(mesajIsle(db, hat, m, profiller[String(m.from)] || '')));
       }
     }
     const sonuc = await Promise.allSettled(isler);

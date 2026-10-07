@@ -10,13 +10,14 @@
 // SDK kullanılmaz (paket eklenmez): iki sağlayıcı da REST ile çağrılır.
 //
 // Çıktı ZORUNLU JSON'dur ve aiCiktisiDogrula ile şemaya göre denetlenir:
-//   { reply, collected, handoff, handoffReason, intent, marka }
+//   { reply, collected, handoff, handoffReason, handoffType, intent, marka }
 // Geçersizse çağıran taraf (whatsapp-webhook) sabit yedek mesajı gönderir; konuşma
 // KİLİTLENMEZ, müşterinin sonraki mesajında bot yeniden dener.
 // ============================================================================
 
 // DEĞİŞTİ (2026-10-07): gemini-2.5-flash 404 veriyordu; canlıda doğrulanan model gemini-3.8-flash
 export const VARSAYILAN_MODEL = { gemini: 'gemini-3.8-flash', claude: 'claude-sonnet-5-5' };
+export const DEVIR_TURLERI = ['temsilci', 'sikayet', 'bildir'];
 export const NIYETLER = ['evden_eve', 'ofis', 'parca_esya', 'depolama', 'kiralik_depo', 'asansor_kiralama', 'sehirlerarasi', 'diger'];
 
 export function aiAyarlari(env = process.env) {
@@ -124,6 +125,8 @@ export function aiCiktisiDogrula(o) {
       collected: o.collected || {},
       handoff: o.handoff === true,
       handoffReason: typeof o.handoffReason === 'string' ? o.handoffReason.slice(0, 300) : '',
+      // YENİ (2026-10-07): temsilci | sikayet → bot susar; bildir → personel bilgilendirilir, bot devam eder
+      handoffType: DEVIR_TURLERI.includes(o.handoffType) ? o.handoffType : '',
       intent,
       marka,
     },

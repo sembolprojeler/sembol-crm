@@ -8,6 +8,9 @@
 // sitesindeki "6 ay peşine 1 ay / yıllık 2 ay hediye" GERÇEK kampanyadır, sistem
 // fiyatında zaten vardır), DepoEvim fiyatları "+KDV", devretme kuralları, mesai.
 // KVKK aydınlatma cümlesi ilk cevaba SUNUCU tarafından eklenir (kvkkMetni).
+// 2026-10-07: her hat tek markalı (0850 = DepoEvim; marka seçimi bu hatta kullanılmaz),
+// handoffType (temsilci | sikayet → bot susar; bildir → bot devam eder), konu dışı sohbet,
+// DepoEvim hattında taşıma talebi (fiyatsız, taşıma ekibine lead).
 // ============================================================================
 
 export const MARKALAR = {
@@ -56,6 +59,8 @@ export function istanbulZamani(ms = Date.now()) {
   const gunNo = new Date(new Date(ms).toLocaleString('en-US', { timeZone: 'Europe/Istanbul' })).getDay(); // 0 pazar
   return { metin: `${p.day} ${p.month} ${p.year} ${p.weekday} ${p.hour}:${p.minute}`, gunNo, dakika: Number(p.hour) % 24 * 60 + Number(p.minute) };
 }
+// Türkiye saatine göre gün: "2026-10-07" (günlük bot cevabı sınırı)
+export const istanbulGunu = (ms = Date.now()) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Istanbul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 const aralikCoz = (s) => {
   const m = String(s || '').match(/^(\d{1,2}):?(\d{2})?\s*-\s*(\d{1,2}):?(\d{2})?$/);
   return m ? [Number(m[1]) * 60 + Number(m[2] || 0), Number(m[3]) * 60 + Number(m[4] || 0)] : null;
@@ -121,6 +126,16 @@ TOPLANACAK ALANLAR (collected içinde TAM bu anahtar ve değerlerle yaz; bilmedi
 - fullName: müşterinin teyit ettiği ad soyad
 Kira fiyatı için: depoBoyutu, kiralamaSuresi, sube, teslimSekli. Alım ücreti için ayrıca alım adresi bilgileri.`;
 
+// YENİ (2026-10-07): 0850 hattı yalnızca DepoEvim. Depolamasız taşıma talebi (evden eve, ofis,
+// şehirlerarası) bilgileri toplanıp taşıma ekibine (Sembol) lead olarak iletilir; fiyat VERİLMEZ.
+const DEPOEVIM_TASIMA = `
+TAŞIMA TALEBİ (depolama olmadan evden eve / ofis / şehirlerarası taşıma):
+- Bu talepleri grubumuzun taşıma ekibi karşılar. Reddetme, başka numaraya yönlendirme; bilgileri sen topla.
+- intent: "evden_eve" (ev), "ofis" (ofis / iş yeri), "sehirlerarasi" (iller arası ev taşıma).
+- FİYAT VERME, tahmini aralık bile söyleme: "Fiyatı taşıma ekibimiz size iletecek" de.
+- Tek tek sor ve şu anahtarlarla yaz: homeSize ("1+1" | "2+1" | "3+1" | "4+1" | "5+1" | "villa" | "ofis"), fromCity, fromDistrict, toCity, toDistrict, fromFloor, toFloor, fromElevator, toElevator ("merdiven" | "bina_asansoru" | "dis_cephe"), moveDate ("YYYY-AA-GG") ya da tarihNotu, fullName.
+- Ev tipi, çıkış il/ilçe ve varış il/ilçe alınınca: "Talebinizi taşıma ekibimize ilettik, ekibimiz mesai saatinde (09:00-18:00) size dönüş yapacak." de; handoff: true, handoffType: "bildir". Müşteri sonra yazarsa sohbete devam et.`;
+
 // --------------------------------------------------------------- ANA TALİMAT
 const ORTAK_KURALLAR_SABLON = `
 __KIMLIK__
@@ -135,20 +150,26 @@ ASLA:
 
 FİYAT:
 - "SİSTEM FİYATI" bloğu doluysa: "tahmini fiyat aralığı" olarak ver, "Net fiyat ücretsiz ekspertiz sonrası belirlenir." notunu ekle ve ekspertiz randevusu teklif et (DepoEvim'de "+KDV" yaz).
-- Blok "eksik" diyorsa fiyat söyleme, eksik bilgiyi (tek soru) sor. Blok "hata" ya da "fiyat_yok" diyorsa fiyat söyleme, ekibin döneceğini söyle ve handoff: true.
-- Ofis taşıma için fiyat verilmez: bilgileri topla, handoff: true.
+- Blok "eksik" diyorsa fiyat söyleme, eksik bilgiyi (tek soru) sor. Blok "hata" ya da "fiyat_yok" diyorsa fiyat söyleme, ekibin döneceğini söyle ve handoff: true, handoffType: "bildir".
+- Ofis taşıma için fiyat verilmez: bilgileri topla, handoff: true, handoffType: "bildir".
 
-DEVRET (handoff: true + kısa handoffReason):
-- Müşteri temsilci, insan, yetkili isterse ya da aranmak isterse.
-- Şikayet, hasar, ödeme, fatura, iade konusu varsa.
-- Bilgiler tamamlandı ve müşteri fiyatı aldıktan sonra randevu/ekspertiz istiyor ya da kesin fiyat bekliyorsa.
-- Emin değilsen, konu kapsam dışıysa, otomatik fiyatı olmayan bir hizmetse (ofis, parça eşya, asansör kiralama, kurumsal, uluslararası, özel hacim).
-Devrederken müşteriye ekibin döneceğini söyle. Mesai dışındaysak "ekibimiz mesai saatinde size dönüş yapacak" de.
+PERSONELE AKTARMA (handoff: true + handoffType + kısa handoffReason) — İKİ TÜR VAR, karıştırma:
+1) BOT SUSAR — yalnızca şu iki durumda:
+   - handoffType "temsilci": müşteri AÇIKÇA temsilci, insan, yetkili, canlı destek ile görüşmek istiyor.
+   - handoffType "sikayet": şikayet ya da hasar bildiriyor.
+   Müşteriye "sizi ekibimize aktarıyorum, mesai saatinde (09:00-18:00) size dönüş yapılacak" de.
+2) EKİP BİLGİLENDİRİLİR, SEN DEVAM EDERSİN — handoffType "bildir":
+   - ekspertiz / randevu talebi, bilgiler tamamlandı, müşteri aranmak istiyor, kesin fiyat bekliyor,
+   - ödeme / fatura / iade sorusu, otomatik fiyatı olmayan hizmet (ofis, parça eşya, asansör kiralama, kurumsal, uluslararası, özel hacim), emin olmadığın konu.
+   Müşteriye ekibin döneceğini söyle; sohbet sürerse genel sorularını cevaplamaya devam et.
+Mesai dışındaysak "ekibimiz mesai saatinde (09:00-18:00) size dönüş yapacak" de.
+
+KONU DIŞI SOHBET: depolama / taşıma ile ilgisiz sorulara (genel kültür, sohbet, şaka, başka işler) kısa ve nazik bir cümleyle cevap ver, ayrıntıya girme; ardından konuyu tek soruyla hizmetimize döndür.
 
 METİN DIŞI MESAJ: "[sesli mesaj]" → sesli mesajı dinleyemediğini kibarca söyle, yazmasını rica et. "[görsel]"/"[video]"/"[belge]" → aldığını, ekibin inceleyeceğini söyle ve sohbete devam et. "[konum: …]" → adres bilgisi olarak değerlendir (il/ilçeyi çıkarabiliyorsan yaz, emin değilsen teyit et).
 
 ÇIKTI: YALNIZCA şu JSON nesnesi, başka metin yok:
-{"reply": "müşteriye gidecek mesaj", "collected": {yeni ya da düzeltilen alanlar}, "handoff": false, "handoffReason": "", "intent": "evden_eve|ofis|parca_esya|depolama|kiralik_depo|asansor_kiralama|sehirlerarasi|diger", "marka": "sembol|depoevim|"}
+{"reply": "müşteriye gidecek mesaj", "collected": {yeni ya da düzeltilen alanlar}, "handoff": false, "handoffType": "temsilci|sikayet|bildir|", "handoffReason": "", "intent": "evden_eve|ofis|parca_esya|depolama|kiralik_depo|asansor_kiralama|sehirlerarasi|diger", "marka": "sembol|depoevim|"}
 - collected'a yalnızca bu mesajla öğrendiğin ya da düzelttiğin alanları yaz; değeri bilmiyorsan anahtarı hiç yazma.`;
 
 const MARKA_SECIMI = `
@@ -186,10 +207,13 @@ function fiyatBlogu(fiyat) {
   return `SİSTEM FİYATI (Sembol, evden eve): tahmini fiyat aralığı ${tl(fiyat.min)} – ${tl(fiyat.max)}`;
 }
 
-export function sistemTalimati({ marka = '', collected = {}, fiyat = null, profilAdi = '', simdiMs = Date.now(), env = process.env, ilkCevap = false } = {}) {
+// bildirim: { sebep } — personel daha önce bilgilendirildi (needsAgent), bot devam ediyor
+// tasima: DepoEvim hattında depolamasız taşıma talebi — fiyat bloğu yerine "fiyat verilmez"
+export function sistemTalimati({ marka = '', collected = {}, fiyat = null, profilAdi = '', simdiMs = Date.now(), env = process.env, ilkCevap = false,
+  bildirim = null, tasima = false } = {}) {
   const z = istanbulZamani(simdiMs);
   const mesai = mesaiIcindeMi(simdiMs, env);
-  const markaBlogu = marka === 'depoevim' ? `MARKA: DepoEvim\n${DEPOEVIM_BILGI}\n${DEPOEVIM_ALANLAR}`
+  const markaBlogu = marka === 'depoevim' ? `MARKA: DepoEvim\n${DEPOEVIM_BILGI}\n${DEPOEVIM_ALANLAR}\n${DEPOEVIM_TASIMA}`
     : marka === 'sembol' ? `MARKA: Sembol Nakliyat\n${SEMBOL_BILGI}\n${SEMBOL_ALANLAR}`
       : `${MARKA_SECIMI}\n${SEMBOL_ALANLAR}\n${DEPOEVIM_ALANLAR}`;
   return [
@@ -200,7 +224,10 @@ export function sistemTalimati({ marka = '', collected = {}, fiyat = null, profi
     `ÇALIŞMA SAATLERİ: hafta içi 09:00–18:00${env.WHATSAPP_CUMARTESI ? `, cumartesi ${env.WHATSAPP_CUMARTESI}` : ''}.`,
     profilAdi ? `WHATSAPP PROFİL ADI: ${String(profilAdi).slice(0, 60)} (ad soyadı teyit etmeden fullName yazma)` : 'WHATSAPP PROFİL ADI: yok',
     `ŞU ANA KADAR TOPLANAN: ${JSON.stringify(collected)}`,
-    fiyatBlogu(fiyat),
+    tasima ? 'SİSTEM FİYATI: yok — taşıma talebinde fiyat VERİLMEZ, fiyatı taşıma ekibi iletecek.' : fiyatBlogu(fiyat),
+    bildirim ? `EKİP BİLGİLENDİRİLDİ (${String(bildirim.sebep || '-').slice(0, 120)}): ekibimiz bu talebi biliyor. Sohbete devam et ve genel sorularını cevapla; `
+      + 'TOPLANAN bilgileri baştan sorma, fiyat uydurma, kesin tarih/saat verme. Gerekirse "ekibimiz mesai saatinde (09:00-18:00) dönüş yapacak" de. '
+      + 'Aynı sebeple tekrar handoff yazma; yalnızca temsilci isteği ya da şikayet olursa handoff ver.' : '',
     ilkCevap ? `Bu, müşteriye ilk cevabın: tanıtım, selam ve KVKK bilgilendirmesi sistem tarafından başa eklenecek; sen tekrar selam verme ve kendini tanıtma, doğrudan konuya gir.${marka ? '' : ' Marka belli değilse ilk sorun: evden eve taşınma mı, eşya depolama / depo kiralama mı?'}` : '',
   ].filter(Boolean).join('\n');
 }

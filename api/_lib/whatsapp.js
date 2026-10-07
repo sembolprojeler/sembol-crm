@@ -3,12 +3,14 @@
 // Sembol CRM — WHATSAPP CLOUD API ORTAK YARDIMCILARI
 // ----------------------------------------------------------------------------
 // api/whatsapp-webhook.js (bot) ve api/whatsapp-send.js (personel cevabı) kullanır.
-//   • Firestore yolları: artifacts/{appId}/public/data/whatsapp_conversations/{waId}
-//                        …/whatsapp_conversations/{waId}/messages/{wamid}
+//   • Firestore yolları: artifacts/{appId}/public/data/whatsapp_conversations/{konuşmaKimliği}
+//                        …/whatsapp_conversations/{konuşmaKimliği}/messages/{wamid}
+//     konuşmaKimliği = waId (eskiKimlik hattı: 0850) | "{phoneNumberId}_{waId}" (diğer hatlar)
+//   • Hat → marka eşlemesi (WHATSAPP_HATLAR) — hatlariOku / hatBul
 //                        …/whatsapp_durum/token  (token / kalıcı hata uyarısı)
 //   • Mesaj gönderme (Graph API), token hatası (190 / OAuthException) tespiti
 //   • Loglarda telefon numarası MASKELENİR (maskele)
-// Ortam: WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_GRAPH_VERSION (isteğe bağlı)
+// Ortam: WHATSAPP_HATLAR (JSON, isteğe bağlı) | WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_GRAPH_VERSION (isteğe bağlı)
 // ============================================================================
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -25,8 +27,9 @@ export function getDb() {
 }
 
 export const veriKoku = (db, appId = process.env.FIRESTORE_APP_ID) => db.collection('artifacts').doc(appId).collection('public').doc('data');
-export const konusmaRef = (db, waId, appId) => veriKoku(db, appId).collection('whatsapp_conversations').doc(String(waId));
-export const mesajlarRef = (db, waId, appId) => konusmaRef(db, waId, appId).collection('messages');
+// kimlik: konusmaKimligi(hat, waId) — 0850 hattında waId'nin kendisi (eski belgeler aynen geçerli)
+export const konusmaRef = (db, kimlik, appId) => veriKoku(db, appId).collection('whatsapp_conversations').doc(String(kimlik));
+export const mesajlarRef = (db, kimlik, appId) => konusmaRef(db, kimlik, appId).collection('messages');
 // belge: 'token' (Meta token / kalıcı gönderim hatası) | 'ai' (yapay zeka yapılandırma hatası: anahtar, model, kredi)
 export const durumRef = (db, appId, belge = 'token') => veriKoku(db, appId).collection('whatsapp_durum').doc(belge);
 export const havuzRef = (db, id, appId) => veriKoku(db, appId).collection('havuzKayitlari').doc(String(id));
@@ -34,8 +37,36 @@ export const havuzRef = (db, id, appId) => veriKoku(db, appId).collection('havuz
 // "905321234567" → "9053****4567" (loglar için)
 export const maskele = (no) => { const d = String(no || '').replace(/\D/g, ''); return d.length > 6 ? `${d.slice(0, 4)}****${d.slice(-4)}` : '****'; };
 
+// --------------------------------------------------------------- HATLAR (2026-10-07)
+// Her WhatsApp numarası (hat) TEK markaya aittir. Yapılandırma env'de (Firestore'da değil:
+// tarayıcıdan değiştirilemesin, her mesajda ek okuma olmasın):
+//   WHATSAPP_HATLAR=[{"phoneNumberId":"123","marka":"depoevim","tokenEnv":"WHATSAPP_TOKEN","ad":"0850 441 78 86","eskiKimlik":true}]
+//   • tokenEnv: o hattın erişim token'ını tutan env değişkeninin ADI (varsayılan WHATSAPP_TOKEN)
+//   • eskiKimlik: konuşma belgesi kimliği yalnızca waId (2026-10-07 öncesi belgeler) — EN FAZLA BİR hat
+// WHATSAPP_HATLAR yoksa: WHATSAPP_PHONE_NUMBER_ID tek hat = DepoEvim (0850), eskiKimlik.
+const HAT_MARKALARI = ['sembol', 'depoevim'];
+export function hatlariOku(env = process.env) {
+  const ham = String(env.WHATSAPP_HATLAR || '').trim();
+  if (!ham) {
+    return env.WHATSAPP_PHONE_NUMBER_ID
+      ? [{ phoneNumberId: String(env.WHATSAPP_PHONE_NUMBER_ID), marka: 'depoevim', tokenEnv: 'WHATSAPP_TOKEN', ad: '0850 441 78 86', eskiKimlik: true }]
+      : [];
+  }
+  let liste;
+  try { liste = JSON.parse(ham); } catch { console.error('[whatsapp] WHATSAPP_HATLAR geçersiz JSON — hiçbir hat işlenmiyor'); return []; }
+  let eskiVar = false;
+  return (Array.isArray(liste) ? liste : []).filter(h => h && h.phoneNumberId && HAT_MARKALARI.includes(h.marka)).map(h => {
+    const eskiKimlik = h.eskiKimlik === true && !eskiVar;
+    if (eskiKimlik) eskiVar = true;
+    return { phoneNumberId: String(h.phoneNumberId), marka: h.marka, tokenEnv: String(h.tokenEnv || 'WHATSAPP_TOKEN'), ad: String(h.ad || ''), eskiKimlik };
+  });
+}
+export const hatBul = (env, phoneNumberId) => (phoneNumberId ? hatlariOku(env).find(h => h.phoneNumberId === String(phoneNumberId)) : null) || null;
+// Aynı müşteri iki hatta yazarsa iki ayrı konuşma olur
+export const konusmaKimligi = (hat, waId) => (hat?.eskiKimlik ? String(waId) : `${hat.phoneNumberId}_${waId}`);
+
 export const varsayilanGraphSurumu = 'v23.0';
-const graphUrl = (env) => `https://graph.facebook.com/${env.WHATSAPP_GRAPH_VERSION || varsayilanGraphSurumu}/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`;
+const graphUrl = (env, phoneNumberId) => `https://graph.facebook.com/${env.WHATSAPP_GRAPH_VERSION || varsayilanGraphSurumu}/${phoneNumberId}/messages`;
 
 // Meta hata kodları: 190 = token geçersiz/süresi dolmuş; OAuthException tipi de token sorunu.
 // Diğer kalıcı (yeniden denemekle düzelmeyen) hesap/izin hataları da uyarı bandına yazılır.
@@ -50,17 +81,19 @@ export function metaHatasiCoz(govde, httpDurum) {
   };
 }
 
-// Metin mesajı gönderir. Asla fırlatmaz: { ok, wamid } | { ok: false, hata }
-export async function waMetinGonder({ env = process.env, fetchFn = globalThis.fetch, to, metin, ms = 15000 }) {
-  if (!env.WHATSAPP_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) {
-    return { ok: false, hata: { kod: null, mesaj: 'WHATSAPP_TOKEN / WHATSAPP_PHONE_NUMBER_ID tanımlı değil', tokenHatasi: true, kalici: true } };
+// Metin mesajı gönderir (hat verilirse o hattın numarası ve token'ı). Asla fırlatmaz: { ok, wamid } | { ok: false, hata }
+export async function waMetinGonder({ env = process.env, fetchFn = globalThis.fetch, hat = null, to, metin, ms = 15000 }) {
+  const phoneNumberId = hat ? hat.phoneNumberId : env.WHATSAPP_PHONE_NUMBER_ID;
+  const token = hat ? env[hat.tokenEnv] : env.WHATSAPP_TOKEN;
+  if (!token || !phoneNumberId) {
+    return { ok: false, hata: { kod: null, mesaj: `${hat ? hat.tokenEnv : 'WHATSAPP_TOKEN'} / phone_number_id tanımlı değil`, tokenHatasi: true, kalici: true } };
   }
   const ctrl = new AbortController();
   const z = setTimeout(() => ctrl.abort(), ms);
   try {
-    const r = await fetchFn(graphUrl(env), {
+    const r = await fetchFn(graphUrl(env, phoneNumberId), {
       method: 'POST',
-      headers: { Authorization: `Bearer ${env.WHATSAPP_TOKEN}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to), type: 'text', text: { body: String(metin).slice(0, 4096), preview_url: false } }),
       signal: ctrl.signal,
     });

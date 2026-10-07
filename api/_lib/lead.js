@@ -674,7 +674,7 @@ export function whatsappAlanlariniTemizle(c) {
 // fiyat: sunucunun hesapladığı tahmin (yapay zeka hesaplamaz) —
 //   Sembol: { min, max } · DepoEvim: { aylik, toplam, nakliyeMin, nakliyeMax }
 export function whatsappLeadKaydi({ marka = 'sembol', hizmet = '', collected = {}, waId, profilAdi = '', onceki = {}, ilkKayit,
-  tamamlandi = false, fiyat = null, nowIso = new Date().toISOString() }) {
+  tamamlandi = false, fiyat = null, nowIso = new Date().toISOString(), asistan = 'SEMBO Asistan' }) {
   const wizardType = whatsappWizardTuru(marka, hizmet);
   const alanlar = whatsappAlanlariniTemizle(collected);
   const body = { ...alanlar, phone: waTelefonCrm(waId) };
@@ -723,7 +723,7 @@ export function whatsappLeadKaydi({ marka = 'sembol', hizmet = '', collected = {
     kayit.notlar = [];
     kayit.reklamKaynagi = 'direkt_giris';
     kayit.kaynakKarari = 'varsayilan';
-    kayit.hareketler = [hareket(`WhatsApp'tan yeni talep (SEMBO Asistan · ${WIZARD_ETIKET[wizardType] || 'WhatsApp'})`)];
+    kayit.hareketler = [hareket(`WhatsApp'tan yeni talep (${asistan} · ${WIZARD_ETIKET[wizardType] || 'WhatsApp'})`)];
     kayit.createdAt = nowIso;
   } else if (onceki.sadeceTiklama) {
     // Sitedeki WhatsApp butonu tıklaması (ref kodu) — reklam kaynağı / QR izi korunur

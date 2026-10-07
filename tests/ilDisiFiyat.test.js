@@ -100,7 +100,8 @@ function ortam(aiCevaplari) {
   const gonderilen = [], ai = [], arka = [];
   const fetchFn = async (url, ops) => { gonderilen.push(JSON.parse(ops.body)); return { ok: true, status: 200, json: async () => ({ messages: [{ id: `out${gonderilen.length}` }] }) }; };
   const handler = handlerOlustur({ getDb: () => db, waitUntil: (p) => arka.push(p), fetchFn, bekle: async () => {}, simdi: () => Date.parse('2026-10-07T08:00:00Z'),
-    env: { WHATSAPP_APP_SECRET: SECRET, WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '111', FIRESTORE_APP_ID: 'test-app', WHATSAPP_BIRLESTIRME_MS: '0' },
+    // 0850 artık yalnızca DepoEvim — Sembol fiyatı ileride gelecek Sembol hattında (talimatlar kodda kalır)
+    env: { WHATSAPP_APP_SECRET: SECRET, WHATSAPP_TOKEN: 't', WHATSAPP_HATLAR: JSON.stringify([{ phoneNumberId: '111', marka: 'sembol', eskiKimlik: true }]), FIRESTORE_APP_ID: 'test-app', WHATSAPP_BIRLESTIRME_MS: '0' },
     aiUret: async (a) => { ai.push(a); return aiCevaplari[Math.min(ai.length - 1, aiCevaplari.length - 1)]; },
     fiyatHesapla: async (a) => F.botFiyatHesapla({ ...a, kmHesapla }) });
   const gonder = async (metin, id) => {
