@@ -83,3 +83,22 @@ test('panel yetkisi tarayıcıda da sunucuyla aynı kural (crmYetki.altSatisEris
   for (const k of kisiler) assert.equal(whatsappErisimi(k, pm), altSatisErisimi(k, pm, 'satisWhatsapp'), JSON.stringify(k));
   assert.equal(whatsappErisimi(null, pm), false);
 });
+
+test('medya görünümü: hazır / yükleniyor / hata / süresi dolmuş / eski mesaj (getir düğmesi)', async () => {
+  const { medyaGorunumu, boyutMetni } = await import('../src/whatsappPanel.js');
+  const t = '2026-10-07T11:59:00.000Z';
+  const hazir = medyaGorunumu({ type: 'image', mediaId: 'M', timestamp: t, medya: { durum: 'hazir', url: 'https://x/wa_1.jpg', mimeType: 'image/jpeg', boyut: 2048, caption: 'salon' } }, SIMDI);
+  assert.equal(hazir.tur, 'gorsel'); assert.equal(hazir.durum, 'hazir'); assert.equal(hazir.caption, 'salon'); assert.equal(hazir.getirilebilir, false);
+  assert.equal(medyaGorunumu({ type: 'audio', mediaId: 'M', timestamp: t, medya: { durum: 'bekliyor' } }, SIMDI).getirilebilir, false);
+  // 2 dakikadan uzun "bekliyor" → yarıda kalmış iş, yeniden getirilebilir
+  assert.equal(medyaGorunumu({ type: 'audio', mediaId: 'M', timestamp: '2026-10-07T11:00:00.000Z', medya: { durum: 'bekliyor' } }, SIMDI).getirilebilir, true);
+  const hata = medyaGorunumu({ type: 'document', mediaId: 'M', medya: { durum: 'hata', hataTuru: 'yukleme', dosyaAdi: 'a.pdf' }, medyaHata: 'upload.php HTTP 500' }, SIMDI);
+  assert.equal(hata.durum, 'hata'); assert.equal(hata.getirilebilir, true); assert.equal(hata.dosyaAdi, 'a.pdf');
+  const dolmus = medyaGorunumu({ type: 'video', mediaId: 'M', medya: { durum: 'hata', hataTuru: 'suresi_doldu' } }, SIMDI);
+  assert.equal(dolmus.suresiDoldu, true); assert.equal(dolmus.getirilebilir, false);
+  const eski = medyaGorunumu({ type: 'image', mediaId: 'M', text: '[görsel]' }, SIMDI);
+  assert.equal(eski.durum, 'yok'); assert.equal(eski.getirilebilir, true);
+  assert.equal(medyaGorunumu({ type: 'text', text: 'x' }, SIMDI), null);
+  assert.equal(medyaGorunumu({ type: 'location', konum: {} }, SIMDI), null);
+  assert.equal(boyutMetni(2048), '2 KB'); assert.equal(boyutMetni(3 * 1024 * 1024), '3.0 MB');
+});

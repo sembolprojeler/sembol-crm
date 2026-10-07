@@ -10238,7 +10238,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {/* YENİ (2026-10-07): WHATSAPP PANELİ */}
             {activeTab === 'whatsapp' && showSatisWhatsapp &&
               <WhatsAppView currentUser={currentUser} yonetici={superYoneticiMi(currentUser) || isManager}
-                acIstegi={whatsappAcIstegi}
+                acIstegi={whatsappAcIstegi} onGorselAc={setViewingImage}
                 onLeadAc={showSatisMusteriHavuzu ? (id) => { setHavuzLeadIstegi({ id, no: Date.now() }); setActiveTab('musteriHavuzu'); } : null} />}
 
             {/* YENİ: SAHA PORTFÖY EKRANI — kendi alt yetkisiyle görünür */}

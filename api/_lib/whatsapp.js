@@ -137,7 +137,12 @@ export async function aiUyariTemizle(db, nowIso = new Date().toISOString(), appI
   if (s.exists && s.data()?.aktif) await ref.set({ aktif: false, cozuldu: nowIso }, { merge: true });
 }
 
-// Gelen mesaj → { tip, metin (yapay zekaya gidecek), mediaId, ozet (CRM önizlemesi), botaGitsin }
+// Webhook'taki medya alanı → mesaj belgesindeki "medya" (dosya henüz alınmadı: durum 'bekliyor')
+const medyaBilgisi = (x = {}) => ({
+  durum: 'bekliyor', mimeType: String(x.mime_type || '').split(';')[0].trim(),
+  caption: String(x.caption || '').slice(0, 1000), dosyaAdi: String(x.filename || '').slice(0, 200),
+});
+// Gelen mesaj → { tip, metin (yapay zekaya gidecek), mediaId, ozet (CRM önizlemesi), botaGitsin, medya? }
 export function gelenMesajiCoz(m = {}) {
   const tip = m.type || 'unknown';
   const kes = (s, n = 1000) => String(s || '').slice(0, n);
@@ -148,10 +153,11 @@ export function gelenMesajiCoz(m = {}) {
       const r = m.interactive?.button_reply || m.interactive?.list_reply || {};
       return { tip, metin: kes(r.title || r.id), ozet: kes(r.title, 120), botaGitsin: true };
     }
-    case 'audio': return { tip, metin: '[sesli mesaj]', mediaId: m.audio?.id || null, ozet: '🎤 Sesli mesaj', botaGitsin: true };
-    case 'image': return { tip, metin: `[görsel]${m.image?.caption ? ' ' + kes(m.image.caption) : ''}`, mediaId: m.image?.id || null, ozet: '📷 Görsel', botaGitsin: true };
-    case 'video': return { tip, metin: `[video]${m.video?.caption ? ' ' + kes(m.video.caption) : ''}`, mediaId: m.video?.id || null, ozet: '🎥 Video', botaGitsin: true };
-    case 'document': return { tip, metin: `[belge] ${kes(m.document?.filename || '')}${m.document?.caption ? ' ' + kes(m.document.caption) : ''}`.trim(), mediaId: m.document?.id || null, ozet: '📄 Belge', botaGitsin: true };
+    // YENİ (2026-10-07): medya bilgisi (mimeType, caption, belge adı) — dosya arka planda crm/uploads'a alınır
+    case 'audio': return { tip, metin: '[sesli mesaj]', mediaId: m.audio?.id || null, ozet: '🎤 Sesli mesaj', botaGitsin: true, medya: medyaBilgisi(m.audio) };
+    case 'image': return { tip, metin: `[görsel]${m.image?.caption ? ' ' + kes(m.image.caption) : ''}`, mediaId: m.image?.id || null, ozet: '📷 Görsel', botaGitsin: true, medya: medyaBilgisi(m.image) };
+    case 'video': return { tip, metin: `[video]${m.video?.caption ? ' ' + kes(m.video.caption) : ''}`, mediaId: m.video?.id || null, ozet: '🎥 Video', botaGitsin: true, medya: medyaBilgisi(m.video) };
+    case 'document': return { tip, metin: `[belge] ${kes(m.document?.filename || '')}${m.document?.caption ? ' ' + kes(m.document.caption) : ''}`.trim(), mediaId: m.document?.id || null, ozet: '📄 Belge', botaGitsin: true, medya: medyaBilgisi(m.document) };
     case 'sticker': return { tip, metin: '[çıkartma]', mediaId: m.sticker?.id || null, ozet: 'Çıkartma', botaGitsin: false };
     case 'location': {
       const l = m.location || {};

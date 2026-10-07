@@ -6,13 +6,15 @@
 // (okuma kurallarda zaten açık); YAZMA yalnızca sunucudan: /api/whatsapp-send
 // (gonder / devral / botaVer / okundu — personelId + şifre ile, api/_lib/crmYetki.js).
 // Mantık (24 saat penceresi, sıralama, etiketler, sekme başlığı) → src/whatsappPanel.js.
-// Medya indirme / önizleme YOK (sonraki aşama): görsel, ses, belge etiketle; konum harita linkiyle.
+// Medya (2026-10-07): crm/uploads'taki dosya — görsel önizleme (tıklayınca büyük: setViewingImage), ses / video
+// oynatıcı, belgede "İndir"; "yükleniyor" / "medya alınamadı"; eski mesajda "Medyayı getir" (/api/whatsapp-send medyaGetir).
+// Konum harita linkiyle.
 // "kaynak" prop'u test/önizleme içindir; varsayılan src/whatsappKaynak.js (Firestore + /api/whatsapp-send).
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send, Bot, UserCheck, Search, ExternalLink, MapPin, AlertTriangle, ArrowLeft, Lock, Loader2, X } from 'lucide-react';
+import { MessageCircle, Send, Bot, UserCheck, Search, ExternalLink, MapPin, AlertTriangle, ArrowLeft, Lock, Loader2, X, Download, FileText, RefreshCw } from 'lucide-react';
 import { firestoreKaynagi } from './whatsappKaynak.js';
-import { pencereAcikMi, pencereKalan, konusmalariSuz, mesajGorunumu, durumBilgisi, dikkatSayisi, sekmeBasligi, bekliyorMu,
+import { pencereAcikMi, pencereKalan, konusmalariSuz, mesajGorunumu, medyaGorunumu, boyutMetni, durumBilgisi, dikkatSayisi, sekmeBasligi, bekliyorMu,
   listeSaati, konusmaMarkasi, MARKA_ETIKETI, PENCERE_UYARISI, SIFRE_YOK_MESAJI } from './whatsappPanel.js';
 
 const MARKA_RENK = { depoevim: 'bg-blue-50 text-blue-700 border-blue-200', sembol: 'bg-red-50 text-red-700 border-red-200' };
@@ -24,11 +26,47 @@ const mesajSaati = (iso, simdi) => {
   return gun.includes(':') ? saat : `${gun} ${saat}`;
 };
 
+// Mesaj balonundaki medya: önizleme / oynatıcı / indir; durum ve "Medyayı getir"
+const MedyaIcerik = ({ md, metin, onGorselAc, onGetir, getiriliyor }) => {
+  const indir = md.url && (
+    <a href={md.url} target="_blank" rel="noopener noreferrer" download className="text-[11px] font-black text-blue-700 underline inline-flex items-center gap-0.5">
+      <Download className="w-3 h-3" /> İndir{md.boyut ? ` (${boyutMetni(md.boyut)})` : ''}
+    </a>);
+  let govde;
+  if (md.durum === 'hazir') {
+    if (md.tur === 'gorsel') govde = (
+      <button type="button" onClick={() => onGorselAc?.(md.url)} className="block" title="Büyüt">
+        <img src={md.url} alt={md.caption || 'Görsel'} loading="lazy" className="max-h-48 max-w-full rounded-lg object-cover" />
+      </button>);
+    else if (md.tur === 'ses') govde = (<div className="space-y-0.5"><audio controls preload="none" src={md.url} className="w-60 max-w-full" />{indir}</div>);
+    else if (md.tur === 'video') govde = (<div className="space-y-0.5"><video controls preload="metadata" src={md.url} className="max-h-60 max-w-full rounded-lg" />{indir}</div>);
+    else govde = (
+      <div className="flex items-center gap-2 p-2 rounded-lg bg-black/5">
+        <FileText className="w-6 h-6 text-neutral-500 shrink-0" />
+        <div className="min-w-0"><p className="text-[12px] font-bold truncate">{md.dosyaAdi || 'Belge'}</p>{indir}</div>
+      </div>);
+  } else {
+    govde = (
+      <div className="text-[12px] italic text-neutral-600">
+        <p className="whitespace-pre-wrap break-words">{metin}</p>
+        {md.durum === 'bekliyor' && !md.getirilebilir && <p className="text-[11px] not-italic font-bold text-neutral-500 flex items-center gap-1"><Loader2 className="w-3 h-3 animate-spin" /> Medya yükleniyor…</p>}
+        {md.suresiDoldu && <p className="text-[11px] not-italic font-bold text-neutral-500">Medya artık alınamıyor</p>}
+        {md.durum === 'hata' && !md.suresiDoldu && <p className="text-[11px] not-italic font-bold text-red-600" title={md.hata}>Medya alınamadı</p>}
+        {md.getirilebilir && onGetir && (
+          <button type="button" disabled={getiriliyor} onClick={onGetir}
+            className="mt-1 not-italic px-2 py-1 rounded-lg text-[11px] font-black bg-white border border-neutral-300 hover:bg-neutral-50 inline-flex items-center gap-1 disabled:opacity-50">
+            {getiriliyor ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />} Medyayı getir
+          </button>)}
+      </div>);
+  }
+  return (<div className="space-y-1">{govde}{md.caption && <p className="text-[13px] whitespace-pre-wrap break-words text-neutral-900">{md.caption}</p>}</div>);
+};
+
 const ModRozeti = ({ k }) => (k.mode === 'human'
   ? <span className="inline-flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300"><UserCheck className="w-3 h-3" /> Personel</span>
   : <span className="inline-flex items-center gap-1 text-[9px] font-black px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200"><Bot className="w-3 h-3" /> Bot</span>);
 
-export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, onLeadAc, kaynak = firestoreKaynagi, simdi = () => Date.now() }) => {
+export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, onLeadAc, onGorselAc, kaynak = firestoreKaynagi, simdi = () => Date.now() }) => {
   const [konusmalar, setKonusmalar] = useState([]);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [okumaHatasi, setOkumaHatasi] = useState('');
@@ -81,10 +119,10 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
 
   const islemYap = async (islem, ek = {}) => {
     if (!currentUser?.password) { setHata(SIFRE_YOK_MESAJI); return false; }
-    setIsleniyor(islem); setHata('');
+    setIsleniyor(islem === 'medyaGetir' ? `medya:${ek.mesajId}` : islem); setHata('');
     const r = await kaynak.istek({ islem, konusmaId: secili.id, ...kimlik, ...ek });
     setIsleniyor('');
-    if (!r.ok) { setHata(r.hata || 'İşlem yapılamadı.'); return false; }
+    if (!r.ok) { if (!(islem === 'medyaGetir' && r.durum === 410)) setHata(r.hata || 'İşlem yapılamadı.'); return false; }
     return true;
   };
   const gonder = async () => {
@@ -209,6 +247,7 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
             <div className="flex-1 overflow-y-auto bg-[#efeae2] px-3 py-3 space-y-1.5">
               {mesajlar.map(m => {
                 const g = mesajGorunumu(m);
+                const md = medyaGorunumu(m, simdi());
                 const d = durumBilgisi(m);
                 const sag = g.kimden !== 'musteri';
                 const renk = g.kimden === 'musteri' ? 'bg-white' : g.kimden === 'personel' ? 'bg-[#d9fdd3]' : 'bg-sky-50 border border-sky-100';
@@ -217,7 +256,9 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
                     <div className={`max-w-[80%] rounded-xl px-2.5 py-1.5 shadow-sm ${renk}`}>
                       {g.ad && <p className={`text-[10px] font-black mb-0.5 ${g.kimden === 'personel' ? 'text-green-700' : 'text-sky-700'}`}>
                         {g.kimden === 'bot' && <Bot className="w-3 h-3 inline mr-0.5 -mt-0.5" />}{g.ad}{g.otomatik ? ' · otomatik' : ''}</p>}
-                      <p className={`text-[13px] whitespace-pre-wrap break-words ${g.medya ? 'italic text-neutral-600' : 'text-neutral-900'}`}>{g.metin}</p>
+                      {md ? <MedyaIcerik md={md} metin={g.metin} onGorselAc={onGorselAc} getiriliyor={isleniyor === `medya:${m.id}`}
+                          onGetir={() => islemYap('medyaGetir', { mesajId: m.id })} />
+                        : <p className={`text-[13px] whitespace-pre-wrap break-words ${g.medya ? 'italic text-neutral-600' : 'text-neutral-900'}`}>{g.metin}</p>}
                       {g.harita && <a href={g.harita} target="_blank" rel="noopener noreferrer" className="text-[11px] font-black text-blue-700 underline inline-flex items-center gap-0.5"><MapPin className="w-3 h-3" /> Haritada aç</a>}
                       <p className="text-[10px] text-neutral-400 text-right mt-0.5 flex items-center justify-end gap-1">
                         {mesajSaati(m.timestamp, simdi())}

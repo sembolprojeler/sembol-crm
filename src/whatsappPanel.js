@@ -59,6 +59,26 @@ export function mesajGorunumu(m = {}) {
   return { kimden, metin, harita, ad, medya: !!etiket, otomatik: !!m.otomatik };
 }
 
+// YENİ (2026-10-07): medya (crm/uploads) — panelde nasıl gösterilecek?
+//  durum: 'hazir' (oynat / önizle / indir) · 'bekliyor' (yükleniyor…) · 'hata' · 'yok' (eski mesaj: hiç alınmamış)
+//  getirilebilir: "Medyayı getir" düğmesi gösterilsin mi (süresi dolmuşsa HAYIR)
+//  Webhook işi yarıda kaldıysa 'bekliyor' 2 dakikadan uzun sürer → getirilebilir.
+const MEDYA_TURU = { image: 'gorsel', audio: 'ses', video: 'video', document: 'belge' };
+export function medyaGorunumu(m = {}, simdi = Date.now()) {
+  const tur = MEDYA_TURU[m.type];
+  if (!tur || (!m.mediaId && !m.medya?.url)) return null;
+  const md = m.medya || {};
+  const durum = md.url && md.durum === 'hazir' ? 'hazir' : md.durum === 'bekliyor' ? 'bekliyor' : md.durum === 'hata' ? 'hata' : 'yok';
+  const suresiDoldu = md.hataTuru === 'suresi_doldu';
+  const takildi = durum === 'bekliyor' && simdi - (Date.parse(m.alindi || m.timestamp || '') || simdi) > 2 * 60 * 1000;
+  return {
+    tur, durum, url: md.url || null, mimeType: md.mimeType || '', boyut: Number(md.boyut) || 0,
+    dosyaAdi: md.dosyaAdi || '', caption: md.caption || '', hata: m.medyaHata || '', suresiDoldu,
+    getirilebilir: !!m.mediaId && !suresiDoldu && (durum === 'yok' || durum === 'hata' || takildi),
+  };
+}
+export const boyutMetni = (n) => (!n ? '' : n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
+
 // Gönderim durumu (yalnızca giden mesajlar)
 export function durumBilgisi(m = {}) {
   if (m.direction !== 'out' && m.from === 'customer') return null;

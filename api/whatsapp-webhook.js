@@ -28,6 +28,8 @@
 //  11) Meta 190 / OAuthException ya da kalıcı hata → whatsapp_durum/token uyarısı
 //      (CRM'de yöneticilere kırmızı bant); yapay zeka yapılandırma hatası → whatsapp_durum/ai
 //  12) Yapay zeka hatası konuşmayı KİLİTLEMEZ: sabit mesaj (30 dk'da bir), sonraki mesajda yeniden dener
+//  13) Medya (görsel / ses / video / belge): ayrı arka plan işiyle Meta'dan indirilip crm/upload.php ile
+//      uploads/ köküne "wa_<rastgele>" adıyla yüklenir (api/_lib/whatsappMedya.js); bot cevabı beklemez
 //  Her erken çıkışta tek satır log: "[whatsapp] atlandı <maskeli numara> <sebep>"
 //
 // ORTAM DEĞİŞKENLERİ (Vercel, VITE_ öneki YOK):
@@ -45,6 +47,7 @@ import { Buffer } from 'node:buffer';
 import { waitUntil } from '@vercel/functions';
 import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, aiUyariYaz, aiUyariTemizle, gelenMesajiCoz, metaHatasiCoz, hatBul, konusmaKimligi } from './_lib/whatsapp.js';
 import { botCevabiUret } from './_lib/ai.js';
+import { mesajMedyasiniIsle, MEDYA_TIPLERI } from './_lib/whatsappMedya.js';
 import { sistemTalimati, girisMetni, kvkkEkMetni, asistanAdi, fiyatRakamlariGecerliMi, hizmetReddiVarMi, RET_DUZELTME_NOTU, retYerineCevap, istanbulGunu } from './_lib/botTalimatlari.js';
 import { botFiyatHesapla, leadFiyati } from './_lib/fiyatHesap.js';
 import { whatsappLeadKaydi, whatsappAlanlariniTemizle, refKoduBul, refKoduTemizle, refBelgeId, leadAcikMi, waTelefonCrm } from './_lib/lead.js';
@@ -454,10 +457,17 @@ export function handlerOlustur({
       await mesajlarRef(db, kid, appId).doc(wamid).create({
         direction: 'in', from: 'customer', type: c.tip, text: metin, timestamp: zaman, alindi: iso(), wamid,
         mediaId: c.mediaId || null, ...(c.konum ? { konum: c.konum } : {}), ...(ref ? { refKodu: ref.kod } : {}),
+        ...(c.medya && c.mediaId ? { medya: c.medya } : {}),
       });
     } catch (err) {
       if (err?.code === 6 || /ALREADY_EXISTS/i.test(String(err?.message))) { atlandi(waId, 'tekrar'); return; }
       throw err;
+    }
+
+    // YENİ (2026-10-07): medya dosyası AYRI arka plan işiyle crm/uploads'a alınır — bot cevabı bunu beklemez
+    if (c.medya && c.mediaId && MEDYA_TIPLERI.includes(c.tip)) {
+      arkaPlanda(mesajMedyasiniIsle({ db, appId, env, fetchFn, hat, kid, mesajId: wamid, m: { mediaId: c.mediaId, medya: c.medya, waId }, simdi })
+        .catch(err => console.error('[whatsapp] medya işi hatası', maskele(waId), err?.message)));
     }
 
     // 2) Konuşma özeti (okunmamış sayısı, son mesaj, hat → marka)

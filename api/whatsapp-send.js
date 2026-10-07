@@ -9,15 +9,18 @@
 //   devral  → mode "human", devralan = bu personel (needsAgent kalkar)
 //   botaVer → mode "bot" — yalnızca devralan ya da yönetici
 //   okundu  → unreadCount 0
+//   medyaGetir → eski / alınamamış medyayı Meta'dan indirip crm/uploads'a yükler (api/_lib/whatsappMedya.js)
 // Kimlik: personelId + şifre, sunucuda personnelList ile (api/_lib/crmYetki.js — GEÇİCİ).
 // 24 saat penceresi: müşterinin son mesajından 24 saat geçtiyse serbest metin gönderilemez → 409.
 // Yanıt: { ok: true, ... } | { ok: false, hata, sebep } (401 kimlik · 403 yetki · 404 · 409 pencere · 502 Meta)
 // ============================================================================
 import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, konusmaHatti } from './_lib/whatsapp.js';
 import { personelDogrula, yoneticiMi } from './_lib/crmYetki.js';
+import { mesajMedyasiniIsle } from './_lib/whatsappMedya.js';
 
 export const PENCERE_MS = 24 * 60 * 60 * 1000;
-const ISLEMLER = ['gonder', 'devral', 'botaVer', 'okundu'];
+const ISLEMLER = ['gonder', 'devral', 'botaVer', 'okundu', 'medyaGetir'];
+const gecerliKimlik = (x) => typeof x === 'string' && x.length > 0 && x.length < 300 && !x.includes('/');
 
 export function handlerOlustur({ getDb = dbVarsayilan, fetchFn = globalThis.fetch, env = process.env, simdi = () => Date.now() } = {}) {
   const appId = env.FIRESTORE_APP_ID;
@@ -42,7 +45,7 @@ export function handlerOlustur({ getDb = dbVarsayilan, fetchFn = globalThis.fetc
     if (typeof b === 'string') { try { b = JSON.parse(b); } catch { b = null; } }
     b = b && typeof b === 'object' ? b : {};
     const { islem, konusmaId } = b;
-    if (!ISLEMLER.includes(islem) || !konusmaId || typeof konusmaId !== 'string' || konusmaId.includes('/')) return cevap(400, { ok: false, hata: 'Geçersiz istek' });
+    if (!ISLEMLER.includes(islem) || !gecerliKimlik(konusmaId) || (islem === 'medyaGetir' && !gecerliKimlik(b.mesajId))) return cevap(400, { ok: false, hata: 'Geçersiz istek' });
 
     const db = getDb();
     const d = await personelDogrula(db, appId, { personelId: b.personelId, sifre: b.sifre });
@@ -59,6 +62,18 @@ export function handlerOlustur({ getDb = dbVarsayilan, fetchFn = globalThis.fetc
     if (islem === 'okundu') {
       if (Number(k.unreadCount) > 0) await kRef.set({ unreadCount: 0, okundu: { ...kim, zaman: nowIso } }, { merge: true });
       return cevap(200, { ok: true });
+    }
+
+    if (islem === 'medyaGetir') {
+      const ms = await mesajlarRef(db, konusmaId, appId).doc(b.mesajId).get();
+      const m = ms.exists ? ms.data() || {} : null;
+      if (!m || !m.mediaId) return cevap(404, { ok: false, hata: 'Bu mesajda medya yok' });
+      if (m.medya?.durum === 'hazir' && m.medya.url) return cevap(200, { ok: true, medya: m.medya });
+      const hat = konusmaHatti(env, k);
+      if (!hat) return cevap(409, { ok: false, sebep: 'hat_yok', hata: 'Bu konuşmanın WhatsApp hattı yapılandırmada yok.' });
+      const s = await mesajMedyasiniIsle({ db, appId, env, fetchFn, hat, kid: konusmaId, mesajId: b.mesajId, m: { ...m, waId: k.waId }, simdi });
+      if (s.ok) return cevap(200, { ok: true, medya: { url: s.url, mimeType: s.mimeType, boyut: s.boyut } });
+      return cevap(s.tur === 'suresi_doldu' ? 410 : 502, { ok: false, sebep: s.tur, hata: s.hata });
     }
 
     if (islem === 'devral') {
