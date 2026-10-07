@@ -172,3 +172,53 @@ test('medyaGetir: Meta\'da süresi dolmuşsa 410 + "artık alınamıyor"; medyas
   assert.equal((await o2.istek({ islem: 'medyaGetir', konusmaId: WA, mesajId: 'wESKI', personelId: 'P1', sifre: '1234' })).kod, 404);
   assert.equal((await o2.istek({ islem: 'medyaGetir', konusmaId: WA, personelId: 'P1', sifre: '1234' })).kod, 400);
 });
+
+// ---------------------------------------------------------------- Cloudflare geçiş başlığı (MEDYA_YUKLEME_ANAHTARI)
+const ANAHTAR = 'gizli-cf-degeri-123';
+const CF_SAYFASI = '<!DOCTYPE html><html><head><title>Just a moment...</title></head><body>Checking your browser</body></html>';
+
+test('MEDYA_YUKLEME_ANAHTARI tanımlıysa upload.php isteğine X-Medya-Anahtari eklenir; Meta isteklerine eklenmez', async () => {
+  const ag = sahteAg();
+  const s = await medyaIndirYukle({ env: { ...ENV, MEDYA_YUKLEME_ANAHTARI: ` ${ANAHTAR} ` }, fetchFn: ag.fetchFn, hat: HAT, mediaId: 'M' });
+  assert.equal(s.ok, true);
+  const yukle = ag.kayit.find(k => k.url === YUKLEME);
+  assert.deepEqual(yukle.ops.headers, { 'X-Medya-Anahtari': ANAHTAR });
+  for (const k of ag.kayit.filter(x => x.url !== YUKLEME)) assert.equal(k.ops.headers?.['X-Medya-Anahtari'], undefined);
+  // tanımlı değilse (ya da boşsa) başlıksız — bugünkü davranış
+  const ag2 = sahteAg();
+  await medyaIndirYukle({ env: { ...ENV, MEDYA_YUKLEME_ANAHTARI: '' }, fetchFn: ag2.fetchFn, hat: HAT, mediaId: 'M' });
+  assert.equal(ag2.kayit.find(k => k.url === YUKLEME).ops.headers, undefined);
+});
+
+test('Cloudflare 403 "Just a moment" sayfası → medyaHata kısa metin (HTML yazılmaz)', async () => {
+  const ag = sahteAg({ yukleme: () => new Response(CF_SAYFASI, { status: 403, headers: { 'Content-Type': 'text/html' } }) });
+  const s = await medyaIndirYukle({ env: ENV, fetchFn: ag.fetchFn, hat: HAT, mediaId: 'M' });
+  assert.equal(s.tur, 'yukleme');
+  assert.equal(s.hata, 'Cloudflare engelledi (403) — geçiş kuralını kontrol edin');
+  // başka 403'ler (Cloudflare sayfası değil) eskisi gibi sunucu metniyle
+  const ag2 = sahteAg({ yukleme: () => new Response('Forbidden', { status: 403 }) });
+  assert.equal((await medyaIndirYukle({ env: ENV, fetchFn: ag2.fetchFn, hat: HAT, mediaId: 'M' })).hata, 'Yükleme başarısız (upload.php HTTP 403): Forbidden');
+});
+
+test('anahtar değeri loglara ve medyaHata\'ya ASLA girmez (sunucu yanıtta geri yansıtsa bile)', async () => {
+  const ag = sahteAg({ yukleme: () => new Response(`Geçersiz başlık: X-Medya-Anahtari=${ANAHTAR}`, { status: 400 }) });
+  const db = sahteDb(); const arka = [];
+  const handler = webhook.handlerOlustur({ getDb: () => db, waitUntil: (p) => arka.push(p), fetchFn: ag.fetchFn, env: { ...ENV, MEDYA_YUKLEME_ANAHTARI: ANAHTAR },
+    bekle: async () => {}, simdi: () => Date.parse('2026-10-07T08:00:00Z'), fiyatHesapla: async () => null,
+    aiUret: async () => ({ ok: true, cikti: { reply: 'Aldım.', collected: {}, handoff: false, handoffReason: '', handoffType: '', intent: 'depolama', marka: '' } }) });
+  const ham = Buffer.from(JSON.stringify({ entry: [{ changes: [{ field: 'messages', value: { metadata: { phone_number_id: '111' },
+    messages: [{ from: WA, id: 'wK', timestamp: '1791360000', type: 'image', image: { id: 'MK', mime_type: 'image/jpeg' } }] } }] }] }));
+  const loglar = [];
+  const eski = { log: console.log, warn: console.warn, error: console.error };
+  for (const ad of ['log', 'warn', 'error']) console[ad] = (...a) => loglar.push(a.map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join(' '));
+  try {
+    await handler({ method: 'POST', headers: { 'x-hub-signature-256': 'sha256=' + createHmac('sha256', 's').update(ham).digest('hex') }, async *[Symbol.asyncIterator]() { yield ham; } }, sahteYanit());
+    while (arka.length) await arka.shift();
+  } finally { Object.assign(console, eski); }
+  const m = mesajBelgesi(db, 'wK');
+  assert.equal(m.medya.durum, 'hata');
+  assert.match(m.medyaHata, /HTTP 400\): Geçersiz başlık: X-Medya-Anahtari=\*\*\*/);
+  assert.ok(loglar.some(l => l.includes('medya alınamadı')));
+  assert.ok(!loglar.some(l => l.includes(ANAHTAR)), 'anahtar loga yazıldı');
+  assert.ok(![...db.belgeler.values()].some(v => JSON.stringify(v).includes(ANAHTAR)), 'anahtar Firestore\'a yazıldı');
+});

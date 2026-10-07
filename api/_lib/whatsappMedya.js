@@ -10,7 +10,9 @@
 // Akış: Meta GET /{media_id} (hattın token'ı) → geçici URL + mime + boyut → indir → yükle.
 // Dosya başına 20 MB sınırı (Meta'nın bildirdiği boyut + indirirken sayılan bayt).
 // Meta medya kimliğini artık tanımıyorsa (süresi doldu) tur: 'suresi_doldu'.
-// Ortam (isteğe bağlı): MEDYA_YUKLEME_URL, MEDYA_DOSYA_KOKU, WHATSAPP_GRAPH_VERSION
+// Ortam (isteğe bağlı): MEDYA_YUKLEME_URL, MEDYA_DOSYA_KOKU, WHATSAPP_GRAPH_VERSION,
+//   MEDYA_YUKLEME_ANAHTARI → upload.php isteğine "X-Medya-Anahtari" başlığı (Cloudflare geçiş kuralı).
+//   Değer ASLA loglanmaz / hata metnine yazılmaz. Tanımlı değilse istek bugünkü gibi başlıksız gider.
 // ============================================================================
 import { randomBytes } from 'node:crypto';
 import { Buffer } from 'node:buffer';
@@ -63,6 +65,16 @@ export function yuklemeYanitiniCoz(metin, env = {}) {
   return null;
 }
 
+// upload.php hata metni: Cloudflare doğrulama sayfası (HTML) yerine kısa açıklama;
+// anahtar yanıtta geçerse (yansıtılmışsa) metinden silinir — loglara / medyaHata'ya ASLA girmez
+export function yuklemeHatasi(durum, metin, anahtar = '') {
+  const t = String(metin || '');
+  if (durum === 403 && /Just a moment/i.test(t)) return 'Cloudflare engelledi (403) — geçiş kuralını kontrol edin';
+  let kisa = t.replace(/\s+/g, ' ').trim();
+  if (anahtar) kisa = kisa.split(anahtar).join('***');
+  return `Yükleme başarısız (upload.php HTTP ${durum}): ${kisa.slice(0, 200) || 'boş yanıt'}`;
+}
+
 // { ok: true, url, mimeType, boyut, dosya } | { ok: false, tur: 'suresi_doldu'|'boyut'|'meta'|'yukleme'|'yapilandirma', hata }
 export async function medyaIndirYukle({ env = process.env, fetchFn = globalThis.fetch, hat, mediaId, rastgele, sinir = MEDYA_SINIRI, ms = 45000 }) {
   const token = hat ? env[hat.tokenEnv] : env.WHATSAPP_TOKEN;
@@ -93,10 +105,12 @@ export async function medyaIndirYukle({ env = process.env, fetchFn = globalThis.
     const dosya = rastgeleDosyaAdi(mimeType, rastgele);
     const fd = new FormData();
     fd.append('file', new Blob([veri], { type: mimeType }), dosya);
-    const r3 = await fetchFn(env.MEDYA_YUKLEME_URL || YUKLEME_URL, { method: 'POST', body: fd, signal: ctrl.signal });
+    const anahtar = String(env.MEDYA_YUKLEME_ANAHTARI || '').trim();
+    const r3 = await fetchFn(env.MEDYA_YUKLEME_URL || YUKLEME_URL, { method: 'POST', body: fd, signal: ctrl.signal,
+      ...(anahtar ? { headers: { 'X-Medya-Anahtari': anahtar } } : {}) });
     const metin = await r3.text().catch(() => '');
     const url = r3.ok ? yuklemeYanitiniCoz(metin, env) : null;
-    if (!url) return { ok: false, tur: 'yukleme', hata: `Yükleme başarısız (upload.php HTTP ${r3.status}): ${metin.replace(/\s+/g, ' ').slice(0, 200) || 'boş yanıt'}` };
+    if (!url) return { ok: false, tur: 'yukleme', hata: yuklemeHatasi(r3.status, metin, anahtar) };
     return { ok: true, url, mimeType, boyut: veri.length, dosya };
   } catch (err) {
     return { ok: false, tur: 'meta', hata: err?.name === 'AbortError' ? 'Medya işlemi zaman aşımına uğradı' : String(err?.message || err).slice(0, 300) };
