@@ -2,20 +2,15 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // EKLENDİ: Fiyat belgesi ve fiyat geçmişi yalnızca sunucudan (/api/fiyatlar,
-    // Admin SDK) yazılır. Admin SDK bu kurallara takılmaz, tarayıcılar takılır.
-    function fiyatKorumali(yol) {
-      return string(yol).matches('.*artifacts/[^/]+/public/data/(ayarlar/fiyatTablosu|fiyat_gecmisi/[^/]+)')
-        // YENİ: WhatsApp konuşmaları / mesajları ve WhatsApp durum (token uyarısı) belgeleri
-        // yalnızca sunucudan yazılır (api/whatsapp-webhook, api/whatsapp-send). CRM okur.
-        || string(yol).matches('.*artifacts/[^/]+/public/data/(whatsapp_conversations|whatsapp_durum)/.*');
+    // Fiyat belgesi, fiyat geçmişi ve WhatsApp konuşmaları / durum belgeleri
+    // yalnızca sunucudan (Admin SDK: /api/fiyatlar, /api/whatsapp-webhook, /api/whatsapp-send) yazılır.
+    function sunucuKorumali(yol) {
+      return string(yol).matches('.*artifacts/[^/]+/public/data/(ayarlar/fiyatTablosu|fiyat_gecmisi/[^/]+|whatsapp_conversations/.+|whatsapp_durum/[^/]+)');
     }
 
     match /{document=**} {
-      // Sadece sisteme giriş yapmış (auth olmuş) 30 personeliniz verileri okuyabilir ve yazabilir.
-      // Dışarıdan hiç kimse (giriş yapmayanlar) veriye erişemez.
       allow read: if request.auth != null;
-      allow write: if request.auth != null && !fiyatKorumali(document);   // DEĞİŞTİ
+      allow write: if request.auth != null && !sunucuKorumali(document);
     }
   }
 }
