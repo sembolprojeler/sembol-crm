@@ -69,6 +69,10 @@ import { db, appId, auth, googleAuth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, call
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView,
   // YENİ: Sol menüdeki "yeni teklif" rozetleri için canlı sayaç hook'u (Hızlı Teklifler)
   useHizliTeklifYeniSayilari } from './Satis.jsx';
+// YENİ (2026-10-07): CRM WhatsApp paneli (bot hattı konuşmaları) + menüdeki "personel bekliyor" rozeti
+import { WhatsAppView } from './WhatsApp.jsx';
+import { useWhatsappBekleyen } from './whatsappKaynak.js';
+import { whatsappErisimi } from './whatsappPanel.js';
 import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJobsView, CancelledJobsView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, IsMerkeziView, IsKilavuzuView, HatirlatmalarView,
   // YENİ: "Randevular" menüsündeki bekleyen ekspertiz rozetleri için canlı sayaç
   useEkspertizBekleyenSayilari,
@@ -236,6 +240,7 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
     { id: 'satisMusteriKayit', label: 'Satış: Müşteri Kayıt' },
     { id: 'satisMusteriHavuzu', label: 'Satış: Müşteri Havuzu' },
     { id: 'satisSahaPortfoy', label: 'Satış: Saha Portföy' },
+    { id: 'satisWhatsapp', label: 'Satış: WhatsApp' }, // YENİ (2026-10-07): bot hattı konuşmaları paneli
     { id: 'operasyon', label: 'Operasyon Bölümü' },
     { id: 'jobList', label: 'İş Listesi' },
     { id: 'customers', label: 'Müşteri Listesi' },
@@ -5499,6 +5504,12 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const [positions, setPositions] = useState([]);
     const [ranks, setRanks] = useState([]);
     const [positionModules, setPositionModules] = useState({});
+    // YENİ (2026-10-07): WHATSAPP PANELİ — yetki altSatisErisimi('satisWhatsapp') ile aynı kural
+    // (rozet dinleyicisi erken return'lerden önce kurulmalı). İstekler: { konusmaId | id, no }
+    const whatsappYetkili = isAuthenticated && whatsappErisimi(currentUser, positionModules);
+    const whatsappBekleyen = useWhatsappBekleyen(whatsappYetkili);
+    const [whatsappAcIstegi, setWhatsappAcIstegi] = useState(null);   // lead → CRM sohbeti
+    const [havuzLeadIstegi, setHavuzLeadIstegi] = useState(null);     // sohbet → lead detayı
 
     // ========================================================================
     // YENİ: İŞ / GÖREV / ARAÇ BİLDİRİMLERİ — MEVCUT STATE ÜZERİNDEN DIFF
@@ -8399,6 +8410,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const showSatisMusteriKayit = altSatisErisimi('satisMusteriKayit');
     const showSatisMusteriHavuzu = altSatisErisimi('satisMusteriHavuzu');
     const showSatisSahaPortfoy = altSatisErisimi('satisSahaPortfoy');
+    const showSatisWhatsapp = altSatisErisimi('satisWhatsapp'); // YENİ (2026-10-07)
     const showJobList = checkAccess('jobList');
     const showCustomers = checkAccess('customers');
     const showPersonnel = checkAccess('personnel');
@@ -9223,13 +9235,17 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   <div className="flex items-center gap-3 min-w-0">
                     <PlusCircle className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap truncate" title="Satış">Satış</span>
                   </div>
-                  <div className="flex items-center justify-end gap-1.5 shrink-0 w-[92px]">
+                  <div className="flex items-center justify-end gap-1.5 shrink-0 min-w-[92px]">
                     {/* YENİ: Yeni teklif rozetleri — kırmızı Sembol, mavi Depoevim; sayı 0 ise gizli */}
                     {showSatisMusteriHavuzu && hizliTeklifYeni.sembol > 0 && (
                       <span title={`Sembol Nakliyat: ${hizliTeklifYeni.sembol} yeni teklif`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-red-600/40 animate-pulse">{hizliTeklifYeni.sembol}</span>
                     )}
                     {showSatisMusteriHavuzu && hizliTeklifYeni.depoevim > 0 && (
                       <span title={`Depoevim: ${hizliTeklifYeni.depoevim} yeni teklif`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-blue-600/40 animate-pulse">{hizliTeklifYeni.depoevim}</span>
+                    )}
+                    {/* YENİ (2026-10-07): WhatsApp — personel bekleyen konuşma sayısı (yeşil) */}
+                    {showSatisWhatsapp && whatsappBekleyen > 0 && (
+                      <span title={`WhatsApp: ${whatsappBekleyen} konuşma personel bekliyor`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-green-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-green-600/40 animate-pulse">{whatsappBekleyen}</span>
                     )}
                     {isAddJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </div>
@@ -9269,6 +9285,16 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'musteriHavuzu' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'musteriHavuzu' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Havuzu
+                    </button>
+                    )}
+                    {/* YENİ (2026-10-07): WHATSAPP — bot hattı konuşmaları (devral / cevap yaz / bota geri ver) */}
+                    {showSatisWhatsapp && (
+                    <button
+                      onClick={() => { setActiveTab('whatsapp'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'whatsapp' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'whatsapp' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> WhatsApp
+                      {whatsappBekleyen > 0 && <span title="Personel bekleyen konuşma" className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center">{whatsappBekleyen}</span>}
                     </button>
                     )}
                     {/* YENİ: SAHA PORTFÖY — Satış Bölümü'nün EN ALTINDA. Saha pazarlama
@@ -10203,7 +10229,17 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 /* YENİ (kullanıcı talebi): isim altındaki Hızlı Fiyat / Fiyat Tablosu kısayolu — kullanılınca temizlenir */
                 fiyatKisayolIstegi={fiyatKisayolIstegi} onFiyatKisayolKullanildi={() => setFiyatKisayolIstegi(null)}
                 /* YENİ: Teklife Bak penceresindeki "Kayıt Aç" butonu için */
-                onKayitAc={showSatisMusteriKayit ? havuzdanKayitAc : null} />}
+                onKayitAc={showSatisMusteriKayit ? havuzdanKayitAc : null}
+                /* YENİ (2026-10-07): bot hattından gelen lead'in "WhatsApp" düğmesi CRM sohbetini açar (diğerleri wa.me) */
+                onWhatsappSohbet={showSatisWhatsapp ? (konusmaId) => { setWhatsappAcIstegi({ konusmaId, no: Date.now() }); setActiveTab('whatsapp'); } : null}
+                /* YENİ (2026-10-07): WhatsApp panelindeki "Lead" düğmesi → bu kaydın detayı açılır */
+                leadAcIstegi={havuzLeadIstegi} onLeadAcIstegiKullanildi={() => setHavuzLeadIstegi(null)} />}
+
+            {/* YENİ (2026-10-07): WHATSAPP PANELİ */}
+            {activeTab === 'whatsapp' && showSatisWhatsapp &&
+              <WhatsAppView currentUser={currentUser} yonetici={superYoneticiMi(currentUser) || isManager}
+                acIstegi={whatsappAcIstegi}
+                onLeadAc={showSatisMusteriHavuzu ? (id) => { setHavuzLeadIstegi({ id, no: Date.now() }); setActiveTab('musteriHavuzu'); } : null} />}
 
             {/* YENİ: SAHA PORTFÖY EKRANI — kendi alt yetkisiyle görünür */}
             {activeTab === 'sahaPortfoy' && showSatisSahaPortfoy &&

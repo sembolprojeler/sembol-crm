@@ -62,6 +62,8 @@ export function hatlariOku(env = process.env) {
   });
 }
 export const hatBul = (env, phoneNumberId) => (phoneNumberId ? hatlariOku(env).find(h => h.phoneNumberId === String(phoneNumberId)) : null) || null;
+// Konuşma belgesinin hattı: hatId (2026-10-07 sonrası) — yoksa eski belge → eskiKimlik hattı (0850)
+export const konusmaHatti = (env, k = {}) => (k.hatId ? hatBul(env, k.hatId) : hatlariOku(env).find(h => h.eskiKimlik) || null);
 // Aynı müşteri iki hatta yazarsa iki ayrı konuşma olur
 export const konusmaKimligi = (hat, waId) => (hat?.eskiKimlik ? String(waId) : `${hat.phoneNumberId}_${waId}`);
 

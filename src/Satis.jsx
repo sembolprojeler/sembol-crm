@@ -14,6 +14,7 @@ import { teklifDetayiAlanlardan, eskiTeklifMetni } from './teklifDetay.js';
 // YENİ: Yapay zeka kaynak şeması — /api/submit-lead ve /api/yeni-musteri ile ortak (etiketler, kutular)
 import { AI_KAYNAK_ETIKETLERI, AI_ISTATISTIK_KUTULARI, aiKaynakMi } from './aiKaynakSema.js';
 // YENİ: QR Site Takip şeması — /api/qr-site ile ortak (sabitler, telefon kuralı, WordPress sayfa adresi)
+import { botLeadKonusmaId } from './whatsappPanel.js'; // YENİ (2026-10-07): bot hattı lead'i → CRM WhatsApp sohbeti
 import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
 import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari,
@@ -4225,7 +4226,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // YENİ (kullanıcı talebi): satış personelinin "Portföyüm" butonu → Telefon Görüşmesi sekmesi açılır
   telefonPortfoyIstegi = null, onTelefonPortfoyKullanildi,
   // YENİ (kullanıcı talebi): isim altındaki kısayollar → { tip: 'hizliFiyat' | 'fiyatTablosu', no }
-  fiyatKisayolIstegi = null, onFiyatKisayolKullanildi }) => {
+  fiyatKisayolIstegi = null, onFiyatKisayolKullanildi,
+  // YENİ (2026-10-07): bot hattından gelen lead'lerde "WhatsApp" düğmesi CRM sohbetini açar (null → wa.me kalır);
+  // WhatsApp panelindeki "Lead" düğmesi → { id, no } ile o kaydın detayı açılır
+  onWhatsappSohbet = null, leadAcIstegi = null, onLeadAcIstegiKullanildi }) => {
   // ---------------------------------------------------------------- STATE ---
   // DEĞİŞTİ (kullanıcı talebi): Havuz açılınca ilk sekme artık "Hızlı Teklifler" ('web')
   const [aktifKanal, setAktifKanal] = useState('web');
@@ -4293,6 +4297,19 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     if (fiyatKisayolIstegi.tip === 'fiyatTablosu') setFiyatTablosuAcik(true);
     onFiyatKisayolKullanildi?.();
   }, [fiyatKisayolIstegi?.no]); // eslint-disable-line react-hooks/exhaustive-deps
+  // YENİ (2026-10-07): WhatsApp panelinden "Lead" — kayıt bulunursa kendi sekmesi seçilir ve detayı açılır
+  useEffect(() => {
+    if (!leadAcIstegi?.id || !kayitlar.length) return;
+    const k = kayitlar.find(x => x.id === leadAcIstegi.id);
+    onLeadAcIstegiKullanildi?.();
+    if (!k) { alert('Lead kaydı bulunamadı (silinmiş olabilir).'); return; }
+    if (!gorunurMu(k)) { alert(`Bu kayıt ${k.atanan} adlı personele atanmış.`); return; }
+    if (KANALLAR.some(x => x.id === k.kanal)) setAktifKanal(k.kanal);
+    setDetayKayit(k);
+    setDetayFotoGoster(null);
+    setDuzenleIletisim((k.iletisim || '').includes('Bekleniyor') ? '' : (k.iletisim || ''));
+    setDuzenleMusteriAdi((k.musteriAdi || '').includes('Ziyaretçi') ? '' : (k.musteriAdi || ''));
+  }, [leadAcIstegi?.no, kayitlar.length > 0]); // eslint-disable-line react-hooks/exhaustive-deps
   // ======================================================================
   // YENİ (kullanıcı talebi): QR TAKİP — site seçicinin altındaki düğme ile
   // açılan sayfa. Kampanyalar ve taramalar burada dinlenir ki Havuz
@@ -5433,10 +5450,18 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                     ) : '—'}
                   </td>
                   <td className="p-3 text-right whitespace-nowrap">
+                    {/* YENİ (2026-10-07): bot hattından gelen lead → CRM WhatsApp sohbeti */}
+                    {onWhatsappSohbet && botLeadKonusmaId(k) ? (
+                      <button type="button" onClick={() => onWhatsappSohbet(botLeadKonusmaId(k))} title="CRM WhatsApp panelinde aç"
+                        className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black mr-1.5 ${renk.aktif}`}>
+                        <kanal.Ikon className="w-3 h-3" /> Sohbeti Aç
+                      </button>
+                    ) : (
                     <a href={iletisimLink(k)} target={aktifKanal === 'telefon' ? '_self' : '_blank'} rel="noopener noreferrer"
                       className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-black mr-1.5 ${k.iletisim.includes('Bekleniyor') ? 'opacity-50 pointer-events-none bg-neutral-200 text-neutral-500' : renk.aktif}`}>
                       <kanal.Ikon className="w-3 h-3" /> {iletisimBtnMetin}
                     </a>
+                    )}
                     <button type="button" onClick={() => {
                         setDetayKayit(k);
                         setDetayFotoGoster(null);
@@ -5545,9 +5570,17 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   <a href={`tel:${telefonRakam(detayKayit.iletisim)}`} className="flex-1 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white transition text-xs font-black flex items-center justify-center gap-1.5 shadow-md">
                     <Phone className="w-3.5 h-3.5" /> Ara
                   </a>
+                  {/* YENİ (2026-10-07): bot hattından gelen lead → CRM WhatsApp sohbeti; diğerleri wa.me */}
+                  {onWhatsappSohbet && botLeadKonusmaId(detayKayit) ? (
+                    <button type="button" onClick={() => { const kid = botLeadKonusmaId(detayKayit); setDetayKayit(null); setDetayFotoGoster(null); onWhatsappSohbet(kid); }}
+                      className="flex-1 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white transition text-xs font-black flex items-center justify-center gap-1.5 shadow-md">
+                      <MessageCircle className="w-3.5 h-3.5" /> WhatsApp'tan cevap ver
+                    </button>
+                  ) : (
                   <a href={`https://wa.me/${waNumarasi(detayKayit.iletisim)}`} target="_blank" rel="noopener noreferrer" className="flex-1 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white transition text-xs font-black flex items-center justify-center gap-1.5 shadow-md">
                     <MessageCircle className="w-3.5 h-3.5" /> WhatsApp
                   </a>
+                  )}
                 </div>
               )}
             </div>
