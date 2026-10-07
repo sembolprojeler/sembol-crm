@@ -126,3 +126,7 @@ export function whatsappErisimi(p, positionModules = {}) {
   const t = tanimli('satisWhatsapp');
   return t === null ? true : t;
 }
+
+// YENİ (2026-10-07): App.jsx görüntüleyicisi { title, name } bekler (name = dosya adresi) —
+// diğer ekranlardaki setViewingImage({ title, name }) çağrılarıyla AYNI biçim
+export const gorselGoruntuleyiciIstegi = (md = {}) => ({ title: md.caption ? `WhatsApp görseli — ${md.caption}`.slice(0, 120) : 'WhatsApp görseli', name: md.url || '' });

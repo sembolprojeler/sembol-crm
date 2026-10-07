@@ -73,6 +73,8 @@ import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, M
 import { WhatsAppView } from './WhatsApp.jsx';
 import { useWhatsappBekleyen } from './whatsappKaynak.js';
 import { whatsappErisimi } from './whatsappPanel.js';
+import { WhatsAppHataSiniri } from './whatsappHataSiniri.js';
+import { goruntuleyiciBilgisi } from './goruntuleyici.js';
 import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJobsView, CancelledJobsView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, IsMerkeziView, IsKilavuzuView, HatirlatmalarView,
   // YENİ: "Randevular" menüsündeki bekleyen ekspertiz rozetleri için canlı sayaç
   useEkspertizBekleyenSayilari,
@@ -10236,10 +10238,13 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 leadAcIstegi={havuzLeadIstegi} onLeadAcIstegiKullanildi={() => setHavuzLeadIstegi(null)} />}
 
             {/* YENİ (2026-10-07): WHATSAPP PANELİ */}
+            {/* Panelin kendi hata sınırı: panelde hata olursa yalnızca panel "Bir hata oluştu" gösterir, CRM düşmez */}
             {activeTab === 'whatsapp' && showSatisWhatsapp &&
+              <WhatsAppHataSiniri>
               <WhatsAppView currentUser={currentUser} yonetici={superYoneticiMi(currentUser) || isManager}
                 acIstegi={whatsappAcIstegi} onGorselAc={setViewingImage}
-                onLeadAc={showSatisMusteriHavuzu ? (id) => { setHavuzLeadIstegi({ id, no: Date.now() }); setActiveTab('musteriHavuzu'); } : null} />}
+                onLeadAc={showSatisMusteriHavuzu ? (id) => { setHavuzLeadIstegi({ id, no: Date.now() }); setActiveTab('musteriHavuzu'); } : null} />
+              </WhatsAppHataSiniri>}
 
             {/* YENİ: SAHA PORTFÖY EKRANI — kendi alt yetkisiyle görünür */}
             {activeTab === 'sahaPortfoy' && showSatisSahaPortfoy &&
@@ -11446,33 +11451,36 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           </div>
         )}
 
-        {viewingImage && (
+        {viewingImage && (() => {
+          // DEĞİŞTİ (2026-10-07): name eksik / dize değilse çökmez (goruntuleyiciBilgisi) — { title, name } girdileri aynı
+          const gv = goruntuleyiciBilgisi(viewingImage);
+          return (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex justify-center items-center p-4">
             <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl animate-in zoom-in-95">
               <div className="bg-black text-white p-4 flex justify-between items-center border-b-4 border-red-600">
-                <h3 className="font-bold text-lg">{viewingImage.title}</h3>
+                <h3 className="font-bold text-lg">{gv.baslik}</h3>
                 <button onClick={() => setViewingImage(null)} className="text-neutral-400 hover:text-white transition"><X className="w-6 h-6" /></button>
               </div>
               <div className="p-6 flex flex-col items-center w-full">
                 <div className="w-full aspect-video bg-neutral-100 rounded-xl border border-neutral-300 flex flex-col items-center justify-center mb-4 overflow-hidden relative shadow-inner">
-                  {viewingImage.name.startsWith('http') ? (
-                    isVideoUrl(viewingImage.name) ? (
-                      <video src={viewingImage.name} controls autoPlay muted className="w-full h-full object-contain z-10 bg-black" />
+                  {gv.http ? (
+                    isVideoUrl(gv.adres) ? (
+                      <video src={gv.adres} controls autoPlay muted className="w-full h-full object-contain z-10 bg-black" />
                     ) : (
-                      <img src={viewingImage.name} alt="Görsel" className="w-full h-full object-contain z-10" />
+                      <img src={gv.adres} alt="Görsel" className="w-full h-full object-contain z-10" />
                     )
                   ) : (
                     <Camera className="w-16 h-16 text-neutral-300 z-10" />
                   )}
                 </div>
-                
-                {viewingImage.name.startsWith('http') && (
+
+                {gv.http && (
                   <div className="w-full flex flex-col gap-2 mb-4">
-                    <a href={viewingImage.name} target="_blank" rel="noreferrer" className="w-full py-3 bg-red-50 text-red-600 hover:bg-red-100 font-bold rounded-xl transition flex justify-center items-center gap-2 border border-red-200">
+                    <a href={gv.adres} target="_blank" rel="noreferrer" className="w-full py-3 bg-red-50 text-red-600 hover:bg-red-100 font-bold rounded-xl transition flex justify-center items-center gap-2 border border-red-200">
                       <ArrowUpRight className="w-5 h-5" /> Görseli / Dosyayı Aç
                     </a>
                     <p className="text-[10px] text-neutral-400 text-center truncate px-2">
-                      Link: {viewingImage.name}
+                      Link: {gv.adres}
                     </p>
                   </div>
                 )}
@@ -11481,7 +11489,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
 
         {showTaskModal && (
           <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex justify-center items-center p-4">

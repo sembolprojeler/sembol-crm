@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { MessageCircle, Send, Bot, UserCheck, Search, ExternalLink, MapPin, AlertTriangle, ArrowLeft, Lock, Loader2, X, Download, FileText, RefreshCw } from 'lucide-react';
 import { firestoreKaynagi } from './whatsappKaynak.js';
-import { pencereAcikMi, pencereKalan, konusmalariSuz, mesajGorunumu, medyaGorunumu, boyutMetni, durumBilgisi, dikkatSayisi, sekmeBasligi, bekliyorMu,
+import { pencereAcikMi, pencereKalan, konusmalariSuz, mesajGorunumu, medyaGorunumu, boyutMetni, gorselGoruntuleyiciIstegi, durumBilgisi, dikkatSayisi, sekmeBasligi, bekliyorMu,
   listeSaati, konusmaMarkasi, MARKA_ETIKETI, PENCERE_UYARISI, SIFRE_YOK_MESAJI } from './whatsappPanel.js';
 
 const MARKA_RENK = { depoevim: 'bg-blue-50 text-blue-700 border-blue-200', sembol: 'bg-red-50 text-red-700 border-red-200' };
@@ -35,7 +35,7 @@ const MedyaIcerik = ({ md, metin, onGorselAc, onGetir, getiriliyor }) => {
   let govde;
   if (md.durum === 'hazir') {
     if (md.tur === 'gorsel') govde = (
-      <button type="button" onClick={() => onGorselAc?.(md.url)} className="block" title="Büyüt">
+      <button type="button" onClick={() => onGorselAc?.(gorselGoruntuleyiciIstegi(md))} className="block" title="Büyüt">
         <img src={md.url} alt={md.caption || 'Görsel'} loading="lazy" className="max-h-48 max-w-full rounded-lg object-cover" />
       </button>);
     else if (md.tur === 'ses') govde = (<div className="space-y-0.5"><audio controls preload="none" src={md.url} className="w-60 max-w-full" />{indir}</div>);
