@@ -12,7 +12,8 @@
 // "kaynak" prop'u test/önizleme içindir; varsayılan src/whatsappKaynak.js (Firestore + /api/whatsapp-send).
 // ============================================================================
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { MessageCircle, Send, Bot, UserCheck, Search, ExternalLink, MapPin, AlertTriangle, ArrowLeft, Lock, Loader2, X, Download, FileText, RefreshCw } from 'lucide-react';
+import { MessageCircle, Send, Bot, UserCheck, Search, ExternalLink, MapPin, AlertTriangle, ArrowLeft, Lock, Loader2, X, Download, FileText, RefreshCw,
+  CalendarDays, Phone, Briefcase, Eye, Users } from 'lucide-react'; // YENİ (2026-10-08): havuz listesi simgeleri
 import { firestoreKaynagi } from './whatsappKaynak.js';
 import { pencereAcikMi, pencereKalan, konusmalariSuz, mesajGorunumu, medyaGorunumu, boyutMetni, gorselGoruntuleyiciIstegi, durumBilgisi, dikkatSayisi, sekmeBasligi, bekliyorMu,
   listeSaati, konusmaMarkasi, MARKA_ETIKETI, PENCERE_UYARISI, SIFRE_YOK_MESAJI } from './whatsappPanel.js';
@@ -71,32 +72,20 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
   const [yukleniyor, setYukleniyor] = useState(true);
   const [okumaHatasi, setOkumaHatasi] = useState('');
   const [seciliId, setSeciliId] = useState(null);
-  const [mesajKutusu, setMesajKutusu] = useState({ kid: null, liste: [] });
   const [islenenIstek, setIslenenIstek] = useState(null);
   const [filtre, setFiltre] = useState({ marka: 'tumu', mod: 'tumu', arama: '' });
-  const [metin, setMetin] = useState('');
-  const [isleniyor, setIsleniyor] = useState('');
-  const [hata, setHata] = useState('');
   const [durum, setDurum] = useState({});
-  const sonRef = useRef(null);
-  const okunduIstendi = useRef('');
+  // DEĞİŞTİ (2026-10-08): sohbet bölümü (mesajlar, yazma, devral / bota ver) WhatsAppSohbet
+  // bileşenine taşındı — Müşteri Havuzu'ndaki "WhatsApp Mesajları Havuzu" da aynısını kullanır.
 
   useEffect(() => kaynak.konusmalariDinle(
     (l) => { setKonusmalar(l); setYukleniyor(false); setOkumaHatasi(''); },
     () => { setYukleniyor(false); setOkumaHatasi('Konuşmalar okunamadı. Sayfayı yenileyin.'); }), [kaynak]);
   useEffect(() => kaynak.durumDinle(setDurum), [kaynak]);
 
-  const sec = (kid) => { setSeciliId(kid); setMetin(''); setHata(''); };
+  const sec = (kid) => { setSeciliId(kid); };
   // Lead ekranından gelen "sohbeti aç" isteği — her yeni istek (no) bir kez uygulanır
   if (acIstegi?.konusmaId && acIstegi.no !== islenenIstek) { setIslenenIstek(acIstegi.no); sec(acIstegi.konusmaId); }
-
-  useEffect(() => {
-    if (!seciliId) return undefined;
-    return kaynak.mesajlariDinle(seciliId, (liste) => setMesajKutusu({ kid: seciliId, liste }), () => setHata('Mesajlar okunamadı.'));
-  }, [seciliId, kaynak]);
-  const mesajlar = mesajKutusu.kid === seciliId ? mesajKutusu.liste : [];
-
-  useEffect(() => { sonRef.current?.scrollIntoView?.({ block: 'end' }); }, [mesajlar.length, seciliId]);
 
   // Sekme başlığı: "(2) WhatsApp – CRM" — panelden çıkınca eski başlık geri gelir
   const ilkBaslik = useRef(typeof document !== 'undefined' ? document.title : '');
@@ -106,34 +95,6 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
 
   const secili = konusmalar.find(k => k.id === seciliId) || null;
   const liste = useMemo(() => konusmalariSuz(konusmalar, filtre), [konusmalar, filtre]);
-  const kimlik = { personelId: currentUser?.id, sifre: currentUser?.password };
-
-  // Açık sohbette okunmamış varsa sunucuya "okundu" (her artışta bir kez)
-  useEffect(() => {
-    if (!secili || !(Number(secili.unreadCount) > 0) || !currentUser?.password) return;
-    const anahtar = `${secili.id}:${secili.lastCustomerWamid || secili.unreadCount}`;
-    if (okunduIstendi.current === anahtar) return;
-    okunduIstendi.current = anahtar;
-    kaynak.istek({ islem: 'okundu', konusmaId: secili.id, ...kimlik });
-  }, [secili?.id, secili?.unreadCount]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const islemYap = async (islem, ek = {}) => {
-    if (!currentUser?.password) { setHata(SIFRE_YOK_MESAJI); return false; }
-    setIsleniyor(islem === 'medyaGetir' ? `medya:${ek.mesajId}` : islem); setHata('');
-    const r = await kaynak.istek({ islem, konusmaId: secili.id, ...kimlik, ...ek });
-    setIsleniyor('');
-    if (!r.ok) { if (!(islem === 'medyaGetir' && r.durum === 410)) setHata(r.hata || 'İşlem yapılamadı.'); return false; }
-    return true;
-  };
-  const gonder = async () => {
-    const m = metin.trim();
-    if (!m || !secili || isleniyor) return;
-    if (await islemYap('gonder', { metin: m })) setMetin('');
-  };
-
-  const acik = secili ? pencereAcikMi(secili, simdi()) : false;
-  const devralanBen = secili?.devralan?.id && String(secili.devralan.id) === String(currentUser?.id);
-  const botaVerebilir = secili?.mode === 'human' && (!secili?.devralan?.id || devralanBen || yonetici);
   const uyarilar = ['token', 'ai'].map(a => durum[a]).filter(d => d?.aktif);
 
   return (
@@ -207,9 +168,73 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
               <MessageCircle className="w-12 h-12 mb-2" />
               <p className="font-bold text-sm">Soldan bir konuşma seçin.</p>
             </div>
-          ) : (<>
+          ) : (
+            /* DEĞİŞTİ (2026-10-08): sohbet bölümü ortak bileşen — key ile her konuşmada sıfırdan açılır */
+            <WhatsAppSohbet key={secili.id} konusma={secili} currentUser={currentUser} yonetici={yonetici}
+              onGeri={() => sec(null)} onLeadAc={onLeadAc} onGorselAc={onGorselAc} kaynak={kaynak} simdi={simdi} />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================================
+// YENİ (2026-10-08): WHATSAPP SOHBET — tek konuşmanın sohbet bölümü (ortak bileşen)
+// ----------------------------------------------------------------------------
+// WhatsApp panelinin sağ tarafı ile Müşteri Havuzu › "WhatsApp Mesajları Havuzu"
+// penceresi AYNI bileşeni kullanır: mesajlar, medya, devral / bota geri ver,
+// 24 saat penceresi, okundu bildirimi. Davranış eskisiyle birebir aynıdır.
+// konusma: canlı konuşma kaydı · onGeri: geri / kapat düğmesi (geriHerZaman: masaüstünde de göster)
+// ============================================================================
+export const WhatsAppSohbet = ({ konusma, currentUser, yonetici = false, onGeri = null, geriHerZaman = false,
+  onLeadAc, onGorselAc, kaynak = firestoreKaynagi, simdi = () => Date.now() }) => {
+  const secili = konusma;
+  const [mesajlar, setMesajlar] = useState([]);
+  const [metin, setMetin] = useState('');
+  const [isleniyor, setIsleniyor] = useState('');
+  const [hata, setHata] = useState('');
+  const sonRef = useRef(null);
+  const okunduIstendi = useRef('');
+  const kimlik = { personelId: currentUser?.id, sifre: currentUser?.password };
+
+  useEffect(() => {
+    if (!secili?.id) return undefined;
+    return kaynak.mesajlariDinle(secili.id, (liste) => setMesajlar(liste), () => setHata('Mesajlar okunamadı.'));
+  }, [secili?.id, kaynak]);
+  useEffect(() => { sonRef.current?.scrollIntoView?.({ block: 'end' }); }, [mesajlar.length, secili?.id]);
+
+  // Açık sohbette okunmamış varsa sunucuya "okundu" (her artışta bir kez)
+  useEffect(() => {
+    if (!secili || !(Number(secili.unreadCount) > 0) || !currentUser?.password) return;
+    const anahtar = `${secili.id}:${secili.lastCustomerWamid || secili.unreadCount}`;
+    if (okunduIstendi.current === anahtar) return;
+    okunduIstendi.current = anahtar;
+    kaynak.istek({ islem: 'okundu', konusmaId: secili.id, ...kimlik });
+  }, [secili?.id, secili?.unreadCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const islemYap = async (islem, ek = {}) => {
+    if (!currentUser?.password) { setHata(SIFRE_YOK_MESAJI); return false; }
+    setIsleniyor(islem === 'medyaGetir' ? `medya:${ek.mesajId}` : islem); setHata('');
+    const r = await kaynak.istek({ islem, konusmaId: secili.id, ...kimlik, ...ek });
+    setIsleniyor('');
+    if (!r.ok) { if (!(islem === 'medyaGetir' && r.durum === 410)) setHata(r.hata || 'İşlem yapılamadı.'); return false; }
+    return true;
+  };
+  const gonder = async () => {
+    const m = metin.trim();
+    if (!m || !secili || isleniyor) return;
+    if (await islemYap('gonder', { metin: m })) setMetin('');
+  };
+
+  if (!secili) return null;
+  const acik = pencereAcikMi(secili, simdi());
+  const devralanBen = secili?.devralan?.id && String(secili.devralan.id) === String(currentUser?.id);
+  const botaVerebilir = secili?.mode === 'human' && (!secili?.devralan?.id || devralanBen || yonetici);
+
+  return (<>
             <div className="px-3 py-2.5 border-b border-neutral-200 flex items-center gap-2 flex-wrap">
-              <button type="button" onClick={() => sec(null)} className="md:hidden p-1.5 rounded-lg hover:bg-neutral-100"><ArrowLeft className="w-5 h-5" /></button>
+              {onGeri && <button type="button" onClick={onGeri} className={`${geriHerZaman ? '' : 'md:hidden '}p-1.5 rounded-lg hover:bg-neutral-100`} title="Geri"><ArrowLeft className="w-5 h-5" /></button>}
               <div className="min-w-0">
                 <p className="font-black text-black text-sm truncate">{secili.profileName || 'WhatsApp Müşterisi'}</p>
                 <p className="text-[11px] font-bold text-neutral-500">{secili.phone || secili.waId}</p>
@@ -296,9 +321,216 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
                 <Lock className="w-4 h-4 shrink-0" /> {PENCERE_UYARISI}
               </div>
             )}
-          </>)}
+  </>);
+};
+
+// ============================================================================
+// YENİ (2026-10-08): WHATSAPP MESAJLARI HAVUZU — Müşteri Havuzu içinde liste görünümü
+// ----------------------------------------------------------------------------
+// "Hızlı Teklifler Havuzu" düzeninde: konuşmalar SON MESAJ tarihine göre (yeniden
+// eskiye) GÜN BLOKLARINA ayrılır ("8 Ekim 2026 Mesajları · Bugün"). Her satırda
+// müşteri, telefon, son mesaj, bot / personel durumu ve hat (Sembol / DepoEvim).
+//   • Satıra ya da "Sohbeti Aç"a tıklayınca sohbet AYNI SAYFADA pencerede açılır
+//     (WhatsAppSohbet — panelle birebir aynı: yaz, devral, bota geri ver, medya).
+//   • "Portföye Ekle" → müşteri "Benim Müşterilerim"e WHATSAPP TEKLİF etiketiyle
+//     eklenir (Satis.jsx onPortfoyeEkle). Eklenmişse "Portföyde · Satışçı" görünür.
+// Veri kaynağı WhatsApp paneliyle aynıdır (salt okuma; yazma yalnızca sunucudan).
+// ============================================================================
+const istGunu = (iso) => {
+  const t = new Date(iso || '');
+  return Number.isNaN(t.getTime()) ? '' : t.toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' }); // 'YYYY-AA-GG'
+};
+const gunBasligi = (gun) => {
+  if (!gun) return 'Tarihsiz';
+  const [y, a, g] = gun.split('-').map(Number);
+  return new Date(y, a - 1, g).toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+};
+const gunFarki = (gun, simdiMs) => {
+  if (!gun) return null;
+  const bugun = istGunu(new Date(simdiMs).toISOString());
+  return Math.round((new Date(bugun + 'T00:00:00') - new Date(gun + 'T00:00:00')) / 86400000);
+};
+const HAVUZ_ZAMANLAR = [['bugun', 'Bugün', 0], ['hafta', 'Son 7 Gün', 6], ['ay', 'Son 30 Gün', 29], ['tumu', 'Tüm Zamanlar', null]];
+
+export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGorselAc,
+  portfoyHaritasi = {}, onPortfoyeEkle, onPortfoyAc, kaynak = firestoreKaynagi, simdi = () => Date.now() }) => {
+  const [konusmalar, setKonusmalar] = useState([]);
+  const [yukleniyor, setYukleniyor] = useState(true);
+  const [okumaHatasi, setOkumaHatasi] = useState('');
+  const [filtre, setFiltre] = useState({ marka: 'tumu', mod: 'tumu', arama: '' });
+  const [zaman, setZaman] = useState('tumu');
+  const [portfoy, setPortfoy] = useState('tumu'); // 'tumu' | 'yok' (portföyde olmayanlar) | 'var'
+  const [acikId, setAcikId] = useState(null);
+  const [ekleniyor, setEkleniyor] = useState('');
+
+  useEffect(() => kaynak.konusmalariDinle(
+    (l) => { setKonusmalar(l); setYukleniyor(false); setOkumaHatasi(''); },
+    () => { setYukleniyor(false); setOkumaHatasi('Konuşmalar okunamadı. Sayfayı yenileyin.'); }), [kaynak]);
+
+  const simdiMs = simdi();
+  // Filtre (panelle aynı fonksiyon) + zaman + portföy, son mesaja göre yeniden eskiye
+  const liste = useMemo(() => {
+    const z = HAVUZ_ZAMANLAR.find(x => x[0] === zaman);
+    return konusmalariSuz(konusmalar, filtre)
+      .filter(k => { if (z?.[2] == null) return true; const f = gunFarki(istGunu(k.lastMessageAt), simdiMs); return f != null && f <= z[2]; })
+      .filter(k => portfoy === 'tumu' ? true : portfoy === 'var' ? !!portfoyHaritasi[k.id] : !portfoyHaritasi[k.id])
+      .slice().sort((a, b) => String(b.lastMessageAt || '').localeCompare(String(a.lastMessageAt || '')));
+  }, [konusmalar, filtre, zaman, portfoy, portfoyHaritasi]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Gün blokları
+  const bloklar = useMemo(() => {
+    const m = new Map();
+    liste.forEach(k => { const g = istGunu(k.lastMessageAt); if (!m.has(g)) m.set(g, []); m.get(g).push(k); });
+    return [...m.entries()];
+  }, [liste]);
+  const acik = konusmalar.find(k => k.id === acikId) || null;
+  const sayac = (fn) => konusmalar.filter(fn).length;
+
+  const portfoyeEkle = async (k) => {
+    if (!onPortfoyeEkle || ekleniyor) return;
+    setEkleniyor(k.id);
+    try { await onPortfoyeEkle({ ...k, _marka: konusmaMarkasi(k) }); } finally { setEkleniyor(''); } // hat bilgisi (DepoEvim → Depo) ile
+  };
+
+  const Cip = ({ aktif, onClick, children }) => (
+    <button type="button" onClick={onClick}
+      className={`px-2.5 py-1 rounded-lg text-[11px] font-black border transition ${aktif ? 'bg-black text-white border-black' : 'bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50'}`}>{children}</button>
+  );
+
+  return (
+    <div className="space-y-3 animate-in fade-in">
+      {/* ---------------------------------------------------- FİLTRELER */}
+      <div className="bg-white border border-neutral-200 rounded-2xl p-3 space-y-2">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-[10px] font-black text-neutral-400 uppercase mr-1">Durum:</span>
+          {[['tumu', 'Tümü', sayac(() => true)], ['bekleyen', 'Personel bekliyor', sayac(bekliyorMu)], ['bot', 'Bot', sayac(k => k.mode !== 'human')], ['human', 'Personel', sayac(k => k.mode === 'human')]].map(([id, ad, n]) => (
+            <Cip key={id} aktif={filtre.mod === id} onClick={() => setFiltre(f => ({ ...f, mod: id }))}>{ad} ({n})</Cip>
+          ))}
+          <span className="w-px h-5 bg-neutral-200 mx-1" />
+          {[['tumu', 'Tümü'], ['yok', 'Portföyde olmayanlar'], ['var', 'Portföydekiler']].map(([id, ad]) => (
+            <Cip key={id} aktif={portfoy === id} onClick={() => setPortfoy(id)}>{ad}</Cip>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input value={filtre.arama} onChange={e => setFiltre(f => ({ ...f, arama: e.target.value }))} placeholder="İsim ya da numara ara"
+              className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-100 text-sm font-bold outline-none focus:ring-2 focus:ring-green-500" />
+          </div>
+          <select value={filtre.marka} onChange={e => setFiltre(f => ({ ...f, marka: e.target.value }))}
+            className="px-2 py-2 rounded-xl text-[11px] font-black border border-neutral-200 bg-white">
+            <option value="tumu">Tüm hatlar</option><option value="depoevim">DepoEvim</option><option value="sembol">Sembol</option>
+          </select>
+          <span className="text-[10px] font-black text-neutral-400 uppercase ml-1 flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" /> Zaman:</span>
+          {HAVUZ_ZAMANLAR.map(([id, ad]) => (
+            <button key={id} type="button" onClick={() => setZaman(id)}
+              className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black border transition ${zaman === id ? 'bg-purple-600 text-white border-purple-600' : 'bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50'}`}>{ad}</button>
+          ))}
         </div>
       </div>
+
+      {/* ---------------------------------------------------- LİSTE (gün blokları) */}
+      <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
+        <div className="hidden md:grid grid-cols-[1.4fr_2fr_1fr_auto] gap-3 px-4 py-2.5 bg-black text-white text-xs font-black">
+          <span>Müşteri</span><span>Son Mesaj</span><span>Hat · Durum</span><span className="text-right pr-1">İşlem</span>
+        </div>
+        {yukleniyor && <p className="p-6 text-center text-sm font-bold text-neutral-400"><Loader2 className="w-4 h-4 inline animate-spin mr-1" /> Yükleniyor…</p>}
+        {okumaHatasi && <p className="p-6 text-center text-sm font-bold text-red-600">{okumaHatasi}</p>}
+        {!yukleniyor && !okumaHatasi && liste.length === 0 && <p className="p-8 text-center text-sm font-bold text-neutral-400">Bu filtrede konuşma yok.</p>}
+        {bloklar.map(([gun, kl]) => {
+          const fark = gunFarki(gun, simdiMs);
+          const bekleyen = kl.filter(bekliyorMu).length;
+          return (
+            <div key={gun || 'yok'}>
+              <div className="flex items-center gap-2 px-4 py-2 bg-green-50 border-y border-green-100">
+                <span className="w-1 h-5 rounded bg-green-600" />
+                <CalendarDays className="w-4 h-4 text-green-700" />
+                <span className="text-sm font-black text-neutral-900">{gunBasligi(gun)} Mesajları</span>
+                {fark === 0 && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-green-600 text-white">Bugün</span>}
+                {fark === 1 && <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-neutral-800 text-white">Dün</span>}
+                <span className="ml-auto text-[11px] font-bold text-neutral-500">{kl.length} konuşma{bekleyen ? <b className="text-red-600"> · {bekleyen} bekliyor</b> : ''}</span>
+              </div>
+              {kl.map(k => {
+                const okunmamis = Number(k.unreadCount) || 0;
+                const marka = konusmaMarkasi(k);
+                const pf = portfoyHaritasi[k.id];
+                const tel = String(k.phone || k.waId || '').replace(/\D/g, '');
+                return (
+                  <div key={k.id} onClick={() => setAcikId(k.id)}
+                    className={`relative grid grid-cols-1 md:grid-cols-[1.4fr_2fr_1fr_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 cursor-pointer hover:bg-neutral-50 ${bekliyorMu(k) ? 'bg-red-50/40' : ''}`}>
+                    <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${marka === 'depoevim' ? 'bg-blue-600' : 'bg-red-600'}`} />
+                    {/* Müşteri */}
+                    <div className="min-w-0 flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-black shrink-0">
+                        {(k.profileName || '?').trim().charAt(0).toLocaleUpperCase('tr-TR') || '?'}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className={`text-sm truncate ${okunmamis ? 'font-black text-black' : 'font-bold text-neutral-900'}`}>{k.profileName || 'WhatsApp Müşterisi'}</p>
+                          {okunmamis > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center">{okunmamis}</span>}
+                        </div>
+                        <p className="text-[11px] font-bold text-neutral-500">{k.phone || k.waId} · {listeSaati(k.lastMessageAt, simdiMs)}</p>
+                      </div>
+                    </div>
+                    {/* Son mesaj */}
+                    <p className={`text-[12px] line-clamp-2 ${okunmamis ? 'text-neutral-900 font-bold' : 'text-neutral-600'}`}>{k.lastMessagePreview || '—'}</p>
+                    {/* Hat · durum */}
+                    <div className="flex items-center gap-1 flex-wrap">
+                      <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${MARKA_RENK[marka]}`}>{MARKA_ETIKETI[marka]}</span>
+                      <ModRozeti k={k} />
+                      {bekliyorMu(k) && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse">Personel bekliyor</span>}
+                    </div>
+                    {/* İşlem */}
+                    <div className="flex items-center gap-1.5 justify-end flex-wrap" onClick={e => e.stopPropagation()}>
+                      <button type="button" onClick={() => setAcikId(k.id)}
+                        className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-green-600 hover:bg-green-700 text-white flex items-center gap-1 shadow-md shadow-green-600/20">
+                        <Eye className="w-3.5 h-3.5" /> Sohbeti Aç
+                      </button>
+                      {tel && <a href={`tel:+${tel}`} className="p-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white" title="Ara"><Phone className="w-3.5 h-3.5" /></a>}
+                      {pf ? (
+                        <button type="button" onClick={() => onPortfoyAc?.(pf, k)} title="Benim Müşterilerim'de aç"
+                          className="px-2.5 py-1.5 rounded-xl text-[11px] font-black border border-green-300 bg-green-50 text-green-800 flex items-center gap-1">
+                          <Briefcase className="w-3.5 h-3.5" /> Portföyde{pf.sahip ? ` · ${pf.sahip}` : ''}
+                        </button>
+                      ) : onPortfoyeEkle && (
+                        <button type="button" disabled={ekleniyor === k.id} onClick={() => portfoyeEkle(k)} title="Benim Müşterilerim'e WHATSAPP TEKLİF olarak ekle"
+                          className="px-2.5 py-1.5 rounded-xl text-[11px] font-black border border-green-600 text-green-700 hover:bg-green-50 flex items-center gap-1 disabled:opacity-50">
+                          {ekleniyor === k.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Users className="w-3.5 h-3.5" />} Portföye Ekle
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* ---------------------------------------------------- SOHBET PENCERESİ (aynı sayfada) */}
+      {acik && (
+        <div className="fixed inset-0 z-[120] bg-black/60 flex items-center justify-center p-2 md:p-6" onClick={() => setAcikId(null)}>
+          <div className="bg-white w-full max-w-3xl h-[88vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <WhatsAppSohbet key={acik.id} konusma={acik} currentUser={currentUser} yonetici={yonetici}
+              onGeri={() => setAcikId(null)} geriHerZaman onLeadAc={onLeadAc ? (id) => { setAcikId(null); onLeadAc(id); } : undefined}
+              onGorselAc={onGorselAc} kaynak={kaynak} simdi={simdi} />
+            {/* Portföy kısayolu — sohbet içinden de */}
+            <div className="px-3 py-2 border-t border-neutral-200 bg-neutral-50 flex items-center gap-2">
+              {portfoyHaritasi[acik.id] ? (
+                <button type="button" onClick={() => { const pf = portfoyHaritasi[acik.id]; setAcikId(null); onPortfoyAc?.(pf, acik); }}
+                  className="px-3 py-1.5 rounded-xl text-[11px] font-black border border-green-300 bg-green-50 text-green-800 flex items-center gap-1">
+                  <Briefcase className="w-3.5 h-3.5" /> Portföyde{portfoyHaritasi[acik.id].sahip ? ` · ${portfoyHaritasi[acik.id].sahip}` : ''} — Benim Müşterilerim'de aç
+                </button>
+              ) : onPortfoyeEkle && (
+                <button type="button" disabled={!!ekleniyor} onClick={async () => { const k = acik; setAcikId(null); await portfoyeEkle(k); }}
+                  className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-green-600 hover:bg-green-700 text-white flex items-center gap-1 disabled:opacity-50">
+                  <Users className="w-3.5 h-3.5" /> Portföye Ekle (WhatsApp Teklif)
+                </button>
+              )}
+              <button type="button" onClick={() => setAcikId(null)} className="ml-auto px-3 py-1.5 rounded-xl text-[11px] font-black border border-neutral-300 bg-white hover:bg-neutral-100 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Kapat</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
