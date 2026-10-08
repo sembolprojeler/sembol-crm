@@ -3358,9 +3358,31 @@ const KaynakIstatistikPaneli = ({ gruplar, kanalAd, onKapat }) => (
   </div>
 );
 
+// ============================================================================
+// YENİ (2026-10-08 · kullanıcı talebi): "SICAK MÜŞTERİ" DURUMU — sarı ve yanıp sönen
+// ----------------------------------------------------------------------------
+// Tüm durum listelerine eklenir (Müşteri Havuzu, Kaydet sonrası görüşme durumu,
+// Benim Müşterilerim seçici ve filtresi). Seçilen müşterinin rozeti ve satırı
+// yanıp söner. Stiller sayfaya BİR KEZ eklenir; "hareketi azalt" açıksa durur.
+// ============================================================================
+const SICAK_MUSTERI = 'Sıcak Müşteri';
+const sicakMi = (durum) => durum === SICAK_MUSTERI;
+if (typeof document !== 'undefined' && !document.getElementById('sicak-musteri-stil')) {
+  const st = document.createElement('style');
+  st.id = 'sicak-musteri-stil';
+  st.textContent = `
+    @keyframes sicakRozet { 0%,100% { box-shadow:0 0 0 0 rgba(234,179,8,.75); filter:brightness(1); } 50% { box-shadow:0 0 0 6px rgba(234,179,8,0); filter:brightness(1.12); } }
+    @keyframes sicakSatir { 0%,100% { background-color:#fefce8; box-shadow:inset 5px 0 0 #eab308; } 50% { background-color:#fef08a; box-shadow:inset 5px 0 0 #ca8a04; } }
+    .sicak-rozet { animation: sicakRozet 1s ease-in-out infinite; }
+    .sicak-satir { animation: sicakSatir 1.2s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { .sicak-rozet, .sicak-satir { animation: none; } }`;
+  document.head.appendChild(st);
+}
+
 // Takip durumları — sıralama satış hunisine göredir
 const DURUMLAR = [
   { id: 'Yeni',              renk: 'bg-neutral-100 text-neutral-700 border-neutral-300' },
+  { id: 'Sıcak Müşteri',     renk: 'bg-yellow-300 text-yellow-900 border-yellow-500 sicak-rozet' }, // YENİ (2026-10-08)
   { id: 'Görüşme Sağlandı',  renk: 'bg-blue-50 text-blue-700 border-blue-200' },
   // YENİ (kullanıcı talebi): iki ara durum eklendi — filtre çubuğu, tablolar ve
   // detay penceresi bu listeyi okuduğu için hepsinde otomatik görünür.
@@ -3381,6 +3403,8 @@ const DURUMLAR = [
 // etiket = ekranda görünen metin, id = DURUMLAR'daki gerçek durum kodu.
 // ============================================================================
 const GORUSME_DURUMU_SECENEKLERI = [
+  // YENİ (2026-10-08): sarı + yanıp sönen; "yazi" = sarı zeminde okunur koyu yazı
+  { id: 'Sıcak Müşteri',   etiket: 'Sıcak Müşteri',           renk: 'bg-yellow-400 hover:bg-yellow-500 shadow-yellow-400/40 sicak-rozet', yazi: 'text-yellow-950' },
   { id: 'Dönüş Bekliyor',  etiket: 'Dönüş Bekliyoruz',        renk: 'bg-amber-500 hover:bg-amber-600 shadow-amber-500/30' },
   { id: 'Tekrar Aranacak', etiket: 'Tekrar Aranacak',         renk: 'bg-sky-500 hover:bg-sky-600 shadow-sky-500/30' },
   { id: 'Ulaşılamadı',     etiket: 'Ulaşılmadı',              renk: 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/30' },
@@ -3950,7 +3974,7 @@ const HizliTekliflerTablosu = ({
                   const telefonVar = telefonGecerliMi(k.iletisim);
                   const kaynakEtiket = reklamKaynagiEtiket(k);
                   return (
-                    <tr key={k.id} className={`border-b border-neutral-100 transition ${yeni ? `bg-yellow-50/40 hover:bg-yellow-50 hizli-yeni-cerceve ${satirSembolMu(k) ? 'hizli-yeni-kirmizi' : 'hizli-yeni-mavi'}` : 'hover:bg-neutral-50'}`}>
+                    <tr key={k.id} className={`border-b border-neutral-100 transition ${yeni ? `bg-yellow-50/40 hover:bg-yellow-50 hizli-yeni-cerceve ${satirSembolMu(k) ? 'hizli-yeni-kirmizi' : 'hizli-yeni-mavi'}` : 'hover:bg-neutral-50'} ${sicakMi(k.durum) ? 'sicak-satir' : ''}`}>
 
                       {/* MÜŞTERİ + TEKLİF ÖZETİ */}
                       <td className="p-3 align-top">
@@ -5550,7 +5574,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               const sonHareket = (k.hareketler || [])[k.hareketler?.length - 1];
               const tip = HIZMET_TIPLERI.find(t => t.id === (k.hizmetTipi || 'Nakliye')) || HIZMET_TIPLERI[0];
               return (
-                <tr key={k.id} className="border-b border-neutral-100 hover:bg-neutral-50 transition">
+                <tr key={k.id} className={`border-b border-neutral-100 hover:bg-neutral-50 transition ${sicakMi(k.durum) ? 'sicak-satir' : ''}`}>{/* YENİ: Sıcak Müşteri yanıp söner */}
                   <td className="p-3 font-bold text-black">
                     <div className="flex items-center gap-2">
                       <span className={`w-7 h-7 rounded-full ${renk.nokta} text-white flex items-center justify-center text-[10px] font-black shrink-0`}>
@@ -6059,7 +6083,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                     }
                     finally { setGorusmeDurumuKaydediliyor(false); setGorusmeDurumuKayit(null); }
                   }}
-                  className={`w-full py-3 rounded-xl text-white text-sm font-black transition shadow-lg disabled:opacity-60 flex items-center justify-between px-4 ${sec.renk} ${(gorusmeDurumuKayit.durum || 'Yeni') === sec.id ? 'ring-2 ring-offset-2 ring-neutral-900' : ''}`}>
+                  className={`w-full py-3 rounded-xl ${sec.yazi || 'text-white'} text-sm font-black transition shadow-lg disabled:opacity-60 flex items-center justify-between px-4 ${sec.renk} ${(gorusmeDurumuKayit.durum || 'Yeni') === sec.id ? 'ring-2 ring-offset-2 ring-neutral-900' : ''}`}>
                   <span>{sec.etiket}</span>
                   {(gorusmeDurumuKayit.durum || 'Yeni') === sec.id
                     ? <span className="text-[10px] font-black bg-white/25 px-2 py-0.5 rounded-full">Mevcut</span>
@@ -9025,6 +9049,7 @@ const ttBelge = (id) => doc(db, 'artifacts', appId, 'public', 'data', TELEFON_TE
 // Durum sonradan istenildiği kadar değiştirilebilir; her değişiklik geçmişe yazılır.
 const TT_DURUMLAR = [
   { id: 'Yeni',            etiket: 'Yeni',                     rozet: 'bg-neutral-100 text-neutral-700 border-neutral-300', nokta: 'bg-neutral-400' },
+  { id: 'Sıcak Müşteri',   etiket: 'Sıcak Müşteri',            rozet: 'bg-yellow-300 text-yellow-900 border-yellow-500 sicak-rozet', nokta: 'bg-yellow-400 sicak-rozet' }, // YENİ (2026-10-08)
   { id: 'Dönüş Bekliyor',  etiket: 'Dönüş Bekliyoruz',         rozet: 'bg-amber-50 text-amber-700 border-amber-300',       nokta: 'bg-amber-500' },
   { id: 'Tekrar Aranacak', etiket: 'Tekrar Aranacak',          rozet: 'bg-sky-50 text-sky-700 border-sky-300',             nokta: 'bg-sky-500' },
   { id: 'Ulaşılamadı',     etiket: 'Ulaşılamadı',              rozet: 'bg-orange-50 text-orange-700 border-orange-300',    nokta: 'bg-orange-500' },
@@ -11619,7 +11644,7 @@ const TTWhatsappSatiri = ({ t, k, sahibiGoster, onSohbetAc, onDetay, onDurum, te
   const sonNot = ttSonNot(t)[0];
   return (
     <div onClick={onSohbetAc}
-      className={`relative grid grid-cols-1 md:grid-cols-[1.4fr_2fr_1fr_120px_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 cursor-pointer hover:bg-neutral-50 ${bekliyor ? 'bg-red-50/40' : ''}`}>
+      className={`relative grid grid-cols-1 md:grid-cols-[1.4fr_2fr_1fr_120px_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 cursor-pointer hover:bg-neutral-50 ${bekliyor ? 'bg-red-50/40' : ''} ${sicakMi(t.durum) ? 'sicak-satir' : ''}`}>
       <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${marka === 'depoevim' ? 'bg-blue-600' : 'bg-red-600'}`} />
       {/* Müşteri */}
       <div className="min-w-0 flex items-center gap-2.5">
@@ -11677,7 +11702,7 @@ const TelefonTeklifSatiri = ({ tHam, gecmis, sahibiGoster, onAc, onDurum, onWhat
   const telVar = ttTelGecerli(t.telefon);
   const r = ttAdimRolleri(t);
   return (
-    <div onClick={onAc} className="relative grid grid-cols-1 md:grid-cols-[1.3fr_1.6fr_0.8fr_auto_1fr_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 hover:bg-neutral-50 cursor-pointer">
+    <div onClick={onAc} className={`relative grid grid-cols-1 md:grid-cols-[1.3fr_1.6fr_0.8fr_auto_1fr_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 hover:bg-neutral-50 cursor-pointer ${sicakMi(t.durum) ? 'sicak-satir' : ''}`}>{/* YENİ: Sıcak Müşteri yanıp söner */}
       {/* Hizmet rengi şeridi — Sembol kırmızı, DepoEvim mavi/mor */}
       <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${hz.stil.serit}`} />
       <div className="min-w-0">
