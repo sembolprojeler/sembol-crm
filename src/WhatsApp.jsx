@@ -359,7 +359,8 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
   const [okumaHatasi, setOkumaHatasi] = useState('');
   const [filtre, setFiltre] = useState({ marka: 'tumu', mod: 'tumu', arama: '' });
   const [zaman, setZaman] = useState('tumu');
-  const [portfoy, setPortfoy] = useState('tumu'); // 'tumu' | 'yok' (portföyde olmayanlar) | 'var'
+  // DEĞİŞTİ (2026-10-08): portföye taşınan konuşma havuzdan düşer (Hızlı Teklif gibi); 'Portföydekiler' ile yine görülebilir
+  const [portfoy, setPortfoy] = useState('yok'); // 'tumu' | 'yok' (portföyde olmayanlar) | 'var'
   const [acikId, setAcikId] = useState(null);
   const [ekleniyor, setEkleniyor] = useState('');
 
@@ -487,12 +488,12 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
                       </button>
                       {tel && <a href={`tel:+${tel}`} className="p-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white" title="Ara"><Phone className="w-3.5 h-3.5" /></a>}
                       {pf ? (
-                        <button type="button" onClick={() => onPortfoyAc?.(pf, k)} title="Benim Müşterilerim'de aç"
+                        <button type="button" onClick={() => { if (onPortfoyAc?.(pf, k) === false) setAcikId(k.id); }} title="Portföydeki sohbeti aç"
                           className="px-2.5 py-1.5 rounded-xl text-[11px] font-black border border-green-300 bg-green-50 text-green-800 flex items-center gap-1">
                           <Briefcase className="w-3.5 h-3.5" /> Portföyde{pf.sahip ? ` · ${pf.sahip}` : ''}
                         </button>
                       ) : onPortfoyeEkle && (
-                        <button type="button" disabled={ekleniyor === k.id} onClick={() => portfoyeEkle(k)} title="Benim Müşterilerim'e WHATSAPP TEKLİF olarak ekle"
+                        <button type="button" disabled={ekleniyor === k.id} onClick={() => portfoyeEkle(k)} title="Müşteriyi sohbetiyle birlikte Benim Müşterilerim'e taşı (WHATSAPP TEKLİF)"
                           className="px-2.5 py-1.5 rounded-xl text-[11px] font-black border border-green-600 text-green-700 hover:bg-green-50 flex items-center gap-1 disabled:opacity-50">
                           {ekleniyor === k.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Users className="w-3.5 h-3.5" />} Portföye Ekle
                         </button>
@@ -516,14 +517,14 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
             {/* Portföy kısayolu — sohbet içinden de */}
             <div className="px-3 py-2 border-t border-neutral-200 bg-neutral-50 flex items-center gap-2">
               {portfoyHaritasi[acik.id] ? (
-                <button type="button" onClick={() => { const pf = portfoyHaritasi[acik.id]; setAcikId(null); onPortfoyAc?.(pf, acik); }}
+                <button type="button" onClick={() => { const pf = portfoyHaritasi[acik.id]; const k = acik; setAcikId(null); if (onPortfoyAc?.(pf, k) === false) setAcikId(k.id); }}
                   className="px-3 py-1.5 rounded-xl text-[11px] font-black border border-green-300 bg-green-50 text-green-800 flex items-center gap-1">
-                  <Briefcase className="w-3.5 h-3.5" /> Portföyde{portfoyHaritasi[acik.id].sahip ? ` · ${portfoyHaritasi[acik.id].sahip}` : ''} — Benim Müşterilerim'de aç
+                  <Briefcase className="w-3.5 h-3.5" /> Portföyde{portfoyHaritasi[acik.id].sahip ? ` · ${portfoyHaritasi[acik.id].sahip}` : ''} — portföyde aç
                 </button>
               ) : onPortfoyeEkle && (
                 <button type="button" disabled={!!ekleniyor} onClick={async () => { const k = acik; setAcikId(null); await portfoyeEkle(k); }}
                   className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-green-600 hover:bg-green-700 text-white flex items-center gap-1 disabled:opacity-50">
-                  <Users className="w-3.5 h-3.5" /> Portföye Ekle (WhatsApp Teklif)
+                  <Users className="w-3.5 h-3.5" /> Portföyüme Taşı (sohbet devam eder)
                 </button>
               )}
               <button type="button" onClick={() => setAcikId(null)} className="ml-auto px-3 py-1.5 rounded-xl text-[11px] font-black border border-neutral-300 bg-white hover:bg-neutral-100 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Kapat</button>
@@ -534,5 +535,44 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
     </div>
   );
 };
+
+// ============================================================================
+// YENİ (2026-10-08): PORTFÖY (Benim Müşterilerim) İÇİN ORTAK PARÇALAR
+// ----------------------------------------------------------------------------
+// • useWhatsappKonusmalari: konuşma listesini canlı dinler (yalnızca aktifken —
+//   portföyde WhatsApp müşterisi yoksa hiç okuma yapılmaz).
+// • WhatsAppSohbetPenceresi: havuzdaki sohbet penceresinin AYNISI (WhatsAppSohbet);
+//   portföye taşınan müşteriyle konuşmaya buradan devam edilir.
+// ============================================================================
+export const useWhatsappKonusmalari = (aktif = true, kaynak = firestoreKaynagi) => {
+  const [liste, setListe] = useState([]);
+  const [hazir, setHazir] = useState(false);
+  useEffect(() => {
+    if (!aktif) return undefined;
+    return kaynak.konusmalariDinle((l) => { setListe(l); setHazir(true); }, () => setHazir(true));
+  }, [aktif, kaynak]);
+  return { liste, hazir };
+};
+
+export const WhatsAppSohbetPenceresi = ({ konusma, yukleniyor = false, onKapat, altKisim = null, currentUser, yonetici = false,
+  onLeadAc, onGorselAc, kaynak = firestoreKaynagi, simdi = () => Date.now() }) => (
+  <div className="fixed inset-0 z-[120] bg-black/60 flex items-center justify-center p-2 md:p-6" onClick={onKapat}>
+    <div className="bg-white w-full max-w-3xl h-[88vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+      {konusma ? (
+        <WhatsAppSohbet key={konusma.id} konusma={konusma} currentUser={currentUser} yonetici={yonetici}
+          onGeri={onKapat} geriHerZaman onLeadAc={onLeadAc ? (id) => { onKapat?.(); onLeadAc(id); } : undefined}
+          onGorselAc={onGorselAc} kaynak={kaynak} simdi={simdi} />
+      ) : (
+        <div className="flex-1 flex flex-col items-center justify-center gap-2 text-sm font-bold text-neutral-400 p-6 text-center">
+          {yukleniyor ? <><Loader2 className="w-5 h-5 animate-spin" /> Sohbet yükleniyor…</> : <><AlertTriangle className="w-5 h-5" /> Bu WhatsApp konuşması bulunamadı ya da görme yetkiniz yok.</>}
+        </div>
+      )}
+      <div className="px-3 py-2 border-t border-neutral-200 bg-neutral-50 flex items-center gap-2">
+        {altKisim}
+        <button type="button" onClick={onKapat} className="ml-auto px-3 py-1.5 rounded-xl text-[11px] font-black border border-neutral-300 bg-white hover:bg-neutral-100 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Kapat</button>
+      </div>
+    </div>
+  </div>
+);
 
 export default WhatsAppView;
