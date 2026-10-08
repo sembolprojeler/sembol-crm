@@ -11444,23 +11444,29 @@ const TelefonTeklifleriButonu = ({ teklifler, onClick, aktif = false, tamYetki =
   const o = ttOzet(teklifler);
   const nakliye = teklifler.filter(t => t.hizmetTipi === 'Nakliye').length;
   return (
+    <>
+    {/* YENİ (2026-10-08): yanıp sönen çerçeve — siyah ↔ gri arasında gidip gelir, dikkat çeker */}
+    <style>{`@keyframes portfoyCerceve { 0%,100% { border-color:#000; box-shadow:0 0 0 0 rgba(0,0,0,.45); } 50% { border-color:#d4d4d4; box-shadow:0 0 0 5px rgba(0,0,0,.12); } }
+      .portfoy-cerceve { animation: portfoyCerceve 1.2s ease-in-out infinite; }
+      @media (prefers-reduced-motion: reduce) { .portfoy-cerceve { animation: none; } }`}</style>
+    {/* DEĞİŞTİ (2026-10-08): yeşil yerine BEYAZ-SİYAH; seçiliyken siyah zemin, değilken beyaz zemin */}
     <button type="button" onClick={onClick}
-      className={`w-full px-3 py-2.5 rounded-2xl border-2 transition flex items-center gap-2.5 ${aktif ? 'bg-emerald-600 text-white border-transparent shadow-lg shadow-emerald-600/30' : 'bg-white text-emerald-800 border-emerald-200 hover:border-emerald-400'}`}>
-      {/* DEĞİŞTİ (kullanıcı talebi): KİŞİYE ÖZEL ALAN olduğu simge ve yazıyla belli */}
-      <span className={`relative w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${aktif ? 'bg-white/20' : 'bg-emerald-50'}`}>
-        <PhoneCall className="w-5 h-5" />
-        <ShieldCheck className={`w-3.5 h-3.5 absolute -bottom-1 -right-1 rounded-full ${aktif ? 'bg-emerald-600 text-white' : 'bg-white text-emerald-700'}`} />
+      className={`portfoy-cerceve w-full px-3 py-2.5 rounded-2xl border-2 transition flex items-center gap-2.5 ${aktif ? 'bg-black text-white shadow-lg shadow-black/30' : 'bg-white text-black hover:bg-neutral-50'}`}>
+      {/* DEĞİŞTİ (kullanıcı talebi): KİŞİYE ÖZEL ALAN olduğu simge ve yazıyla belli — simge: portföy çantası */}
+      <span className={`relative w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${aktif ? 'bg-white text-black' : 'bg-black text-white'}`}>
+        <Briefcase className="w-5 h-5" />
+        <ShieldCheck className={`w-3.5 h-3.5 absolute -bottom-1 -right-1 rounded-full ${aktif ? 'bg-black text-white' : 'bg-white text-black'}`} />
       </span>
       <span className="text-left flex-1 min-w-0">
         {/* DEĞİŞTİ (kullanıcı talebi): "Telefon Teklifleri" → "Telefon Görüşmesi" */}
         <span className="flex items-center gap-1.5 flex-wrap">
           {/* DEĞİŞTİ (kullanıcı talebi): "Telefon Görüşmesi" → "Benim Müşterilerim" */}
           <span className="text-sm font-black leading-tight">Benim Müşterilerim</span>
-          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1 ${aktif ? 'bg-white text-emerald-700' : 'bg-emerald-600 text-white'}`}>
+          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1 ${aktif ? 'bg-white text-black' : 'bg-black text-white'}`}>
             <User className="w-2.5 h-2.5" /> {tamYetki ? 'KİŞİSEL ALANLAR' : 'KİŞİSEL ALANIM'}
           </span>
         </span>
-        <span className={`block text-[10px] font-bold mt-0.5 truncate ${aktif ? 'text-white/80' : 'text-emerald-600'}`}>
+        <span className={`block text-[10px] font-bold mt-0.5 truncate ${aktif ? 'text-white/80' : 'text-neutral-600'}`}>
           {tamYetki ? 'Tüm satışçıların kişiye özel müşterileri' : 'Yalnızca size ait müşteriler — kendi aramalarınız + havuzdan aldıklarınız'}
         </span>
       </span>
@@ -11468,8 +11474,9 @@ const TelefonTeklifleriButonu = ({ teklifler, onClick, aktif = false, tamYetki =
       <span className="hidden sm:inline text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 shrink-0">{teklifler.length - nakliye} Depo</span>
       {o.geciken > 0 && <span className="text-[11px] font-black px-2 py-0.5 rounded-full text-white bg-red-600 animate-pulse shrink-0">{o.geciken} gecikti</span>}
       {o.bugun > 0 && <span className="text-[11px] font-black px-2 py-0.5 rounded-full text-white bg-orange-500 shrink-0">{o.bugun} bugün</span>}
-      <span className={`text-xs font-black px-2 py-0.5 rounded-full shrink-0 ${aktif ? 'bg-white/25' : 'bg-emerald-50'}`}>{o.toplam}</span>
+      <span className={`text-xs font-black px-2 py-0.5 rounded-full shrink-0 ${aktif ? 'bg-white text-black' : 'bg-black text-white'}`}>{o.toplam}</span>
     </button>
+    </>
   );
 };
 
