@@ -15,7 +15,7 @@ import { teklifDetayiAlanlardan, eskiTeklifMetni } from './teklifDetay.js';
 import { AI_KAYNAK_ETIKETLERI, AI_ISTATISTIK_KUTULARI, aiKaynakMi } from './aiKaynakSema.js';
 // YENİ: QR Site Takip şeması — /api/qr-site ile ortak (sabitler, telefon kuralı, WordPress sayfa adresi)
 import { botLeadKonusmaId, konusmaMarkasi, bekliyorMu, listeSaati, MARKA_ETIKETI } from './whatsappPanel.js'; // YENİ (2026-10-07): bot hattı lead'i → CRM WhatsApp sohbeti
-import { WhatsAppHavuzu, WhatsAppSohbetPenceresi, useWhatsappKonusmalari } from './WhatsApp.jsx';
+import { WhatsAppHavuzu, WhatsAppSohbetPenceresi, useWhatsappKonusmalari, TeklifeBakDugmesi } from './WhatsApp.jsx';
 import { WhatsAppHataSiniri } from './whatsappHataSiniri.js'; // Havuzda hata olursa yalnızca bu bölüm etkilenir // YENİ (2026-10-08): WhatsApp Mesajları Havuzu — Müşteri Havuzu içinde liste
 import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
@@ -4543,6 +4543,33 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     telefonTeklifleri.forEach(t => { if (t.whatsappKonusmaId) m[t.whatsappKonusmaId] = { id: t.id, sahip: ttSahibi(t) }; });
     return m;
   }, [telefonTeklifleri]);
+  // YENİ (2026-10-08): konuşmanın TEKLİFİ = havuzdaki lead kaydı (WhatsApp Paneli kaynaklı)
+  // Önce konuşmadaki leadId / tasimaLeadId, yoksa bot lead'i bu konuşmaya bağlı en yeni kayıt.
+  const waTeklifKaydi = (k) => {
+    if (!k) return null;
+    const idIle = [k.leadId, k.tasimaLeadId].filter(Boolean).map(id => kayitlar.find(x => x.id === id)).find(Boolean);
+    if (idIle) return idIle;
+    return kayitlar.filter(x => botLeadKonusmaId(x) === k.id)
+      .sort((a, b) => String(b.tarih || b.createdAt || '').localeCompare(String(a.tarih || a.createdAt || '')))[0] || null;
+  };
+  // "Teklife Bak" → sekme değişmeden havuz kaydının detayı (Teklif Detayı) açılır
+  const waTeklifAc = (k) => {
+    const kayit = waTeklifKaydi(k);
+    if (!kayit) { alert('Bu konuşmaya bağlı teklif kaydı bulunamadı.'); return; }
+    if (!gorunurMu(kayit)) { alert(`Bu kayıt ${kayit.atanan} adlı personele atanmış.`); return; }
+    setDetayKayit(kayit);
+    setDetayFotoGoster(null);
+    setDuzenleIletisim((kayit.iletisim || '').includes('Bekleniyor') ? '' : (kayit.iletisim || ''));
+    setDuzenleMusteriAdi((kayit.musteriAdi || '').includes('Ziyaretçi') ? '' : (kayit.musteriAdi || ''));
+  };
+  // YENİ (2026-10-08): sohbet penceresinden CEVAP YAZAN kullanıcı → konuşma otomatik onun portföyüne taşınır
+  // (zaten kendisindeyse bir şey yapılmaz; başkasındaysa devralır — "Portföye Ekle" ile aynı kurallar)
+  const waOtomatikPortfoy = async (k) => {
+    if (!k?.id) return;
+    const pf = waPortfoyHaritasi[k.id];
+    if (pf && pf.sahip === kullaniciAdi) return;
+    await whatsappTelefonaAktar({ ...k, _marka: konusmaMarkasi(k) });
+  };
   // Sohbetteki "Taşıma lead'i" → havuz kaydını açar (App'teki leadAcIstegi ile aynı kurallar)
   const waLeadAc = (id) => {
     const k = kayitlar.find(x => x.id === id);
@@ -5269,12 +5296,14 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           istatistikGoster={gorusmeIstatAcik}
           /* YENİ (2026-10-08): WHATSAPP TEKLİF müşterilerinde sohbet penceresi */
           whatsappSohbet={!!onWhatsappAc} whatsappYonetici={whatsappYonetici} onGorselAc={onGorselAc} onWhatsappLeadAc={waLeadAc}
-          acilisSohbetId={waSohbetAcilis} onAcilisSohbetKullanildi={() => setWaSohbetAcilis(null)} />
+          acilisSohbetId={waSohbetAcilis} onAcilisSohbetKullanildi={() => setWaSohbetAcilis(null)}
+          onWhatsappGonderildi={waOtomatikPortfoy} whatsappTeklifVarMi={(k) => !!waTeklifKaydi(k)} onWhatsappTeklifAc={waTeklifAc} />
       ) : waHavuzAcik && onWhatsappAc ? (
         /* YENİ (2026-10-08): WHATSAPP MESAJLARI HAVUZU — Hızlı Teklifler düzeninde gün blokları */
         <WhatsAppHataSiniri>
         <WhatsAppHavuzu currentUser={currentUser} yonetici={whatsappYonetici} onGorselAc={onGorselAc}
           onLeadAc={waLeadAc} portfoyHaritasi={waPortfoyHaritasi}
+          onGonderildi={waOtomatikPortfoy} teklifVarMi={(k) => !!waTeklifKaydi(k)} onTeklifAc={waTeklifAc}
           onPortfoyeEkle={async (konusma) => {
             try {
               await whatsappTelefonaAktar(konusma);
@@ -11534,7 +11563,8 @@ const ttFiyatMetni = (t) => {
 // havuzdaki satırla aynı görünür (avatar, son mesaj, hat, bot/personel) ve
 // tıklanınca sohbet penceresi açılır. Durum seçici ve son not portföy için korunur.
 // ============================================================================
-const TTWhatsappSatiri = ({ t, k, sahibiGoster, onSohbetAc, onDetay, onDurum }) => {
+const TTWhatsappSatiri = ({ t, k, sahibiGoster, onSohbetAc, onDetay, onDurum, teklifVarMi = null, onTeklifAc = null }) => {
+  const kk = k || { id: t.whatsappKonusmaId }; // konuşma henüz yüklenmediyse kimlikle aranır
   const okunmamis = Number(k?.unreadCount) || 0;
   const marka = k ? konusmaMarkasi(k) : (t.hizmetTipi === 'Depo' ? 'depoevim' : 'sembol');
   const bekliyor = k ? bekliyorMu(k) : false;
@@ -11542,7 +11572,7 @@ const TTWhatsappSatiri = ({ t, k, sahibiGoster, onSohbetAc, onDetay, onDurum }) 
   const sonNot = ttSonNot(t)[0];
   return (
     <div onClick={onSohbetAc}
-      className={`relative grid grid-cols-1 md:grid-cols-[1.4fr_2fr_1fr_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 cursor-pointer hover:bg-neutral-50 ${bekliyor ? 'bg-red-50/40' : ''}`}>
+      className={`relative grid grid-cols-1 md:grid-cols-[1.4fr_2fr_1fr_120px_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 cursor-pointer hover:bg-neutral-50 ${bekliyor ? 'bg-red-50/40' : ''}`}>
       <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${marka === 'depoevim' ? 'bg-blue-600' : 'bg-red-600'}`} />
       {/* Müşteri */}
       <div className="min-w-0 flex items-center gap-2.5">
@@ -11569,18 +11599,22 @@ const TTWhatsappSatiri = ({ t, k, sahibiGoster, onSohbetAc, onDetay, onDurum }) 
           : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200">Bot</span>)}
         {bekliyor && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse">Personel bekliyor</span>}
       </div>
+      {/* YENİ (2026-10-08): TEKLİF sütunu — konuşmanın havuzdaki teklif kaydı */}
+      <div className="md:text-center" onClick={e => e.stopPropagation()}>
+        <TeklifeBakDugmesi k={kk} teklifVarMi={teklifVarMi} onTeklifAc={onTeklifAc} />
+      </div>
       {/* İşlem */}
       <div className="flex items-center gap-1.5 justify-end flex-wrap" onClick={e => e.stopPropagation()}>
         <button type="button" onClick={onSohbetAc}
           className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-green-600 hover:bg-green-700 text-white flex items-center gap-1 shadow-md shadow-green-600/20">
-          <Eye className="w-3.5 h-3.5" /> Sohbeti Aç
+          <MessageCircle className="w-3.5 h-3.5" /> Sohbeti Aç
         </button>
         {tel && <a href={`tel:0${tel}`} className="p-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white" title="Ara"><Phone className="w-3.5 h-3.5" /></a>}
         <button type="button" onClick={onDetay} title="Notlar / hareketler" className="p-1.5 rounded-lg border border-neutral-200 bg-white hover:bg-neutral-50 text-neutral-600"><StickyNote className="w-3.5 h-3.5" /></button>
         <div className="w-36"><TTDurumSecici durum={t.durum || 'Yeni'} onDegis={onDurum} /></div>
       </div>
       {sonNot && (
-        <div className="md:col-span-4 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5">
+        <div className="md:col-span-5 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5">
           <p className="text-xs font-semibold text-neutral-800 line-clamp-2 flex gap-1.5"><StickyNote className="w-3.5 h-3.5 text-yellow-600 shrink-0 mt-0.5" /> {sonNot.metin}</p>
           <p className="text-[10px] font-bold text-neutral-400 ml-5">{sonNot.kullanici} · {new Date(sonNot.tarih).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}</p>
         </div>
@@ -12430,7 +12464,8 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
   istatistikGoster = true,
   // YENİ (2026-10-08): WhatsApp Mesajları Havuzu'ndan taşınan müşteriler için sohbet
   whatsappSohbet = false, whatsappYonetici = false, onGorselAc = null, onWhatsappLeadAc = null,
-  acilisSohbetId = null, onAcilisSohbetKullanildi }) => {   // YENİ: sayaç kutuları (Müşteri Havuzu'nda "Görüşme İstatistikleri" düğmesiyle)
+  acilisSohbetId = null, onAcilisSohbetKullanildi,
+  onWhatsappGonderildi = null, whatsappTeklifVarMi = null, onWhatsappTeklifAc = null }) => { // YENİ: otomatik portföy + Teklife Bak   // YENİ: sayaç kutuları (Müşteri Havuzu'nda "Görüşme İstatistikleri" düğmesiyle)
   const [form, setForm] = useState(null);             // { baslangic, hizmet } — açık sihirbaz
   const [detayId, setDetayId] = useState(null);
   const [waKayit, setWaKayit] = useState(null);        // { t, sablon } — WhatsApp penceresi
@@ -12811,7 +12846,8 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
                   whatsappSohbet && t.whatsappKonusmaId ? (
                     /* YENİ (2026-10-08): WhatsApp'tan taşınan müşteri — havuzdaki gibi sohbet satırı */
                     <TTWhatsappSatiri key={t.id} t={t} k={waHarita[t.whatsappKonusmaId] || null} sahibiGoster={tamYetki}
-                      onSohbetAc={() => setWaSohbetId(t.whatsappKonusmaId)} onDetay={() => setDetayId(t.id)} onDurum={(y) => durumDegistir(t, y)} />
+                      onSohbetAc={() => setWaSohbetId(t.whatsappKonusmaId)} onDetay={() => setDetayId(t.id)} onDurum={(y) => durumDegistir(t, y)}
+                      teklifVarMi={whatsappTeklifVarMi} onTeklifAc={onWhatsappTeklifAc} />
                   ) : (
                   <TelefonTeklifSatiri key={t.id} tHam={t} gecmis={gecmisOf(t)} sahibiGoster={tamYetki}
                     onAc={() => setDetayId(t.id)} onDurum={(y) => durumDegistir(t, y)} onWhatsapp={() => setWaKayit({ t, sablon: 'ozet' })} />
@@ -12856,7 +12892,7 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
       {waSohbetId && (
         <WhatsAppSohbetPenceresi konusma={waHarita[waSohbetId] || null} yukleniyor={!waHazir}
           onKapat={() => setWaSohbetId(null)} currentUser={currentUser} yonetici={whatsappYonetici}
-          onLeadAc={onWhatsappLeadAc} onGorselAc={onGorselAc}
+          onLeadAc={onWhatsappLeadAc} onGorselAc={onGorselAc} onGonderildi={onWhatsappGonderildi}
           altKisim={(() => {
             const t = teklifler.find(x => x.whatsappKonusmaId === waSohbetId);
             return t ? (
