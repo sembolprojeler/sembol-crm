@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react'; // DÜZELTME: QR Takip için useRef eklendi
 import { Calculator, CalendarClock, CalendarPlus, QrCode, Download, Copy, Check, ChevronUp, Sparkles, ExternalLink, Filter, Truck, MapPin, Phone, FileText, PlusCircle, ClipboardList, ClipboardCheck, Shield, Eye, Star, AlertTriangle, X, Users, CalendarDays, ChevronLeft, Briefcase, Wallet, ArrowUpRight, ArrowUpDown, UserPlus, Edit, User, MessageCircle, Package, Database, History, Save, Search, FolderOpen, Ban, CheckCircle, Camera, Mail, Clock, XCircle, RefreshCw, Loader2, Send, StickyNote, ChevronDown, HelpCircle, Settings, Trash2, Zap, Handshake, Building2, Home, HardHat, ShieldCheck, TrendingUp, ChevronRight, Globe, CreditCard, PhoneCall } from 'lucide-react';
-import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs, getDoc, increment, orderBy, limit } from 'firebase/firestore';
+import { collection, addDoc, onSnapshot, doc, setDoc, updateDoc, deleteDoc, writeBatch, query, where, getDocs, getDoc, increment, orderBy, limit, runTransaction } from 'firebase/firestore'; // YENİ: runTransaction (portföy teması — mükerrer yazmayı önler)
 import { db, appId, PROVINCES, FLOORS, TURKEY_LOCATIONS, DEPO_LOCATIONS, normalizeCariPhone, generateContractPDF, SayfalamaBar, isVideoUrl, MediaCaptureMenu, HasarCozumBelgeleri, odemeIcinDefterBul,
   // YENİ: Müşteri Havuzu'nda "Atanan Satışçı" listesini yalnızca Satış Personeli
   // ile sınırlamak için — eski/hatalı pozisyon adlarını da doğru eşler.
@@ -4562,6 +4562,107 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     }
     return teklif;
   };
+  // ==========================================================================
+  // YENİ (2026-10-08 · kullanıcı talebi): PORTFÖYDEKİ MÜŞTERİ TEKRAR YAZDI
+  // --------------------------------------------------------------------------
+  // Portföydeki (Benim Müşterilerim) bir müşteri:
+  //   • Hızlı Teklif formunu / herhangi bir kanaldan yeni talebi TEKRAR doldurursa
+  //     (aynı numara, kayıttan SONRA gelen, kimsenin almadığı "Yeni" talep) ya da
+  //   • WhatsApp'tan TEKRAR yazarsa (konuşmadaki son müşteri mesajı değişti, son
+  //     temastan 12 saatten fazla geçti — aynı sohbetin her mesajı ayrı sayılmaz)
+  // → kaydın hareketlerine "Müşteri tekrar yazdı …" eklenir (Geçmiş penceresinde görünür),
+  //   görüşme tarihi EN SON YAZDIĞI GÜNE alınır ve liste o günün EN ÜSTÜNE taşınır (sonTemasAt).
+  //   Yeni talep havuzda kalmaz: kaydın satışçısına atanır ve portföy kaydına bağlanır.
+  // Mükerrer yazma: transaction + işaret (temasIsaretleri / whatsappSonWamid) — birden çok
+  // kullanıcı aynı anda açık olsa da hareket bir kez yazılır.
+  // ==========================================================================
+  const { liste: temasKonusmalari } = useWhatsappKonusmalari(!!onWhatsappAc);
+  const temasDenenen = useRef(new Set());
+  const ttIstGunu = (iso) => { const d = new Date(iso || ''); return Number.isNaN(d.getTime()) ? ttBugunStr() : d.toLocaleDateString('sv-SE', { timeZone: 'Europe/Istanbul' }); };
+  const isaretTemiz = (x) => String(x || '').replace(/[^A-Za-z0-9_]/g, '_').slice(0, 120);
+  // Numara → portföy kaydı (satışçısı olan; birden çoksa en yenisi)
+  const portfoyTelHaritasi = useMemo(() => {
+    const m = new Map();
+    telefonTeklifleri.forEach(t => {
+      const a = ttTelAnahtar(t.telefon);
+      if (!a || !ttSahibi(t)) return;
+      const e = m.get(a);
+      if (!e || String(t.createdAt || '') > String(e.createdAt || '')) m.set(a, t);
+    });
+    return m;
+  }, [telefonTeklifleri]);
+  // Tek temas yazımı (transaction): ek = ek alanlar, kontrol = (veri) => yazılsın mı
+  const portfoyTemasiYaz = async (teklifId, tarihIso, islem, ek, kontrol) => {
+    await runTransaction(db, async (tx) => {
+      const ref = ttBelge(teklifId);
+      const snap = await tx.get(ref);
+      if (!snap.exists()) return;
+      const v = snap.data();
+      if (!kontrol(v)) return;
+      const gun = ttIstGunu(tarihIso);
+      tx.update(ref, {
+        ...ek,
+        iletisimTarihi: String(v.iletisimTarihi || '') > gun ? v.iletisimTarihi : gun, // en son yazdığı gün
+        sonTemasAt: tarihIso,
+        updatedAt: new Date().toISOString(),
+        hareketler: [...(v.hareketler || []), { tarih: tarihIso, kullanici: 'Sistem', islem }],
+      });
+    });
+  };
+  // 1) Havuza düşen yeni talep → portföydeki müşterinin kaydına
+  useEffect(() => {
+    if (!kayitlar.length || !portfoyTelHaritasi.size) return;
+    kayitlar.forEach(k => {
+      const anahtar = `h${k.id}`;
+      if (temasDenenen.current.has(anahtar)) return;
+      if (k.telefonTeklifId || k.atanan || (k.durum || 'Yeni') !== 'Yeni') return;
+      const t = portfoyTelHaritasi.get(ttTelAnahtar(k.iletisim));
+      if (!t || t.havuzKayitId === k.id) return;
+      if (String(k.createdAt || '') <= String(t.createdAt || '')) return; // kayıttan önceki talep sayılmaz
+      temasDenenen.current.add(anahtar);
+      const isaret = `h_${isaretTemiz(k.id)}`;
+      const kanalAdi = (KANALLAR.find(x => x.id === k.kanal)?.ad) || 'Havuz';
+      (async () => {
+        try {
+          await portfoyTemasiYaz(t.id, k.createdAt || new Date().toISOString(),
+            `Müşteri tekrar yazdı — ${kanalAdi}${k.kanal === 'web' ? ' (Hızlı Teklif formu)' : ''} · ${k.hizmetTipi || 'Nakliye'} talebi portföye bağlandı`,
+            { [`temasIsaretleri.${isaret}`]: true }, (v) => !v.temasIsaretleri?.[isaret]);
+          await hareketliGuncelle(k, { telefonTeklifId: t.id, atanan: ttSahibi(t) },
+            `Portföydeki müşteri tekrar yazdı — ${ttSahibi(t)} adlı satışçının kaydına bağlandı`);
+        } catch (e) { console.error('Portföy teması (talep) yazılamadı:', e); temasDenenen.current.delete(anahtar); }
+      })();
+    });
+  }, [kayitlar, portfoyTelHaritasi]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 2) WhatsApp'tan tekrar yazdı (konuşmaya bağlı kayıt; yoksa numaradan)
+  useEffect(() => {
+    if (!temasKonusmalari.length || !telefonTeklifleri.length) return;
+    const ONIKI_SAAT = 12 * 3600 * 1000;
+    temasKonusmalari.forEach(kn => {
+      const wamid = kn.lastCustomerWamid;
+      if (!wamid || !kn.lastMessageAt) return;
+      const t = telefonTeklifleri.find(x => x.whatsappKonusmaId === kn.id) || portfoyTelHaritasi.get(ttTelAnahtar(kn.phone || kn.waId));
+      if (!t || !ttSahibi(t) || t.whatsappSonWamid === wamid) return;
+      const anahtar = `w${t.id}|${wamid}`;
+      if (temasDenenen.current.has(anahtar)) return;
+      temasDenenen.current.add(anahtar);
+      const sonTemas = Date.parse(t.sonTemasAt || t.createdAt || '') || 0;
+      const mesajZamani = Date.parse(kn.lastMessageAt) || 0;
+      const yeniTemas = mesajZamani > sonTemas + ONIKI_SAAT; // aynı sohbetin devamı değil, yeni temas
+      (async () => {
+        try {
+          if (!yeniTemas) {
+            // Sessiz güncelleme: yalnızca son müşteri mesajı işaretlenir (hareket / taşıma yok)
+            await updateDoc(ttBelge(t.id), { whatsappSonWamid: wamid });
+            return;
+          }
+          await portfoyTemasiYaz(t.id, kn.lastMessageAt,
+            `Müşteri tekrar yazdı — WhatsApp${kn.lastMessagePreview ? `: "${String(kn.lastMessagePreview).slice(0, 80)}"` : ''}`,
+            { whatsappSonWamid: wamid }, (v) => v.whatsappSonWamid !== wamid);
+        } catch (e) { console.error('Portföy teması (WhatsApp) yazılamadı:', e); temasDenenen.current.delete(anahtar); }
+      })();
+    });
+  }, [temasKonusmalari, telefonTeklifleri, portfoyTelHaritasi]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Havuz listesinde "Portföyde · Satışçı" göstermek için: konuşmaId → { id, sahip }
   const waPortfoyHaritasi = useMemo(() => {
     const m = {};
@@ -5362,7 +5463,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         {/* YENİ (2026-10-08): havuz satırındaki "Geçmiş" → numaraya göre tüm geçmiş */}
         {waGecmis && (
           <MusteriGecmisiPenceresi gecmis={musteriGecmisiBul(gecmisIndeksi, waGecmis.phone || waGecmis.waId)} ad={waGecmis.profileName}
-            telefon={waGecmis.phone || waGecmis.waId} haricKonusmaId={waGecmis.id} onKapat={() => setWaGecmis(null)} />
+            telefon={waGecmis.phone || waGecmis.waId} haricKonusmaId={waGecmis.id} onKapat={() => setWaGecmis(null)}
+            ilkTemas={(waGecmis.createdAt || waGecmis.firstMessageAt) ? { tarih: waGecmis.createdAt || waGecmis.firstMessageAt, metin: 'WhatsApp\'tan ilk mesaj' } : null} />
         )}
         </WhatsAppHataSiniri>
       ) : (<>
@@ -10324,8 +10426,16 @@ const MusteriGecmisiKutusu = ({ gecmis, ad = '', kompakt = false }) => {
 //   • Kimlerle konuşmuş: tüm kayıtlardaki satışçı / not yazan / devralan personel
 // Hepsi alt alta, tarih sırasıyla (yeniden eskiye); tıklanınca kapanır.
 // ============================================================================
-const MusteriGecmisiPenceresi = ({ gecmis, ad = '', telefon = '', waKonusmalar = [], haricKonusmaId = null, onKapat }) => {
+const MusteriGecmisiPenceresi = ({ gecmis, ad = '', telefon = '', waKonusmalar = [], haricKonusmaId = null, onKapat,
+  kayit = null, ilkTemas = null }) => { // YENİ (2026-10-08): bu kaydın hareketleri + ilk temas (form / WhatsApp)
   const g = gecmis || { isler: [], havuz: [], telefon: [], toplam: 0 };
+  // İlk temas: kaydın geldiği havuz talebi (Hızlı Teklif formu / WhatsApp lead) ya da kaydın oluşturulması
+  const kaynakTalep = kayit?.havuzKayitId ? g.havuz.find(k => k.id === kayit.havuzKayitId) : null;
+  const ilk = ilkTemas || (kaynakTalep
+    ? { tarih: kaynakTalep.createdAt, metin: `${(KANALLAR.find(x => x.id === kaynakTalep.kanal)?.ad) || 'Havuz'} talebi${kaynakTalep.kanal === 'web' ? ' (Hızlı Teklif formu dolduruldu)' : ''}` }
+    : kayit ? { tarih: kayit.createdAt, metin: `${ttKaynakBul(kayit).ad} — kayıt oluşturuldu` } : null);
+  const kendiHareketleri = [...(kayit?.hareketler || [])].sort((a, b) => String(b.tarih || '').localeCompare(String(a.tarih || '')));
+  const trZaman = (iso) => { const d = new Date(iso || ''); return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }); };
   const anahtar = ttTelAnahtar(telefon);
   // WhatsApp konuşmaları da numaradan eşleştirilir (konuşmanın kendisi hariç)
   const wa = (waKonusmalar || []).filter(k => k.id !== haricKonusmaId && anahtar && ttTelAnahtar(k.phone || k.waId) === anahtar)
@@ -10368,6 +10478,12 @@ const MusteriGecmisiPenceresi = ({ gecmis, ad = '', telefon = '', waKonusmalar =
               ? `Bu müşteriyi daha önce ${tasinan.length} kez taşıdık — son: ${ttTrTarih(tasinan[0].date)} (${ttGoreliSure(tasinan[0].date)})`
               : 'Bu numarayla tamamlanmış taşıma kaydı yok'}
           </div>
+          {/* YENİ (2026-10-08): İLK TEMAS — müşteri ilk ne zaman yazdı / formu doldurdu */}
+          {ilk && (
+            <div className="rounded-xl border-2 border-violet-200 bg-violet-50 px-3 py-2 text-xs font-black text-violet-900 flex items-center gap-2">
+              <CalendarDays className="w-4 h-4 shrink-0" /> İlk temas: {trZaman(ilk.tarih)} — {ilk.metin}
+            </div>
+          )}
           {kisiler.length > 0 && (
             <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-[11px] font-bold text-sky-900 flex items-start gap-2">
               <Users className="w-4 h-4 shrink-0 mt-0.5" /> <span><b>Görüşen / ilgilenen personel:</b> {kisiler.join(', ')}</span>
@@ -10377,6 +10493,22 @@ const MusteriGecmisiPenceresi = ({ gecmis, ad = '', telefon = '', waKonusmalar =
             <p className="text-[11px] font-black text-red-700 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5 flex gap-1.5">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" /> Bu numara farklı isimle de kayıtlı: {farkliIsimler.join(', ')}
             </p>
+          )}
+
+          {/* YENİ (2026-10-08): BU MÜŞTERİNİN HAREKETLERİ — tekrar yazdı / durum / not / devir (yeniden eskiye) */}
+          {kayit && (
+            <Bolum Ikon={History} baslik="Bu müşterinin hareketleri" sayi={kendiHareketleri.length} renk="text-violet-700">
+              {kendiHareketleri.map((h, i) => {
+                const tekrar = String(h.islem || '').startsWith('Müşteri tekrar yazdı');
+                return (
+                  <div key={`k-${i}`} className={`rounded-lg px-2.5 py-1.5 text-[11px] flex items-start gap-2 border ${tekrar ? 'border-green-300 bg-green-50' : 'border-violet-100 bg-white'}`}>
+                    <span className="font-black text-neutral-500 shrink-0 w-[92px]">{trZaman(h.tarih)}</span>
+                    <span className={`flex-1 min-w-0 font-bold ${tekrar ? 'text-green-800' : 'text-neutral-800'}`}>{h.islem}</span>
+                    <span className="text-[10px] font-black text-neutral-400 shrink-0">{h.kullanici || ''}</span>
+                  </div>
+                );
+              })}
+            </Bolum>
           )}
 
           <Bolum Ikon={Truck} baslik="Taşıma / iş kayıtları" sayi={g.isler.length} renk="text-neutral-800">
@@ -11627,7 +11759,8 @@ const useTelefonTeklifleri = (aktif = true) => {
     if (!aktif) return undefined;
     const unsub = onSnapshot(ttKoleksiyon(), snap => {
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      list.sort((a, b) => (b.iletisimTarihi || '').localeCompare(a.iletisimTarihi || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
+      // DEĞİŞTİ (2026-10-08): aynı gün içinde SON TEMAS (müşteri tekrar yazdı) en üstte; yoksa oluşturulma zamanı
+      list.sort((a, b) => (b.iletisimTarihi || '').localeCompare(a.iletisimTarihi || '') || (b.sonTemasAt || b.createdAt || '').localeCompare(a.sonTemasAt || a.createdAt || ''));
       setTeklifler(list);
     }, err => console.error('Telefon teklifleri okunamadı:', err));
     return () => unsub();
@@ -11868,7 +12001,7 @@ const TTWhatsappHavuzSatiri = ({ k, lead = null, gecmis = null, islem, teklifVar
           <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-green-600 text-white">WHATSAPP</span>
           {okunmamis > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center" title="Okunmamış mesaj">{okunmamis}</span>}
         </div>
-        {gecmis && onGecmis && <div className="mt-1 flex"><TTGecmisDugmesi gecmis={gecmis} onClick={onGecmis} /></div>}
+        {onGecmis && <div className="mt-1 flex"><TTGecmisDugmesi gecmis={gecmis} ek={ttTekrarTemasSayisi(t)} onClick={onGecmis} /></div>}
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
           <span className="text-[11px] font-bold text-neutral-500">{ttTelGoster(t.telefon) || hamTel || 'Telefon yok'}</span>
           {telVar && <a href={`tel:0${ttTelAnahtar(t.telefon)}`} onClick={e => e.stopPropagation()} className="p-1 rounded-md bg-blue-600 text-white hover:bg-blue-700" title="Ara"><Phone className="w-3 h-3" /></a>}
@@ -11969,7 +12102,7 @@ const TTWhatsappSatiri = ({ t: tHam, k, lead = null, gecmis = null, sahibiGoster
           {gecmis && !onGecmis && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300" title="Bu numaranın geçmiş kaydı var">↺ Geçmiş {gecmis.toplam}</span>}
         </div>
         {/* DEĞİŞTİ (2026-10-08): Geçmiş düğmesi HER ZAMAN ismin ALTINDA kendi satırında (isim uzunluğundan bağımsız) */}
-        {gecmis && onGecmis && <div className="mt-1 flex"><TTGecmisDugmesi gecmis={gecmis} onClick={onGecmis} /></div>}
+        {onGecmis && <div className="mt-1 flex"><TTGecmisDugmesi gecmis={gecmis} ek={ttTekrarTemasSayisi(t)} onClick={onGecmis} /></div>}
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
           <span className="text-[11px] font-bold text-neutral-500">{ttTelGoster(t.telefon) || k?.phone || 'Telefon yok'}</span>
           {telVar && <a href={`tel:0${ttTelAnahtar(t.telefon)}`} onClick={e => e.stopPropagation()} className="p-1 rounded-md bg-blue-600 text-white hover:bg-blue-700" title="Ara"><Phone className="w-3 h-3" /></a>}
@@ -12046,12 +12179,17 @@ const TTWhatsappSatiri = ({ t: tHam, k, lead = null, gecmis = null, sahibiGoster
 };
 
 // YENİ (2026-10-08): ismin yanındaki "Geçmiş" düğmesi — bir tık büyük, tıklanınca geçmiş penceresi açılır
-const TTGecmisDugmesi = ({ gecmis, onClick }) => (
-  <button type="button" onClick={e => { e.stopPropagation(); onClick?.(); }} title="Bu numaranın tüm geçmişini aç (taşıma, portföy, havuz, WhatsApp)"
-    className="text-[11px] font-black px-2.5 py-1 rounded-lg bg-amber-100 text-amber-900 border-2 border-amber-400 hover:bg-amber-200 hover:border-amber-500 flex items-center gap-1 shadow-sm transition">
-    <History className="w-3.5 h-3.5" /> Geçmiş {gecmis.toplam}
-  </button>
-);
+// DEĞİŞTİ (2026-10-08): HER müşteride görünür; sayı = numaranın diğer kayıtları + "tekrar yazdı" temasları (0 ise sayısız)
+const ttTekrarTemasSayisi = (t) => (t?.hareketler || []).filter(h => String(h.islem || '').startsWith('Müşteri tekrar yazdı')).length;
+const TTGecmisDugmesi = ({ gecmis, ek = 0, onClick }) => {
+  const n = (gecmis?.toplam || 0) + ek;
+  return (
+    <button type="button" onClick={e => { e.stopPropagation(); onClick?.(); }} title="Bu müşterinin tüm geçmişini aç (ilk temas, hareketler, taşıma, portföy, havuz, WhatsApp)"
+      className={`text-[11px] font-black px-2.5 py-1 rounded-lg border-2 flex items-center gap-1 shadow-sm transition ${n ? 'bg-amber-100 text-amber-900 border-amber-400 hover:bg-amber-200 hover:border-amber-500' : 'bg-white text-neutral-600 border-neutral-300 hover:bg-neutral-50'}`}>
+      <History className="w-3.5 h-3.5" /> Geçmiş{n ? ` ${n}` : ''}
+    </button>
+  );
+};
 
 // ---------------------------------------------------------------- SATIR ---
 const TelefonTeklifSatiri = ({ tHam, gecmis, sahibiGoster, onAc, onDurum, onWhatsapp, onGecmis = null }) => {
@@ -12071,7 +12209,7 @@ const TelefonTeklifSatiri = ({ tHam, gecmis, sahibiGoster, onAc, onDurum, onWhat
           {gecmis && !onGecmis && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300" title="Bu numaranın geçmiş kaydı var">↺ Geçmiş {gecmis.toplam}</span>}
         </div>
         {/* DEĞİŞTİ (2026-10-08): Geçmiş düğmesi HER ZAMAN ismin ALTINDA kendi satırında (isim uzunluğundan bağımsız) */}
-        {gecmis && onGecmis && <div className="mt-1 flex"><TTGecmisDugmesi gecmis={gecmis} onClick={onGecmis} /></div>}
+        {onGecmis && <div className="mt-1 flex"><TTGecmisDugmesi gecmis={gecmis} ek={ttTekrarTemasSayisi(t)} onClick={onGecmis} /></div>}
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
           <span className="text-[11px] font-bold text-neutral-500">{ttTelGoster(t.telefon) || 'Telefon yok'}</span>
           {telVar && (<>
@@ -13328,7 +13466,14 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
       {/* YENİ (2026-10-08): MÜŞTERİ GEÇMİŞİ PENCERESİ — numaraya göre tüm eşleşmeler */}
       {gecmisPencere && (
         <MusteriGecmisiPenceresi gecmis={gecmisOf(gecmisPencere.t)} ad={gecmisPencere.t.musteriAdi} telefon={gecmisPencere.t.telefon}
-          waKonusmalar={waKonusmalar} haricKonusmaId={gecmisPencere.t.whatsappKonusmaId || null} onKapat={() => setGecmisPencere(null)} />
+          waKonusmalar={waKonusmalar} haricKonusmaId={gecmisPencere.t.whatsappKonusmaId || null} onKapat={() => setGecmisPencere(null)}
+          kayit={teklifler.find(x => x.id === gecmisPencere.t.id) || gecmisPencere.t}
+          ilkTemas={(() => {
+            // WhatsApp müşterisi: konuşmanın ilk mesajı (varsa) — yoksa pencere kendi hesaplar
+            const kn = gecmisPencere.t.whatsappKonusmaId ? waHarita[gecmisPencere.t.whatsappKonusmaId] : null;
+            const ilkIso = kn && (kn.createdAt || kn.firstMessageAt);
+            return ilkIso ? { tarih: ilkIso, metin: 'WhatsApp\'tan ilk mesaj' } : null;
+          })()} />
       )}
       {/* YENİ (2026-10-08): WHATSAPP SOHBET PENCERESİ — havuzdakiyle birebir aynı */}
       {waSohbetId && (
