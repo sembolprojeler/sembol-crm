@@ -4229,7 +4229,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   fiyatKisayolIstegi = null, onFiyatKisayolKullanildi,
   // YENİ (2026-10-07): bot hattından gelen lead'lerde "WhatsApp" düğmesi CRM sohbetini açar (null → wa.me kalır);
   // WhatsApp panelindeki "Lead" düğmesi → { id, no } ile o kaydın detayı açılır
-  onWhatsappSohbet = null, leadAcIstegi = null, onLeadAcIstegiKullanildi }) => {
+  onWhatsappSohbet = null, leadAcIstegi = null, onLeadAcIstegiKullanildi,
+  // YENİ (kullanıcı talebi): "WhatsApp Mesajları Havuzu" kartı (sol menüden kaldırıldı, buraya taşındı)
+  onWhatsappAc = null, whatsappBekleyen = 0 }) => {
   // ---------------------------------------------------------------- STATE ---
   // DEĞİŞTİ (kullanıcı talebi): Havuz açılınca ilk sekme artık "Hızlı Teklifler" ('web')
   const [aktifKanal, setAktifKanal] = useState('web');
@@ -5095,9 +5097,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           <div className="space-y-2">
             {/* ---- YENİ (kullanıcı talebi): TELEFON TEKLİFLERİ — Hızlı Tekliflerin üstünde ----
                 Tıklayınca telefonda görüşülen müşterilerin manuel girildiği sayfa açılır. */}
-            {/* DEĞİŞTİ (kullanıcı talebi): Telefon Görüşmesi (sol) ve Hızlı Teklifler Havuzu (sağ) tek satırda yan yana */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
+            {/* DEĞİŞTİ (kullanıcı talebi): üstte ORTADA tam satır "Benim Müşterilerim" (eski Telefon Görüşmesi);
+                altında yan yana "Hızlı Teklifler Havuzu" ve "WhatsApp Mesajları Havuzu" */}
             <TelefonTeklifleriButonu teklifler={gorunurTelefonTeklifleri} aktif={telefonTeklifAcik} onClick={() => setTelefonTeklifAcik(true)} tamYetki={telefonMudurMu} />
+            <div className={`grid grid-cols-1 ${onWhatsappAc ? 'lg:grid-cols-2' : ''} gap-2`}>
             {/* KALDIRILDI (kullanıcı talebi): "Eski havuz talepleri aktarılıyor" çubuğu.
                 Aktarım arka planda sessizce, otomatik yapılır; hata olursa yalnızca
                 tarayıcı konsoluna yazılır ve bir sonraki açılışta yeniden denenir. */}
@@ -5128,6 +5131,31 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
               )}
               <span className={`text-xs font-black px-2 py-0.5 rounded-full ${webAktif ? 'bg-white/25' : 'bg-orange-50'}`}>{webKayitlari.length}</span>
             </button>
+
+            {/* ---- YENİ (kullanıcı talebi): WHATSAPP MESAJLARI HAVUZU ----
+                Sol menüdeki "WhatsApp" kaldırıldı; aynı ekran (bot hattı konuşmaları:
+                devral / cevap yaz / bota geri ver) bu karttan açılır. Yalnızca WhatsApp
+                yetkisi olanlarda görünür (App.jsx onWhatsappAc'ı yetkiye göre verir). */}
+            {onWhatsappAc && (
+            <button type="button" onClick={onWhatsappAc}
+              className="w-full px-3 py-2.5 rounded-2xl border-2 transition flex items-center gap-2.5 bg-white text-green-800 border-green-200 hover:border-green-400">
+              <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-green-50">
+                <MessageCircle className="w-5 h-5 text-green-600" />
+              </span>
+              <span className="text-left flex-1 min-w-0">
+                <span className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-sm font-black leading-tight">WhatsApp Mesajları Havuzu</span>
+                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1 bg-green-600 text-white"><Users className="w-2.5 h-2.5" /> ORTAK ALAN</span>
+                </span>
+                <span className="block text-[10px] font-bold mt-0.5 truncate text-green-700" title="WhatsApp bot hattından gelen konuşmalar — devral, cevap yaz, bota geri ver">
+                  WhatsApp bot hattından gelen konuşmalar — devral, cevap yaz, bota geri ver
+                </span>
+              </span>
+              {whatsappBekleyen > 0 && (
+                <span className="text-[11px] font-black px-2 py-0.5 rounded-full text-white animate-pulse bg-green-600 shrink-0" title="Personel bekleyen konuşma">{whatsappBekleyen} bekliyor</span>
+              )}
+            </button>
+            )}
             </div>
 
             {/* ---- DİĞER KANALLAR ----
@@ -11293,7 +11321,8 @@ const TelefonTeklifleriButonu = ({ teklifler, onClick, aktif = false, tamYetki =
       <span className="text-left flex-1 min-w-0">
         {/* DEĞİŞTİ (kullanıcı talebi): "Telefon Teklifleri" → "Telefon Görüşmesi" */}
         <span className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-sm font-black leading-tight">Telefon Görüşmesi</span>
+          {/* DEĞİŞTİ (kullanıcı talebi): "Telefon Görüşmesi" → "Benim Müşterilerim" */}
+          <span className="text-sm font-black leading-tight">Benim Müşterilerim</span>
           <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1 ${aktif ? 'bg-white text-emerald-700' : 'bg-emerald-600 text-white'}`}>
             <User className="w-2.5 h-2.5" /> {tamYetki ? 'KİŞİSEL ALANLAR' : 'KİŞİSEL ALANIM'}
           </span>
