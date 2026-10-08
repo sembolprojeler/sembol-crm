@@ -4356,6 +4356,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   const [waHavuzAcik, setWaHavuzAcik] = useState(false);
   // YENİ (2026-10-08): portföye taşınan WhatsApp müşterisinin sohbeti Benim Müşterilerim'de açılır
   const [waSohbetAcilis, setWaSohbetAcilis] = useState(null);
+  const [waGecmis, setWaGecmis] = useState(null); // YENİ (2026-10-08): WhatsApp havuzundaki "Geçmiş" penceresi (konuşma)
   // YENİ (kullanıcı talebi): Telefon Görüşmesi istatistik kutuları başlıktaki düğmeyle açılır
   const [gorusmeIstatAcik, setGorusmeIstatAcik] = useState(false);
   const telefonTeklifleri = useTelefonTeklifleri(true);
@@ -5330,6 +5331,18 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         <WhatsAppHavuzu currentUser={currentUser} yonetici={whatsappYonetici} onGorselAc={onGorselAc}
           onLeadAc={waLeadAc} portfoyHaritasi={waPortfoyHaritasi}
           onGonderildi={waOtomatikPortfoy} teklifVarMi={(k) => !!waTeklifKaydi(k)} onTeklifAc={waTeklifAc}
+          /* YENİ (2026-10-08): Benim Müşterilerim ile aynı sütunlar ve görünüm */
+          tabloBasligi={(
+            <div className="hidden md:grid grid-cols-[1.3fr_1.6fr_0.8fr_auto_1fr_auto] gap-3 pl-4 pr-3 py-2.5 bg-neutral-900 text-white text-xs font-black">
+              <span>Müşteri</span><span>Hizmet · Güzergâh · Cevaplar</span><span>Fiyat</span><span className="w-[128px] text-center">Görüşme</span><span>Portföy</span><span className="w-4" />
+            </div>
+          )}
+          satirRender={(k, islem) => (
+            <TTWhatsappHavuzSatiri k={k} lead={waTeklifKaydi(k)} islem={islem}
+              gecmis={musteriGecmisiBul(gecmisIndeksi, k.phone || k.waId)}
+              teklifVarMi={(x) => !!waTeklifKaydi(x)} onTeklifAc={waTeklifAc}
+              onGecmis={() => setWaGecmis(k)} />
+          )}
           onPortfoyeEkle={async (konusma) => {
             try {
               await whatsappTelefonaAktar(konusma);
@@ -5346,6 +5359,11 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
             if (pf.sahip && pf.sahip !== kullaniciAdi && !telefonMudurMu) return false;
             setWaHavuzAcik(false); setWaSohbetAcilis(k.id); setTelefonTeklifAcik(true); return true;
           }} />
+        {/* YENİ (2026-10-08): havuz satırındaki "Geçmiş" → numaraya göre tüm geçmiş */}
+        {waGecmis && (
+          <MusteriGecmisiPenceresi gecmis={musteriGecmisiBul(gecmisIndeksi, waGecmis.phone || waGecmis.waId)} ad={waGecmis.profileName}
+            telefon={waGecmis.phone || waGecmis.waId} haricKonusmaId={waGecmis.id} onKapat={() => setWaGecmis(null)} />
+        )}
         </WhatsAppHataSiniri>
       ) : (<>
       {/* ARAÇ ÇUBUĞU: hesap filtresi + arama + aksiyonlar
@@ -11817,6 +11835,116 @@ const ttWhatsappGorunum = (t, lead) => {
   }
   return out;
 };
+// ============================================================================
+// YENİ (2026-10-08 · kullanıcı talebi): WHATSAPP HAVUZU SATIRI — Benim Müşterilerim ile AYNI GÖRÜNÜM
+// ----------------------------------------------------------------------------
+// Müşteri | Hizmet · Güzergâh · Cevaplar | Fiyat | Görüşme (Sohbeti Aç + Teklife Bak alt alta) |
+// Portföy (Portföye Ekle / Portföyde · Satışçı) | ›   — bilgiler konuşmanın bot lead mesajından.
+// Henüz portföy kaydı olmadığı için görünüm verisi konuşma + lead'den üretilir (kayıt yazılmaz).
+// ============================================================================
+const TTWhatsappHavuzSatiri = ({ k, lead = null, gecmis = null, islem, teklifVarMi = null, onTeklifAc = null, onGecmis = null }) => {
+  const marka = konusmaMarkasi(k);
+  const hamTel = k.phone || k.waId || '';
+  const iso = String(k.lastMessageAt || '');
+  const taban = { ...ttBosForm(marka === 'depoevim' ? 'Depo' : 'Nakliye'), musteriAdi: k.profileName || '',
+    telefon: ttTelGecerli(hamTel) ? ttTelGoster(hamTel) : '', iletisimTarihi: iso.slice(0, 10) || ttBugunStr(),
+    durum: 'Yeni', whatsappKonusmaId: k.id, notlar: lead?.notlar || [] };
+  const t = ttWhatsappGorunum(taban, lead);
+  const hz = ttHizmetBul(t.hizmetTipi);
+  const telVar = ttTelGecerli(t.telefon);
+  const r = ttAdimRolleri(t);
+  const okunmamis = Number(k.unreadCount) || 0;
+  const bekliyor = bekliyorMu(k);
+  const n = ttSonNot(t)[0];
+  const { pf, ekleniyor, sohbetAc, portfoyeEkle, portfoyAc } = islem;
+  return (
+    <div onClick={sohbetAc}
+      className={`relative grid grid-cols-1 md:grid-cols-[1.3fr_1.6fr_0.8fr_auto_1fr_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 hover:bg-neutral-50 cursor-pointer ${bekliyor ? 'bg-red-50/40' : ''}`}>
+      <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${hz.stil.serit}`} />
+      {/* ---- MÜŞTERİ ---- */}
+      <div className="min-w-0">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <p className="text-sm font-black text-neutral-900 truncate">{t.musteriAdi || 'WhatsApp Müşterisi'}</p>
+          <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-green-600 text-white">WHATSAPP</span>
+          {okunmamis > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center" title="Okunmamış mesaj">{okunmamis}</span>}
+        </div>
+        {gecmis && onGecmis && <div className="mt-1 flex"><TTGecmisDugmesi gecmis={gecmis} onClick={onGecmis} /></div>}
+        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+          <span className="text-[11px] font-bold text-neutral-500">{ttTelGoster(t.telefon) || hamTel || 'Telefon yok'}</span>
+          {telVar && <a href={`tel:0${ttTelAnahtar(t.telefon)}`} onClick={e => e.stopPropagation()} className="p-1 rounded-md bg-blue-600 text-white hover:bg-blue-700" title="Ara"><Phone className="w-3 h-3" /></a>}
+          <button type="button" onClick={e => { e.stopPropagation(); sohbetAc(); }} className="p-1 rounded-md bg-green-600 text-white hover:bg-green-700" title="WhatsApp sohbetini aç"><MessageCircle className="w-3 h-3" /></button>
+        </div>
+        <p className="text-[10px] font-bold text-neutral-400 mt-0.5">{ttTrTarih(t.iletisimTarihi)}{iso ? ` · ${listeSaati(iso, Date.now())}` : ''}</p>
+        <div className="flex items-center gap-1 mt-0.5 flex-wrap">
+          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${marka === 'depoevim' ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-red-50 text-red-700 border-red-200'}`}>{MARKA_ETIKETI?.[marka] || marka}</span>
+          {k.mode === 'human'
+            ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">Personel{k.devralan?.ad ? ` · ${k.devralan.ad}` : ''}</span>
+            : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 border border-neutral-200">Bot</span>}
+          {bekliyor && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse">Personel bekliyor</span>}
+        </div>
+      </div>
+      {/* ---- HİZMET · GÜZERGÂH · CEVAPLAR ---- */}
+      <div className="min-w-0">
+        <p className="text-[11px] font-black text-neutral-800 truncate flex items-center gap-1.5">
+          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${hz.stil.rozet}`}>{hz.id === 'Nakliye' ? 'EVDEN EVE' : hz.id.toUpperCase()}</span>
+          <MapPin className="w-3 h-3 text-neutral-400 shrink-0" /> {ttGuzergah(t)}
+        </p>
+        <div className="flex flex-wrap gap-1 mt-1">
+          {t.hizmetTipi === 'Nakliye' && t.odaSayisi && <TTCip>{t.odaSayisi}</TTCip>}
+          {t.hizmetTipi !== 'Nakliye' && t.depoBoyutu && <TTCip>{t.depoBoyutu} depo</TTCip>}
+          {t.hizmetTipi === 'Depo' && t.kiralamaSuresi && t.kiralamaSuresi !== '1' && <TTCip vurgu>{t.kiralamaSuresi} ay kampanya</TTCip>}
+          {t.hizmetTipi === 'Depo' && t.nakliyeIstiyor === 'Kendisi' && <TTCip>Kendisi getirecek</TTCip>}
+          {r.map(x => t[`${x}Kat`] ? <TTCip key={x} vurgu={t[`${x}Tasima`] === 'Merdiven' && ttKatNo(t[`${x}Kat`]) >= 3}>{t[`${x}Kat`]}{t[`${x}Tasima`] ? ` · ${t[`${x}Tasima`]}` : ''}</TTCip> : null)}
+          {t.toplama === 'Firma' && <TTCip vurgu>Toplama bizde</TTCip>}
+          {(t.tasinmaTarihi || t.tasinmaNotu) && <TTCip><CalendarDays className="w-3 h-3 inline -mt-0.5" /> {t.tasinmaTarihi ? ttTrTarih(t.tasinmaTarihi) : t.tasinmaNotu}</TTCip>}
+          <TTCip><Camera className="w-3 h-3 inline -mt-0.5" /> {t.videoDurumu || 'Paylaşmadı'}</TTCip>
+        </div>
+        {k.lastMessagePreview && (
+          <p className={`text-[10px] mt-1 line-clamp-1 flex items-center gap-1 ${okunmamis ? 'text-neutral-900 font-black' : 'text-neutral-500 font-bold'}`} title={k.lastMessagePreview}>
+            <MessageCircle className="w-3 h-3 text-green-600 shrink-0" /> {k.lastMessagePreview}
+          </p>
+        )}
+      </div>
+      {/* ---- FİYAT ---- */}
+      <div>
+        <p className="text-sm font-black text-neutral-900">{ttFiyatMetni(t)}</p>
+        {t.depoAylik ? <p className="text-[10px] font-bold text-sky-700">{ttTl(t.depoAylik)} +KDV/ay</p> : null}
+      </div>
+      {/* ---- GÖRÜŞME: Sohbeti Aç + Teklife Bak ALT ALTA ---- */}
+      <div className="flex md:flex-col items-stretch gap-1.5 md:min-w-[128px]" onClick={e => e.stopPropagation()}>
+        <button type="button" onClick={sohbetAc}
+          className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-white text-[11px] font-black shadow-lg transition whitespace-nowrap bg-green-600 hover:bg-green-700 shadow-green-600/40 ring-2 ring-green-200">
+          <MessageCircle className="w-3.5 h-3.5" /> Sohbeti Aç
+        </button>
+        <TeklifeBakDugmesi k={k} teklifVarMi={teklifVarMi} onTeklifAc={onTeklifAc} />
+      </div>
+      {/* ---- PORTFÖY (Durum · Takip sütununda) ---- */}
+      <div className="space-y-1" onClick={e => e.stopPropagation()}>
+        {pf ? (
+          <button type="button" onClick={portfoyAc} title="Portföydeki sohbeti aç"
+            className="w-full px-2 py-1.5 rounded-lg text-[11px] font-black border border-green-300 bg-green-50 text-green-800 flex items-center justify-center gap-1.5">
+            <Briefcase className="w-3.5 h-3.5" /> Portföyde{pf.sahip ? ` · ${pf.sahip}` : ''}
+          </button>
+        ) : (
+          <button type="button" disabled={ekleniyor} onClick={portfoyeEkle} title="Müşteriyi sohbetiyle birlikte Benim Müşterilerim'e taşı (WHATSAPP TEKLİF)"
+            className="w-full px-2 py-1.5 rounded-lg text-[11px] font-black border-2 border-green-600 text-green-700 bg-white hover:bg-green-50 flex items-center justify-center gap-1.5 disabled:opacity-50">
+            {ekleniyor ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Users className="w-3.5 h-3.5" />} Portföye Ekle
+          </button>
+        )}
+        {lead && <p className="text-[10px] font-bold text-neutral-400 text-center">Havuz durumu: {lead.durum || 'Yeni'}</p>}
+      </div>
+      <ChevronRight className="hidden md:block w-4 h-4 text-neutral-300" />
+      {/* ---- SON NOT (havuz kaydında not varsa) ---- */}
+      {n && (
+        <div className="md:col-span-6 bg-yellow-50 border border-yellow-200 rounded-lg px-2.5 py-1.5">
+          <p className="text-xs font-semibold text-neutral-800 line-clamp-2 flex gap-1.5"><StickyNote className="w-3.5 h-3.5 text-yellow-600 shrink-0 mt-0.5" /> {n.metin}</p>
+          <p className="text-[10px] font-bold text-neutral-400 ml-5">{n.kullanici} · {new Date(n.tarih).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })}</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const TTWhatsappSatiri = ({ t: tHam, k, lead = null, gecmis = null, sahibiGoster, onSohbetAc, onDetay, onDurum, teklifVarMi = null, onTeklifAc = null, onGecmis = null }) => {
   const kk = k || { id: tHam.whatsappKonusmaId }; // konuşma henüz yüklenmediyse kimlikle aranır
   const t = ttWhatsappGorunum(ttNormalize(tHam), lead);
@@ -11838,8 +11966,10 @@ const TTWhatsappSatiri = ({ t: tHam, k, lead = null, gecmis = null, sahibiGoster
           <p className={`text-sm truncate ${okunmamis ? 'font-black text-black' : 'font-black text-neutral-900'}`}>{t.musteriAdi || k?.profileName || 'WhatsApp Müşterisi'}</p>
           <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${ttKaynakBul(t).stil}`}>{ttKaynakBul(t).rozet}</span>
           {okunmamis > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center" title="Okunmamış mesaj">{okunmamis}</span>}
-          {gecmis && (onGecmis ? <TTGecmisDugmesi gecmis={gecmis} onClick={onGecmis} /> : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300" title="Bu numaranın geçmiş kaydı var">↺ Geçmiş {gecmis.toplam}</span>)}
+          {gecmis && !onGecmis && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300" title="Bu numaranın geçmiş kaydı var">↺ Geçmiş {gecmis.toplam}</span>}
         </div>
+        {/* DEĞİŞTİ (2026-10-08): Geçmiş düğmesi HER ZAMAN ismin ALTINDA kendi satırında (isim uzunluğundan bağımsız) */}
+        {gecmis && onGecmis && <div className="mt-1 flex"><TTGecmisDugmesi gecmis={gecmis} onClick={onGecmis} /></div>}
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
           <span className="text-[11px] font-bold text-neutral-500">{ttTelGoster(t.telefon) || k?.phone || 'Telefon yok'}</span>
           {telVar && <a href={`tel:0${ttTelAnahtar(t.telefon)}`} onClick={e => e.stopPropagation()} className="p-1 rounded-md bg-blue-600 text-white hover:bg-blue-700" title="Ara"><Phone className="w-3 h-3" /></a>}
@@ -11938,8 +12068,10 @@ const TelefonTeklifSatiri = ({ tHam, gecmis, sahibiGoster, onAc, onDurum, onWhat
           <p className="text-sm font-black text-neutral-900 truncate">{t.musteriAdi || 'İsimsiz'}</p>
           {/* YENİ (kullanıcı talebi): kaynak etiketi — MANUEL / HIZLI TEKLİF */}
           <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${ttKaynakBul(t).stil}`}>{ttKaynakBul(t).rozet}</span>
-          {gecmis && (onGecmis ? <TTGecmisDugmesi gecmis={gecmis} onClick={onGecmis} /> : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300" title="Bu numaranın geçmiş kaydı var">↺ Geçmiş {gecmis.toplam}</span>)}
+          {gecmis && !onGecmis && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300" title="Bu numaranın geçmiş kaydı var">↺ Geçmiş {gecmis.toplam}</span>}
         </div>
+        {/* DEĞİŞTİ (2026-10-08): Geçmiş düğmesi HER ZAMAN ismin ALTINDA kendi satırında (isim uzunluğundan bağımsız) */}
+        {gecmis && onGecmis && <div className="mt-1 flex"><TTGecmisDugmesi gecmis={gecmis} onClick={onGecmis} /></div>}
         <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
           <span className="text-[11px] font-bold text-neutral-500">{ttTelGoster(t.telefon) || 'Telefon yok'}</span>
           {telVar && (<>
