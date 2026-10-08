@@ -188,7 +188,8 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
 // konusma: canlı konuşma kaydı · onGeri: geri / kapat düğmesi (geriHerZaman: masaüstünde de göster)
 // ============================================================================
 export const WhatsAppSohbet = ({ konusma, currentUser, yonetici = false, onGeri = null, geriHerZaman = false,
-  onLeadAc, onGorselAc, kaynak = firestoreKaynagi, simdi = () => Date.now() }) => {
+  onLeadAc, onGorselAc, kaynak = firestoreKaynagi, simdi = () => Date.now(),
+  onGonderildi = null }) => { // YENİ (2026-10-08): mesaj gönderilince (ör. otomatik portföye taşı)
   const secili = konusma;
   const [mesajlar, setMesajlar] = useState([]);
   const [metin, setMetin] = useState('');
@@ -224,7 +225,11 @@ export const WhatsAppSohbet = ({ konusma, currentUser, yonetici = false, onGeri 
   const gonder = async () => {
     const m = metin.trim();
     if (!m || !secili || isleniyor) return;
-    if (await islemYap('gonder', { metin: m })) setMetin('');
+    if (await islemYap('gonder', { metin: m })) {
+      setMetin('');
+      // YENİ (2026-10-08): cevap yazan personel → konuşma otomatik onun portföyüne taşınır (Satis.jsx)
+      try { await onGonderildi?.(secili); } catch (e) { console.error('Otomatik portföy hatası:', e); }
+    }
   };
 
   if (!secili) return null;
@@ -353,7 +358,9 @@ const gunFarki = (gun, simdiMs) => {
 const HAVUZ_ZAMANLAR = [['bugun', 'Bugün', 0], ['hafta', 'Son 7 Gün', 6], ['ay', 'Son 30 Gün', 29], ['tumu', 'Tüm Zamanlar', null]];
 
 export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGorselAc,
-  portfoyHaritasi = {}, onPortfoyeEkle, onPortfoyAc, kaynak = firestoreKaynagi, simdi = () => Date.now() }) => {
+  portfoyHaritasi = {}, onPortfoyeEkle, onPortfoyAc, kaynak = firestoreKaynagi, simdi = () => Date.now(),
+  // YENİ (2026-10-08): cevap yazınca otomatik portföy + "Teklife Bak" sütunu
+  onGonderildi = null, teklifVarMi = null, onTeklifAc = null }) => {
   const [konusmalar, setKonusmalar] = useState([]);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [okumaHatasi, setOkumaHatasi] = useState('');
@@ -431,8 +438,8 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
 
       {/* ---------------------------------------------------- LİSTE (gün blokları) */}
       <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
-        <div className="hidden md:grid grid-cols-[1.4fr_2fr_1fr_auto] gap-3 px-4 py-2.5 bg-black text-white text-xs font-black">
-          <span>Müşteri</span><span>Son Mesaj</span><span>Hat · Durum</span><span className="text-right pr-1">İşlem</span>
+        <div className="hidden md:grid grid-cols-[1.4fr_2fr_1fr_120px_auto] gap-3 px-4 py-2.5 bg-black text-white text-xs font-black">
+          <span>Müşteri</span><span>Son Mesaj</span><span>Hat · Durum</span><span className="text-center">Teklif</span><span className="text-right pr-1">İşlem</span>
         </div>
         {yukleniyor && <p className="p-6 text-center text-sm font-bold text-neutral-400"><Loader2 className="w-4 h-4 inline animate-spin mr-1" /> Yükleniyor…</p>}
         {okumaHatasi && <p className="p-6 text-center text-sm font-bold text-red-600">{okumaHatasi}</p>}
@@ -457,7 +464,7 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
                 const tel = String(k.phone || k.waId || '').replace(/\D/g, '');
                 return (
                   <div key={k.id} onClick={() => setAcikId(k.id)}
-                    className={`relative grid grid-cols-1 md:grid-cols-[1.4fr_2fr_1fr_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 cursor-pointer hover:bg-neutral-50 ${bekliyorMu(k) ? 'bg-red-50/40' : ''}`}>
+                    className={`relative grid grid-cols-1 md:grid-cols-[1.4fr_2fr_1fr_120px_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 cursor-pointer hover:bg-neutral-50 ${bekliyorMu(k) ? 'bg-red-50/40' : ''}`}>
                     <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${marka === 'depoevim' ? 'bg-blue-600' : 'bg-red-600'}`} />
                     {/* Müşteri */}
                     <div className="min-w-0 flex items-center gap-2.5">
@@ -480,11 +487,15 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
                       <ModRozeti k={k} />
                       {bekliyorMu(k) && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse">Personel bekliyor</span>}
                     </div>
+                    {/* YENİ (2026-10-08): TEKLİF sütunu — konuşmanın havuzdaki teklifi (lead detayı) */}
+                    <div className="md:text-center" onClick={e => e.stopPropagation()}>
+                      <TeklifeBakDugmesi k={k} teklifVarMi={teklifVarMi} onTeklifAc={onTeklifAc} />
+                    </div>
                     {/* İşlem */}
                     <div className="flex items-center gap-1.5 justify-end flex-wrap" onClick={e => e.stopPropagation()}>
                       <button type="button" onClick={() => setAcikId(k.id)}
                         className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-green-600 hover:bg-green-700 text-white flex items-center gap-1 shadow-md shadow-green-600/20">
-                        <Eye className="w-3.5 h-3.5" /> Sohbeti Aç
+                        <MessageCircle className="w-3.5 h-3.5" /> Sohbeti Aç
                       </button>
                       {tel && <a href={`tel:+${tel}`} className="p-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white" title="Ara"><Phone className="w-3.5 h-3.5" /></a>}
                       {pf ? (
@@ -513,7 +524,7 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
           <div className="bg-white w-full max-w-3xl h-[88vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             <WhatsAppSohbet key={acik.id} konusma={acik} currentUser={currentUser} yonetici={yonetici}
               onGeri={() => setAcikId(null)} geriHerZaman onLeadAc={onLeadAc ? (id) => { setAcikId(null); onLeadAc(id); } : undefined}
-              onGorselAc={onGorselAc} kaynak={kaynak} simdi={simdi} />
+              onGorselAc={onGorselAc} kaynak={kaynak} simdi={simdi} onGonderildi={onGonderildi} />
             {/* Portföy kısayolu — sohbet içinden de */}
             <div className="px-3 py-2 border-t border-neutral-200 bg-neutral-50 flex items-center gap-2">
               {portfoyHaritasi[acik.id] ? (
@@ -544,6 +555,19 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
 // • WhatsAppSohbetPenceresi: havuzdaki sohbet penceresinin AYNISI (WhatsAppSohbet);
 //   portföye taşınan müşteriyle konuşmaya buradan devam edilir.
 // ============================================================================
+// YENİ (2026-10-08): "Teklife Bak" — havuzdaki ve portföydeki WhatsApp satırlarında ortak düğme
+export const TeklifeBakDugmesi = ({ k, teklifVarMi, onTeklifAc }) => {
+  if (!onTeklifAc) return null;
+  const var_ = teklifVarMi ? teklifVarMi(k) : true;
+  return (
+    <button type="button" disabled={!var_} onClick={() => onTeklifAc(k)}
+      title={var_ ? 'Konuşmanın teklifini (havuz kaydını) aç' : 'Bu konuşmaya bağlı teklif kaydı yok'}
+      className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-neutral-100 hover:bg-neutral-200 text-neutral-800 inline-flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+      <Eye className="w-3.5 h-3.5" /> Teklife Bak
+    </button>
+  );
+};
+
 export const useWhatsappKonusmalari = (aktif = true, kaynak = firestoreKaynagi) => {
   const [liste, setListe] = useState([]);
   const [hazir, setHazir] = useState(false);
@@ -555,13 +579,13 @@ export const useWhatsappKonusmalari = (aktif = true, kaynak = firestoreKaynagi) 
 };
 
 export const WhatsAppSohbetPenceresi = ({ konusma, yukleniyor = false, onKapat, altKisim = null, currentUser, yonetici = false,
-  onLeadAc, onGorselAc, kaynak = firestoreKaynagi, simdi = () => Date.now() }) => (
+  onLeadAc, onGorselAc, kaynak = firestoreKaynagi, simdi = () => Date.now(), onGonderildi = null }) => (
   <div className="fixed inset-0 z-[120] bg-black/60 flex items-center justify-center p-2 md:p-6" onClick={onKapat}>
     <div className="bg-white w-full max-w-3xl h-[88vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
       {konusma ? (
         <WhatsAppSohbet key={konusma.id} konusma={konusma} currentUser={currentUser} yonetici={yonetici}
           onGeri={onKapat} geriHerZaman onLeadAc={onLeadAc ? (id) => { onKapat?.(); onLeadAc(id); } : undefined}
-          onGorselAc={onGorselAc} kaynak={kaynak} simdi={simdi} />
+          onGorselAc={onGorselAc} kaynak={kaynak} simdi={simdi} onGonderildi={onGonderildi} />
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center gap-2 text-sm font-bold text-neutral-400 p-6 text-center">
           {yukleniyor ? <><Loader2 className="w-5 h-5 animate-spin" /> Sohbet yükleniyor…</> : <><AlertTriangle className="w-5 h-5" /> Bu WhatsApp konuşması bulunamadı ya da görme yetkiniz yok.</>}
