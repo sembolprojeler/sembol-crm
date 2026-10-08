@@ -5260,8 +5260,9 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                   WhatsApp bot hattından gelen konuşmalar — gün gün listelenir
                 </span>
               </span>
+              {/* DEĞİŞTİ (2026-10-08): sayı = havuzda temsilcisi atanmamış konuşma (App: useWhatsappAtanmamisSayisi) */}
               {whatsappBekleyen > 0 && (
-                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full animate-pulse shrink-0 ${waAktif ? 'bg-white text-green-700' : 'bg-green-600 text-white'}`} title="Personel bekleyen konuşma">{whatsappBekleyen} bekliyor</span>
+                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full animate-pulse shrink-0 ${waAktif ? 'bg-white text-green-700' : 'bg-green-600 text-white'}`} title="Havuzda temsilcisi atanmamış konuşma">{whatsappBekleyen} yeni</span>
               )}
             </button>
             ); })()}
@@ -11458,6 +11459,28 @@ const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', ge
 // (5) VERİ HOOK'U, GİRİŞ BUTONU, LİSTE, DETAY VE SAYFA
 // ============================================================================
 // Tüm telefon tekliflerini canlı dinler (tek dinleyici — Müşteri Havuzu çağırır)
+// ============================================================================
+// YENİ (2026-10-08): WHATSAPP HAVUZU BİLDİRİM SAYISI — TEMSİLCİSİ ATANMAMIŞ konuşmalar
+// ----------------------------------------------------------------------------
+// Rozet artık "personel bekliyor" sayısını değil, havuzda HENÜZ KİMSENİN PORTFÖYÜNDE
+// OLMAYAN konuşma sayısını gösterir (havuz varsayılan görünümüyle aynı). Havuz boşsa 0 →
+// rozet görünmez; yeni bir müşteri yazınca 1 olur, biri portföyüne alınca düşer.
+// Yalnızca whatsappKonusmaId alanı olan portföy kayıtları okunur (hafif sorgu).
+// Portföy listesi gelmeden 0 döner (açılışta yanlış sayı yanıp sönmesin).
+// ============================================================================
+export const useWhatsappAtanmamisSayisi = (aktif = true) => {
+  const { liste } = useWhatsappKonusmalari(aktif);
+  const [portfoydeki, setPortfoydeki] = useState(null); // null = henüz yüklenmedi
+  useEffect(() => {
+    if (!aktif) return undefined;
+    const q = query(ttKoleksiyon(), where('whatsappKonusmaId', '>', ''));
+    return onSnapshot(q,
+      snap => setPortfoydeki(new Set(snap.docs.map(d => d.data().whatsappKonusmaId).filter(Boolean))),
+      err => { console.error('WhatsApp portföy sayısı okunamadı:', err); setPortfoydeki(new Set()); });
+  }, [aktif]);
+  return useMemo(() => (portfoydeki ? liste.filter(k => !portfoydeki.has(k.id)).length : 0), [liste, portfoydeki]);
+};
+
 const useTelefonTeklifleri = (aktif = true) => {
   const [teklifler, setTeklifler] = useState([]);
   useEffect(() => {
