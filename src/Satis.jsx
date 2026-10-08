@@ -9258,7 +9258,10 @@ const ttIlFiyatiKmIle = (taban, km, il, M, odaK = '') => {
     f += Math.round(f * (Number(kademe.yuzde) || 0) / 100); // yüzde TOPLAMIN üzerine (ev tipi farkı hariç)
   }
   const odaFarki = odaK ? mesafeOdaFarkiKalemi(M, { toplamKm: km }, odaK) : null;
-  if (odaFarki) f += odaFarki.tutar; // en son
+  // DEĞİŞTİ (2026-10-08): ev tipi yüzdesi km tutarına değil, o ana kadarki TOPLAMA (f) uygulanır
+  const odaY = odaFarki ? ttOdaYuzdesi(M, km, odaK) : null;
+  if (odaY) f += Math.round(f * odaY.yuzde / 100); // en son
+  else if (odaFarki) f += odaFarki.tutar;
   return Math.ceil(f / 1000) * 1000;
 };
 // Verilen fiyat tablosundan (taslak) yeni ilEve / ilDepo tablolarını üretir.
@@ -9517,9 +9520,45 @@ const ttMesafeUygula = (f, kalemler, uyarilar, odaK = '') => { // DEĞİŞTİ: o
 };
 // Uzun yol farkı (kademe %) — tüm kalemler eklendikten SONRA (toplamın üzerine), ardından EN SON ev tipi farkı
 // DEĞİŞTİ: /api/mesafe-site ve WhatsApp botu ile ORTAK fonksiyon (fiyatSema.mesafeFarklariEkle)
+// ============================================================================
+// YENİ (2026-10-08): EV TİPİ KM FARKI = SON TOPLAMIN YÜZDESİ (kullanıcı talebi)
+// ----------------------------------------------------------------------------
+// Eskiden yüzde yalnızca KM TUTARINA uygulanıyordu (12.795 × %80 = 10.236 ₺).
+// Artık ÜSTTEKİ TÜM KALEMLERİN TOPLAMINA uygulanır:
+//   taban 42.000 + km 12.795 + geçiş 1.350 + uzun yol 25.265 = 81.410 ₺
+//   81.410 × %80 = 65.128 ₺ → toplam 146.538 ₺
+// Neden: uzun yolda km ve otoban 1+0'da da aynıdır; ev büyüdükçe (2+1, 3+1, 4+1)
+// iş zorlaştığı için fark, hazırlanan fiyatın tamamı üzerinden alınır.
+// Ortak fonksiyon (fiyatSema.mesafeFarklariEkle) kalemi yine ekler; burada yalnızca
+// tutarı ve adı yeni kurala göre DÜZELTİLİR (kalem yoksa hiçbir şey eklenmez).
+// ============================================================================
+const ttOdaFarkiMi = (k) => !!k && (k.odaFarki || /^Ev tipi/i.test(String(k.ad || '')));
+// Toplam km'nin aştığı en yüksek ev tipi kademesinin yüzdesi (fiyatSema ile aynı kural)
+const ttOdaYuzdesi = (M, km, odaK) => {
+  const n = Number(km) || 0;
+  if (n <= 0 || !odaK) return null;
+  const kademe = mesafeOdaKademeListesi(M)
+    .filter(k => k && n > (Number(k.km) || 0))
+    .sort((a, b) => (Number(b.km) || 0) - (Number(a.km) || 0))[0];
+  const yuzde = Number(kademe?.yuzde?.[odaK]) || 0;
+  return yuzde > 0 ? { yuzde, esik: Number(kademe.km) || 0 } : null;
+};
+// kalemler içindeki ev tipi kalemini "son toplam × yüzde" olarak yeniden hesaplar (yerinde)
+const ttOdaFarkiniSonToplamaUygula = (M, km, kalemler, odaK) => {
+  const i = kalemler.findIndex(ttOdaFarkiMi);
+  if (i < 0) return kalemler;
+  const o = ttOdaYuzdesi(M, km, odaK);
+  if (!o) return kalemler;
+  const baz = kalemler.filter(k => !ttOdaFarkiMi(k)).reduce((t, k) => t + (Number(k.tutar) || 0), 0); // üstteki tüm kalemler
+  kalemler[i] = { ...kalemler[i], ad: `Ev tipi km farkı (${odaK} · %${o.yuzde} · ${baz.toLocaleString('tr-TR')} ₺ toplam üzerine${o.esik ? ` · ${o.esik.toLocaleString('tr-TR')} km üstü` : ''})`,
+    tutar: Math.round(baz * o.yuzde / 100), km: true, odaFarki: true };
+  return kalemler;
+};
+
 const ttMesafeIscilikEkle = (f, km, kalemler) => {
   if (!km.uygulandi) return;
   mesafeFarklariEkle(TT_MESAFE, f.rota, kalemler, km.odaK);
+  ttOdaFarkiniSonToplamaUygula(TT_MESAFE, f.rota?.toplamKm, kalemler, km.odaK); // YENİ: % son toplamın üzerine
 };
 
 const ttFiyatHesapla = (fHam) => {
@@ -9994,7 +10033,8 @@ const TTRotaKarti = ({ form, setForm, kullanici }) => {
   const kalemler = mesafeKalemleri(TT_MESAFE, rota);
   // YENİ: ev tipine göre km farkı da kartta görünür (fiyat hesabıyla aynı oda anahtarı)
   const kartOdaK = ttOdaAnahtari(form.hizmetTipi === 'Nakliye' ? form.odaSayisi : (form.depoBoyutu === 'Özel' ? '4+1' : form.depoBoyutu));
-  const kartOdaFarki = kartOdaK ? mesafeOdaFarkiKalemi(TT_MESAFE, rota, kartOdaK) : null;
+  // DEĞİŞTİ (2026-10-08): kartta da fiyat panelindeki tutar (son toplam × %) gösterilir
+  const kartOdaFarki = kartOdaK ? (ttFiyatHesapla(form).kalemler.find(ttOdaFarkiMi) || mesafeOdaFarkiKalemi(TT_MESAFE, rota, kartOdaK)) : null;
   if (kartOdaFarki) kalemler.push(kartOdaFarki);
   return (
     <div className="rounded-2xl border-2 border-emerald-200 bg-emerald-50/40 p-3 space-y-2">
@@ -13348,6 +13388,7 @@ const FiyatTablosuPenceresi = ({ currentUser, fiyatBilgi, onKapat }) => {
                 ...mesafeKalemleri(M, { toplamKm, gecisler }),
               ];
               mesafeFarklariEkle(M, { toplamKm }, kalemler, '2+1'); // uzun yol farkı, EN SON ev tipi farkı (ortak fonksiyon)
+              ttOdaFarkiniSonToplamaUygula(M, toplamKm, kalemler, '2+1'); // YENİ (2026-10-08): % son toplamın üzerine
               return { kalemler, toplam: kalemler.reduce((t, k) => t + k.tutar, 0) };
             };
             const ornekler = [
