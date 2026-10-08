@@ -15,6 +15,8 @@ import { teklifDetayiAlanlardan, eskiTeklifMetni } from './teklifDetay.js';
 import { AI_KAYNAK_ETIKETLERI, AI_ISTATISTIK_KUTULARI, aiKaynakMi } from './aiKaynakSema.js';
 // YENİ: QR Site Takip şeması — /api/qr-site ile ortak (sabitler, telefon kuralı, WordPress sayfa adresi)
 import { botLeadKonusmaId } from './whatsappPanel.js'; // YENİ (2026-10-07): bot hattı lead'i → CRM WhatsApp sohbeti
+import { WhatsAppHavuzu } from './WhatsApp.jsx';
+import { WhatsAppHataSiniri } from './whatsappHataSiniri.js'; // Havuzda hata olursa yalnızca bu bölüm etkilenir // YENİ (2026-10-08): WhatsApp Mesajları Havuzu — Müşteri Havuzu içinde liste
 import { QR_SITE_LANDING_URL, QR_SIRKET_TELEFONU, QR_HIZMETLER, QR_RANDEVU_SAATLERI, qrTelefonNormalize, qrTelefonGecerliMi } from './qrSiteSema.js';
 // YENİ (kullanıcı talebi): Fiyat Tablosu şeması — /api/fiyatlar ile ortak (etiketler, anahtarlar, doğrulama)
 import { DEPO_BOYUTLARI, DEPO_KIRALAMA, SEHIR_ICI_GRUPLARI, SEHIRLER_ARASI_EK_GRUPLARI, IL_TABLOSU_ETIKET, IL_TABLOSU_NOTU, FIYAT_VERI_ANAHTARLARI, fiyatDogrula, fiyatFarklari, fiyatTemizle, fiyatYolAnahtari,
@@ -4231,7 +4233,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // WhatsApp panelindeki "Lead" düğmesi → { id, no } ile o kaydın detayı açılır
   onWhatsappSohbet = null, leadAcIstegi = null, onLeadAcIstegiKullanildi,
   // YENİ (kullanıcı talebi): "WhatsApp Mesajları Havuzu" kartı (sol menüden kaldırıldı, buraya taşındı)
-  onWhatsappAc = null, whatsappBekleyen = 0 }) => {
+  onWhatsappAc = null, whatsappBekleyen = 0,
+  whatsappYonetici = false, onGorselAc = null }) => { // YENİ (2026-10-08): havuzdaki sohbet penceresi için yetki + görsel açıcı
   // ---------------------------------------------------------------- STATE ---
   // DEĞİŞTİ (kullanıcı talebi): Havuz açılınca ilk sekme artık "Hızlı Teklifler" ('web')
   const [aktifKanal, setAktifKanal] = useState('web');
@@ -4325,6 +4328,8 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
   // Veri burada TEK KEZ dinlenir; hem giriş butonu hem sayfa aynı listeyi kullanır.
   // DEĞİŞTİ (kullanıcı talebi): Müşteri Havuzu açılınca ilk olarak Telefon Görüşmesi seçili gelir
   const [telefonTeklifAcik, setTelefonTeklifAcik] = useState(true);
+  // YENİ (2026-10-08): WhatsApp Mesajları Havuzu sekmesi (ayrı sayfa yerine Müşteri Havuzu içinde)
+  const [waHavuzAcik, setWaHavuzAcik] = useState(false);
   // YENİ (kullanıcı talebi): Telefon Görüşmesi istatistik kutuları başlıktaki düğmeyle açılır
   const [gorusmeIstatAcik, setGorusmeIstatAcik] = useState(false);
   const telefonTeklifleri = useTelefonTeklifleri(true);
@@ -4498,6 +4503,55 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     await hareketliGuncelle(canli, degisiklik,
       `Telefon Görüşmesi'ne aktarıldı${degisiklik.atanan ? ` • ${canli.atanan ? `${canli.atanan} → ` : ''}${kullaniciAdi} adlı satışçıya atandı` : ''}${bekleyenNot ? ` • Not: "${bekleyenNot.slice(0, 60)}"` : ''}`);
     return teklif;
+  };
+
+  // ==========================================================================
+  // YENİ (2026-10-08): WHATSAPP KONUŞMASINI PORTFÖYE EKLE
+  // --------------------------------------------------------------------------
+  // Hızlı Teklif'teki "Teklif Gönder" ile aynı mantık: konuşmadan bir telefon
+  // teklifi (Benim Müşterilerim kaydı) oluşturulur, basan kullanıcıya atanır ve
+  // soru akışlı görüşme formu bu kayıtla açılır. Kayıt "WHATSAPP TEKLİF"
+  // etiketiyle görünür (whatsappKonusmaId alanı — ttKaynakTuru).
+  // Sabit belge kimliği (whatsapp_<konuşmaId>) → iki kişi aynı anda bassa da tek kayıt.
+  // Başkasının portföyündeyse basan kişi devralır (Hızlı Teklif'teki gibi).
+  // ==========================================================================
+  const whatsappTelefonaAktar = async (konusma) => {
+    const sabitId = ttWhatsappTeklifId(konusma.id);
+    let teklif = telefonTeklifleri.find(t => t.id === sabitId) || null;
+    if (!teklif) {
+      const var_ = await getDoc(ttBelge(sabitId));
+      if (var_.exists()) teklif = { id: sabitId, ...var_.data() };
+    }
+    if (!teklif) {
+      const veri = ttWhatsapptanTeklifVerisi(konusma, kullaniciAdi);
+      await setDoc(ttBelge(sabitId), veri);
+      teklif = { id: sabitId, ...veri };
+      addSystemLog?.('Müşteri Havuzu', `${veri.musteriAdi || veri.telefon} WhatsApp Mesajları Havuzu'ndan portföye eklendi (${kullaniciAdi}).`);
+    } else if (ttSahibi(teklif) !== kullaniciAdi) {
+      // Başkasının portföyündeyse basan kullanıcı devralır
+      await updateDoc(ttBelge(teklif.id), { atanan: kullaniciAdi, updatedAt: new Date().toISOString(),
+        hareketler: [...(teklif.hareketler || []), { tarih: new Date().toISOString(), kullanici: kullaniciAdi, islem: `Devralındı: ${ttSahibi(teklif) || 'Atanmadı'} → ${kullaniciAdi} (WhatsApp havuzundan)` }] });
+      teklif = { ...teklif, atanan: kullaniciAdi };
+    }
+    return teklif;
+  };
+  // Havuz listesinde "Portföyde · Satışçı" göstermek için: konuşmaId → { id, sahip }
+  const waPortfoyHaritasi = useMemo(() => {
+    const m = {};
+    telefonTeklifleri.forEach(t => { if (t.whatsappKonusmaId) m[t.whatsappKonusmaId] = { id: t.id, sahip: ttSahibi(t) }; });
+    return m;
+  }, [telefonTeklifleri]);
+  // Sohbetteki "Taşıma lead'i" → havuz kaydını açar (App'teki leadAcIstegi ile aynı kurallar)
+  const waLeadAc = (id) => {
+    const k = kayitlar.find(x => x.id === id);
+    if (!k) { alert('Lead kaydı bulunamadı (silinmiş olabilir).'); return; }
+    if (!gorunurMu(k)) { alert(`Bu kayıt ${k.atanan} adlı personele atanmış.`); return; }
+    setWaHavuzAcik(false); setTelefonTeklifAcik(false);
+    if (KANALLAR.some(x => x.id === k.kanal)) setAktifKanal(k.kanal);
+    setDetayKayit(k);
+    setDetayFotoGoster(null);
+    setDuzenleIletisim((k.iletisim || '').includes('Bekleniyor') ? '' : (k.iletisim || ''));
+    setDuzenleMusteriAdi((k.musteriAdi || '').includes('Ziyaretçi') ? '' : (k.musteriAdi || ''));
   };
 
   // ==========================================================================
@@ -5084,7 +5138,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           ==================================================================== */}
       {(() => {
         // DEĞİŞTİ: kanal seçilince Telefon Görüşmesi sekmesi kapanır (geçişler tek tık)
-        const sekmeSec = (id) => { setTelefonTeklifAcik(false); setAktifKanal(id); setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setHesapFiltre('Tümü'); setArama(''); setYeniKayitAcik(false); setHesapYonetimAcik(false); };
+        const sekmeSec = (id) => { setTelefonTeklifAcik(false); setWaHavuzAcik(false); setAktifKanal(id); setDurumFiltre('Tümü'); setHizmetFiltre('Tümü'); setHesapFiltre('Tümü'); setArama(''); setYeniKayitAcik(false); setHesapYonetimAcik(false); };
         const webKanal = KANALLAR.find(k => k.id === 'web');
         // DEĞİŞTİ (kullanıcı talebi): iki sitenin talepleri birlikte; "yeni" rozetleri ayrı renkte
         const webKayitlari = gorunurKayitlar.filter(x => x.kanal === 'web' && !havuzdanAlindiMi(x) && webTekilIdler.has(x.id)); // YENİ: yalnızca havuzdakiler (mükerrersiz)
@@ -5092,14 +5146,14 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
         const webYeniler = webKayitlari.filter(x => webTekilIdler.has(x.id) && (x.durum || 'Yeni') === 'Yeni');
         const webYeniSembol = webYeniler.filter(x => kayitSitesi(x) !== 'depoevim').length;
         const webYeniDepo = webYeniler.length - webYeniSembol;
-        const webAktif = aktifKanal === 'web' && !telefonTeklifAcik;
+        const webAktif = aktifKanal === 'web' && !telefonTeklifAcik && !waHavuzAcik; // DEĞİŞTİ: WhatsApp havuzu açıkken pasif
         return (
           <div className="space-y-2">
             {/* ---- YENİ (kullanıcı talebi): TELEFON TEKLİFLERİ — Hızlı Tekliflerin üstünde ----
                 Tıklayınca telefonda görüşülen müşterilerin manuel girildiği sayfa açılır. */}
             {/* DEĞİŞTİ (kullanıcı talebi): üstte ORTADA tam satır "Benim Müşterilerim" (eski Telefon Görüşmesi);
                 altında yan yana "Hızlı Teklifler Havuzu" ve "WhatsApp Mesajları Havuzu" */}
-            <TelefonTeklifleriButonu teklifler={gorunurTelefonTeklifleri} aktif={telefonTeklifAcik} onClick={() => setTelefonTeklifAcik(true)} tamYetki={telefonMudurMu} />
+            <TelefonTeklifleriButonu teklifler={gorunurTelefonTeklifleri} aktif={telefonTeklifAcik} onClick={() => { setWaHavuzAcik(false); setTelefonTeklifAcik(true); }} tamYetki={telefonMudurMu} />
             <div className={`grid grid-cols-1 ${onWhatsappAc ? 'lg:grid-cols-2' : ''} gap-2`}>
             {/* KALDIRILDI (kullanıcı talebi): "Eski havuz talepleri aktarılıyor" çubuğu.
                 Aktarım arka planda sessizce, otomatik yapılır; hata olursa yalnızca
@@ -5136,26 +5190,28 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 Sol menüdeki "WhatsApp" kaldırıldı; aynı ekran (bot hattı konuşmaları:
                 devral / cevap yaz / bota geri ver) bu karttan açılır. Yalnızca WhatsApp
                 yetkisi olanlarda görünür (App.jsx onWhatsappAc'ı yetkiye göre verir). */}
-            {onWhatsappAc && (
-            <button type="button" onClick={onWhatsappAc}
-              className="w-full px-3 py-2.5 rounded-2xl border-2 transition flex items-center gap-2.5 bg-white text-green-800 border-green-200 hover:border-green-400">
-              <span className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-green-50">
-                <MessageCircle className="w-5 h-5 text-green-600" />
+            {/* DEĞİŞTİ (2026-10-08): ayrı sayfa (WhatsApp ekranı) yerine Hızlı Teklifler gibi
+                AYNI SAYFADA liste açılır — WhatsAppHavuzu (gün blokları, sohbet penceresi, portföye ekle). */}
+            {onWhatsappAc && (() => { const waAktif = waHavuzAcik && !telefonTeklifAcik; return (
+            <button type="button" onClick={() => { setTelefonTeklifAcik(false); setWaHavuzAcik(true); }}
+              className={`w-full px-3 py-2.5 rounded-2xl border-2 transition flex items-center gap-2.5 ${waAktif ? 'bg-green-600 text-white border-transparent shadow-lg shadow-green-600/30' : 'bg-white text-green-800 border-green-200 hover:border-green-400'}`}>
+              <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${waAktif ? 'bg-white/20' : 'bg-green-50'}`}>
+                <MessageCircle className={`w-5 h-5 ${waAktif ? 'text-white' : 'text-green-600'}`} />
               </span>
               <span className="text-left flex-1 min-w-0">
                 <span className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-sm font-black leading-tight">WhatsApp Mesajları Havuzu</span>
-                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1 bg-green-600 text-white"><Users className="w-2.5 h-2.5" /> ORTAK ALAN</span>
+                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1 ${waAktif ? 'bg-white text-green-700' : 'bg-green-600 text-white'}`}><Users className="w-2.5 h-2.5" /> ORTAK ALAN</span>
                 </span>
-                <span className="block text-[10px] font-bold mt-0.5 truncate text-green-700" title="WhatsApp bot hattından gelen konuşmalar — devral, cevap yaz, bota geri ver">
-                  WhatsApp bot hattından gelen konuşmalar — devral, cevap yaz, bota geri ver
+                <span className={`block text-[10px] font-bold mt-0.5 truncate ${waAktif ? 'text-white/80' : 'text-green-700'}`} title="WhatsApp bot hattından gelen konuşmalar — gün gün listelenir; sohbeti aç, devral, portföye ekle">
+                  WhatsApp bot hattından gelen konuşmalar — gün gün listelenir
                 </span>
               </span>
               {whatsappBekleyen > 0 && (
-                <span className="text-[11px] font-black px-2 py-0.5 rounded-full text-white animate-pulse bg-green-600 shrink-0" title="Personel bekleyen konuşma">{whatsappBekleyen} bekliyor</span>
+                <span className={`text-[11px] font-black px-2 py-0.5 rounded-full animate-pulse shrink-0 ${waAktif ? 'bg-white text-green-700' : 'bg-green-600 text-white'}`} title="Personel bekleyen konuşma">{whatsappBekleyen} bekliyor</span>
               )}
             </button>
-            )}
+            ); })()}
             </div>
 
             {/* ---- DİĞER KANALLAR ----
@@ -5163,7 +5219,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 basınca açılır. Seçili kanal bu gruptansa düğmede adı görünür. */}
             <div className="bg-white rounded-2xl border border-neutral-200 px-2.5 py-2">
               {(() => {
-                const digerAktif = !telefonTeklifAcik && aktifKanal !== 'web' ? KANALLAR.find(k => k.id === aktifKanal) : null;
+                const digerAktif = !telefonTeklifAcik && !waHavuzAcik && aktifKanal !== 'web' ? KANALLAR.find(k => k.id === aktifKanal) : null;
                 const digerToplam = gorunurKayitlar.filter(x => x.kanal !== 'web').length;
                 return (
                   <button type="button" onClick={() => setDigerAcik(a => !a)} aria-expanded={digerAcik}
@@ -5182,7 +5238,7 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
                 {KANALLAR.filter(k => k.id !== 'web').map(k => {
                   const r = KANAL_RENK[k.renk];
                   const sayi = gorunurKayitlar.filter(x => x.kanal === k.id).length;
-                  const aktif = aktifKanal === k.id && !telefonTeklifAcik;
+                  const aktif = aktifKanal === k.id && !telefonTeklifAcik && !waHavuzAcik;
                   return (
                     <button key={k.id} type="button" onClick={() => sekmeSec(k.id)} title={k.ad}
                       className={`px-2 py-1.5 rounded-xl border transition flex items-center gap-1.5 min-w-0 ${aktif ? `${r.aktif} border-transparent` : `bg-white ${r.pasif}`}`}>
@@ -5209,6 +5265,21 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
           onHavuzKaydinaIsle={havuzKaydinaIsle} onGeri={null}
           acilisDetayId={telefonDetayId} onAcilisDetayKullanildi={() => setTelefonDetayId(null)}
           istatistikGoster={gorusmeIstatAcik} />
+      ) : waHavuzAcik && onWhatsappAc ? (
+        /* YENİ (2026-10-08): WHATSAPP MESAJLARI HAVUZU — Hızlı Teklifler düzeninde gün blokları */
+        <WhatsAppHataSiniri>
+        <WhatsAppHavuzu currentUser={currentUser} yonetici={whatsappYonetici} onGorselAc={onGorselAc}
+          onLeadAc={waLeadAc} portfoyHaritasi={waPortfoyHaritasi}
+          onPortfoyeEkle={async (konusma) => {
+            try {
+              const teklif = await whatsappTelefonaAktar(konusma);
+              setWaHavuzAcik(false);
+              setTelefonOnDoldur(teklif);     // Görüşme formu bu kayıtla açılır (Hızlı Teklif'teki gibi)
+              setTelefonTeklifAcik(true);
+            } catch (e) { console.error('WhatsApp portföy hatası:', e); alert('Portföye eklenemedi: ' + (e?.message || '')); }
+          }}
+          onPortfoyAc={(pf) => { setWaHavuzAcik(false); setTelefonDetayId(pf.id); setTelefonTeklifAcik(true); }} />
+        </WhatsAppHataSiniri>
       ) : (<>
       {/* ARAÇ ÇUBUĞU: hesap filtresi + arama + aksiyonlar
           GİZLENDİ (kullanıcı talebi): "şu an işimiz yok". Kod duruyor; tekrar
@@ -9293,8 +9364,11 @@ const TT_KAYNAKLAR = [
   { id: 'manuel', ad: 'Telefon Görüşmeleri',      rozet: 'GELEN ARAMALAR', stil: 'bg-emerald-600 text-white', pasif: 'bg-white text-emerald-700 border-emerald-200' },
   // DEĞİŞTİ (kullanıcı talebi): "Hızlı Teklif Görüşmeleri" → "Hızlı Teklif Havuzu"
   { id: 'havuz',  ad: 'Hızlı Teklif Havuzu',      rozet: 'HIZLI TEKLİF', stil: 'bg-orange-500 text-white',   pasif: 'bg-white text-orange-700 border-orange-200' },
+  // YENİ (2026-10-08): WhatsApp Mesajları Havuzu'ndan portföye eklenenler
+  { id: 'whatsapp', ad: 'WhatsApp Mesajları Havuzu', rozet: 'WHATSAPP TEKLİF', stil: 'bg-green-600 text-white', pasif: 'bg-white text-green-700 border-green-200' },
 ];
-const ttKaynakTuru = (t) => (t.havuzKayitId ? 'havuz' : 'manuel');
+// DEĞİŞTİ (2026-10-08): önce WhatsApp konuşması kontrol edilir
+const ttKaynakTuru = (t) => (t.whatsappKonusmaId ? 'whatsapp' : t.havuzKayitId ? 'havuz' : 'manuel');
 const ttKaynakBul = (t) => TT_KAYNAKLAR.find(k => k.id === ttKaynakTuru(t));
 // Kaydın sahibi (görünürlük ve transfer için): atanan yoksa oluşturan
 const ttSahibi = (t) => t.atanan || t.olusturan || '';
@@ -10580,6 +10654,24 @@ const ttHavuzdanTeklifVerisi = (k, kullanici) => {
   };
 };
 
+// YENİ (2026-10-08): WhatsApp konuşmasından üretilen görüşmenin sabit belge kimliği
+const ttWhatsappTeklifId = (konusmaId) => `whatsapp_${String(konusmaId).replace(/[^\w-]/g, '_')}`;
+// WhatsApp konuşmasından telefon teklifi (Benim Müşterilerim kaydı) — etiketi WHATSAPP TEKLİF
+const ttWhatsapptanTeklifVerisi = (k, kullanici) => {
+  const hizmet = /depo/i.test(String(k._marka || k.brand || '')) ? 'Depo' : 'Nakliye'; // DepoEvim hattı → Depo (formda değiştirilebilir)
+  const ham = k.phone || k.waId || '';
+  const tel = ttTelGecerli(ham) ? ttTelGoster(ham) : '';
+  const simdi = new Date().toISOString();
+  const f = { ...ttBosForm(hizmet), musteriAdi: k.profileName || '', telefon: tel, whatsappKonusmaId: k.id, kaynak: 'WhatsApp Teklif',
+    aciklama: k.lastMessagePreview ? `WhatsApp: ${String(k.lastMessagePreview).slice(0, 500)}` : '' };
+  const h = ttFiyatHesapla(f);
+  return {
+    ...f, site: ttSiteOf(f.hizmetTipi), sistemFiyati: h.nakliyeToplam || 0, depoAylik: h.depo?.aylik || '',
+    notlar: [], surecAdimlari: {}, olusturan: kullanici, atanan: kullanici, createdAt: simdi,
+    hareketler: [{ tarih: simdi, kullanici, islem: "WhatsApp Mesajları Havuzu'ndan portföye eklendi" }],
+  };
+};
+
 // DEĞİŞTİ (kullanıcı talebi): hizli=true → "Hızlı Fiyat Hesapla": müşteri bilgisi istenmez, kayıt YAPILMAZ;
 // sorular ve fiyat motoru görüşme formuyla birebir aynıdır (tek kaynak).
 const TelefonTeklifFormu = ({ baslangic = null, varsayilanHizmet = 'Nakliye', gecmisIndeksi = null, gonderen = '', onKaydet, onKapat, onWhatsappKaydi = null, currentUser = null, hizli = false }) => { // DEĞİŞTİ: currentUser (km servisi doğrulaması)
@@ -11472,8 +11564,8 @@ const TelefonTeklifSatiri = ({ tHam, gecmis, sahibiGoster, onAc, onDurum, onWhat
       {/* YENİ (kullanıcı talebi): havuzdan gelen → "Teklife Bak", elle girilen → "Görüşmeye Bak" */}
       <div className="md:text-center">
         <button type="button" onClick={e => { e.stopPropagation(); onAc(); }}
-          className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-white text-[11px] font-black shadow-lg transition whitespace-nowrap ${ttKaynakTuru(t) === 'havuz' ? 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/40 ring-2 ring-orange-200' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/40 ring-2 ring-emerald-200'}`}>
-          {ttKaynakTuru(t) === 'havuz' ? <><Eye className="w-3.5 h-3.5" /> Teklife Bak</> : <><PhoneCall className="w-3.5 h-3.5" /> Görüşmeye Bak</>}
+          className={`inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl text-white text-[11px] font-black shadow-lg transition whitespace-nowrap ${ttKaynakTuru(t) === 'whatsapp' ? 'bg-green-600 hover:bg-green-700 shadow-green-600/40 ring-2 ring-green-200' : ttKaynakTuru(t) === 'havuz' ? 'bg-orange-500 hover:bg-orange-600 shadow-orange-500/40 ring-2 ring-orange-200' : 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-600/40 ring-2 ring-emerald-200'}`}>
+          {ttKaynakTuru(t) !== 'manuel' ? <><Eye className="w-3.5 h-3.5" /> Teklife Bak</> : <><PhoneCall className="w-3.5 h-3.5" /> Görüşmeye Bak</>}
         </button>
       </div>
       <div className="space-y-1" onClick={e => e.stopPropagation()}>
@@ -12561,7 +12653,7 @@ const TelefonTeklifleriView = ({ teklifler = [], currentUser, satiscilar = [], t
         <div className="flex flex-wrap gap-1.5">
           <TTFiltreAcilir baslik="Kaynak" deger={kaynakFiltre} onSec={setKaynakFiltre} secenekler={[
             { id: 'Tümü', ad: 'Tüm Görüşmeler', sayi: gorunur.length },
-            ...TT_KAYNAKLAR.map(k => ({ id: k.id, ad: k.ad, sayi: gorunur.filter(t => ttKaynakTuru(t) === k.id).length, nokta: k.id === 'havuz' ? 'bg-orange-500' : 'bg-emerald-600' })),
+            ...TT_KAYNAKLAR.map(k => ({ id: k.id, ad: k.ad, sayi: gorunur.filter(t => ttKaynakTuru(t) === k.id).length, nokta: k.id === 'havuz' ? 'bg-orange-500' : k.id === 'whatsapp' ? 'bg-green-600' : 'bg-emerald-600' })),
           ]} />
           <TTFiltreAcilir baslik="Hizmet" deger={hizmetFiltre} onSec={setHizmetFiltre} secenekler={[
             { id: 'Tümü', ad: 'Tüm Hizmetler', sayi: gorunur.length },
