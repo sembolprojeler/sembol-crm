@@ -68,7 +68,7 @@ import { db, appId, auth, googleAuth, DEPO_LOCATIONS, MESAI_STATUS_OPTIONS, call
   denetimKaydiniTemizle } from './shared.jsx';
 import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, MusteriHavuzuView, SahaPortfoyView,
   // YENİ: Sol menüdeki "yeni teklif" rozetleri için canlı sayaç hook'u (Hızlı Teklifler)
-  useHizliTeklifYeniSayilari } from './Satis.jsx';
+  useHizliTeklifYeniSayilari, useWhatsappAtanmamisSayisi } from './Satis.jsx'; // YENİ (2026-10-08): WhatsApp havuzu rozeti
 // YENİ (2026-10-07): CRM WhatsApp paneli (bot hattı konuşmaları) + menüdeki "personel bekliyor" rozeti
 import { WhatsAppView } from './WhatsApp.jsx';
 import { useWhatsappBekleyen } from './whatsappKaynak.js';
@@ -5517,6 +5517,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // (rozet dinleyicisi erken return'lerden önce kurulmalı). İstekler: { konusmaId | id, no }
     const whatsappYetkili = isAuthenticated && whatsappErisimi(currentUser, positionModules);
     const whatsappBekleyen = useWhatsappBekleyen(whatsappYetkili);
+    // YENİ (2026-10-08): menü ve kart rozeti = havuzda TEMSİLCİSİ ATANMAMIŞ konuşma sayısı (havuz boşsa rozet yok)
+    const whatsappAtanmamis = useWhatsappAtanmamisSayisi(whatsappYetkili);
     const [whatsappAcIstegi, setWhatsappAcIstegi] = useState(null);   // lead → CRM sohbeti
     const [havuzLeadIstegi, setHavuzLeadIstegi] = useState(null);     // sohbet → lead detayı
 
@@ -9247,16 +9249,25 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     <PlusCircle className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap truncate" title="Satış">Satış</span>
                   </div>
                   <div className="flex items-center justify-end gap-1.5 shrink-0 min-w-[92px]">
-                    {/* YENİ: Yeni teklif rozetleri — kırmızı Sembol, mavi Depoevim; sayı 0 ise gizli */}
-                    {showSatisMusteriHavuzu && hizliTeklifYeni.sembol > 0 && (
+                    {/* YENİ (2026-10-08 · kullanıcı talebi): Satış butonunda TEK TURUNCU rozet = Hızlı Teklifler
+                        Havuzu'ndaki müşteri sayısı (Sembol + Depoevim toplamı); 0 ise gizli. Ayrı kırmızı/mavi
+                        rozetlerin kodu aşağıda duruyor, kapalı (false &&). */}
+                    {showSatisMusteriHavuzu && (hizliTeklifYeni.sembol + hizliTeklifYeni.depoevim) > 0 && (
+                      <span title={`Hızlı Teklifler Havuzu: ${hizliTeklifYeni.sembol + hizliTeklifYeni.depoevim} müşteri (Sembol ${hizliTeklifYeni.sembol} · Depoevim ${hizliTeklifYeni.depoevim})`}
+                        className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-orange-500 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-orange-500/40 animate-pulse">
+                        {hizliTeklifYeni.sembol + hizliTeklifYeni.depoevim}
+                      </span>
+                    )}
+                    {/* ESKİ: Yeni teklif rozetleri — kırmızı Sembol, mavi Depoevim (kapalı) */}
+                    {false && showSatisMusteriHavuzu && hizliTeklifYeni.sembol > 0 && (
                       <span title={`Sembol Nakliyat: ${hizliTeklifYeni.sembol} yeni teklif`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-red-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-red-600/40 animate-pulse">{hizliTeklifYeni.sembol}</span>
                     )}
-                    {showSatisMusteriHavuzu && hizliTeklifYeni.depoevim > 0 && (
+                    {false && showSatisMusteriHavuzu && hizliTeklifYeni.depoevim > 0 && (
                       <span title={`Depoevim: ${hizliTeklifYeni.depoevim} yeni teklif`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-blue-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-blue-600/40 animate-pulse">{hizliTeklifYeni.depoevim}</span>
                     )}
                     {/* YENİ (2026-10-07): WhatsApp — personel bekleyen konuşma sayısı (yeşil) */}
-                    {showSatisWhatsapp && whatsappBekleyen > 0 && (
-                      <span title={`WhatsApp: ${whatsappBekleyen} konuşma personel bekliyor`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-green-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-green-600/40 animate-pulse">{whatsappBekleyen}</span>
+                    {showSatisWhatsapp && whatsappAtanmamis > 0 && (
+                      <span title={`WhatsApp havuzu: ${whatsappAtanmamis} konuşmaya temsilci atanmadı`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-green-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-green-600/40 animate-pulse">{whatsappAtanmamis}</span>
                     )}
                     {isAddJobSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </div>
@@ -9297,7 +9308,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     >
                       {/* DEĞİŞTİ: WhatsApp ekranı artık Müşteri Havuzu'nun parçası — orada da seçili görünür */}
                       <div className={`w-1.5 h-1.5 rounded-full ${(activeTab === 'musteriHavuzu' || activeTab === 'whatsapp') ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Havuzu
-                      {showSatisWhatsapp && whatsappBekleyen > 0 && <span title="WhatsApp: personel bekleyen konuşma" className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center">{whatsappBekleyen}</span>}
+                      {showSatisWhatsapp && whatsappAtanmamis > 0 && <span title="WhatsApp havuzu: temsilcisi atanmamış konuşma" className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center">{whatsappAtanmamis}</span>}
                     </button>
                     )}
                     {/* KALDIRILDI (kullanıcı talebi): sol menüdeki "WhatsApp" — artık Müşteri Havuzu'ndaki
@@ -10260,7 +10271,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 leadAcIstegi={havuzLeadIstegi} onLeadAcIstegiKullanildi={() => setHavuzLeadIstegi(null)}
                 /* YENİ (kullanıcı talebi): "WhatsApp Mesajları Havuzu" kartı — sol menüdeki WhatsApp yerine */
                 onWhatsappAc={showSatisWhatsapp ? () => { setActiveTab('whatsapp'); setIsSidebarOpen(false); } : null}
-                whatsappBekleyen={whatsappBekleyen}
+                whatsappBekleyen={whatsappAtanmamis} /* DEĞİŞTİ (2026-10-08): kart rozeti = temsilcisi atanmamış */
                 /* YENİ (2026-10-08): havuz içindeki sohbet penceresi — WhatsApp paneliyle aynı yetki ve görsel açıcı */
                 whatsappYonetici={superYoneticiMi(currentUser) || isManager} onGorselAc={setViewingImage} />}
 
