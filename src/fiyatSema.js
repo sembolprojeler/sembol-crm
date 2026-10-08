@@ -116,8 +116,11 @@ export const FIYAT_VERI_ANAHTARLARI = ['genel', 'sehirIciEve', 'sehirIciDepo', '
 //   EV TİPİNE GÖRE KM FARKI (kullanıcı talebi): büyük ev daha çok araç / ekip / yakıt ister.
 //   DEĞİŞTİ: birden fazla kademe eklenip silinebilir — her kademe: { km, yuzde: { '1+0' … '4+1' } }
 //   Toplam km bir kademeyi AŞARSA aşılan EN YÜKSEK kademenin ev tipi yüzdesi uygulanır
-//   DEĞİŞTİ (kullanıcı talebi): yüzde, ev tipi farkından ÖNCEKİ SON TOPLAMA uygulanır
-//          (uzun yol farkı dahil) ör. 62.798 ₺ × 1+1 %5 = 3.140 ₺ → 65.938 ₺
+//   DEĞİŞTİ (2026-10-08 · kullanıcı talebi): yüzde, ev tipi farkından ÖNCEKİ SON TOPLAMA uygulanır
+//          (taban + ek hizmetler + km + geçiş + sabit ek + uzun yol farkı)
+//          ör. 42.000 + 12.795 + 1.350 + 25.265 = 81.410 ₺ × 4+1 %80 = 65.128 ₺ → 146.538 ₺
+//          CRM (Hızlı Fiyat Hesapla), /api/mesafe-site ve WhatsApp botu AYNI kuralı kullanır
+//          (hepsi mesafeFarklariEkle'yi çağırır) — fiyatlar ayrışmaz.
 //   En küçük kademe aşılınca köprü / otoyol / feribot geçiş ücretleri de eklenir.
 //   Hiçbir kademe aşılmazsa: geçiş alınmaz; Avrupa Yakası ekstrası eskisi gibi uygulanır.
 //
@@ -322,18 +325,29 @@ export const mesafeKalemleri = (M, rota) => {
   if (ek > 0) kalemler.push({ ad: `Uzun yol ek maliyeti (${Number(kademe.km).toLocaleString('tr-TR')} km üstü kademe)`, tutar: ek, km: true });
   return kalemler;
 };
-// YENİ (kullanıcı talebi): EV TİPİNE GÖRE KM FARKI — ev tipinin yüzdesi × KM TUTARI.
-// Toplam km, ev tipi kademesini AŞARSA uygulanır. odaK: '1+0' … '4+1'
-// DÜZELTME (2026-10-06): taban YALNIZCA km tutarıdır (referans: CRM Hızlı Fiyat Hesapla).
-// "Son toplam üzerine" seçeneği kaldırıldı — /api/mesafe-site onu kullanıyordu ve sitelerde
-// CRM'den yüksek fiyat çıkıyordu.  ör. 3.309 km × 15 ₺ = 49.635 ₺ × %110 = 54.599 ₺
-export const mesafeOdaFarkiKalemi = (M, rota, odaK) => {
+// YENİ (kullanıcı talebi): EV TİPİNE GÖRE KM FARKI. Toplam km, ev tipi kademesini AŞARSA uygulanır.
+// odaK: '1+0' … '4+1'
+// DEĞİŞTİ (2026-10-08 · kullanıcı talebi): 4. parametre "kalemler" verilirse yüzde, ÜSTTEKİ TÜM
+// KALEMLERİN TOPLAMINA uygulanır (son toplam). Neden: uzun yolda km ve otoban 1+0'da da aynıdır;
+// ev büyüdükçe iş zorlaştığı için fark, hazırlanan fiyatın tamamı üzerinden alınır.
+//   ör. 81.410 ₺ × %80 = 65.128 ₺
+// "kalemler" verilmezse eski davranış sürer (km tutarı × yüzde) — eski çağrılar bozulmaz.
+// (2026-10-06'daki "yalnızca km tutarı" kuralı, CRM de son toplama geçtiği için kaldırıldı;
+//  mesafeFarklariEkle her üç yerde de son toplamı kullanır → site ile CRM yine aynı fiyatı verir.)
+export const mesafeOdaFarkiKalemi = (M, rota, odaK, kalemler = null) => {
   const km = Math.round(Number(rota?.toplamKm) || 0);
   const kademe = mesafeAktifOdaKademe(M, km); // DEĞİŞTİ: aşılan en yüksek ev tipi kademesi
   const esik = Number(kademe?.km) || 0;
   const yuzde = Number(kademe?.yuzde?.[odaK]) || 0;
   if (!km || !kademe || yuzde <= 0) return null;
   const esikMetni = esik ? ` · ${esik.toLocaleString('tr-TR')} km üstü` : '';
+  if (Array.isArray(kalemler)) {
+    // YENİ: üstteki tüm kalemlerin toplamı (listede önceden kalmış bir ev tipi kalemi varsa çift sayılmaz)
+    const baz = kalemler.filter(k => k && !k.odaFarki).reduce((t, k) => t + (Number(k.tutar) || 0), 0);
+    if (baz <= 0) return null;
+    return { ad: `Ev tipi km farkı (${odaK} · %${yuzde} · ${baz.toLocaleString('tr-TR')} ₺ toplam üzerine${esikMetni})`, tutar: Math.round(baz * yuzde / 100), km: true, odaFarki: true };
+  }
+  // Eski davranış (geriye dönük uyumluluk): yalnızca km tutarı × yüzde
   const kmTutari = Math.round(km * (Number(M?.kmUcreti) || 0));
   return { ad: `Ev tipi km farkı (${odaK} · %${yuzde}${esikMetni})`, tutar: Math.round(kmTutari * yuzde / 100), km: true, odaFarki: true };
 };
@@ -351,11 +365,11 @@ export const mesafeIscilikKalemi = (M, rota, kalemler) => {
 // YENİ — ORTAK SON ADIM (CRM Hızlı Fiyat Hesapla, /api/mesafe-site, WhatsApp botu aynı fonksiyonu kullanır).
 // Diğer tüm kalemler (taban + ek hizmetler + km + geçiş + sabit ek + Avrupa ekstrası) eklendikten
 // SONRA çağrılır; listeye sırayla 1) uzun yol farkı (toplamın %'si) 2) EN SON ev tipi km farkı
-// (km tutarının %'si) eklenir.
+// eklenir. DEĞİŞTİ (2026-10-08): ev tipi farkı = uzun yol farkı DAHİL SON TOPLAMIN %'si.
 export const mesafeFarklariEkle = (M, rota, kalemler, odaK = '') => {
   const uzunYolFarki = mesafeIscilikKalemi(M, rota, kalemler);
   if (uzunYolFarki) kalemler.push(uzunYolFarki);
-  const odaFarki = odaK ? mesafeOdaFarkiKalemi(M, rota, odaK) : null;
+  const odaFarki = odaK ? mesafeOdaFarkiKalemi(M, rota, odaK, kalemler) : null; // DEĞİŞTİ: son toplam üzerine
   if (odaFarki) kalemler.push(odaFarki);
   return { uzunYolFarki, odaFarki };
 };
