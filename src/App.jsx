@@ -10241,7 +10241,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 leadAcIstegi={havuzLeadIstegi} onLeadAcIstegiKullanildi={() => setHavuzLeadIstegi(null)}
                 /* YENİ (kullanıcı talebi): "WhatsApp Mesajları Havuzu" kartı — sol menüdeki WhatsApp yerine */
                 onWhatsappAc={showSatisWhatsapp ? () => { setActiveTab('whatsapp'); setIsSidebarOpen(false); } : null}
-                whatsappBekleyen={whatsappBekleyen} />}
+                whatsappBekleyen={whatsappBekleyen}
+                /* YENİ (2026-10-08): havuz içindeki sohbet penceresi — WhatsApp paneliyle aynı yetki ve görsel açıcı */
+                whatsappYonetici={superYoneticiMi(currentUser) || isManager} onGorselAc={setViewingImage} />}
 
             {/* YENİ (2026-10-07): WHATSAPP PANELİ */}
             {/* Panelin kendi hata sınırı: panelde hata olursa yalnızca panel "Bir hata oluştu" gösterir, CRM düşmez */}
