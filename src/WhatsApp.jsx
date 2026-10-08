@@ -11,7 +11,7 @@
 // Konum harita linkiyle.
 // "kaynak" prop'u test/önizleme içindir; varsayılan src/whatsappKaynak.js (Firestore + /api/whatsapp-send).
 // ============================================================================
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'; // DEĞİŞTİ: Fragment (özel satır görünümü)
 import { MessageCircle, Send, Bot, UserCheck, Search, ExternalLink, MapPin, AlertTriangle, ArrowLeft, Lock, Loader2, X, Download, FileText, RefreshCw,
   CalendarDays, Phone, Briefcase, Eye, Users } from 'lucide-react'; // YENİ (2026-10-08): havuz listesi simgeleri
 import { firestoreKaynagi } from './whatsappKaynak.js';
@@ -361,7 +361,10 @@ const HAVUZ_ZAMANLAR = [['bugun', 'Bugün', 0], ['hafta', 'Son 7 Gün', 6], ['ay
 export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGorselAc,
   portfoyHaritasi = {}, onPortfoyeEkle, onPortfoyAc, kaynak = firestoreKaynagi, simdi = () => Date.now(),
   // YENİ (2026-10-08): cevap yazınca otomatik portföy + "Teklife Bak" sütunu
-  onGonderildi = null, teklifVarMi = null, onTeklifAc = null }) => {
+  onGonderildi = null, teklifVarMi = null, onTeklifAc = null,
+  // YENİ (2026-10-08): Benim Müşterilerim görünümü — verilirse tablo başlığı ve satırlar bunlarla çizilir
+  // (Satis.jsx: aynı sütunlar · Hizmet/Güzergâh/Fiyat mesaj bilgisinden). Verilmezse eski görünüm sürer.
+  tabloBasligi = null, satirRender = null }) => {
   const [konusmalar, setKonusmalar] = useState([]);
   const [yukleniyor, setYukleniyor] = useState(true);
   const [okumaHatasi, setOkumaHatasi] = useState('');
@@ -439,9 +442,11 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
 
       {/* ---------------------------------------------------- LİSTE (gün blokları) */}
       <div className="bg-white border border-neutral-200 rounded-2xl overflow-hidden">
+        {tabloBasligi || (
         <div className="hidden md:grid grid-cols-[1.4fr_2fr_1fr_120px_auto] gap-3 px-4 py-2.5 bg-black text-white text-xs font-black">
           <span>Müşteri</span><span>Son Mesaj</span><span>Hat · Durum</span><span className="text-center">Teklif</span><span className="text-right pr-1">İşlem</span>
         </div>
+        )}
         {yukleniyor && <p className="p-6 text-center text-sm font-bold text-neutral-400"><Loader2 className="w-4 h-4 inline animate-spin mr-1" /> Yükleniyor…</p>}
         {okumaHatasi && <p className="p-6 text-center text-sm font-bold text-red-600">{okumaHatasi}</p>}
         {!yukleniyor && !okumaHatasi && liste.length === 0 && <p className="p-8 text-center text-sm font-bold text-neutral-400">Bu filtrede konuşma yok.</p>}
@@ -459,9 +464,18 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
                 <span className="ml-auto text-[11px] font-bold text-neutral-500">{kl.length} konuşma{bekleyen ? <b className="text-red-600"> · {bekleyen} bekliyor</b> : ''}</span>
               </div>
               {kl.map(k => {
+                const pf = portfoyHaritasi[k.id];
+                // YENİ (2026-10-08): özel satır (Benim Müşterilerim düzeni) — işlemler buradan verilir
+                if (satirRender) return (
+                  <Fragment key={k.id}>{satirRender(k, {
+                    pf, ekleniyor: ekleniyor === k.id,
+                    sohbetAc: () => setAcikId(k.id),
+                    portfoyeEkle: () => portfoyeEkle(k),
+                    portfoyAc: () => { if (onPortfoyAc?.(pf, k) === false) setAcikId(k.id); },
+                  })}</Fragment>
+                );
                 const okunmamis = Number(k.unreadCount) || 0;
                 const marka = konusmaMarkasi(k);
-                const pf = portfoyHaritasi[k.id];
                 const tel = musteriTelefonu(k);
                 return (
                   <div key={k.id} onClick={() => setAcikId(k.id)}
@@ -563,7 +577,7 @@ export const TeklifeBakDugmesi = ({ k, teklifVarMi, onTeklifAc }) => {
   return (
     <button type="button" disabled={!var_} onClick={() => onTeklifAc(k)}
       title={var_ ? 'Konuşmanın teklifini (havuz kaydını) aç' : 'Bu konuşmaya bağlı teklif kaydı yok'}
-      className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-neutral-100 hover:bg-neutral-200 text-neutral-800 inline-flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
+      className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-neutral-100 hover:bg-neutral-200 text-neutral-800 inline-flex items-center justify-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap">
       <Eye className="w-3.5 h-3.5" /> Teklife Bak
     </button>
   );
