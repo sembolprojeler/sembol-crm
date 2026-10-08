@@ -9284,13 +9284,16 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     {showSatisMusteriHavuzu && (
                     <button
                       onClick={() => { setActiveTab('musteriHavuzu'); setIsSidebarOpen(false); }}
-                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'musteriHavuzu' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${(activeTab === 'musteriHavuzu' || activeTab === 'whatsapp') ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
                     >
-                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'musteriHavuzu' ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Havuzu
+                      {/* DEĞİŞTİ: WhatsApp ekranı artık Müşteri Havuzu'nun parçası — orada da seçili görünür */}
+                      <div className={`w-1.5 h-1.5 rounded-full ${(activeTab === 'musteriHavuzu' || activeTab === 'whatsapp') ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Havuzu
+                      {showSatisWhatsapp && whatsappBekleyen > 0 && <span title="WhatsApp: personel bekleyen konuşma" className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center">{whatsappBekleyen}</span>}
                     </button>
                     )}
-                    {/* YENİ (2026-10-07): WHATSAPP — bot hattı konuşmaları (devral / cevap yaz / bota geri ver) */}
-                    {showSatisWhatsapp && (
+                    {/* KALDIRILDI (kullanıcı talebi): sol menüdeki "WhatsApp" — artık Müşteri Havuzu'ndaki
+                        "WhatsApp Mesajları Havuzu" kartından açılır. Kod yerinde, kapalı (false &&). */}
+                    {false && showSatisWhatsapp && (
                     <button
                       onClick={() => { setActiveTab('whatsapp'); setIsSidebarOpen(false); }}
                       className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'whatsapp' ? 'text-yellow-500' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
@@ -10235,10 +10238,20 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 /* YENİ (2026-10-07): bot hattından gelen lead'in "WhatsApp" düğmesi CRM sohbetini açar (diğerleri wa.me) */
                 onWhatsappSohbet={showSatisWhatsapp ? (konusmaId) => { setWhatsappAcIstegi({ konusmaId, no: Date.now() }); setActiveTab('whatsapp'); } : null}
                 /* YENİ (2026-10-07): WhatsApp panelindeki "Lead" düğmesi → bu kaydın detayı açılır */
-                leadAcIstegi={havuzLeadIstegi} onLeadAcIstegiKullanildi={() => setHavuzLeadIstegi(null)} />}
+                leadAcIstegi={havuzLeadIstegi} onLeadAcIstegiKullanildi={() => setHavuzLeadIstegi(null)}
+                /* YENİ (kullanıcı talebi): "WhatsApp Mesajları Havuzu" kartı — sol menüdeki WhatsApp yerine */
+                onWhatsappAc={showSatisWhatsapp ? () => { setActiveTab('whatsapp'); setIsSidebarOpen(false); } : null}
+                whatsappBekleyen={whatsappBekleyen} />}
 
             {/* YENİ (2026-10-07): WHATSAPP PANELİ */}
             {/* Panelin kendi hata sınırı: panelde hata olursa yalnızca panel "Bir hata oluştu" gösterir, CRM düşmez */}
+            {/* YENİ (kullanıcı talebi): sol menü kaldırıldığı için Müşteri Havuzu'na dönüş düğmesi */}
+            {activeTab === 'whatsapp' && showSatisWhatsapp && showSatisMusteriHavuzu && (
+              <button type="button" onClick={() => setActiveTab('musteriHavuzu')}
+                className="mb-3 px-3 py-1.5 rounded-xl text-xs font-black border border-neutral-200 bg-white hover:bg-neutral-50 flex items-center gap-1.5">
+                <ChevronDown className="w-4 h-4 rotate-90" /> Müşteri Havuzu
+              </button>
+            )}
             {activeTab === 'whatsapp' && showSatisWhatsapp &&
               <WhatsAppHataSiniri>
               <WhatsAppView currentUser={currentUser} yonetici={superYoneticiMi(currentUser) || isManager}
