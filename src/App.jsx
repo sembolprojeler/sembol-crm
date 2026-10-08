@@ -8852,9 +8852,21 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                        görüşme penceresi doğrudan Evden Eve Nakliyat seçili açılır; pencerenin
                        üstündeki hizmet kartlarından Eşya Depolama / Depodan Çıkış'a geçilebilir.
                        (Seçim penceresinin kodu yerinde duruyor; kullanılmıyor.) */
-                    onClick={() => { setHizliGorusme({ hizmet: 'Nakliye', no: Date.now() }); setIsSidebarOpen(false); setActiveTab('musteriHavuzu'); }}
+                    /* DEĞİŞTİ (2026-10-08 · kullanıcı talebi): "+" artık MÜŞTERİ KAYIT ekranını açar
+                       (sol menüdeki Satış › Müşteri Kayıt ile birebir aynı: Nakliye sekmesi, boş form;
+                       zaten kayıt ekranındaysa form korunur). Eski davranış (telefon görüşmesi):
+                       setHizliGorusme({ hizmet: 'Nakliye', no: Date.now() }); setActiveTab('musteriHavuzu'); */
+                    onClick={() => {
+                      const zatenSayfadayiz = ['addNakliye', 'addDepo', 'addAsansor'].includes(activeTab);
+                      if (!zatenSayfadayiz) {
+                        setActiveTab('addNakliye'); setRecordType('Nakliye'); setEditingJobId(null);
+                        setFormData({...formData, isSpecial: false, esnekMusteri: false, esnekTarihler: [], customerType: 'Bireysel', tcNo: '', taxNo: '', customerName: '', customerPhone: '', altPhone: '', fromProvince: 'İstanbul (Anadolu)', fromDistrict: '', fromFloor: '1. Kat', fromPacking: 'Kendisi Topladı', fromTransportMethod: 'Merdiven', fromRoomCount: '1+1', fromDistance: '', fromDistanceUnit: 'Metre', fromAddress: '', toProvince: 'İstanbul (Anadolu)', toDistrict: '', toFloor: '1. Kat', toPacking: 'Kendisi Topladı', toTransportMethod: 'Merdiven', toRoomCount: '1+1', toDistance: '', toDistanceUnit: 'Metre', toAddress: '', wallMounting: [], esyaDurumu: [], contractDetails: '', notes: ''});
+                      }
+                      setIsAddJobSubMenuOpen(true); // menüde Satış › Müşteri Kayıt açık ve seçili görünsün
+                      setIsSidebarOpen(false);
+                    }}
                     className="relative p-2 rounded-xl transition shrink-0 gorusme-kisayol-yanson text-white"
-                    title="Telefon Görüşmesi Ekle"
+                    title="Müşteri Kayıt"
                   >
                     <Plus className="w-5 h-5" strokeWidth={3} />
                   </button>
@@ -9308,7 +9320,9 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                     >
                       {/* DEĞİŞTİ: WhatsApp ekranı artık Müşteri Havuzu'nun parçası — orada da seçili görünür */}
                       <div className={`w-1.5 h-1.5 rounded-full ${(activeTab === 'musteriHavuzu' || activeTab === 'whatsapp') ? 'bg-yellow-400' : 'bg-yellow-600'}`}></div> Müşteri Havuzu
-                      {showSatisWhatsapp && whatsappAtanmamis > 0 && <span title="WhatsApp havuzu: temsilcisi atanmamış konuşma" className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center">{whatsappAtanmamis}</span>}
+                      {/* KALDIRILDI (2026-10-08 · kullanıcı talebi): Müşteri Havuzu yanındaki yeşil WhatsApp rozeti — yalnızca burada kapalı (false &&);
+                          Satış butonundaki ve WhatsApp Mesajları Havuzu kartındaki rozetler aynen duruyor */}
+                      {false && showSatisWhatsapp && whatsappAtanmamis > 0 && <span title="WhatsApp havuzu: temsilcisi atanmamış konuşma" className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center">{whatsappAtanmamis}</span>}
                     </button>
                     )}
                     {/* KALDIRILDI (kullanıcı talebi): sol menüdeki "WhatsApp" — artık Müşteri Havuzu'ndaki
