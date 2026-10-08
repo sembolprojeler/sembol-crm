@@ -30,7 +30,13 @@
 //  12) Yapay zeka hatası konuşmayı KİLİTLEMEZ: sabit mesaj (30 dk'da bir), sonraki mesajda yeniden dener
 //  13) Medya (görsel / ses / video / belge): ayrı arka plan işiyle Meta'dan indirilip crm/upload.php ile
 //      uploads/ köküne "wa_<rastgele>" adıyla yüklenir (api/_lib/whatsappMedya.js); bot cevabı beklemez
-//  Her erken çıkışta tek satır log: "[whatsapp] atlandı <maskeli numara> <sebep>"
+//  14) KULLANICI ADI / BSUID (2026-10-08): kullanıcı adı olan müşterinin mesajı telefon OLMADAN gelebilir
+//      (from / wa_id yok; from_user_id + contacts[].user_id + profile.username var). Konuşma kimliği o zaman
+//      BSUID'dir; cevap "recipient" alanıyla gider (api/_lib/whatsapp.js musteriCoz / waMetinGonder). Telefon
+//      sonradan gelirse konuşmaya yazılır, aynı konuşma sürer. Lead'de telefon yoksa iletisim "Telefon Bekleniyor …".
+//  Her gelen mesajda tek satır "[whatsapp] gelen <maskeli kimlik> <tip> m=<anahtarlar> c=<contacts[0] anahtarları>"
+//  (yalnızca ANAHTAR adları — telefon / ad gibi değerler loglanmaz).
+//  Her erken çıkışta tek satır log: "[whatsapp] atlandı <maskeli kimlik> <sebep>"
 //
 // ORTAM DEĞİŞKENLERİ (Vercel, VITE_ öneki YOK):
 //   WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID
@@ -45,7 +51,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { waitUntil } from '@vercel/functions';
-import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, aiUyariYaz, aiUyariTemizle, gelenMesajiCoz, metaHatasiCoz, hatBul, konusmaKimligi } from './_lib/whatsapp.js';
+import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, aiUyariYaz, aiUyariTemizle, gelenMesajiCoz, metaHatasiCoz, hatBul, konusmaKimligi, musteriCoz, anahtarOzeti, bsuidMi } from './_lib/whatsapp.js';
 import { botCevabiUret } from './_lib/ai.js';
 import { mesajMedyasiniIsle, MEDYA_TIPLERI } from './_lib/whatsappMedya.js';
 import { sistemTalimati, girisMetni, kvkkEkMetni, asistanAdi, fiyatRakamlariGecerliMi, hizmetReddiVarMi, RET_DUZELTME_NOTU, retYerineCevap, istanbulGunu } from './_lib/botTalimatlari.js';
@@ -120,6 +126,8 @@ export function kvkkGonderilenOku(k = {}) {
 const DURUM_SIRASI = { sent: 1, delivered: 2, read: 3 };
 const enGec = (...zamanlar) => zamanlar.filter(Boolean).map(String).sort().at(-1) || '';
 const atlandi = (no, sebep) => console.log('[whatsapp] atlandı', maskele(no), sebep);
+// Gelen yapının teşhisi: mesaj ve contacts[0] ANAHTAR adları (değerler değil)
+const yapiOzeti = (m, contacts) => `m=${anahtarOzeti(m)} c=${anahtarOzeti(Array.isArray(contacts) ? contacts[0] : null)}`;
 
 // ------------------------------------------------------------------ İMZA
 export function imzaGecerliMi(ham, baslik, secret) {
@@ -225,6 +233,7 @@ export function handlerOlustur({
 
     const hizmet = ({ parca_esya: 'parca_esya', asansor_kiralama: 'asansor_kiralama', ofis: 'ofis' })[intent] || '';
     const { kayit } = whatsappLeadKaydi({ marka: leadMarka, hizmet, collected, waId, profilAdi: konusma.profileName || '', onceki, ilkKayit,
+      telefonWa: konusma.telefonWa || (bsuidMi(waId) ? '' : waId), userId: konusma.userId || '', kullaniciAdi: konusma.username || '',
       tamamlandi: fiyat?.durum === 'tamam', fiyat: leadFiyati(fiyat), nowIso, asistan: asistanAdi(hat.marka) });
     // CRM WhatsApp sekmesi lead'den konuşmayı açabilsin
     kayit.whatsapp = { ...kayit.whatsapp, konusmaId: kid, hatId: hat.phoneNumberId, hatMarka: hat.marka };
@@ -442,10 +451,18 @@ export function handlerOlustur({
   }
 
   // ---- gelen müşteri mesajı
-  async function mesajIsle(db, hat, m, profilAdi) {
-    const waId = String(m.from || '');
+  // contacts: aynı olaydaki value.contacts (profil adı, kullanıcı adı, BSUID)
+  async function mesajIsle(db, hat, m, contacts = []) {
+    const mu = musteriCoz(m, contacts);
     const wamid = String(m.id || '');
-    if (!waId || !wamid) return;
+    console.log('[whatsapp] gelen', maskele(mu.kimlik), m.type || '-', mu.telefon ? 'tel' : mu.userId ? 'kullanici_adi' : 'kimliksiz', yapiOzeti(m, contacts));
+    if (!mu.kimlik) { atlandi('', `kimlik yok (from / from_user_id / wa_id / user_id yok) ${yapiOzeti(m, contacts)}`); return; }
+    if (!wamid) { atlandi(mu.kimlik, `wamid (id) yok ${yapiOzeti(m, contacts)}`); return; }
+    // Konuşma kimliği: telefon, yoksa BSUID. Kullanıcı adıyla başlamış konuşmada telefon sonradan
+    // gelirse (Meta 30 gün kuralı) konuşma bölünmez — BSUID'li belge varsa o sürer.
+    let waId = mu.kimlik;
+    if (mu.telefon && mu.userId && (await konusmaRef(db, konusmaKimligi(hat, mu.userId), appId).get()).exists) waId = mu.userId;
+    const profilAdi = mu.profilAdi;
     const kid = konusmaKimligi(hat, waId);
     const c = gelenMesajiCoz(m);
     const ref = c.tip === 'text' || c.tip === 'button' ? refKoduBul(c.metin) : null;
@@ -476,7 +493,11 @@ export function handlerOlustur({
       const s = await t.get(kRef);
       const k = s.exists ? s.data() : {};
       const yeni = {
-        waId, phone: waTelefonCrm(waId), profileName: profilAdi || k.profileName || '',
+        waId, phone: waTelefonCrm(mu.telefon) || k.phone || '', profileName: profilAdi || k.profileName || '',
+        // YENİ (2026-10-08): kullanıcı adı / BSUID — telefon yoksa panelde "Kullanıcı adıyla yazdı"
+        ...(mu.telefon ? { telefonWa: mu.telefon } : {}), ...(mu.userId ? { userId: mu.userId } : {}),
+        ...(mu.kullaniciAdi ? { username: mu.kullaniciAdi } : {}),
+        kullaniciAdiyla: !mu.telefon && !k.telefonWa,
         hatId: hat.phoneNumberId, marka: hat.marka,
         lastMessageAt: zaman, lastMessagePreview: c.ozet || '', lastCustomerMessageAt: zaman, lastCustomerWamid: wamid,
         unreadCount: (Number(k.unreadCount) || 0) + 1,
@@ -488,7 +509,7 @@ export function handlerOlustur({
       t.set(kRef, yeni, { merge: true });
       return { ...k, ...yeni };
     });
-    if (!c.botaGitsin) { atlandi(waId, `bota gitmeyen mesaj türü (${c.tip})`); return; }
+    if (!c.botaGitsin) { atlandi(waId, `bota gitmeyen mesaj türü (${c.tip}) ${yapiOzeti(m, contacts)}`); return; }
     if (konusma.mode === 'human') {
       konusma = await insanModu(db, hat, kid, waId, konusma);
       if (konusma.mode === 'human') return;
@@ -526,10 +547,16 @@ export function handlerOlustur({
 
   // ---- giden mesaj durumu
   async function durumIsle(db, hat, s) {
-    const waId = String(s.recipient_id || '');
-    if (!waId || !s.id) return;
-    const ref = mesajlarRef(db, konusmaKimligi(hat, waId), appId).doc(String(s.id));
-    const snap = await ref.get();
+    // recipient_id (telefon) kullanıcı adlı müşteride gelmeyebilir; recipient_user_id (BSUID) her zaman gelir
+    const adaylar = [s.recipient_id, s.recipient_user_id].map(x => String(x || '')).filter(Boolean);
+    if (!adaylar.length || !s.id) { atlandi('', `durum: alıcı / id yok s=${anahtarOzeti(s)}`); return; }
+    const waId = adaylar[0];
+    let ref = null, snap = null;
+    for (const aday of adaylar) {
+      ref = mesajlarRef(db, konusmaKimligi(hat, aday), appId).doc(String(s.id));
+      snap = await ref.get();
+      if (snap.exists) break;
+    }
     if (!snap.exists) return; // bu sistemden gönderilmemiş mesaj
     const d = snap.data() || {};
     const zaman = Number(s.timestamp) > 0 ? new Date(Number(s.timestamp) * 1000).toISOString() : iso();
@@ -548,17 +575,16 @@ export function handlerOlustur({
     const isler = [];
     for (const entry of payload?.entry || []) {
       for (const change of entry?.changes || []) {
-        if (change?.field !== 'messages') continue;
+        if (change?.field !== 'messages') { console.log('[whatsapp] atlandı', '-', `messages dışı alan (${change?.field || '-'})`); continue; }
         const v = change.value || {};
         // Hat yapılandırmada yoksa (aynı uygulamaya bağlı başka numara) mesajlar işlenmez
         const hat = hatBul(env, v.metadata?.phone_number_id);
         if (!hat) {
-          (v.messages || []).forEach(m => atlandi(m.from, `bilinmeyen hat (${maskele(v.metadata?.phone_number_id)})`));
+          (v.messages || []).forEach(m => atlandi(musteriCoz(m, v.contacts).kimlik, `bilinmeyen hat (${maskele(v.metadata?.phone_number_id)}) ${yapiOzeti(m, v.contacts)}`));
           continue;
         }
-        const profiller = Object.fromEntries((v.contacts || []).map(c => [String(c.wa_id), c.profile?.name || '']));
         (v.statuses || []).forEach(s => isler.push(durumIsle(db, hat, s)));
-        (v.messages || []).forEach(m => isler.push(mesajIsle(db, hat, m, profiller[String(m.from)] || '')));
+        (v.messages || []).forEach(m => isler.push(mesajIsle(db, hat, m, v.contacts || [])));
       }
     }
     const sonuc = await Promise.allSettled(isler);
@@ -582,7 +608,7 @@ export function handlerOlustur({
 
     let ham;
     try { ham = await hamGovdeOku(req); } catch { res.status(400).json({ error: 'Gövde okunamadı' }); return; }
-    if (!imzaGecerliMi(ham, req.headers['x-hub-signature-256'], env.WHATSAPP_APP_SECRET)) { res.status(401).json({ error: 'Geçersiz imza' }); return; }
+    if (!imzaGecerliMi(ham, req.headers['x-hub-signature-256'], env.WHATSAPP_APP_SECRET)) { console.warn('[whatsapp] atlandı', '-', 'geçersiz imza (401)'); res.status(401).json({ error: 'Geçersiz imza' }); return; }
     let payload;
     try { payload = JSON.parse(ham.toString('utf8')); } catch { res.status(400).json({ error: 'Geçersiz JSON' }); return; }
 

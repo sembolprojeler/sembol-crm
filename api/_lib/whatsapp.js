@@ -34,7 +34,7 @@ export const mesajlarRef = (db, kimlik, appId) => konusmaRef(db, kimlik, appId).
 export const durumRef = (db, appId, belge = 'token') => veriKoku(db, appId).collection('whatsapp_durum').doc(belge);
 export const havuzRef = (db, id, appId) => veriKoku(db, appId).collection('havuzKayitlari').doc(String(id));
 
-// "905321234567" → "9053****4567" (loglar için)
+// "905321234567" → "9053****4567" (loglar için; BSUID "US.1349…1918" → "1349****1918")
 export const maskele = (no) => { const d = String(no || '').replace(/\D/g, ''); return d.length > 6 ? `${d.slice(0, 4)}****${d.slice(-4)}` : '****'; };
 
 // --------------------------------------------------------------- HATLAR (2026-10-07)
@@ -67,6 +67,34 @@ export const konusmaHatti = (env, k = {}) => (k.hatId ? hatBul(env, k.hatId) : h
 // Aynı müşteri iki hatta yazarsa iki ayrı konuşma olur
 export const konusmaKimligi = (hat, waId) => (hat?.eskiKimlik ? String(waId) : `${hat.phoneNumberId}_${waId}`);
 
+// --------------------------------------------------------------- KULLANICI ADI / BSUID (2026-10-08)
+// Meta kullanıcı adı geçişi: kullanıcı adı olan müşterinin mesajı telefon OLMADAN gelebilir
+// (messages[].from ve contacts[].wa_id yok). O zaman kimlik işletmeye özel kullanıcı kimliğidir (BSUID):
+//   messages[].from_user_id · contacts[].user_id · contacts[].profile.username · statuses[].recipient_user_id
+//   Biçim: "US.13491208655302741918" (ülke kodu + nokta + harf/rakam; ana kimlik "US.ENT.…")
+// Gönderim: BSUID "to" alanına YAZILMAZ → "recipient" alanı (waMetinGonder bunu kendisi seçer).
+export const bsuidMi = (x) => /^[A-Z]{2}\.[A-Za-z0-9.]{1,140}$/.test(String(x || ''));
+// Gelen mesajın müşterisi: { kimlik (telefon, yoksa BSUID), telefon, userId, kullaniciAdi, profilAdi }
+export function musteriCoz(m = {}, contacts = []) {
+  let telefon = String(m.from || '').trim();
+  let userId = String(m.from_user_id || '').trim();
+  const liste = Array.isArray(contacts) ? contacts : [];
+  const c = liste.find(x => (telefon && String(x?.wa_id || '') === telefon) || (userId && String(x?.user_id || '') === userId))
+    || (liste.length === 1 ? liste[0] : null);
+  if (!telefon && c?.wa_id) telefon = String(c.wa_id);
+  if (!userId && c?.user_id) userId = String(c.user_id);
+  if (bsuidMi(telefon)) { userId = userId || telefon; telefon = ''; } // telefon alanında BSUID gelirse
+  return {
+    kimlik: telefon || userId, telefon, userId,
+    kullaniciAdi: String(c?.profile?.username || '').replace(/^@/, '').slice(0, 100), profilAdi: String(c?.profile?.name || ''),
+  };
+}
+// Teşhis logu: nesnenin ANAHTAR adları (değerler değil) — "from,id,type,text{body}" / "wa_id,user_id,profile{name,username}"
+export function anahtarOzeti(o) {
+  if (!o || typeof o !== 'object') return '-';
+  return Object.keys(o).map(k => (o[k] && typeof o[k] === 'object' && !Array.isArray(o[k]) ? `${k}{${Object.keys(o[k]).join(',')}}` : k)).join(',') || '-';
+}
+
 export const varsayilanGraphSurumu = 'v23.0';
 const graphUrl = (env, phoneNumberId) => `https://graph.facebook.com/${env.WHATSAPP_GRAPH_VERSION || varsayilanGraphSurumu}/${phoneNumberId}/messages`;
 
@@ -96,7 +124,9 @@ export async function waMetinGonder({ env = process.env, fetchFn = globalThis.fe
     const r = await fetchFn(graphUrl(env, phoneNumberId), {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: String(to), type: 'text', text: { body: String(metin).slice(0, 4096), preview_url: false } }),
+      // Telefon → "to"; BSUID (kullanıcı adıyla yazan müşteri) → "recipient" (Meta: BSUID "to"ya yazılmaz)
+      body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', ...(bsuidMi(to) ? { recipient: String(to) } : { to: String(to) }),
+        type: 'text', text: { body: String(metin).slice(0, 4096), preview_url: false } }),
       signal: ctrl.signal,
     });
     const j = await r.json().catch(() => ({}));

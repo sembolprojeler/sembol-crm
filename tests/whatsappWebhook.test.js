@@ -542,8 +542,67 @@ test('bilinmeyen hat: mesaj kaydedilmez, maskeli tek satır loglanır', async ()
   const log = await loglariYakala(() => gonder(o, olay({ messages: [mesaj('w1', 'merhaba')] }, '987654321')));
   assert.equal(mesajlar(o.db).length, 0);
   assert.equal(o.aiCagrilari.length, 0);
-  assert.ok(log.includes('[whatsapp] atlandı 9053****4567 bilinmeyen hat (9876****4321)'));
+  assert.ok(log.some(s => s.startsWith('[whatsapp] atlandı 9053****4567 bilinmeyen hat (9876****4321) m=from,id,timestamp,type,text{body}')));
   assert.ok(!log.some(s => s.includes(WA)));
+});
+
+// ---- KULLANICI ADI / BSUID (2026-10-08): telefon (from / wa_id) OLMADAN gelen mesaj
+const BSUID = 'TR.13491208655302741918';
+const bsuidMesaj = (id, metin) => ({ from_user_id: BSUID, id, timestamp: '1791273600', type: 'text', text: { body: metin } });
+const bsuidKisi = { user_id: BSUID, profile: { name: 'Depo Evim', username: 'depoevim' } };
+
+test('kullanıcı adı: from\'suz, user_id\'li mesaj işlenir — konuşma BSUID ile, cevap "recipient" ile, panel/lead telefon yok bilgisiyle', async () => {
+  SAAT = Date.parse('2026-10-08T08:00:00Z');
+  const o = ortam({ aiCevaplari: [tamam({ collected: { depoBoyutu: '5' } })] });
+  const log = await loglariYakala(() => gonder(o, olay({ contacts: [bsuidKisi], messages: [bsuidMesaj('wB1', 'Merhaba, depo fiyatı?')] })));
+  // Cevap BSUID'e "recipient" alanıyla gider, "to" yok
+  assert.equal(o.gonderilen.length, 1);
+  assert.equal(o.gonderilen[0].recipient, BSUID);
+  assert.equal(o.gonderilen[0].to, undefined);
+  assert.equal(o.aiCagrilari.length, 1);
+  const k = o.db.belge(`whatsapp_conversations/${BSUID}`);
+  assert.equal(k.waId, BSUID); assert.equal(k.userId, BSUID); assert.equal(k.username, 'depoevim');
+  assert.equal(k.phone, ''); assert.equal(k.kullaniciAdiyla, true); assert.equal(k.profileName, 'Depo Evim');
+  const mm = [...o.db.belgeler.entries()].filter(([y]) => y.includes(`whatsapp_conversations/${BSUID}/messages/`)).map(([, v]) => v);
+  assert.deepEqual(mm.map(x => x.from).sort(), ['bot', 'customer']);
+  // Lead: telefon yok açıkça belirtilir
+  const lead = o.db.havuz(k.leadId);
+  assert.match(lead.iletisim, /^Telefon Bekleniyor — WhatsApp kullanıcı adıyla yazdı \(@depoevim\)$/);
+  assert.equal(lead.whatsapp.telefonYok, true); assert.equal(lead.whatsapp.userId, BSUID); assert.equal(lead.whatsapp.kullaniciAdi, 'depoevim');
+  // Teşhis logu: anahtar adları var, değerler (BSUID, ad, kullanıcı adı) yok
+  assert.ok(log.some(s => s.startsWith('[whatsapp] gelen 1349****1918 text kullanici_adi m=from_user_id,id,timestamp,type,text{body} c=user_id,profile{name,username}')));
+  assert.ok(!log.some(s => s.includes(BSUID) || s.includes('Depo Evim') || s.includes('@depoevim')));
+  // Durum: recipient_id yok, recipient_user_id var
+  await gonder(o, olay({ statuses: [{ id: 'wamid.out1', recipient_user_id: BSUID, status: 'read', timestamp: '1791273700' }] }));
+  assert.equal(o.db.belge(`whatsapp_conversations/${BSUID}/messages/wamid.out1`).status, 'read');
+});
+
+test('kullanıcı adı: telefon sonradan gelirse konuşma bölünmez, telefon konuşmaya ve lead\'e yazılır', async () => {
+  const o = ortam({ aiCevaplari: [tamam({ collected: { depoBoyutu: '5' } })] });
+  await gonder(o, olay({ contacts: [bsuidKisi], messages: [bsuidMesaj('wB1', 'Merhaba')] }));
+  await gonder(o, olay({ contacts: [{ ...bsuidKisi, wa_id: WA }], messages: [{ ...bsuidMesaj('wB2', '2+1 ev'), from: WA }] }));
+  assert.equal(konusma(o.db), undefined); // telefonla ayrı konuşma AÇILMADI
+  const k = o.db.belge(`whatsapp_conversations/${BSUID}`);
+  assert.equal(k.phone, '0532 123 45 67'); assert.equal(k.telefonWa, WA); assert.equal(k.kullaniciAdiyla, false);
+  assert.equal(o.gonderilen.length, 2); assert.equal(o.gonderilen[1].recipient, BSUID);
+  const lead = o.db.havuz(k.leadId);
+  assert.equal(lead.iletisim, '0532 123 45 67'); assert.equal(lead.whatsapp.telefonYok, false);
+});
+
+test('teşhis: kimliksiz / wamid\'siz / desteklenmeyen mesaj ve messages dışı alan loglanır (yalnızca anahtar adları)', async () => {
+  const o = ortam({ aiCevaplari: [tamam()] });
+  const log = await loglariYakala(async () => {
+    await gonder(o, olay({ contacts: [{ profile: { name: 'Gizli Ad' } }], messages: [{ id: 'wK', type: 'text', text: { body: 'selam' } }] }));
+    await gonder(o, olay({ messages: [{ from: WA, type: 'text', text: { body: 'selam' } }] }));
+    await gonder(o, olay({ messages: [{ from: WA, id: 'wU', type: 'unsupported', unsupported: { type: 'x' } }] }));
+    await gonder(o, { object: 'whatsapp_business_account', entry: [{ changes: [{ field: 'account_update', value: {} }] }] });
+  });
+  assert.ok(log.some(s => s.startsWith('[whatsapp] atlandı **** kimlik yok') && s.includes('m=id,type,text{body} c=profile{name}')));
+  assert.ok(log.some(s => s.startsWith('[whatsapp] atlandı 9053****4567 wamid (id) yok m=from,type,text{body}')));
+  assert.ok(log.some(s => s.startsWith('[whatsapp] atlandı 9053****4567 bota gitmeyen mesaj türü (unsupported) m=from,id,type,unsupported{type}')));
+  assert.ok(log.includes('[whatsapp] atlandı - messages dışı alan (account_update)'));
+  assert.ok(!log.some(s => s.includes(WA) || s.includes('Gizli Ad') || s.includes('selam')));
+  assert.equal(o.aiCagrilari.length, 0);
 });
 
 test('eski konuşma (8761 benzeri): ekspertiz "Oluştur" sonrası human\'a düşmüş, personel yazmamış → yeni mesajda bota döner, needsAgent kalır', async () => {

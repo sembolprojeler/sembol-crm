@@ -1,7 +1,7 @@
 // src/whatsappPanel.js — CRM WhatsApp panelinin saf mantığı
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { pencereAcikMi, pencereKalan, konusmalariSuz, mesajGorunumu, durumBilgisi, dikkatSayisi, sekmeBasligi, bekleyenSayisi, botLeadKonusmaId, listeSaati, PENCERE_MS } from '../src/whatsappPanel.js';
+import { pencereAcikMi, pencereKalan, konusmalariSuz, mesajGorunumu, durumBilgisi, dikkatSayisi, sekmeBasligi, bekleyenSayisi, botLeadKonusmaId, listeSaati, PENCERE_MS, musteriAdi, musteriAltSatiri, musteriTelefonu, kullaniciAdiylaMi } from '../src/whatsappPanel.js';
 
 const SIMDI = Date.parse('2026-10-07T12:00:00Z');
 
@@ -101,4 +101,22 @@ test('medya görünümü: hazır / yükleniyor / hata / süresi dolmuş / eski m
   assert.equal(medyaGorunumu({ type: 'text', text: 'x' }, SIMDI), null);
   assert.equal(medyaGorunumu({ type: 'location', konum: {} }, SIMDI), null);
   assert.equal(boyutMetni(2048), '2 KB'); assert.equal(boyutMetni(3 * 1024 * 1024), '3.0 MB');
+});
+
+test('kullanıcı adıyla yazan müşteri (BSUID): telefon yerine kullanıcı adı / etiket, aranabilir telefon yok', () => {
+  const k = { waId: 'TR.13491208655302741918', userId: 'TR.13491208655302741918', username: 'depoevim', phone: '', kullaniciAdiyla: true };
+  assert.equal(kullaniciAdiylaMi(k), true);
+  assert.equal(musteriAdi(k), '@depoevim');
+  assert.equal(musteriAltSatiri(k), '@depoevim · Kullanıcı adıyla yazdı');
+  assert.equal(musteriAltSatiri({ ...k, username: '' }), 'Kullanıcı adıyla yazdı');
+  assert.equal(musteriTelefonu(k), '');
+  // Telefon sonradan geldiyse normal görünür
+  const t = { ...k, phone: '0532 123 45 67', telefonWa: '905321234567', kullaniciAdiyla: false, profileName: 'Ayşe' };
+  assert.equal(kullaniciAdiylaMi(t), false); assert.equal(musteriAdi(t), 'Ayşe');
+  assert.equal(musteriAltSatiri(t), '0532 123 45 67'); assert.equal(musteriTelefonu(t), '05321234567');
+  // Eski telefonlu konuşma değişmez
+  assert.equal(musteriAltSatiri({ waId: '905321234567', phone: '0532 123 45 67' }), '0532 123 45 67');
+  assert.equal(musteriTelefonu({ waId: '905321234567' }), '905321234567');
+  // Arama kullanıcı adıyla da bulur
+  assert.equal(konusmalariSuz([k, { waId: '905321234567', profileName: 'Ali' }], { arama: '@depo' }).length, 1);
 });

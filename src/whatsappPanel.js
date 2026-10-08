@@ -27,6 +27,18 @@ export function pencereKalan(k, simdi = Date.now()) {
 export const MARKA_ETIKETI = { depoevim: 'DepoEvim', sembol: 'Sembol' };
 export const konusmaMarkasi = (k) => k?.marka === 'sembol' ? 'sembol' : 'depoevim';
 
+// YENİ (2026-10-08): kullanıcı adıyla yazan müşteri (Meta telefon göndermedi; waId = BSUID "TR.1349…")
+const bsuidMi = (x) => /^[A-Z]{2}\./.test(String(x || ''));
+export const kullaniciAdiylaMi = (k) => !k?.phone && (k?.kullaniciAdiyla === true || bsuidMi(k?.waId));
+// Aranabilir telefon rakamları ('' → telefon yok; BSUID asla telefon sayılmaz)
+export const musteriTelefonu = (k) => String(k?.phone || (bsuidMi(k?.waId) ? '' : k?.waId) || '').replace(/\D/g, '');
+export const musteriAdi = (k) => k?.profileName || (k?.username ? `@${k.username}` : '') || 'WhatsApp Müşterisi';
+// Adın altındaki satır: telefon ya da "@kullanici · Kullanıcı adıyla yazdı"
+export function musteriAltSatiri(k) {
+  if (!kullaniciAdiylaMi(k)) return k?.phone || k?.waId || '';
+  return k?.username ? `@${k.username} · Kullanıcı adıyla yazdı` : 'Kullanıcı adıyla yazdı';
+}
+
 export const bekliyorMu = (k) => k?.needsAgent === true;
 export const bekleyenSayisi = (liste = []) => liste.filter(bekliyorMu).length;
 
@@ -39,6 +51,7 @@ export function konusmalariSuz(liste = [], { marka = 'tumu', mod = 'tumu', arama
     .filter(k => marka === 'tumu' || konusmaMarkasi(k) === marka)
     .filter(k => mod === 'tumu' || (mod === 'bekleyen' ? bekliyorMu(k) : (k.mode || 'bot') === mod))
     .filter(k => !q || String(k.profileName || '').toLocaleLowerCase('tr-TR').includes(q)
+      || String(k.username || '').toLocaleLowerCase('tr-TR').includes(q.replace(/^@/, ''))
       || (qRakam.length >= 3 && (String(k.waId || '').includes(qRakam) || String(k.phone || '').replace(/\D/g, '').includes(qRakam))))
     .sort((a, b) => (bekliyorMu(b) - bekliyorMu(a)) || String(b.lastMessageAt || '').localeCompare(String(a.lastMessageAt || '')));
 }

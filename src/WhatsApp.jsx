@@ -16,7 +16,7 @@ import { MessageCircle, Send, Bot, UserCheck, Search, ExternalLink, MapPin, Aler
   CalendarDays, Phone, Briefcase, Eye, Users } from 'lucide-react'; // YENİ (2026-10-08): havuz listesi simgeleri
 import { firestoreKaynagi } from './whatsappKaynak.js';
 import { pencereAcikMi, pencereKalan, konusmalariSuz, mesajGorunumu, medyaGorunumu, boyutMetni, gorselGoruntuleyiciIstegi, durumBilgisi, dikkatSayisi, sekmeBasligi, bekliyorMu,
-  listeSaati, konusmaMarkasi, MARKA_ETIKETI, PENCERE_UYARISI, SIFRE_YOK_MESAJI } from './whatsappPanel.js';
+  listeSaati, konusmaMarkasi, musteriAdi, musteriAltSatiri, musteriTelefonu, kullaniciAdiylaMi, MARKA_ETIKETI, PENCERE_UYARISI, SIFRE_YOK_MESAJI } from './whatsappPanel.js';
 
 const MARKA_RENK = { depoevim: 'bg-blue-50 text-blue-700 border-blue-200', sembol: 'bg-red-50 text-red-700 border-red-200' };
 const mesajSaati = (iso, simdi) => {
@@ -144,13 +144,14 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <span className={`truncate text-[13px] ${okunmamis ? 'font-black text-black' : 'font-bold text-neutral-800'}`}>{k.profileName || k.phone || 'WhatsApp Müşterisi'}</span>
+                      <span className={`truncate text-[13px] ${okunmamis ? 'font-black text-black' : 'font-bold text-neutral-800'}`}>{k.profileName || k.phone || musteriAdi(k)}</span>
                       <span className="ml-auto text-[10px] font-bold text-neutral-400 shrink-0">{listeSaati(k.lastMessageAt, simdi())}</span>
                     </div>
                     <p className={`text-[12px] truncate ${okunmamis ? 'text-neutral-800 font-bold' : 'text-neutral-500'}`}>{k.lastMessagePreview || '—'}</p>
                     <div className="flex items-center gap-1 mt-1 flex-wrap">
                       {bekliyorMu(k) && <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white">Personel bekliyor</span>}
                       <ModRozeti k={k} />
+                      {kullaniciAdiylaMi(k) && <span className="text-[9px] font-black px-1.5 py-0.5 rounded border border-purple-200 bg-purple-50 text-purple-700" title="Meta telefon numarasını göndermedi — müşteri WhatsApp kullanıcı adıyla yazdı">Kullanıcı adıyla yazdı</span>}
                       <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${MARKA_RENK[marka]}`}>{MARKA_ETIKETI[marka]}</span>
                       {okunmamis > 0 && <span className="ml-auto min-w-[20px] h-5 px-1.5 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center">{okunmamis}</span>}
                     </div>
@@ -241,8 +242,8 @@ export const WhatsAppSohbet = ({ konusma, currentUser, yonetici = false, onGeri 
             <div className="px-3 py-2.5 border-b border-neutral-200 flex items-center gap-2 flex-wrap">
               {onGeri && <button type="button" onClick={onGeri} className={`${geriHerZaman ? '' : 'md:hidden '}p-1.5 rounded-lg hover:bg-neutral-100`} title="Geri"><ArrowLeft className="w-5 h-5" /></button>}
               <div className="min-w-0">
-                <p className="font-black text-black text-sm truncate">{secili.profileName || 'WhatsApp Müşterisi'}</p>
-                <p className="text-[11px] font-bold text-neutral-500">{secili.phone || secili.waId}</p>
+                <p className="font-black text-black text-sm truncate">{musteriAdi(secili)}</p>
+                <p className="text-[11px] font-bold text-neutral-500">{musteriAltSatiri(secili)}</p>
               </div>
               <ModRozeti k={secili} />
               {secili.mode === 'human' && secili.devralan?.ad && <span className="text-[10px] font-bold text-amber-800">· {secili.devralan.ad}</span>}
@@ -461,7 +462,7 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
                 const okunmamis = Number(k.unreadCount) || 0;
                 const marka = konusmaMarkasi(k);
                 const pf = portfoyHaritasi[k.id];
-                const tel = String(k.phone || k.waId || '').replace(/\D/g, '');
+                const tel = musteriTelefonu(k);
                 return (
                   <div key={k.id} onClick={() => setAcikId(k.id)}
                     className={`relative grid grid-cols-1 md:grid-cols-[1.4fr_2fr_1fr_120px_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 cursor-pointer hover:bg-neutral-50 ${bekliyorMu(k) ? 'bg-red-50/40' : ''}`}>
@@ -473,10 +474,10 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
                       </div>
                       <div className="min-w-0">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <p className={`text-sm truncate ${okunmamis ? 'font-black text-black' : 'font-bold text-neutral-900'}`}>{k.profileName || 'WhatsApp Müşterisi'}</p>
+                          <p className={`text-sm truncate ${okunmamis ? 'font-black text-black' : 'font-bold text-neutral-900'}`}>{musteriAdi(k)}</p>
                           {okunmamis > 0 && <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-green-600 text-white text-[10px] font-black flex items-center justify-center">{okunmamis}</span>}
                         </div>
-                        <p className="text-[11px] font-bold text-neutral-500">{k.phone || k.waId} · {listeSaati(k.lastMessageAt, simdiMs)}</p>
+                        <p className="text-[11px] font-bold text-neutral-500">{musteriAltSatiri(k)} · {listeSaati(k.lastMessageAt, simdiMs)}</p>
                       </div>
                     </div>
                     {/* Son mesaj */}

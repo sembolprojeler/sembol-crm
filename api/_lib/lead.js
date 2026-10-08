@@ -633,10 +633,17 @@ export const refBelgeId = (kod) => `ref_${String(kod || '').toUpperCase().replac
 // WhatsApp numarası (wa_id, ör. "905321234567") → CRM'in iletişim biçimi "0532 123 45 67".
 // Türkiye dışı numaralar rakam olarak kalır (CRM'deki wa.me bağlantısı bozulmaz).
 export function waTelefonCrm(waId) {
+  // BSUID (kullanıcı adıyla yazan müşteri, ör. "US.1349…") telefon DEĞİLDİR
+  if (/^[A-Z]{2}\./.test(String(waId || ''))) return '';
   const d = String(waId || '').replace(/\D/g, '');
   if (/^90\d{10}$/.test(d)) { const n = '0' + d.slice(2); return `${n.slice(0, 4)} ${n.slice(4, 7)} ${n.slice(7, 9)} ${n.slice(9)}`; }
   return d;
 }
+
+// Kullanıcı adıyla yazan (telefonu Meta'dan gelmeyen) müşterinin lead iletişim alanı.
+// "Bekleniyor" geçtiği için CRM bunu numarasız sayar (ara / wa.me pasif, düzenlemede boş açılır).
+export const telefonYokMetni = (kullaniciAdi = '') =>
+  `Telefon Bekleniyor — WhatsApp kullanıcı adıyla yazdı${kullaniciAdi ? ` (@${String(kullaniciAdi).replace(/^@/, '')})` : ''}`;
 
 // Botun hizmet niyeti → sihirbaz türü (sonMesaj biçimi ve hizmetTipi buna göre)
 export function whatsappWizardTuru(marka, hizmet) {
@@ -673,11 +680,12 @@ export function whatsappAlanlariniTemizle(c) {
 
 // fiyat: sunucunun hesapladığı tahmin (yapay zeka hesaplamaz) —
 //   Sembol: { min, max } · DepoEvim: { aylik, toplam, nakliyeMin, nakliyeMax }
-export function whatsappLeadKaydi({ marka = 'sembol', hizmet = '', collected = {}, waId, profilAdi = '', onceki = {}, ilkKayit,
+// telefonWa: müşterinin telefonu (wa_id) — kullanıcı adıyla yazan müşteride boş olabilir (waId o zaman BSUID'dir)
+export function whatsappLeadKaydi({ marka = 'sembol', hizmet = '', collected = {}, waId, telefonWa = waId, userId = '', kullaniciAdi = '', profilAdi = '', onceki = {}, ilkKayit,
   tamamlandi = false, fiyat = null, nowIso = new Date().toISOString(), asistan = 'SEMBO Asistan' }) {
   const wizardType = whatsappWizardTuru(marka, hizmet);
   const alanlar = whatsappAlanlariniTemizle(collected);
-  const body = { ...alanlar, phone: waTelefonCrm(waId) };
+  const body = { ...alanlar, phone: waTelefonCrm(telefonWa) };
   if (fiyat?.min) { body.priceMin = fiyat.min; body.priceMax = fiyat.max || fiyat.min; }
   if (fiyat?.aylik) body.fiyatAylik = fiyat.aylik;
   if (fiyat?.toplam) body.fiyatToplam = fiyat.toplam;
@@ -690,7 +698,9 @@ export function whatsappLeadKaydi({ marka = 'sembol', hizmet = '', collected = {
   const kayit = {
     kanal: 'whatsapp',
     musteriAdi,
-    iletisim: body.phone,
+    // YENİ (2026-10-08): telefon yoksa (kullanıcı adıyla yazdı) açıkça belirtilir;
+    // personelin lead'e elle yazdığı numara bot güncellemesinde silinmez
+    iletisim: body.phone || (onceki.iletisim && !String(onceki.iletisim).includes('Bekleniyor') ? onceki.iletisim : telefonYokMetni(kullaniciAdi)),
     hesapId: SITE_BY_WIZARD[wizardType] || 'sembolevdeneve',
     hizmetTipi: HIZMET_TIPI_BY_WIZARD[wizardType] || 'Nakliye',
     sonMesaj: buildSonMesaj(wizardType, body),
@@ -706,7 +716,9 @@ export function whatsappLeadKaydi({ marka = 'sembol', hizmet = '', collected = {
     tasinmaTarihi: body.moveDate || body.baslangicTarihi || '',
     tarihEsnek: !!body.dateFlexible,
     ...(TEKLIF_ALANLARI_BY_WIZARD[wizardType] ? { teklifAlanlari: teklifAlanlariAl(wizardType, body) } : {}),
-    whatsapp: { waId: String(waId || ''), profilAdi: String(profilAdi || '').slice(0, 100) },
+    whatsapp: { waId: String(waId || ''), profilAdi: String(profilAdi || '').slice(0, 100),
+      ...(userId ? { userId: String(userId) } : {}), ...(kullaniciAdi ? { kullaniciAdi: String(kullaniciAdi).slice(0, 100) } : {}),
+      telefonYok: !body.phone },
     updatedAt: nowIso,
   };
   // KVKK: aydınlatma metni botun ilk mesajında verildi (açık rıza / kvkkOnay DEĞİL)
