@@ -24,6 +24,8 @@ export function sahteDb() {
       if (belgeler.has(yol)) throw Object.assign(new Error('ALREADY_EXISTS'), { code: 6 });
       belgeler.set(yol, structuredClone(veri));
     },
+    // YENİ (bot bilgi sürümleri): Firestore delete()
+    async delete() { belgeler.delete(yol); },
     collection: (ad) => koleksiyon(`${yol}/${ad}`),
   });
   // YENİ: doc() kimliksiz (otomatik kimlik), orderBy / limit / get (yalnızca doğrudan alt belgeler)

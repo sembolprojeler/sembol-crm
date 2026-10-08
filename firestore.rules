@@ -2,10 +2,10 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Fiyat belgesi, fiyat geçmişi ve WhatsApp konuşmaları / durum belgeleri
+    // Fiyat belgesi, fiyat geçmişi, WhatsApp konuşmaları / durum belgeleri ve bot bilgi bankası (bot_bilgi, 2026-10-08)
     // yalnızca sunucudan (Admin SDK: /api/fiyatlar, /api/whatsapp-webhook, /api/whatsapp-send) yazılır.
     function sunucuKorumali(yol) {
-      return string(yol).matches('.*artifacts/[^/]+/public/data/(ayarlar/fiyatTablosu|fiyat_gecmisi/[^/]+|whatsapp_conversations/.+|whatsapp_durum/[^/]+)');
+      return string(yol).matches('.*artifacts/[^/]+/public/data/(ayarlar/fiyatTablosu|fiyat_gecmisi/[^/]+|whatsapp_conversations/.+|whatsapp_durum/[^/]+|bot_bilgi/.+)');
     }
 
     match /{document=**} {

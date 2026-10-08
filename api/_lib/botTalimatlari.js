@@ -11,7 +11,12 @@
 // 2026-10-07: her hat tek markalı (0850 = DepoEvim; marka seçimi bu hatta kullanılmaz),
 // handoffType (temsilci | sikayet → bot susar; bildir → bot devam eder), konu dışı sohbet,
 // DepoEvim hattında taşıma talebi (fiyatsız, taşıma ekibine lead).
+// 2026-10-08: DepoEvim BİLGİ bloğu CRM'deki "Bot Bilgileri" sayfasından (bilgi bankası, src/botBilgiSema.js)
+// gelebilir — sistemTalimati({ bilgiMetni }). Boşsa / okunamazsa yedek: ilk içerik (varsayilanBotBilgi).
+// Bilgi bankası YALNIZCA bilgi bloğunun yerine geçer; buradaki kurallar (KVKK, devir, hizmet reddi,
+// 81 il, taşıma akışı, "+KDV", "uydurma") her zaman kodda kalır.
 // ============================================================================
+import { varsayilanBotBilgi, botBilgiMetni } from '../../src/botBilgiSema.js';
 
 export const MARKALAR = {
   sembol: {
@@ -84,22 +89,19 @@ SEMBOL NAKLİYAT (sembolevdeneve.com) — kullanabileceğin bilgiler, başka bil
 - Fiyatı etkileyenler: eşya miktarı, kat ve asansör durumu, mesafe, paketleme.
 - Otomatik fiyat EVDEN EVE nakliyatın hepsi için verilir: İstanbul içi, il dışı il içi (ör. Ankara içi) ve iller arası (her ilden her ile). Ofis, parça eşya, asansör kiralama, uluslararası ve diğer işlerde bilgileri topla ve ekibe devret.`;
 
-const DEPOEVIM_BILGI = `
-DEPOEVİM (depoevim.com) — Sembol Nakliyat güvencesiyle eşya depolama ve kiralık depo. Kullanabileceğin bilgiler, başka bilgi uydurma:
-- 2004'ten beri nakliyat, 2015'ten beri DepoEvim markasıyla depolama. K3 yetki belgeli, Allianz sigortalı (doğal afet, su baskını, yangın, hırsızlık).
-- Telefon: 0545 240 84 61 · info@depoevim.com · Çalışma saatleri: hafta içi 09:00–18:00.
-- Şubeler (İstanbul): Kartal (Yalı Mh. Bağlar Cd. No:74/2), Ümraniye (Dudullu OSB Mh. 1. Cd. No:30/4), Çekmeköy (Ekşioğlu Mah. Atabey Cad. No:28/2), Başakşehir (Atatürk Blv. No:98 Kat:2, Avrupa Yakası), Pendik (Bahçelievler Mah. Yeni Sok. No:5 C). Gebze şubesi "yakında" — henüz hizmet vermiyor.
-- 7/24 kamera, kişiye özel kilitli oda, rutubetsiz/iklimlendirilmiş, düzenli ilaçlama. Taahhüt yok, sözleşmeli ve faturalı.
-- İKİ AYRI HİZMET — karıştırma:
-  1) EŞYA DEPOLAMA (anahtar teslim): firma eşyayı adresten alır, paketler, depoya taşır. Aylık kira + bir defalık alım/nakliye ücreti.
-  2) KİRALIK DEPO (bireysel depo kiralama): müşteri eşyasını kendisi getirir; depoya erişim RANDEVU ile. Yalnızca aylık kira.
-- Depo boyutları (aylık kira, +KDV): 1+0 = 10 m³ (2×1,7×3 m), 1+1 = 15 m³ (2×2,5×3 m), 2+1 = 22 m³ (3×2,5×3 m), 3+1 = 30 m³ (4×2,5×3 m). Daha büyük/özel hacim ve kurumsal depolama için ekip teklif verir (devret).
-- Kampanya (gerçek): 6 ay peşin ödemede 1 ay, 12 ay peşin ödemede 2 ay hediye. Aylık ödemeler IBAN ile; kredi kartı yalnızca kampanyalı toplu ödemede.
-- Aylık kira yalnızca muhafaza + sigorta bedelidir; paketleme ve alım nakliyesi ayrıca, bir defaya mahsus hesaplanır.
-- Eşyalar Türkiye'nin her ilinden alınabilir (alım ücreti mesafeye göre hesaplanır); depolar İstanbul'dadır. Alım adresi İstanbul dışı diye reddetme.
-- Online kiralama sayfası: https://www.depoevim.com/depo-fiyatlarimiz/ (müşteri isterse önerebilirsin; ödeme sen ALMAZSIN, ödeme bilgisi isteme).
-- İş yeri / ticari eşya, her gün giriş-çıkış yapılacak ticari kullanım, kurumsal arşiv → ekibe devret.
-- TÜM DepoEvim fiyatlarını "+KDV" diye söyle.`;
+// DepoEvim bilgi bloğu = SABİT başlık ve kurallar (yönetici silemez) + bilgi bankası metni.
+// Bilgi bankası boşsa / okunamazsa yedek: ilk içerik (2026-10-08 öncesi sabit metnin bölümlere ayrılmış hâli).
+export const DEPOEVIM_BILGI_YEDEK = botBilgiMetni(varsayilanBotBilgi('depoevim'));
+export function depoevimBilgiBlogu(bilgiMetni = '') {
+  return [
+    '',
+    'DEPOEVİM (depoevim.com) — Sembol Nakliyat güvencesiyle eşya depolama ve kiralık depo. Kullanabileceğin bilgiler aşağıda, başka bilgi uydurma:',
+    String(bilgiMetni || '').trim() || DEPOEVIM_BILGI_YEDEK,
+    `- (Sabit kural) Bilgilerde rakam yerine "[fiyat: Fiyat Tablosu'ndan]" geçer: tutar söyleme, fiyatı yalnızca SİSTEM FİYATI bloğundan ver.`,
+    `- (Sabit kural) Eşyalar Türkiye'nin her ilinden alınabilir; alım adresi İstanbul dışı diye reddetme.`,
+    '- (Sabit kural) TÜM DepoEvim fiyatlarını "+KDV" diye söyle.',
+  ].join('\n');
+}
 
 // --------------------------------------------------------------- ALANLAR
 const SEMBOL_ALANLAR = `
@@ -179,7 +181,7 @@ MARKA HENÜZ BELLİ DEĞİL. Müşterinin ihtiyacını anlamaya çalış:
 - Anlaşılmıyorsa kısa ve tek soruyla sor: "Evden eve nakliyat mı, yoksa eşya depolama / depo kiralama mı düşünüyorsunuz?"
 Marka belli olunca "marka" alanına yaz ve o markanın bilgileriyle devam et.
 ${SEMBOL_BILGI}
-${DEPOEVIM_BILGI}`;
+${depoevimBilgiBlogu()}`;
 
 // Kimlik markaya göre: belirsizken isimsiz nötr asistan, Sembol'de SEMBO Asistan, DepoEvim'de DepoEvim Asistanı
 const KIMLIK = {
@@ -210,10 +212,11 @@ function fiyatBlogu(fiyat) {
 // bildirim: { sebep } — personel daha önce bilgilendirildi (needsAgent), bot devam ediyor
 // tasima: DepoEvim hattında depolamasız taşıma talebi — fiyat bloğu yerine "fiyat verilmez"
 export function sistemTalimati({ marka = '', collected = {}, fiyat = null, profilAdi = '', simdiMs = Date.now(), env = process.env, ilkCevap = false,
-  bildirim = null, tasima = false } = {}) {
+  bildirim = null, tasima = false, bilgiMetni = '' } = {}) {
+  // bilgiMetni: bilgi bankasından (api/_lib/botBilgi.js) — boşsa yedek metin
   const z = istanbulZamani(simdiMs);
   const mesai = mesaiIcindeMi(simdiMs, env);
-  const markaBlogu = marka === 'depoevim' ? `MARKA: DepoEvim\n${DEPOEVIM_BILGI}\n${DEPOEVIM_ALANLAR}\n${DEPOEVIM_TASIMA}`
+  const markaBlogu = marka === 'depoevim' ? `MARKA: DepoEvim\n${depoevimBilgiBlogu(bilgiMetni)}\n${DEPOEVIM_ALANLAR}\n${DEPOEVIM_TASIMA}`
     : marka === 'sembol' ? `MARKA: Sembol Nakliyat\n${SEMBOL_BILGI}\n${SEMBOL_ALANLAR}`
       : `${MARKA_SECIMI}\n${SEMBOL_ALANLAR}\n${DEPOEVIM_ALANLAR}`;
   return [

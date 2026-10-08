@@ -659,3 +659,57 @@ test('DepoEvim hattı: konuşma depolamayla başlayıp sonra taşımaya dönerse
   assert.equal(lead.hizmetTipi, 'Nakliye'); assert.match(lead.hareketler[0].islem, /Ofis \/ İşyeri Taşıma/);
   assert.deepEqual(lead.kvkkAydinlatmaMarka, ['depoevim', 'sembol']);
 });
+
+// ---- BOT BİLGİLERİ (2026-10-08): DepoEvim bilgi bloğu bilgi bankasından; boş / bozuk → yedek
+const { botBilgiOnbelleginiTemizle } = await import('../api/_lib/botBilgi.js');
+const { varsayilanBotBilgi } = await import('../src/botBilgiSema.js');
+
+test('bilgi bankası: doluysa bot onu kullanır (TL tutarı gizli), sabit kurallar kalır; boşsa / bozuksa koddaki yedek', async () => {
+  SAAT = Date.parse('2026-10-08T10:00:00Z');
+  botBilgiOnbelleginiTemizle();
+  // boş → yedek
+  const o1 = ortam({ aiCevaplari: [tamam()] });
+  await gonder(o1, olay({ messages: [mesaj('wK1', 'merhaba')] }));
+  assert.match(o1.aiCagrilari[0].sistem, /2004'ten beri nakliyat/);
+  // dolu → bilgi bankası
+  botBilgiOnbelleginiTemizle();
+  const db = sahteDb();
+  const icerik = { bolumler: { ...varsayilanBotBilgi('depoevim').bolumler, firma: 'BİLGİ BANKASI FİRMA METNİ', odeme: 'Kutu ücreti 50 TL.' }, sss: [{ soru: 'Hafta sonu?', cevap: 'Kapalıyız.' }] };
+  await kok(db).collection('bot_bilgi').doc('depoevim').set({ icerik, surumId: 's1' });
+  const o2 = ortam({ db, aiCevaplari: [tamam()] });
+  await gonder(o2, olay({ messages: [mesaj('wK2', 'merhaba')] }));
+  const sistem = o2.aiCagrilari[0].sistem;
+  assert.match(sistem, /BİLGİ BANKASI FİRMA METNİ/); assert.doesNotMatch(sistem, /2004'ten beri nakliyat/);
+  assert.match(sistem, /S: Hafta sonu\?\nC: Kapalıyız\./);
+  assert.doesNotMatch(sistem, /50 TL/); assert.match(sistem, /Kutu ücreti \[fiyat: Fiyat Tablosu'ndan\]/);
+  assert.match(sistem, /\(Sabit kural\) TÜM DepoEvim fiyatlarını "\+KDV"/);
+  assert.match(sistem, /KVKK|aydınlatma/i);
+  // bozuk belge → yedek, bot yine cevap verir
+  botBilgiOnbelleginiTemizle();
+  const db3 = sahteDb();
+  await kok(db3).collection('bot_bilgi').doc('depoevim').set({ icerik: { bolumler: { firma: 42 } } });
+  const o3 = ortam({ db: db3, aiCevaplari: [tamam()] });
+  await gonder(o3, olay({ messages: [mesaj('wK3', 'merhaba')] }));
+  assert.match(o3.aiCagrilari[0].sistem, /2004'ten beri nakliyat/);
+  assert.equal(o3.gonderilen.length, 1);
+  botBilgiOnbelleginiTemizle();
+});
+
+test('bilgi bankası okunamıyorsa (Firestore hatası) bot yedek bilgiyle cevap vermeye devam eder', async () => {
+  botBilgiOnbelleginiTemizle();
+  const db = sahteDb();
+  const asil = db.collection;
+  // yalnızca bot_bilgi okuması hata verir
+  db.collection = (ad) => {
+    const k = asil(ad);
+    const sar = (ref) => ({ ...ref, collection: (alt) => { const c = ref.collection(alt); return alt === 'bot_bilgi' ? { ...c, doc: () => ({ get: async () => { throw new Error('UNAVAILABLE'); } }) } : sarKoleksiyon(c); }, doc: ref.doc ? (id) => sar(ref.doc(id)) : undefined });
+    const sarKoleksiyon = (c) => ({ ...c, doc: (id) => sar(c.doc(id)) });
+    return sarKoleksiyon(k);
+  };
+  const o = ortam({ db, aiCevaplari: [tamam()] });
+  await gonder(o, olay({ messages: [mesaj('wK4', 'merhaba')] }));
+  assert.equal(o.aiCagrilari.length, 1);
+  assert.match(o.aiCagrilari[0].sistem, /2004'ten beri nakliyat/);
+  assert.equal(o.gonderilen.length, 1);
+  botBilgiOnbelleginiTemizle();
+});

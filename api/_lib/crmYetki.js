@@ -40,7 +40,9 @@ export function altSatisErisimi(p, positionModules, key) {
 export const yoneticiMi = (p) => superAdminMi(p) || p?.rank === 'Müdür' || (p?.position || '').includes('Yönetici') || p?.permissions?.canEdit === true;
 
 // { ok: true, personel } | { ok: false, kod: 401 | 403, hata, sebep }
-export async function personelDogrula(db, appId, { personelId, sifre } = {}) {
+// yetki (isteğe bağlı, 2026-10-08): (personel) => boolean — verilirse WhatsApp paneli yetkisi YERİNE
+// bu kontrol uygulanır (ör. Bot Bilgileri: src/botBilgiSema.js botBilgiYetkisi)
+export async function personelDogrula(db, appId, { personelId, sifre } = {}, { yetki = null, yetkiHatasi = 'Bu işlem için yetkiniz yok.' } = {}) {
   if (!personelId) return { ok: false, kod: 401, sebep: 'kimlik_yok', hata: 'Oturum bilgisi eksik. Lütfen yeniden giriş yapın.' };
   if (!sifre) return { ok: false, kod: 401, sebep: 'sifre_yok', hata: SIFRE_YOK_MESAJI };
   const kok = db.collection('artifacts').doc(appId).collection('public').doc('data');
@@ -50,6 +52,7 @@ export async function personelDogrula(db, appId, { personelId, sifre } = {}) {
   if (!p.password) return { ok: false, kod: 401, sebep: 'sifre_yok', hata: SIFRE_YOK_MESAJI };
   if (String(p.password) !== String(sifre)) return { ok: false, kod: 401, sebep: 'sifre_hatali', hata: 'Oturum doğrulanamadı (şifre değişmiş olabilir). Lütfen yeniden giriş yapın.' };
   if (p.employmentStatus === 'Pasif' || p.permissions?.canView === false) return { ok: false, kod: 403, sebep: 'pasif', hata: 'Hesabınızın sisteme erişimi kapalı.' };
+  if (yetki) return yetki(p) ? { ok: true, personel: p } : { ok: false, kod: 403, sebep: 'yetki_yok', hata: yetkiHatasi };
   const ayar = (await kok.collection('settings').doc('company').get()).data() || {};
   if (!altSatisErisimi(p, ayar.positionModules || {}, 'satisWhatsapp')) return { ok: false, kod: 403, sebep: 'yetki_yok', hata: 'WhatsApp paneli yetkiniz yok.' };
   return { ok: true, personel: p };

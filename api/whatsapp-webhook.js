@@ -34,6 +34,8 @@
 //      (from / wa_id yok; from_user_id + contacts[].user_id + profile.username var). Konuşma kimliği o zaman
 //      BSUID'dir; cevap "recipient" alanıyla gider (api/_lib/whatsapp.js musteriCoz / waMetinGonder). Telefon
 //      sonradan gelirse konuşmaya yazılır, aynı konuşma sürer. Lead'de telefon yoksa iletisim "Telefon Bekleniyor …".
+//  15) BİLGİ BANKASI (2026-10-08): DepoEvim bilgi bloğu CRM'deki "Bot Bilgileri" sayfasından (bot_bilgi/depoevim,
+//      api/_lib/botBilgi.js, 60 sn önbellek); boş / bozuk / okunamıyorsa botTalimatlari.js'deki yedek metin.
 //  Her gelen mesajda tek satır "[whatsapp] gelen <maskeli kimlik> <tip> m=<anahtarlar> c=<contacts[0] anahtarları>"
 //  (yalnızca ANAHTAR adları — telefon / ad gibi değerler loglanmaz).
 //  Her erken çıkışta tek satır log: "[whatsapp] atlandı <maskeli kimlik> <sebep>"
@@ -53,6 +55,7 @@ import { Buffer } from 'node:buffer';
 import { waitUntil } from '@vercel/functions';
 import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, aiUyariYaz, aiUyariTemizle, gelenMesajiCoz, metaHatasiCoz, hatBul, konusmaKimligi, musteriCoz, anahtarOzeti, bsuidMi } from './_lib/whatsapp.js';
 import { botCevabiUret } from './_lib/ai.js';
+import { botBilgiMetniOku } from './_lib/botBilgi.js';
 import { mesajMedyasiniIsle, MEDYA_TIPLERI } from './_lib/whatsappMedya.js';
 import { sistemTalimati, girisMetni, kvkkEkMetni, asistanAdi, fiyatRakamlariGecerliMi, hizmetReddiVarMi, RET_DUZELTME_NOTU, retYerineCevap, istanbulGunu } from './_lib/botTalimatlari.js';
 import { botFiyatHesapla, leadFiyati } from './_lib/fiyatHesap.js';
@@ -275,12 +278,14 @@ export function handlerOlustur({
     const collected = konusma.collected || {};
     // Hat tek markalıdır: yapay zekanın "marka" alanı dikkate alınmaz
     const marka = hat.marka;
+    // YENİ (2026-10-08): DepoEvim bilgi bloğu CRM'deki Bot Bilgileri sayfasından (60 sn önbellek; boş / hata → yedek metin)
+    const bilgiMetni = marka === 'depoevim' ? await botBilgiMetniOku(db, appId, marka, simdi()) : '';
     let intent = konusma.intent || '';
     const tasimaMi = (niyet) => marka === 'depoevim' && TASIMA_NIYETLERI.includes(niyet);
     let tasima = tasimaMi(intent);
     const fiyatOnce = tasima ? null : await fiyatGuvenli(db, marka, collected, intent);
     const bildirim = konusma.needsAgent ? { sebep: konusma.handoffReason || '' } : null;
-    const talimat = (c, f, t) => sistemTalimati({ marka, collected: c, fiyat: f, profilAdi: konusma.profileName || '', simdiMs: simdi(), env, ilkCevap, bildirim, tasima: t });
+    const talimat = (c, f, t) => sistemTalimati({ marka, collected: c, fiyat: f, profilAdi: konusma.profileName || '', simdiMs: simdi(), env, ilkCevap, bildirim, tasima: t, bilgiMetni });
 
     let reply, handoff, handoffReason, handoffType = '', yeniCollected = collected, fiyat = fiyatOnce, aiHata = null;
     const r1 = await aiUret({ sistem: talimat(collected, fiyatOnce, tasima), gecmis, env, fetchFn });

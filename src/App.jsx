@@ -73,6 +73,9 @@ import { AddJobView, CustomerListView, CustomerProfileView , EskiVeriIceAktar, M
 import { WhatsAppView } from './WhatsApp.jsx';
 import { useWhatsappBekleyen } from './whatsappKaynak.js';
 import { whatsappErisimi } from './whatsappPanel.js';
+import { BotBilgileriView } from './BotBilgileri.jsx';
+import { botBilgiYetkisi } from './botBilgiSema.js';
+import { sayfadanCikilsinMi } from './kaydedilmemisUyari.js';
 import { WhatsAppHataSiniri } from './whatsappHataSiniri.js';
 import { goruntuleyiciBilgisi } from './goruntuleyici.js';
 import { CurrentJobsView, AllJobsView, CompletedJobsView, CalendarView, DamagedJobsView, CancelledJobsView, IsOnaylamaTahtasiView, EkipKurmaTahtasiView, MyAssignedJobsView, IsMerkeziView, IsKilavuzuView, HatirlatmalarView,
@@ -5072,13 +5075,17 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     // Not: Detay sayfaları (cari/personel/araç profili) geçici bir seçime bağlı
     // olduğundan, yenilemede kendi liste sayfalarına düşer.
     const GECICI_SEKME_KARSILIGI = { customerProfile: 'allCustomers', personnelProfile: 'personnelList', vehicleProfile: 'vehicleList' };
-    const [activeTab, setActiveTab] = useState(() => {
+    // YENİ (2026-10-08): menü / sekme değişiminden önce kaydedilmemiş değişiklik onayı (Bot Bilgileri) — setActiveTab aşağıda sarılır
+    const [activeTab, setActiveTabHam] = useState(() => {
       try {
         const kayitli = sessionStorage.getItem('sembolAktifSekme');
         if (!kayitli) return 'dashboard';
         return GECICI_SEKME_KARSILIGI[kayitli] || kayitli;
       } catch (e) { return 'dashboard'; }
     }); 
+    const aktifSekmeRef = useRef(activeTab);
+    useEffect(() => { aktifSekmeRef.current = activeTab; }, [activeTab]);
+    const setActiveTab = useCallback((sekme) => { if (sekme === aktifSekmeRef.current || sayfadanCikilsinMi()) setActiveTabHam(sekme); }, []);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     // YENİ (kullanıcı talebi): Tahmini Malzeme Durumu tablosunu canlı dinle —
     // değişince tüm ekranlardaki tahminler (Ekip Kurma Tahtası vb.) yenilenir
@@ -8421,6 +8428,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const showFinance = checkAccess('finance');
     const showAuth = checkAccess('auth');
     const showSystemFiles = checkAccess('systemFiles');
+    // YENİ (2026-10-08): Sistem Dosyaları > Bot Bilgileri — yalnızca Sistem Yöneticisi / Firma Sahibi / Müdür / pozisyonu 'Yönetici' (canEdit AÇMAZ)
+    const showBotBilgileri = botBilgiYetkisi(currentUser);
     const showMyComplaint = checkAccess('myComplaint');
     const showGlobalSearch = checkAccess('globalSearch');
     const showGlobalSearchCustomer = checkAccess('globalSearchCustomer');
@@ -9670,7 +9679,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                 showSystemFiles) öğe bazında AYNEN korunuyor, sadece tek başlık altında
                 toplandılar. Başlığın arka planı artık Finans Bölümü'ndeki gibi HER ZAMAN
                 renk geçişli — burada kırmızı tonlarda. */}
-            {(showAuth || showSystemFiles) && (
+            {(showAuth || showSystemFiles || showBotBilgileri) && (
               <div className="flex flex-col gap-1">
                 <button 
                   onClick={() => { setIsSystemFilesSubMenuOpen(!isSystemFilesSubMenuOpen); setIsAuthSubMenuOpen(false); setIsMaterialSubMenuOpen(false); setIsSubMenuOpen(false); setIsPersonnelSubMenuOpen(false); setIsVehicleSubMenuOpen(false); setIsTaskSubMenuOpen(false); setIsCustomerSubMenuOpen(false); setIsJobSubMenuOpen(false); setIsFinanceSubMenuOpen(false); }}
@@ -9746,6 +9755,16 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                       <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'resmiAyarlar' ? 'bg-white' : 'bg-red-600'}`}></div> Resmi Ayarları
                     </button>
                     </>)}
+                    {/* YENİ (2026-10-08): Bot Bilgileri — WhatsApp botunun bilgi bankası. Yalnızca yöneticiler
+                        (botBilgiYetkisi: Sistem Yöneticisi, Firma Sahibi, Müdür, pozisyonu 'Yönetici'); systemFiles yetkisinden bağımsız. */}
+                    {showBotBilgileri && (
+                    <button 
+                      onClick={() => { setActiveTab('botBilgileri'); setIsSidebarOpen(false); }}
+                      className={`w-full py-2.5 px-4 text-sm font-bold transition flex justify-start items-center gap-3 rounded-xl ${activeTab === 'botBilgileri' ? 'bg-red-600 text-white shadow-md' : 'text-neutral-400 hover:text-white hover:bg-neutral-900'}`}
+                    >
+                      <div className={`w-1.5 h-1.5 rounded-full ${activeTab === 'botBilgileri' ? 'bg-white' : 'bg-red-600'}`}></div> Bot Bilgileri
+                    </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -10988,6 +11007,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             {/* YENİ: Resmi Ayarları — sözleşme maddeleri ve şirket IBAN yönetimi.
                 Uygulama Ayarları ile aynı yetkiye (systemFiles) bağlıdır. */}
             {activeTab === 'resmiAyarlar' && showSystemFiles && <ResmiAyarlarView db={db} appId={appId} addSystemLog={addSystemLog} currentUser={currentUser} />}
+            {activeTab === 'botBilgileri' && showBotBilgileri && <BotBilgileriView currentUser={currentUser} addSystemLog={addSystemLog} />}
           </div>
         </main>
 
