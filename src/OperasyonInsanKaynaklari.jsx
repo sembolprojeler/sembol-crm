@@ -1157,6 +1157,35 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
     const [muhBelgeYukleniyor, setMuhBelgeYukleniyor] = useState(false);
     // YENİ: "Dekontu Gör" penceresinde gösterilecek kayıt
     const [muhBelgeGoster, setMuhBelgeGoster] = useState(null);
+    // ========================================================================
+    // YENİ (2026-10-09 · kullanıcı talebi): ÖDEME → DEFTER SEÇİMİ (yalnızca MÜDÜR)
+    // ------------------------------------------------------------------------
+    // • Müdür yetkisindekiler (rank 'Müdür', 'Firma Sahibi', 'Sistem Yöneticisi')
+    //   Ödeme girebilir; "Kaydet"e basınca "Hangi defterden ödendi?" penceresi açılır.
+    //   Seçilen deftere PARA ÇIKIŞI yazılır (Finans > Defter ile aynı alanlar) ve
+    //   muhasebe kaydı o deftere bağlanır (defterId / defterIslemId).
+    // • Diğer kullanıcılar (bu sayfayı gören avukat / personel) yalnızca MASRAF girer;
+    //   "Ödeme" seçeneği ve defter penceresi onlara hiç görünmez.
+    // ========================================================================
+    const mudurMu = currentUser?.rank === 'Müdür' || currentUser?.position === 'Firma Sahibi' || currentUser?.fullName === 'Sistem Yöneticisi';
+    const [defterler, setDefterler] = useState([]);
+    const [odemeDefterPencere, setOdemeDefterPencere] = useState(false);
+    const [odemeDefterId, setOdemeDefterId] = useState('');
+    const [odemeKaydediliyor, setOdemeKaydediliyor] = useState(false);
+    useEffect(() => {
+      if (!mudurMu) return undefined; // defter listesi yalnızca müdüre okunur
+      const unsub = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'defterler'), snap => {
+        setDefterler(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(d => !d.silindi));
+      }, () => {});
+      return () => unsub();
+    }, [mudurMu]);
+    // Müdür olmayan kullanıcıda kayıt yönü her zaman "masraf"
+    useEffect(() => { if (!mudurMu && muhForm.yon !== 'masraf') setMuhForm(f => ({ ...f, yon: 'masraf', tur: MASRAF_TURLERI[0] })); }, [mudurMu, muhForm.yon]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Defter türünden ödeme yöntemi (Finans > Defter ile aynı eşleme)
+    const defterOdemeYontemi = (d) => d?.tur === 'Banka' ? 'Banka / Havale' : (d?.tur === 'Kredi Kartı' || d?.tur === 'Cari (Kişi/Firma)') ? 'Kredi Kartı' : (d?.tur === 'Borçlu' || d?.tur === 'Diğer') ? 'Diğer' : 'Nakit';
+    // YENİ (kullanıcı talebi): DOSYA FİLTRESİ tek butonda — tıklayınca aranabilir liste açılır
+    const [muhDosyaAcik, setMuhDosyaAcik] = useState(false);
+    const [muhDosyaArama, setMuhDosyaArama] = useState('');
 
     // ========================================================================
     // YENİ (kullanıcı talebi): DEKONT PENCERESİNDE BELGE YÖNETİMİ
@@ -1430,16 +1459,39 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
     };
 
     // Muhasebe kaydı ekle (masraf veya ödeme). Kim girdiyse ismi kayda işlenir (avukat dahil).
-    const handleSaveMuhasebe = async () => {
+    // DEĞİŞTİ (2026-10-09): defter (yalnızca müdürün ödemesinde) verilirse deftere PARA ÇIKIŞI da yazılır
+    const handleSaveMuhasebe = async (defter = null) => {
       if (!muhForm.tutar || isNaN(parseFloat(muhForm.tutar))) return;
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe'), {
-        ...muhForm, tutar: parseFloat(muhForm.tutar),
+      if (!mudurMu && muhForm.yon !== 'masraf') return; // güvenlik: müdür olmayan ödeme giremez
+      const tutar = parseFloat(muhForm.tutar);
+      const simdi = new Date().toISOString();
+      const ref = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe'), {
+        ...muhForm, tutar,
         belgeler: muhBelgeler, // YENİ: Yüklenen dekont/belge listesi kayda eklenir
-        ekleyen: currentUser?.fullName || 'Sistem', createdAt: new Date().toISOString()
+        ...(defter ? { defterId: defter.id, defterAd: defter.ad || '' } : {}),
+        ekleyen: currentUser?.fullName || 'Sistem', createdAt: simdi
       });
+      if (defter) {
+        // Seçilen deftere para çıkışı — Finans > Defter'de "Kaynak: Dava Dosyaları" olarak görünür
+        const dosya = muhForm.dosyaId ? dosyalar.find(d => d.id === muhForm.dosyaId) : null;
+        const defterKaydi = await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri'), {
+          defterId: defter.id, tip: 'cikis', tutar, tarih: muhForm.tarih,
+          kategori: 'Hukuk / Avukat', etiketler: [],
+          aciklama: `${muhForm.tur}${dosya ? ` — ${dosya.baslik}` : ' — Genel'}${muhForm.aciklama ? ` — ${muhForm.aciklama}` : ''}`,
+          odemeYontemi: defterOdemeYontemi(defter), kaynak: 'Dava Dosyaları', avukatMuhasebeId: ref.id,
+          createdAt: simdi, by: currentUser?.fullName || 'Sistem',
+        });
+        await updateDoc(ref, { defterIslemId: defterKaydi.id });
+      }
       addSystemLog?.('Avukat Muhasebe', `${muhForm.yon === 'masraf' ? 'Masraf' : 'Ödeme'} kaydı eklendi: ${parseFloat(muhForm.tutar).toLocaleString('tr-TR')} TL (${muhForm.tur})${muhBelgeler.length ? ` — ${muhBelgeler.length} belge eklendi` : ''}.`);
       setMuhForm(emptyMuhForm);
       setMuhBelgeler([]); // YENİ: Belge listesi de temizlenir
+      setOdemeDefterPencere(false); setOdemeDefterId('');
+    };
+    // YENİ (2026-10-09): Kaydet — müdürün ÖDEMESİNDE önce defter seçim penceresi açılır
+    const kaydetTiklandi = () => {
+      if (muhForm.yon === 'odeme' && mudurMu) { setOdemeDefterId(''); setOdemeDefterPencere(true); return; }
+      handleSaveMuhasebe(null);
     };
 
     // --- HESAPLAMALAR ---
@@ -1689,7 +1741,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
             {/* Kayıt yönü: masraf mı ödeme mi */}
             <select value={muhForm.yon} onChange={e => setMuhForm({ ...muhForm, yon: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600">
               <option value="masraf">Masraf / Ücret (Gider)</option>
-              <option value="odeme">Ödeme (Ödenen Tutar)</option>
+              {mudurMu && <option value="odeme">Ödeme (Ödenen Tutar)</option>}{/* DEĞİŞTİ: yalnızca müdür */}
             </select>
             <select value={muhForm.tur} onChange={e => setMuhForm({ ...muhForm, tur: e.target.value })} className="p-2.5 border border-neutral-300 rounded-xl bg-white text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600">
               {(muhForm.yon === 'masraf' ? MASRAF_TURLERI : ['Avukata Ödeme', 'Harç Ödemesi', 'Kurum Ödemesi', 'Diğer Ödeme']).map(t => <option key={t}>{t}</option>)}
@@ -1701,7 +1753,7 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
               <option value="">Genel (dosyasız)</option>
               {dosyalar.map(d => <option key={d.id} value={d.id}>{d.baslik}</option>)}
             </select>
-            <button onClick={handleSaveMuhasebe} disabled={!muhForm.tutar} className="p-2.5 bg-purple-700 text-white rounded-xl text-xs font-black hover:bg-purple-800 transition disabled:opacity-40">Kaydet</button>
+            <button onClick={kaydetTiklandi} disabled={!muhForm.tutar} className="p-2.5 bg-purple-700 text-white rounded-xl text-xs font-black hover:bg-purple-800 transition disabled:opacity-40">Kaydet</button>
           </div>
           <input value={muhForm.aciklama} onChange={e => setMuhForm({ ...muhForm, aciklama: e.target.value })} placeholder="Açıklama (opsiyonel — örn: Nisan ayı sabit ücret, X dosyası bilirkişi ücreti)" className="w-full p-2.5 border border-neutral-300 rounded-xl text-xs outline-none focus:ring-2 focus:ring-purple-600" />
 
@@ -1740,14 +1792,53 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
         </div>
 
         {/* DOSYAYA GÖRE FİLTRE */}
-        <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex items-center gap-2 flex-wrap">
-          <span className="text-[10px] font-black text-neutral-400 uppercase">Dosya:</span>
-          <button onClick={() => setMuhDosyaFilter('Tümü')} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${muhDosyaFilter === 'Tümü' ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200'}`}>Tümü</button>
-          <button onClick={() => setMuhDosyaFilter('Genel')} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${muhDosyaFilter === 'Genel' ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200'}`}>Genel</button>
-          {dosyalar.map(d => (
-            <button key={d.id} onClick={() => setMuhDosyaFilter(d.id)} className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${muhDosyaFilter === d.id ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-500 border-neutral-200'}`}>{d.baslik}</button>
-          ))}
-        </div>
+        {/* DEĞİŞTİ (2026-10-09 · kullanıcı talebi): dosyalar tek tek gösterilmez — TEK BUTON;
+            tıklayınca aranabilir liste açılır (dosya adı yazarak ya da seçerek). Her satırda kayıt sayısı. */}
+        {(() => {
+          const sayi = (id) => muhasebe.filter(m => id === 'Genel' ? !m.dosyaId : m.dosyaId === id).length;
+          const secenekler = [{ id: 'Tümü', ad: 'Tüm dosyalar', n: muhasebe.length }, { id: 'Genel', ad: 'Genel (dosyasız)', n: sayi('Genel') },
+            ...dosyalar.map(d => ({ id: d.id, ad: d.baslik || 'Adsız dosya', n: sayi(d.id) }))];
+          const q = muhDosyaArama.trim().toLocaleLowerCase('tr-TR');
+          const gorunen = q ? secenekler.filter(x => x.ad.toLocaleLowerCase('tr-TR').includes(q)) : secenekler;
+          const secili = secenekler.find(x => x.id === muhDosyaFilter) || secenekler[0];
+          return (
+            <div className="relative">
+              <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 p-3 flex items-center gap-2 flex-wrap">
+                <span className="text-[10px] font-black text-neutral-400 uppercase">Dosya:</span>
+                <button type="button" onClick={() => setMuhDosyaAcik(a => !a)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black border-2 flex items-center gap-2 transition ${muhDosyaFilter !== 'Tümü' ? 'bg-purple-700 text-white border-purple-700' : 'bg-white text-neutral-700 border-neutral-200 hover:border-purple-400'}`}>
+                  <FolderOpen className="w-4 h-4" /> <span className="max-w-[260px] truncate">{secili.ad}</span>
+                  <ChevronDown className={`w-4 h-4 transition-transform ${muhDosyaAcik ? 'rotate-180' : ''}`} />
+                </button>
+                {muhDosyaFilter !== 'Tümü' && (
+                  <button type="button" onClick={() => setMuhDosyaFilter('Tümü')} className="px-2 py-1 rounded-lg text-[11px] font-bold text-neutral-500 hover:text-red-600 flex items-center gap-1"><X className="w-3.5 h-3.5" /> Filtreyi kaldır</button>
+                )}
+              </div>
+              {muhDosyaAcik && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => { setMuhDosyaAcik(false); setMuhDosyaArama(''); }} />
+                  <div className="absolute z-40 left-3 mt-1 w-[min(420px,calc(100vw-32px))] bg-white border border-neutral-200 rounded-2xl shadow-2xl p-2 animate-in fade-in slide-in-from-top-1">
+                    <div className="relative mb-2">
+                      <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input autoFocus value={muhDosyaArama} onChange={e => setMuhDosyaArama(e.target.value)} placeholder="Dosya ara (ad yazın)…"
+                        className="w-full pl-9 pr-3 py-2 rounded-xl bg-neutral-100 text-xs font-bold outline-none focus:ring-2 focus:ring-purple-600" />
+                    </div>
+                    <div className="max-h-72 overflow-y-auto space-y-0.5">
+                      {gorunen.length === 0 && <p className="p-3 text-center text-xs font-bold text-neutral-400">Eşleşen dosya yok</p>}
+                      {gorunen.map(x => (
+                        <button key={x.id} type="button" onClick={() => { setMuhDosyaFilter(x.id); setMuhDosyaAcik(false); setMuhDosyaArama(''); }}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-2 hover:bg-purple-50 ${muhDosyaFilter === x.id ? 'bg-purple-100 text-purple-800' : 'text-neutral-700'}`}>
+                          <span className="flex-1 truncate">{x.ad}</span>
+                          {muhDosyaFilter === x.id && <CheckCircle className="w-3.5 h-3.5 text-purple-700" />}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
 
         {/* MUHASEBE TABLOSU — kaydı kimin girdiği (avukat dahil) her satırda görünür */}
         <div className="bg-white rounded-2xl shadow-sm border border-neutral-200 overflow-x-auto">
@@ -1774,7 +1865,10 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
                   <td className="p-3"><span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${m.yon === 'masraf' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>{m.yon === 'masraf' ? 'MASRAF' : 'ÖDEME'}</span></td>
                   <td className="p-3 font-bold text-neutral-700">{m.tur}</td>
                   <td className="p-3 text-neutral-500 font-bold">{dosyaAdi(m.dosyaId)}</td>
-                  <td className="p-3 text-neutral-500 max-w-[200px] truncate">{m.aciklama || '—'}</td>
+                  <td className="p-3 text-neutral-500 max-w-[200px]">
+                    <span className="block truncate">{m.aciklama || '—'}</span>
+                    {m.defterAd && <span className="inline-flex items-center gap-1 mt-0.5 text-[10px] font-black px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"><Wallet className="w-3 h-3" /> {m.defterAd}</span>}
+                  </td>
                   <td className="p-3 font-bold text-purple-700">{m.ekleyen || '—'}</td>
                   {/* YENİ: DEKONTU GÖR — kayda belge eklenmişse buton, yoksa tire görünür */}
                   <td className="p-3 text-center">
@@ -2016,6 +2110,64 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
           </div>
         )}
 
+        {/* YENİ (2026-10-09): ÖDEME — HANGİ DEFTERDEN? (yalnızca müdür görür) */}
+        {odemeDefterPencere && mudurMu && (() => {
+          const BLOKLAR = ['Sembol Nakliyat', 'Depoevim', 'Genel'];
+          const odemeTurleri = ['Nakit', 'Kasa', 'Banka', 'Kredi Kartı'];
+          const uygun = defterler.filter(d => odemeTurleri.includes(d.tur));
+          const digerleri = defterler.filter(d => !odemeTurleri.includes(d.tur));
+          const blokOf = (d) => BLOKLAR.includes(d.blok) ? d.blok : 'Genel';
+          const secili = defterler.find(d => d.id === odemeDefterId) || null;
+          const Kart = ({ d }) => (
+            <button type="button" onClick={() => setOdemeDefterId(d.id)}
+              className={`text-left px-3 py-2 rounded-xl border-2 transition ${odemeDefterId === d.id ? 'border-purple-700 bg-purple-50' : 'border-neutral-200 hover:border-purple-300 bg-white'}`}>
+              <span className="block text-xs font-black text-neutral-900 truncate">{d.ad || 'Adsız defter'}</span>
+              {/* YENİ (2026-10-09): her hesap türü kendi renginde (Banka mavi, Nakit yeşil, Kredi Kartı mor…) */}
+              <span className={`block text-[10px] font-black ${({ 'Banka': 'text-blue-700', 'Nakit': 'text-emerald-700', 'Kasa': 'text-emerald-700', 'Kredi Kartı': 'text-purple-700', 'Borçlu': 'text-orange-600', 'Kredi': 'text-red-600', 'Ödemeler': 'text-cyan-700' })[d.tur] || 'text-neutral-500'}`}>{d.tur === 'Kasa' ? 'Nakit' : d.tur} · <span className="text-neutral-400">{blokOf(d)}</span></span>
+            </button>
+          );
+          return (
+            <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in" onClick={() => !odemeKaydediliyor && setOdemeDefterPencere(false)}>
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[85vh] overflow-hidden flex flex-col animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                <div className="px-4 py-3 bg-purple-700 text-white">
+                  <p className="text-sm font-black flex items-center gap-2"><Wallet className="w-4 h-4" /> Ödeme hangi defterden yapıldı?</p>
+                  <p className="text-[11px] font-bold text-white/80">{muhForm.tur} · {(parseFloat(muhForm.tutar) || 0).toLocaleString('tr-TR')} ₺ — seçilen deftere PARA ÇIKIŞI olarak yazılır</p>
+                </div>
+                <div className="p-4 overflow-y-auto space-y-3">
+                  {defterler.length === 0 && <p className="text-xs font-bold text-neutral-400 text-center py-4"><Loader2 className="w-4 h-4 inline animate-spin mr-1" /> Defterler yükleniyor…</p>}
+                  {BLOKLAR.map(b => {
+                    const liste = uygun.filter(d => blokOf(d) === b);
+                    if (!liste.length) return null;
+                    return (
+                      <div key={b} className="space-y-1.5">
+                        <p className="text-[10px] font-black uppercase text-neutral-400">{b}</p>
+                        <div className="grid grid-cols-2 gap-1.5">{liste.map(d => <Kart key={d.id} d={d} />)}</div>
+                      </div>
+                    );
+                  })}
+                  {digerleri.length > 0 && (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer font-black text-neutral-500">Diğer defterler ({digerleri.length})</summary>
+                      <div className="grid grid-cols-2 gap-1.5 mt-1.5">{digerleri.map(d => <Kart key={d.id} d={d} />)}</div>
+                    </details>
+                  )}
+                </div>
+                <div className="p-3 border-t border-neutral-200 flex flex-wrap gap-2">
+                  <button type="button" disabled={odemeKaydediliyor} onClick={() => setOdemeDefterPencere(false)} className="px-4 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
+                  <button type="button" disabled={odemeKaydediliyor} title="Deftere yazmadan yalnızca muhasebe kaydı"
+                    onClick={async () => { setOdemeKaydediliyor(true); try { await handleSaveMuhasebe(null); } finally { setOdemeKaydediliyor(false); } }}
+                    className="px-3 py-2.5 border border-neutral-300 text-neutral-600 font-bold rounded-xl text-xs">Deftere işlemeden kaydet</button>
+                  <button type="button" disabled={!secili || odemeKaydediliyor}
+                    onClick={async () => { setOdemeKaydediliyor(true); try { await handleSaveMuhasebe(secili); } catch (e) { console.error(e); alert('Kaydedilemedi: ' + (e?.message || '')); } finally { setOdemeKaydediliyor(false); } }}
+                    className="ml-auto px-4 py-2.5 bg-purple-700 hover:bg-purple-800 text-white font-black rounded-xl text-sm flex items-center gap-1.5 disabled:opacity-40">
+                    {odemeKaydediliyor ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />} {secili ? `${secili.ad} defterinden öde` : 'Defter seçin'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* MUHASEBE KAYDI SİLME ONAYI */}
         {muhDeleteId && (
           <div className="fixed inset-0 bg-black/60 z-[9998] flex items-center justify-center p-4 animate-in fade-in">
@@ -2024,7 +2176,18 @@ import { db, appId, MESAI_STATUS_OPTIONS, isPersonnelVisibleInMonth, isUzaktanCa
               <p className="text-sm font-bold text-neutral-700 mb-4">Bu muhasebe kaydı silinecek. Emin misiniz?</p>
               <div className="flex gap-2">
                 <button onClick={() => setMuhDeleteId(null)} className="flex-1 py-2.5 bg-neutral-100 text-neutral-600 font-bold rounded-xl text-sm">Vazgeç</button>
-                <button onClick={async () => { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe', muhDeleteId)); addSystemLog?.('Avukat Muhasebe', 'Bir muhasebe kaydı silindi.'); setMuhDeleteId(null); }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
+                <button onClick={async () => {
+                  // YENİ (2026-10-09): ödeme bir deftere yazıldıysa o defter kaydı da silinir (Finans'taki gibi yumuşak silme)
+                  const silinen = muhasebe.find(x => x.id === muhDeleteId);
+                  await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'avukatMuhasebe', muhDeleteId));
+                  if (silinen?.defterIslemId) {
+                    try {
+                      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'defterIslemleri', silinen.defterIslemId), {
+                        silindi: true, silinmeTarihi: new Date().toISOString(), silen: currentUser?.fullName || 'Sistem', silmeNedeni: 'Dava Dosyaları muhasebe kaydı silindi' });
+                    } catch (e) { console.error('Bağlı defter kaydı silinemedi:', e); }
+                  }
+                  addSystemLog?.('Avukat Muhasebe', `Bir muhasebe kaydı silindi${silinen?.defterAd ? ` (${silinen.defterAd} defterindeki çıkış da silindi)` : ''}.`); setMuhDeleteId(null);
+                }} className="flex-1 py-2.5 bg-red-600 text-white font-black rounded-xl text-sm">Evet, Sil</button>
               </div>
             </div>
           </div>
