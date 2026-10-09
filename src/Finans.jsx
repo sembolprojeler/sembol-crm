@@ -106,6 +106,70 @@ const nakitYuvarla = (tutar) => {
 // NOT: Otomatik personel borç kalemlerinin id'si `oto_personel_{personId}`
 // biçimindedir (bkz. alacakDefterBilgi). personId bu id'den çözülür.
 // ==========================================================================
+// ============================================================================
+// YENİ (2026-10-09 · kullanıcı talebi): RENKLİ HESAP SEÇİCİ
+// ----------------------------------------------------------------------------
+// Tarayıcının hazır açılır listesi (Mac'te Chrome / Safari) seçenek renklerini
+// göstermediği için "Hesap Türü" ve transfer "Nereye" seçicileri bu bileşenle
+// çizilir: bloklara göre gruplu (Sembol Nakliyat / Depoevim / Genel), her HESAP
+// TÜRÜ kendi renginde (Banka mavi, Nakit yeşil, Kredi Kartı mor, Borçlu turuncu,
+// Kredi kırmızı, Ödemeler camgöbeği). Parantez içinde bakiye / sayı GÖSTERİLMEZ.
+// ============================================================================
+export const HESAP_TURU_RENK = {
+  'Banka': 'text-blue-700', 'Nakit': 'text-emerald-700', 'Kredi Kartı': 'text-purple-700',
+  'Borçlu': 'text-orange-600', 'Kredi': 'text-red-600', 'Ödemeler': 'text-cyan-700',
+};
+export const HESAP_TURU_NOKTA = {
+  'Banka': 'bg-blue-600', 'Nakit': 'bg-emerald-600', 'Kredi Kartı': 'bg-purple-600',
+  'Borçlu': 'bg-orange-500', 'Kredi': 'bg-red-600', 'Ödemeler': 'bg-cyan-600',
+};
+const RenkliHesapSecici = ({ defterler = [], value = '', onChange, bloklar = [], blokOf = () => 'Genel', turEtiket = (t) => t, haricId = null, bos = '', halka = 'focus:ring-emerald-600' }) => {
+  const [acik, setAcik] = useState(false);
+  const secili = defterler.find(d => d.id === value) || null;
+  const Satir = ({ d }) => {
+    const tur = turEtiket(d.tur);
+    return (
+      <span className="flex items-center gap-2 min-w-0">
+        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${HESAP_TURU_NOKTA[tur] || 'bg-neutral-400'}`} />
+        <span className={`font-black truncate ${HESAP_TURU_RENK[tur] || 'text-neutral-800'}`}>{d.ad}</span>
+        <span className={`text-[11px] font-bold shrink-0 opacity-80 ${HESAP_TURU_RENK[tur] || 'text-neutral-500'}`}>— {tur}</span>
+      </span>
+    );
+  };
+  return (
+    <div className="relative">
+      <button type="button" onClick={() => setAcik(a => !a)}
+        className={`w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 ${halka} text-sm flex items-center justify-between gap-2 text-left`}>
+        {secili ? <Satir d={secili} /> : <span className="text-neutral-400 font-bold">{bos || 'Hesap seçin...'}</span>}
+        <ChevronDown className={`w-4 h-4 text-neutral-400 shrink-0 transition-transform ${acik ? 'rotate-180' : ''}`} />
+      </button>
+      {acik && (
+        <>
+          <div className="fixed inset-0 z-[60]" onClick={() => setAcik(false)} />
+          <div className="absolute z-[61] left-0 right-0 mt-1 max-h-80 overflow-y-auto bg-white border border-neutral-200 rounded-xl shadow-2xl p-1.5">
+            {bloklar.map(b => {
+              const liste = defterler.filter(d => d.id !== haricId && blokOf(d) === b).sort((x, y) => (x.ad || '').localeCompare((y.ad || ''), 'tr-TR'));
+              if (!liste.length) return null; // boş blok gösterilmez
+              return (
+                <div key={b} className="mb-1">
+                  <p className="px-2 pt-1.5 pb-1 text-[10px] font-black uppercase text-neutral-400">{b}</p>
+                  {liste.map(d => (
+                    <button key={d.id} type="button" onClick={() => { onChange(d.id); setAcik(false); }}
+                      className={`w-full px-2.5 py-2 rounded-lg text-sm flex items-center justify-between gap-2 hover:bg-neutral-50 ${d.id === value ? 'bg-neutral-100' : ''}`}>
+                      <Satir d={d} />
+                      {d.id === value && <Check className="w-4 h-4 text-neutral-600 shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 const OTO_PERSONEL_KALEM_ONEKI = 'oto_personel_';
 
 // Tüm personelin tahsil edilmiş borç toplamlarını canlı döner: { [personId]: tutar }
@@ -994,7 +1058,9 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
         reportData[creator] = { count: 0, revenue: 0, nakliyeCount: 0, nakliyeRevenue: 0, depoCount: 0, depoRevenue: 0, asansorCount: 0, asansorRevenue: 0, cancelledCount: 0 };
       }
       const price = Number(job.price) || 0;
-      reportData[creator].count += 1;
+      // DEĞİŞTİ (2026-10-09 · kullanıcı talebi): ASANSÖR işleri "Toplam İş" sayısına KATILMAZ
+      // (yalnızca "Sadece Asansör" filtresinde sayılır). Asansör adedi yeşil "Asn." rozetinde görünmeye devam eder.
+      if (job.type !== 'Asansör' || selectedType === 'Asansör') reportData[creator].count += 1;
       reportData[creator].revenue += price;
       
       if (job.type === 'Nakliye') { reportData[creator].nakliyeCount += 1; reportData[creator].nakliyeRevenue += price; }
@@ -1029,7 +1095,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
       .map(k => ({ name: k, ...reportData[k] }))
       .sort((a, b) => b.revenue - a.revenue);
 
-    const totalJobs = filteredJobs.length;
+    // DEĞİŞTİ (2026-10-09 · kullanıcı talebi): toplam iş sayısına asansör işleri katılmaz ("Sadece Asansör" filtresi hariç)
+    const totalJobs = selectedType === 'Asansör' ? filteredJobs.length : filteredJobs.filter(j => j.type !== 'Asansör').length;
     const totalNakliye = filteredJobs.filter(j => j.type === 'Nakliye').length;
     const totalDepo = filteredJobs.filter(j => j.type === 'Depo').length;
     const totalAsansor = filteredJobs.filter(j => j.type === 'Asansör').length;
@@ -1277,7 +1344,8 @@ const PersonelBorcHucresi = ({ hamBorc, tahsilEdilen, onDegisim }) => {
                       )}
                     </td>
                     <td className="p-4 text-right font-bold text-neutral-600">
-                      ₺{(item.count - item.asansorCount) > 0 ? Math.round((item.revenue - item.asansorRevenue) / (item.count - item.asansorCount)).toLocaleString('tr-TR') : 0}
+                      {/* DEĞİŞTİ (2026-10-09): Toplam İş artık asansörü içermediği için ortalama = (ciro − asansör cirosu) ÷ asansör hariç iş adedi */}
+                      {(() => { const adet = selectedType === 'Asansör' ? 0 : item.count; return `₺${adet > 0 ? Math.round((item.revenue - item.asansorRevenue) / adet).toLocaleString('tr-TR') : 0}`; })()}
                     </td>
                   </tr>
                 ))}
@@ -14405,38 +14473,11 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                 {/* NEREYE — kaynak defter listeden çıkarılır, kendine transfer engellenir */}
                 <div>
                   <label className="text-xs font-bold text-neutral-600 block mb-1">Nereye (hedef hesap) *</label>
-                  <select value={virmanForm.hedefDefterId}
-                    onChange={e => setVirmanForm({ ...virmanForm, hedefDefterId: e.target.value })}
-                    className="w-full p-3 border border-neutral-300 rounded-xl outline-none focus:ring-2 focus:ring-slate-700 text-sm bg-white">
-                    <option value="">Hedef hesap seçin...</option>
-                    {/* ==========================================================
-                        YENİ (kullanıcı talebi): Hesap Türü seçicisiyle (İşlemi
-                        Düzenle formu) AYNI desen — hesaplar düz liste yerine
-                        BLOKLARA (Sembol Nakliyat / Depoevim / Genel) göre
-                        gruplanmış gösteriliyor. <optgroup label="..."> tarayıcıda
-                        ayırıcı başlık olarak render edilir. Kaynak hesap (kendine
-                        transfer engeli) ve alfabetik sıralama AYNEN korunur.
-                        ========================================================== */}
-                    {DEFTER_BLOKLARI.map(blokAdi => {
-                      const blokDefterleri = defterler
-                        .filter(d => d.id !== seciliDefterId && defterBlogu(d) === blokAdi)
-                        .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
-                      if (blokDefterleri.length === 0) return null; // Boş blok gösterilmez
-                      return (
-                        <optgroup key={blokAdi} label={blokAdi}>
-                          {blokDefterleri.map(d => (
-                            <option key={d.id} value={d.id}>
-                              {/* DEĞİŞTİ (kullanıcı talebi): İkinci alanda TÜR yerine
-                                  BLOK yazıyor. "BANKA — Banka" gibi kendini tekrar
-                                  eden bir etiket yerine "BANKA — Sembol Nakliyat"
-                                  gösteriliyor; hangi şirkete ait olduğu anlaşılıyor. */}
-                              {d.ad} — {defterBlogu(d)} (₺{paraFmt(defterBakiye(d.id))})
-                            </option>
-                          ))}
-                        </optgroup>
-                      );
-                    })}
-                  </select>
+                  {/* DEĞİŞTİ (2026-10-09 · kullanıcı talebi): renkli hesap seçici — parantez içinde bakiye YOK,
+                      her hesap türü kendi renginde (gruplama ve kendine transfer engeli aynı) */}
+                  <RenkliHesapSecici defterler={defterler} value={virmanForm.hedefDefterId} haricId={seciliDefterId}
+                    onChange={(id) => setVirmanForm({ ...virmanForm, hedefDefterId: id })}
+                    bloklar={DEFTER_BLOKLARI} blokOf={defterBlogu} turEtiket={defterTuruEtiket} bos="Hedef hesap seçin..." halka="focus:ring-slate-700" />
                   {defterler.length < 2 && (
                     <p className="text-[11px] font-bold text-red-600 mt-1.5">
                       Transfer için en az iki defter gerekiyor. Defterler ekranından yeni bir hesap açın.
@@ -15797,33 +15838,11 @@ silinmeTarihi: new Date().toISOString()`}</pre>
                       mavi rozet ve eski kayıtların araması bozulmaz.
                       ============================================================== */}
                   <div><label className="text-xs font-bold text-neutral-600 block mb-1">Hesap Türü</label>
-                    <select value={islemForm.hedefDefterId || seciliDefterId || ''}
-                      onChange={e => setIslemForm({ ...islemForm, hedefDefterId: e.target.value })}
-                      className="w-full p-2.5 border border-neutral-300 rounded-xl bg-white outline-none focus:ring-2 focus:ring-emerald-600 text-sm">
-                      {/* ==========================================================
-                          YENİ (kullanıcı talebi): Hesaplar artık düz liste değil,
-                          ana Defterler ekranındaki gibi BLOKLARA göre gruplanmış
-                          gösteriliyor. <optgroup label="..."> kullanılır; tarayıcı
-                          bunu açılır listede AYIRICI BAŞLIK olarak gösterir, böylece
-                          blok adı (Sembol Nakliyat / Depoevim / Genel) görünür olur.
-                          Bloklar DEFTER_BLOKLARI sırasıyla (Sembol Nakliyat > Depoevim
-                          > Genel) listelenir; blok içi sıralama eskisi gibi isme göre
-                          alfabetiktir. Boş bloklar hiç çizilmez.
-                          ========================================================== */}
-                      {DEFTER_BLOKLARI.map(blokAdi => {
-                        const blokDefterleri = defterler
-                          .filter(d => defterBlogu(d) === blokAdi)
-                          .sort((a, b) => (a.ad || '').localeCompare((b.ad || ''), 'tr-TR'));
-                        if (blokDefterleri.length === 0) return null; // Boş blok gösterilmez
-                        return (
-                          <optgroup key={blokAdi} label={blokAdi}>
-                            {blokDefterleri.map(d => (
-                              <option key={d.id} value={d.id}>{d.ad} — {defterTuruEtiket(d.tur)}</option>
-                            ))}
-                          </optgroup>
-                        );
-                      })}
-                    </select>
+                    {/* DEĞİŞTİ (2026-10-09 · kullanıcı talebi): renkli hesap seçici — bloklara göre gruplu,
+                        her hesap türü (Banka / Nakit / Kredi Kartı / Borçlu / Kredi / Ödemeler) farklı renkte */}
+                    <RenkliHesapSecici defterler={defterler} value={islemForm.hedefDefterId || seciliDefterId || ''}
+                      onChange={(id) => setIslemForm({ ...islemForm, hedefDefterId: id })}
+                      bloklar={DEFTER_BLOKLARI} blokOf={defterBlogu} turEtiket={defterTuruEtiket} />
                     {/* Başka hesap seçildiyse taşınacağı açıkça belirtilir */}
                     {islemForm.hedefDefterId && islemForm.hedefDefterId !== seciliDefterId && (
                       <p className="text-[11px] font-bold text-amber-700 mt-1.5">
