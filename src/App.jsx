@@ -804,7 +804,7 @@ const UygulamaIciTarayiciUyarisi = ({ className = '' }) => {
     const [filterPeriod, setFilterPeriod] = useState('today');
     const [viewingDashboardJob, setViewingDashboardJob] = useState(null);
     // YENİ: "Son Kaydedilen İşler" için dönem filtresi (bugün/hafta/ay/tümü)
-    const [sonKayitFilter, setSonKayitFilter] = useState('all');
+    const [sonKayitFilter, setSonKayitFilter] = useState('today'); // DEĞİŞTİ (2026-10-09 · kullanıcı talebi): ilk açılışta "Bugün" seçili (İş İstatistikleri gibi)
     // YENİ: "Tümünü Gör" — liste varsayılan olarak 15 kayıtla sınırlıdır, butonla tamamı açılır
     const [sonKayitHepsi, setSonKayitHepsi] = useState(false);
 
