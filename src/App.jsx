@@ -118,6 +118,55 @@ import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuh
 // NOT: Asıl yönlendirme sunucudadır (vercel.json → api/qr-yonlendir.js, 302);
 // bu blok yalnızca yedektir (ör. önizleme / yerel geliştirme).
 // ============================================================================
+
+// ============================================================================
+// YENİ (2026-10-09 · kullanıcı talebi): YALNIZCA CANLI BİLDİRİM
+// ----------------------------------------------------------------------------
+// Chrome / Safari / uygulama bildirimleri yalnızca CRM AÇIKKEN (bu oturumda) olan
+// olaylar için gönderilir. Daha önce olmuş, kullanıcıya hiç gelmemiş eski kayıtlar
+// (arşiv / dönem yüklemesi, dinleyicinin yeniden kurulması, ilk 100'e giren eski
+// defter kaydı, vadesi önceden gelmiş hatırlatma…) toplu bildirim ÜRETMEZ.
+//   • olayZamani verilirse: olay bu oturum açıldıktan (2 dk tolerans) SONRA olmalı;
+//     zaman yoksa / geçersizse bildirim GÖNDERİLMEZ (güvenli taraf).
+//   • olayZamani verilmezse (ör. iptal / tarih değişikliği): değişiklik bu oturumda
+//     canlı gözlendiği için gönderilir (önbellekle kıyaslanan "diff" olayları).
+//   • Aynı olay (tag) oturumda bir kez bildirilir.
+//   • Taşma koruması: 15 sn içinde 4'ten fazla bildirim gelirse ayrı ayrı göstermek
+//     yerine tek bir özet bildirim çıkar ("8 yeni bildirim — CRM'i açın").
+// ============================================================================
+const CANLI_OTURUM_BASLANGIC = Date.now();
+const CANLI_TOLERANS_MS = 2 * 60 * 1000;
+const canliBildirimGecmisi = new Set();
+let canliBildirimPencere = { bas: 0, sayi: 0, ozetZamanlayici: null, bastirilan: 0 };
+const zamanMs = (z) => {
+  if (z == null || z === '') return NaN;
+  if (typeof z === 'number') return z;
+  if (typeof z?.toMillis === 'function') return z.toMillis();       // Firestore Timestamp
+  if (typeof z?.seconds === 'number') return z.seconds * 1000;
+  return Date.parse(z);
+};
+const canliOlayMi = (olayZamani) => {
+  const t = zamanMs(olayZamani);
+  return Number.isFinite(t) && t >= CANLI_OTURUM_BASLANGIC - CANLI_TOLERANS_MS;
+};
+const canliBildirimGonder = (baslik, metin, secenek = {}, olayZamani = undefined) => {
+  if (olayZamani !== undefined && !canliOlayMi(olayZamani)) return;   // geçmiş olay → bildirim yok
+  const tag = secenek?.tag;
+  if (tag) { if (canliBildirimGecmisi.has(tag)) return; canliBildirimGecmisi.add(tag); }
+  const simdi = Date.now();
+  if (simdi - canliBildirimPencere.bas > 15000) canliBildirimPencere = { bas: simdi, sayi: 0, ozetZamanlayici: null, bastirilan: 0 };
+  canliBildirimPencere.sayi += 1;
+  if (canliBildirimPencere.sayi <= 4) { bildirimGonder(baslik, metin, secenek); return; }
+  // Taşma: fazlası tek özet bildirimde toplanır
+  canliBildirimPencere.bastirilan += 1;
+  if (!canliBildirimPencere.ozetZamanlayici) {
+    const pencere = canliBildirimPencere;
+    pencere.ozetZamanlayici = setTimeout(() => {
+      bildirimGonder('🔔 Yeni bildirimler', `${pencere.bastirilan} bildirim daha var — ayrıntılar için CRM'i açın.`, { tag: `ozet-${pencere.bas}` });
+    }, 3000);
+  }
+};
+
 const ESKI_QR_SITE_ID = typeof window !== 'undefined' ? new URLSearchParams(window.location.search).get('qr') : null;
 if (ESKI_QR_SITE_ID && !new URLSearchParams(window.location.search).get('qrt')) {
   window.location.replace(`${QR_SITE_LANDING_URL}?yer=${encodeURIComponent(ESKI_QR_SITE_ID)}`);
@@ -4989,7 +5038,8 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             const h = chg.doc.data();
             const acilisZamaniUygun = h.createdAt && h.createdAt >= HATIRLATMA_BILDIRIM_BASLANGIC;
             if ((chg.type === 'added' || chg.type === 'modified') && !h.tamamlandi && h.tarih && h.tarih <= bugunStr && acilisZamaniUygun) {
-              bildirimGonder('🗓️ Hatırlatma', h.aciklama || 'Bugüne ait bir hatırlatmanız var.', { tag: `hatirlatma-${chg.doc.id}` });
+              // DEĞİŞTİ (2026-10-09): yalnızca CRM açıkken açılan / güncellenen hatırlatma bildirilir
+              canliBildirimGonder('🗓️ Hatırlatma', h.aciklama || 'Bugüne ait bir hatırlatmanız var.', { tag: `hatirlatma-${chg.doc.id}` }, h.updatedAt || h.createdAt || null);
             }
           });
         }
@@ -5591,25 +5641,25 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
             const otomatikAsansorMu = j.contractDetails === 'Otomatik Oluşturulan Asansör Kurulum Kaydı';
             const cokGunluDevamKaydiMi = (j.price === '0' || j.price === 0) && j.type !== 'Asansör';
             if (!otomatikAsansorMu && !cokGunluDevamKaydiMi) {
-              bildirimGonder('🆕 Yeni İş Kaydı',
+              canliBildirimGonder('🆕 Yeni İş Kaydı', // DEĞİŞTİ (2026-10-09): yalnızca bu oturumda açılan kayıt
                 `${tarihGunAdi(j.date)}\n${j.type} Kaydı • ${j.customerName || 'İsimsiz müşteri'}\nAçan: ${j.createdBy || 'Bilinmiyor'} • Fiyat: ${fiyatGoster(j.price)}`,
-                { tag: `is-yeni-${j.id}` });
+                { tag: `is-yeni-${j.id}` }, j.createdAt || null);
             }
           }
         } else {
           if (yetkiliMi && bildirimUygun) {
             if (j.status === 'cancelled' && onceki.status !== 'cancelled') {
-              bildirimGonder('❌ İş İptal Edildi',
+              canliBildirimGonder('❌ İş İptal Edildi',
                 `${tarihGunAdi(j.date)}\n${j.type} Kaydı • ${j.customerName || 'İsimsiz müşteri'}\nİptal eden: ${j.cancelledBy || 'Bilinmiyor'}`,
                 { tag: `is-iptal-${j.id}` });
             } else if (j.date !== onceki.date && j.status !== 'cancelled') {
-              bildirimGonder('📅 İş Tarihi Değiştirildi',
+              canliBildirimGonder('📅 İş Tarihi Değiştirildi',
                 `${j.customerName || 'İsimsiz müşteri'} (${j.type})\nYeni tarih: ${tarihGunAdi(j.date)}\nDeğiştiren: ${j.updatedBy || 'Bilinmiyor'}`,
-                { tag: `is-tarih-${j.id}` });
+                { tag: `is-tarih-${j.id}-${j.date}` });
             }
           }
           if (opYetkisiVarMi() && bildirimUygun && j.endJobDetails?.damageStatus === 'Hasar var' && onceki.hasar !== 'Hasar var') {
-            bildirimGonder('⚠️ Hasarlı İş Bildirimi', `${j.customerName || 'Bir müşteri'} işinde hasar bildirimi yapıldı.`, { tag: `hasar-${j.id}` });
+            canliBildirimGonder('⚠️ Hasarlı İş Bildirimi', `${j.customerName || 'Bir müşteri'} işinde hasar bildirimi yapıldı.`, { tag: `hasar-${j.id}` });
           }
         }
         jobOnbellekRef.current[j.id] = { status: j.status, date: j.date, hasar: j.endJobDetails?.damageStatus };
@@ -5628,7 +5678,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       if (opYetkisiVarMi()) {
         tasks.forEach(t => {
           if (!taskOnbellekRef.current.has(t.id)) {
-            bildirimGonder('📋 Yeni Görev', t.title || t.description || 'Görev Tahtası\'na yeni bir görev eklendi.', { tag: `gorev-${t.id}` });
+            canliBildirimGonder('📋 Yeni Görev', t.title || t.description || 'Görev Tahtası\'na yeni bir görev eklendi.', { tag: `gorev-${t.id}` }, t.createdAt || null);
           }
         });
       }
@@ -5647,7 +5697,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
       if (opYetkisiVarMi()) {
         vehicles.forEach(v => {
           if (!vehicleOnbellekRef.current.has(v.id)) {
-            bildirimGonder('🚚 Yeni Araç', `${v.plate || 'Yeni araç'} Araç Tahtası'na eklendi.`, { tag: `arac-${v.id}` });
+            canliBildirimGonder('🚚 Yeni Araç', `${v.plate || 'Yeni araç'} Araç Tahtası'na eklendi.`, { tag: `arac-${v.id}` }, v.createdAt || null);
           }
         });
       }
@@ -5703,11 +5753,11 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
           const tutarStr = `₺${(parseFloat(d.tutar) || 0).toLocaleString('tr-TR')}`;
           const yapan = d.by || 'Bilinmiyor';
           if (d.isVirman) {
-            bildirimGonder('🔁 Hesaplar Arası Transfer', `${d.aciklama || ''} • ${tutarStr}\nİşlemi yapan: ${yapan}`, { tag: `defter-virman-${d.virmanId || chg.doc.id}` });
+            canliBildirimGonder('🔁 Hesaplar Arası Transfer', `${d.aciklama || ''} • ${tutarStr}\nİşlemi yapan: ${yapan}`, { tag: `defter-virman-${d.virmanId || chg.doc.id}` }, d.createdAt || null); // DEĞİŞTİ (2026-10-09): yalnızca canlı kayıt
           } else if (d.tip === 'giris') {
-            bildirimGonder('💰 Para Girişi (Defter)', `${d.aciklama || d.kategori || 'Gelir kaydı'} • ${tutarStr}\nİşlemi yapan: ${yapan}`, { tag: `defter-giris-${chg.doc.id}` });
+            canliBildirimGonder('💰 Para Girişi (Defter)', `${d.aciklama || d.kategori || 'Gelir kaydı'} • ${tutarStr}\nİşlemi yapan: ${yapan}`, { tag: `defter-giris-${chg.doc.id}` }, d.createdAt || null); // DEĞİŞTİ (2026-10-09): yalnızca canlı kayıt
           } else if (d.tip === 'cikis') {
-            bildirimGonder('💸 Para Çıkışı (Defter)', `${d.aciklama || d.kategori || 'Gider kaydı'} • ${tutarStr}\nİşlemi yapan: ${yapan}`, { tag: `defter-cikis-${chg.doc.id}` });
+            canliBildirimGonder('💸 Para Çıkışı (Defter)', `${d.aciklama || d.kategori || 'Gider kaydı'} • ${tutarStr}\nİşlemi yapan: ${yapan}`, { tag: `defter-cikis-${chg.doc.id}` }, d.createdAt || null); // DEĞİŞTİ (2026-10-09): yalnızca canlı kayıt
           }
         });
       }, () => {});
@@ -6579,7 +6629,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
 
     const handleAddVehicle = async (newVehicle) => {
       if (!firebaseUser) return;
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'vehicles'), newVehicle);
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'vehicles'), { ...newVehicle, createdAt: new Date().toISOString() }); // YENİ: createdAt (canlı bildirim)
       addSystemLog('Araç Eklendi', `${newVehicle.plate} plakalı araç eklendi.`);
       setActiveTab('vehicleList');
     };
@@ -6652,7 +6702,7 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const handleAddTask = async (e) => {
       e.preventDefault();
       if (!firebaseUser) return;
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'tasks'), { ...newTask, status: 'todo' });
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'tasks'), { ...newTask, status: 'todo', createdAt: new Date().toISOString() }); // YENİ: createdAt (canlı bildirim)
       setShowTaskModal(false);
       setNewTask({ title: '', description: '', assignee: 'Tüm Personeller', date: new Date().toISOString().split('T')[0] });
       setActiveTab('taskList');
