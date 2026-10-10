@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Truck, ShieldCheck, MapPin, CheckCircle, Clock, PlusCircle, ClipboardList, Star, AlertTriangle, X, Users, CalendarDays, Briefcase, Wallet, Activity, ArrowUpRight, ArrowDownRight, ArrowRightLeft, Landmark, CreditCard, DollarSign, Edit, Ban, User, Loader2, Package, Database, Download, BarChart, TrendingUp, UserPlus, BookOpen, Search, ChevronLeft, ChevronRight, Tag, History, Plus, Trash2, ChevronDown, ChevronUp, Banknote, UserMinus, Settings, FileText, Copy, ClipboardCheck, Upload, Save, Check, Eye } from 'lucide-react'; // DÜZELTME: Check (Ekstre Yükle) ve Eye (kategori detay) ikonları eklendi
-import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc, query, where, deleteField } from 'firebase/firestore';
+import { collection, onSnapshot, doc, setDoc, getDoc, addDoc, updateDoc, deleteDoc, query, where, deleteField } from 'firebase/firestore'; // (query + where: Finans menü rozetleri de kullanır)
 // DEĞİŞİKLİK: gecerliMaas artık shared.jsx içinden gelir.
 // Deneme maaşı mantığı ayrı dosya yerine shared.jsx içinde tek noktada tutuluyor;
 // hem Operasyon.jsx (form) hem Finans.jsx (bordro) aynı kaynaktan okur.
@@ -168,6 +168,100 @@ const RenkliHesapSecici = ({ defterler = [], value = '', onChange, bloklar = [],
       )}
     </div>
   );
+};
+
+// ============================================================================
+// YENİ (2026-10-10 · kullanıcı talebi): FİNANS MENÜ ROZETLERİ — "YAKLAŞIYOR" SAYILARI
+// ----------------------------------------------------------------------------
+// Sol menüde Finans'ın yanında:
+//   TURUNCU = Ödemeler defterlerinde "YAKLAŞIYOR" yazan vade sayısı
+//   MOR     = Kredi defterlerinde "YAKLAŞIYOR" yazan taksit sayısı
+// Kural Defter ekranındaki "YAKLAŞIYOR" etiketiyle AYNI: ödenmemiş (kısmi ödenmiş dahil),
+// vadesi BUGÜN ile 7 gün sonrası arasında. Gecikmişler sayılmaz (onların kendi rozeti var).
+// Okuma maliyeti düşük: tüm defter işlemleri değil, yalnızca ödeme / kredi MAHSUP kayıtları
+// dinlenir. Gün değişince (yarım saatte bir kontrol) sayılar kendiliğinden yenilenir.
+// Plan üretimi Defter ekranındaki odemeKalemBilgi / krediBilgi ile birebir aynı kuraldır.
+// ============================================================================
+const fbGunStr = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const FB_DEVIR_TARIHI = '2026-09-01'; // Defter ekranındaki SISTEM_DEVIR_TARIHI ile aynı
+const FB_YAKLASAN_GUN = 7;            // Defter ekranındaki vadeYaklasti ile aynı
+const fbKalemTutariTarihte = (kalem, tarihStr) => {
+  const anaTutar = parseFloat(kalem.tutar) || 0;
+  const zamlar = (kalem.zamlar || []).filter(z => z && z.gecerliTarih && z.gecerliTarih <= tarihStr)
+    .sort((a, b) => a.gecerliTarih.localeCompare(b.gecerliTarih));
+  return zamlar.length ? (parseFloat(zamlar[zamlar.length - 1].tutar) || anaTutar) : anaTutar;
+};
+export const useFinansYaklasanSayilari = (aktif = true) => {
+  const [defterler, setDefterler] = useState([]);
+  const [odemeMahsup, setOdemeMahsup] = useState([]);
+  const [krediMahsup, setKrediMahsup] = useState([]);
+  const [gun, setGun] = useState(fbGunStr());
+  useEffect(() => {
+    if (!aktif) return undefined;
+    const kok = (ad) => collection(db, 'artifacts', appId, 'public', 'data', ad);
+    const u1 = onSnapshot(kok('defterler'), s => setDefterler(s.docs.map(d => ({ id: d.id, ...d.data() }))), () => {});
+    const u2 = onSnapshot(query(kok('defterIslemleri'), where('odemeMahsup', '==', true)), s => setOdemeMahsup(s.docs.map(d => d.data())), () => {});
+    const u3 = onSnapshot(query(kok('defterIslemleri'), where('krediMahsup', '==', true)), s => setKrediMahsup(s.docs.map(d => d.data())), () => {});
+    const z = setInterval(() => setGun(fbGunStr()), 30 * 60 * 1000); // gece yarısından sonra yenilensin
+    return () => { u1(); u2(); u3(); clearInterval(z); };
+  }, [aktif]);
+  return useMemo(() => {
+    if (!aktif) return { odeme: 0, kredi: 0 };
+    const bugun = gun;
+    const [by, ba, bg] = bugun.split('-').map(Number);
+    const sinir = fbGunStr(new Date(by, ba - 1, bg + FB_YAKLASAN_GUN));
+    const yaklasiyor = (t) => t >= bugun && t <= sinir;
+    const tarihStr = (t) => fbGunStr(t);
+    let odeme = 0, kredi = 0;
+    // Ödenen toplamlar: defterId|kalemId|vadeNo → tutar
+    const odenen = {};
+    odemeMahsup.forEach(i => { if (i.silindi || i.tip !== 'giris') return; const k = `${i.defterId}|${i.odemeKalemId}|${parseInt(i.vadeNo)}`; odenen[k] = (odenen[k] || 0) + (parseFloat(i.tutar) || 0); });
+    defterler.filter(d => !d.silindi).forEach(d => {
+      if (d.tur === 'Ödemeler') {
+        (d.odemeler || []).forEach(kalem => {
+          if (!kalem?.ilkTarih) return;
+          const tekrar = kalem.tekrar || 'tek';
+          const istenen = tekrar === 'tek' ? 1 : (parseInt(kalem.tekrarSayisi) || 0);
+          const ust = istenen === 0 ? 2000 : istenen; // süresiz: tarih sınırında durulur
+          const [y, a, g] = kalem.ilkTarih.split('-').map(Number);
+          for (let n = 1; n <= ust; n++) {
+            let t;
+            if (tekrar === 'haftalik') { t = new Date(y, a - 1, g); t.setDate(t.getDate() + 7 * (n - 1)); }
+            else if (tekrar === 'yillik') { t = new Date(y + (n - 1), a - 1, 1); t.setDate(Math.min(g, new Date(y + (n - 1), a, 0).getDate())); }
+            else if (tekrar === 'aylik') { t = new Date(y, (a - 1) + (n - 1), 1); t.setDate(Math.min(g, new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate())); }
+            else { t = new Date(y, a - 1, g); }
+            const ts = tarihStr(t);
+            if (ts > sinir) break;
+            const odenmis = odenen[`${d.id}|${kalem.id}|${n}`] || 0;
+            if (kalem.bitisTarihi && ts > kalem.bitisTarihi && !odenmis) break;
+            if (!yaklasiyor(ts) || ts < FB_DEVIR_TARIHI) continue;
+            if (odenmis < fbKalemTutariTarihte(kalem, ts) - 0.01) odeme += 1;
+          }
+        });
+      } else if (d.tur === 'Kredi') {
+        const kalemler = Array.isArray(d.krediler) ? d.krediler
+          : (d.kredi && parseFloat(d.kredi.toplamGeriOdeme) > 0 ? [{ id: '__eski__', ...d.kredi }] : []);
+        kalemler.forEach(k => {
+          const taksitSayisi = parseInt(k.taksitSayisi) || 0;
+          if (!taksitSayisi || !k.ilkTaksitTarihi) return;
+          const aylik = parseFloat(k.aylikTaksit) || ((parseFloat(k.toplamGeriOdeme) || 0) / taksitSayisi);
+          const odemeler = krediMahsup.filter(i => !i.silindi && i.tip === 'giris' && i.defterId === d.id
+            && (k.id === '__eski__' ? true : (i.krediKalemId ? i.krediKalemId === k.id : false)));
+          const [y, a, g] = k.ilkTaksitTarihi.split('-').map(Number);
+          for (let n = 1; n <= taksitSayisi; n++) {
+            const t = new Date(y, (a - 1) + (n - 1), 1);
+            t.setDate(Math.min(g, new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate()));
+            const ts = tarihStr(t);
+            if (ts > sinir) break;
+            if (!yaklasiyor(ts) || ts < FB_DEVIR_TARIHI) continue;
+            const odenmis = odemeler.filter(i => parseInt(i.taksitNo) === n).reduce((s, i) => s + (parseFloat(i.tutar) || 0), 0);
+            if (odenmis < aylik - 0.01) kredi += 1;
+          }
+        });
+      }
+    });
+    return { odeme, kredi };
+  }, [aktif, defterler, odemeMahsup, krediMahsup, gun]);
 };
 
 const OTO_PERSONEL_KALEM_ONEKI = 'oto_personel_';
