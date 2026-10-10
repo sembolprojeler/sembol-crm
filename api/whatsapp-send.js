@@ -4,7 +4,7 @@
 // ----------------------------------------------------------------------------
 // whatsapp_conversations / messages tarayıcıdan YAZILAMAZ (firestore.rules); panelin
 // bütün yazma işleri buradan geçer. Tek uç, "islem" alanıyla (Vercel fonksiyon sınırı):
-//   gonder  → mesaj konuşmanın hattından (Cloud API) gider; messages'a from:"agent",
+//   gonder  → mesaj konuşmanın geldiği numaradan (hatId → WHATSAPP_NUMARALAR, Cloud API) gider; messages'a from:"agent",
 //             agentName, agentId; konuşma mode "human" (personel yazdı → bot susar)
 //   devral  → mode "human", devralan = bu personel (needsAgent kalkar)
 //   botaVer → mode "bot" — yalnızca devralan ya da yönetici
@@ -29,6 +29,8 @@ import { sistemTalimati, fiyatRakamlariGecerliMi } from './_lib/botTalimatlari.j
 import { botBilgiYetkisi, botBilgiMarkasiGecerliMi, botBilgiDogrula, botBilgiMetni } from '../src/botBilgiSema.js';
 
 export const PENCERE_MS = 24 * 60 * 60 * 1000;
+// Konuşmanın geldiği numara WHATSAPP_NUMARALAR'da yoksa (eşlenmemiş numara) cevap gönderilemez
+export const HAT_YOK_MESAJI = 'Bu konuşmanın geldiği WhatsApp numarası sistemde tanımlı değil (WHATSAPP_NUMARALAR); yönetici eklemeden cevap gönderilemez.';
 const ISLEMLER = ['gonder', 'devral', 'botaVer', 'okundu', 'medyaGetir'];
 const BOT_BILGI_ISLEMLERI = ['botBilgiKaydet', 'botBilgiGeriAl', 'botBilgiDene'];
 const gecerliKimlik = (x) => typeof x === 'string' && x.length > 0 && x.length < 300 && !x.includes('/');
@@ -47,7 +49,7 @@ export function handlerOlustur({ getDb = dbVarsayilan, fetchFn = globalThis.fetc
   const iso = () => new Date(simdi()).toISOString();
 
   async function leadHareketi(db, k, islem) {
-    for (const id of new Set([k.leadId, k.tasimaLeadId].filter(Boolean))) {
+    for (const id of new Set([k.leadId, k.tasimaLeadId, k.depoLeadId].filter(Boolean))) {
       try {
         const ref = havuzRef(db, id, appId);
         const s = await ref.get();
@@ -142,7 +144,7 @@ export function handlerOlustur({ getDb = dbVarsayilan, fetchFn = globalThis.fetc
       if (!m || !m.mediaId) return cevap(404, { ok: false, hata: 'Bu mesajda medya yok' });
       if (m.medya?.durum === 'hazir' && m.medya.url) return cevap(200, { ok: true, medya: m.medya });
       const hat = konusmaHatti(env, k);
-      if (!hat) return cevap(409, { ok: false, sebep: 'hat_yok', hata: 'Bu konuşmanın WhatsApp hattı yapılandırmada yok.' });
+      if (!hat) return cevap(409, { ok: false, sebep: 'hat_yok', hata: HAT_YOK_MESAJI });
       const s = await mesajMedyasiniIsle({ db, appId, env, fetchFn, hat, kid: konusmaId, mesajId: b.mesajId, m: { ...m, waId: k.waId }, simdi });
       if (s.ok) return cevap(200, { ok: true, medya: { url: s.url, mimeType: s.mimeType, boyut: s.boyut } });
       return cevap(s.tur === 'suresi_doldu' ? 410 : 502, { ok: false, sebep: s.tur, hata: s.hata });
@@ -177,7 +179,7 @@ export function handlerOlustur({ getDb = dbVarsayilan, fetchFn = globalThis.fetc
       return cevap(409, { ok: false, sebep: 'pencere', hata: '24 saat geçti, müşteri yazınca cevap verebilirsiniz (şablon mesaj sonraki aşamada).' });
     }
     const hat = konusmaHatti(env, k);
-    if (!hat || !k.waId) return cevap(409, { ok: false, sebep: 'hat_yok', hata: 'Bu konuşmanın WhatsApp hattı yapılandırmada yok.' });
+    if (!hat || !k.waId) return cevap(409, { ok: false, sebep: 'hat_yok', hata: HAT_YOK_MESAJI });
 
     const g = await waMetinGonder({ env, fetchFn, hat, to: k.waId, metin });
     const zaman = iso();

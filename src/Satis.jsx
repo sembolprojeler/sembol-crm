@@ -4670,10 +4670,10 @@ export const MusteriHavuzuView = ({ currentUser, personnelList = [], addSystemLo
     return m;
   }, [telefonTeklifleri]);
   // YENİ (2026-10-08): konuşmanın TEKLİFİ = havuzdaki lead kaydı (WhatsApp Paneli kaynaklı)
-  // Önce konuşmadaki leadId / tasimaLeadId, yoksa bot lead'i bu konuşmaya bağlı en yeni kayıt.
+  // Önce konuşmadaki leadId / tasimaLeadId / depoLeadId, yoksa bot lead'i bu konuşmaya bağlı en yeni kayıt.
   const waTeklifKaydi = (k) => {
     if (!k) return null;
-    const idIle = [k.leadId, k.tasimaLeadId].filter(Boolean).map(id => kayitlar.find(x => x.id === id)).find(Boolean);
+    const idIle = [k.leadId, k.tasimaLeadId, k.depoLeadId].filter(Boolean).map(id => kayitlar.find(x => x.id === id)).find(Boolean);
     if (idIle) return idIle;
     return kayitlar.filter(x => botLeadKonusmaId(x) === k.id)
       .sort((a, b) => String(b.tarih || b.createdAt || '').localeCompare(String(a.tarih || a.createdAt || '')))[0] || null;

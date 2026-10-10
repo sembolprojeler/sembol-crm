@@ -5,7 +5,8 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  // site-kodlari/: canlı site script'lerinin kopyası (WordPress Hook) — sitedeki kod biçimi korunur
+  globalIgnores(['dist', 'site-kodlari']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [

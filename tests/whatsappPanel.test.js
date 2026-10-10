@@ -120,3 +120,17 @@ test('kullanıcı adıyla yazan müşteri (BSUID): telefon yerine kullanıcı ad
   // Arama kullanıcı adıyla da bulur
   assert.equal(konusmalariSuz([k, { waId: '905321234567', profileName: 'Ali' }], { arama: '@depo' }).length, 1);
 });
+
+test('tanımsız (eşlenmemiş) numaradan gelen konuşma: ayrı etiket ve filtre; marka alanı ne olursa olsun', async () => {
+  const { konusmaMarkasi, MARKA_ETIKETI, ESLENMEMIS_UYARISI } = await import('../src/whatsappPanel.js');
+  const liste = [
+    { id: 'x', eslenmemis: true, marka: '', lastMessageAt: '2026-10-07T10:00:00Z', needsAgent: true },
+    { id: 'y', eslenmemis: false, marka: 'sembol', lastMessageAt: '2026-10-07T11:00:00Z' },
+    { id: 'z', marka: '', lastMessageAt: '2026-10-07T09:00:00Z' },   // eski 0850 belgesi
+  ];
+  assert.deepEqual(liste.map(konusmaMarkasi), ['eslenmemis', 'sembol', 'depoevim']);
+  assert.equal(MARKA_ETIKETI.eslenmemis, 'Tanımsız numara');
+  assert.deepEqual(konusmalariSuz(liste, { marka: 'eslenmemis' }).map(k => k.id), ['x']);
+  assert.deepEqual(konusmalariSuz(liste, { marka: 'depoevim' }).map(k => k.id), ['z']);
+  assert.match(ESLENMEMIS_UYARISI, /bot cevap vermedi/);
+});

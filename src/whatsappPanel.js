@@ -23,9 +23,11 @@ export function pencereKalan(k, simdi = Date.now()) {
   return sa ? `${sa} sa ${dk} dk` : `${dk} dk`;
 }
 
-// Hat → marka etiketi (konuşmadaki marka alanı; eski belgelerde boş olabilir → DepoEvim/0850)
-export const MARKA_ETIKETI = { depoevim: 'DepoEvim', sembol: 'Sembol' };
-export const konusmaMarkasi = (k) => k?.marka === 'sembol' ? 'sembol' : 'depoevim';
+// Hat → marka etiketi (konuşmadaki marka alanı; eski belgelerde boş olabilir → DepoEvim/0850).
+// YENİ (2026-10-10): eşlemede olmayan numaradan gelen konuşma (eslenmemis) — bot cevap vermez, gönderim kapalı
+export const MARKA_ETIKETI = { depoevim: 'DepoEvim', sembol: 'Sembol', eslenmemis: 'Tanımsız numara' };
+export const konusmaMarkasi = (k) => (k?.eslenmemis === true ? 'eslenmemis' : k?.marka === 'sembol' ? 'sembol' : 'depoevim');
+export const ESLENMEMIS_UYARISI = 'Bu mesaj sistemde tanımlı olmayan bir WhatsApp numarasına geldi; bot cevap vermedi. Yönetici numarayı WHATSAPP_NUMARALAR\'a ekleyince buradan cevap verebilirsiniz.';
 
 // YENİ (2026-10-08): kullanıcı adıyla yazan müşteri (Meta telefon göndermedi; waId = BSUID "TR.1349…")
 const bsuidMi = (x) => /^[A-Z]{2}\./.test(String(x || ''));

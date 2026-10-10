@@ -2,7 +2,9 @@
 // ============================================================================
 // SEMBO Asistan — SİSTEM TALİMATLARI (Sembol Nakliyat / DepoEvim)
 // ----------------------------------------------------------------------------
-// Ali'nin kararları (2026-10): marka tespiti (ref kodu → sorarak), fiyatı yapay
+// 2026-10-10: marka HER ZAMAN numaradan (WHATSAPP_NUMARALAR) — "markayı sor" / nötr tanıtım kaldırıldı;
+// Sembol numarasında depolama talebi → DepoEvim bilgileri + alanları (sistemTalimati({ depolama })).
+// Ali'nin kararları (2026-10): fiyatı yapay
 // zeka HESAPLAMAZ (sunucu hesaplar, "SİSTEM FİYATI" bloğunda verir), ofise fiyat
 // yok, %30 nakliye indirimi ve başka hiçbir indirim/kampanya uydurulmaz (DepoEvim
 // sitesindeki "6 ay peşine 1 ay / yıllık 2 ay hediye" GERÇEK kampanyadır, sistem
@@ -37,20 +39,16 @@ export const MARKALAR = {
   },
 };
 
-// DEĞİŞTİ (2026-10-07): numara iki markada ortak — marka belli değilken NÖTR tanıtım + İKİ aydınlatma linki.
-export const asistanAdi = (marka) => MARKALAR[marka]?.asistan || 'Sembol Nakliyat / DepoEvim Asistanı';
+// DEĞİŞTİ (2026-10-10): marka her zaman numaradan belli — nötr (markasız) tanıtım yok.
+export const asistanAdi = (marka) => MARKALAR[marka]?.asistan || 'WhatsApp Asistanı';
 // İlk bot cevabının başına sunucu ekler. Döner: { metin, markalar: [linki gönderilen markalar] }
 export function girisMetni(marka) {
   const m = MARKALAR[marka];
-  if (m) {
-    return { metin: `Merhaba, ben ${m.asistan}, ${m.iyelik} dijital asistanıyım (yapay zeka). `
-      + `Talebinizi değerlendirmek için paylaştığınız bilgiler KVKK kapsamında işlenir: ${m.aydinlatma}`, markalar: [marka] };
-  }
-  return { metin: `Merhaba, ben Sembol Nakliyat ve DepoEvim'in dijital asistanıyım (yapay zeka). `
-    + `Talebinizi değerlendirmek için paylaştığınız bilgiler KVKK kapsamında işlenir — Sembol Nakliyat: ${MARKALAR.sembol.aydinlatma} · DepoEvim: ${MARKALAR.depoevim.aydinlatma}`,
-  markalar: ['sembol', 'depoevim'] };
+  if (!m) return { metin: '', markalar: [] };
+  return { metin: `Merhaba, ben ${m.asistan}, ${m.iyelik} dijital asistanıyım (yapay zeka). `
+    + `Talebinizi değerlendirmek için paylaştığınız bilgiler KVKK kapsamında işlenir: ${m.aydinlatma}`, markalar: [marka] };
 }
-// Marka sonradan belli olduysa ve o markanın linki daha önce gitmediyse cevabın başına BİR KEZ eklenir
+// Eski konuşmada bir markanın linki daha önce gitmediyse cevabın başına BİR KEZ eklenir
 export const kvkkEkMetni = (marka) => `Bilgilendirme: ${MARKALAR[marka].ad} olarak paylaştığınız bilgiler KVKK kapsamında işlenir: ${MARKALAR[marka].aydinlatma}`;
 // Geriye uyumluluk (eski çağrılar): yalnızca metin
 export const kvkkMetni = (marka) => girisMetni(marka).metin;
@@ -138,6 +136,19 @@ TAŞIMA TALEBİ (depolama olmadan evden eve / ofis / şehirlerarası taşıma):
 - Tek tek sor ve şu anahtarlarla yaz: homeSize ("1+1" | "2+1" | "3+1" | "4+1" | "5+1" | "villa" | "ofis"), fromCity, fromDistrict, toCity, toDistrict, fromFloor, toFloor, fromElevator, toElevator ("merdiven" | "bina_asansoru" | "dis_cephe"), moveDate ("YYYY-AA-GG") ya da tarihNotu, fullName.
 - Ev tipi, çıkış il/ilçe ve varış il/ilçe alınınca: "Talebinizi taşıma ekibimize ilettik, ekibimiz mesai saatinde (09:00-18:00) size dönüş yapacak." de; handoff: true, handoffType: "bildir". Müşteri sonra yazarsa sohbete devam et.`;
 
+// YENİ (2026-10-10): Sembol numarasında eşya depolama / kiralık depo talebi. Reddedilmez, başka numaraya
+// yönlendirilmez; DepoEvim bilgileri ve alanlarıyla bot yardım eder, fiyat Fiyat Tablosu'ndan (sunucu hesaplar).
+// Lead DepoEvim'e açılır (hizmetTipi Depo / hesapId depoevim — CRM'in mevcut kuralı).
+const SEMBOL_DEPOLAMA_IPUCU = `
+DEPOLAMA TALEBİ: Müşteri eşya depolama ya da kiralık depo isterse reddetme, başka numaraya yönlendirme; yardım et.
+- Firma eşyayı adresten alıp depolasın istiyorsa intent "depolama"; eşyayı depoya kendisi getirecekse intent "kiralik_depo" yaz.
+- Depolama grubumuzun DepoEvim tesislerinde yapılır (Sembol Nakliyat güvencesi). Depolama bilgileri ve fiyatı sistem tarafından verilecek; şimdilik tek soruyla ihtiyacını netleştir.`;
+const SEMBOL_DEPOLAMA = `
+DEPOLAMA TALEBİ (bu konuşmada müşteri eşya depolama / kiralık depo istiyor):
+- Sen yine SEMBO Asistan'sın; depolama grubumuzun DepoEvim tesislerinde yapılır (Sembol Nakliyat güvencesi). Reddetme, başka numaraya yönlendirme.
+- Aşağıdaki DepoEvim bilgilerini ve alanlarını kullan; fiyatı YALNIZCA SİSTEM FİYATI bloğundan ver, TÜM depolama fiyatlarını "+KDV" diye söyle.
+- Müşteri depolamadan vazgeçip yalnızca taşıma isterse intent'i "evden_eve" / "sehirlerarasi" / "ofis" yap.`;
+
 // --------------------------------------------------------------- ANA TALİMAT
 const ORTAK_KURALLAR_SABLON = `
 __KIMLIK__
@@ -171,25 +182,15 @@ KONU DIŞI SOHBET: depolama / taşıma ile ilgisiz sorulara (genel kültür, soh
 METİN DIŞI MESAJ: "[sesli mesaj]" → sesli mesajı dinleyemediğini kibarca söyle, yazmasını rica et. "[görsel]"/"[video]"/"[belge]" → aldığını, ekibin inceleyeceğini söyle ve sohbete devam et. "[konum: …]" → adres bilgisi olarak değerlendir (il/ilçeyi çıkarabiliyorsan yaz, emin değilsen teyit et).
 
 ÇIKTI: YALNIZCA şu JSON nesnesi, başka metin yok:
-{"reply": "müşteriye gidecek mesaj", "collected": {yeni ya da düzeltilen alanlar}, "handoff": false, "handoffType": "temsilci|sikayet|bildir|", "handoffReason": "", "intent": "evden_eve|ofis|parca_esya|depolama|kiralik_depo|asansor_kiralama|sehirlerarasi|diger", "marka": "sembol|depoevim|"}
+{"reply": "müşteriye gidecek mesaj", "collected": {yeni ya da düzeltilen alanlar}, "handoff": false, "handoffType": "temsilci|sikayet|bildir|", "handoffReason": "", "intent": "evden_eve|ofis|parca_esya|depolama|kiralik_depo|asansor_kiralama|sehirlerarasi|diger"}
 - collected'a yalnızca bu mesajla öğrendiğin ya da düzelttiğin alanları yaz; değeri bilmiyorsan anahtarı hiç yazma.`;
 
-const MARKA_SECIMI = `
-MARKA HENÜZ BELLİ DEĞİL. Müşterinin ihtiyacını anlamaya çalış:
-- Eşya depolama ya da kiralık depo istiyorsa → marka "depoevim".
-- Evden eve nakliyat, asansör kiralama, ofis, parça eşya ya da başka bir şey istiyorsa → marka "sembol".
-- Anlaşılmıyorsa kısa ve tek soruyla sor: "Evden eve nakliyat mı, yoksa eşya depolama / depo kiralama mı düşünüyorsunuz?"
-Marka belli olunca "marka" alanına yaz ve o markanın bilgileriyle devam et.
-${SEMBOL_BILGI}
-${depoevimBilgiBlogu()}`;
-
-// Kimlik markaya göre: belirsizken isimsiz nötr asistan, Sembol'de SEMBO Asistan, DepoEvim'de DepoEvim Asistanı
+// Kimlik numaranın markasına göre: Sembol'de SEMBO Asistan, DepoEvim'de DepoEvim Asistanı
 const KIMLIK = {
   sembol: `SEN: "SEMBO Asistan" — Sembol Nakliyat'ın WhatsApp dijital asistanı. Yapay zeka olduğunu gizleme.`,
   depoevim: `SEN: "DepoEvim Asistanı" — DepoEvim'in WhatsApp dijital asistanı (Sembol Nakliyat güvencesi). Yapay zeka olduğunu gizleme.`,
-  '': `SEN: Sembol Nakliyat ve DepoEvim'in ortak WhatsApp dijital asistanı. Marka belli olana kadar kendine özel bir isim verme. Yapay zeka olduğunu gizleme.`,
 };
-const ortakKurallar = (marka) => ORTAK_KURALLAR_SABLON.replace('__KIMLIK__', KIMLIK[marka] || KIMLIK['']);
+const ortakKurallar = (marka) => ORTAK_KURALLAR_SABLON.replace('__KIMLIK__', KIMLIK[marka] || KIMLIK.sembol);
 
 // Konuşmaya özel bağlam bloğu (her çağrıda yeniden üretilir)
 function fiyatBlogu(fiyat) {
@@ -211,14 +212,16 @@ function fiyatBlogu(fiyat) {
 
 // bildirim: { sebep } — personel daha önce bilgilendirildi (needsAgent), bot devam ediyor
 // tasima: DepoEvim hattında depolamasız taşıma talebi — fiyat bloğu yerine "fiyat verilmez"
-export function sistemTalimati({ marka = '', collected = {}, fiyat = null, profilAdi = '', simdiMs = Date.now(), env = process.env, ilkCevap = false,
-  bildirim = null, tasima = false, bilgiMetni = '' } = {}) {
-  // bilgiMetni: bilgi bankasından (api/_lib/botBilgi.js) — boşsa yedek metin
+// depolama: Sembol hattında depolama talebi — DepoEvim bilgileri + alanları (fiyat DepoEvim Fiyat Tablosu'ndan)
+// marka: numaranın markası ('sembol' | 'depoevim'); başka değer Sembol sayılır
+export function sistemTalimati({ marka = 'sembol', collected = {}, fiyat = null, profilAdi = '', simdiMs = Date.now(), env = process.env, ilkCevap = false,
+  bildirim = null, tasima = false, depolama = false, bilgiMetni = '' } = {}) {
+  // bilgiMetni: DepoEvim bilgi bankasından (api/_lib/botBilgi.js) — boşsa yedek metin
   const z = istanbulZamani(simdiMs);
   const mesai = mesaiIcindeMi(simdiMs, env);
   const markaBlogu = marka === 'depoevim' ? `MARKA: DepoEvim\n${depoevimBilgiBlogu(bilgiMetni)}\n${DEPOEVIM_ALANLAR}\n${DEPOEVIM_TASIMA}`
-    : marka === 'sembol' ? `MARKA: Sembol Nakliyat\n${SEMBOL_BILGI}\n${SEMBOL_ALANLAR}`
-      : `${MARKA_SECIMI}\n${SEMBOL_ALANLAR}\n${DEPOEVIM_ALANLAR}`;
+    : depolama ? `MARKA: Sembol Nakliyat\n${SEMBOL_BILGI}\n${SEMBOL_DEPOLAMA}\n${depoevimBilgiBlogu(bilgiMetni)}\n${DEPOEVIM_ALANLAR}`
+      : `MARKA: Sembol Nakliyat\n${SEMBOL_BILGI}\n${SEMBOL_ALANLAR}\n${SEMBOL_DEPOLAMA_IPUCU}`;
   return [
     ortakKurallar(marka),
     markaBlogu,
@@ -231,7 +234,7 @@ export function sistemTalimati({ marka = '', collected = {}, fiyat = null, profi
     bildirim ? `EKİP BİLGİLENDİRİLDİ (${String(bildirim.sebep || '-').slice(0, 120)}): ekibimiz bu talebi biliyor. Sohbete devam et ve genel sorularını cevapla; `
       + 'TOPLANAN bilgileri baştan sorma, fiyat uydurma, kesin tarih/saat verme. Gerekirse "ekibimiz mesai saatinde (09:00-18:00) dönüş yapacak" de. '
       + 'Aynı sebeple tekrar handoff yazma; yalnızca temsilci isteği ya da şikayet olursa handoff ver.' : '',
-    ilkCevap ? `Bu, müşteriye ilk cevabın: tanıtım, selam ve KVKK bilgilendirmesi sistem tarafından başa eklenecek; sen tekrar selam verme ve kendini tanıtma, doğrudan konuya gir.${marka ? '' : ' Marka belli değilse ilk sorun: evden eve taşınma mı, eşya depolama / depo kiralama mı?'}` : '',
+    ilkCevap ? 'Bu, müşteriye ilk cevabın: tanıtım, selam ve KVKK bilgilendirmesi sistem tarafından başa eklenecek; sen tekrar selam verme ve kendini tanıtma, doğrudan konuya gir.' : '',
   ].filter(Boolean).join('\n');
 }
 

@@ -5,12 +5,12 @@
 // api/whatsapp-webhook.js (bot) ve api/whatsapp-send.js (personel cevabı) kullanır.
 //   • Firestore yolları: artifacts/{appId}/public/data/whatsapp_conversations/{konuşmaKimliği}
 //                        …/whatsapp_conversations/{konuşmaKimliği}/messages/{wamid}
-//     konuşmaKimliği = waId (eskiKimlik hattı: 0850) | "{phoneNumberId}_{waId}" (diğer hatlar)
-//   • Hat → marka eşlemesi (WHATSAPP_HATLAR) — hatlariOku / hatBul
+//     konuşmaKimliği = "{phoneNumberId}_{waId}" (2026-10-10 öncesi 0850 belgeleri: waId)
+//   • Numara → marka eşlemesi (WHATSAPP_NUMARALAR) — hatlariOku / hatBul / eslenmemisHat
 //                        …/whatsapp_durum/token  (token / kalıcı hata uyarısı)
 //   • Mesaj gönderme (Graph API), token hatası (190 / OAuthException) tespiti
 //   • Loglarda telefon numarası MASKELENİR (maskele)
-// Ortam: WHATSAPP_HATLAR (JSON, isteğe bağlı) | WHATSAPP_TOKEN + WHATSAPP_PHONE_NUMBER_ID, WHATSAPP_GRAPH_VERSION (isteğe bağlı)
+// Ortam: WHATSAPP_NUMARALAR (JSON), WHATSAPP_TOKEN, WHATSAPP_GRAPH_VERSION (isteğe bağlı)
 // ============================================================================
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
@@ -37,35 +37,42 @@ export const havuzRef = (db, id, appId) => veriKoku(db, appId).collection('havuz
 // "905321234567" → "9053****4567" (loglar için; BSUID "US.1349…1918" → "1349****1918")
 export const maskele = (no) => { const d = String(no || '').replace(/\D/g, ''); return d.length > 6 ? `${d.slice(0, 4)}****${d.slice(-4)}` : '****'; };
 
-// --------------------------------------------------------------- HATLAR (2026-10-07)
-// Her WhatsApp numarası (hat) TEK markaya aittir. Yapılandırma env'de (Firestore'da değil:
-// tarayıcıdan değiştirilemesin, her mesajda ek okuma olmasın):
-//   WHATSAPP_HATLAR=[{"phoneNumberId":"123","marka":"depoevim","tokenEnv":"WHATSAPP_TOKEN","ad":"0850 441 78 86","eskiKimlik":true}]
-//   • tokenEnv: o hattın erişim token'ını tutan env değişkeninin ADI (varsayılan WHATSAPP_TOKEN)
-//   • eskiKimlik: konuşma belgesi kimliği yalnızca waId (2026-10-07 öncesi belgeler) — EN FAZLA BİR hat
-// WHATSAPP_HATLAR yoksa: WHATSAPP_PHONE_NUMBER_ID tek hat = DepoEvim (0850), eskiKimlik.
-const HAT_MARKALARI = ['sembol', 'depoevim'];
+// --------------------------------------------------------------- NUMARALAR (2026-10-10)
+// Her WhatsApp numarası (hat) TEK markaya aittir; marka gelen mesajdaki metadata.phone_number_id'den
+// belirlenir. Eşleme env'de (Firestore'da değil: tarayıcıdan değiştirilemesin, her mesajda ek okuma olmasın).
+// Kodda sabit numara / id YOK:
+//   WHATSAPP_NUMARALAR={"<phone_number_id>":"sembolevdeneve","<phone_number_id>":"depoevim"}
+// Token: WHATSAPP_TOKEN (tüm numaralar); bir numara başka bir Meta işletmesindeyse
+// WHATSAPP_TOKEN_<phone_number_id> tanımlanırsa o numara için o kullanılır.
+// Eşlemede olmayan numaradan gelen mesaj KAYDEDİLİR ama bot cevap vermez (eslenmemisHat).
+// (Eski WHATSAPP_HATLAR / WHATSAPP_PHONE_NUMBER_ID yapılandırması kaldırıldı.)
+const NUMARA_MARKALARI = { sembolevdeneve: 'sembol', depoevim: 'depoevim' };
+const hatNesnesi = (env, phoneNumberId, marka) => {
+  const ozel = `WHATSAPP_TOKEN_${phoneNumberId}`;
+  return { phoneNumberId, marka, tokenEnv: env[ozel] ? ozel : 'WHATSAPP_TOKEN' };
+};
 export function hatlariOku(env = process.env) {
-  const ham = String(env.WHATSAPP_HATLAR || '').trim();
-  if (!ham) {
-    return env.WHATSAPP_PHONE_NUMBER_ID
-      ? [{ phoneNumberId: String(env.WHATSAPP_PHONE_NUMBER_ID), marka: 'depoevim', tokenEnv: 'WHATSAPP_TOKEN', ad: '0850 441 78 86', eskiKimlik: true }]
-      : [];
-  }
-  let liste;
-  try { liste = JSON.parse(ham); } catch { console.error('[whatsapp] WHATSAPP_HATLAR geçersiz JSON — hiçbir hat işlenmiyor'); return []; }
-  let eskiVar = false;
-  return (Array.isArray(liste) ? liste : []).filter(h => h && h.phoneNumberId && HAT_MARKALARI.includes(h.marka)).map(h => {
-    const eskiKimlik = h.eskiKimlik === true && !eskiVar;
-    if (eskiKimlik) eskiVar = true;
-    return { phoneNumberId: String(h.phoneNumberId), marka: h.marka, tokenEnv: String(h.tokenEnv || 'WHATSAPP_TOKEN'), ad: String(h.ad || ''), eskiKimlik };
+  const ham = String(env.WHATSAPP_NUMARALAR || '').trim();
+  if (!ham) return [];
+  let esleme;
+  try { esleme = JSON.parse(ham); } catch { console.error('[whatsapp] UYARI WHATSAPP_NUMARALAR geçersiz JSON — hiçbir numaraya bot cevap vermiyor'); return []; }
+  if (!esleme || typeof esleme !== 'object' || Array.isArray(esleme)) { console.error('[whatsapp] UYARI WHATSAPP_NUMARALAR {"<phone_number_id>": "sembolevdeneve" | "depoevim"} biçiminde olmalı'); return []; }
+  return Object.entries(esleme).flatMap(([id, deger]) => {
+    const phoneNumberId = String(id).trim();
+    const marka = NUMARA_MARKALARI[String(deger || '').trim().toLowerCase()];
+    if (!phoneNumberId || !marka) { console.error('[whatsapp] UYARI WHATSAPP_NUMARALAR geçersiz satır atlandı:', maskele(phoneNumberId), String(deger).slice(0, 30)); return []; }
+    return [hatNesnesi(env, phoneNumberId, marka)];
   });
 }
 export const hatBul = (env, phoneNumberId) => (phoneNumberId ? hatlariOku(env).find(h => h.phoneNumberId === String(phoneNumberId)) : null) || null;
-// Konuşma belgesinin hattı: hatId (2026-10-07 sonrası) — yoksa eski belge → eskiKimlik hattı (0850)
-export const konusmaHatti = (env, k = {}) => (k.hatId ? hatBul(env, k.hatId) : hatlariOku(env).find(h => h.eskiKimlik) || null);
-// Aynı müşteri iki hatta yazarsa iki ayrı konuşma olur
-export const konusmaKimligi = (hat, waId) => (hat?.eskiKimlik ? String(waId) : `${hat.phoneNumberId}_${waId}`);
+// Eşlemede olmayan numara: mesaj kaydı için hat (marka yok, bot cevap vermez)
+export const eslenmemisHat = (env, phoneNumberId) => ({ ...hatNesnesi(env, String(phoneNumberId), ''), eslenmemis: true });
+// Konuşma belgesinin hattı (gönderim bu numaradan yapılır). hatId'siz çok eski belge (2026-10-07 öncesi,
+// yalnızca 0850 vardı) → eşlemedeki DepoEvim numarası. Eşlemede yoksa null.
+export const konusmaHatti = (env, k = {}) => (k.hatId ? hatBul(env, k.hatId) : hatlariOku(env).find(h => h.marka === 'depoevim') || null);
+// Konuşma belgesi kimliği "{phoneNumberId}_{waId}" — aynı müşteri iki numaraya yazarsa iki ayrı konuşma.
+// (2026-10-10 öncesi 0850 belgelerinin kimliği yalnızca waId idi; o belgeler okunur / cevaplanır, yenisi açılmaz.)
+export const konusmaKimligi = (hat, waId) => `${hat.phoneNumberId}_${waId}`;
 
 // --------------------------------------------------------------- KULLANICI ADI / BSUID (2026-10-08)
 // Meta kullanıcı adı geçişi: kullanıcı adı olan müşterinin mesajı telefon OLMADAN gelebilir
@@ -111,12 +118,12 @@ export function metaHatasiCoz(govde, httpDurum) {
   };
 }
 
-// Metin mesajı gönderir (hat verilirse o hattın numarası ve token'ı). Asla fırlatmaz: { ok, wamid } | { ok: false, hata }
+// Metin mesajı hattın (konuşmanın geldiği numaranın) numarası ve token'ıyla gider. Asla fırlatmaz: { ok, wamid } | { ok: false, hata }
 export async function waMetinGonder({ env = process.env, fetchFn = globalThis.fetch, hat = null, to, metin, ms = 15000 }) {
-  const phoneNumberId = hat ? hat.phoneNumberId : env.WHATSAPP_PHONE_NUMBER_ID;
-  const token = hat ? env[hat.tokenEnv] : env.WHATSAPP_TOKEN;
+  const phoneNumberId = hat?.phoneNumberId;
+  const token = hat ? env[hat.tokenEnv] : '';
   if (!token || !phoneNumberId) {
-    return { ok: false, hata: { kod: null, mesaj: `${hat ? hat.tokenEnv : 'WHATSAPP_TOKEN'} / phone_number_id tanımlı değil`, tokenHatasi: true, kalici: true } };
+    return { ok: false, hata: { kod: null, mesaj: `${hat?.tokenEnv || 'WHATSAPP_TOKEN'} / phone_number_id tanımlı değil`, tokenHatasi: true, kalici: true } };
   }
   const ctrl = new AbortController();
   const z = setTimeout(() => ctrl.abort(), ms);

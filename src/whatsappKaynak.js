@@ -19,8 +19,8 @@ export const firestoreKaynagi = {
   durumDinle: (cb) => {
     const durum = {};
     const dinle = (ad) => onSnapshot(doc(db, ...kok(), 'whatsapp_durum', ad), s => { durum[ad] = s.exists() ? s.data() : null; cb({ ...durum }); }, () => {});
-    const u1 = dinle('token'), u2 = dinle('ai');
-    return () => { u1(); u2(); };
+    const u1 = dinle('token'), u2 = dinle('ai'), u3 = dinle('numara');
+    return () => { u1(); u2(); u3(); };
   },
   bekleyenleriDinle: (cb) => onSnapshot(
     query(collection(db, ...kok(), 'whatsapp_conversations'), where('needsAgent', '==', true), limit(99)), s => cb(s.size), () => cb(0)),

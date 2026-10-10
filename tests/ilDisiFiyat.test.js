@@ -101,7 +101,7 @@ function ortam(aiCevaplari) {
   const fetchFn = async (url, ops) => { gonderilen.push(JSON.parse(ops.body)); return { ok: true, status: 200, json: async () => ({ messages: [{ id: `out${gonderilen.length}` }] }) }; };
   const handler = handlerOlustur({ getDb: () => db, waitUntil: (p) => arka.push(p), fetchFn, bekle: async () => {}, simdi: () => Date.parse('2026-10-07T08:00:00Z'),
     // 0850 artık yalnızca DepoEvim — Sembol fiyatı ileride gelecek Sembol hattında (talimatlar kodda kalır)
-    env: { WHATSAPP_APP_SECRET: SECRET, WHATSAPP_TOKEN: 't', WHATSAPP_HATLAR: JSON.stringify([{ phoneNumberId: '111', marka: 'sembol', eskiKimlik: true }]), FIRESTORE_APP_ID: 'test-app', WHATSAPP_BIRLESTIRME_MS: '0' },
+    env: { WHATSAPP_APP_SECRET: SECRET, WHATSAPP_TOKEN: 't', WHATSAPP_NUMARALAR: JSON.stringify({ 111: 'sembolevdeneve' }), FIRESTORE_APP_ID: 'test-app', WHATSAPP_BIRLESTIRME_MS: '0' },
     aiUret: async (a) => { ai.push(a); return aiCevaplari[Math.min(ai.length - 1, aiCevaplari.length - 1)]; },
     fiyatHesapla: async (a) => F.botFiyatHesapla({ ...a, kmHesapla }) });
   const gonder = async (metin, id) => {
@@ -128,7 +128,7 @@ test('webhook: yapay zeka İzmir için ret cümlesi kursa da müşteriye sistem 
   assert.match(govde, new RegExp(`${min.toLocaleString('tr-TR').replace('.', '\\.')} TL – ${max.toLocaleString('tr-TR').replace('.', '\\.')} TL`));
   assert.doesNotMatch(govde, RET);
   assert.match(o.ai[2].sistem, /DÜZELTME: Bir önceki taslak cevabın/);
-  const k = o.db.belge(`whatsapp_conversations/${WA}`);
+  const k = o.db.belge(`whatsapp_conversations/111_${WA}`);
   assert.equal(k.sonFiyatDurumu.durum, 'tamam'); assert.equal(k.sonFiyatDurumu.kaynak, 'km');
   assert.notEqual(k.mode, 'human');
 });
@@ -140,7 +140,7 @@ test('webhook: fiyat eksikken ret cümlesi yerine "81 il" + eksik bilginin sorus
   const govde = o.gonderilen[0].text.body;
   assert.match(govde, /Türkiye'nin 81 ilinde il içi ve iller arası taşıma yapıyoruz\. Eşyalar hangi ilçeden alınacak\?/);
   assert.doesNotMatch(govde, /vermiyoruz/);
-  assert.notEqual(o.db.belge(`whatsapp_conversations/${WA}`).mode, 'human');
+  assert.notEqual(o.db.belge(`whatsapp_conversations/111_${WA}`).mode, 'human');
 });
 
 test('webhook: yapay zeka ret etmezse cevap aynen gider (düzeltme çağrısı yapılmaz)', async () => {

@@ -12,8 +12,8 @@ const webhook = await import('../api/whatsapp-webhook.js');
 const send = await import('../api/whatsapp-send.js');
 
 const WA = '905321234567';
-const HAT = { phoneNumberId: '111', marka: 'depoevim', tokenEnv: 'WHATSAPP_TOKEN', eskiKimlik: true };
-const ENV = { WHATSAPP_TOKEN: 'tok', WHATSAPP_PHONE_NUMBER_ID: '111', FIRESTORE_APP_ID: 'test-app', WHATSAPP_APP_SECRET: 's', WHATSAPP_BIRLESTIRME_MS: '0' };
+const HAT = { phoneNumberId: '111', marka: 'depoevim', tokenEnv: 'WHATSAPP_TOKEN' };
+const ENV = { WHATSAPP_TOKEN: 'tok', WHATSAPP_NUMARALAR: JSON.stringify({ 111: 'depoevim' }), FIRESTORE_APP_ID: 'test-app', WHATSAPP_APP_SECRET: 's', WHATSAPP_BIRLESTIRME_MS: '0' };
 const YUKLEME = 'https://www.sembolevdeneve.com/crm/upload.php';
 const META_DOSYA = 'https://lookaside.fbsbx.com/whatsapp_business/attachments/?mid=1';
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { 'Content-Type': 'application/json' } });
@@ -82,7 +82,7 @@ test('upload.php yanıtı CRM ile aynı okunur: url | fileName | file | düz met
 
 // ---------------------------------------------------------------- webhook
 const kok = (db) => db.collection('artifacts').doc('test-app').collection('public').doc('data');
-const mesajBelgesi = (db, id) => db.belge(`whatsapp_conversations/${WA}/messages/${id}`);
+const mesajBelgesi = (db, id) => db.belge(`whatsapp_conversations/111_${WA}/messages/${id}`);
 function webhookOrtami(ag) {
   const db = sahteDb(); const arka = [], ai = [];
   const handler = webhook.handlerOlustur({ getDb: () => db, waitUntil: (p) => arka.push(p), fetchFn: ag.fetchFn, env: ENV, bekle: async () => {},
@@ -154,7 +154,7 @@ test('medyaGetir: eski mesajın medyası alınır (24 saat penceresinden bağım
   assert.equal((await o.istek({ islem: 'medyaGetir', konusmaId: WA, mesajId: 'wESKI' })).kod, 401);
   const r = await o.istek({ islem: 'medyaGetir', konusmaId: WA, mesajId: 'wESKI', personelId: 'P1', sifre: '1234' });
   assert.equal(r.kod, 200); assert.match(r.govde.medya.url, /wa_[0-9a-f]{32}\.ogg$/);
-  const m = mesajBelgesi(o.db, 'wESKI');
+  const m = o.db.belge(`whatsapp_conversations/${WA}/messages/wESKI`);   // eski (kimliği yalnızca waId) konuşma
   assert.equal(m.medya.durum, 'hazir'); assert.equal(m.medya.mimeType, 'audio/ogg');
   // ikinci istek yeniden indirmez
   const once = ag.kayit.length;
@@ -167,7 +167,7 @@ test('medyaGetir: Meta\'da süresi dolmuşsa 410 + "artık alınamıyor"; medyas
   const o = await sendOrtami(ag, { from: 'customer', type: 'image', text: '[görsel]', mediaId: 'COKESKI' });
   const r = await o.istek({ islem: 'medyaGetir', konusmaId: WA, mesajId: 'wESKI', personelId: 'P1', sifre: '1234' });
   assert.equal(r.kod, 410); assert.equal(r.govde.sebep, 'suresi_doldu');
-  assert.equal(mesajBelgesi(o.db, 'wESKI').medya.hataTuru, 'suresi_doldu');
+  assert.equal(o.db.belge(`whatsapp_conversations/${WA}/messages/wESKI`).medya.hataTuru, 'suresi_doldu');
   const o2 = await sendOrtami(ag, { from: 'customer', type: 'text', text: 'merhaba' });
   assert.equal((await o2.istek({ islem: 'medyaGetir', konusmaId: WA, mesajId: 'wESKI', personelId: 'P1', sifre: '1234' })).kod, 404);
   assert.equal((await o2.istek({ islem: 'medyaGetir', konusmaId: WA, personelId: 'P1', sifre: '1234' })).kod, 400);

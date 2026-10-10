@@ -6,18 +6,15 @@ import { Buffer } from 'node:buffer';
 import { sahteDb, sahteYanit } from './yardimci.js';
 
 process.env.FIRESTORE_APP_ID = 'test-app';
-const { handlerOlustur, imzaGecerliMi, devirTuruBul, YEDEK_MESAJ, SESSIZ_BILGI_MESAJI, SINIR_MESAJI, SEMBOL_TASIMA_KVKK } = await import('../api/whatsapp-webhook.js');
+const { handlerOlustur, imzaGecerliMi, devirTuruBul, YEDEK_MESAJ, SESSIZ_BILGI_MESAJI, SINIR_MESAJI, SEMBOL_TASIMA_KVKK, DEPOEVIM_DEPOLAMA_KVKK, AI_HATA_BILDIRIMI } = await import('../api/whatsapp-webhook.js');
 
 const SECRET = 'gizli';
-const ENV = { WHATSAPP_APP_SECRET: SECRET, WHATSAPP_VERIFY_TOKEN: 'dogrula', WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '111',
+const ENV = { WHATSAPP_APP_SECRET: SECRET, WHATSAPP_VERIFY_TOKEN: 'dogrula', WHATSAPP_TOKEN: 't', WHATSAPP_NUMARALAR: JSON.stringify({ 111: 'depoevim' }),
   FIRESTORE_APP_ID: 'test-app', GEMINI_API_KEY: 'k', WHATSAPP_BIRLESTIRME_MS: '0' };
 const WA = '905321234567';
-// Gelecekteki Sembol hattı (Sembol talimatları kodda kalır, 0850'de kullanılmaz)
-const HATLAR_IKI = JSON.stringify([
-  { phoneNumberId: '111', marka: 'depoevim', tokenEnv: 'WHATSAPP_TOKEN', eskiKimlik: true },
-  { phoneNumberId: '222', marka: 'sembol', tokenEnv: 'WHATSAPP_TOKEN_SEMBOL' },
-]);
-const ENV_SEMBOL = { WHATSAPP_HATLAR: JSON.stringify([{ phoneNumberId: '111', marka: 'sembol', eskiKimlik: true }]) };
+// İki numara: 111 = DepoEvim (0850), 222 = Sembol (0216) — WHATSAPP_NUMARALAR biçimi
+const NUMARALAR_IKI = JSON.stringify({ 111: 'depoevim', 222: 'sembolevdeneve' });
+const ENV_SEMBOL = { WHATSAPP_NUMARALAR: JSON.stringify({ 111: 'sembolevdeneve' }) };
 
 let SAAT = Date.parse('2026-10-06T08:00:00Z');
 function ortam({ aiCevaplari = [], metaHata = null, fiyat = null, env = {}, db = sahteDb(), bekle } = {}) {
@@ -60,8 +57,9 @@ async function gonder(o, payload) {
   await o.bitir();
   return res;
 }
-const konusma = (db) => db.belge(`whatsapp_conversations/${WA}`);
-const mesajlar = (db) => [...db.belgeler.entries()].filter(([k]) => k.includes(`whatsapp_conversations/${WA}/messages/`)).map(([, v]) => v);
+const KID = `111_${WA}`;
+const konusma = (db) => db.belge(`whatsapp_conversations/${KID}`);
+const mesajlar = (db) => [...db.belgeler.entries()].filter(([k]) => k.includes(`whatsapp_conversations/${KID}/messages/`)).map(([, v]) => v);
 
 test('GET doğrulama: doğru token → challenge, yanlış → 403', async () => {
   const { handler } = ortam();
@@ -153,15 +151,15 @@ test('ref kodu: ref yapay zekaya gitmez, DepoEvim tıklama kaydı lead\'e dönü
   // yapay zekanın "sembol" markası yok sayıldı: hat DepoEvim
   assert.equal(lead.hesapId, 'depoevim'); assert.equal(lead.hizmetTipi, 'Depo');
   assert.equal(lead.kvkkAydinlatmaKanal, 'whatsapp'); assert.deepEqual(lead.kvkkAydinlatmaMarka, ['depoevim']);
-  assert.equal(lead.whatsapp.konusmaId, WA); assert.equal(lead.whatsapp.hatId, '111');
+  assert.equal(lead.whatsapp.konusmaId, KID); assert.equal(lead.whatsapp.hatId, '111');
   assert.equal(konusma(db).leadId, 'ref_DE-ABC12');
 });
 
-test('Sembol hattı (gelecek) fiyat: alanlar tamamlanınca sistem fiyatıyla ikinci tur; uydurma rakam sabit metne çevrilir; lead fiyatı yazılır', async () => {
+test('Sembol hattı fiyat: alanlar tamamlanınca sistem fiyatıyla ikinci tur; uydurma rakam sabit metne çevrilir; lead fiyatı yazılır', async () => {
   const fiyat = ({ alanlar }) => (alanlar.paketleme ? { durum: 'tamam', marka: 'sembol', min: 51100, max: 64000 } : { durum: 'eksik', eksik: ['paketleme'] });
   const o = ortam({ fiyat, env: ENV_SEMBOL, aiCevaplari: [
-    tamam({ marka: 'sembol', collected: { homeSize: '2+1', paketleme: 'firma' }, reply: 'Hesaplıyorum' }),
-    tamam({ marka: 'sembol', reply: 'Tahmini fiyat 45.000 TL olur.' }), // uydurma rakam
+    tamam({ intent: 'evden_eve', collected: { homeSize: '2+1', paketleme: 'firma' }, reply: 'Hesaplıyorum' }),
+    tamam({ intent: 'evden_eve', reply: 'Tahmini fiyat 45.000 TL olur.' }), // uydurma rakam
   ] });
   await gonder(o, olay({ messages: [mesaj('w1', 'paketlemeyi siz yapın')] }));
   assert.equal(o.aiCagrilari.length, 2);
@@ -189,17 +187,21 @@ test('temsilci isteği: mode human olur, sonraki mesajlarda bot susar; lead\'e h
 // ---------------------------------------------------------------- YAPAY ZEKA HATASI (2026-10-07: kilitlemez)
 const hataAi = (tur = 'gecici', durum = 429) => ({ ok: false, tur, durum, hata: `Gemini HTTP ${durum}` });
 const kok = (db) => db.collection('artifacts').doc('test-app').collection('public').doc('data');
-const konusmaKur = (db, veri) => kok(db).collection('whatsapp_conversations').doc(WA).set(veri);
-const mesajKur = (db, id, veri) => kok(db).collection('whatsapp_conversations').doc(WA).collection('messages').doc(id).set(veri);
+const konusmaKur = (db, veri) => kok(db).collection('whatsapp_conversations').doc(KID).set(veri);
+const mesajKur = (db, id, veri) => kok(db).collection('whatsapp_conversations').doc(KID).collection('messages').doc(id).set(veri);
 const yedekDeseni = new RegExp(YEDEK_MESAJ.replace('.', '\\.'));
 
-test('yapay zeka hatası: sabit mesaj gider, konuşma bot modunda kalır, sonraki mesajda bot cevap verir', async () => {
+test('yapay zeka hatası: sabit mesaj + personele bildirim (needsAgent, "bildir"), konuşma bot modunda kalır, sonraki mesajda bot cevap verir', async () => {
   SAAT = Date.parse('2026-10-06T08:00:00Z');
   const o = ortam({ aiCevaplari: [hataAi('yapilandirma', 402), tamam({ reply: 'Kaç oda?' })] });
   await gonder(o, olay({ messages: [mesaj('w1', 'merhaba')] }));
   assert.match(o.gonderilen[0].text.body, yedekDeseni);
   let k = konusma(o.db);
-  assert.equal(k.mode, 'bot'); assert.equal(k.needsAgent, false);
+  // 2026-10-10: personel bilgilendirilir ama bot SUSMAZ
+  assert.equal(k.mode, 'bot'); assert.equal(k.needsAgent, true); assert.equal(k.devirTuru, 'bildir');
+  assert.equal(k.handoffReason, AI_HATA_BILDIRIMI);
+  assert.ok(o.db.havuz(k.leadId), 'personelin göreceği lead açıldı');
+  assert.match(o.db.havuz(k.leadId).hareketler.at(-1).islem, /Bot personeli bilgilendirdi.*yapay zeka hatası/);
   assert.equal(k.botHatasi.tur, 'yapilandirma');
   assert.equal(o.db.belge('whatsapp_durum/ai').aktif, true);   // yöneticiye uyarı (kredi bitti)
   SAAT += 60000;
@@ -314,12 +316,14 @@ test('statuses: sent → read ilerler, geri gitmez; failed kaydedilir', async ()
   assert.equal(mesajlar(o.db).length, 2);
 });
 
-test('bilinmeyen hattın olayı işlenmez; WHATSAPP_BOT_KAPALI=1 iken yalnızca kaydedilir', async () => {
+test('eşlenmemiş numaranın mesajı kaydedilir ama bot cevap vermez; WHATSAPP_BOT_KAPALI=1 iken yalnızca kaydedilir', async () => {
   const o = ortam({ aiCevaplari: [tamam()] });
   const p = olay({ messages: [mesaj('w1', 'merhaba')] });
   p.entry[0].changes[0].value.metadata.phone_number_id = '999';
   await gonder(o, p);
-  assert.equal(mesajlar(o.db).length, 0);
+  assert.equal(mesajlar(o.db).length, 0);                       // 111 konuşmasına yazılmadı
+  assert.equal(o.db.belge(`whatsapp_conversations/999_${WA}/messages/w1`).text, 'merhaba');
+  assert.equal(o.aiCagrilari.length, 0); assert.equal(o.gonderilen.length, 0);
   const o2 = ortam({ aiCevaplari: [tamam()], env: { WHATSAPP_BOT_KAPALI: '1' } });
   await gonder(o2, olay({ messages: [mesaj('w1', 'merhaba')] }));
   assert.equal(mesajlar(o2.db).length, 1);
@@ -521,7 +525,7 @@ test('DepoEvim hattında evden eve talebi: fiyat verilmez, Sembol ekibi için "e
 
 test('hat ayrımı: aynı müşteri iki hatta yazarsa iki ayrı konuşma; her hat kendi numarası, token\'ı ve markasıyla cevap verir', async () => {
   SAAT = Date.parse('2026-10-07T08:00:00Z');
-  const o = ortam({ env: { WHATSAPP_HATLAR: HATLAR_IKI, WHATSAPP_TOKEN_SEMBOL: 'ts' }, aiCevaplari: [tamam({ reply: 'Nasıl yardımcı olabilirim?' })] });
+  const o = ortam({ env: { WHATSAPP_NUMARALAR: NUMARALAR_IKI, WHATSAPP_TOKEN_222: 'ts' }, aiCevaplari: [tamam({ intent: 'diger', reply: 'Nasıl yardımcı olabilirim?' })] });
   await gonder(o, olay({ messages: [mesaj('w1', 'merhaba')] }, '111'));
   await gonder(o, olay({ messages: [mesaj('w2', 'merhaba')] }, '222'));
   assert.match(o.gonderilen[0]._url, /\/111\/messages$/); assert.equal(o.gonderilen[0]._yetki, 'Bearer t');
@@ -537,13 +541,122 @@ test('hat ayrımı: aynı müşteri iki hatta yazarsa iki ayrı konuşma; her ha
   assert.equal(o.db.belge(`whatsapp_conversations/222_${WA}/messages/wamid.out2`).status, 'read');
 });
 
-test('bilinmeyen hat: mesaj kaydedilmez, maskeli tek satır loglanır', async () => {
-  const o = ortam({ aiCevaplari: [tamam()] });
-  const log = await loglariYakala(() => gonder(o, olay({ messages: [mesaj('w1', 'merhaba')] }, '987654321')));
-  assert.equal(mesajlar(o.db).length, 0);
-  assert.equal(o.aiCagrilari.length, 0);
-  assert.ok(log.some(s => s.startsWith('[whatsapp] atlandı 9053****4567 bilinmeyen hat (9876****4321) m=from,id,timestamp,type,text{body}')));
-  assert.ok(!log.some(s => s.includes(WA)));
+// console.warn'ı yakalar (UYARI satırları)
+async function uyarilariYakala(fn) {
+  const satirlar = [];
+  const eski = console.warn;
+  console.warn = (...a) => { satirlar.push(a.join(' ')); };
+  try { await fn(); } finally { console.warn = eski; }
+  return satirlar;
+}
+
+test('eşlenmemiş numara: mesaj ve konuşma KAYDEDİLİR (personel bekliyor), bot cevap vermez, uyarı loglanır + CRM bandı; numara eklenince aynı konuşmada bot devam eder, bant kalkar', async () => {
+  SAAT = Date.parse('2026-10-10T08:00:00Z');
+  const o = ortam({ aiCevaplari: [tamam({ intent: 'evden_eve', reply: 'Kaç odalı bir ev taşınacak?' })] });
+  let uyarilar;
+  const log = await loglariYakala(async () => { uyarilar = await uyarilariYakala(() => gonder(o, olay({ contacts: [{ wa_id: WA, profile: { name: 'Ece' } }], messages: [mesaj('w1', 'merhaba')] }, '987654321'))); });
+  const kid = `987654321_${WA}`;
+  const k = o.db.belge(`whatsapp_conversations/${kid}`);
+  assert.equal(k.eslenmemis, true); assert.equal(k.hatId, '987654321'); assert.equal(k.marka, '');
+  assert.equal(k.needsAgent, true); assert.equal(k.unreadCount, 1); assert.equal(k.profileName, 'Ece'); assert.equal(k.mode, 'bot');
+  assert.equal(o.db.belge(`whatsapp_conversations/${kid}/messages/w1`).from, 'customer');
+  assert.equal(o.aiCagrilari.length, 0); assert.equal(o.gonderilen.length, 0);
+  assert.ok(uyarilar.some(s => s.startsWith('[whatsapp] UYARI eşlenmemiş numara 9876****4321') && s.includes('WHATSAPP_NUMARALAR')));
+  assert.ok(log.some(s => s.startsWith('[whatsapp] atlandı 9053****4567 eşlenmemiş numara (9876****4321)')));
+  assert.ok(![...log, ...uyarilar].some(s => s.includes(WA) || s.includes('987654321')));   // numara / id maskeli
+  const bant = o.db.belge('whatsapp_durum/numara');
+  assert.equal(bant.aktif, true); assert.equal(bant.phoneNumberId, '987654321');
+  assert.equal(o.db.belge(`whatsapp_conversations/111_${WA}`), undefined);
+
+  // Ertesi gün: numara Sembol olarak eşlendi → aynı konuşma, bot SEMBO Asistan olarak o numaradan cevap verir, bant kalkar
+  const o2 = ortam({ db: o.db, env: { WHATSAPP_NUMARALAR: JSON.stringify({ 111: 'depoevim', 987654321: 'sembolevdeneve' }) },
+    aiCevaplari: [tamam({ intent: 'evden_eve', reply: 'Kaç odalı bir ev taşınacak?' })] });
+  SAAT += 60000;
+  await gonder(o2, olay({ messages: [mesaj('w2', 'evden eve fiyat')] }, '987654321'));
+  assert.equal(o2.gonderilen.length, 1);
+  assert.match(o2.gonderilen[0]._url, /\/987654321\/messages$/);
+  assert.match(o2.gonderilen[0].text.body, /^Merhaba, ben SEMBO Asistan/);
+  const k2 = o.db.belge(`whatsapp_conversations/${kid}`);
+  assert.equal(k2.eslenmemis, false); assert.equal(k2.marka, 'sembol');
+  assert.equal(o.db.belge('whatsapp_durum/numara').aktif, false);
+});
+
+test('WHATSAPP_NUMARALAR: boş / bozuk JSON / geçersiz marka → o numaralara bot cevap vermez (mesaj yine kaydedilir)', async () => {
+  const { hatlariOku } = await import('../api/_lib/whatsapp.js');
+  const hatalar = [];
+  const eski = console.error;
+  console.error = (...a) => hatalar.push(a.join(' '));
+  try {
+    assert.deepEqual(hatlariOku({}), []);
+    assert.deepEqual(hatlariOku({ WHATSAPP_NUMARALAR: '{bozuk' }), []);
+    assert.deepEqual(hatlariOku({ WHATSAPP_NUMARALAR: '[{"phoneNumberId":"1"}]' }), []);
+    assert.deepEqual(hatlariOku({ WHATSAPP_NUMARALAR: JSON.stringify({ 1: 'sembol', 2: 'DepoEvim', 3: 'sembolevdeneve' }) }).map(h => [h.phoneNumberId, h.marka, h.tokenEnv]),
+      [['2', 'depoevim', 'WHATSAPP_TOKEN'], ['3', 'sembol', 'WHATSAPP_TOKEN']]);
+    assert.equal(hatlariOku({ WHATSAPP_NUMARALAR: '{"3":"sembolevdeneve"}', WHATSAPP_TOKEN_3: 'x' })[0].tokenEnv, 'WHATSAPP_TOKEN_3');
+  } finally { console.error = eski; }
+  assert.ok(hatalar.some(s => s.includes('geçersiz JSON')));
+  const o = ortam({ env: { WHATSAPP_NUMARALAR: '{bozuk' }, aiCevaplari: [tamam()] });
+  console.error = () => {};
+  try { await uyarilariYakala(() => gonder(o, olay({ messages: [mesaj('w1', 'merhaba')] }))); } finally { console.error = eski; }
+  assert.equal(o.gonderilen.length, 0); assert.equal(o.aiCagrilari.length, 0);
+  assert.equal(konusma(o.db).eslenmemis, true);
+});
+
+test('Sembol hattında depolama talebi: DepoEvim bilgileriyle yeniden üretilir, fiyat DepoEvim Fiyat Tablosu\'ndan (+KDV), lead DepoEvim (Depo / depoevim), DepoEvim aydınlatması bir kez, Sembol numarasından gider', async () => {
+  SAAT = Date.parse('2026-10-11T08:00:00Z');
+  const db = sahteDb();
+  await kok(db).collection('havuzKayitlari').doc('ref_SB-DEP01')
+    .set({ sadeceTiklama: true, musteriAdi: 'Ziyaretçi', reklamKaynagi: 'facebook_ads', durum: 'Yeni', kanal: 'whatsapp', hareketler: [] });
+  const fiyatMarkalari = [];
+  const fiyat = (a) => {
+    fiyatMarkalari.push(a.marka);
+    if (a.marka !== 'depoevim') return { durum: 'eksik', eksik: ['homeSize'] };
+    return a.alanlar.sube ? { durum: 'tamam', marka: 'depoevim', kira: { aylik: 6000, sureAy: 6, odenecekAy: 5, ucretsizAy: 1, toplam: 30000 }, nakliye: null, nakliyeEksik: ['pickupCity'] }
+      : { durum: 'eksik', eksik: ['sube'] };
+  };
+  const o = ortam({ db, fiyat, env: { WHATSAPP_NUMARALAR: NUMARALAR_IKI }, aiCevaplari: [
+    tamam({ intent: 'depolama', reply: 'İlk taslak' }),                                     // niyet anlaşıldı → DepoEvim bilgileriyle yeniden
+    tamam({ intent: 'depolama', reply: 'Hangi şubemizi tercih edersiniz?' }),
+    tamam({ intent: 'depolama', collected: { depoBoyutu: '15', kiralamaSuresi: '6', sube: 'kartal', teslimSekli: 'kendim' }, reply: 'Hesaplıyorum' }),
+    tamam({ intent: 'depolama', reply: 'Aylık kira 6.000 TL +KDV, 6 ay peşin toplam 30.000 TL +KDV.' }),
+  ] });
+  await gonder(o, olay({ contacts: [{ wa_id: WA, profile: { name: 'Selin' } }], messages: [mesaj('w1', 'Eşyalarımı depolamak istiyorum (Ref: SB-DEP01)')] }, '222'));
+  assert.equal(o.aiCagrilari.length, 2);
+  assert.match(o.aiCagrilari[0].sistem, /MARKA: Sembol Nakliyat/);
+  assert.doesNotMatch(o.aiCagrilari[0].sistem, /DEPOLAMA TALEBİ \(bu konuşmada/);
+  assert.match(o.aiCagrilari[1].sistem, /DEPOLAMA TALEBİ \(bu konuşmada/);
+  assert.match(o.aiCagrilari[1].sistem, /DEPOEVİM \(depoevim\.com\)/);
+  assert.match(o.aiCagrilari[1].sistem, /depoBoyutu/);
+  assert.match(o.aiCagrilari[1].sistem, /SEN: "SEMBO Asistan"/);
+  const ilk = o.gonderilen[0];
+  assert.match(ilk._url, /\/222\/messages$/);
+  assert.ok(ilk.text.body.startsWith('Merhaba, ben SEMBO Asistan'));
+  assert.ok(ilk.text.body.includes(`\n\n${DEPOEVIM_DEPOLAMA_KVKK}\n\nHangi şubemizi tercih edersiniz?`));
+  let k = o.db.belge(`whatsapp_conversations/222_${WA}`);
+  assert.equal(k.marka, 'sembol'); assert.deepEqual(Object.keys(k.kvkkGonderilen).sort(), ['depoevim', 'sembol']);
+  assert.ok(fiyatMarkalari.includes('depoevim'));
+
+  SAAT += 60000;
+  await gonder(o, olay({ messages: [mesaj('w2', '15 m3, 6 ay, Kartal, kendim getireceğim')] }, '222'));
+  assert.match(o.aiCagrilari[3].sistem, /SİSTEM FİYATI \(DepoEvim, tümü \+KDV\): aylık kira 6\.000 TL \+KDV/);
+  const ikinci = o.gonderilen[1].text.body;
+  assert.match(ikinci, /6\.000 TL \+KDV/);
+  assert.doesNotMatch(ikinci, /aydinlatma-metni/);                                        // aydınlatma tekrar edilmez
+  k = o.db.belge(`whatsapp_conversations/222_${WA}`);
+  assert.equal(k.depoLeadId, 'ref_SB-DEP01'); assert.equal(k.leadId ?? null, null);
+  const lead = db.havuz('ref_SB-DEP01');
+  assert.equal(lead.hizmetTipi, 'Depo'); assert.equal(lead.hesapId, 'depoevim');
+  assert.equal(lead.reklamKaynagi, 'facebook_ads'); assert.equal(lead.kayitTipi, 'whatsapp-bot');
+  assert.equal(lead.whatsapp.hatId, '222'); assert.equal(lead.whatsapp.hatMarka, 'sembol');
+  assert.deepEqual(lead.kvkkAydinlatmaMarka, ['depoevim', 'sembol']);
+});
+
+test('gönderim konuşmanın geldiği numaradan: statuses eski (2026-10-10 öncesi, kimliği yalnızca waId) 0850 konuşmasına da yazılır', async () => {
+  const db = sahteDb();
+  await kok(db).collection('whatsapp_conversations').doc(WA).collection('messages').doc('wamid.eski').set({ direction: 'out', from: 'bot', status: 'sent', text: 'x' });
+  const o = ortam({ db });
+  await gonder(o, olay({ statuses: [{ id: 'wamid.eski', recipient_id: WA, status: 'read', timestamp: '1791273700' }] }));
+  assert.equal(db.belge(`whatsapp_conversations/${WA}/messages/wamid.eski`).status, 'read');
 });
 
 // ---- KULLANICI ADI / BSUID (2026-10-08): telefon (from / wa_id) OLMADAN gelen mesaj
@@ -560,10 +673,10 @@ test('kullanıcı adı: from\'suz, user_id\'li mesaj işlenir — konuşma BSUID
   assert.equal(o.gonderilen[0].recipient, BSUID);
   assert.equal(o.gonderilen[0].to, undefined);
   assert.equal(o.aiCagrilari.length, 1);
-  const k = o.db.belge(`whatsapp_conversations/${BSUID}`);
+  const k = o.db.belge(`whatsapp_conversations/111_${BSUID}`);
   assert.equal(k.waId, BSUID); assert.equal(k.userId, BSUID); assert.equal(k.username, 'depoevim');
   assert.equal(k.phone, ''); assert.equal(k.kullaniciAdiyla, true); assert.equal(k.profileName, 'Depo Evim');
-  const mm = [...o.db.belgeler.entries()].filter(([y]) => y.includes(`whatsapp_conversations/${BSUID}/messages/`)).map(([, v]) => v);
+  const mm = [...o.db.belgeler.entries()].filter(([y]) => y.includes(`whatsapp_conversations/111_${BSUID}/messages/`)).map(([, v]) => v);
   assert.deepEqual(mm.map(x => x.from).sort(), ['bot', 'customer']);
   // Lead: telefon yok açıkça belirtilir
   const lead = o.db.havuz(k.leadId);
@@ -574,7 +687,7 @@ test('kullanıcı adı: from\'suz, user_id\'li mesaj işlenir — konuşma BSUID
   assert.ok(!log.some(s => s.includes(BSUID) || s.includes('Depo Evim') || s.includes('@depoevim')));
   // Durum: recipient_id yok, recipient_user_id var
   await gonder(o, olay({ statuses: [{ id: 'wamid.out1', recipient_user_id: BSUID, status: 'read', timestamp: '1791273700' }] }));
-  assert.equal(o.db.belge(`whatsapp_conversations/${BSUID}/messages/wamid.out1`).status, 'read');
+  assert.equal(o.db.belge(`whatsapp_conversations/111_${BSUID}/messages/wamid.out1`).status, 'read');
 });
 
 test('kullanıcı adı: telefon sonradan gelirse konuşma bölünmez, telefon konuşmaya ve lead\'e yazılır', async () => {
@@ -582,7 +695,7 @@ test('kullanıcı adı: telefon sonradan gelirse konuşma bölünmez, telefon ko
   await gonder(o, olay({ contacts: [bsuidKisi], messages: [bsuidMesaj('wB1', 'Merhaba')] }));
   await gonder(o, olay({ contacts: [{ ...bsuidKisi, wa_id: WA }], messages: [{ ...bsuidMesaj('wB2', '2+1 ev'), from: WA }] }));
   assert.equal(konusma(o.db), undefined); // telefonla ayrı konuşma AÇILMADI
-  const k = o.db.belge(`whatsapp_conversations/${BSUID}`);
+  const k = o.db.belge(`whatsapp_conversations/111_${BSUID}`);
   assert.equal(k.phone, '0532 123 45 67'); assert.equal(k.telefonWa, WA); assert.equal(k.kullaniciAdiyla, false);
   assert.equal(o.gonderilen.length, 2); assert.equal(o.gonderilen[1].recipient, BSUID);
   const lead = o.db.havuz(k.leadId);
@@ -712,4 +825,45 @@ test('bilgi bankası okunamıyorsa (Firestore hatası) bot yedek bilgiyle cevap 
   assert.match(o.aiCagrilari[0].sistem, /2004'ten beri nakliyat/);
   assert.equal(o.gonderilen.length, 1);
   botBilgiOnbelleginiTemizle();
+});
+
+test('peş peşe mesaj kilidi: bot cevap yazarken gelen mesaj paralel tur başlatmaz; tur bitince TEK ek tur (iki mesajı birlikte görür); 90 sn\'lik bayat kilit devralınır', async () => {
+  SAAT = Date.parse('2026-10-10T08:00:00Z');
+  let birakAi;
+  const aiBekle = new Promise(r => { birakAi = r; });
+  let cagri = 0, ayniAnda = 0, enFazla = 0;
+  const o = ortam({ aiCevaplari: [async () => {
+    cagri++; ayniAnda++; enFazla = Math.max(enFazla, ayniAnda);
+    if (cagri === 1) await aiBekle;            // 1. tur yapay zekada takılı
+    ayniAnda--;
+    return tamam({ reply: `Cevap ${cagri}` });
+  }] });
+  const r1 = sahteYanit();
+  await o.handler(istek(olay({ messages: [mesaj('wK1', 'Merhaba')] })), r1);
+  await new Promise(r => setTimeout(r, 0));
+  for (let i = 0; i < 20 && cagri === 0; i++) await new Promise(r => setTimeout(r, 0));
+  assert.equal(cagri, 1);
+  assert.ok(konusma(o.db).botKilit, 'kilit alındı');
+  const r2 = sahteYanit();
+  await o.handler(istek(olay({ messages: [{ ...mesaj('wK2', 'Kadıköy'), timestamp: '1791273601' }] })), r2);
+  for (let i = 0; i < 20 && !konusma(o.db).botTekrar; i++) await new Promise(r => setTimeout(r, 0));
+  assert.equal(konusma(o.db).botTekrar, true);   // 2. mesaj kilidi gördü, yalnızca "tekrar" işaretledi
+  assert.equal(cagri, 1);
+  birakAi();
+  await o.bitir();
+  assert.equal(enFazla, 1);                       // hiçbir an iki tur aynı anda çalışmadı
+  assert.equal(o.gonderilen.length, 2);
+  assert.deepEqual(o.aiCagrilari[1].gecmis.filter(g => g.rol === 'musteri').map(g => g.metin), ['Merhaba', 'Kadıköy']);
+  assert.equal(konusma(o.db).botKilit, null); assert.equal(konusma(o.db).botTekrar, false);
+
+  // bayat kilit (çökmüş tur, 90 sn'den eski) yeni mesajı engellemez
+  const o2 = ortam({ aiCevaplari: [tamam({ reply: 'Buradayım' })] });
+  await kok(o2.db).collection('whatsapp_conversations').doc(KID).set({ waId: WA, mode: 'bot', botKilit: { wamid: 'eski', zaman: new Date(SAAT - 91000).toISOString() }, kvkkGonderilen: { depoevim: 'x' } });
+  await gonder(o2, olay({ messages: [mesaj('wK3', 'alo')] }));
+  assert.equal(o2.gonderilen.length, 1);
+  // taze kilit (10 sn) varsa yeni tur başlamaz, botTekrar işaretlenir
+  const o3 = ortam({ aiCevaplari: [tamam()] });
+  await kok(o3.db).collection('whatsapp_conversations').doc(KID).set({ waId: WA, mode: 'bot', botKilit: { wamid: 'x', zaman: new Date(SAAT - 10000).toISOString() } });
+  await gonder(o3, olay({ messages: [mesaj('wK4', 'alo')] }));
+  assert.equal(o3.gonderilen.length, 0); assert.equal(konusma(o3.db).botTekrar, true);
 });

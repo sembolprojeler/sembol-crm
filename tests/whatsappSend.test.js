@@ -9,7 +9,7 @@ const { altSatisErisimi, modulErisimi, yoneticiMi, SIFRE_YOK_MESAJI } = await im
 
 const WA = '905321234567';
 const SAAT = Date.parse('2026-10-07T12:00:00Z');
-const ENV = { FIRESTORE_APP_ID: 'test-app', WHATSAPP_TOKEN: 't', WHATSAPP_PHONE_NUMBER_ID: '111' };
+const ENV = { FIRESTORE_APP_ID: 'test-app', WHATSAPP_TOKEN: 't', WHATSAPP_NUMARALAR: JSON.stringify({ 111: 'depoevim', 222: 'sembolevdeneve' }) };
 const kok = (db) => db.collection('artifacts').doc('test-app').collection('public').doc('data');
 
 async function kur({ konusma = {}, personel = {}, positionModules = { 'Satış Temsilcisi': { addJob: true } }, metaHata = null } = {}) {
@@ -105,6 +105,46 @@ test('gonder: Meta hatası → 502, mesaj "failed" olarak kaydedilir (panelde g�
   assert.equal(r.kod, 502);
   assert.equal(mesajlar(o.db)[0].status, 'failed');
   assert.equal(kon(o.db).mode, 'bot');
+});
+
+test('gonder: konuşmanın geldiği numaradan — Sembol (222) konuşması 222\'den, depolama lead\'ine de hareket yazılır', async () => {
+  const o = await kur({ konusma: { hatId: '222', marka: 'sembol', leadId: null, depoLeadId: 'L1' } });
+  const r = await o.istek({ islem: 'gonder', konusmaId: WA, metin: 'Merhaba', ...ayse });
+  assert.equal(r.kod, 200);
+  assert.match(o.gonderilen[0].url, /\/222\/messages$/);
+  assert.match(o.db.havuz('L1').hareketler.at(-1).islem, /cevap yazdı/);
+});
+
+test('gonder: eşlenmemiş numaradan gelen konuşma → 409 hat_yok, Meta çağrılmaz, mesaj yazılmaz', async () => {
+  const o = await kur({ konusma: { hatId: '999', marka: '', eslenmemis: true } });
+  const r = await o.istek({ islem: 'gonder', konusmaId: WA, metin: 'Merhaba', ...ayse });
+  assert.equal(r.kod, 409); assert.equal(r.govde.sebep, 'hat_yok'); assert.match(r.govde.hata, /WHATSAPP_NUMARALAR/);
+  assert.equal(o.gonderilen.length, 0); assert.equal(mesajlar(o.db).length, 0);
+  assert.equal(kon(o.db).mode, 'bot');
+});
+
+test('gonder: token hatası (190) → 502 + whatsapp_durum/token uyarısı (CRM bandı); sonraki başarılı gönderim bandı kaldırır', async () => {
+  const o = await kur({ metaHata: { code: 190, type: 'OAuthException', message: 'Error validating access token' } });
+  const r = await o.istek({ islem: 'gonder', konusmaId: WA, metin: 'Merhaba', ...ayse });
+  assert.equal(r.kod, 502);
+  const uyari = o.db.belge('whatsapp_durum/token');
+  assert.equal(uyari.aktif, true); assert.equal(uyari.tur, 'token'); assert.equal(uyari.kod, 190);
+  assert.equal(uyari.mesaj, 'WhatsApp token geçersiz, mesajlar gönderilemiyor');
+  // token düzeldi
+  const o2 = await kur();
+  await kok(o2.db).collection('whatsapp_durum').doc('token').set({ aktif: true, tur: 'token' });
+  assert.equal((await o2.istek({ islem: 'gonder', konusmaId: WA, metin: 'x', ...ayse })).kod, 200);
+  assert.equal(o2.db.belge('whatsapp_durum/token').aktif, false);
+});
+
+test('gonder: 24 saat penceresi sınırda — 23 sa 59 dk açık, 24 sa 1 dk kapalı; müşteri mesajı hiç yoksa kapalı', async () => {
+  let o = await kur({ konusma: { lastCustomerMessageAt: new Date(SAAT - PENCERE_MS + 60000).toISOString() } });
+  assert.equal((await o.istek({ islem: 'gonder', konusmaId: WA, metin: 'x', ...ayse })).kod, 200);
+  o = await kur({ konusma: { lastCustomerMessageAt: new Date(SAAT - PENCERE_MS - 60000).toISOString() } });
+  assert.equal((await o.istek({ islem: 'gonder', konusmaId: WA, metin: 'x', ...ayse })).kod, 409);
+  o = await kur({ konusma: { lastCustomerMessageAt: null } });
+  assert.equal((await o.istek({ islem: 'gonder', konusmaId: WA, metin: 'x', ...ayse })).kod, 409);
+  assert.equal(o.gonderilen.length, 0);
 });
 
 test('devral → human (needsAgent kalkar); bota ver: başka personel 403, devralan ya da yönetici 200', async () => {

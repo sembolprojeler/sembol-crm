@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { botCevabiUret, aiJsonCoz, aiCiktisiDogrula, aiAyarlari } from '../api/_lib/ai.js';
-import { sistemTalimati, mesaiIcindeMi, fiyatRakamlariGecerliMi, kvkkMetni } from '../api/_lib/botTalimatlari.js';
+import { sistemTalimati, mesaiIcindeMi, fiyatRakamlariGecerliMi, kvkkMetni, girisMetni } from '../api/_lib/botTalimatlari.js';
 
 const CEVAP = { reply: 'Kaç oda?', collected: { fromCity: 'İstanbul' }, handoff: false, handoffReason: '', intent: 'evden_eve', marka: 'sembol' };
 const sahteFetch = (yanit, kayit = []) => async (url, ops) => { kayit.push({ url, ops, govde: JSON.parse(ops.body) }); return { ok: true, status: 200, json: async () => yanit }; };
@@ -62,15 +62,27 @@ test('mesai: hafta içi 09-18 İstanbul saati; cumartesi env ile', () => {
   assert.equal(mesaiIcindeMi(Date.parse('2026-10-10T08:00:00Z'), { WHATSAPP_CUMARTESI: '09:00-14:00' }), true);
 });
 
-test('talimat: fiyat yalnızca sistem bloğundan; DepoEvim +KDV; marka belirsizse soru kuralı', () => {
+test('talimat: fiyat yalnızca sistem bloğundan; DepoEvim +KDV; marka hep numaradan (sorma kuralı yok); Sembol hattında depolama', () => {
   const s1 = sistemTalimati({ marka: 'sembol', fiyat: { durum: 'tamam', marka: 'sembol', min: 51100, max: 64000 } });
   assert.match(s1, /51\.100 TL – 64\.000 TL/);
   assert.doesNotMatch(s1, /DEPOEVİM \(depoevim\.com\)/);
   const s2 = sistemTalimati({ marka: 'depoevim', fiyat: { durum: 'tamam', marka: 'depoevim', kira: { aylik: 7500, toplam: 37500, sureAy: 6, ucretsizAy: 1, odenecekAy: 5 }, nakliye: null, nakliyeEksik: ['pickupFloor'] } });
   assert.match(s2, /aylık kira 7\.500 TL \+KDV/);
   assert.match(s2, /alım ücreti için eksik: pickupFloor/);
-  assert.match(sistemTalimati({}), /MARKA HENÜZ BELLİ DEĞİL/);
+  // 2026-10-10: marka her zaman numaradan — nötr kimlik / "markayı sor" / çıktıda marka alanı yok
+  for (const s of [s1, s2, sistemTalimati({})]) {
+    assert.doesNotMatch(s, /MARKA HENÜZ BELLİ DEĞİL|ortak WhatsApp dijital asistanı|"marka":/);
+  }
+  assert.match(sistemTalimati({}), /MARKA: Sembol Nakliyat/);
+  // Sembol hattı: depolama ipucu (reddetme) her zaman; depolama talebinde DepoEvim bilgileri + alanları
+  assert.match(s1, /DEPOLAMA TALEBİ: Müşteri eşya depolama/);
+  const s3 = sistemTalimati({ marka: 'sembol', depolama: true, bilgiMetni: '- Kartal şubesi: test' });
+  assert.match(s3, /SEN: "SEMBO Asistan"/);
+  assert.match(s3, /DEPOEVİM \(depoevim\.com\)/); assert.match(s3, /Kartal şubesi: test/);
+  assert.match(s3, /depoBoyutu/); assert.match(s3, /"\+KDV"/);
+  assert.doesNotMatch(s3, /TOPLANACAK ALANLAR[^]*homeSize: "1\+1"/);
   assert.match(kvkkMetni('depoevim'), /depoevim\.com\/aydinlatma-metni/);
+  assert.equal(girisMetni('').metin, '');
 });
 
 test('uydurma rakam koruması', () => {

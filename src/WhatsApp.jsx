@@ -16,9 +16,9 @@ import { MessageCircle, Send, Bot, UserCheck, Search, ExternalLink, MapPin, Aler
   CalendarDays, Phone, Briefcase, Eye, Users } from 'lucide-react'; // YENİ (2026-10-08): havuz listesi simgeleri
 import { firestoreKaynagi } from './whatsappKaynak.js';
 import { pencereAcikMi, pencereKalan, konusmalariSuz, mesajGorunumu, medyaGorunumu, boyutMetni, gorselGoruntuleyiciIstegi, durumBilgisi, dikkatSayisi, sekmeBasligi, bekliyorMu,
-  listeSaati, konusmaMarkasi, musteriAdi, musteriAltSatiri, musteriTelefonu, kullaniciAdiylaMi, MARKA_ETIKETI, PENCERE_UYARISI, SIFRE_YOK_MESAJI } from './whatsappPanel.js';
+  listeSaati, konusmaMarkasi, musteriAdi, musteriAltSatiri, musteriTelefonu, kullaniciAdiylaMi, MARKA_ETIKETI, PENCERE_UYARISI, SIFRE_YOK_MESAJI, ESLENMEMIS_UYARISI } from './whatsappPanel.js';
 
-const MARKA_RENK = { depoevim: 'bg-blue-50 text-blue-700 border-blue-200', sembol: 'bg-red-50 text-red-700 border-red-200' };
+const MARKA_RENK = { depoevim: 'bg-blue-50 text-blue-700 border-blue-200', sembol: 'bg-red-50 text-red-700 border-red-200', eslenmemis: 'bg-neutral-100 text-neutral-700 border-neutral-300' };
 const mesajSaati = (iso, simdi) => {
   const t = new Date(iso || '');
   if (Number.isNaN(t.getTime())) return '';
@@ -95,7 +95,7 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
 
   const secili = konusmalar.find(k => k.id === seciliId) || null;
   const liste = useMemo(() => konusmalariSuz(konusmalar, filtre), [konusmalar, filtre]);
-  const uyarilar = ['token', 'ai'].map(a => durum[a]).filter(d => d?.aktif);
+  const uyarilar = ['token', 'ai', 'numara'].map(a => durum[a]).filter(d => d?.aktif);
 
   return (
     <div className="animate-in fade-in">
@@ -125,7 +125,7 @@ export const WhatsAppView = ({ currentUser, yonetici = false, acIstegi = null, o
               ))}
               <select value={filtre.marka} onChange={e => setFiltre(f => ({ ...f, marka: e.target.value }))}
                 className="ml-auto px-2 py-1 rounded-lg text-[11px] font-black border border-neutral-200 bg-white">
-                <option value="tumu">Tüm hatlar</option><option value="depoevim">DepoEvim</option><option value="sembol">Sembol</option>
+                <option value="tumu">Tüm hatlar</option><option value="depoevim">DepoEvim</option><option value="sembol">Sembol</option><option value="eslenmemis">Tanımsız numara</option>
               </select>
             </div>
           </div>
@@ -256,6 +256,10 @@ export const WhatsAppSohbet = ({ konusma, currentUser, yonetici = false, onGeri 
                   <button type="button" onClick={() => onLeadAc(secili.tasimaLeadId)} className="px-2.5 py-1.5 rounded-lg text-[11px] font-black border border-red-200 text-red-700 hover:bg-red-50 flex items-center gap-1">
                     <ExternalLink className="w-3.5 h-3.5" /> Taşıma lead'i
                   </button>)}
+                {secili.depoLeadId && onLeadAc && (
+                  <button type="button" onClick={() => onLeadAc(secili.depoLeadId)} className="px-2.5 py-1.5 rounded-lg text-[11px] font-black border border-blue-200 text-blue-700 hover:bg-blue-50 flex items-center gap-1">
+                    <ExternalLink className="w-3.5 h-3.5" /> Depolama lead'i
+                  </button>)}
                 {(secili.mode !== 'human' || !devralanBen) && (
                   <button type="button" disabled={!!isleniyor} onClick={() => islemYap('devral')}
                     className="px-2.5 py-1.5 rounded-lg text-[11px] font-black bg-amber-500 hover:bg-amber-600 text-white flex items-center gap-1 disabled:opacity-50">
@@ -308,7 +312,11 @@ export const WhatsAppSohbet = ({ konusma, currentUser, yonetici = false, onGeri 
                 <button type="button" onClick={() => setHata('')}><X className="w-4 h-4" /></button>
               </div>
             )}
-            {acik ? (
+            {secili.eslenmemis ? (
+              <div className="p-3 border-t border-neutral-200 bg-neutral-50 text-xs font-bold text-neutral-600 flex items-center gap-2">
+                <Lock className="w-4 h-4 shrink-0" /> {ESLENMEMIS_UYARISI}
+              </div>
+            ) : acik ? (
               <div className="p-2.5 border-t border-neutral-200 flex items-end gap-2">
                 <textarea value={metin} onChange={e => setMetin(e.target.value)} rows={2} maxLength={4096}
                   onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); gonder(); } }}
@@ -430,7 +438,7 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
           </div>
           <select value={filtre.marka} onChange={e => setFiltre(f => ({ ...f, marka: e.target.value }))}
             className="px-2 py-2 rounded-xl text-[11px] font-black border border-neutral-200 bg-white">
-            <option value="tumu">Tüm hatlar</option><option value="depoevim">DepoEvim</option><option value="sembol">Sembol</option>
+            <option value="tumu">Tüm hatlar</option><option value="depoevim">DepoEvim</option><option value="sembol">Sembol</option><option value="eslenmemis">Tanımsız numara</option>
           </select>
           <span className="text-[10px] font-black text-neutral-400 uppercase ml-1 flex items-center gap-1"><CalendarDays className="w-3.5 h-3.5" /> Zaman:</span>
           {HAVUZ_ZAMANLAR.map(([id, ad]) => (
@@ -480,7 +488,7 @@ export const WhatsAppHavuzu = ({ currentUser, yonetici = false, onLeadAc, onGors
                 return (
                   <div key={k.id} onClick={() => setAcikId(k.id)}
                     className={`relative grid grid-cols-1 md:grid-cols-[1.4fr_2fr_1fr_120px_auto] gap-2 md:gap-3 items-center pl-4 pr-3 py-2.5 border-b border-neutral-100 cursor-pointer hover:bg-neutral-50 ${bekliyorMu(k) ? 'bg-red-50/40' : ''}`}>
-                    <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${marka === 'depoevim' ? 'bg-blue-600' : 'bg-red-600'}`} />
+                    <span className={`absolute left-0 top-0 bottom-0 w-1.5 ${marka === 'depoevim' ? 'bg-blue-600' : marka === 'eslenmemis' ? 'bg-neutral-400' : 'bg-red-600'}`} />
                     {/* Müşteri */}
                     <div className="min-w-0 flex items-center gap-2.5">
                       <div className="w-9 h-9 rounded-full bg-green-100 text-green-700 flex items-center justify-center font-black shrink-0">

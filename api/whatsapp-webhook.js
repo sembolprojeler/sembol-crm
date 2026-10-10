@@ -6,9 +6,12 @@
 // POST → Meta olayları:
 //   1) X-Hub-Signature-256 (HMAC-SHA256, App Secret, HAM gövde) doğrulanır; geçersiz → 401
 //   2) Meta'ya HEMEN 200 dönülür; iş waitUntil ile arka planda yapılır
-//   3) HAT (2026-10-07): metadata.phone_number_id → WHATSAPP_HATLAR'daki hat (marka, token).
-//      Bilinmeyen hat loglanıp yok sayılır. Her hat TEK markadır (0850 = yalnızca DepoEvim);
-//      aynı müşteri iki hatta yazarsa iki ayrı konuşma olur (api/_lib/whatsapp.js konusmaKimligi).
+//   3) NUMARA (2026-10-10): metadata.phone_number_id → WHATSAPP_NUMARALAR eşlemesi
+//      ({"<id>": "sembolevdeneve" | "depoevim"}) → marka. Her numara TEK markadır, bot markayı sormaz;
+//      cevaplar konuşmanın geldiği numaradan gider. Aynı müşteri iki numaraya yazarsa iki ayrı konuşma
+//      olur (api/_lib/whatsapp.js konusmaKimligi). EŞLEMEDE OLMAYAN numaradan gelen mesaj KAYDEDİLİR
+//      (konuşmada eslenmemis: true, personel bekliyor), bot cevap VERMEZ, "[whatsapp] UYARI" loglanır ve
+//      whatsapp_durum/numara uyarısı yazılır (CRM bandı); o numaradan eşlenmiş mesaj gelince uyarı kalkar.
 //   4) Tekrar koruması: mesaj belgesi kimliği = wamid, create() ile yazılır; zaten
 //      varsa (Meta aynı olayı yeniden gönderdi) işlenmez, bot ikinci kez cevap vermez
 //   5) Peş peşe mesaj kilidi: müşteri art arda yazarsa kısa bir bekleme sonrası
@@ -24,10 +27,14 @@
 //   8) Maliyet: konuşma başına günde (Türkiye saati) en fazla 30 bot cevabı
 //   9) DepoEvim hattında depolamasız taşıma talebi: bilgiler toplanır, fiyat VERİLMEZ,
 //      Sembol ekibi için "evden eve" lead'i açılır (konuşmada tasimaLeadId)
+//   9b) YENİ (2026-10-10) Sembol hattında depolama talebi (intent depolama / kiralik_depo): bot DepoEvim
+//      bilgileriyle yardım eder, fiyat DepoEvim Fiyat Tablosu'ndan (+KDV), lead DepoEvim'e (hizmetTipi Depo,
+//      hesapId depoevim; konuşmada depoLeadId), DepoEvim aydınlatması BİR KEZ
 //  10) statuses → giden mesajın durumu (sent / delivered / read / failed)
 //  11) Meta 190 / OAuthException ya da kalıcı hata → whatsapp_durum/token uyarısı
 //      (CRM'de yöneticilere kırmızı bant); yapay zeka yapılandırma hatası → whatsapp_durum/ai
-//  12) Yapay zeka hatası konuşmayı KİLİTLEMEZ: sabit mesaj (30 dk'da bir), sonraki mesajda yeniden dener
+//  12) Yapay zeka hatası konuşmayı KİLİTLEMEZ: sabit mesaj (30 dk'da bir), sonraki mesajda yeniden dener.
+//      2026-10-10: hata turunda personel BİLGİLENDİRİLİR (needsAgent, devirTuru "bildir") — bot susmaz
 //  13) Medya (görsel / ses / video / belge): ayrı arka plan işiyle Meta'dan indirilip crm/upload.php ile
 //      uploads/ köküne "wa_<rastgele>" adıyla yüklenir (api/_lib/whatsappMedya.js); bot cevabı beklemez
 //  14) KULLANICI ADI / BSUID (2026-10-08): kullanıcı adı olan müşterinin mesajı telefon OLMADAN gelebilir
@@ -41,8 +48,9 @@
 //  Her erken çıkışta tek satır log: "[whatsapp] atlandı <maskeli kimlik> <sebep>"
 //
 // ORTAM DEĞİŞKENLERİ (Vercel, VITE_ öneki YOK):
-//   WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_TOKEN, WHATSAPP_PHONE_NUMBER_ID
-//   WHATSAPP_HATLAR (isteğe bağlı JSON; yoksa WHATSAPP_PHONE_NUMBER_ID tek hat = DepoEvim)
+//   WHATSAPP_VERIFY_TOKEN, WHATSAPP_APP_SECRET, WHATSAPP_TOKEN
+//   WHATSAPP_NUMARALAR (JSON: {"<phone_number_id>": "sembolevdeneve" | "depoevim"}; boşsa hiçbir numaraya bot cevap vermez)
+//   WHATSAPP_TOKEN_<phone_number_id> (isteğe bağlı: o numara başka bir Meta işletmesindeyse)
 //   AI_PROVIDER (gemini|claude), GEMINI_API_KEY | ANTHROPIC_API_KEY, AI_MODEL (isteğe bağlı)
 //   FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL, FIREBASE_PRIVATE_KEY, FIRESTORE_APP_ID (mevcut)
 //   İsteğe bağlı: WHATSAPP_BIRLESTIRME_MS (peş peşe mesaj bekleme, varsayılan 4000),
@@ -53,7 +61,7 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { waitUntil } from '@vercel/functions';
-import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, aiUyariYaz, aiUyariTemizle, gelenMesajiCoz, metaHatasiCoz, hatBul, konusmaKimligi, musteriCoz, anahtarOzeti, bsuidMi } from './_lib/whatsapp.js';
+import { getDb as dbVarsayilan, konusmaRef, mesajlarRef, havuzRef, durumRef, maskele, waMetinGonder, uyariYaz, uyariTemizle, aiUyariYaz, aiUyariTemizle, gelenMesajiCoz, metaHatasiCoz, hatBul, eslenmemisHat, konusmaKimligi, musteriCoz, anahtarOzeti, bsuidMi } from './_lib/whatsapp.js';
 import { botCevabiUret } from './_lib/ai.js';
 import { botBilgiMetniOku } from './_lib/botBilgi.js';
 import { mesajMedyasiniIsle, MEDYA_TIPLERI } from './_lib/whatsappMedya.js';
@@ -67,6 +75,11 @@ export const SESSIZ_BILGI_MESAJI = 'Mesajınız ekibimize iletildi, mesai saatin
 // DepoEvim hattında taşıma talebi: lead Sembol'e gider → Sembol aydınlatması bir kez
 export const SEMBOL_TASIMA_KVKK = 'Taşıma talebiniz grubumuzdaki Sembol Nakliyat tarafından karşılanacak. '
   + 'Kişisel verileriniz Sembol Nakliyat aydınlatma metni kapsamında işlenir: https://www.sembolevdeneve.com/aydinlatma-metni/';
+// Sembol hattında depolama talebi: lead DepoEvim'e gider → DepoEvim aydınlatması bir kez
+export const DEPOEVIM_DEPOLAMA_KVKK = 'Depolama talebiniz grubumuzdaki DepoEvim tarafından karşılanacak. '
+  + 'Kişisel verileriniz DepoEvim aydınlatma metni kapsamında işlenir: https://www.depoevim.com/aydinlatma-metni/';
+// Yapay zeka hatası turunda personele bildirim sebebi (bot susmaz)
+export const AI_HATA_BILDIRIMI = 'Bot cevap veremedi (yapay zeka hatası) — müşteriye sabit mesaj gitti';
 // Günlük bot cevabı sınırı dolunca — günde bir kez
 export const SINIR_MESAJI = 'Ekibimiz size en kısa sürede dönüş yapacak.';
 const KILIT_SURESI_MS = 90000;
@@ -119,6 +132,10 @@ export function sessizModKarari(k = {}, mesajlar = [], simdiMs = Date.now()) {
 const TASIMA_NIYETLERI = ['evden_eve', 'sehirlerarasi', 'ofis'];
 // Bu alanlar gelince taşıma ekibi bilgilendirilir (yapay zekaya bırakılmaz)
 const TASIMA_ZORUNLU = ['homeSize', 'fromCity', 'fromDistrict', 'toCity', 'toDistrict'];
+// Sembol hattında depolama talepleri → DepoEvim fiyatı ve lead'i
+const DEPOLAMA_NIYETLERI = ['depolama', 'kiralik_depo'];
+// Konuşmaya bağlı bütün lead'ler (hareket satırları için)
+const konusmaLeadleri = (k = {}) => [...new Set([k.leadId, k.tasimaLeadId, k.depoLeadId].filter(Boolean))];
 
 // Hangi markaların aydınlatma linki gönderildi? Eski konuşmalar: kvkkVerildi → eski nötr
 // metin yalnızca Sembol linkini gönderiyordu.
@@ -218,6 +235,7 @@ export function handlerOlustur({
 
   // ---- lead (Müşteri Havuzu) — açık lead güncellenir, iş kapandıysa yeni lead.
   // alan: konuşmadaki kimlik alanı — 'leadId' (hattın markası) | 'tasimaLeadId' (DepoEvim hattından Sembol taşıma talebi)
+  //       | 'depoLeadId' (Sembol hattından DepoEvim depolama talebi)
   async function leadYaz(db, { hat, kid, waId, konusma, alan, leadMarka, intent, collected, fiyat, kvkkMarkalari = [], hareket, devir }) {
     const nowIso = iso();
     let id = null, onceki = {}, ilkKayit = true;
@@ -228,10 +246,11 @@ export function handlerOlustur({
       if (!leadAcikMi(d)) return false;
       id = aday; onceki = d; ilkKayit = false; return true;
     };
-    // Site ref kodu yalnızca kendi markasının lead'ine bağlanır (SB → Sembol, DE → DepoEvim)
-    const refMarka = konusma.refKodu ? refKoduBul(`(Ref: ${konusma.refKodu})`)?.marka : '';
+    // DEĞİŞTİ (2026-10-10): site ref kodu yalnızca reklam kaynağı / sayfa bilgisini eşleştirmek içindir —
+    // markadan bağımsız olarak konuşmanın İLK açılan lead'ine bir kez bağlanır (ör. Sembol sitesinden gelip
+    // depolama isteyen müşterinin DepoEvim lead'i). Lead'in markası hizmetten gelir (whatsappLeadKaydi).
     if (konusma[alan]) await dene(konusma[alan]);
-    if (!id && konusma.refKodu && !konusma.refKullanildi && refMarka === leadMarka) await dene(refBelgeId(konusma.refKodu));
+    if (!id && konusma.refKodu && !konusma.refKullanildi) await dene(refBelgeId(konusma.refKodu));
     if (!id) { id = `wa_${waId}_${simdi()}`; onceki = {}; ilkKayit = true; }
 
     const hizmet = ({ parca_esya: 'parca_esya', asansor_kiralama: 'asansor_kiralama', ofis: 'ofis' })[intent] || '';
@@ -258,7 +277,7 @@ export function handlerOlustur({
       sinirMesajiGunu: gun, needsAgent: true, lastMessageAt: nowIso, lastMessagePreview: SINIR_MESAJI, lastBotAt: nowIso,
       ...(konusma.needsAgent ? {} : { handoffReason: sebep, bildirimAt: nowIso, devirTuru: 'bildir' }),
     }, { merge: true });
-    if (!konusma.needsAgent) await leadHareketiEkle(db, waId, konusma.leadId || konusma.tasimaLeadId, `Bot personeli bilgilendirdi (bot devam ediyor): ${sebep}`);
+    if (!konusma.needsAgent) for (const id of konusmaLeadleri(konusma)) await leadHareketiEkle(db, waId, id, `Bot personeli bilgilendirdi (bot devam ediyor): ${sebep}`);
   }
 
   // ---- bir bot turu: son mesajları okur, cevap üretir, gönderir, kaydeder
@@ -276,22 +295,34 @@ export function handlerOlustur({
     const kvkkGonderilen = kvkkGonderilenOku(konusma);
     const ilkCevap = !Object.keys(kvkkGonderilen).length;
     const collected = konusma.collected || {};
-    // Hat tek markalıdır: yapay zekanın "marka" alanı dikkate alınmaz
+    // Marka numaradan gelir (WHATSAPP_NUMARALAR): yapay zekanın "marka" alanı dikkate alınmaz
     const marka = hat.marka;
-    // YENİ (2026-10-08): DepoEvim bilgi bloğu CRM'deki Bot Bilgileri sayfasından (60 sn önbellek; boş / hata → yedek metin)
-    const bilgiMetni = marka === 'depoevim' ? await botBilgiMetniOku(db, appId, marka, simdi()) : '';
+    // YENİ (2026-10-08): DepoEvim bilgi bloğu CRM'deki Bot Bilgileri sayfasından (60 sn önbellek; boş / hata → yedek metin).
+    // DepoEvim hattında her turda; Sembol hattında yalnızca depolama talebinde gerekir.
+    let depoBilgisi = null;
+    const bilgiMetniAl = async (depolama) => {
+      if (marka !== 'depoevim' && !depolama) return '';
+      if (depoBilgisi === null) depoBilgisi = await botBilgiMetniOku(db, appId, 'depoevim', simdi());
+      return depoBilgisi;
+    };
     let intent = konusma.intent || '';
     const tasimaMi = (niyet) => marka === 'depoevim' && TASIMA_NIYETLERI.includes(niyet);
+    // YENİ (2026-10-10): Sembol hattında depolama talebi → DepoEvim fiyatı / lead'i
+    const depolamaMi = (niyet) => marka === 'sembol' && DEPOLAMA_NIYETLERI.includes(niyet);
+    const fiyatMarkasi = (d) => (d ? 'depoevim' : marka);
     let tasima = tasimaMi(intent);
-    const fiyatOnce = tasima ? null : await fiyatGuvenli(db, marka, collected, intent);
+    let depo = depolamaMi(intent);
+    const fiyatOnce = tasima ? null : await fiyatGuvenli(db, fiyatMarkasi(depo), collected, intent);
     const bildirim = konusma.needsAgent ? { sebep: konusma.handoffReason || '' } : null;
-    const talimat = (c, f, t) => sistemTalimati({ marka, collected: c, fiyat: f, profilAdi: konusma.profileName || '', simdiMs: simdi(), env, ilkCevap, bildirim, tasima: t, bilgiMetni });
+    const talimat = async (c, f, t, d) => sistemTalimati({ marka, collected: c, fiyat: f, profilAdi: konusma.profileName || '', simdiMs: simdi(), env, ilkCevap, bildirim,
+      tasima: t, depolama: d, bilgiMetni: await bilgiMetniAl(d) });
 
-    let reply, handoff, handoffReason, handoffType = '', yeniCollected = collected, fiyat = fiyatOnce, aiHata = null;
-    const r1 = await aiUret({ sistem: talimat(collected, fiyatOnce, tasima), gecmis, env, fetchFn });
+    let reply, handoff, handoffReason, handoffType, yeniCollected = collected, fiyat = fiyatOnce, aiHata = null;
+    const r1 = await aiUret({ sistem: await talimat(collected, fiyatOnce, tasima, depo), gecmis, env, fetchFn });
     if (!r1.ok) {
-      // DEĞİŞTİ (2026-10-07): yapay zeka hatası konuşmayı KİLİTLEMEZ (personele devretmez);
+      // DEĞİŞTİ (2026-10-07): yapay zeka hatası konuşmayı KİLİTLEMEZ (bot susmaz);
       // müşterinin sonraki mesajında bot yeniden dener. Sabit mesaj 30 dakikada en fazla bir kez.
+      // YENİ (2026-10-10): personel bilgilendirilir (needsAgent, "bildir") — konuşma CRM'de "personel bekliyor"a düşer.
       aiHata = r1.hata;
       const hataAni = iso();
       console.error('[whatsapp] yapay zeka hatası:', maskele(waId), r1.tur, r1.hata);
@@ -301,21 +332,25 @@ export function handlerOlustur({
         atlandi(waId, 'yedek sessizliği (30 dk)');
         return;
       }
-      reply = YEDEK_MESAJ; handoff = false; handoffReason = '';
+      reply = YEDEK_MESAJ; handoff = true; handoffType = 'bildir'; handoffReason = AI_HATA_BILDIRIMI;
     } else {
       await aiUyariTemizle(db, iso(), appId);
       let out = r1.cikti;
       intent = out.intent && out.intent !== 'diger' ? out.intent : (intent || out.intent);
       tasima = tasimaMi(intent);
+      const depoOnce = depo;
+      depo = depolamaMi(intent);
       yeniCollected = { ...collected, ...whatsappAlanlariniTemizle(out.collected) };
-      fiyat = tasima ? null : await fiyatGuvenli(db, marka, yeniCollected, intent);
-      // Fiyat bu turda hesaplanabilir hâle geldiyse (ya da değiştiyse) cevap fiyatla yeniden üretilir
-      if (fiyat?.durum === 'tamam' && JSON.stringify(fiyat) !== JSON.stringify(fiyatOnce) && !out.handoff) {
-        const r2 = await aiUret({ sistem: talimat(yeniCollected, fiyat, tasima), gecmis, env, fetchFn });
+      fiyat = tasima ? null : await fiyatGuvenli(db, fiyatMarkasi(depo), yeniCollected, intent);
+      // Fiyat bu turda hesaplanabilir hâle geldiyse (ya da değiştiyse) ya da Sembol hattında depolama talebi
+      // bu turda anlaşıldıysa (DepoEvim bilgileri gerekir) cevap yeniden üretilir
+      const fiyatYeni = fiyat?.durum === 'tamam' && JSON.stringify(fiyat) !== JSON.stringify(fiyatOnce);
+      if ((fiyatYeni || depo !== depoOnce) && !out.handoff) {
+        const r2 = await aiUret({ sistem: await talimat(yeniCollected, fiyat, tasima, depo), gecmis, env, fetchFn });
         if (r2.ok) {
           out = { ...r2.cikti, handoff: r2.cikti.handoff || out.handoff, handoffReason: r2.cikti.handoffReason || out.handoffReason, handoffType: r2.cikti.handoffType || out.handoffType };
           yeniCollected = { ...yeniCollected, ...whatsappAlanlariniTemizle(r2.cikti.collected) };
-        } else out = { ...out, reply: fiyatMesaji(fiyat) };
+        } else if (fiyatYeni) out = { ...out, reply: fiyatMesaji(fiyat) };
       }
       reply = out.reply;
       handoff = out.handoff;
@@ -325,7 +360,7 @@ export function handlerOlustur({
       // bir kez düzeltme notuyla yeniden üretilir; yine ret varsa sabit cevap (soru / fiyat / devret)
       if (hizmetReddiVarMi(reply)) {
         console.warn('[whatsapp] cevapta hizmet reddi — yeniden üretiliyor', maskele(waId));
-        const r3 = await aiUret({ sistem: `${talimat(yeniCollected, fiyat, tasima)}\n${RET_DUZELTME_NOTU}`, gecmis, env, fetchFn });
+        const r3 = await aiUret({ sistem: `${await talimat(yeniCollected, fiyat, tasima, depo)}\n${RET_DUZELTME_NOTU}`, gecmis, env, fetchFn });
         if (r3.ok && !hizmetReddiVarMi(r3.cikti.reply)) {
           reply = r3.cikti.reply; handoff = r3.cikti.handoff; handoffReason = r3.cikti.handoffReason; handoffType = r3.cikti.handoffType || '';
           yeniCollected = { ...yeniCollected, ...whatsappAlanlariniTemizle(r3.cikti.collected) };
@@ -367,25 +402,27 @@ export function handlerOlustur({
     // YENİ (2026-10-07): DepoEvim hattında taşıma talebi anlaşıldığı ilk turda Sembol Nakliyat aydınlatması BİR KEZ
     let kvkkYeni = [];
     if (tasima && !kvkkGonderilen.sembol) { reply = `${SEMBOL_TASIMA_KVKK}\n\n${reply}`; kvkkYeni.push('sembol'); }
-    if (ilkCevap) { const gm = girisMetni(marka); reply = `${gm.metin}\n\n${reply}`; kvkkYeni.push(...gm.markalar); }
+    // YENİ (2026-10-10): Sembol hattında depolama talebi anlaşıldığı ilk turda DepoEvim aydınlatması BİR KEZ
+    if (depo && !kvkkGonderilen.depoevim) { reply = `${DEPOEVIM_DEPOLAMA_KVKK}\n\n${reply}`; kvkkYeni.push('depoevim'); }
+    if (ilkCevap) { const gm = girisMetni(marka); reply = [gm.metin, reply].filter(Boolean).join('\n\n'); kvkkYeni.push(...gm.markalar); }
     else if (marka && !kvkkGonderilen[marka]) { reply = `${kvkkEkMetni(marka)}\n\n${reply}`; kvkkYeni.push(marka); }
     kvkkYeni = [...new Set(kvkkYeni)];
 
     // Fiyat izi (Vercel logu + konuşma belgesi) — numara maskeli
     const fiyatIzi = fiyat ? { durum: fiyat.durum, kaynak: fiyat.kaynak || '', toplamKm: fiyat.toplamKm ?? null,
       eksik: [...(fiyat.eksik || []), ...(fiyat.konumHatalari || []).map(k => `${k}?`)], sebep: fiyat.sebep || '' } : null;
-    console.log('[whatsapp] tur', maskele(waId), JSON.stringify({ hat: hat.marka, intent, tasima, fiyat: fiyatIzi, devir: devirTuru, gunluk: gunlukSayi + 1 }));
+    console.log('[whatsapp] tur', maskele(waId), JSON.stringify({ hat: hat.marka, intent, tasima, depo, fiyat: fiyatIzi, devir: devirTuru, gunluk: gunlukSayi + 1 }));
 
     const { g, nowIso } = await gonderVeKaydet(db, hat, kid, waId, reply, aiHata ? { aiHata: String(aiHata).slice(0, 300) } : {});
 
     // Lead: ilk anlamlı bilgi geldiyse (ya da personel devreye girdiyse) oluştur / güncelle
-    const alan = tasima ? 'tasimaLeadId' : 'leadId';
+    const alan = tasima ? 'tasimaLeadId' : depo ? 'depoLeadId' : 'leadId';
     let leadId = konusma[alan] || null;
     // Aydınlatma metni gönderilmiş markalar (bu turda başarıyla gidenler dahil)
     const kvkkMarkalari = ['depoevim', 'sembol'].filter(m => kvkkGonderilen[m] || (g.ok && kvkkYeni.includes(m)));
     if (Object.keys(yeniCollected).length || sustur || yeniBildirim) {
       try {
-        leadId = await leadYaz(db, { hat, kid, waId, konusma, alan, leadMarka: tasima ? 'sembol' : marka, intent, collected: yeniCollected, fiyat, kvkkMarkalari,
+        leadId = await leadYaz(db, { hat, kid, waId, konusma, alan, leadMarka: tasima ? 'sembol' : depo ? 'depoevim' : marka, intent, collected: yeniCollected, fiyat, kvkkMarkalari,
           hareket: sustur ? `Bot görüşmeyi personele devretti: ${sebep}` : yeniBildirim ? `Bot personeli bilgilendirdi (bot devam ediyor): ${sebep}` : null,
           devir: sustur || yeniBildirim ? { tur: devirTuru, sebep } : null });
       } catch (err) { console.error('[whatsapp] lead yazılamadı', maskele(waId), err?.message); }
@@ -414,7 +451,7 @@ export function handlerOlustur({
     const nowIso = iso();
     const alanlar = { mode: 'bot', needsAgent, botaDonus: { zaman: nowIso, sebep }, sonOtomatikBilgi: null, ...ek };
     await konusmaRef(db, kid, appId).set(alanlar, { merge: true });
-    for (const leadId of new Set([k.leadId, k.tasimaLeadId].filter(Boolean))) await leadHareketiEkle(db, waId, leadId, hareket);
+    for (const leadId of konusmaLeadleri(k)) await leadHareketiEkle(db, waId, leadId, hareket);
     console.log('[whatsapp] bota döndü', maskele(waId), sebep);
     return { ...k, ...alanlar };
   }
@@ -504,16 +541,20 @@ export function handlerOlustur({
         ...(mu.kullaniciAdi ? { username: mu.kullaniciAdi } : {}),
         kullaniciAdiyla: !mu.telefon && !k.telefonWa,
         hatId: hat.phoneNumberId, marka: hat.marka,
+        // YENİ (2026-10-10): eşlemede olmayan numara — bot cevap vermez, personel bekler
+        eslenmemis: !!hat.eslenmemis,
+        ...(hat.eslenmemis && !k.needsAgent ? { needsAgent: true, handoffReason: 'Eşlenmemiş WhatsApp numarası — bot cevap vermiyor', bildirimAt: iso(), devirTuru: 'bildir' } : {}),
         lastMessageAt: zaman, lastMessagePreview: c.ozet || '', lastCustomerMessageAt: zaman, lastCustomerWamid: wamid,
         unreadCount: (Number(k.unreadCount) || 0) + 1,
         mode: k.mode || 'bot',
-        ...(s.exists ? {} : { createdAt: iso(), needsAgent: false, collected: {} }),
+        ...(s.exists ? {} : { createdAt: iso(), collected: {}, ...(hat.eslenmemis ? {} : { needsAgent: false }) }),
         // Ref kodu yalnızca ilk kez (ya da yeni bir ref) gelince bağlanır (marka hattan gelir)
         ...(ref && ref.kod !== k.refKodu ? { refKodu: ref.kod, refKullanildi: false } : {}),
       };
       t.set(kRef, yeni, { merge: true });
       return { ...k, ...yeni };
     });
+    if (hat.eslenmemis) { atlandi(waId, `eşlenmemiş numara (${maskele(hat.phoneNumberId)}) — kaydedildi, bot cevap vermez`); return; }
     if (!c.botaGitsin) { atlandi(waId, `bota gitmeyen mesaj türü (${c.tip}) ${yapiOzeti(m, contacts)}`); return; }
     if (konusma.mode === 'human') {
       konusma = await insanModu(db, hat, kid, waId, konusma);
@@ -557,8 +598,10 @@ export function handlerOlustur({
     if (!adaylar.length || !s.id) { atlandi('', `durum: alıcı / id yok s=${anahtarOzeti(s)}`); return; }
     const waId = adaylar[0];
     let ref = null, snap = null;
-    for (const aday of adaylar) {
-      ref = mesajlarRef(db, konusmaKimligi(hat, aday), appId).doc(String(s.id));
+    // 2026-10-10 öncesi 0850 konuşmalarının belge kimliği yalnızca waId'dir (yeni kimlik bulunamazsa o denenir)
+    const kimlikler = [...adaylar.map(a => konusmaKimligi(hat, a)), ...(hat.marka === 'depoevim' ? adaylar : [])];
+    for (const kimlik of kimlikler) {
+      ref = mesajlarRef(db, kimlik, appId).doc(String(s.id));
       snap = await ref.get();
       if (snap.exists) break;
     }
@@ -575,6 +618,20 @@ export function handlerOlustur({
     if ((DURUM_SIRASI[s.status] || 0) > (DURUM_SIRASI[d.status] || 0)) await ref.set({ status: s.status, statusAt: zaman }, { merge: true });
   }
 
+  // ---- eşlenmemiş numara uyarısı (CRM WhatsApp sekmesinde kırmızı bant) — whatsapp_durum/numara
+  async function numaraUyarisiYaz(db, numaraId) {
+    await durumRef(db, appId, 'numara').set({
+      aktif: true, tur: 'numara', phoneNumberId: numaraId, tarih: iso(),
+      mesaj: `WhatsApp: eşlemede olmayan bir numaraya (phone_number_id ${numaraId}) mesaj geldi — mesajlar kaydedildi ama bot cevap vermiyor. Vercel'de WHATSAPP_NUMARALAR'a ekleyin.`,
+    }, { merge: true });
+  }
+  // O numara eşlemeye eklendikten sonraki ilk mesajda bant kalkar (yalnızca aynı numaranın uyarısıysa)
+  async function numaraUyarisiTemizle(db, numaraId) {
+    const ref = durumRef(db, appId, 'numara');
+    const s = await ref.get();
+    if (s.exists && s.data()?.aktif && s.data()?.phoneNumberId === numaraId) await ref.set({ aktif: false, cozuldu: iso() }, { merge: true });
+  }
+
   async function olaylariIsle(payload) {
     const db = getDb();
     const isler = [];
@@ -582,14 +639,23 @@ export function handlerOlustur({
       for (const change of entry?.changes || []) {
         if (change?.field !== 'messages') { console.log('[whatsapp] atlandı', '-', `messages dışı alan (${change?.field || '-'})`); continue; }
         const v = change.value || {};
-        // Hat yapılandırmada yoksa (aynı uygulamaya bağlı başka numara) mesajlar işlenmez
-        const hat = hatBul(env, v.metadata?.phone_number_id);
+        const numaraId = String(v.metadata?.phone_number_id || '');
+        const mesajlarListesi = v.messages || [];
+        const hat = hatBul(env, numaraId);
         if (!hat) {
-          (v.messages || []).forEach(m => atlandi(musteriCoz(m, v.contacts).kimlik, `bilinmeyen hat (${maskele(v.metadata?.phone_number_id)}) ${yapiOzeti(m, v.contacts)}`));
+          // YENİ (2026-10-10): eşlemede olmayan numara — mesaj KAYDEDİLİR, bot cevap vermez, uyarı loglanır
+          if (!numaraId) { mesajlarListesi.forEach(m => atlandi(musteriCoz(m, v.contacts).kimlik, `phone_number_id yok ${yapiOzeti(m, v.contacts)}`)); continue; }
+          if (mesajlarListesi.length) {
+            console.warn('[whatsapp] UYARI eşlenmemiş numara', maskele(numaraId), `— ${mesajlarListesi.length} mesaj kaydedildi, bot cevap vermiyor. WHATSAPP_NUMARALAR'a ekleyin.`);
+            isler.push(numaraUyarisiYaz(db, numaraId));
+          }
+          const eh = eslenmemisHat(env, numaraId);
+          mesajlarListesi.forEach(m => isler.push(mesajIsle(db, eh, m, v.contacts || [])));
           continue;
         }
+        if (mesajlarListesi.length) isler.push(numaraUyarisiTemizle(db, numaraId));
         (v.statuses || []).forEach(s => isler.push(durumIsle(db, hat, s)));
-        (v.messages || []).forEach(m => isler.push(mesajIsle(db, hat, m, v.contacts || [])));
+        mesajlarListesi.forEach(m => isler.push(mesajIsle(db, hat, m, v.contacts || [])));
       }
     }
     const sonuc = await Promise.allSettled(isler);
