@@ -92,7 +92,7 @@ import { QrSiteTakipView, QrTakipYonlendirme } from './Satis.jsx';
 import { QR_SITE_LANDING_URL } from './qrSiteSema.js'; // YENİ
 import { MaterialListView, AddVehicleView, VehicleMaintenanceView, VehicleProfileView } from './OperasyonAracMalzeme.jsx';
 import { AddInfoView, ComplaintsView, MyComplaintSubmitView, PersonelBasvuruView, SirketEvraklariView, DavaDosyalariView, SirketBelgeleriView, AvukatDashboardView, SahaRaporlamasiView, SirketIletisimView } from './OperasyonInsanKaynaklari.jsx';
-import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView } from './Finans.jsx';
+import { ReportingView, AdvancedReportingView, FinanceDashboardView, PersonelMuhasebeView, PersonelOdemeView, FinansDefterView, useFinansYaklasanSayilari } from './Finans.jsx'; // YENİ: Finans menü rozetleri
 // NOT: Mesai Takip modülü artık ayrı bir dosya değil; kullanıcı isteğiyle
 // Operasyon Bölümü'nün parçası olarak OperasyonPersonel.jsx içine taşındı
 // (yukarıdaki OperasyonPersonel.jsx import satırından geliyor).
@@ -5569,6 +5569,20 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
     const whatsappBekleyen = useWhatsappBekleyen(whatsappYetkili);
     // YENİ (2026-10-08): menü ve kart rozeti = havuzda TEMSİLCİSİ ATANMAMIŞ konuşma sayısı (havuz boşsa rozet yok)
     const whatsappAtanmamis = useWhatsappAtanmamisSayisi(whatsappYetkili);
+    // YENİ (2026-10-10): FİNANS MENÜ ROZETLERİ — yaklaşan ödeme (turuncu) / kredi taksiti (mor) sayısı.
+    // Erken çağrı (hook kuralı) olduğundan Finans yetkisi checkAccess('finance') ile AYNI kuralla burada hesaplanır.
+    const finansRozetYetkili = (() => {
+      if (!isAuthenticated || !currentUser || currentUser.employmentStatus === 'Pasif') return false;
+      if (currentUser.fullName === 'Sistem Yöneticisi' || currentUser.position === 'Firma Sahibi') return true;
+      const m = currentUser.permissions?.modules;
+      if (m && typeof m.finance === 'boolean') return m.finance;
+      const p = positionModules?.[currentUser.position];
+      if (p && typeof p.finance === 'boolean') return p.finance;
+      const r = positionModules?.[currentUser.rank];
+      if (r && typeof r.finance === 'boolean') return r.finance;
+      return false;
+    })();
+    const finansYaklasan = useFinansYaklasanSayilari(finansRozetYetkili);
     const [whatsappAcIstegi, setWhatsappAcIstegi] = useState(null);   // lead → CRM sohbeti
     const [havuzLeadIstegi, setHavuzLeadIstegi] = useState(null);     // sohbet → lead detayı
 
@@ -9234,7 +9248,16 @@ const ModuleAccessView = ({ moduleCatalog, addSystemLog }) => {
                   <div className="flex items-center gap-3 min-w-0">
                     <Wallet className="w-5 h-5 shrink-0 animate-pulse" /> <span className="whitespace-nowrap truncate" title="Finans">Finans</span>
                   </div>
-                  {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  <div className="flex items-center justify-end gap-1.5 shrink-0">
+                    {/* YENİ (2026-10-10): TURUNCU = yaklaşan ödeme · MOR = yaklaşan kredi taksiti (7 gün içinde, ödenmemiş); 0 ise gizli */}
+                    {finansYaklasan.odeme > 0 && (
+                      <span title={`Ödemeler: ${finansYaklasan.odeme} ödeme yaklaşıyor (7 gün içinde)`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-orange-500 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-orange-500/40 animate-pulse">{finansYaklasan.odeme}</span>
+                    )}
+                    {finansYaklasan.kredi > 0 && (
+                      <span title={`Krediler: ${finansYaklasan.kredi} taksit yaklaşıyor (7 gün içinde)`} className="min-w-[22px] h-[22px] px-1.5 rounded-full bg-purple-600 text-white text-[11px] font-black flex items-center justify-center shadow-md shadow-purple-600/40 animate-pulse">{finansYaklasan.kredi}</span>
+                    )}
+                    {isFinanceSubMenuOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </div>
                 </button>
                 
                 {isFinanceSubMenuOpen && (
